@@ -11,6 +11,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,7 @@ use sha2::{Digest, Sha256};
 use toml::Value;
 
 use super::paths::{self, dirs, files};
+use crate::settings::types::TronSettings;
 
 /// Managed profile that defines complete default Tron behavior.
 pub const DEFAULT_PROFILE: &str = "default";
@@ -35,7 +37,7 @@ pub const DEFAULT_AUTH_PROFILE: &str = "default";
 pub const CURRENT_PROFILE_VERSION: &str = "2";
 
 /// Parsed profile document.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ProfileDocument {
     /// Schema version.
@@ -70,16 +72,56 @@ pub struct ProfileDocument {
     pub output_contracts: HashMap<String, OutputContractSpec>,
     /// Auditing policies.
     pub audit_policy: HashMap<String, AuditPolicySpec>,
-    /// Profile-owned settings refs.
-    pub settings: SettingsSpec,
+    /// Profile-owned effective settings.
+    pub settings: TronSettings,
     /// Auth registry/store refs.
     pub auth: AuthSpec,
 }
 
-/// Compatibility name used by older call sites while v2 wiring lands.
+/// Compatibility name used by older tests and schema helpers.
 pub type ProfileSpec = ProfileDocument;
-/// Effective agent execution spec after profile inheritance is resolved.
-pub type AgentExecutionSpec = ProfileDocument;
+
+/// Prompt, provider, context, or tool file compiled into the runtime spec.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompiledProfileFile {
+    /// Profile-relative reference from TOML.
+    pub relative_ref: String,
+    /// Absolute source path used for audit/reload.
+    pub source_path: PathBuf,
+    /// SHA-256 content hash.
+    pub hash: String,
+    /// Loaded UTF-8 content.
+    pub content: String,
+}
+
+/// Effective agent execution spec after inheritance, settings overlay, and file loading.
+#[derive(Clone, Debug)]
+pub struct AgentExecutionSpec {
+    /// Merged raw profile document.
+    document: ProfileDocument,
+    /// Entrypoint prompt files by entrypoint id.
+    pub entrypoint_prompts: HashMap<String, CompiledProfileFile>,
+    /// Process prompt files by process id.
+    pub process_prompts: HashMap<String, CompiledProfileFile>,
+    /// Provider prompt files by provider policy id.
+    pub provider_prompts: HashMap<String, CompiledProfileFile>,
+    /// Context block manifest files by context policy id.
+    pub context_manifests: HashMap<String, CompiledProfileFile>,
+    /// Tool presentation manifest files by tool policy id.
+    pub tool_manifests: HashMap<String, CompiledProfileFile>,
+    /// Readable auth registry used to resolve authProfile.
+    pub auth_registry: Option<CompiledProfileFile>,
+    /// All source files that affect this compiled spec.
+    pub source_files: Vec<PathBuf>,
+}
+
+impl Deref for AgentExecutionSpec {
+    type Target = ProfileDocument;
+
+    fn deref(&self) -> &Self::Target {
+        &self.document
+    }
+}
 
 /// Entrypoint policy for a primary runtime surface.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -340,7 +382,7 @@ pub struct AuthProfileSpec {
 }
 
 /// Resolved effective execution profile.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ResolvedProfile {
     /// Active profile name.
     pub name: String,
@@ -357,46 +399,75 @@ pub struct ResolvedProfile {
 }
 
 impl AgentExecutionSpec {
+    fn from_document_uncompiled(document: ProfileDocument) -> Self {
+        Self {
+            document,
+            entrypoint_prompts: HashMap::new(),
+            process_prompts: HashMap::new(),
+            provider_prompts: HashMap::new(),
+            context_manifests: HashMap::new(),
+            tool_manifests: HashMap::new(),
+            auth_registry: None,
+            source_files: Vec::new(),
+        }
+    }
+
+    /// Borrow the merged raw profile document.
+    #[must_use]
+    pub fn document(&self) -> &ProfileDocument {
+        &self.document
+    }
+
+    /// Borrow the profile-owned effective settings.
+    #[must_use]
+    pub fn settings(&self) -> &TronSettings {
+        &self.document.settings
+    }
+
     /// Prompt ref for a main entrypoint.
     #[must_use]
     pub fn entrypoint_prompt(&self, name: &str) -> Option<&str> {
-        self.entrypoints.get(name)?.prompt.as_deref()
+        self.document.entrypoints.get(name)?.prompt.as_deref()
     }
 
     /// Prompt ref for a process.
     #[must_use]
     pub fn process_prompt(&self, name: &str) -> Option<&str> {
-        self.processes.get(name)?.prompt.as_deref()
+        self.document.processes.get(name)?.prompt.as_deref()
     }
 
     /// Provider prompt ref.
     #[must_use]
     pub fn provider_prompt(&self, provider: &str) -> Option<&str> {
-        self.provider_policies.get(provider)?.prompt.as_deref()
+        self.document
+            .provider_policies
+            .get(provider)?
+            .prompt
+            .as_deref()
     }
 
     /// Process spec by id.
     #[must_use]
     pub fn process(&self, name: &str) -> Option<&ProcessSpec> {
-        self.processes.get(name)
+        self.document.processes.get(name)
     }
 
     /// Context policy by id.
     #[must_use]
     pub fn context_policy(&self, name: &str) -> Option<&ContextPolicySpec> {
-        self.context_policies.get(name)
+        self.document.context_policies.get(name)
     }
 
     /// Tool policy by id.
     #[must_use]
     pub fn tool_policy(&self, name: &str) -> Option<&ToolPolicySpec> {
-        self.tool_policies.get(name)
+        self.document.tool_policies.get(name)
     }
 
     /// Local context policy, if any, matching provider id.
     #[must_use]
     pub fn local_context_policy_for_provider(&self, provider: &str) -> Option<&ContextPolicySpec> {
-        self.context_policies.values().find(|policy| {
+        self.document.context_policies.values().find(|policy| {
             policy
                 .local_providers
                 .iter()
@@ -408,30 +479,11 @@ impl AgentExecutionSpec {
 /// Parse the compiled managed default profile.
 #[must_use]
 pub fn bundled_default_execution_spec() -> AgentExecutionSpec {
-    toml::from_str(include_str!(
+    let document: ProfileDocument = toml::from_str(include_str!(
         "../../../defaults/profiles/default/profile.toml"
     ))
-    .expect("bundled default profile.toml must be a valid AgentExecutionSpec")
-}
-
-/// Resolve the active execution spec from `~/.tron/profiles/`.
-///
-/// Startup seeds and validates the managed default profile before runtime
-/// starts, so runtime callers should treat errors here as configuration
-/// defects, not as a reason to substitute hardcoded behavior.
-pub fn active_execution_spec() -> io::Result<AgentExecutionSpec> {
-    resolve_active_profile().map(|profile| profile.spec)
-}
-
-/// Resolve a named process from the active spec.
-pub fn active_process_spec(name: &str) -> io::Result<ProcessSpec> {
-    let spec = active_execution_spec()?;
-    spec.process(name).cloned().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("active profile is missing process `{name}`"),
-        )
-    })
+    .expect("bundled default profile.toml must be a valid ProfileDocument");
+    AgentExecutionSpec::from_document_uncompiled(document)
 }
 
 /// Read the active profile name from `profiles/active.toml`.
@@ -456,12 +508,6 @@ fn parse_active_profile(content: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Resolve the active profile or the managed default if no active
-/// pointer exists yet.
-pub fn resolve_active_profile() -> io::Result<ResolvedProfile> {
-    resolve_active_profile_at(&paths::tron_home())
-}
-
 /// Resolve the active profile under a specific Tron home.
 pub fn resolve_active_profile_at(home: &Path) -> io::Result<ResolvedProfile> {
     let name = active_profile_name_at(home).ok_or_else(|| {
@@ -474,20 +520,6 @@ pub fn resolve_active_profile_at(home: &Path) -> io::Result<ResolvedProfile> {
         )
     })?;
     resolve_profile_at(home, &name)
-}
-
-/// Resolve a relative file reference through the active profile inheritance chain.
-pub fn resolve_active_file_at(home: &Path, rel: &str) -> io::Result<PathBuf> {
-    let name = active_profile_name_at(home).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "missing active profile pointer: {}",
-                home.join(dirs::PROFILES).join(files::ACTIVE_TOML).display()
-            ),
-        )
-    })?;
-    resolve_profile_file_at(home, &name, rel)
 }
 
 /// Resolve a relative file reference through one profile's inheritance chain.
@@ -506,27 +538,43 @@ pub fn resolve_profile_file_at(home: &Path, name: &str, rel: &str) -> io::Result
 
 /// Resolve a named profile with inheritance.
 pub fn resolve_profile_at(home: &Path, name: &str) -> io::Result<ResolvedProfile> {
+    resolve_profile_at_with_user_overlay(home, name, true)
+}
+
+/// Resolve a named profile without the global user settings overlay.
+pub fn resolve_profile_base_at(home: &Path, name: &str) -> io::Result<ResolvedProfile> {
+    resolve_profile_at_with_user_overlay(home, name, false)
+}
+
+fn resolve_profile_at_with_user_overlay(
+    home: &Path,
+    name: &str,
+    include_user_overlay: bool,
+) -> io::Result<ResolvedProfile> {
     let mut seen = BTreeSet::new();
-    let raw = resolve_profile_value(home, name, &mut seen)?;
-    let spec: AgentExecutionSpec = raw.clone().try_into().map_err(|error| {
+    let mut raw = resolve_profile_value(home, name, &mut seen)?;
+    if include_user_overlay {
+        apply_user_profile_overlay(home, name, &mut raw)?;
+    }
+    let document: ProfileDocument = raw.clone().try_into().map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("invalid profile `{name}`: {error}"),
         )
     })?;
-    validate_profile(home, name, &spec)?;
-    let profile_chain = profile_file_candidate_profiles(home, name)?
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>();
+    validate_profile(home, name, &document)?;
+    let candidate_profiles = profile_file_candidate_profiles(home, name)?;
+    let spec = compile_agent_execution_spec(home, name, document, &candidate_profiles)?;
+    let profile_chain = candidate_profiles.into_iter().rev().collect::<Vec<_>>();
     let raw_string = toml::to_string(&raw).unwrap_or_default();
+    let spec_hash = agent_execution_spec_hash(&raw_string, &spec);
     Ok(ResolvedProfile {
         name: name.to_string(),
         active_dir: home.join(dirs::PROFILES).join(name),
         spec,
         raw,
         profile_chain,
-        spec_hash: sha256_hex(raw_string.as_bytes()),
+        spec_hash,
     })
 }
 
@@ -594,6 +642,234 @@ fn deep_merge_toml(base: &mut Value, overlay: Value) {
     }
 }
 
+fn apply_user_profile_overlay(home: &Path, active_name: &str, raw: &mut Value) -> io::Result<()> {
+    if active_name == USER_PROFILE {
+        return Ok(());
+    }
+    let path = home
+        .join(dirs::PROFILES)
+        .join(USER_PROFILE)
+        .join(files::PROFILE_TOML);
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let overlay: Value = toml::from_str(&content).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid TOML in {}: {error}", path.display()),
+        )
+    })?;
+    let Some(settings_overlay) = overlay.get("settings").cloned() else {
+        return Ok(());
+    };
+    let Some(raw_table) = raw.as_table_mut() else {
+        return Ok(());
+    };
+    match raw_table.get_mut("settings") {
+        Some(settings) => deep_merge_toml(settings, settings_overlay),
+        None => {
+            raw_table.insert("settings".to_string(), settings_overlay);
+        }
+    }
+    Ok(())
+}
+
+fn compile_agent_execution_spec(
+    home: &Path,
+    name: &str,
+    document: ProfileDocument,
+    candidate_profiles: &[String],
+) -> io::Result<AgentExecutionSpec> {
+    let mut spec = AgentExecutionSpec::from_document_uncompiled(document);
+    let mut source_files = candidate_profiles
+        .iter()
+        .map(|profile| {
+            home.join(dirs::PROFILES)
+                .join(profile)
+                .join(files::PROFILE_TOML)
+        })
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    let user_overlay = home
+        .join(dirs::PROFILES)
+        .join(USER_PROFILE)
+        .join(files::PROFILE_TOML);
+    if name != USER_PROFILE && user_overlay.is_file() {
+        source_files.push(user_overlay);
+    }
+
+    let auth_registry =
+        compile_profiles_file(home, name, "auth.registry", &spec.document.auth.registry)?;
+    source_files.push(auth_registry.source_path.clone());
+    spec.auth_registry = Some(auth_registry);
+
+    for (entrypoint, entry) in &spec.document.entrypoints {
+        if let Some(prompt) = &entry.prompt {
+            let compiled = compile_profile_file(
+                home,
+                name,
+                candidate_profiles,
+                &format!("entrypoints.{entrypoint}.prompt"),
+                prompt,
+            )?;
+            source_files.push(compiled.source_path.clone());
+            spec.entrypoint_prompts.insert(entrypoint.clone(), compiled);
+        }
+    }
+    for (process_id, process) in &spec.document.processes {
+        if let Some(prompt) = &process.prompt {
+            let compiled = compile_profile_file(
+                home,
+                name,
+                candidate_profiles,
+                &format!("processes.{process_id}.prompt"),
+                prompt,
+            )?;
+            source_files.push(compiled.source_path.clone());
+            spec.process_prompts.insert(process_id.clone(), compiled);
+        }
+    }
+    for (provider, policy) in &spec.document.provider_policies {
+        if let Some(prompt) = &policy.prompt {
+            let compiled = compile_profile_file(
+                home,
+                name,
+                candidate_profiles,
+                &format!("providerPolicies.{provider}.prompt"),
+                prompt,
+            )?;
+            source_files.push(compiled.source_path.clone());
+            spec.provider_prompts.insert(provider.clone(), compiled);
+        }
+    }
+    for (policy_id, policy) in &spec.document.context_policies {
+        if let Some(blocks) = &policy.blocks {
+            let compiled = compile_profile_file(
+                home,
+                name,
+                candidate_profiles,
+                &format!("contextPolicies.{policy_id}.blocks"),
+                blocks,
+            )?;
+            source_files.push(compiled.source_path.clone());
+            spec.context_manifests.insert(policy_id.clone(), compiled);
+        }
+    }
+    for (policy_id, policy) in &spec.document.tool_policies {
+        if let Some(manifest) = &policy.manifest {
+            let compiled = compile_profile_file(
+                home,
+                name,
+                candidate_profiles,
+                &format!("toolPolicies.{policy_id}.manifest"),
+                manifest,
+            )?;
+            source_files.push(compiled.source_path.clone());
+            spec.tool_manifests.insert(policy_id.clone(), compiled);
+        }
+    }
+    source_files.sort();
+    source_files.dedup();
+    spec.source_files = source_files;
+    Ok(spec)
+}
+
+fn compile_profile_file(
+    home: &Path,
+    name: &str,
+    candidate_profiles: &[String],
+    label: &str,
+    rel: &str,
+) -> io::Result<CompiledProfileFile> {
+    let source_path = validate_profile_file_ref(home, name, candidate_profiles, label, rel)?;
+    let content = fs::read_to_string(&source_path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to read {label} file {}: {error}",
+                source_path.display()
+            ),
+        )
+    })?;
+    Ok(CompiledProfileFile {
+        relative_ref: rel.to_string(),
+        hash: sha256_hex(content.as_bytes()),
+        source_path,
+        content,
+    })
+}
+
+fn compile_profiles_file(
+    home: &Path,
+    name: &str,
+    label: &str,
+    rel: &str,
+) -> io::Result<CompiledProfileFile> {
+    let source_path = validate_profiles_file_ref(home, name, label, rel)?;
+    let content = fs::read_to_string(&source_path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to read {label} file {}: {error}",
+                source_path.display()
+            ),
+        )
+    })?;
+    Ok(CompiledProfileFile {
+        relative_ref: rel.to_string(),
+        hash: sha256_hex(content.as_bytes()),
+        source_path,
+        content,
+    })
+}
+
+fn agent_execution_spec_hash(raw_string: &str, spec: &AgentExecutionSpec) -> String {
+    let mut files = Vec::new();
+    if let Some(file) = &spec.auth_registry {
+        files.push(("auth.registry".to_string(), file));
+    }
+    files.extend(
+        spec.entrypoint_prompts
+            .iter()
+            .map(|(id, file)| (format!("entrypoints.{id}.prompt"), file)),
+    );
+    files.extend(
+        spec.process_prompts
+            .iter()
+            .map(|(id, file)| (format!("processes.{id}.prompt"), file)),
+    );
+    files.extend(
+        spec.provider_prompts
+            .iter()
+            .map(|(id, file)| (format!("providerPolicies.{id}.prompt"), file)),
+    );
+    files.extend(
+        spec.context_manifests
+            .iter()
+            .map(|(id, file)| (format!("contextPolicies.{id}.blocks"), file)),
+    );
+    files.extend(
+        spec.tool_manifests
+            .iter()
+            .map(|(id, file)| (format!("toolPolicies.{id}.manifest"), file)),
+    );
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"profile.raw\0");
+    hasher.update(raw_string.as_bytes());
+    hasher.update(b"\0profile.files\0");
+    for (label, file) in files {
+        hasher.update(label.as_bytes());
+        hasher.update([0]);
+        hasher.update(file.relative_ref.as_bytes());
+        hasher.update([0]);
+        hasher.update(file.hash.as_bytes());
+        hasher.update([0]);
+    }
+    hex::encode(hasher.finalize())
+}
+
 fn validate_profile(home: &Path, name: &str, spec: &ProfileSpec) -> io::Result<()> {
     if spec.version != CURRENT_PROFILE_VERSION {
         return Err(io::Error::new(
@@ -619,22 +895,29 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileSpec) -> io::Result<(
         )?;
     }
     let candidate_profiles = profile_file_candidate_profiles(home, name)?;
-    if spec.settings.defaults.trim().is_empty() {
+    let mut settings = spec.settings.clone();
+    settings.validate_strict().map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("profile `{name}` has invalid settings: {error}"),
+        )
+    })?;
+    settings.validate();
+    settings.validate_strict().map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("profile `{name}` has invalid settings: {error}"),
+        )
+    })?;
+    let _ = validate_profiles_file_ref(home, name, "auth.registry", &spec.auth.registry)?;
+    let _ = validate_profiles_file_ref(home, name, "auth.rawStore", &spec.auth.raw_store)?;
+    validate_auth_profile(home, name, &spec.auth.registry, &spec.auth_profile)?;
+    if !spec.entrypoints.contains_key("main") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("profile `{name}` must define settings.defaults"),
+            format!("profile `{name}` must define entrypoints.main"),
         ));
     }
-    validate_profile_file_ref(
-        home,
-        name,
-        &candidate_profiles,
-        "settings.defaults",
-        &spec.settings.defaults,
-    )?;
-    validate_profiles_file_ref(home, name, "auth.registry", &spec.auth.registry)?;
-    validate_profiles_file_ref(home, name, "auth.rawStore", &spec.auth.raw_store)?;
-    validate_auth_profile(home, name, &spec.auth.registry, &spec.auth_profile)?;
 
     for (entrypoint, entry) in &spec.entrypoints {
         if let Some(prompt) = &entry.prompt {
@@ -919,11 +1202,16 @@ fn validate_profile_file_ref(
     ))
 }
 
-fn validate_profiles_file_ref(home: &Path, name: &str, label: &str, rel: &str) -> io::Result<()> {
+fn validate_profiles_file_ref(
+    home: &Path,
+    name: &str,
+    label: &str,
+    rel: &str,
+) -> io::Result<PathBuf> {
     validate_relative_ref(name, label, rel)?;
     let path = home.join(dirs::PROFILES).join(rel);
     if path.is_file() {
-        Ok(())
+        Ok(path)
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -1188,7 +1476,8 @@ store = "auth.json"
         assert!(spec.tool_policies.contains_key("localModel"));
         assert!(spec.provider_policies.contains_key("default"));
         assert!(spec.cache_policies.contains_key("default"));
-        assert_eq!(spec.settings.defaults, "settings/defaults.json");
+        assert_eq!(spec.settings.server.default_model, "claude-sonnet-4-6");
+        assert_eq!(spec.settings.server.default_provider, "anthropic");
     }
 
     #[test]
@@ -1210,6 +1499,46 @@ store = "auth.json"
             "localDefault"
         );
         assert_eq!(local.spec.entrypoints["main"].tool_policy, "localModel");
+    }
+
+    #[test]
+    fn spec_hash_changes_when_referenced_prompt_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+
+        let before = resolve_profile_at(&home, NORMAL_PROFILE).unwrap().spec_hash;
+        write(
+            &home
+                .join(dirs::PROFILES)
+                .join(DEFAULT_PROFILE)
+                .join("prompts/core.md"),
+            "changed core prompt",
+        );
+        let after = resolve_profile_at(&home, NORMAL_PROFILE).unwrap().spec_hash;
+
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn profile_without_main_entrypoint_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+        let profile_path = home
+            .join(dirs::PROFILES)
+            .join(DEFAULT_PROFILE)
+            .join(files::PROFILE_TOML);
+        let mut value: Value = toml::from_str(&fs::read_to_string(&profile_path).unwrap()).unwrap();
+        value
+            .get_mut("entrypoints")
+            .and_then(Value::as_table_mut)
+            .unwrap()
+            .remove("main");
+        fs::write(&profile_path, toml::to_string(&value).unwrap()).unwrap();
+
+        let error = resolve_profile_at(&home, DEFAULT_PROFILE).unwrap_err();
+        assert!(error.to_string().contains("entrypoints.main"));
     }
 
     #[test]

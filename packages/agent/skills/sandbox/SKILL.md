@@ -32,7 +32,7 @@ The pattern:
 2. Exec: install dependencies, scaffold the app, write code — all in `/workspace`
 3. Exec with `--detach`: start the server **bound to 0.0.0.0**
 4. Exec: verify it's running (`curl -s http://localhost:3000`)
-5. Get the machine's Tailscale IP from `server.tailscaleIp` in `~/.tron/profiles/user/settings.json` — always use this for OpenURL, never `hostname` or `.local` addresses
+5. Get the machine's Tailscale IP from `settings.server.tailscaleIp` in `~/.tron/profiles/user/profile.toml` — always use this for OpenURL, never `hostname` or `.local` addresses
 6. OpenURL with `http://{tailscale-ip}:3000`
 7. **Keep the container running.** Don't stop or remove it — the user is actively using it. Only clean up when they ask.
 

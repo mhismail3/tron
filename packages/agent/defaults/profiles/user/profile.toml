@@ -1,0 +1,13 @@
+# User profile overlay.
+#
+# This managed seed is intentionally sparse. Runtime settings overrides written
+# by `settings.update` live under `[settings]` in this file and are merged over
+# the active profile's managed settings. User-created execution profiles should
+# be separate siblings under `profiles/`, not edits to this overlay.
+
+version = "2"
+name = "user"
+managed = false
+profileClass = "custom"
+inherits = []
+authProfile = "default"

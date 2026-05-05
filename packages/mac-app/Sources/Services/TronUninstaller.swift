@@ -36,7 +36,7 @@ enum TronUninstaller {
             try? fm.removeItem(at: path)
         }
         if options.resetSettings {
-            try? fm.removeItem(at: setup.settingsPath)
+            try? ServerSettingsWriter.removeSettingsOverlay(at: setup.settingsPath)
         }
         if options.resetCredentials {
             try? fm.removeItem(at: setup.bearerTokenPath)

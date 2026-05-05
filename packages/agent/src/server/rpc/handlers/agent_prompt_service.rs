@@ -46,6 +46,7 @@ struct PromptRunPlan {
     context_artifacts: Arc<crate::server::rpc::session_context::ContextArtifactsService>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
     memory_registry: Arc<parking_lot::Mutex<crate::runtime::memory::MemoryRegistry>>,
+    profile_runtime: Arc<crate::runtime::ProfileRuntime>,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
@@ -149,6 +150,7 @@ pub fn spawn_prompt_run(
         context_artifacts: ctx.context_artifacts.clone(),
         skill_registry: ctx.skill_registry.clone(),
         memory_registry: ctx.memory_registry.clone(),
+        profile_runtime: ctx.profile_runtime.clone(),
         subagent_manager: ctx.subagent_manager.clone(),
         shutdown_token: ctx.shutdown_coordinator.as_ref().map(|coord| coord.token()),
         worktree_coordinator: ctx.worktree_coordinator.clone(),
@@ -196,6 +198,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         context_artifacts,
         skill_registry,
         memory_registry,
+        profile_runtime,
         subagent_manager,
         shutdown_token,
         worktree_coordinator,
@@ -213,11 +216,13 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         request,
     } = plan;
 
-    let resolved_profile = match crate::core::profile::resolve_profile_at(
-        &crate::core::paths::tron_home(),
-        &profile,
-    ) {
-        Ok(resolved) => Arc::new(resolved),
+    let session_plan = match profile_runtime.plan_session(crate::runtime::SessionPlanRequest {
+        requested_profile: Some(profile.clone()),
+        model: model.clone(),
+        source: source.clone(),
+        entrypoint: None,
+    }) {
+        Ok(plan) => plan,
         Err(error) => {
             warn!(
                 session_id = %request.session_id,
@@ -243,6 +248,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             return;
         }
     };
+    let resolved_profile = session_plan.resolved_profile.clone();
 
     let is_chat = profile == crate::core::profile::CHAT_PROFILE
         || !should_acquire_worktree_for_source(source.as_deref());
@@ -264,6 +270,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let drain_context_artifacts = context_artifacts.clone();
     let drain_skill_registry = skill_registry.clone();
     let drain_memory_registry = memory_registry.clone();
+    let drain_profile_runtime = profile_runtime.clone();
     let drain_subagent_manager = subagent_manager.clone();
     let drain_shutdown_token = shutdown_token.clone();
     let drain_worktree_coordinator = worktree_coordinator.clone();
@@ -482,21 +489,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         .unwrap_or(working_dir);
 
     let is_resumed = !state.messages.is_empty();
-    let context_policy = crate::llm::models::registry::detect_provider_from_model(&model)
-        .map(|provider| {
-            crate::runtime::context::local_policy::ContextPolicy::from_entrypoint_with_spec(
-                provider,
-                &resolved_profile.spec,
-                "main",
-            )
-        })
-        .unwrap_or_else(|| {
-            crate::runtime::context::local_policy::ContextPolicy::from_entrypoint_with_spec(
-                crate::core::messages::Provider::Unknown,
-                &resolved_profile.spec,
-                "main",
-            )
-        });
+    let context_policy = session_plan.runtime_context_policy();
     // Bootstrap result injection follows the active profile context policy.
     // Skipped results stay queued in the event store for future turns whose
     // profile policy allows them.
@@ -583,11 +576,12 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 .as_ref()
                 .map(|branch| format!(" (based on {branch})"))
                 .unwrap_or_default(),
-            crate::runtime::context::instruction_prompts::entrypoint_prompt(
-                &profile,
-                "gitWorkflow",
-                "git-workflow",
-            ),
+            resolved_profile
+                .spec
+                .entrypoint_prompts
+                .get("gitWorkflow")
+                .map(|prompt| prompt.content.as_str())
+                .unwrap_or(""),
         );
         Some(match memory {
             Some(memory) => format!("{memory}{worktree_context}"),
@@ -627,8 +621,11 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     let compactor_settings = &settings.context.compactor;
     let context_limit = provider.context_window();
-    let profile_prompt =
-        crate::runtime::context::instruction_prompts::entrypoint_prompt(&profile, "main", "core");
+    let profile_prompt = session_plan
+        .prompt
+        .as_ref()
+        .map(|prompt| prompt.content.clone())
+        .unwrap_or_default();
     let system_prompt = if profile == crate::core::profile::NORMAL_PROFILE {
         crate::runtime::context::instruction_prompts::load_system_prompt_from_file(&working_dir)
             .or_else(crate::runtime::context::instruction_prompts::load_global_system_prompt)
@@ -668,6 +665,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         CreateAgentOpts {
             provider,
             tools,
+            context_policy: session_plan.runtime_context_policy(),
+            tool_policy: session_plan.tool_policy.clone(),
             guardrails,
             hooks: hooks.clone(),
             is_unattended: false,
@@ -1020,6 +1019,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         drain_context_artifacts,
         drain_skill_registry,
         drain_memory_registry,
+        drain_profile_runtime,
         drain_subagent_manager,
         drain_shutdown_token,
         drain_worktree_coordinator,
@@ -1049,6 +1049,7 @@ fn drain_prompt_queue(
     context_artifacts: Arc<crate::server::rpc::session_context::ContextArtifactsService>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
     memory_registry: Arc<parking_lot::Mutex<crate::runtime::memory::MemoryRegistry>>,
+    profile_runtime: Arc<crate::runtime::ProfileRuntime>,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
@@ -1165,6 +1166,7 @@ fn drain_prompt_queue(
         context_artifacts,
         skill_registry,
         memory_registry,
+        profile_runtime,
         subagent_manager,
         shutdown_token: shutdown_token.clone(),
         worktree_coordinator,

@@ -1,10 +1,28 @@
 use super::*;
 use crate::runtime::context::types::CompactionConfig;
 
+fn profile_context_policy(
+    provider: crate::core::messages::Provider,
+) -> crate::runtime::context::local_policy::ContextPolicy {
+    crate::runtime::context::local_policy::ContextPolicy::from_provider_with_spec(
+        provider,
+        &crate::core::profile::bundled_default_execution_spec(),
+    )
+}
+
+fn cloud_context_policy() -> crate::runtime::context::local_policy::ContextPolicy {
+    profile_context_policy(crate::core::messages::Provider::Anthropic)
+}
+
+fn local_context_policy() -> crate::runtime::context::local_policy::ContextPolicy {
+    profile_context_policy(crate::core::messages::Provider::Ollama)
+}
+
 fn test_config() -> ContextManagerConfig {
     ContextManagerConfig {
         model: "claude-sonnet-4-5-20250929".into(),
         system_prompt: Some("You are helpful.".into()),
+        context_policy: cloud_context_policy(),
         working_directory: Some("/tmp".into()),
         tools: Vec::new(),
         rules_content: None,
@@ -40,13 +58,13 @@ fn working_directory_defaults_to_home_workspace_when_none() {
 }
 
 #[test]
+#[should_panic(expected = "ContextManagerConfig.system_prompt must be resolved")]
 fn default_system_prompt() {
     let config = ContextManagerConfig {
         system_prompt: None,
         ..test_config()
     };
-    let cm = ContextManager::new(config);
-    assert!(!cm.get_system_prompt().is_empty());
+    let _ = ContextManager::new(config);
 }
 
 // -- local model system prompt --
@@ -55,7 +73,8 @@ fn default_system_prompt() {
 fn ollama_model_gets_local_prompt() {
     let config = ContextManagerConfig {
         model: "gemma4:e4b".into(),
-        system_prompt: None,
+        system_prompt: Some("Tool routing".into()),
+        context_policy: local_context_policy(),
         ..test_config()
     };
     let cm = ContextManager::new(config);
@@ -69,6 +88,7 @@ fn ollama_model_custom_prompt_takes_precedence() {
     let config = ContextManagerConfig {
         model: "gemma4:e4b".into(),
         system_prompt: Some("Custom override".into()),
+        context_policy: local_context_policy(),
         ..test_config()
     };
     let cm = ContextManager::new(config);
@@ -79,7 +99,7 @@ fn ollama_model_custom_prompt_takes_precedence() {
 fn non_ollama_model_gets_core_prompt() {
     let config = ContextManagerConfig {
         model: "claude-sonnet-4-5-20250929".into(),
-        system_prompt: None,
+        system_prompt: Some("YOUR IDENTITY".into()),
         ..test_config()
     };
     let cm = ContextManager::new(config);
@@ -102,6 +122,7 @@ fn local_session_excludes_job_results_from_current_tokens() {
     let config = ContextManagerConfig {
         model: "gemma4:e4b".into(),
         system_prompt: Some("You are helpful.".into()),
+        context_policy: local_context_policy(),
         ..test_config()
     };
     let mut cm = ContextManager::new(config);
@@ -124,6 +145,7 @@ fn local_session_snapshot_and_get_current_tokens_agree() {
     let config = ContextManagerConfig {
         model: "gemma4:e4b".into(),
         system_prompt: Some("You are helpful.".into()),
+        context_policy: local_context_policy(),
         ..test_config()
     };
     let mut cm = ContextManager::new(config);
@@ -138,6 +160,7 @@ fn local_session_snapshot_and_get_current_tokens_agree() {
 fn is_local_model_true_for_ollama() {
     let config = ContextManagerConfig {
         model: "gemma4:e4b".into(),
+        context_policy: local_context_policy(),
         ..test_config()
     };
     assert!(ContextManager::new(config).is_local_model());
@@ -154,6 +177,7 @@ fn is_local_model_false_for_cloud() {
 fn ollama_job_results_tokens_always_zero_in_snapshot() {
     let config = ContextManagerConfig {
         model: "gemma4:e4b".into(),
+        context_policy: local_context_policy(),
         ..test_config()
     };
     let mut cm = ContextManager::new(config);
@@ -1017,6 +1041,7 @@ fn local_window_config() -> ContextManagerConfig {
     ContextManagerConfig {
         model: "gemma4:e4b".into(),
         system_prompt: Some("You are helpful.".into()),
+        context_policy: local_context_policy(),
         working_directory: Some("/tmp".into()),
         tools: Vec::new(),
         rules_content: None,

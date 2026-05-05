@@ -87,6 +87,14 @@ fn make_manager_and_store() -> (Arc<SessionManager>, Arc<EventStore>, Arc<EventE
     (mgr, store, broadcast)
 }
 
+fn make_profile_runtime() -> Arc<crate::runtime::ProfileRuntime> {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".tron");
+    crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+    let _keep_home_alive = Box::leak(Box::new(dir));
+    Arc::new(crate::runtime::ProfileRuntime::load(home).unwrap())
+}
+
 struct MockProviderFactoryFor<P: Provider + Default + 'static>(std::marker::PhantomData<P>);
 impl<P: Provider + Default + 'static> MockProviderFactoryFor<P> {
     fn new() -> Self {
@@ -130,6 +138,7 @@ fn make_subagent_manager(
         store.clone(),
         broadcast,
         Arc::new(FixedProviderFactory(provider)),
+        make_profile_runtime(),
         None,
         None,
     );
@@ -296,6 +305,7 @@ async fn subagent_completion_emits_events() {
         store.clone(),
         broadcast.clone(),
         Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        make_profile_runtime(),
         None,
         None,
     );
@@ -461,6 +471,7 @@ async fn spawn_subsession_emits_events() {
         store.clone(),
         broadcast.clone(),
         Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        make_profile_runtime(),
         None,
         None,
     );
@@ -534,6 +545,7 @@ async fn spawn_provider_creation_failure_ends_child_session() {
         store,
         broadcast,
         Arc::new(ProviderCreationErrorFactory),
+        make_profile_runtime(),
         None,
         None,
     ));
@@ -566,6 +578,7 @@ async fn spawn_subsession_provider_creation_failure_ends_child_session() {
         store,
         broadcast,
         Arc::new(ProviderCreationErrorFactory),
+        make_profile_runtime(),
         None,
         None,
     ));
@@ -1014,6 +1027,7 @@ async fn spawn_subsession_emits_spawn_type_in_event() {
         store.clone(),
         broadcast.clone(),
         Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        make_profile_runtime(),
         None,
         None,
     );
@@ -1045,6 +1059,7 @@ async fn spawn_subsession_with_hook_type_emits_hook_in_event() {
         store.clone(),
         broadcast.clone(),
         Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        make_profile_runtime(),
         None,
         None,
     );
@@ -1077,6 +1092,7 @@ async fn spawn_tool_agent_emits_tool_agent_type_in_event() {
         store.clone(),
         broadcast.clone(),
         Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        make_profile_runtime(),
         None,
         None,
     );
@@ -1108,6 +1124,7 @@ async fn subagent_completed_includes_spawn_type() {
         store.clone(),
         broadcast.clone(),
         Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
+        make_profile_runtime(),
         None,
         None,
     );
@@ -1139,6 +1156,7 @@ async fn subagent_failed_includes_spawn_type() {
         store.clone(),
         broadcast.clone(),
         Arc::new(MockProviderFactoryFor::<ErrorProvider>::new()),
+        make_profile_runtime(),
         None,
         None,
     );

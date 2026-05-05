@@ -13,44 +13,13 @@
 //!
 //! ## Invariant
 //!
-//! If `is_local_provider(p)` is true, the model must only see and be able to
-//! execute tools in the active profile's local tool policy. Schema filtering
+//! If a session plan selects a local provider policy, the model must only see
+//! and be able to execute tools in that profile's local tool policy. Schema filtering
 //! alone is insufficient — the executor must also refuse off-list calls to
 //! close the gap where a model hallucinates a tool name from training data or
 //! memory.
 
 use crate::core::messages::Provider;
-
-/// Tool names exposed to local models.
-#[must_use]
-pub fn local_model_tools() -> Vec<String> {
-    ContextPolicy::local_default()
-        .tool_filter()
-        .expect("active profile local tool policy must define allowedTools")
-}
-
-/// Rules truncation budget.
-#[must_use]
-pub fn rules_truncation_chars() -> usize {
-    ContextPolicy::local_default()
-        .rules_truncation()
-        .expect("active profile local context policy must define rulesTruncationChars")
-}
-
-/// Rules truncation suffix.
-#[must_use]
-pub fn rules_truncation_suffix() -> String {
-    ContextPolicy::local_default()
-        .spec
-        .rules_truncation_suffix
-        .expect("active profile local context policy must define rulesTruncationSuffix")
-}
-
-/// Char budget for token estimation.
-#[must_use]
-pub fn rules_estimation_chars() -> usize {
-    rules_truncation_chars() + rules_truncation_suffix().len()
-}
 
 /// Which context-assembly policy applies to a turn.
 ///
@@ -67,14 +36,6 @@ pub struct ContextPolicy {
 }
 
 impl ContextPolicy {
-    /// Derive the policy from a provider type.
-    #[must_use]
-    pub fn from_provider(p: Provider) -> Self {
-        let spec = crate::core::profile::active_execution_spec()
-            .expect("active profile must resolve before local context policy selection");
-        Self::from_provider_with_spec(p, &spec)
-    }
-
     /// Derive the policy from an explicit execution spec.
     #[must_use]
     pub fn from_provider_with_spec(
@@ -91,62 +52,25 @@ impl ContextPolicy {
         spec: &crate::core::profile::AgentExecutionSpec,
         entrypoint_id: &str,
     ) -> Self {
-        let provider_id = p.as_str();
-        let provider_is_local = spec.context_policies.iter().any(|(_, policy)| {
-            policy
-                .local_providers
-                .iter()
-                .any(|candidate| candidate == provider_id)
-        });
+        let provider_is_local = provider_is_local_for_spec(p, spec);
 
         let entrypoint = spec
             .entrypoints
             .get(entrypoint_id)
-            .or_else(|| spec.entrypoints.get("main"))
-            .or_else(|| spec.entrypoints.get("chat"));
+            .expect("validated profile must define the requested entrypoint");
         let context_id = if provider_is_local {
             entrypoint
-                .and_then(|entrypoint| entrypoint.local_context_policy.as_deref())
-                .or_else(|| entrypoint.map(|entrypoint| entrypoint.context_policy.as_str()))
+                .local_context_policy
+                .as_deref()
+                .unwrap_or(entrypoint.context_policy.as_str())
         } else {
-            entrypoint.map(|entrypoint| entrypoint.context_policy.as_str())
-        }
-        .or_else(|| spec.context_policies.keys().next().map(String::as_str))
-        .expect("bundled default profile must define a context policy");
+            entrypoint.context_policy.as_str()
+        };
         let selected_is_local = provider_is_local
             || spec
                 .context_policy(context_id)
                 .is_some_and(|policy| !policy.local_providers.is_empty());
         Self::from_context_id_with_spec(spec, context_id, selected_is_local)
-    }
-
-    /// The default local context policy from the active profile.
-    #[must_use]
-    pub fn local_default() -> Self {
-        let spec = crate::core::profile::active_execution_spec()
-            .expect("active profile must resolve before local context policy selection");
-        let (id, _) = spec
-            .context_policies
-            .iter()
-            .find(|(_, policy)| !policy.local_providers.is_empty())
-            .expect("bundled default profile must define a local context policy");
-        Self::from_context_id_with_spec(&spec, id, true)
-    }
-
-    /// The default cloud/chat context policy from the active profile.
-    #[must_use]
-    pub fn cloud_default() -> Self {
-        let spec = crate::core::profile::active_execution_spec()
-            .expect("active profile must resolve before cloud context policy selection");
-        let entrypoint = spec
-            .entrypoints
-            .get("main")
-            .or_else(|| spec.entrypoints.get("chat"));
-        let context_id = entrypoint
-            .map(|entrypoint| entrypoint.context_policy.as_str())
-            .or_else(|| spec.context_policies.keys().next().map(String::as_str))
-            .expect("bundled default profile must define a context policy");
-        Self::from_context_id_with_spec(&spec, context_id, false)
     }
 
     fn from_context_id_with_spec(
@@ -161,15 +85,26 @@ impl ContextPolicy {
         let entrypoint = spec
             .entrypoints
             .get("main")
-            .or_else(|| spec.entrypoints.get("chat"));
+            .expect("validated profile must define entrypoints.main");
         let tool_policy_id = context_spec
             .tool_policy
             .as_deref()
-            .or_else(|| entrypoint.map(|entrypoint| entrypoint.tool_policy.as_str()));
-        let tool_policy = tool_policy_id.and_then(|id| spec.tool_policy(id).cloned());
+            .unwrap_or(entrypoint.tool_policy.as_str());
+        let tool_policy = spec.tool_policy(tool_policy_id).cloned();
+        Self::from_resolved_parts(context_id, context_spec, tool_policy, is_local)
+    }
+
+    /// Build a context policy from already-resolved profile policy tables.
+    #[must_use]
+    pub fn from_resolved_parts(
+        id: impl Into<String>,
+        spec: crate::core::profile::ContextPolicySpec,
+        tool_policy: Option<crate::core::profile::ToolPolicySpec>,
+        is_local: bool,
+    ) -> Self {
         Self {
-            id: context_id.to_string(),
-            spec: context_spec,
+            id: id.into(),
+            spec,
             tool_policy,
             is_local,
         }
@@ -245,6 +180,12 @@ impl ContextPolicy {
         self.spec.rules_truncation_chars
     }
 
+    /// Char budget for token estimation, including the truncation suffix.
+    #[must_use]
+    pub fn rules_estimation_chars(&self) -> Option<usize> {
+        Some(self.rules_truncation()? + self.spec.rules_truncation_suffix.as_ref()?.len())
+    }
+
     /// Truncate rules according to this policy.
     #[must_use]
     pub fn truncate_rules(&self, rules: &str) -> String {
@@ -268,32 +209,17 @@ impl ContextPolicy {
 
 /// Is this provider a local model (stripped context, small window)?
 #[must_use]
-pub fn is_local_provider(p: Provider) -> bool {
-    ContextPolicy::from_provider(p).is_local()
-}
-
-/// Is this tool permitted for local models?
-#[must_use]
-pub fn is_local_tool(name: &str) -> bool {
-    local_model_tools().iter().any(|tool| tool == name)
-}
-
-/// Truncate `rules` for local display.
-///
-/// Safe at multi-byte char boundaries. Returns the original string unchanged if
-/// it already fits within the active profile's local truncation budget.
-#[must_use]
-pub fn truncate_rules_for_local(rules: &str) -> String {
-    let budget = rules_truncation_chars();
-    if rules.len() <= budget {
-        return rules.to_string();
-    }
-    let cut = rules
-        .char_indices()
-        .take_while(|&(i, _)| i <= budget)
-        .last()
-        .map_or(0, |(i, _)| i);
-    format!("{}{}", &rules[..cut], rules_truncation_suffix())
+pub fn provider_is_local_for_spec(
+    p: Provider,
+    spec: &crate::core::profile::AgentExecutionSpec,
+) -> bool {
+    let provider_id = p.as_str();
+    spec.context_policies.iter().any(|(_, policy)| {
+        policy
+            .local_providers
+            .iter()
+            .any(|candidate| candidate == provider_id)
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -304,21 +230,33 @@ pub fn truncate_rules_for_local(rules: &str) -> String {
 mod tests {
     use super::*;
 
-    // ── is_local_provider ────────────────────────────────────────────────
+    fn spec() -> crate::core::profile::AgentExecutionSpec {
+        crate::core::profile::bundled_default_execution_spec()
+    }
+
+    fn policy(provider: Provider) -> ContextPolicy {
+        ContextPolicy::from_provider_with_spec(provider, &spec())
+    }
+
+    fn local_policy() -> ContextPolicy {
+        policy(Provider::Ollama)
+    }
+
+    // ── provider_is_local_for_spec ──────────────────────────────────────
 
     #[test]
     fn ollama_is_local() {
-        assert!(is_local_provider(Provider::Ollama));
+        assert!(provider_is_local_for_spec(Provider::Ollama, &spec()));
     }
 
     #[test]
     fn cloud_providers_are_not_local() {
-        assert!(!is_local_provider(Provider::Anthropic));
-        assert!(!is_local_provider(Provider::OpenAi));
-        assert!(!is_local_provider(Provider::OpenAiCodex));
-        assert!(!is_local_provider(Provider::Google));
-        assert!(!is_local_provider(Provider::MiniMax));
-        assert!(!is_local_provider(Provider::Kimi));
+        assert!(!provider_is_local_for_spec(Provider::Anthropic, &spec()));
+        assert!(!provider_is_local_for_spec(Provider::OpenAi, &spec()));
+        assert!(!provider_is_local_for_spec(Provider::OpenAiCodex, &spec()));
+        assert!(!provider_is_local_for_spec(Provider::Google, &spec()));
+        assert!(!provider_is_local_for_spec(Provider::MiniMax, &spec()));
+        assert!(!provider_is_local_for_spec(Provider::Kimi, &spec()));
     }
 
     #[test]
@@ -326,13 +264,14 @@ mod tests {
         // Defensive: unrecognized providers default to cloud policy so they
         // get full tool access and unrestricted context. Forcing them into
         // the local allow-list would silently break any new provider added.
-        assert!(!is_local_provider(Provider::Unknown));
+        assert!(!provider_is_local_for_spec(Provider::Unknown, &spec()));
     }
 
-    // ── is_local_tool ────────────────────────────────────────────────────
+    // ── local tool filter ────────────────────────────────────────────────
 
     #[test]
     fn local_tools_allow_file_search_web_and_questions() {
+        let allowed = local_policy().tool_filter().unwrap();
         for name in [
             "Read",
             "Write",
@@ -343,47 +282,55 @@ mod tests {
             "WebFetch",
             "AskUserQuestion",
         ] {
-            assert!(is_local_tool(name), "{name} should be local-allowed");
+            assert!(
+                allowed.iter().any(|tool| tool == name),
+                "{name} should be local-allowed"
+            );
         }
     }
 
     #[test]
     fn cloud_only_tool_rejected() {
-        assert!(!is_local_tool("SpawnSubagent"));
-        assert!(!is_local_tool("GetConfirmation"));
-        assert!(!is_local_tool("UnknownTool"));
+        let allowed = local_policy().tool_filter().unwrap();
+        assert!(!allowed.iter().any(|tool| tool == "SpawnSubagent"));
+        assert!(!allowed.iter().any(|tool| tool == "GetConfirmation"));
+        assert!(!allowed.iter().any(|tool| tool == "UnknownTool"));
     }
 
     #[test]
     fn local_tool_check_is_case_sensitive() {
-        assert!(!is_local_tool("read"));
-        assert!(!is_local_tool("BASH"));
+        let allowed = local_policy().tool_filter().unwrap();
+        assert!(!allowed.iter().any(|tool| tool == "read"));
+        assert!(!allowed.iter().any(|tool| tool == "BASH"));
     }
 
-    // ── truncate_rules_for_local ─────────────────────────────────────────
+    // ── truncate_rules ──────────────────────────────────────────────────
 
     #[test]
     fn truncate_empty_returns_empty() {
-        assert_eq!(truncate_rules_for_local(""), "");
+        assert_eq!(local_policy().truncate_rules(""), "");
     }
 
     #[test]
     fn truncate_shorter_than_budget_unchanged() {
         let s = "short rules";
-        assert_eq!(truncate_rules_for_local(s), s);
+        assert_eq!(local_policy().truncate_rules(s), s);
     }
 
     #[test]
     fn truncate_exactly_at_budget_unchanged() {
-        let s = "a".repeat(rules_truncation_chars());
-        assert_eq!(truncate_rules_for_local(&s), s);
+        let p = local_policy();
+        let s = "a".repeat(p.rules_truncation().unwrap());
+        assert_eq!(p.truncate_rules(&s), s);
     }
 
     #[test]
     fn truncate_over_budget_adds_suffix() {
-        let s = "a".repeat(rules_truncation_chars() + 100);
-        let out = truncate_rules_for_local(&s);
-        assert!(out.ends_with(&rules_truncation_suffix()));
+        let p = local_policy();
+        let suffix = p.spec.rules_truncation_suffix.clone().unwrap();
+        let s = "a".repeat(p.rules_truncation().unwrap() + 100);
+        let out = p.truncate_rules(&s);
+        assert!(out.ends_with(&suffix));
         assert!(out.len() < s.len());
     }
 
@@ -391,19 +338,21 @@ mod tests {
     fn truncate_multibyte_boundary_safe() {
         // Each 'é' is 2 bytes. Build a string that forces truncation mid-codepoint
         // if we weren't being careful.
-        let s = "é".repeat(rules_truncation_chars());
-        let out = truncate_rules_for_local(&s);
+        let p = local_policy();
+        let suffix = p.spec.rules_truncation_suffix.clone().unwrap();
+        let s = "é".repeat(p.rules_truncation().unwrap());
+        let out = p.truncate_rules(&s);
         // Must be valid UTF-8 (trivially true for String, but must not have
         // split a codepoint mid-byte - verify by successful construction and
         // sensible length).
-        assert!(out.ends_with(&rules_truncation_suffix()));
+        assert!(out.ends_with(&suffix));
     }
 
     // ── ContextPolicy ────────────────────────────────────────────────────
 
     #[test]
     fn policy_from_ollama_is_local() {
-        let policy = ContextPolicy::from_provider(Provider::Ollama);
+        let policy = policy(Provider::Ollama);
         assert!(policy.is_local());
         assert_eq!(policy.id(), "localDefault");
     }
@@ -419,7 +368,7 @@ mod tests {
             Provider::Kimi,
             Provider::Unknown,
         ] {
-            let policy = ContextPolicy::from_provider(p);
+            let policy = policy(p);
             assert!(!policy.is_local(), "{p:?} should use cloud policy");
             assert_eq!(policy.id(), "cloudDefault");
         }
@@ -427,18 +376,18 @@ mod tests {
 
     #[test]
     fn local_policy_strips_everything() {
-        let p = ContextPolicy::local_default();
+        let p = local_policy();
         assert!(p.strip_memory());
         assert!(p.strip_skill_index());
         assert!(p.strip_job_results());
         assert!(p.skip_pending_jobs_bootstrap());
-        assert_eq!(p.tool_filter(), Some(local_model_tools()));
-        assert_eq!(p.rules_truncation(), Some(rules_truncation_chars()));
+        assert!(p.tool_filter().is_some());
+        assert!(p.rules_truncation().is_some());
     }
 
     #[test]
     fn cloud_policy_strips_nothing() {
-        let p = ContextPolicy::cloud_default();
+        let p = policy(Provider::Anthropic);
         assert!(!p.strip_memory());
         assert!(!p.strip_skill_index());
         assert!(!p.strip_job_results());
@@ -449,10 +398,11 @@ mod tests {
 
     #[test]
     fn estimation_chars_matches_truncation_output() {
-        let s = "a".repeat(rules_truncation_chars() + 1000);
-        let out = truncate_rules_for_local(&s);
+        let p = local_policy();
+        let s = "a".repeat(p.rules_truncation().unwrap() + 1000);
+        let out = p.truncate_rules(&s);
         // The actual output length should be <= rules_estimation_chars(),
         // so the estimator's budget is a safe upper bound.
-        assert!(out.len() <= rules_estimation_chars());
+        assert!(out.len() <= p.rules_estimation_chars().unwrap());
     }
 }

@@ -25,6 +25,7 @@ pub(crate) fn build_context_manager_for_session(
     session_manager: &SessionManager,
     event_store: &crate::events::EventStore,
     context_artifacts: &crate::server::rpc::session_context::ContextArtifactsService,
+    profile_runtime: &crate::runtime::ProfileRuntime,
     tool_definitions: Vec<Tool>,
 ) -> Result<PreparedSessionContext, RpcError> {
     let session = session_manager
@@ -46,13 +47,18 @@ pub(crate) fn build_context_manager_for_session(
         },
     };
 
-    let settings = crate::settings::get_settings();
     let profile_name = session.profile.as_str();
-    let _resolved_profile =
-        crate::core::profile::resolve_profile_at(&crate::core::paths::tron_home(), profile_name)
-            .map_err(|error| RpcError::Internal {
-                message: format!("invalid session profile `{profile_name}`: {error}"),
-            })?;
+    let session_plan = profile_runtime
+        .plan_session(crate::runtime::SessionPlanRequest {
+            requested_profile: Some(profile_name.to_string()),
+            model: state.model.clone(),
+            source: session.source.clone(),
+            entrypoint: None,
+        })
+        .map_err(|error| RpcError::Internal {
+            message: format!("invalid session profile `{profile_name}`: {error}"),
+        })?;
+    let settings = session_plan.settings.clone();
     let is_chat = profile_name == crate::core::profile::CHAT_PROFILE
         || session.source.as_deref() == Some("chat");
     let artifacts = if is_chat {
@@ -74,23 +80,18 @@ pub(crate) fn build_context_manager_for_session(
             .or_else(crate::runtime::context::instruction_prompts::load_global_system_prompt)
             .map(|loaded| loaded.content)
             .or_else(|| {
-                Some(
-                    crate::runtime::context::instruction_prompts::entrypoint_prompt(
-                        profile_name,
-                        "main",
-                        "core",
-                    ),
-                )
+                session_plan
+                    .prompt
+                    .as_ref()
+                    .map(|prompt| prompt.content.clone())
             })
         } else {
-            Some(
-                crate::runtime::context::instruction_prompts::entrypoint_prompt(
-                    profile_name,
-                    "main",
-                    "core",
-                ),
-            )
+            session_plan
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.content.clone())
         },
+        context_policy: session_plan.runtime_context_policy(),
         working_directory: state.working_directory.clone(),
         tools: tool_definitions,
         rules_content: artifacts.rules.merged_content.clone(),
@@ -181,13 +182,14 @@ pub(crate) fn build_summarizer(
     working_directory: &str,
 ) -> Box<dyn Summarizer> {
     if let Some(manager) = ctx.subagent_manager.as_ref() {
+        let process_plan = manager.plan_process("compaction").ok();
         let spawner = crate::runtime::agent::compaction_handler::SubagentManagerSpawner {
             manager: manager.clone(),
             parent_session_id: session_id.to_owned(),
             working_directory: working_directory.to_owned(),
-            system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
-                "compaction",
-            ),
+            system_prompt: process_plan
+                .and_then(|plan| plan.prompt.map(|prompt| prompt.content))
+                .unwrap_or_default(),
             model: None,
         };
         Box::new(crate::runtime::context::llm_summarizer::LlmSummarizer::new(

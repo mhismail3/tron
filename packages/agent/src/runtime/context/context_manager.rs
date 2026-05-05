@@ -15,7 +15,6 @@ use super::constants::{
     CHARS_PER_TOKEN, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MIN_TOKENS, Thresholds,
 };
 use super::context_snapshot_builder::{ContextSnapshotBuilder, SnapshotDeps};
-use super::instruction_prompts;
 use super::local_policy;
 use super::message_store::MessageStore;
 use super::rules_index::RulesIndex;
@@ -64,10 +63,8 @@ pub struct ContextManager {
     volatile_skill_removal_tokens: u64,
     /// Volatile token estimate: background job results.
     volatile_job_results_tokens: u64,
-    /// Local model mode (Ollama). Disables memory and skill index token estimation
-    /// since those fields are stripped at turn time. Skill context/activation/removal
-    /// tokens still flow through (users can manually activate skills).
-    is_local_model: bool,
+    /// Profile-resolved context policy for this session/process.
+    context_policy: local_policy::ContextPolicy,
     /// H15 invariant tracking: monotonic counter bumped by `begin_turn()` at
     /// the start of each turn-entry path (currently only
     /// `turn_runner::execute_turn`). `set_volatile_tokens` records the
@@ -92,22 +89,17 @@ impl ContextManager {
             config.working_directory = Some(format!("{home}/Workspace"));
         }
 
-        let is_local = crate::llm::models::registry::detect_provider_from_model(&config.model)
-            .is_some_and(local_policy::is_local_provider);
-
         let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
-            if is_local {
-                instruction_prompts::default_prompt("local")
-            } else {
-                instruction_prompts::default_prompt("core")
-            }
+            panic!("ContextManagerConfig.system_prompt must be resolved from the active profile")
         });
+        let context_policy = config.context_policy.clone();
 
         // Filter tool definitions for token estimation accuracy. Local models
-        // only receive the active profile's local tool policy at turn time, so
+        // only receive the profile-selected local tool policy at turn time, so
         // the estimator should count only those.
-        if is_local {
-            let local_tools = local_policy::local_model_tools();
+        if context_policy.is_local()
+            && let Some(local_tools) = context_policy.tool_filter()
+        {
             config
                 .tools
                 .retain(|t| local_tools.iter().any(|name| name == &t.name));
@@ -132,7 +124,7 @@ impl ContextManager {
             volatile_skill_context_tokens: 0,
             volatile_skill_removal_tokens: 0,
             volatile_job_results_tokens: 0,
-            is_local_model: is_local,
+            context_policy,
             turn_generation: 0,
             volatile_refreshed_at_generation: None,
         }
@@ -420,15 +412,11 @@ impl ContextManager {
     /// Local models strip the skill index and job results at turn time,
     /// but keep manually-activated skill content.
     pub fn is_local_model(&self) -> bool {
-        self.is_local_model
+        self.context_policy.is_local()
     }
 
-    fn context_policy(&self) -> local_policy::ContextPolicy {
-        if self.is_local_model {
-            local_policy::ContextPolicy::local_default()
-        } else {
-            local_policy::ContextPolicy::cloud_default()
-        }
+    fn context_policy(&self) -> &local_policy::ContextPolicy {
+        &self.context_policy
     }
 
     #[must_use]
@@ -489,7 +477,11 @@ impl ContextManager {
             // time. Cap the estimate to match what the model actually
             // receives.
             let capped = self.rules_content.as_ref().map(|r| {
-                let len = r.len().min(local_policy::rules_estimation_chars());
+                let budget = self
+                    .context_policy()
+                    .rules_estimation_chars()
+                    .unwrap_or(r.len());
+                let len = r.len().min(budget);
                 len as u64 / u64::from(CHARS_PER_TOKEN)
             });
             capped.unwrap_or(0)
@@ -923,7 +915,7 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
             .collect()
     }
     fn is_local_model(&self) -> bool {
-        self.manager.is_local_model
+        self.manager.is_local_model()
     }
 }
 

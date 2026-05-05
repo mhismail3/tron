@@ -109,7 +109,10 @@ mod tests {
             memory_registry: Arc::new(parking_lot::Mutex::new(
                 crate::runtime::memory::MemoryRegistry::new(),
             )),
-            settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
+            settings_path: std::path::PathBuf::from("/tmp/tron-test-profile.toml"),
+            profile_runtime: std::sync::Arc::new(
+                crate::runtime::ProfileRuntime::load(crate::core::paths::tron_home()).unwrap(),
+            ),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             transcription_engine: std::sync::Arc::new(std::sync::OnceLock::new()),

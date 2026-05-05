@@ -58,6 +58,8 @@ pub struct ContextManagerConfig {
     pub model: String,
     /// Custom system prompt override.
     pub system_prompt: Option<String>,
+    /// Profile-resolved context assembly policy for this session/process.
+    pub context_policy: super::local_policy::ContextPolicy,
     /// Working directory for file operations.
     pub working_directory: Option<String>,
     /// Available tools.

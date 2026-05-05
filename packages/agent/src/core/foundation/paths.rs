@@ -98,9 +98,6 @@ pub mod dirs {
     pub const TOOLS: &str = "tools";
     /// Context compiler policy files referenced by a profile.
     pub const CONTEXT: &str = "context";
-    /// Profile-owned settings files.
-    pub const SETTINGS: &str = "settings";
-
     /// Relative agent dir for rules discovery: `.tron/memory/rules`.
     ///
     /// This is a composed constant used in `rules_discovery.rs` where a
@@ -111,10 +108,6 @@ pub mod dirs {
 
 /// Well-known file names under `~/.tron/`.
 pub mod files {
-    /// Sparse settings override file used by compatibility settings RPCs.
-    pub const SETTINGS_JSON: &str = "settings.json";
-    /// Managed default settings inside the default profile.
-    pub const DEFAULTS_JSON: &str = "defaults.json";
     /// Protected built-in authentication credentials (API keys, tokens).
     pub const AUTH_JSON: &str = "auth.json";
     /// Readable credential registry.
@@ -439,41 +432,19 @@ pub fn tron_binary_path() -> PathBuf {
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("tron"))
 }
 
-/// `~/.tron/profiles/user/settings.json`
+/// `~/.tron/profiles/user/profile.toml`
 pub fn settings_path() -> PathBuf {
-    let profile = crate::core::profile::resolve_active_profile()
-        .expect("active profile must resolve before settings path resolution")
-        .spec
-        .settings
-        .user_overrides_profile;
-    profiles_dir().join(profile).join(files::SETTINGS_JSON)
+    user_profile_path()
 }
 
-/// Active profile managed settings defaults.
+/// Managed default profile path.
 pub fn settings_defaults_path() -> PathBuf {
-    let relative = crate::core::profile::resolve_active_profile()
-        .expect("active profile must resolve before settings defaults path resolution")
-        .spec
-        .settings
-        .defaults;
-    crate::core::profile::resolve_active_file_at(&tron_home(), &relative)
-        .expect("validated active profile must provide settings defaults")
+    default_profile_dir().join(files::PROFILE_TOML)
 }
 
 /// `~/.tron/profiles/auth.json`
 pub fn auth_path() -> PathBuf {
-    let relative = crate::core::profile::resolve_active_profile()
-        .expect("active profile must resolve before auth path resolution")
-        .spec
-        .auth
-        .raw_store;
-    let path = profiles_dir().join(relative);
-    assert!(
-        path.is_file(),
-        "validated active profile must provide auth raw store: {}",
-        path.display()
-    );
-    path
+    profiles_dir().join(files::AUTH_JSON)
 }
 
 /// `~/.tron/profiles/auth.json` — WebSocket bearer-token storage and provider auth.
@@ -566,6 +537,13 @@ pub fn global_system_prompt_path() -> PathBuf {
         .join("core.md")
 }
 
+/// `~/.tron/profiles/user/profile.toml`
+pub fn user_profile_path() -> PathBuf {
+    profiles_dir()
+        .join(crate::core::profile::USER_PROFILE)
+        .join(files::PROFILE_TOML)
+}
+
 /// `~/.tron/profiles/user/containers.json`
 pub fn containers_path() -> PathBuf {
     profiles_dir()
@@ -586,52 +564,6 @@ pub fn active_profile_path() -> PathBuf {
 /// `~/.tron/profiles/auth.toml`
 pub fn auth_registry_path() -> PathBuf {
     profiles_dir().join(files::AUTH_TOML)
-}
-
-/// Active profile prompt.
-pub fn default_prompt_path(name: &str) -> PathBuf {
-    let entrypoint = match name {
-        "core" => "main",
-        "git-workflow" => "gitWorkflow",
-        other => other,
-    };
-    let profile = crate::core::profile::resolve_active_profile()
-        .expect("active profile must resolve before prompt path resolution");
-    let relative = profile
-        .spec
-        .entrypoint_prompt(entrypoint)
-        .unwrap_or_else(|| panic!("active profile entrypoint `{entrypoint}` must define a prompt"));
-    crate::core::profile::resolve_profile_file_at(&tron_home(), &profile.name, relative)
-        .expect("validated active profile must provide entrypoint prompt")
-}
-
-/// Active profile process prompt.
-pub fn default_process_prompt_path(name: &str) -> PathBuf {
-    let profile = crate::core::profile::resolve_active_profile()
-        .expect("active profile must resolve before process prompt path resolution");
-    let relative = profile
-        .spec
-        .process_prompt(name)
-        .unwrap_or_else(|| panic!("active profile process `{name}` must define a prompt"));
-    crate::core::profile::resolve_profile_file_at(&tron_home(), &profile.name, relative)
-        .expect("validated active profile must provide process prompt")
-}
-
-/// Active profile provider prompt.
-pub fn default_provider_prompt_path(provider: &str, name: &str) -> PathBuf {
-    let profile = crate::core::profile::resolve_active_profile()
-        .expect("active profile must resolve before provider prompt path resolution");
-    let policy =
-        if matches!(name, "codexInstructions" | "codex-instructions") && provider == "openai" {
-            "openaiCodex"
-        } else {
-            provider
-        };
-    let relative = profile.spec.provider_prompt(policy).unwrap_or_else(|| {
-        panic!("active profile provider policy `{policy}` must define a prompt")
-    });
-    crate::core::profile::resolve_profile_file_at(&tron_home(), &profile.name, relative)
-        .expect("validated active profile must provide provider prompt")
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -985,7 +917,7 @@ mod tests {
     #[test]
     fn settings_path_correct() {
         let p = settings_path();
-        assert!(p.ends_with(format!("{}/user/{}", dirs::PROFILES, files::SETTINGS_JSON)));
+        assert!(p.ends_with(format!("{}/user/{}", dirs::PROFILES, files::PROFILE_TOML)));
     }
 
     #[test]

@@ -16,6 +16,22 @@ fn test_db_config() -> ConnectionConfig {
     }
 }
 
+fn test_tron_home(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    let home = dir.path().join(".tron");
+    tron::core::constitution::ensure_tron_home_at(&home).unwrap();
+    home
+}
+
+fn test_settings_path(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(tron::core::paths::dirs::PROFILES)
+        .join(tron::core::profile::USER_PROFILE)
+        .join(tron::core::paths::files::PROFILE_TOML)
+}
+
+fn test_profile_runtime(home: &std::path::Path) -> Arc<tron::runtime::ProfileRuntime> {
+    Arc::new(tron::runtime::ProfileRuntime::load(home).unwrap())
+}
+
 #[test]
 fn cli_default_host() {
     let cli = Cli::parse_from(["tron"]);
@@ -366,7 +382,8 @@ async fn server_auth_maps_to_api_key_auth() {
 async fn server_boots_and_responds() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("log.db");
-    let settings_path = dir.path().join("settings.json");
+    let home = test_tron_home(&dir);
+    let settings_path = test_settings_path(&home);
 
     // Single DB for events + tasks
     let db_str = db_path.to_string_lossy();
@@ -389,6 +406,7 @@ async fn server_boots_and_responds() {
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),
         )),
+        profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
@@ -598,7 +616,8 @@ fn tool_registry_always_includes_web_search_and_mcp_meta_tools() {
 async fn init_mcp_registers_meta_tools_without_servers() {
     let settings = TronSettings::default();
     let dir = tempfile::tempdir().unwrap();
-    let state = init_mcp(&settings, &dir.path().join("settings.json")).await;
+    let home = test_tron_home(&dir);
+    let state = init_mcp(&settings, &test_settings_path(&home)).await;
 
     assert_eq!(state.search.name(), "McpSearch");
     assert_eq!(state.call.name(), "McpCall");
@@ -644,6 +663,8 @@ async fn server_graceful_shutdown() {
     let event_store = Arc::new(EventStore::new(pool));
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
+    let home = test_tron_home(&dir);
+    let settings_path = test_settings_path(&home);
 
     let rpc_context = RpcContext {
         orchestrator,
@@ -653,7 +674,8 @@ async fn server_graceful_shutdown() {
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),
         )),
-        settings_path: dir.path().join("settings.json"),
+        profile_runtime: test_profile_runtime(&home),
+        settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
@@ -808,10 +830,9 @@ fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
     assert!(
         home.join(tron::core::paths::dirs::PROFILES)
             .join(tron::core::profile::DEFAULT_PROFILE)
-            .join(tron::core::paths::dirs::SETTINGS)
-            .join(tron::core::paths::files::DEFAULTS_JSON)
+            .join(tron::core::paths::files::PROFILE_TOML)
             .exists(),
-        "default settings defaults must be seeded for auditable defaults"
+        "default profile must be seeded for auditable profile-owned settings"
     );
 }
 

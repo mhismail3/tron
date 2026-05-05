@@ -41,7 +41,7 @@ xcodebuild test -scheme TronMac -destination 'platform=macOS'
 | Distributed app | `/Applications/Tron.app` |
 | Server helper | `/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app` |
 | Bundled LaunchAgent plist | `/Applications/Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist` |
-| Settings | `~/.tron/profiles/user/settings.json` |
+| Settings overlay | `~/.tron/profiles/user/profile.toml` (`[settings]`) |
 | Auth | `~/.tron/profiles/auth.json` |
 | Bearer token | `~/.tron/profiles/auth.json` (`bearerToken`) |
 | Runtime locks | `~/.tron/internal/run/` |

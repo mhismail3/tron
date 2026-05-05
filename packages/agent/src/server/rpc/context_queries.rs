@@ -26,6 +26,7 @@ impl ContextQueryService {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
+        let profile_runtime = ctx.profile_runtime.clone();
         let skill_registry = ctx.skill_registry.clone();
         let memory_registry = ctx.memory_registry.clone();
         let tool_definitions = tool_definitions(ctx);
@@ -37,6 +38,7 @@ impl ContextQueryService {
                     session_manager.as_ref(),
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
+                    profile_runtime.as_ref(),
                     tool_definitions.clone(),
                 )?;
                 // Skill index + memory content: skip for local models (stripped at turn time)
@@ -87,6 +89,7 @@ impl ContextQueryService {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
+        let profile_runtime = ctx.profile_runtime.clone();
         let skill_registry = ctx.skill_registry.clone();
         let memory_registry = ctx.memory_registry.clone();
         let tool_definitions = tool_definitions(ctx);
@@ -98,6 +101,7 @@ impl ContextQueryService {
                     session_manager.as_ref(),
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
+                    profile_runtime.as_ref(),
                     tool_definitions.clone(),
                 )?;
                 build_detailed_snapshot_response(
@@ -146,6 +150,7 @@ impl ContextQueryService {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
+        let profile_runtime = ctx.profile_runtime.clone();
         let tool_definitions = tool_definitions(ctx);
         let session_id_for_query = session_id.clone();
         ctx.run_blocking("context.should_compact", move || {
@@ -155,6 +160,7 @@ impl ContextQueryService {
                     session_manager.as_ref(),
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
+                    profile_runtime.as_ref(),
                     tool_definitions.clone(),
                 )?;
                 Ok(json!({
@@ -198,6 +204,7 @@ impl ContextQueryService {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
+        let profile_runtime = ctx.profile_runtime.clone();
         let tool_definitions = tool_definitions(ctx);
         let session_id_for_query = session_id.clone();
         ctx.run_blocking("context.can_accept_turn", move || {
@@ -207,6 +214,7 @@ impl ContextQueryService {
                     session_manager.as_ref(),
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
+                    profile_runtime.as_ref(),
                     tool_definitions.clone(),
                 )?;
                 Ok(json!({
@@ -226,6 +234,7 @@ pub(crate) async fn prepare_session_context(
     let session_manager = ctx.session_manager.clone();
     let event_store = ctx.event_store.clone();
     let context_artifacts = ctx.context_artifacts.clone();
+    let profile_runtime = ctx.profile_runtime.clone();
     let tool_definitions = tool_definitions(ctx);
     let session_id = session_id.to_owned();
     ctx.run_blocking(task_name, move || {
@@ -235,6 +244,7 @@ pub(crate) async fn prepare_session_context(
                 session_manager.as_ref(),
                 event_store.as_ref(),
                 context_artifacts.as_ref(),
+                profile_runtime.as_ref(),
                 tool_definitions.clone(),
             )
         })

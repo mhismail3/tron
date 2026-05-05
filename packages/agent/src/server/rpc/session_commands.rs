@@ -12,48 +12,22 @@ use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::session_context::{ContextArtifactsService, RuleFileLevel};
 
 fn resolve_session_profile(
+    ctx: &RpcContext,
     requested: Option<&str>,
     model: &str,
     source: Option<&str>,
 ) -> Result<String, RpcError> {
-    let provider = crate::llm::models::registry::detect_provider_from_model(model);
-    let local_model =
-        provider.is_some_and(crate::runtime::context::local_policy::is_local_provider);
-    let mut profile = requested
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            if local_model {
-                crate::core::profile::LOCAL_PROFILE.to_string()
-            } else if source == Some("chat") {
-                crate::core::profile::CHAT_PROFILE.to_string()
-            } else {
-                crate::core::profile::NORMAL_PROFILE.to_string()
-            }
-        });
-
-    if profile == crate::core::profile::DEFAULT_PROFILE {
-        profile = crate::core::profile::NORMAL_PROFILE.to_string();
-    }
-
-    let resolved =
-        crate::core::profile::resolve_profile_at(&crate::core::paths::tron_home(), &profile)
-            .map_err(|error| RpcError::InvalidParams {
-                message: format!("invalid session profile `{profile}`: {error}"),
-            })?;
-
-    if local_model
-        && resolved.spec.profile_class.as_deref() != Some(crate::core::profile::LOCAL_PROFILE)
-    {
-        profile = crate::core::profile::LOCAL_PROFILE.to_string();
-        crate::core::profile::resolve_profile_at(&crate::core::paths::tron_home(), &profile)
-            .map_err(|error| RpcError::InvalidParams {
-                message: format!("invalid local session profile `{profile}`: {error}"),
-            })?;
-    }
-
-    Ok(profile)
+    ctx.profile_runtime
+        .plan_session(crate::runtime::SessionPlanRequest {
+            requested_profile: requested.map(str::to_string),
+            model: model.to_string(),
+            source: source.map(str::to_string),
+            entrypoint: None,
+        })
+        .map(|plan| plan.profile_name)
+        .map_err(|error| RpcError::InvalidParams {
+            message: format!("invalid session profile: {error}"),
+        })
 }
 
 /// Release worktree for a session if one is active.
@@ -98,6 +72,7 @@ impl SessionCommandService {
         let title = request.title.clone();
         let source = request.source.clone();
         let profile = resolve_session_profile(
+            ctx,
             request.profile.as_deref(),
             request.model.as_str(),
             request.source.as_deref(),
@@ -525,7 +500,10 @@ mod tests {
             memory_registry: Arc::new(parking_lot::Mutex::new(
                 crate::runtime::memory::MemoryRegistry::new(),
             )),
-            settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
+            settings_path: std::path::PathBuf::from("/tmp/tron-test-profile.toml"),
+            profile_runtime: std::sync::Arc::new(
+                crate::runtime::ProfileRuntime::load(crate::core::paths::tron_home()).unwrap(),
+            ),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             transcription_engine: Arc::new(std::sync::OnceLock::new()),

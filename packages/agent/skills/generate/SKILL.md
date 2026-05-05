@@ -142,10 +142,10 @@ Expect `200`. If the port was taken (connection refused), kill the old PID, pick
 **CRITICAL: The iOS device CANNOT reach `localhost` on the Mac server. You MUST use the Tailscale IP. NEVER pass `localhost` to the Display tool — the WebView runs on the phone.**
 
 ```bash
-python3 -c "import json; print(json.load(open('$HOME/.tron/profiles/user/settings.json')).get('server',{}).get('tailscaleIp',''))"
+python3 -c "import pathlib,tomllib; p=pathlib.Path.home()/'.tron/profiles/user/profile.toml'; data=tomllib.loads(p.read_text()) if p.exists() else {}; print(data.get('settings',{}).get('server',{}).get('tailscaleIp',''))"
 ```
 
-If the Tailscale IP is empty or missing, tell the user: "Tailscale IP is not configured. The UI won't load on your device. Set `server.tailscaleIp` in `~/.tron/profiles/user/settings.json`."
+If the Tailscale IP is empty or missing, tell the user: "Tailscale IP is not configured. The UI won't load on your device. Set `settings.server.tailscaleIp` in `~/.tron/profiles/user/profile.toml`."
 
 The display URL is: `http://<tailscale-ip>:<port>`
 

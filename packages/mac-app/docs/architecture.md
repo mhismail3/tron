@@ -60,7 +60,7 @@ packages/mac-app/
 │   │   │   ├── PairingURLBuilder.swift # builds `tron://pair?…` URL
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Server/
-│   │       ├── BearerTokenReader.swift     # reads auth.json bearerToken; caches pairing Tailscale IP in settings.json
+│   │       ├── BearerTokenReader.swift     # reads auth.json bearerToken; caches pairing Tailscale IP in profile.toml
 │   │       ├── ServerPing.swift            # one-shot string-id system.ping over WS → ServerPingResult; skips broadcast/event frames
 │   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
 │   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
@@ -182,7 +182,7 @@ download a model. Applying the step copies only `worker.py` and
 `requirements.txt` from the signed app bundle into
 `~/.tron/internal/transcription/`, making later iOS Settings enablement safe.
 If the user enables the toggle, the wrapper writes
-`server.transcription.enabled = true` into `settings.json`, restarts
+`server.transcription.enabled = true` into `profiles/user/profile.toml`, restarts
 `com.tron.server`, and waits for `system.ping`. The helper then owns the
 Python venv and HuggingFace cache under that same directory. If the user skips
 the step, the wrapper writes `enabled = false` and does not restart the helper.
@@ -194,10 +194,10 @@ to that tester group. The page also exposes copy/open fallbacks for the same
 URL, but it does not call the server or mutate onboarding state beyond normal
 step persistence.
 
-The Pairing step does not require a pre-existing `settings.json`. It
+The Pairing step does not require a pre-existing user profile. It
 reads the agent-issued `auth.json` bearer token, confirms the server is answering
 `system.ping`, probes the current Mac Tailscale state live, and only then
-caches `server.tailscaleIp` into `settings.json` for future wrapper/menu-bar
+caches `server.tailscaleIp` into `profiles/user/profile.toml` for future wrapper/menu-bar
 reads and later server settings reloads. If the cache write fails, the freshly
 resolved QR payload still works; settings are a fallback/cache, not a
 prerequisite for first-run pairing.
@@ -297,10 +297,11 @@ Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` both call
 `SMAppService.unregister`, remove runtime state
 (`run/.onboarded`, `run/updater-state.json`, `run/auth.lock`, and
 the current `run/.mac-wrapper.<bundle-id>.lock`), and quit the wrapper. By default, auth,
-settings, databases, and workspace files remain intact, so the next app
+profile settings, databases, and workspace files remain intact, so the next app
 launch returns to the onboarding wizard instead of a broken menu-bar-only
-state. The menu confirmation dialog can also remove `settings.json`
-and/or `auth.json`; databases and workspace files are still preserved.
+state. The menu confirmation dialog can also clear `[settings]` overrides from
+`profiles/user/profile.toml` and/or remove `auth.json`; databases and workspace
+files are still preserved.
 
 ## Key Invariants
 
@@ -309,12 +310,12 @@ and/or `auth.json`; databases and workspace files are still preserved.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
 - **The helper app must be signed before registration.** Release validation fails loudly if `Tron Server.app`, its binary, the bundled LaunchAgent plist, or the helper signature is missing/corrupt. The helper keeps bundle id `com.tron.server`; the LaunchAgent associates with the wrapper bundle ids because macOS presents some TCC services under the responsible wrapper app.
-- **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may remove `settings.json` and/or `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
+- **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may clear `[settings]` overrides from `profiles/user/profile.toml` and/or remove `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the correct helper is running.** Registration inspects `launchctl print` for the loaded job's parent bundle identifier and event-trigger executable before deciding whether to reuse, repair, or fail. Missing/mismatched helper executables are stale registrations and manager builds repair them; default Debug companion builds never repair or own production registration.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. App activation, Re-check, and the gear-button watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after all rows are green and the user presses Continue.
 - **Transcription is opt-in user data.** `worker.py` and `requirements.txt` ship read-only in the app bundle, and the wizard copies them to `~/.tron/internal/transcription/` when the user applies the Transcription step. The app bundle never contains the Python venv or Parakeet model cache, and skipping the step leaves the server setting false.
 - **App bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/internal/run`; `Tron.app` is only replaced by a new notarized DMG.
-- **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `settings.json`, `run/.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
+- **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `profile.toml`, `run/.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
 - **Production uses one port (`9847`) and one LaunchAgent label (`com.tron.server`).** The DMG-installed `Tron.app` (`com.tron.mac`), local Release copies, the default Xcode Debug companion (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) all target the production `~/.tron` data tree. Debug companion observes production but does not manage its Login Item; `tron dev` is the explicit server takeover path and stops the production LaunchAgent before binding 9847. The isolated install scheme is the exception by design: it uses `com.tron.server.dev`, port `9848`, and `~/.tron-dev`.
 - **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/core/foundation/paths.rs` for the Rust-side mirror.
 

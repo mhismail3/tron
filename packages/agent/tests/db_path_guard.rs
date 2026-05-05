@@ -247,6 +247,52 @@ fn legacy_tron_home_paths_are_absent() {
 }
 
 #[test]
+fn runtime_does_not_use_global_active_profile_helpers() {
+    let root = repo_root();
+    let scan_roots = [
+        root.join("packages/agent/src/cron"),
+        root.join("packages/agent/src/llm"),
+        root.join("packages/agent/src/runtime"),
+        root.join("packages/agent/src/server"),
+        root.join("packages/agent/src/tools"),
+    ];
+    let forbidden = [
+        "active_execution_spec(",
+        "active_process_spec(",
+        "resolve_active_profile(",
+        "instruction_prompts::entrypoint_prompt",
+        "instruction_prompts::process_prompt",
+        "instruction_prompts::provider_prompt",
+        "ContextPolicy::from_provider(",
+        "local_model_tools(",
+    ];
+
+    let mut files = Vec::new();
+    for scan_root in scan_roots {
+        collect_text_files(&scan_root, &mut files);
+    }
+
+    let mut violations = Vec::new();
+    for file in files {
+        let relative = repo_relative(&file);
+        let Ok(body) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        for pattern in forbidden {
+            if body.contains(pattern) {
+                violations.push(format!("{relative}: contains {pattern}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "runtime must consume ProfileRuntime/session/process plans, not global active-profile helpers:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn mac_bundle_script_loads_gitignored_local_relay_env() {
     let root = repo_root();
     let script_path = root.join("packages/mac-app/scripts/bundle-agent.sh");

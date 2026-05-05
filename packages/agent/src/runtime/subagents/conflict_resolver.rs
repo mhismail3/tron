@@ -49,13 +49,12 @@ const CANCEL_DRAIN_MS: u64 = 30_000;
 /// target, strategy, conflicted file list) appended as a trailing
 /// Render the full subagent system prompt with merge context appended.
 pub fn build_prompt(
+    base_prompt: &str,
     source_branch: &str,
     target_branch: &str,
     strategy: &str,
     conflicts: &[ConflictedFile],
 ) -> String {
-    let base_prompt =
-        crate::runtime::context::instruction_prompts::process_prompt("conflictResolver");
     let mut out = String::with_capacity(base_prompt.len() + 512);
     out.push_str(&base_prompt);
     out.push_str("\n\n## Current Merge\n\n");
@@ -148,7 +147,27 @@ pub async fn spawn(
         crate::worktree::types::MergeStrategy::Squash => "squash",
     };
 
+    let process_plan = match manager.plan_process("conflictResolver") {
+        Ok(plan) => plan,
+        Err(error) => {
+            warn!(
+                session_id = %parent_session_id,
+                error = %error,
+                "conflict-resolver process planning failed"
+            );
+            return SpawnOutcome {
+                spawned: false,
+                subagent_session_id: None,
+                reason: Some(format!("process planning failed: {error}")),
+            };
+        }
+    };
     let prompt = build_prompt(
+        process_plan
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.content.as_str())
+            .unwrap_or(""),
         &pending.source_branch,
         &pending.target_branch,
         strategy_label,
@@ -163,8 +182,7 @@ pub async fn spawn(
         strategy_label,
     );
 
-    let process = crate::core::profile::active_process_spec("conflictResolver")
-        .expect("active profile must define conflictResolver process");
+    let process = &process_plan.process;
     let working_directory = info.worktree_path.to_string_lossy().to_string();
     let allowed: Vec<String> = process
         .allowed_tools
@@ -172,6 +190,7 @@ pub async fn spawn(
         .expect("conflictResolver process must define allowedTools");
 
     let config = SubsessionConfig {
+        process_id: Some("conflictResolver".into()),
         parent_session_id: parent_session_id.to_string(),
         task,
         model: None, // inherit parent's configured subagent model
@@ -403,7 +422,13 @@ mod tests {
             mk("a.rs", ConflictKind::BothModified, false),
             mk("assets/image.png", ConflictKind::BothAdded, true),
         ];
-        let out = build_prompt("feature/x", "main", "merge", &conflicts);
+        let out = build_prompt(
+            "Resolve conflicts.",
+            "feature/x",
+            "main",
+            "merge",
+            &conflicts,
+        );
         assert!(out.contains("## Current Merge"));
         assert!(out.contains("feature/x"));
         assert!(out.contains("main"));
@@ -416,7 +441,7 @@ mod tests {
 
     #[test]
     fn build_prompt_lists_zero_conflicts_gracefully() {
-        let out = build_prompt("a", "b", "rebase", &[]);
+        let out = build_prompt("Resolve conflicts.", "a", "b", "rebase", &[]);
         assert!(out.contains("Conflicted files (0)"));
     }
 

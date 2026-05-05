@@ -322,7 +322,12 @@ mod tests {
     #[tokio::test]
     async fn status_with_empty_router() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+        let settings_path = home
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML);
         let router = crate::mcp::router::McpRouter::new(Vec::new(), settings_path, 0).await;
         let mut ctx = make_test_context();
         ctx.mcp_router = Some(std::sync::Arc::new(tokio::sync::RwLock::new(router)));

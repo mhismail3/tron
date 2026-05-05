@@ -813,10 +813,13 @@ async fn ensure_valid_tokens_skips_refresh_when_valid() {
 
 #[test]
 fn instructions_not_empty() {
-    let instructions = crate::runtime::context::instruction_prompts::provider_prompt(
-        "openai",
-        "codex-instructions",
-    );
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".tron");
+    crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+    let profile =
+        crate::core::profile::resolve_profile_at(&home, crate::core::profile::NORMAL_PROFILE)
+            .unwrap();
+    let instructions = &profile.spec.provider_prompts["openaiCodex"].content;
     assert!(!instructions.is_empty());
     assert!(instructions.contains("Codex") || instructions.contains("instructions are missing"));
 }

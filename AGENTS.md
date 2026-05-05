@@ -30,7 +30,7 @@ Prefer fast, focused checks while iterating. Escalate to full suites when the ch
 
 ## Settings Parity
 
-Every server setting (`~/.tron/profiles/user/settings.json`, seeded from `~/.tron/profiles/default/settings/defaults.json`) must have a 1-to-1 corresponding control in the iOS settings UI. When adding a new setting to the Rust agent (`settings/types/`), also add:
+Every server setting lives in profile TOML: managed defaults under `[settings]` in `~/.tron/profiles/default/profile.toml`, with sparse user overrides under `[settings]` in `~/.tron/profiles/user/profile.toml`. Each setting must have a 1-to-1 corresponding control in the iOS settings UI. When adding a new setting to the Rust agent (`settings/types/`), also add:
 1. Decode in `RPCTypes+Settings.swift` (`ServerSettings`)
 2. Update struct in `RPCTypes+Settings.swift` (`ServerSettingsUpdate`)
 3. Property in `SettingsState.swift` (load, reset, build reset update)

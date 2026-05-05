@@ -149,6 +149,7 @@ const MANAGED_DEFAULTS: &[ManagedDefault] = &[
     managed_default!("profiles/normal/profile.toml", DefaultKind::Toml, true),
     managed_default!("profiles/chat/profile.toml", DefaultKind::Toml, true),
     managed_default!("profiles/local/profile.toml", DefaultKind::Toml, true),
+    managed_default!("profiles/user/profile.toml", DefaultKind::Toml, false),
     managed_default!("profiles/default/prompts/core.md", DefaultKind::Text, true),
     managed_default!("profiles/default/prompts/chat.md", DefaultKind::Text, true),
     managed_default!("profiles/default/prompts/local.md", DefaultKind::Text, true),
@@ -190,11 +191,6 @@ const MANAGED_DEFAULTS: &[ManagedDefault] = &[
     managed_default!(
         "profiles/default/tools/presentation.toml",
         DefaultKind::Toml,
-        true
-    ),
-    managed_default!(
-        "profiles/default/settings/defaults.json",
-        DefaultKind::Json,
         true
     ),
 ];
@@ -248,9 +244,6 @@ fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
         home.join(dirs::PROFILES)
             .join(DEFAULT_PROFILE)
             .join(dirs::TOOLS),
-        home.join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::SETTINGS),
         home.join(dirs::PROFILES).join(USER_PROFILE),
         home.join(dirs::PROFILES)
             .join(USER_PROFILE)
@@ -511,9 +504,8 @@ mod tests {
         );
         assert!(
             home.join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join(dirs::SETTINGS)
-                .join(files::DEFAULTS_JSON)
+                .join(USER_PROFILE)
+                .join(files::PROFILE_TOML)
                 .exists()
         );
         assert!(home.join(dirs::WORKSPACE).join(dirs::KNOWLEDGE).exists());

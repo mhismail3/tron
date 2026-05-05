@@ -121,12 +121,11 @@ pub async fn execute_tool(
     // schemas; if the model hallucinates a call to a hidden tool, refuse
     // execution here so the gate is enforced at the execution boundary (not
     // only at schema-rendering time).
-    let context_policy = ctx
+    let spec = ctx
         .execution_spec
-        .map(|spec| {
-            local_policy::ContextPolicy::from_entrypoint_with_spec(ctx.provider_type, spec, "main")
-        })
-        .unwrap_or_else(|| local_policy::ContextPolicy::from_provider(ctx.provider_type));
+        .expect("ToolExecutionContext.execution_spec must come from the session execution plan");
+    let context_policy =
+        local_policy::ContextPolicy::from_entrypoint_with_spec(ctx.provider_type, spec, "main");
     let allowed_tools = context_policy.tool_filter();
     if context_policy.is_local()
         && let Some(allowed) = allowed_tools.as_ref()
@@ -496,7 +495,13 @@ mod tests {
     use crate::tools::traits::TronTool;
     use async_trait::async_trait;
     use serde_json::{Map, json};
+    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn test_execution_spec() -> &'static crate::core::profile::AgentExecutionSpec {
+        static SPEC: OnceLock<crate::core::profile::AgentExecutionSpec> = OnceLock::new();
+        SPEC.get_or_init(crate::core::profile::bundled_default_execution_spec)
+    }
 
     macro_rules! tool_exec_ctx {
         ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr) => {
@@ -514,7 +519,7 @@ mod tests {
                 output_buffer_registry: None,
                 sequence_counter: None,
                 provider_type: Provider::Anthropic,
-                execution_spec: None,
+                execution_spec: Some(test_execution_spec()),
                 event_persister: None,
                 turn: 0,
                 tool_abort_registry: None,
@@ -535,7 +540,7 @@ mod tests {
                 output_buffer_registry: None,
                 sequence_counter: None,
                 provider_type: $provider,
-                execution_spec: None,
+                execution_spec: Some(test_execution_spec()),
                 event_persister: None,
                 turn: 0,
                 tool_abort_registry: None,
@@ -1337,7 +1342,7 @@ mod tests {
             output_buffer_registry: None,
             sequence_counter: None,
             provider_type: Provider::Anthropic,
-            execution_spec: None,
+            execution_spec: Some(test_execution_spec()),
             event_persister: None,
             turn: 0,
             tool_abort_registry: Some(abort_registry),

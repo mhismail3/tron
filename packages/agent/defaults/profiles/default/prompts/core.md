@@ -134,7 +134,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | ACTIVE_PROFILE | `~/.tron/profiles/active.toml` | Selects the active execution profile |
 | DEFAULT_PROFILE | `~/.tron/profiles/default/` | Managed default execution spec and prompt files |
 | USER_PROFILE | `~/.tron/profiles/user/` | Sparse user profile, settings, prompt, and container overrides |
-| SETTINGS_JSON | `~/.tron/profiles/user/settings.json` | Server configuration overrides |
+| USER_PROFILE | `~/.tron/profiles/user/profile.toml` | Sparse server configuration overrides under `[settings]` |
 | CONTAINERS_JSON | `~/.tron/profiles/user/containers.json` | Container configuration |
 | AUTH_REGISTRY | `~/.tron/profiles/auth.toml` | Credential profile registry and secret handles |
 | AUTH | `~/.tron/profiles/auth.json` | Tron-owned provider auth and bearerToken |

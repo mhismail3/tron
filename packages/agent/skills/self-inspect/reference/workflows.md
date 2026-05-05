@@ -10,7 +10,7 @@ DB="$HOME/.tron/internal/database/log.db"
 
 1. `curl -s http://localhost:9847/health/deep | jq .` — full server health with subsystem checks
 2. `sqlite3 "$DB" "SELECT (SELECT COUNT(*) FROM sessions) as sessions, (SELECT COUNT(*) FROM events) as events, (SELECT COUNT(*) FROM logs) as logs;"` — database stats
-3. `cat ~/.tron/profiles/user/settings.json | jq .` — verify sparse settings overrides
+3. `sed -n '/^\[settings\]/,$p' ~/.tron/profiles/user/profile.toml` — verify sparse settings overrides
 4. `du -sh ~/.tron/internal/ ~/.tron/workspace/ ~/.tron/skills/ ~/.claude/skills/ 2>/dev/null` — disk usage (both skill roots; `~/.claude/skills/` may not exist on fresh Macs)
 
 ## Workflow 2: Investigate a Failed Session
@@ -111,7 +111,13 @@ DB="$HOME/.tron/internal/database/log.db"
    ```
 2. Check default provider/model:
    ```bash
-   cat ~/.tron/profiles/user/settings.json | jq '.server | {defaultModel, defaultProvider}'
+   python3 - <<'PY'
+   import pathlib, tomllib
+   profile = pathlib.Path.home() / ".tron/profiles/user/profile.toml"
+   data = tomllib.loads(profile.read_text()) if profile.exists() else {}
+   server = data.get("settings", {}).get("server", {})
+   print({key: server.get(key) for key in ("defaultModel", "defaultProvider")})
+   PY
    ```
 3. Search logs for auth errors:
    ```sql
@@ -145,6 +151,6 @@ FROM sessions GROUP BY origin;
    ls -la /Applications/Tron.app/Contents/Library/LoginItems/Tron\ Server.app/Contents/MacOS/tron
    ls -la ~/.tron/internal/database/log.db
    ls -la ~/.tron/internal/run
-   ls -la ~/.tron/profiles/user/settings.json
+   ls -la ~/.tron/profiles/user/profile.toml
    ls -la ~/.tron/profiles/auth.json
    ```

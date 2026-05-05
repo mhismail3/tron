@@ -15,13 +15,24 @@ fn settings_error(error: crate::settings::SettingsError) -> RpcError {
     }
 }
 
-async fn refresh_codex_app_server_if_needed(ctx: &RpcContext, updates: &Value) {
+fn serde_settings_error(error: serde_json::Error) -> RpcError {
+    RpcError::Internal {
+        message: error.to_string(),
+    }
+}
+
+async fn refresh_codex_app_server_if_needed(
+    ctx: &RpcContext,
+    updates: &Value,
+    previous_sparse: Value,
+    previous_settings: crate::settings::CodexAppServerSettings,
+) -> Result<(), RpcError> {
     if updates.pointer("/server/codexAppServer").is_none() {
-        return;
+        return Ok(());
     }
 
     let Some(manager) = &ctx.codex_app_server else {
-        return;
+        return Ok(());
     };
 
     let settings = crate::settings::get_settings();
@@ -29,10 +40,85 @@ async fn refresh_codex_app_server_if_needed(ctx: &RpcContext, updates: &Value) {
         .reconfigure(settings.server.codex_app_server.clone())
         .await
     {
-        tracing::warn!(
-            error = %error,
-            "Codex App Server settings were saved, but runtime reconfiguration failed"
-        );
+        restore_sparse_settings_file(
+            ctx,
+            previous_sparse,
+            "settings.rollbackCodexAppServerUpdate",
+        )
+        .await?;
+        ctx.profile_runtime
+            .reload_now("settings.rollbackCodexAppServerUpdate")
+            .map_err(|rollback_error| RpcError::Internal {
+                message: format!(
+                    "Codex App Server reconfiguration failed ({error}); sparse settings were restored, but profile runtime reload failed during rollback: {rollback_error}"
+                ),
+            })?;
+        if let Err(rollback_error) = manager.reconfigure(previous_settings).await {
+            tracing::warn!(
+                error = %rollback_error,
+                "Codex App Server failed to reconfigure back to previous settings after rollback"
+            );
+        }
+        return Err(RpcError::Internal {
+            message: format!(
+                "Codex App Server reconfiguration failed; sparse settings were rolled back: {error}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+async fn read_sparse_settings_snapshot(ctx: &RpcContext) -> Result<Value, RpcError> {
+    let path = ctx.settings_path.clone();
+    ctx.run_blocking("settings.readSparseSnapshot", move || {
+        crate::settings::SettingsStore::new(path)
+            .read_sparse_value()
+            .map_err(settings_error)
+    })
+    .await
+}
+
+async fn restore_sparse_settings_file(
+    ctx: &RpcContext,
+    previous_sparse: Value,
+    reason: &str,
+) -> Result<(), RpcError> {
+    let path = ctx.settings_path.clone();
+    ctx.run_blocking("settings.rollbackSparseSettings", move || {
+        crate::settings::SettingsStore::new(path)
+            .restore_sparse_value_for_rollback(previous_sparse)
+            .map_err(settings_error)
+    })
+    .await?;
+    tracing::warn!(reason, "settings sparse overlay restored");
+    Ok(())
+}
+
+async fn rollback_sparse_settings(
+    ctx: &RpcContext,
+    previous_sparse: Value,
+    reason: &str,
+) -> Result<(), RpcError> {
+    restore_sparse_settings_file(ctx, previous_sparse, reason).await?;
+    crate::settings::init_settings(ctx.profile_runtime.current().settings.clone());
+    Ok(())
+}
+
+async fn reload_profile_runtime_or_rollback(
+    ctx: &RpcContext,
+    previous_sparse: Value,
+    reason: &'static str,
+) -> Result<(), RpcError> {
+    match ctx.profile_runtime.reload_now(reason) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            rollback_sparse_settings(ctx, previous_sparse, reason).await?;
+            Err(RpcError::Internal {
+                message: format!(
+                    "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
+                ),
+            })
+        }
     }
 }
 
@@ -43,13 +129,7 @@ pub struct GetSettingsHandler;
 impl MethodHandler for GetSettingsHandler {
     #[instrument(skip(self, ctx), fields(method = "settings.get"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings_path = ctx.settings_path.clone();
-        ctx.run_blocking("settings.get", move || {
-            crate::settings::SettingsStore::new(settings_path)
-                .load_value()
-                .map_err(settings_error)
-        })
-        .await
+        serde_json::to_value(&ctx.profile_runtime.current().settings).map_err(serde_settings_error)
     }
 }
 
@@ -61,6 +141,14 @@ impl MethodHandler for ResetSettingsHandler {
     #[instrument(skip(self, ctx), fields(method = "settings.resetToDefaults"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
+        let previous_sparse = read_sparse_settings_snapshot(ctx).await?;
+        let previous_codex_app_server = ctx
+            .profile_runtime
+            .current()
+            .settings
+            .server
+            .codex_app_server
+            .clone();
         let settings_path = ctx.settings_path.clone();
         let result = ctx
             .run_blocking("settings.resetToDefaults", move || {
@@ -69,19 +157,20 @@ impl MethodHandler for ResetSettingsHandler {
                     .map_err(settings_error)
             })
             .await?;
+        reload_profile_runtime_or_rollback(
+            ctx,
+            previous_sparse.clone(),
+            "settings.resetToDefaults",
+        )
+        .await?;
 
-        if let Some(manager) = &ctx.codex_app_server {
-            let settings = crate::settings::get_settings();
-            if let Err(error) = manager
-                .reconfigure(settings.server.codex_app_server.clone())
-                .await
-            {
-                tracing::warn!(
-                    error = %error,
-                    "settings reset saved defaults, but Codex App Server reconfiguration failed"
-                );
-            }
-        }
+        refresh_codex_app_server_if_needed(
+            ctx,
+            &serde_json::json!({"server": {"codexAppServer": true}}),
+            previous_sparse,
+            previous_codex_app_server,
+        )
+        .await?;
 
         Ok(result)
     }
@@ -96,21 +185,21 @@ impl MethodHandler for UpdateSettingsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let updates = require_param(params.as_ref(), "settings")?.clone();
         let codex_updates = updates.clone();
+        let has_codex_changes = updates.pointer("/server/codexAppServer").is_some();
         let has_mcp_changes = updates.get("mcp").is_some();
         let settings_path = ctx.settings_path.clone();
 
         if has_mcp_changes && let Some(ref router) = ctx.mcp_router {
             let mut router_guard = router.write().await;
             let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
-            let previous_sparse = {
-                let path = settings_path.clone();
-                ctx.run_blocking("settings.readSparseBeforeMcpUpdate", move || {
-                    crate::settings::SettingsStore::new(path)
-                        .read_sparse_value()
-                        .map_err(settings_error)
-                })
-                .await?
-            };
+            let previous_sparse = read_sparse_settings_snapshot(ctx).await?;
+            let previous_codex_app_server = ctx
+                .profile_runtime
+                .current()
+                .settings
+                .server
+                .codex_app_server
+                .clone();
             ctx.run_blocking("settings.update", move || {
                 crate::settings::SettingsStore::new(settings_path)
                     .update(updates)
@@ -119,30 +208,67 @@ impl MethodHandler for UpdateSettingsHandler {
             .await?;
 
             if let Err(message) = router_guard.reload_from_settings().await {
-                let path = ctx.settings_path.clone();
-                ctx.run_blocking("settings.rollbackMcpUpdate", move || {
-                    crate::settings::SettingsStore::new(path)
-                        .replace_sparse_value(previous_sparse)
-                        .map_err(settings_error)
-                })
-                .await?;
+                rollback_sparse_settings(ctx, previous_sparse, "settings.rollbackMcpUpdate")
+                    .await?;
                 return Err(RpcError::Internal { message });
+            }
+            if let Err(error) = ctx.profile_runtime.reload_now("settings.update") {
+                rollback_sparse_settings(
+                    ctx,
+                    previous_sparse,
+                    "settings.rollbackAfterProfileRuntimeFailure",
+                )
+                .await?;
+                if let Err(rollback_error) = router_guard.reload_from_settings().await {
+                    tracing::warn!(
+                        error = %rollback_error,
+                        "MCP router failed to reload after profile-runtime rollback"
+                    );
+                }
+                return Err(RpcError::Internal {
+                    message: format!(
+                        "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
+                    ),
+                });
             }
             drop(router_guard);
             mcp::broadcast_status_changed(ctx).await;
-            refresh_codex_app_server_if_needed(ctx, &codex_updates).await;
+            refresh_codex_app_server_if_needed(
+                ctx,
+                &codex_updates,
+                previous_sparse,
+                previous_codex_app_server,
+            )
+            .await?;
             return Ok(serde_json::json!({ "success": true }));
         }
 
         let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
+        let previous_sparse = read_sparse_settings_snapshot(ctx).await?;
+        let previous_codex_app_server = ctx
+            .profile_runtime
+            .current()
+            .settings
+            .server
+            .codex_app_server
+            .clone();
         ctx.run_blocking("settings.update", move || {
             crate::settings::SettingsStore::new(settings_path)
                 .update(updates)
                 .map_err(settings_error)
         })
         .await?;
+        reload_profile_runtime_or_rollback(ctx, previous_sparse.clone(), "settings.update").await?;
 
-        refresh_codex_app_server_if_needed(ctx, &codex_updates).await;
+        if has_codex_changes {
+            refresh_codex_app_server_if_needed(
+                ctx,
+                &codex_updates,
+                previous_sparse,
+                previous_codex_app_server,
+            )
+            .await?;
+        }
 
         Ok(serde_json::json!({ "success": true }))
     }
@@ -160,7 +286,6 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
     use std::io;
-    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -189,10 +314,9 @@ mod tests {
 
     fn make_ctx_with_temp_settings() -> (crate::server::rpc::context::RpcContext, tempfile::TempDir)
     {
-        let mut ctx = make_test_context();
+        let ctx = make_test_context();
         let dir = tempfile::tempdir().unwrap();
-        ctx.settings_path = dir.path().join("settings.json");
-        crate::settings::seed_settings_defaults_for_path(&ctx.settings_path).unwrap();
+        let _ = std::fs::remove_file(&ctx.settings_path);
         (ctx, dir)
     }
 
@@ -255,6 +379,23 @@ mod tests {
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result.is_object());
         assert!(result.get("server").is_some());
+    }
+
+    #[tokio::test]
+    async fn get_settings_uses_last_valid_profile_runtime_snapshot() {
+        let _guard = settings_test_guard().await;
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+        let profile_path = ctx
+            .profile_runtime
+            .home()
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::DEFAULT_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML);
+        std::fs::write(profile_path, "{broken").unwrap();
+
+        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["server"]["defaultModel"], "claude-sonnet-4-6");
     }
 
     #[tokio::test]
@@ -363,14 +504,15 @@ mod tests {
             .await
             .unwrap();
 
-        let content = std::fs::read_to_string(&ctx.settings_path).unwrap();
-        let saved: Value = serde_json::from_str(&content).unwrap();
+        let saved = crate::settings::SettingsStore::new(&ctx.settings_path)
+            .read_sparse_value()
+            .unwrap();
         assert_eq!(saved["server"]["defaultProvider"], "openai");
         assert_eq!(saved["server"]["defaultModel"], "model-a");
     }
 
     #[tokio::test]
-    async fn update_settings_rejects_malformed_existing_json() {
+    async fn update_settings_rejects_malformed_existing_toml() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         std::fs::write(&ctx.settings_path, "{broken").unwrap();
@@ -383,7 +525,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(err.to_string().contains("parse settings JSON"));
+        assert!(err.to_string().contains("parse settings TOML"));
         assert_eq!(
             std::fs::read_to_string(&ctx.settings_path).unwrap(),
             "{broken"
@@ -405,6 +547,38 @@ mod tests {
 
         assert!(err.to_string().contains("unknown field"));
         assert!(!ctx.settings_path.exists());
+    }
+
+    #[tokio::test]
+    async fn update_settings_accepts_mcp_camel_case_wire_keys() {
+        let _guard = settings_test_guard().await;
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+
+        let _ = UpdateSettingsHandler
+            .handle(
+                Some(json!({
+                    "settings": {
+                        "mcp": {
+                            "schemaRefreshTtlMs": 45_000,
+                            "servers": [{
+                                "name": "example",
+                                "command": "example-mcp",
+                                "args": [],
+                                "env": {},
+                                "toolTimeoutMs": 12_000,
+                                "enabled": false
+                            }]
+                        }
+                    }
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let settings = crate::settings::get_settings();
+        assert_eq!(settings.mcp.schema_refresh_ttl_ms, 45_000);
+        assert_eq!(settings.mcp.servers[0].tool_timeout_ms, 12_000);
     }
 
     #[tokio::test]
@@ -440,8 +614,9 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("broken"));
-        let saved: Value =
-            serde_json::from_str(&std::fs::read_to_string(&ctx.settings_path).unwrap()).unwrap();
+        let saved = crate::settings::SettingsStore::new(&ctx.settings_path)
+            .read_sparse_value()
+            .unwrap();
         assert_eq!(saved, json!({}));
         assert!(
             ctx.mcp_router
@@ -475,8 +650,9 @@ mod tests {
             .await
             .unwrap();
 
-        let content = std::fs::read_to_string(&ctx.settings_path).unwrap();
-        let saved: Value = serde_json::from_str(&content).unwrap();
+        let saved = crate::settings::SettingsStore::new(&ctx.settings_path)
+            .read_sparse_value()
+            .unwrap();
         assert_eq!(saved["server"]["defaultProvider"], "openai");
         assert_eq!(saved["server"]["defaultModel"], "model-a");
     }
@@ -496,12 +672,6 @@ mod tests {
     async fn update_settings_creates_file_if_missing() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let nested_path = PathBuf::from(ctx.settings_path.parent().unwrap())
-            .join("subdir")
-            .join("settings.json");
-        let mut ctx = ctx;
-        ctx.settings_path = nested_path.clone();
-        crate::settings::seed_settings_defaults_for_path(&ctx.settings_path).unwrap();
 
         let _ = UpdateSettingsHandler
             .handle(
@@ -510,7 +680,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(nested_path.exists());
+        assert!(ctx.settings_path.exists());
     }
 
     #[tokio::test]
@@ -595,8 +765,9 @@ mod tests {
         let _ = ResetSettingsHandler.handle(None, &ctx).await.unwrap();
 
         // The file should still exist but contain only {}
-        let content = std::fs::read_to_string(&ctx.settings_path).unwrap();
-        let saved: Value = serde_json::from_str(&content).unwrap();
+        let saved = crate::settings::SettingsStore::new(&ctx.settings_path)
+            .read_sparse_value()
+            .unwrap();
         assert_eq!(saved, json!({}));
     }
 

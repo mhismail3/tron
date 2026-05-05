@@ -1,7 +1,7 @@
 //! Git workflow settings — user-tunable knobs for the per-session git
 //! workflow suite (sync, finalize, switch, push, conflict resolution).
 //!
-//! Persisted under `settings.json > git`. Every field has a 1:1 iOS
+//! Persisted under `profiles/user/profile.toml > [settings.git]`. Every field has a 1:1 iOS
 //! settings control (see `GitWorkflowSettingsPage.swift` in the iOS app).
 
 use serde::{Deserialize, Serialize};

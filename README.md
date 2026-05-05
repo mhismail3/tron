@@ -256,7 +256,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron preflight` | Pre-deploy infrastructure check |
 | `tron deploy` | Build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive) |
 | `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
-| `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `settings.json` and/or `auth.json`. |
+| `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
 | `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo — for DMG users, see `tron self-update` instead. |
 | `tron self-update` | User-mode GitHub Releases updater (`check`, `status`, `pause`, `resume`, `logs`, `reset`). Opt-in via `server.update.enabled`; gated by `~/.tron/internal/run/auto-update.pause` sentinel. |
 
@@ -342,7 +342,7 @@ Messages use the server's WebSocket RPC framing. Request IDs are strings and are
 `system.getInfo` returns the running daemon's `version`, `uptime` (seconds), `activeSessions` count, `platform` / `arch`, plus three additive fields used by the iOS pairing flow:
 
 - `port` — WebSocket listening port (mirrors the `--port` CLI flag).
-- `tailscaleIp` — cached `server.tailscaleIp` from `settings.json`, or `null` if unset. The Mac pairing wizard resolves Tailscale live on fresh installs, then writes this cache for later wrapper/menu-bar reads and future server settings reloads.
+- `tailscaleIp` — cached `server.tailscaleIp` from `profiles/user/profile.toml` `[settings]`, or `null` if unset. The Mac pairing wizard resolves Tailscale live on fresh installs, then writes this cache for later wrapper/menu-bar reads and future server settings reloads.
 - `paired` — `true` once `~/.tron/internal/run/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
 
 These fields are additive; older clients that ignore them continue to work unchanged.
@@ -460,13 +460,13 @@ The `EventBridge` also routes browser CDP frames and `Display` tool frames when 
 
 Settings are loaded from three layers (highest priority last):
 
-1. **Managed defaults** (`~/.tron/profiles/default/settings/defaults.json`)
-2. **User file** (`~/.tron/profiles/user/settings.json`, deep-merged over defaults)
+1. **Active profile settings** (`[settings]` in the resolved `profiles/<name>/profile.toml` chain)
+2. **User overlay** (`~/.tron/profiles/user/profile.toml` `[settings]`, deep-merged over the active profile)
 3. **Environment variables** (`TRON_*` overrides)
 
-Settings are server-authoritative. The iOS app reads the effective merged values via `settings.get` and writes sparse user overrides via `settings.update` / `settings.resetToDefaults`. Missing files use defaults, but malformed or non-object JSON returns an RPC error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>`.
+Settings are server-authoritative. The iOS app reads the current valid `ProfileRuntime` snapshot via `settings.get` and writes sparse user overrides via `settings.update` / `settings.resetToDefaults`. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an RPC error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>` and `ProfileRuntime`. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active.
 
-`defaults.json` is the auditable profile-seeded baseline from `packages/agent/defaults/profiles/default/settings/defaults.json`, compiled into the agent and written into `~/.tron/profiles/default/settings/defaults.json` during startup seeding/recovery. `profiles/user/settings.json` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed. If the managed default is missing or corrupt, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings file.
+The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If the managed default is missing or corrupt, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
 
 The schema is defined in `packages/agent/src/settings/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 
@@ -741,7 +741,7 @@ packages/ios-app/Sources/
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
 - **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; iOS discovers the live endpoint through authenticated `codexApp.status` and does not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages are not available until a pairing probe, `settings.get`, and setup hydration succeed.
-- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `settings.json`.
+- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings.get` response and best-effort `auth.get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet fallback. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
@@ -813,7 +813,7 @@ packages/mac-app/Sources/
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
 5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/internal/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/internal/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
 6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open fallbacks. TestFlight then owns beta availability and update selection.
-7. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
+7. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it in `profiles/user/profile.toml`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
 8. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
 ### Menu-bar Actions
@@ -828,7 +828,7 @@ packages/mac-app/Sources/
 | Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
 | Check for updates | Opens the latest GitHub Release |
-| Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `internal/run/` runtime state; optional checkboxes remove `profiles/user/settings.json` and/or `profiles/auth.json`. The database and workspace are always preserved. |
+| Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `internal/run/` runtime state; optional checkboxes remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. The database and workspace are always preserved. |
 | Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
 
 ### Variants & Workflows
@@ -913,7 +913,6 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   |   +-- context/               Context block assembly policy
 |   |   +-- providers/             Provider-specific presentation defaults
 |   |   +-- tools/                 Tool presentation policy
-|   |   +-- settings/              Managed settings defaults
 |   +-- normal/                    Managed standard workspace/session profile
 |   |   +-- profile.toml           Inherits default; profileClass = "normal"
 |   +-- chat/                      Managed quick-chat profile
@@ -921,8 +920,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- local/                     Managed local-provider profile
 |   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/tools
 |   +-- user/                      Sparse user profile/settings/prompt overrides
-|       +-- settings.json          Sparse user settings overrides
-|       +-- containers.json        Container configuration
+|       +-- profile.toml           Sparse `[settings]` overrides
 +-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel
 +-- memory/                       Durable user/agent continuity
 |   +-- MEMORY.md                  Canonical single-file root (name, preferences, active projects)

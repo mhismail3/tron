@@ -16,12 +16,8 @@ use crate::server::rpc::errors::{CLIENT_VERSION_UNSUPPORTED, RpcError};
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
 
-fn load_settings(ctx: &RpcContext) -> Result<crate::settings::TronSettings, RpcError> {
-    crate::settings::load_settings_from_path(&ctx.settings_path).map_err(|error| {
-        RpcError::Internal {
-            message: format!("load settings: {error}"),
-        }
-    })
+fn load_settings(ctx: &RpcContext) -> crate::settings::TronSettings {
+    ctx.profile_runtime.current().settings.clone()
 }
 
 /// Current RPC wire-protocol version.
@@ -110,7 +106,7 @@ impl MethodHandler for PingHandler {
 ///   `host:port` together; previously the port had to be inferred from the
 ///   active preset, which broke when the user typed the host without a port.
 /// - `tailscaleIp` — the cached Tailscale IPv4 from
-///   `~/.tron/profiles/user/settings.json:server.tailscaleIp`. Surfaced as a
+///   `~/.tron/profiles/user/profile.toml:[settings.server].tailscaleIp`. Surfaced as a
 ///   recommended host on the iOS pairing screen. Optional — `null` when the
 ///   server hasn't been wrapped by `Tron.app` yet.
 /// - `paired` — `true` once the `~/.tron/internal/run/.onboarded` sentinel
@@ -127,7 +123,7 @@ impl MethodHandler for GetInfoHandler {
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let uptime = ctx.server_start_time.elapsed().as_secs();
         let active_sessions = ctx.orchestrator.active_session_count();
-        let tailscale_ip = load_settings(ctx)?.server.tailscale_ip;
+        let tailscale_ip = load_settings(ctx).server.tailscale_ip;
         let paired = crate::server::onboarding::is_onboarded(&ctx.onboarded_marker_path);
 
         Ok(serde_json::json!({
@@ -288,7 +284,7 @@ pub struct CheckForUpdatesHandler;
 impl MethodHandler for CheckForUpdatesHandler {
     #[instrument(skip(self, ctx), fields(method = "system.checkForUpdates"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = load_settings(ctx)?;
+        let settings = load_settings(ctx);
         let update_cfg = &settings.server.update;
 
         // Disabled → tell iOS so it can render the disabled banner without
@@ -349,7 +345,7 @@ impl MethodHandler for CheckForUpdatesHandler {
 /// updater submenu.
 ///
 /// Deliberately does NOT call the fetcher — this is a cheap read of
-/// (a) current settings via `RpcContext::settings_path` (strict disk load) and
+/// (a) current settings via the last valid `ProfileRuntime` snapshot and
 /// (b) the updater state file via `read_update_state`. Safe to poll
 /// every 2s from the iOS page without any rate-limit risk.
 ///
@@ -361,7 +357,7 @@ pub struct GetUpdateStatusHandler;
 impl MethodHandler for GetUpdateStatusHandler {
     #[instrument(skip(self, ctx), fields(method = "system.getUpdateStatus"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = load_settings(ctx)?;
+        let settings = load_settings(ctx);
         let state_path = ctx.updater_state_path.clone();
         // read_update_state does blocking filesystem I/O; keep the
         // reactor snappy by bouncing off the blocking pool.
@@ -467,8 +463,9 @@ mod tests {
     /// test pins that nullable contract so a future refactor that
     /// accidentally substitutes `""` for `None` fails fast.
     ///
-    /// The handler strictly reads `ctx.settings_path`, so the test writes
-    /// that exact file instead of mutating the process-global settings cache.
+    /// The handler reads the last valid `ProfileRuntime` settings snapshot, so
+    /// the test writes through the profile-backed settings store and reloads
+    /// the runtime snapshot exactly like `settings.update` would.
     #[tokio::test]
     async fn get_info_tailscale_ip_reflects_settings() {
         let ctx = make_test_context();
@@ -801,10 +798,13 @@ mod tests {
     }
 
     fn write_settings_file(ctx: &RpcContext, settings: &TronSettings) {
-        let parent = ctx.settings_path.parent().expect("settings parent");
-        std::fs::create_dir_all(parent).expect("create settings parent");
-        let json = serde_json::to_string(settings).expect("serialize settings");
-        std::fs::write(&ctx.settings_path, json).expect("write settings");
+        let value = serde_json::to_value(settings).expect("serialize settings");
+        crate::settings::SettingsStore::new(&ctx.settings_path)
+            .replace_sparse_value(value)
+            .expect("write settings");
+        ctx.profile_runtime
+            .reload_now("test.writeSettingsFile")
+            .expect("reload profile runtime");
     }
 
     /// When `server.update.enabled = false` the handler must NOT call

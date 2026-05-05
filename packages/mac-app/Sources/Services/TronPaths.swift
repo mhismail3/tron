@@ -11,7 +11,7 @@ enum TronPaths {
         static let runDir = "run"
         static let databaseDir = "database"
         static let authFile = "auth.json"
-        static let settingsFile = "settings.json"
+        static let profileFile = "profile.toml"
         static let transcriptionDir = "transcription"
         static let skillsDir = "skills"
     }
@@ -96,7 +96,7 @@ enum TronPaths {
     }
 
     static var settingsPath: URL {
-        userProfileDir.appendingPathComponent(HomeComponent.settingsFile, isDirectory: false)
+        userProfileDir.appendingPathComponent(HomeComponent.profileFile, isDirectory: false)
     }
 
     static var transcriptionDir: URL {

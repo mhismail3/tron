@@ -3,11 +3,11 @@
 //! Configuration management with layered sources for the Tron agent.
 //!
 //! Settings are loaded from three layers (in priority order):
-//! 1. **Managed defaults** — `~/.tron/profiles/default/settings/defaults.json`
-//! 2. **User file** — `~/.tron/profiles/user/settings.json` (deep-merged over defaults)
+//! 1. **Active profile settings** — `[settings]` in the resolved profile chain
+//! 2. **User overlay** — `~/.tron/profiles/user/profile.toml` `[settings]`
 //! 3. **Environment variables** — `TRON_*` overrides (highest priority)
 //!
-//! Settings are server-authoritative: `~/.tron/profiles/user/settings.json` stores
+//! Settings are server-authoritative: `~/.tron/profiles/user/profile.toml` stores
 //! sparse user overrides. iOS reads/writes the effective server settings via
 //! `settings.get`, `settings.update`, and `settings.resetToDefaults`.
 //! Device-only iOS preferences stay in the app's local storage, not here.
@@ -74,7 +74,7 @@ fn settings_slot() -> &'static ArcSwapOption<TronSettings> {
 
 /// Get the global settings instance.
 ///
-/// On first call, loads settings from `~/.tron/profiles/user/settings.json` with env var
+/// On first call, loads settings from `~/.tron/profiles/user/profile.toml` with env var
 /// overrides. On subsequent calls, returns the cached value. Missing settings
 /// files use managed defaults; malformed settings fail fast.
 ///
@@ -112,7 +112,7 @@ pub fn init_settings(settings: TronSettings) {
 /// and atomically swaps the global cache. All subsequent [`get_settings`]
 /// calls return the new values.
 ///
-/// Called by settings RPC handlers after writing to `settings.json`.
+/// Called by settings RPC handlers after writing sparse profile settings.
 pub fn reload_settings_from_path(path: &Path) -> Result<()> {
     let new = Arc::new(load_settings_from_path(path)?);
     settings_slot().store(Some(new));
@@ -167,9 +167,26 @@ mod tests {
     }
 
     fn temp_settings_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
-        let path = dir.path().join("settings.json");
-        seed_settings_defaults_for_path(&path).unwrap();
-        path
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+        home.join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML)
+    }
+
+    fn write_sparse_settings(path: &std::path::Path, settings_toml: &str) {
+        let content = format!(
+            r#"version = "2"
+name = "user"
+managed = false
+profileClass = "custom"
+inherits = []
+authProfile = "default"
+
+{settings_toml}
+"#
+        );
+        std::fs::write(path, content).unwrap();
     }
 
     #[test]
@@ -243,11 +260,12 @@ mod tests {
         // Write a settings file that disables standalone files discovery
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(
+        write_sparse_settings(
             &path,
-            r#"{"context": {"rules": {"discoverStandaloneFiles": false}}}"#,
-        )
-        .unwrap();
+            r#"[settings.context.rules]
+discoverStandaloneFiles = false
+"#,
+        );
 
         // Reload — should pick up the change
         reload_settings_from_path(&path).unwrap();
@@ -275,6 +293,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
+        std::fs::remove_file(&path).unwrap();
         // Reload from a sparse file that doesn't exist — should get managed defaults (not keep 77_000).
         reload_settings_from_path(&path).unwrap();
 
@@ -296,20 +315,16 @@ mod tests {
         init_settings(TronSettings::default());
         assert!(get_settings().context.rules.discover_standalone_files);
 
-        // Simulate iOS settings.update: write merged settings to disk
+        // Simulate iOS settings.update: write sparse settings to the profile overlay.
         let dir = tempfile::tempdir().unwrap();
         let settings_path = temp_settings_path(&dir);
 
-        // First: read current file (empty — new install)
-        let current = serde_json::json!({});
-        // Apply the update (standalone files disabled)
-        let update = serde_json::json!({"context": {"rules": {"discoverStandaloneFiles": false}}});
-        let merged = deep_merge(current, update);
-        std::fs::write(
+        write_sparse_settings(
             &settings_path,
-            serde_json::to_string_pretty(&merged).unwrap(),
-        )
-        .unwrap();
+            r#"[settings.context.rules]
+discoverStandaloneFiles = false
+"#,
+        );
 
         // Reload (what UpdateSettingsHandler should do)
         reload_settings_from_path(&settings_path).unwrap();

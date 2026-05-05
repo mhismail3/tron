@@ -57,7 +57,7 @@ struct TranscriptionSetupCoordinatorTests {
         try Data("worker".utf8).write(to: source.appendingPathComponent("worker.py"))
         try Data("parakeet-mlx\n".utf8).write(to: source.appendingPathComponent("requirements.txt"))
         let manager = MockLaunchAgentManager()
-        let settingsPath = tmp.appendingPathComponent("profiles/user/settings.json", isDirectory: false)
+        let settingsPath = tmp.appendingPathComponent("profiles/user/profile.toml", isDirectory: false)
         let destination = tmp.appendingPathComponent("internal/transcription", isDirectory: true)
 
         let result = await TranscriptionSetupCoordinator.apply(
@@ -75,11 +75,9 @@ struct TranscriptionSetupCoordinatorTests {
         #expect(manager.calls.filter { $0.kind == .restart }.isEmpty)
         #expect(FileManager.default.fileExists(atPath: destination.appendingPathComponent("worker.py").path))
         #expect(FileManager.default.fileExists(atPath: destination.appendingPathComponent("requirements.txt").path))
-        let data = try Data(contentsOf: settingsPath)
-        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let server = try #require(root["server"] as? [String: Any])
-        let transcription = try #require(server["transcription"] as? [String: Any])
-        #expect(transcription["enabled"] as? Bool == false)
+        let text = try String(contentsOf: settingsPath, encoding: .utf8)
+        #expect(text.contains("[settings.server.transcription]"))
+        #expect(text.contains("enabled = false"))
     }
 
     @Test("enabled preference copies sidecar and restarts server")
@@ -96,7 +94,7 @@ struct TranscriptionSetupCoordinatorTests {
             enabled: true,
             sidecarSource: source,
             sidecarDestination: tmp.appendingPathComponent("internal/transcription", isDirectory: true),
-            settingsPath: tmp.appendingPathComponent("profiles/user/settings.json", isDirectory: false),
+            settingsPath: tmp.appendingPathComponent("profiles/user/profile.toml", isDirectory: false),
             bearerToken: "token",
             launchAgentManager: manager,
             label: TronPaths.launchAgentLabel,

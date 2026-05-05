@@ -186,12 +186,10 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     if let Some(persister) = persister {
         let context_blocks =
             crate::llm::context_composition::compose_context_audit_blocks(&context);
-        let resolved_profile = run_context.resolved_profile.clone().unwrap_or_else(|| {
-            Arc::new(
-                crate::core::profile::resolve_active_profile()
-                    .expect("active profile must resolve before turn audit"),
-            )
-        });
+        let resolved_profile = run_context
+            .resolved_profile
+            .clone()
+            .expect("RunContext.resolved_profile must be set before turn audit");
         let active_profile_name = run_context
             .profile_name
             .clone()
@@ -726,17 +724,15 @@ fn build_turn_context(
     server_origin: Option<&str>,
     provider_type: crate::core::messages::Provider,
 ) -> Context {
-    let context_policy = run_context
+    let resolved_profile = run_context
         .resolved_profile
         .as_deref()
-        .map(|profile| {
-            local_policy::ContextPolicy::from_entrypoint_with_spec(
-                provider_type,
-                &profile.spec,
-                "main",
-            )
-        })
-        .unwrap_or_else(|| local_policy::ContextPolicy::from_provider(provider_type));
+        .expect("RunContext.resolved_profile must be set from the session execution plan");
+    let context_policy = local_policy::ContextPolicy::from_entrypoint_with_spec(
+        provider_type,
+        &resolved_profile.spec,
+        "main",
+    );
     let is_local = context_policy.is_local();
 
     // Set volatile token estimates for accurate snapshots.
@@ -805,7 +801,7 @@ fn build_turn_context(
             .spec()
             .rules_truncation_suffix
             .clone()
-            .unwrap_or_else(local_policy::rules_truncation_suffix);
+            .unwrap_or_default();
         let rules_truncated = context
             .rules_content
             .as_ref()
@@ -832,7 +828,7 @@ fn resolved_turn_policy_ids(
     let entrypoint = spec
         .entrypoints
         .get("main")
-        .or_else(|| spec.entrypoints.get("chat"));
+        .expect("validated profile must define entrypoints.main");
     let context_policy =
         crate::runtime::context::local_policy::ContextPolicy::from_entrypoint_with_spec(
             provider_type,
@@ -843,13 +839,8 @@ fn resolved_turn_policy_ids(
     let tool_policy_id = context_policy
         .tool_policy_id()
         .map(String::from)
-        .or_else(|| entrypoint.map(|entrypoint| entrypoint.tool_policy.clone()))
-        .or_else(|| spec.tool_policies.keys().next().cloned())
-        .expect("validated active profile must define a tool policy");
-    let cache_policy_id = entrypoint
-        .map(|entrypoint| entrypoint.cache_policy.clone())
-        .or_else(|| spec.cache_policies.keys().next().cloned())
-        .expect("validated active profile must define a cache policy");
+        .unwrap_or_else(|| entrypoint.tool_policy.clone());
+    let cache_policy_id = entrypoint.cache_policy.clone();
 
     (context_policy_id, tool_policy_id, cache_policy_id)
 }

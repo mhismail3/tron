@@ -196,8 +196,10 @@ pub struct RpcContext {
     /// `RwLock`) because `content()` mutates the cache on fingerprint mismatch
     /// — see `runtime::memory` module docs for the full invariant set.
     pub memory_registry: Arc<Mutex<MemoryRegistry>>,
-    /// Path to settings JSON file.
+    /// Path to the sparse user profile settings overlay.
     pub settings_path: PathBuf,
+    /// Compiled active profile runtime.
+    pub profile_runtime: Arc<crate::runtime::profile_runtime::ProfileRuntime>,
     /// Agent execution dependencies (None = prompt handler returns error).
     pub agent_deps: Option<AgentDeps>,
     /// When the server started (for uptime calculation).

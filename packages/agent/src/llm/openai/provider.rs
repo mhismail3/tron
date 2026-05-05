@@ -501,12 +501,7 @@ impl OpenAIProvider {
         ResponsesRequest {
             model: openai_request_model_id(&self.config.model),
             input,
-            instructions: Some(
-                crate::runtime::context::instruction_prompts::provider_prompt(
-                    "openai",
-                    "codex-instructions",
-                ),
-            ),
+            instructions: options.provider_instructions.clone(),
             stream: true,
             store: false,
             temperature: options.temperature,

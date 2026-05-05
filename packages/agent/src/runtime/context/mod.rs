@@ -15,7 +15,7 @@
 //! | `rules_discovery` | Finds `.claude/rules/` files in project directories |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |
-//! | `instruction_prompts` | Active-profile prompt loading with strict file validation |
+//! | `instruction_prompts` | Project/global prompt overlay loading; normal profile prompts arrive through `ProfileRuntime` plans |
 //! | `token_estimator` | Token counting and context budget calculations |
 //! | `path_extractor` | Extracts workspace paths from session context |
 //! | `constants` | Token limits, compaction thresholds |
@@ -28,10 +28,11 @@
 //!
 //! ## Key Invariant
 //!
-//! All normal prompt text is loaded from `~/.tron/profiles/` and compiled
-//! into typed profile context blocks before provider adaptation. Compaction
-//! uses a multi-signal trigger (token threshold, progress signals, turn count
-//! fallback) to decide when to compact context.
+//! All normal prompt text is resolved before `ContextManager` construction by
+//! `ProfileRuntime` session/process plans. Context state consumes that snapshot;
+//! it does not resolve active profile files or fall back to embedded behavior.
+//! Compaction uses a multi-signal trigger (token threshold, progress signals,
+//! turn count fallback) to decide when to compact context.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;

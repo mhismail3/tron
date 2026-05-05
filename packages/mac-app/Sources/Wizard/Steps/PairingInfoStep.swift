@@ -201,7 +201,7 @@ struct PairingInfoStep: View {
     private func failureBody(for reason: PairingFailureReason) -> String {
         switch reason {
         case .noTailscaleIP:
-            return "Open Tailscale on this Mac and confirm it is signed in. Fresh installs do not need a pre-existing settings.json."
+            return "Open Tailscale on this Mac and confirm it is signed in. Fresh installs do not need a pre-existing user profile."
         case .noToken:
             return "The server has not written its local pairing token yet. Go back to Install or wait a few seconds, then reopen Pairing Info."
         case .serverUnreachable:
@@ -225,8 +225,8 @@ struct PairingInfoStep: View {
             if Task.isCancelled { return }
         }
 
-        // Fresh installs do not have settings.json yet. Resolve the
-        // current Tailscale address live, then cache it into settings
+        // Fresh installs do not have a user profile yet. Resolve the
+        // current Tailscale address live, then cache it into the profile
         // only after we know the value is real.
         let token = setup.readBearerToken()
         guard let token, !token.isEmpty else {

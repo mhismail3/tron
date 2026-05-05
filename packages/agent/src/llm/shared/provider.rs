@@ -335,6 +335,10 @@ pub struct ProviderStreamOptions {
     /// Thinking budget for Gemini 2.5 models (0-32768).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gemini_thinking_budget: Option<u32>,
+
+    /// Provider-specific profile instructions/presentation text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_instructions: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

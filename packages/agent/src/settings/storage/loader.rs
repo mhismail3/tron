@@ -1,22 +1,17 @@
-//! Settings loading with deep merge and environment variable overrides.
+//! Profile-backed settings loading with deep merge and environment overrides.
 //!
 //! Loading flow:
-//! 1. Start with `~/.tron/profiles/default/settings/defaults.json`
-//! 2. If `~/.tron/profiles/user/settings.json` exists, deep-merge user values over defaults
-//! 3. Apply environment variable overrides (highest priority)
-//!
-//! Deep merge rules:
-//! - Objects are merged recursively (source overrides target per-key)
-//! - Arrays and primitives are replaced entirely by source
-//! - Null values in source are skipped (preserving target)
+//! 1. Resolve the active profile without the global user overlay.
+//! 2. Read sparse `[settings]` overrides from `~/.tron/profiles/user/profile.toml`.
+//! 3. Deep-merge sparse values over the profile settings.
+//! 4. Apply supported environment variable overrides.
 
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use tracing::debug;
 
-use crate::settings::errors::Result;
+use crate::settings::errors::{Result, SettingsError};
 use crate::settings::types::TronSettings;
 
 /// Resolve the `~/.tron` directory.
@@ -24,14 +19,14 @@ pub fn tron_home_dir() -> PathBuf {
     crate::core::paths::tron_home()
 }
 
-/// Resolve the sparse settings override path (`~/.tron/profiles/user/settings.json`).
+/// Resolve the sparse profile override path (`~/.tron/profiles/user/profile.toml`).
 pub fn settings_path() -> PathBuf {
-    crate::core::paths::settings_path()
+    crate::core::paths::user_profile_path()
 }
 
-/// Resolve the managed default settings file inside `profiles/default`.
+/// Resolve the managed default profile file.
 pub fn settings_defaults_path() -> PathBuf {
-    crate::core::paths::settings_defaults_path()
+    crate::core::paths::default_profile_dir().join(crate::core::paths::files::PROFILE_TOML)
 }
 
 /// Resolve the built-in auth file (`~/.tron/profiles/auth.json`).
@@ -39,83 +34,21 @@ pub fn auth_path() -> PathBuf {
     crate::core::paths::auth_path()
 }
 
-/// Seed the default profile settings file if it is missing.
+/// Profile settings are seeded as part of the managed profile defaults.
 pub fn seed_settings_defaults() -> Result<Option<PathBuf>> {
-    seed_settings_defaults_at(&crate::core::paths::tron_home())
+    Ok(None)
 }
 
-/// Seed `<home>/profiles/default/settings/defaults.json` if it is missing.
-///
-/// Normal startup gets this file from the Constitution first-seed bundle.
-/// This helper remains available for explicit setup and tests.
+/// Profile settings are seeded as part of the managed profile defaults.
 pub fn seed_settings_defaults_at(home: &Path) -> Result<Option<PathBuf>> {
-    let path = home
-        .join(crate::core::paths::dirs::PROFILES)
-        .join(crate::core::profile::DEFAULT_PROFILE)
-        .join(crate::core::paths::dirs::SETTINGS)
-        .join(crate::core::paths::files::DEFAULTS_JSON);
-    if path.exists() {
-        return Ok(None);
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut defaults = bundled_settings_defaults_bytes()?;
-    if !defaults.ends_with(b"\n") {
-        defaults.push(b'\n');
-    }
-    let parent = path.parent().ok_or_else(|| {
-        crate::settings::errors::SettingsError::InvalidValue(
-            "settings defaults path must have a parent directory".to_string(),
-        )
-    })?;
-    let mut temp = tempfile::Builder::new()
-        .prefix(".defaults.")
-        .suffix(".tmp")
-        .tempfile_in(parent)?;
-    temp.write_all(&defaults)?;
-    temp.as_file_mut().sync_all()?;
-    temp.persist(&path)
-        .map_err(|error| crate::settings::errors::SettingsError::Io(error.error))?;
-    Ok(Some(path))
+    let _ = home;
+    Ok(None)
 }
 
-/// Seed the managed defaults file corresponding to an arbitrary sparse settings path.
-///
-/// This is explicit setup, not a load-time fallback. Normal startup seeds the
-/// canonical profile defaults before settings resolution; tests and isolated
-/// stores use this helper to create the same managed-default layer beside their
-/// temporary sparse file.
+/// Profile settings are seeded as part of profile defaults.
 pub fn seed_settings_defaults_for_path(settings_path: &Path) -> Result<Option<PathBuf>> {
-    let path = defaults_path_for_settings_path(settings_path);
-    if path.exists() {
-        return Ok(None);
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut defaults = bundled_settings_defaults_bytes()?;
-    if !defaults.ends_with(b"\n") {
-        defaults.push(b'\n');
-    }
-    let parent = path.parent().ok_or_else(|| {
-        crate::settings::errors::SettingsError::InvalidValue(
-            "settings defaults path must have a parent directory".to_string(),
-        )
-    })?;
-    let mut temp = tempfile::Builder::new()
-        .prefix(".defaults.")
-        .suffix(".tmp")
-        .tempfile_in(parent)?;
-    temp.write_all(&defaults)?;
-    temp.as_file_mut().sync_all()?;
-    temp.persist(&path)
-        .map_err(|error| crate::settings::errors::SettingsError::Io(error.error))?;
-    Ok(Some(path))
-}
-
-fn bundled_settings_defaults_bytes() -> Result<Vec<u8>> {
-    Ok(include_bytes!("../../../defaults/profiles/default/settings/defaults.json").to_vec())
+    let _ = settings_path;
+    Ok(None)
 }
 
 /// Load settings from the default path with env var overrides.
@@ -123,26 +56,12 @@ pub fn load_settings() -> Result<TronSettings> {
     load_settings_from_path(&settings_path())
 }
 
-/// Load settings from a specific path with env var overrides.
-///
-/// If the sparse user file does not exist, returns managed defaults. If any
-/// configured file contains invalid JSON, returns an error.
+/// Load settings from a sparse user profile path with env var overrides.
 pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     let defaults = load_settings_defaults_for(path)?;
-    let mut settings = if path.exists() {
-        debug!(?path, "loading settings from file");
-        let content = std::fs::read_to_string(path)?;
-        let user: Value = serde_json::from_str(&content)?;
-        let merged = deep_merge(serde_json::to_value(defaults)?, user);
-        serde_json::from_value(merged)?
-    } else {
-        debug!(
-            ?path,
-            "settings file not found, using Constitution defaults"
-        );
-        defaults
-    };
-
+    let overlay = read_sparse_settings_overlay(path)?;
+    let merged = deep_merge(serde_json::to_value(defaults)?, overlay);
+    let mut settings: TronSettings = serde_json::from_value(merged)?;
     settings.validate_strict()?;
     apply_env_overrides(&mut settings);
     settings.validate();
@@ -150,53 +69,64 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     Ok(settings)
 }
 
-/// Load the managed defaults that correspond to a sparse settings path.
+/// Load active profile settings before sparse user overrides.
 pub fn load_settings_defaults_for(settings_path: &Path) -> Result<TronSettings> {
-    let path = defaults_path_for_settings_path(settings_path);
-    if !path.exists() {
-        return Err(crate::settings::errors::SettingsError::InvalidValue(
-            format!("managed settings defaults are missing: {}", path.display()),
-        ));
-    }
-
-    debug!(?path, "loading settings defaults");
-    let content = std::fs::read_to_string(&path)?;
-    let mut defaults: TronSettings = serde_json::from_str(&content)?;
+    let home = tron_home_for_user_profile_path(settings_path)
+        .unwrap_or_else(crate::core::paths::tron_home);
+    let active = crate::core::profile::active_profile_name_at(&home).ok_or_else(|| {
+        SettingsError::InvalidValue(format!(
+            "missing active profile pointer under {}",
+            home.join(crate::core::paths::dirs::PROFILES)
+                .join(crate::core::paths::files::ACTIVE_TOML)
+                .display()
+        ))
+    })?;
+    let resolved = crate::core::profile::resolve_profile_base_at(&home, &active)
+        .map_err(|error| SettingsError::InvalidValue(error.to_string()))?;
+    let mut defaults = resolved.spec.settings().clone();
     defaults.validate_strict()?;
     defaults.validate();
     defaults.validate_strict()?;
     Ok(defaults)
 }
 
-fn defaults_path_for_settings_path(settings_path: &Path) -> PathBuf {
-    if settings_path.file_name().and_then(|name| name.to_str())
-        != Some(crate::core::paths::files::SETTINGS_JSON)
-    {
-        return settings_path.with_file_name(crate::core::paths::files::DEFAULTS_JSON);
+/// Read only sparse `[settings]` from a user profile TOML file.
+pub fn read_sparse_settings_overlay(path: &Path) -> Result<Value> {
+    if !path.exists() {
+        return Ok(Value::Object(Default::default()));
     }
+    debug!(?path, "loading sparse profile settings overlay");
+    let content = std::fs::read_to_string(path)?;
+    let value: toml::Value = toml::from_str(&content).map_err(|error| {
+        SettingsError::InvalidValue(format!("failed to parse settings TOML: {error}"))
+    })?;
+    let settings = value
+        .get("settings")
+        .cloned()
+        .unwrap_or_else(|| toml::Value::Table(Default::default()));
+    toml_value_to_json(settings)
+}
 
-    let tron_home_profiles =
-        crate::core::paths::tron_home().join(crate::core::paths::dirs::PROFILES);
-    if settings_path.starts_with(&tron_home_profiles) {
-        return settings_defaults_path();
+fn tron_home_for_user_profile_path(path: &Path) -> Option<PathBuf> {
+    let file = path.file_name()?.to_str()?;
+    if file != crate::core::paths::files::PROFILE_TOML {
+        return None;
     }
-
-    if let Some(user_dir) = settings_path.parent()
-        && user_dir.file_name().and_then(|name| name.to_str())
-            == Some(crate::core::profile::USER_PROFILE)
-        && let Some(profiles_dir) = user_dir.parent()
-        && profiles_dir.file_name().and_then(|name| name.to_str())
-            == Some(crate::core::paths::dirs::PROFILES)
-    {
-        return profiles_dir
-            .join(crate::core::profile::DEFAULT_PROFILE)
-            .join(crate::core::paths::dirs::SETTINGS)
-            .join(crate::core::paths::files::DEFAULTS_JSON);
+    let user_dir = path.parent()?;
+    if user_dir.file_name()?.to_str()? != crate::core::profile::USER_PROFILE {
+        return None;
     }
+    let profiles_dir = user_dir.parent()?;
+    if profiles_dir.file_name()?.to_str()? != crate::core::paths::dirs::PROFILES {
+        return None;
+    }
+    profiles_dir.parent().map(Path::to_path_buf)
+}
 
-    // Test/custom settings paths use a sibling defaults.json. Missing defaults
-    // are a configuration error, not an implicit fallback to built-in settings.
-    settings_path.with_file_name(crate::core::paths::files::DEFAULTS_JSON)
+fn toml_value_to_json(value: toml::Value) -> Result<Value> {
+    serde_json::to_value(value).map_err(|error| {
+        SettingsError::InvalidValue(format!("failed to convert TOML settings: {error}"))
+    })
 }
 
 /// Recursive deep merge of two JSON values.
@@ -327,9 +257,26 @@ mod tests {
     use crate::settings::errors::SettingsError;
 
     fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
-        let path = dir.path().join("settings.json");
-        seed_settings_defaults_for_path(&path).unwrap();
-        path
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+        home.join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML)
+    }
+
+    fn write_sparse_settings(path: &Path, settings_toml: &str) {
+        let content = format!(
+            r#"version = "2"
+name = "user"
+managed = false
+profileClass = "custom"
+inherits = []
+authProfile = "default"
+
+{settings_toml}
+"#
+        );
+        std::fs::write(path, content).unwrap();
     }
 
     #[test]
@@ -453,14 +400,13 @@ mod tests {
     #[test]
     fn load_missing_sparse_file_returns_managed_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        std::fs::write(
-            dir.path().join("defaults.json"),
-            serde_json::to_string(&TronSettings::default()).unwrap(),
-        )
-        .unwrap();
+        let path = temp_settings_path(&dir);
+        std::fs::remove_file(&path).unwrap();
+
         let settings = load_settings_from_path(&path).unwrap();
-        let defaults = TronSettings::default();
+        let defaults = crate::core::profile::bundled_default_execution_spec()
+            .settings()
+            .clone();
         assert_eq!(settings.version, defaults.version);
         assert_eq!(settings.name, defaults.name);
         assert_eq!(settings.server.default_model, defaults.server.default_model);
@@ -480,57 +426,69 @@ mod tests {
     }
 
     #[test]
-    fn seed_settings_defaults_writes_full_default_file_once() {
+    fn seed_settings_defaults_is_noop_because_profiles_seed_settings() {
         let dir = tempfile::tempdir().unwrap();
         let seeded = seed_settings_defaults_at(dir.path()).unwrap();
-        let path = dir
-            .path()
-            .join(crate::core::paths::dirs::PROFILES)
-            .join(crate::core::profile::DEFAULT_PROFILE)
-            .join(crate::core::paths::dirs::SETTINGS)
-            .join("defaults.json");
-
-        assert_eq!(seeded.as_deref(), Some(path.as_path()));
-        assert!(path.exists());
-        let parsed: TronSettings =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(
-            parsed.server.default_model,
-            TronSettings::default().server.default_model
-        );
+        assert!(seeded.is_none());
 
         let second = seed_settings_defaults_at(dir.path()).unwrap();
-        assert!(second.is_none(), "seeding must preserve existing defaults");
+        assert!(second.is_none());
     }
 
     #[test]
-    fn bundled_settings_defaults_match_rust_defaults() {
-        let bundled: TronSettings =
-            serde_json::from_slice(&bundled_settings_defaults_bytes().unwrap()).unwrap();
-        let bundled_value = serde_json::to_value(bundled).unwrap();
-        let emergency_value = serde_json::to_value(TronSettings::default()).unwrap();
+    fn bundled_profile_settings_match_rust_settings_schema() {
+        let profile = crate::core::profile::bundled_default_execution_spec();
+        let bundled_value = serde_json::to_value(profile.settings()).unwrap();
+        let round_tripped: TronSettings = serde_json::from_value(bundled_value.clone()).unwrap();
 
         assert_eq!(
-            bundled_value, emergency_value,
-            "bundled settings/defaults.json must preserve current behavior"
+            serde_json::to_value(round_tripped).unwrap(),
+            bundled_value,
+            "default profile [settings] must preserve the public settings JSON shape"
         );
     }
 
     #[test]
-    fn load_uses_managed_defaults_before_sparse_user_file() {
+    fn load_uses_active_profile_settings_before_sparse_user_overlay() {
         let dir = tempfile::tempdir().unwrap();
-        let defaults_path = dir.path().join("defaults.json");
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
+        let home = settings_path
+            .ancestors()
+            .nth(3)
+            .expect("profile path should be under .tron")
+            .to_path_buf();
         std::fs::write(
-            &defaults_path,
-            r#"{"server": {"defaultModel": "managed-default", "heartbeatIntervalMs": 45000}}"#,
+            home.join(crate::core::paths::dirs::PROFILES)
+                .join(crate::core::paths::files::ACTIVE_TOML),
+            "active = \"managed\"\n",
         )
         .unwrap();
+        let managed_profile = home
+            .join(crate::core::paths::dirs::PROFILES)
+            .join("managed")
+            .join(crate::core::paths::files::PROFILE_TOML);
+        std::fs::create_dir_all(managed_profile.parent().unwrap()).unwrap();
         std::fs::write(
+            &managed_profile,
+            r#"version = "2"
+name = "managed"
+managed = false
+profileClass = "custom"
+inherits = ["default"]
+authProfile = "default"
+
+[settings.server]
+defaultModel = "managed-default"
+heartbeatIntervalMs = 45000
+"#,
+        )
+        .unwrap();
+        write_sparse_settings(
             &settings_path,
-            r#"{"server": {"defaultProvider": "openai"}}"#,
-        )
-        .unwrap();
+            r#"[settings.server]
+defaultProvider = "openai"
+"#,
+        );
 
         let settings = load_settings_from_path(&settings_path).unwrap();
 
@@ -540,38 +498,60 @@ mod tests {
     }
 
     #[test]
-    fn malformed_managed_defaults_fail_fast() {
+    fn malformed_active_profile_fails_fast() {
         let dir = tempfile::tempdir().unwrap();
-        let defaults_path = dir.path().join("defaults.json");
-        let settings_path = dir.path().join("settings.json");
-        std::fs::write(&defaults_path, "{broken").unwrap();
+        let settings_path = temp_settings_path(&dir);
+        let home = settings_path
+            .ancestors()
+            .nth(3)
+            .expect("profile path should be under .tron")
+            .to_path_buf();
+        std::fs::write(
+            home.join(crate::core::paths::dirs::PROFILES)
+                .join(crate::core::paths::files::ACTIVE_TOML),
+            "active = \"broken\"\n",
+        )
+        .unwrap();
+        let broken_profile = home
+            .join(crate::core::paths::dirs::PROFILES)
+            .join("broken")
+            .join(crate::core::paths::files::PROFILE_TOML);
+        std::fs::create_dir_all(broken_profile.parent().unwrap()).unwrap();
+        std::fs::write(&broken_profile, "{broken").unwrap();
 
         let err = load_settings_from_path(&settings_path).unwrap_err();
 
-        assert!(matches!(err, SettingsError::Json(_)));
+        assert!(matches!(err, SettingsError::InvalidValue(_)));
+        assert!(err.to_string().contains("invalid TOML"));
     }
 
     #[test]
-    fn load_empty_json_returns_defaults() {
+    fn load_empty_profile_settings_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(&path, "{}").unwrap();
+        write_sparse_settings(&path, "");
 
         let settings = load_settings_from_path(&path).unwrap();
-        let defaults = TronSettings::default();
+        let defaults = crate::core::profile::bundled_default_execution_spec()
+            .settings()
+            .clone();
         assert_eq!(settings.version, defaults.version);
         assert_eq!(settings.server.default_model, defaults.server.default_model);
     }
 
     #[test]
-    fn load_partial_json_overrides() {
+    fn load_partial_toml_overrides() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(
+        write_sparse_settings(
             &path,
-            r#"{"server": {"defaultModel": "custom-model"}, "retry": {"maxRetries": 5}}"#,
-        )
-        .unwrap();
+            r#"[settings.server]
+defaultModel = "custom-model"
+
+[settings.retry]
+maxRetries = 5
+"#,
+        );
 
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(settings.server.default_model, "custom-model");
@@ -583,7 +563,12 @@ mod tests {
     fn load_deeply_nested_override() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(&path, r#"{"context": {"compactor": {"maxTokens": 50000}}}"#).unwrap();
+        write_sparse_settings(
+            &path,
+            r#"[settings.context.compactor]
+maxTokens = 50000
+"#,
+        );
 
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(settings.context.compactor.max_tokens, 50_000);
@@ -591,21 +576,29 @@ mod tests {
     }
 
     #[test]
-    fn load_invalid_json_returns_error() {
+    fn load_invalid_toml_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(&path, "not valid json").unwrap();
+        std::fs::write(&path, "{broken").unwrap();
 
         let result = load_settings_from_path(&path);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SettingsError::Json(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            SettingsError::InvalidValue(_)
+        ));
     }
 
     #[test]
     fn load_zero_heartbeat_interval_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(&path, r#"{"server": {"heartbeatIntervalMs": 0}}"#).unwrap();
+        write_sparse_settings(
+            &path,
+            r#"[settings.server]
+heartbeatIntervalMs = 0
+"#,
+        );
 
         let err = load_settings_from_path(&path).unwrap_err();
 
@@ -617,11 +610,13 @@ mod tests {
     fn load_with_guardrails() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(
+        write_sparse_settings(
             &path,
-            r#"{"guardrails": {"audit": {"enabled": true, "maxEntries": 500}}}"#,
-        )
-        .unwrap();
+            r#"[settings.guardrails.audit]
+enabled = true
+maxEntries = 500
+"#,
+        );
 
         let settings = load_settings_from_path(&path).unwrap();
         assert!(settings.guardrails.is_some());
@@ -633,11 +628,12 @@ mod tests {
     fn load_array_replace_not_merge() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(
+        write_sparse_settings(
             &path,
-            r#"{"tools": {"bash": {"dangerousPatterns": ["^rm -rf /"]}}}"#,
-        )
-        .unwrap();
+            r#"[settings.tools.bash]
+dangerousPatterns = ["^rm -rf /"]
+"#,
+        );
 
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(settings.tools.bash.dangerous_patterns.len(), 1);
@@ -648,7 +644,12 @@ mod tests {
     fn load_validates_clamping() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(&path, r#"{"retry": {"jitterFactor": 5.0}}"#).unwrap();
+        write_sparse_settings(
+            &path,
+            r#"[settings.retry]
+jitterFactor = 5.0
+"#,
+        );
 
         let settings = load_settings_from_path(&path).unwrap();
         assert!((settings.retry.jitter_factor - 1.0).abs() < f64::EPSILON);

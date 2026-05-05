@@ -225,7 +225,7 @@ Stored in `events.type`. Each has a typed JSON payload.
 
 ## Settings Schema
 
-Settings live at `~/.tron/profiles/user/settings.json`. All keys are camelCase. Missing fields get defaults from `~/.tron/profiles/default/settings/defaults.json`.
+Settings are profile-owned. Defaults live under `[settings]` in the active profile chain, and sparse user overrides live under `[settings]` in `~/.tron/profiles/user/profile.toml`. The `settings.get` RPC still returns camelCase JSON for UI/client parity; the on-disk source of truth is TOML profile data.
 
 ### Root Sections
 

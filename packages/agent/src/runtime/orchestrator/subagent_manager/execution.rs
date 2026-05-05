@@ -29,6 +29,7 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) hooks: Option<Arc<HookEngine>>,
     pub(super) worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
     pub(super) child_subagent_manager: Option<Arc<SubagentManager>>,
+    pub(super) process_plan: crate::runtime::ProcessExecutionPlan,
     pub(super) child_session_id: String,
     pub(super) parent_session_id: String,
     pub(super) task: String,
@@ -53,6 +54,7 @@ pub(super) struct ToolAgentTaskLaunch {
     pub(super) hooks: Option<Arc<HookEngine>>,
     pub(super) worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
     pub(super) child_subagent_manager: Option<Arc<SubagentManager>>,
+    pub(super) process_plan: crate::runtime::ProcessExecutionPlan,
     pub(super) child_session_id: String,
     pub(super) parent_session_id: String,
     pub(super) task: String,
@@ -146,6 +148,8 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         CreateAgentOpts {
             provider,
             tools: params.tools,
+            context_policy: params.process_plan.runtime_context_policy(),
+            tool_policy: params.process_plan.tool_policy.clone(),
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
@@ -200,6 +204,8 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         &params.task,
         RunContext {
             reasoning_level: params.reasoning_level,
+            profile_name: Some(params.process_plan.resolved_profile.name.clone()),
+            resolved_profile: Some(params.process_plan.resolved_profile.clone()),
             ..Default::default()
         },
         &params.hooks,
@@ -313,6 +319,8 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         CreateAgentOpts {
             provider,
             tools: params.tools,
+            context_policy: params.process_plan.runtime_context_policy(),
+            tool_policy: params.process_plan.tool_policy.clone(),
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
@@ -372,7 +380,11 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
     let result = agent_runner::run_agent(
         &mut agent,
         &params.task,
-        RunContext::default(),
+        RunContext {
+            profile_name: Some(params.process_plan.resolved_profile.name.clone()),
+            resolved_profile: Some(params.process_plan.resolved_profile.clone()),
+            ..Default::default()
+        },
         &params.hooks,
         &child_broadcast,
         None,

@@ -23,39 +23,65 @@ use crate::tools::utils::validation::{
 /// The `SpawnSubagent` tool launches child agent sessions.
 pub struct SpawnSubagentTool {
     spawner: Arc<dyn SubagentSpawner>,
+    profile_runtime: Arc<crate::runtime::ProfileRuntime>,
 }
 
 impl SpawnSubagentTool {
     /// Create a new `SpawnSubagent` tool with the given spawner.
+    #[cfg(test)]
     pub fn new(spawner: Arc<dyn SubagentSpawner>) -> Self {
-        Self { spawner }
+        let tempdir = tempfile::tempdir().expect("test profile runtime tempdir");
+        let home = tempdir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home)
+            .expect("test profile runtime seeded home");
+        let profile_runtime =
+            Arc::new(crate::runtime::ProfileRuntime::load(&home).expect("test profile runtime"));
+        std::mem::forget(tempdir);
+        Self {
+            spawner,
+            profile_runtime,
+        }
     }
-}
 
-fn process_id_for_mode(mode: &SubagentMode) -> &'static str {
-    match mode {
-        SubagentMode::InProcess => "spawnSubagent.inProcess",
-        SubagentMode::Tmux => "spawnSubagent.tmux",
+    /// Create a new `SpawnSubagent` tool backed by the compiled profile runtime.
+    pub fn with_profile_runtime(
+        spawner: Arc<dyn SubagentSpawner>,
+        profile_runtime: Arc<crate::runtime::ProfileRuntime>,
+    ) -> Self {
+        Self {
+            spawner,
+            profile_runtime,
+        }
     }
-}
 
-fn process_for_mode(mode: &SubagentMode) -> crate::core::profile::ProcessSpec {
-    crate::core::profile::active_process_spec(process_id_for_mode(mode))
-        .expect("active profile must define SpawnSubagent process specs")
-}
+    fn process_id_for_mode(mode: &SubagentMode) -> &'static str {
+        match mode {
+            SubagentMode::InProcess => "spawnSubagent.inProcess",
+            SubagentMode::Tmux => "spawnSubagent.tmux",
+        }
+    }
 
-fn default_timeout_ms_for_mode(mode: &SubagentMode) -> u64 {
-    let process = process_for_mode(mode);
-    process
-        .timeout_ms
-        .or(process.blocking_timeout_ms)
-        .expect("SpawnSubagent process must define timeoutMs or blockingTimeoutMs")
-}
+    fn process_for_mode(&self, mode: &SubagentMode) -> crate::core::profile::ProcessSpec {
+        let process_id = Self::process_id_for_mode(mode);
+        self.profile_runtime
+            .plan_process(process_id, None)
+            .expect("active profile must define SpawnSubagent process specs")
+            .process
+    }
 
-fn default_max_turns_for_mode(mode: &SubagentMode) -> u32 {
-    process_for_mode(mode)
-        .max_turns
-        .expect("SpawnSubagent process must define maxTurns")
+    fn default_timeout_ms_for_mode(&self, mode: &SubagentMode) -> u64 {
+        let process = self.process_for_mode(mode);
+        process
+            .timeout_ms
+            .or(process.blocking_timeout_ms)
+            .expect("SpawnSubagent process must define timeoutMs or blockingTimeoutMs")
+    }
+
+    fn default_max_turns_for_mode(&self, mode: &SubagentMode) -> u32 {
+        self.process_for_mode(mode)
+            .max_turns
+            .expect("SpawnSubagent process must define maxTurns")
+    }
 }
 
 #[async_trait]
@@ -69,7 +95,7 @@ impl TronTool for SpawnSubagentTool {
     }
 
     fn definition(&self) -> Tool {
-        let default_timeout = default_timeout_ms_for_mode(&SubagentMode::InProcess);
+        let default_timeout = self.default_timeout_ms_for_mode(&SubagentMode::InProcess);
         ToolSchemaBuilder::new(
             "SpawnSubagent",
             format!("Spawn an agent to handle a specific task. Blocks for up to `timeout` milliseconds (default {default_timeout} ms). \
@@ -121,16 +147,16 @@ Returns (when completed within timeout):\n\
         };
 
         let timeout_ms = get_optional_u64(&params, "timeout")
-            .unwrap_or_else(|| default_timeout_ms_for_mode(&mode));
+            .unwrap_or_else(|| self.default_timeout_ms_for_mode(&mode));
         let blocking_timeout_ms = if timeout_ms > 0 {
             Some(timeout_ms)
         } else {
             None
         };
         let default_turns = if mode == SubagentMode::Tmux {
-            default_max_turns_for_mode(&SubagentMode::Tmux)
+            self.default_max_turns_for_mode(&SubagentMode::Tmux)
         } else {
-            default_max_turns_for_mode(&SubagentMode::InProcess)
+            self.default_max_turns_for_mode(&SubagentMode::InProcess)
         };
         #[allow(clippy::cast_possible_truncation)]
         let max_turns = get_optional_u64(&params, "maxTurns").map_or(default_turns, |v| v as u32);

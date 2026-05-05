@@ -18,7 +18,7 @@ struct TronUninstallerTests {
             )
             _ = FileManager.default.createFile(atPath: path.path, contents: Data("x".utf8))
         }
-        try createFixtureFile(setup.settingsPath, contents: "settings")
+        try createFixtureFile(setup.settingsPath, contents: "[settings.server]\ntailscaleIp = \"100.64.0.1\"\n")
         try createFixtureFile(setup.bearerTokenPath, contents: "auth")
 
         let outcome = await TronUninstaller.unregisterAndClean(setup: setup)
@@ -32,13 +32,26 @@ struct TronUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
-    @Test("reset options remove settings and credentials after unregister")
+    @Test("reset options clear settings overlay and remove credentials after unregister")
     func resetOptionsRemoveDurableFiles() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let manager = MockLaunchAgentManager()
         let setup = makeSetup(tmp: tmp, manager: manager)
-        try createFixtureFile(setup.settingsPath, contents: "settings")
+        try createFixtureFile(
+            setup.settingsPath,
+            contents: """
+            version = "2"
+            name = "user"
+            inherits = ["normal"]
+
+            [settings.server]
+            tailscaleIp = "100.64.0.1"
+
+            [toolPolicies.default]
+            allowed = ["Bash"]
+            """
+        )
         try createFixtureFile(setup.bearerTokenPath, contents: "auth")
 
         let outcome = await TronUninstaller.unregisterAndClean(
@@ -47,7 +60,9 @@ struct TronUninstallerTests {
         )
 
         #expect(outcome == .ok)
-        #expect(!FileManager.default.fileExists(atPath: setup.settingsPath.path))
+        let profile = try String(contentsOf: setup.settingsPath, encoding: .utf8)
+        #expect(!profile.contains("[settings.server]"))
+        #expect(profile.contains("[toolPolicies.default]"))
         #expect(!FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
@@ -101,7 +116,7 @@ struct TronUninstallerTests {
             serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"),
             bearerTokenPath: profiles.appendingPathComponent("auth.json", isDirectory: false),
             onboardedMarkerPath: run.appendingPathComponent(".onboarded", isDirectory: false),
-            settingsPath: userProfile.appendingPathComponent("settings.json", isDirectory: false),
+            settingsPath: userProfile.appendingPathComponent("profile.toml", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist"),
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,

@@ -37,12 +37,11 @@ fn unique_test_path(name: &str, extension: &str) -> PathBuf {
     ))
 }
 
-fn unique_settings_path() -> PathBuf {
-    let dir = unique_test_path("settings", "dir");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("settings.json");
-    crate::settings::seed_settings_defaults_for_path(&path).unwrap();
-    path
+fn unique_tron_home() -> PathBuf {
+    let dir = unique_test_path("tron-home", "dir");
+    let home = dir.join(".tron");
+    crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+    home
 }
 
 /// A no-op mock provider for tests.
@@ -149,13 +148,20 @@ pub fn make_test_context() -> RpcContext {
     let store = Arc::new(EventStore::new(pool));
     let mgr = Arc::new(SessionManager::new(store.clone()));
     let orch = Arc::new(Orchestrator::new(mgr.clone()));
+    let home = unique_tron_home();
+    let settings_path = home
+        .join(crate::core::paths::dirs::PROFILES)
+        .join(crate::core::profile::USER_PROFILE)
+        .join(crate::core::paths::files::PROFILE_TOML);
+    let profile_runtime = Arc::new(crate::runtime::ProfileRuntime::load(&home).unwrap());
     RpcContext {
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,
         skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
         memory_registry: Arc::new(Mutex::new(MemoryRegistry::new())),
-        settings_path: unique_settings_path(),
+        settings_path,
+        profile_runtime,
         agent_deps: None,
         server_start_time: Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),

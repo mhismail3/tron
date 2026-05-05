@@ -947,17 +947,30 @@ async fn run_summarizer(
     transcript: String,
 ) -> SummarizerOutcome {
     let task = format!("Summarize the provided session transcript:\n\n{transcript}");
-    let process = crate::core::profile::active_process_spec("memoryRetain")
-        .expect("active profile must define memoryRetain process");
+    let process_plan = match manager.plan_process("memoryRetain") {
+        Ok(plan) => plan,
+        Err(error) => {
+            let reason = error.to_string();
+            warn!(session_id = %parent_session_id, error = %reason, "memory retain process planning failed, using keyword fallback");
+            return SummarizerOutcome::Err {
+                fallback: keyword_summary(parent_session_id),
+                reason,
+            };
+        }
+    };
+    let process = &process_plan.process;
 
     match manager
         .spawn_subsession(SubsessionConfig {
+            process_id: Some("memoryRetain".into()),
             parent_session_id: parent_session_id.to_owned(),
             task,
             model: None,
-            system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
-                "memoryRetain",
-            ),
+            system_prompt: process_plan
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.content.clone())
+                .unwrap_or_default(),
             working_directory: working_directory.to_owned(),
             timeout_ms: process
                 .timeout_ms

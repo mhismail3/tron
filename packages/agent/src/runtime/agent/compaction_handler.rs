@@ -60,11 +60,21 @@ impl crate::runtime::context::llm_summarizer::SubsessionSpawner for SubagentMana
         &self,
         task: &str,
     ) -> crate::runtime::context::llm_summarizer::SubsessionResult {
-        let process = crate::core::profile::active_process_spec("compaction")
-            .expect("active profile must define compaction process");
+        let process_plan = match self.manager.plan_process("compaction") {
+            Ok(plan) => plan,
+            Err(error) => {
+                return crate::runtime::context::llm_summarizer::SubsessionResult {
+                    success: false,
+                    output: None,
+                    error: Some(error.to_string()),
+                };
+            }
+        };
+        let process = &process_plan.process;
         match self
             .manager
             .spawn_subsession(SubsessionConfig {
+                process_id: Some("compaction".into()),
                 parent_session_id: self.parent_session_id.clone(),
                 task: task.to_owned(),
                 model: self.model.clone(),
@@ -126,17 +136,20 @@ impl crate::tools::traits::ContentSummarizer for SubagentContentSummarizer {
         task: &str,
         parent_session_id: &str,
     ) -> Result<crate::tools::traits::SummarizerResult, crate::tools::errors::ToolError> {
-        let process = crate::core::profile::active_process_spec("webFetchSummarizer")
-            .expect("active profile must define webFetchSummarizer process");
+        let process_plan = self.manager.plan_process("webFetchSummarizer")?;
+        let process = &process_plan.process;
         let result = self
             .manager
             .spawn_subsession(SubsessionConfig {
+                process_id: Some("webFetchSummarizer".into()),
                 parent_session_id: parent_session_id.to_owned(),
                 task: task.to_owned(),
                 model: None,
-                system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
-                    "webFetchSummarizer",
-                ),
+                system_prompt: process_plan
+                    .prompt
+                    .as_ref()
+                    .map(|prompt| prompt.content.clone())
+                    .unwrap_or_default(),
                 working_directory: process
                     .working_directory
                     .clone()
@@ -533,13 +546,16 @@ impl CompactionHandler {
         Box<dyn std::error::Error + Send + Sync>,
     > {
         if let Some(manager) = subagent_manager {
+            let process_plan = manager.plan_process("compaction")?;
             let spawner = SubagentManagerSpawner {
                 manager: manager.clone(),
                 parent_session_id: session_id.to_owned(),
                 working_directory: context_manager.get_working_directory().to_owned(),
-                system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
-                    "compaction",
-                ),
+                system_prompt: process_plan
+                    .prompt
+                    .as_ref()
+                    .map(|prompt| prompt.content.clone())
+                    .unwrap_or_default(),
                 model: None,
             };
             let summarizer = crate::runtime::context::llm_summarizer::LlmSummarizer::new(spawner);

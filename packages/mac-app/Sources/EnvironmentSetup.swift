@@ -28,12 +28,12 @@ struct EnvironmentSetup: Sendable {
     /// Returns nil if missing/unreadable.
     var readBearerToken: @Sendable () -> String?
 
-    /// Reads `server.tailscaleIp` from `~/.tron/profiles/user/settings.json`.
+    /// Reads `server.tailscaleIp` from `~/.tron/profiles/user/profile.toml`.
     /// Returns nil if missing/unset. Pairing treats this as a fallback
     /// cache only; fresh installs resolve Tailscale live first.
     var readTailscaleIPFromSettings: @Sendable () -> String?
 
-    /// Writes `server.tailscaleIp` into `~/.tron/profiles/user/settings.json`
+    /// Writes `server.tailscaleIp` into `~/.tron/profiles/user/profile.toml`
     /// without disturbing any existing settings. Best-effort cache for
     /// later server/menu-bar reads; pairing must not depend on this
     /// write succeeding.
@@ -93,7 +93,7 @@ struct EnvironmentSetup: Sendable {
     /// Applies the first-run transcription preference. The wizard seeds
     /// bundled sidecar support files into `~/.tron/internal/transcription/`
     /// either way so iOS can enable it later; enabling also writes
-    /// `settings.json`, restarts the helper, and waits for ping.
+    /// `profile.toml`, restarts the helper, and waits for ping.
     var applyTranscriptionPreference: @Sendable (Bool) async -> TranscriptionSetupResult
 
     /// Touches the `~/.tron/internal/run/.onboarded` sentinel atomically.

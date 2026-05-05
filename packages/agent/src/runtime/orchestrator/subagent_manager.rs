@@ -62,6 +62,8 @@ impl SpawnType {
 
 /// Configuration for a system-spawned subsession.
 pub struct SubsessionConfig {
+    /// Profile process id that defines prompt/model/tool/permission policy.
+    pub process_id: Option<String>,
     /// Parent session ID (for audit trail).
     pub parent_session_id: String,
     /// User message content sent to the subsession.
@@ -99,6 +101,7 @@ impl Default for SubsessionConfig {
     fn default() -> Self {
         Self {
             parent_session_id: String::new(),
+            process_id: None,
             task: String::new(),
             model: None,
             system_prompt: String::new(),
@@ -146,6 +149,7 @@ pub struct SubagentManager {
     event_store: Arc<EventStore>,
     broadcast: Arc<EventEmitter>,
     provider_factory: Arc<dyn ProviderFactory>,
+    profile_runtime: Arc<crate::runtime::ProfileRuntime>,
     tool_factory: tokio::sync::OnceCell<Arc<dyn Fn() -> ToolRegistry + Send + Sync>>,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
@@ -177,6 +181,7 @@ impl SubagentManager {
         event_store: Arc<EventStore>,
         broadcast: Arc<EventEmitter>,
         provider_factory: Arc<dyn ProviderFactory>,
+        profile_runtime: Arc<crate::runtime::ProfileRuntime>,
         guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
         hooks: Option<Arc<HookEngine>>,
     ) -> Self {
@@ -185,6 +190,7 @@ impl SubagentManager {
             event_store,
             broadcast,
             provider_factory,
+            profile_runtime,
             tool_factory: tokio::sync::OnceCell::new(),
             guardrails,
             hooks,
@@ -248,6 +254,18 @@ impl SubagentManager {
         registry: Arc<parking_lot::RwLock<crate::skills::registry::SkillRegistry>>,
     ) {
         let _ = self.skill_registry.set(registry);
+    }
+
+    /// Resolve a subprocess plan from the current compiled profile snapshot.
+    pub fn plan_process(
+        &self,
+        process_id: &str,
+    ) -> Result<crate::runtime::ProcessExecutionPlan, ToolError> {
+        self.profile_runtime
+            .plan_process(process_id, None)
+            .map_err(|error| ToolError::Internal {
+                message: format!("Failed to plan process `{process_id}`: {error}"),
+            })
     }
 
     /// Compute the full `denied_tools` list for a spawned subagent by
@@ -325,6 +343,11 @@ impl SubagentManager {
             })?;
 
         let spawn_type = config.spawn_type;
+        let process_id = config
+            .process_id
+            .as_deref()
+            .unwrap_or("spawnSubagent.inProcess");
+        let process_plan = self.plan_process(process_id)?;
         let (tracker, cancel) = self.register_subagent(
             child_session_id.clone(),
             config.parent_session_id.clone(),
@@ -383,6 +406,7 @@ impl SubagentManager {
             hooks: self.hooks.clone(),
             worktree_coordinator: self.worktree_coordinator.get().cloned(),
             child_subagent_manager: self.arc_self(),
+            process_plan,
             child_session_id: child_session_id.clone(),
             parent_session_id: config.parent_session_id.clone(),
             task,
@@ -565,6 +589,14 @@ impl SubagentSpawner for SubagentManager {
             }
         }
 
+        let process_plan = self.plan_process("spawnSubagent.inProcess")?;
+        let system_prompt = config.system_prompt.clone().or_else(|| {
+            process_plan
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.content.clone())
+        });
+
         execution::spawn_tool_agent_task(execution::ToolAgentTaskLaunch {
             session_manager: self.session_manager.clone(),
             event_store: self.event_store.clone(),
@@ -574,11 +606,12 @@ impl SubagentSpawner for SubagentManager {
             hooks: self.hooks.clone(),
             worktree_coordinator: self.worktree_coordinator.get().cloned(),
             child_subagent_manager: self.arc_self(),
+            process_plan,
             child_session_id: child_session_id.clone(),
             parent_session_id: parent_sid.clone(),
             task: task.clone(),
             model: model.to_owned(),
-            system_prompt: config.system_prompt.clone(),
+            system_prompt,
             working_directory: config.working_directory.clone(),
             max_turns: config.max_turns,
             subagent_depth: config.current_depth,

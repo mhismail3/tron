@@ -124,7 +124,7 @@ struct ServerStatusPollerTests {
         #expect(snapshot.state == .failed(reason: "malformed response"))
     }
 
-    @Test("falls back to settings.json tailscale IP when server doesn't report one")
+    @Test("falls back to profile TOML Tailscale IP when server doesn't report one")
     func fallbackTailscaleFromSettings() async throws {
         let setup = Self.makeSetup(
             token: "abc",

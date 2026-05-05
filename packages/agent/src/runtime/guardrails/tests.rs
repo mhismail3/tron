@@ -317,7 +317,7 @@ fn path_write_to_tron_home_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
     let eval = engine.evaluate(&make_write_ctx(&format!(
-        "{home}/.tron/profiles/user/settings.json"
+        "{home}/.tron/profiles/user/profile.toml"
     )));
     assert!(eval.blocked);
     assert!(
@@ -419,7 +419,7 @@ fn path_normal_mkdir_not_blocked() {
 fn path_bash_tee_to_tron_home_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let cmd = format!("echo test | tee {home}/.tron/profiles/user/settings.json");
+    let cmd = format!("echo test | tee {home}/.tron/profiles/user/profile.toml");
     let eval = engine.evaluate(&make_bash_ctx(&cmd));
     assert!(eval.blocked);
 }

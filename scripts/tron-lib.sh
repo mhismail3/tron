@@ -24,8 +24,7 @@ DEFAULT_PROFILE_DIR="$PROFILES_DIR/default"
 NORMAL_PROFILE_DIR="$PROFILES_DIR/normal"
 CHAT_PROFILE_DIR="$PROFILES_DIR/chat"
 LOCAL_PROFILE_DIR="$PROFILES_DIR/local"
-SETTINGS_FILE="$USER_PROFILE_DIR/settings.json"
-CONTAINERS_FILE="$USER_PROFILE_DIR/containers.json"
+USER_PROFILE_FILE="$USER_PROFILE_DIR/profile.toml"
 WORKSPACE_DIR="$TRON_HOME/workspace"
 WORKSPACE_VAULT_DIR="$WORKSPACE_DIR/vault"
 WORKSPACE_KNOWLEDGE_DIR="$WORKSPACE_DIR/knowledge"
@@ -174,11 +173,37 @@ confirm_action() {
     [[ $REPLY =~ ^[Yy]$ ]]
 }
 
+clear_user_profile_settings() {
+    if [ ! -f "$USER_PROFILE_FILE" ]; then
+        return 0
+    fi
+
+    local tmp_file="$USER_PROFILE_FILE.tmp.$$"
+    awk '
+        /^[[:space:]]*\[+[^][]+\]+[[:space:]]*($|#)/ {
+            table = $0
+            sub(/^[[:space:]]*\[+/, "", table)
+            sub(/\]+[[:space:]]*($|#.*$)/, "", table)
+            skip = (table == "settings" || table ~ /^settings\./)
+            if (skip) {
+                next
+            }
+        }
+        !skip { print }
+    ' "$USER_PROFILE_FILE" > "$tmp_file"
+
+    if grep -q '[^[:space:]]' "$tmp_file"; then
+        mv "$tmp_file" "$USER_PROFILE_FILE"
+    else
+        rm -f "$tmp_file" "$USER_PROFILE_FILE"
+    fi
+}
+
 ensure_tron_home() {
     mkdir -p "$TRON_HOME"/internal/{database,run}
     mkdir -p "$DEFAULT_PROFILE_DIR" "$NORMAL_PROFILE_DIR" "$CHAT_PROFILE_DIR" "$LOCAL_PROFILE_DIR" "$USER_PROFILE_DIR"
     mkdir -p "$USER_PROFILE_DIR/prompts"
-    mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,providers,context,tools,settings}
+    mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,providers,context,tools}
     mkdir -p "$DEFAULT_PROFILE_DIR/prompts/processes"
     mkdir -p "$TRON_HOME"/memory/{rules,sessions}
     mkdir -p "$WORKSPACE_DIR"/{inbox,projects,automations,plans,reports,artifacts,scratch,labs,archive}
@@ -189,9 +214,10 @@ ensure_tron_home() {
 }
 
 ensure_default_configs() {
-    # settings.json is intentionally not created here. The Rust profile seeder
-    # writes default/settings/defaults.json; profiles/user/settings.json
-    # is reserved for sparse user/app overrides written through settings.update.
+    # Standalone settings JSON is intentionally not created here. The Rust
+    # profile seeder owns managed defaults in profiles/default/profile.toml,
+    # while settings.update writes sparse [settings] overrides to
+    # profiles/user/profile.toml.
 
     if [ ! -f "$AUTH_FILE" ]; then
         mkdir -p "$(dirname "$AUTH_FILE")"
@@ -928,7 +954,7 @@ cmd_uninstall() {
                 echo ""
                 echo "Removes the LaunchAgent, CLI entrypoint, runtime bundles, and Mac onboarding marker."
                 echo "Preserves ~/.tron/internal/database and ~/.tron/workspace. Optional flags remove"
-                echo "~/.tron/profiles/user/settings.json and/or ~/.tron/profiles/auth.json."
+                echo "settings overrides in ~/.tron/profiles/user/profile.toml and/or ~/.tron/profiles/auth.json."
                 return 0
                 ;;
             *)
@@ -972,8 +998,8 @@ cmd_uninstall() {
     rm -f "$ONBOARDED_MARKER_PATH"
 
     if [ "$reset_settings" = true ]; then
-        print_status "Removing settings..."
-        rm -f "$SETTINGS_FILE"
+        print_status "Clearing profile settings overrides..."
+        clear_user_profile_settings
     fi
 
     if [ "$reset_credentials" = true ]; then

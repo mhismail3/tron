@@ -24,7 +24,7 @@ struct MacAppStartupMaintenanceTests {
             serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron", isDirectory: false),
             bearerTokenPath: tmp.appendingPathComponent("profiles/auth.json", isDirectory: false),
             onboardedMarkerPath: tmp.appendingPathComponent("internal/run/.onboarded", isDirectory: false),
-            settingsPath: tmp.appendingPathComponent("profiles/user/settings.json", isDirectory: false),
+            settingsPath: tmp.appendingPathComponent("profiles/user/profile.toml", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false),
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,

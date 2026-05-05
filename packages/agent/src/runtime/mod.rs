@@ -9,6 +9,7 @@
 //! - **Agent runner**: High-level: skill injection, user content building, interrupt handling
 //! - **Memory**: User-memory loader for `~/.tron/memory/MEMORY.md` + `rules/*.md` (fingerprint-gated, per-turn).
 //! - **Orchestrator**: Multi-session management with event broadcasting
+//! - **Profile runtime**: Atomically compiled profile snapshots and session/process plans
 //!
 //! ## Module Position
 //!
@@ -26,6 +27,7 @@ pub mod hooks;
 pub mod memory;
 pub mod orchestrator;
 pub mod pipeline;
+pub mod profile_runtime;
 pub mod subagents;
 pub mod types;
 
@@ -38,4 +40,8 @@ pub use orchestrator::agent_runner::run_agent;
 pub use orchestrator::orchestrator::Orchestrator;
 pub use orchestrator::session_manager::{ForkSessionResult, SessionFilter, SessionManager};
 pub use orchestrator::session_reconstructor::ReconstructedState;
+pub use profile_runtime::{
+    ProcessExecutionPlan, ProfileRuntime, ResolvedHarnessSpec, SessionExecutionPlan,
+    SessionPlanRequest,
+};
 pub use types::{AgentConfig, ReasoningLevel, RunContext, RunResult, TurnResult};

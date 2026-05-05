@@ -117,6 +117,7 @@ pub enum McpContentBlock {
 
 /// MCP server configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
     /// Server name (used as tool name prefix).
     pub name: String,
@@ -133,7 +134,7 @@ pub struct McpServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// Per-tool-call timeout in milliseconds.
-    #[serde(default = "default_tool_timeout")]
+    #[serde(default = "default_tool_timeout", alias = "tool_timeout_ms")]
     pub tool_timeout_ms: u64,
     /// Whether this server is enabled. Disabled servers are not started.
     #[serde(default = "default_enabled")]
@@ -150,6 +151,7 @@ fn default_enabled() -> bool {
 
 /// MCP settings configuration.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpSettings {
     /// Configured MCP servers.
     #[serde(default)]
@@ -163,7 +165,10 @@ pub struct McpSettings {
     ///
     /// `0` disables proactive refresh entirely (cache is only rebuilt at
     /// startup and on manual restart). Default: 30 seconds.
-    #[serde(default = "default_schema_refresh_ttl_ms")]
+    #[serde(
+        default = "default_schema_refresh_ttl_ms",
+        alias = "schema_refresh_ttl_ms"
+    )]
     pub schema_refresh_ttl_ms: u64,
 }
 
@@ -302,6 +307,46 @@ mod tests {
         assert_eq!(config.name, "sqlite");
         assert_eq!(config.tool_timeout_ms, 30_000);
         assert!(config.enabled);
+    }
+
+    #[test]
+    fn mcp_settings_use_camel_case_wire_names() {
+        let settings = McpSettings {
+            servers: vec![McpServerConfig {
+                name: "devtools".to_string(),
+                command: Some("npx".to_string()),
+                args: vec!["chrome-devtools-mcp".to_string()],
+                env: Default::default(),
+                url: None,
+                tool_timeout_ms: 12_345,
+                enabled: true,
+            }],
+            schema_refresh_ttl_ms: 54_321,
+        };
+
+        let json = serde_json::to_value(&settings).unwrap();
+
+        assert_eq!(json["schemaRefreshTtlMs"], 54_321);
+        assert!(json.get("schema_refresh_ttl_ms").is_none());
+        assert_eq!(json["servers"][0]["toolTimeoutMs"], 12_345);
+        assert!(json["servers"][0].get("tool_timeout_ms").is_none());
+    }
+
+    #[test]
+    fn mcp_settings_accept_legacy_snake_case_profile_keys() {
+        let json = json!({
+            "schema_refresh_ttl_ms": 54_321,
+            "servers": [{
+                "name": "devtools",
+                "command": "npx",
+                "tool_timeout_ms": 12_345
+            }]
+        });
+
+        let settings: McpSettings = serde_json::from_value(json).unwrap();
+
+        assert_eq!(settings.schema_refresh_ttl_ms, 54_321);
+        assert_eq!(settings.servers[0].tool_timeout_ms, 12_345);
     }
 
     #[test]

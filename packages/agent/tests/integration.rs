@@ -48,11 +48,20 @@ fn unique_test_path(name: &str, extension: &str) -> PathBuf {
 }
 
 fn unique_settings_path() -> PathBuf {
-    let dir = unique_test_path("settings", "dir");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("settings.json");
-    tron::settings::seed_settings_defaults_for_path(&path).unwrap();
-    path
+    let dir = unique_test_path("tron-home", "dir");
+    let home = dir.join(".tron");
+    tron::core::constitution::ensure_tron_home_at(&home).unwrap();
+    home.join(tron::core::paths::dirs::PROFILES)
+        .join(tron::core::profile::USER_PROFILE)
+        .join(tron::core::paths::files::PROFILE_TOML)
+}
+
+fn profile_runtime_for_settings_path(path: &std::path::Path) -> Arc<tron::runtime::ProfileRuntime> {
+    let home = path
+        .ancestors()
+        .nth(3)
+        .expect("settings path must be profiles/user/profile.toml");
+    Arc::new(tron::runtime::ProfileRuntime::load(home).unwrap())
 }
 
 /// Boot a test server and return the WS URL + shutdown handle.
@@ -78,6 +87,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),
         )),
+        profile_runtime: profile_runtime_for_settings_path(&settings_path),
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
@@ -370,6 +380,7 @@ async fn boot_server_with_provider_and_handles(
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),
         )),
+        profile_runtime: profile_runtime_for_settings_path(&settings_path),
         settings_path,
         agent_deps: Some(AgentDeps {
             provider_factory: Arc::new(FixedProviderFactory(provider)),

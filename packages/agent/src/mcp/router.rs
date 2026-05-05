@@ -392,9 +392,11 @@ mod tests {
     use super::*;
 
     fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
-        let path = dir.path().join("settings.json");
-        crate::settings::seed_settings_defaults_for_path(&path).unwrap();
-        path
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+        home.join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML)
     }
 
     fn disabled_config(name: &str) -> McpServerConfig {
@@ -479,7 +481,7 @@ mod tests {
 
         let err = router.reload_from_settings().await.unwrap_err();
 
-        assert!(err.contains("parse settings JSON"));
+        assert!(err.contains("parse settings TOML"));
         assert_eq!(router.status().len(), 1);
         assert_eq!(router.status()[0].name, "disabled");
     }

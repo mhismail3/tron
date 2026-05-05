@@ -673,7 +673,12 @@ done
         let script =
             drifting_mock_server_script(state_file.to_str().unwrap(), &first_tools, &second_tools);
         let config = mock_config("drift-srv", &script);
-        let settings_path = tmp_dir.path().join("settings.json");
+        let tron_home = tmp_dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&tron_home).unwrap();
+        let settings_path = tron_home
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML);
 
         // TTL of 1ms so the second call is *guaranteed* stale enough to trigger
         // a refresh. Startup fetches tools once; the first `.call()` refreshes.
@@ -728,7 +733,12 @@ done
         let script =
             drifting_mock_server_script(state_file.to_str().unwrap(), &first_tools, &second_tools);
         let config = mock_config("no-ttl-srv", &script);
-        let settings_path = tmp_dir.path().join("settings.json");
+        let tron_home = tmp_dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&tron_home).unwrap();
+        let settings_path = tron_home
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML);
 
         let mut router = McpRouter::new(vec![config], settings_path, 0).await;
 

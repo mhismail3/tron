@@ -534,7 +534,7 @@ struct WizardVisualLayoutTests {
         #expect(source.contains(".fixedSize(horizontal: false, vertical: true)"))
     }
 
-    @Test("pairing page resolves Tailscale live and treats settings as cache")
+    @Test("pairing page resolves Tailscale live and treats profile settings as cache")
     func pairingPageResolvesTailscaleLiveAndCachesSettings() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -543,7 +543,7 @@ struct WizardVisualLayoutTests {
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/PairingInfoStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
-        #expect(source.contains("Fresh installs do not have settings.json yet"))
+        #expect(source.contains("Fresh installs do not have a user profile yet"))
         #expect(source.contains("setup.probeTailscale()"))
         #expect(source.contains("state.tailscaleStatus = liveTailscale"))
         #expect(source.contains("state.tailscaleStatus?.displayIP"))
@@ -575,7 +575,7 @@ struct WizardVisualLayoutTests {
         #expect(!source.contains("Resolving Tron Server, Tailscale, and the local pairing token."))
         #expect(source.contains("same account"))
         #expect(source.contains("enter the values manually"))
-        #expect(source.contains("Fresh installs do not need a pre-existing settings.json."))
+        #expect(source.contains("Fresh installs do not need a pre-existing user profile."))
         #expect(source.contains("PairingInfoStepLayout.initialResolveDelayNanoseconds"))
         #expect(source.contains("PairingInfoStepLayout.copyCheckInAnimationSeconds"))
         #expect(source.contains("PairingInfoStepLayout.copyCheckOutAnimationSeconds"))

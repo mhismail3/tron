@@ -313,6 +313,16 @@ impl HookHandler for PromptHookHandler {
         let hook_event = self.hook_type.to_string();
         let model = self.model.clone();
         let session_id = context.session_id().to_owned();
+        let process_id = if is_title_gen {
+            "hooks.titleGen"
+        } else if is_branch_name_gen {
+            "hooks.branchName"
+        } else if is_suggest_prompts {
+            "hooks.suggestPrompts"
+        } else {
+            "hooks.suggestPrompts"
+        }
+        .to_string();
         let manager = self.subagent_manager.clone();
         let emitter = self.event_emitter.clone();
         let coordinator = self.worktree_coordinator.clone();
@@ -326,6 +336,7 @@ impl HookHandler for PromptHookHandler {
 
             let result = manager
                 .spawn_subsession(SubsessionConfig {
+                    process_id: Some(process_id),
                     parent_session_id: session_id.clone(),
                     task,
                     model: Some(model.clone()),

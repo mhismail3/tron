@@ -29,6 +29,7 @@ pub struct CronAgentTurnExecutor {
     session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
     provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
     tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
+    profile_runtime: Arc<crate::runtime::ProfileRuntime>,
     origin: String,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
 }
@@ -40,6 +41,7 @@ impl CronAgentTurnExecutor {
         session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
         provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
         tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
+        profile_runtime: Arc<crate::runtime::ProfileRuntime>,
         origin: String,
         subagent_manager: Option<
             Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>,
@@ -50,6 +52,7 @@ impl CronAgentTurnExecutor {
             session_manager,
             provider_factory,
             tool_factory,
+            profile_runtime,
             origin,
             subagent_manager,
         }
@@ -96,12 +99,18 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         tool_restrictions: Option<&crate::cron::ToolRestrictions>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<crate::cron::AgentTurnResult, CronError> {
-        // Resolve model (fall back to settings default)
-        let settings = crate::settings::loader::load_settings_from_path(
-            &crate::settings::loader::settings_path(),
-        )
-        .unwrap_or_default();
-        let model = model.unwrap_or(&settings.server.default_model);
+        // Resolve model and profile from the current compiled profile runtime.
+        let current = self.profile_runtime.current();
+        let model = model.unwrap_or(&current.settings.server.default_model);
+        let session_plan = self
+            .profile_runtime
+            .plan_session(crate::runtime::SessionPlanRequest {
+                requested_profile: None,
+                model: model.to_owned(),
+                source: Some("automation".into()),
+                entrypoint: None,
+            })
+            .map_err(|error| CronError::Execution(format!("profile planning failed: {error}")))?;
 
         // Resolve workspace path
         let workspace_path = if let Some(wid) = workspace_id {
@@ -163,7 +172,12 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         // 3. Build agent config
         let agent_config = crate::runtime::AgentConfig {
             model: model.to_owned(),
-            system_prompt: system_prompt.map(String::from),
+            system_prompt: system_prompt.map(String::from).or_else(|| {
+                session_plan
+                    .prompt
+                    .as_ref()
+                    .map(|prompt| prompt.content.clone())
+            }),
             max_turns: 100,
             enable_thinking: true,
             working_directory: Some(workspace_path.clone()),
@@ -190,6 +204,8 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
             crate::runtime::CreateAgentOpts {
                 provider,
                 tools,
+                context_policy: session_plan.runtime_context_policy(),
+                tool_policy: session_plan.tool_policy.clone(),
                 guardrails: None,
                 hooks: None,
                 is_unattended: true,
@@ -233,7 +249,11 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
 
         // 9. Run agent with timeout
         let broadcast = Arc::new(crate::runtime::EventEmitter::new());
-        let run_ctx = crate::runtime::RunContext::default();
+        let run_ctx = crate::runtime::RunContext {
+            profile_name: Some(session_plan.profile_name.clone()),
+            resolved_profile: Some(session_plan.resolved_profile.clone()),
+            ..crate::runtime::RunContext::default()
+        };
 
         let result = tokio::select! {
             r = crate::runtime::run_agent(
@@ -363,6 +383,14 @@ mod tests {
         (store, mgr)
     }
 
+    fn make_profile_runtime() -> Arc<crate::runtime::ProfileRuntime> {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+        let _keep_home_alive = Box::leak(Box::new(dir));
+        Arc::new(crate::runtime::ProfileRuntime::load(home).unwrap())
+    }
+
     // ── Provider retry tests ──────────────────────────────────────────
 
     use crate::core::content::AssistantContent;
@@ -462,6 +490,7 @@ mod tests {
             mgr.clone(),
             factory,
             Arc::new(crate::tools::registry::ToolRegistry::new),
+            make_profile_runtime(),
             "http://localhost:0".into(),
             None,
         );
@@ -507,6 +536,7 @@ mod tests {
             mgr.clone(),
             factory,
             Arc::new(crate::tools::registry::ToolRegistry::new),
+            make_profile_runtime(),
             "http://localhost:0".into(),
             None,
         );
@@ -544,6 +574,7 @@ mod tests {
             mgr.clone(),
             factory,
             Arc::new(crate::tools::registry::ToolRegistry::new),
+            make_profile_runtime(),
             "http://localhost:0".into(),
             None,
         );

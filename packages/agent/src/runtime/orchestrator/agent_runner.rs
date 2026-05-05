@@ -205,6 +205,7 @@ mod tests {
     ) -> (TronAgent, JournalCleanup) {
         let session_id = unique_test_session_id();
         let cleanup = JournalCleanup::new(&session_id);
+        let spec = crate::core::profile::bundled_default_execution_spec();
         let agent = TronAgent::new(
             AgentConfig::default(),
             AgentDeps {
@@ -214,7 +215,12 @@ mod tests {
                 hooks: None,
                 context_manager: ContextManager::new(ContextManagerConfig {
                     model: "mock".into(),
-                    system_prompt: None,
+                    system_prompt: Some("You are helpful.".into()),
+                    context_policy:
+                        crate::runtime::context::local_policy::ContextPolicy::from_provider_with_spec(
+                            Provider::Anthropic,
+                            &spec,
+                        ),
                     working_directory: None,
                     tools: vec![],
                     rules_content: None,
@@ -236,21 +242,32 @@ mod tests {
         make_agent_with_provider(Arc::new(MockProvider))
     }
 
+    fn test_resolved_profile() -> Arc<crate::core::profile::ResolvedProfile> {
+        let tempdir = tempfile::tempdir().expect("profile tempdir");
+        let home = tempdir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).expect("seed profile home");
+        let profile =
+            crate::core::profile::resolve_profile_at(&home, crate::core::profile::NORMAL_PROFILE)
+                .expect("normal profile");
+        std::mem::forget(tempdir);
+        Arc::new(profile)
+    }
+
+    fn run_context() -> RunContext {
+        RunContext {
+            profile_name: Some(crate::core::profile::NORMAL_PROFILE.to_string()),
+            resolved_profile: Some(test_resolved_profile()),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
     async fn run_agent_emits_complete_then_ready() {
         let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(
-            &mut agent,
-            "Hello",
-            RunContext::default(),
-            &None,
-            &broadcast,
-            None,
-        )
-        .await;
+        let result = run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None).await;
 
         assert_eq!(result.stop_reason, StopReason::EndTurn);
         assert_eq!(result.turns_executed, 1);
@@ -280,7 +297,7 @@ mod tests {
 
         let ctx = RunContext {
             skill_context: Some("You are a code reviewer.".into()),
-            ..Default::default()
+            ..run_context()
         };
 
         let result = run_agent(&mut agent, "Review code", ctx, &None, &broadcast, None).await;
@@ -294,7 +311,7 @@ mod tests {
 
         let ctx = RunContext {
             job_results: Some("# Completed Background Jobs\n\nProcess done.".into()),
-            ..Default::default()
+            ..run_context()
         };
 
         let result = run_agent(&mut agent, "Check results", ctx, &None, &broadcast, None).await;
@@ -307,15 +324,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let _ = run_agent(
-            &mut agent,
-            "Hello",
-            RunContext::default(),
-            &None,
-            &broadcast,
-            None,
-        )
-        .await;
+        let _ = run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None).await;
 
         // Count agent_end events — there should be exactly one (from TronAgent, forwarded)
         let mut agent_end_count = 0;
@@ -357,15 +366,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(
-            &mut agent,
-            "Hi",
-            RunContext::default(),
-            &None,
-            &broadcast,
-            None,
-        )
-        .await;
+        let result = run_agent(&mut agent, "Hi", run_context(), &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::Error);
 
         // Should still emit agent_ready after error
@@ -423,15 +424,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(
-            &mut agent,
-            "Hi",
-            RunContext::default(),
-            &None,
-            &broadcast,
-            None,
-        )
-        .await;
+        let result = run_agent(&mut agent, "Hi", run_context(), &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
 
         // Collect all forwarded events
@@ -468,14 +461,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            run_agent(
-                &mut agent,
-                "Hello",
-                RunContext::default(),
-                &None,
-                &broadcast,
-                None,
-            ),
+            run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None),
         )
         .await;
 
@@ -491,15 +477,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(
-            &mut agent,
-            "Hello",
-            RunContext::default(),
-            &None,
-            &broadcast,
-            None,
-        )
-        .await;
+        let result = run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None).await;
 
         assert_eq!(result.stop_reason, StopReason::EndTurn);
 

@@ -76,7 +76,7 @@ pub fn deep_health_check(
             &tron_home
                 .join(crate::core::paths::dirs::PROFILES)
                 .join(crate::core::profile::USER_PROFILE)
-                .join(crate::core::paths::files::SETTINGS_JSON),
+                .join(crate::core::paths::files::PROFILE_TOML),
         ),
         // 3. Auth
         check_auth(
@@ -419,14 +419,13 @@ mod tests {
             crate::events::run_migrations(&conn).unwrap();
         }
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("settings.json"), "{}").unwrap();
+        crate::core::constitution::ensure_tron_home_at(dir.path()).unwrap();
         let settings_dir = dir
             .path()
             .join(crate::core::paths::dirs::PROFILES)
             .join(crate::core::profile::USER_PROFILE);
-        std::fs::create_dir_all(&settings_dir).unwrap();
         std::fs::write(
-            settings_dir.join(crate::core::paths::files::SETTINGS_JSON),
+            settings_dir.join(crate::core::paths::files::PROFILE_TOML),
             "{broken",
         )
         .unwrap();
@@ -451,14 +450,24 @@ mod tests {
             crate::events::run_migrations(&conn).unwrap();
         }
         let dir = tempfile::tempdir().unwrap();
+        crate::core::constitution::ensure_tron_home_at(dir.path()).unwrap();
         let settings_dir = dir
             .path()
             .join(crate::core::paths::dirs::PROFILES)
             .join(crate::core::profile::USER_PROFILE);
-        std::fs::create_dir_all(&settings_dir).unwrap();
         std::fs::write(
-            settings_dir.join(crate::core::paths::files::SETTINGS_JSON),
-            serde_json::json!({"server": {"auth": {"enforced": true}}}).to_string(),
+            settings_dir.join(crate::core::paths::files::PROFILE_TOML),
+            r#"
+version = "2"
+name = "user"
+managed = false
+profileClass = "custom"
+inherits = []
+authProfile = "default"
+
+[settings.server.auth]
+enforced = true
+"#,
         )
         .unwrap();
 

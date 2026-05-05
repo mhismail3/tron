@@ -19,7 +19,7 @@ struct MenuBarItemBuilderTests {
             serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"),
             bearerTokenPath: tmp.appendingPathComponent("auth.json"),
             onboardedMarkerPath: tmp.appendingPathComponent("run/.onboarded"),
-            settingsPath: tmp.appendingPathComponent("settings.json"),
+            settingsPath: tmp.appendingPathComponent("profile.toml"),
             launchAgentPlistPath: tmp.appendingPathComponent("com.tron.server.plist"),
             launchAgentLabel: "com.tron.server",
             serverPort: port,

@@ -463,6 +463,7 @@ struct ServiceState {
 async fn init_services(
     event_store: Arc<EventStore>,
     settings: &tron::settings::TronSettings,
+    profile_runtime: Arc<tron::runtime::ProfileRuntime>,
     origin: &str,
     push_service: PushServiceOption,
     mcp: McpState,
@@ -512,11 +513,13 @@ async fn init_services(
     });
 
     // Subagent manager
+    let profile_runtime_for_tools = profile_runtime.clone();
     let subagent_manager = Arc::new(SubagentManager::new(
         session_manager.clone(),
         event_store.clone(),
         orchestrator.broadcast().clone(),
         provider_factory.clone(),
+        profile_runtime,
         None,
         None,
     ));
@@ -539,7 +542,12 @@ async fn init_services(
             subagent_ops,
         ));
 
-    let tool_factory = build_tool_factory(&tool_config, &subagent_manager, &job_manager);
+    let tool_factory = build_tool_factory(
+        &tool_config,
+        &subagent_manager,
+        &job_manager,
+        &profile_runtime_for_tools,
+    );
 
     // Break circular dep: SubagentManager needs tool_factory to spawn children
     subagent_manager.set_tool_factory(tool_factory.clone());
@@ -618,15 +626,20 @@ fn build_tool_factory(
     tool_config: &Arc<ToolRegistryConfig>,
     subagent_manager: &Arc<SubagentManager>,
     job_manager: &Arc<dyn tron::tools::traits::JobManagerOps>,
+    profile_runtime: &Arc<tron::runtime::ProfileRuntime>,
 ) -> Arc<dyn Fn() -> ToolRegistry + Send + Sync> {
     let config = tool_config.clone();
     let spawner: Arc<dyn tron::tools::traits::SubagentSpawner> = subagent_manager.clone();
+    let profile_runtime = profile_runtime.clone();
     let sm_for_summarizer = subagent_manager.clone();
     let jm_for_tools = job_manager.clone();
     Arc::new(move || {
         let mut registry = tool_factory::create_tool_registry(&config);
         registry.register(Arc::new(
-            tron::tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
+            tron::tools::subagent::spawn::SpawnSubagentTool::with_profile_runtime(
+                spawner.clone(),
+                profile_runtime.clone(),
+            ),
         ));
 
         // Job management tools
@@ -694,7 +707,11 @@ struct CronState {
 }
 
 /// Build the cron scheduler with executor dependencies.
-fn init_cron(services: &ServiceState, origin: &str) -> CronState {
+fn init_cron(
+    services: &ServiceState,
+    origin: &str,
+    profile_runtime: Arc<tron::runtime::ProfileRuntime>,
+) -> CronState {
     let cancel = tokio_util::sync::CancellationToken::new();
     let config_path = tron::core::paths::automations_path();
     let backup_path = tron::core::paths::automations_backup_path();
@@ -705,6 +722,7 @@ fn init_cron(services: &ServiceState, origin: &str) -> CronState {
             services.session_manager.clone(),
             deps.provider_factory.clone(),
             deps.tool_factory.clone(),
+            profile_runtime.clone(),
             origin.to_owned(),
             services.shared_subagent_manager.clone(),
         )) as _
@@ -785,6 +803,7 @@ async fn init_worktree(
 fn build_rpc_context(
     services: ServiceState,
     settings_path: PathBuf,
+    profile_runtime: Arc<tron::runtime::ProfileRuntime>,
     origin: String,
     cron: &CronState,
     worktree_coordinator: Option<Arc<tron::worktree::WorktreeCoordinator>>,
@@ -797,6 +816,7 @@ fn build_rpc_context(
         skill_registry: services.skill_registry,
         memory_registry: services.memory_registry,
         settings_path,
+        profile_runtime,
         agent_deps: services.agent_deps,
         server_start_time: std::time::Instant::now(),
         transcription_engine: services.transcription_engine,
@@ -898,9 +918,13 @@ async fn main() -> Result<()> {
     // process-level lock on the event-store DB. Keep in scope explicitly so
     // compilation fails if it's ever moved out without an equivalent guard.
     let (pool, db_path, _db_lock) = init_database(args.db_path)?;
+    let profile_runtime = Arc::new(
+        tron::runtime::ProfileRuntime::load(tron::core::paths::tron_home())
+            .context("Failed to load active profile runtime")?,
+    );
     let settings_path = tron::settings::loader::settings_path();
-    let settings = tron::settings::loader::load_settings_from_path(&settings_path)
-        .context("Failed to load settings")?;
+    let settings = profile_runtime.current().settings.clone();
+    tron::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);
     let (log_handle, flush_task) = init_logging(
         &db_path,
@@ -940,17 +964,27 @@ async fn main() -> Result<()> {
     let mcp = init_mcp(&settings, &settings_path).await;
     let mcp_router = mcp.router.clone();
     let mcp_router_for_shutdown = mcp_router.clone();
-    let services = init_services(event_store, &settings, &origin, push_service, mcp).await?;
+    let services = init_services(
+        event_store,
+        &settings,
+        profile_runtime.clone(),
+        &origin,
+        push_service,
+        mcp,
+    )
+    .await?;
 
     // Phase 4: Cron, worktree, RPC context
-    let cron = init_cron(&services, &origin);
+    let cron = init_cron(&services, &origin, profile_runtime.clone());
     let worktree_coordinator = init_worktree(&services, &settings).await;
     let session_manager_for_startup = services.session_manager.clone();
     let orchestrator_for_bridge = services.orchestrator.clone();
     let process_manager_for_shutdown = services.process_manager.clone();
+    let profile_runtime_for_watcher = profile_runtime.clone();
     let rpc_context = build_rpc_context(
         services,
         settings_path,
+        profile_runtime,
         origin.clone(),
         &cron,
         worktree_coordinator,
@@ -1023,6 +1057,9 @@ async fn main() -> Result<()> {
 
     // Phase 6: Background tasks and bind
     spawn_background_tasks(&session_manager_for_startup, &server);
+    server
+        .shutdown()
+        .register_task(profile_runtime_for_watcher.spawn_watcher(server.shutdown().token()));
     let (cron_sched_handle, cron_watcher_handle) = cron.scheduler.clone().start();
 
     // User-mode auto-update scheduler (Plan §H.2, Phase 5.5). Spawned

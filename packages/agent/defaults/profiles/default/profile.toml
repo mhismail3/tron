@@ -30,7 +30,7 @@
 #   3. Override only the keys that differ. For long prompts, place Markdown
 #      files in the child profile and point prompt fields at those relative
 #      files. For settings/UI/server values, keep managed defaults here and use
-#      sparse JSON overrides in ~/.tron/profiles/user/settings.json.
+#      sparse TOML overrides in ~/.tron/profiles/user/profile.toml.
 #   4. Select it globally by writing profiles/active.toml with:
 #
 #        active = "<profile-name>"
@@ -82,8 +82,8 @@
 #
 # - prompts/*.md: main/chat/local/git workflow behavior text.
 # - prompts/processes/*.md: model-backed child process behavior.
-# - settings/defaults.json: server, provider, UI, tool, hook, memory,
-#   automation, git, MCP, and iOS-facing defaults.
+# - [settings]: server, provider, UI, tool, hook, memory, automation, git,
+#   MCP, and iOS-facing defaults.
 # - context/context-blocks.toml: the allowed context block ids, homes,
 #   cache classes, and provider surfaces.
 # - tools/presentation.toml: profile-owned tool presentation rules.
@@ -124,15 +124,243 @@ authProfile = "default"
 
 # Profile-owned settings.
 #
-# `defaults` points at the full managed settings JSON for this profile. That
-# JSON cannot contain comments, so this TOML file explains how it participates
-# in the harness spec. External settings RPCs and the iOS settings UI remain
-# compatible: effective settings are managed defaults plus sparse user JSON at
-# ~/.tron/profiles/user/settings.json plus supported environment overrides.
-# `userOverridesProfile` names the sparse user overlay profile.
+# These values are the managed server/iOS/RPC settings baseline. They are
+# intentionally embedded in profile TOML so one profile snapshot explains both
+# model-facing behavior and harness behavior. `settings.get` still returns this
+# shape as JSON, and `settings.update` writes sparse overrides to
+# `profiles/user/profile.toml` under `[settings]`.
 [settings]
-defaults = "settings/defaults.json"
-userOverridesProfile = "user"
+version = "0.1.0"
+name = "tron"
+
+[settings.api.anthropic]
+authUrl = "https://claude.ai/oauth/authorize"
+tokenUrl = "https://console.anthropic.com/v1/oauth/token"
+redirectUri = "https://console.anthropic.com/oauth/code/callback"
+clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+scopes = ["org:create_api_key", "user:profile", "user:inference"]
+systemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
+oauthBetaHeaders = "oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+tokenExpiryBufferSeconds = 300
+
+[settings.retry]
+maxRetries = 3
+baseDelayMs = 1000
+maxDelayMs = 60000
+jitterFactor = 0.2
+
+[settings.tools.bash]
+defaultTimeoutMs = 120000
+maxTimeoutMs = 600000
+maxOutputLength = 40000
+dangerousPatterns = ["^rm\\s+(-rf?|--force)\\s+/\\s*$", "rm\\s+-rf?\\s+/", "^sudo\\s+", "^chmod\\s+777\\s+/\\s*$", "^mkfs\\.", "^dd\\s+if=.*of=/dev/", ">\\s*/dev/sd[a-z]"]
+
+[settings.tools.bash.sandbox]
+defaultImage = "ubuntu:latest"
+networkEnabled = true
+
+[settings.tools.read]
+defaultLimitLines = 2000
+maxLineLength = 2000
+maxOutputTokens = 20000
+
+[settings.tools.find]
+defaultMaxResults = 100
+defaultMaxDepth = 10
+
+[settings.tools.search]
+defaultMaxResults = 100
+maxFileSizeBytes = 10485760
+binaryExtensions = ["png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "svg", "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "tar", "gz", "bz2", "7z", "rar", "exe", "dll", "so", "dylib", "o", "a", "woff", "woff2", "ttf", "eot", "otf", "db", "sqlite", "bin"]
+skipDirectories = ["node_modules", "__pycache__", "dist", "build", ".git", ".svn", ".hg", "vendor", "target"]
+maxOutputTokens = 15000
+astDefaultLimit = 50
+astMaxLimit = 200
+defaultContext = 0
+astBinaryPath = "sg"
+requireConfirmationForReplace = false
+defaultTimeoutMs = 60000
+
+[settings.tools.web.fetch]
+timeoutMs = 30000
+
+[settings.tools.web.cache]
+ttlMs = 900000
+maxEntries = 100
+
+[settings.tools.browser]
+headed = false
+
+[settings.tools.computerUse]
+confirmBeforeAction = true
+screenshotThrottleMs = 500
+
+[settings.context.compactor]
+maxTokens = 25000
+compactionThreshold = 0.85
+targetTokens = 10000
+charsPerToken = 4
+bufferTokens = 4000
+triggerTokenThreshold = 0.7
+preserveRecentCount = 5
+
+[settings.context.rules]
+discoverStandaloneFiles = true
+
+[settings.agent]
+maxTurns = 250
+subagentMaxDepth = 3
+subagentModel = "claude-haiku-4-5-20251001"
+
+[settings.logging]
+dbLogLevel = "info"
+
+[settings.logging.moduleOverrides]
+ort = "error"
+
+[settings.hooks]
+defaultTimeoutMs = 5000
+discoveryTimeoutMs = 10000
+projectDir = ".agent/hooks"
+userDir = ".config/tron/hooks"
+extensions = [".prompt", ".ts", ".js", ".mjs", ".sh"]
+llmModel = "claude-haiku-4-5-20251001"
+errorPolicy = "continue"
+
+[[settings.hooks.builtinHooks]]
+id = "builtin:title-gen"
+enabled = true
+
+[[settings.hooks.builtinHooks]]
+id = "builtin:branch-name-gen"
+enabled = true
+
+[[settings.hooks.builtinHooks]]
+id = "builtin:suggest-prompts"
+enabled = true
+
+[settings.server]
+heartbeatIntervalMs = 30000
+memoryDbPath = "memory.db"
+defaultModel = "claude-sonnet-4-6"
+defaultProvider = "anthropic"
+
+[settings.server.transcription]
+enabled = false
+
+[settings.server.update]
+enabled = false
+channel = "stable"
+frequency = "daily"
+action = "notify"
+
+[settings.server.codexAppServer]
+enabled = true
+port = 4500
+approvalPolicy = "onRequest"
+sandboxMode = "workspaceWrite"
+
+[settings.tmux]
+commandTimeoutMs = 30000
+pollingIntervalMs = 500
+
+[settings.session]
+worktreeTimeoutMs = 30000
+queueDrainMode = "sequential"
+
+[settings.session.isolation]
+mode = "always"
+baseDir = ".worktrees"
+branchPrefix = "session/"
+autoCommitOnRelease = true
+preserveBranches = true
+deleteWorktreeOnRelease = true
+
+[settings.ui]
+theme = "forest_green"
+
+[settings.ui.palette]
+primary = "#123524"
+primaryLight = "#1a4a32"
+primaryBright = "#2d7a4e"
+primaryVivid = "#34d399"
+emerald = "#10b981"
+mint = "#6ee7b7"
+sage = "#86efac"
+dark = "#0a1f15"
+muted = "#1f3d2c"
+subtle = "#2d5a40"
+textBright = "#ecfdf5"
+textPrimary = "#d1fae5"
+textSecondary = "#a7f3d0"
+textMuted = "#6b8f7a"
+textDim = "#4a6b58"
+statusBarText = "#2eb888"
+success = "#22c55e"
+warning = "#f59e0b"
+error = "#ef4444"
+info = "#38bdf8"
+
+[settings.ui.icons]
+prompt = "\u203a"
+user = "\u203a"
+assistant = "\u25c6"
+system = "\u25c7"
+toolRunning = "\u25c7"
+toolSuccess = "\u25c6"
+toolError = "\u25c8"
+ready = "\u25c6"
+thinking = "\u25c7"
+streaming = "\u25c6"
+bullet = "\u2022"
+arrow = "\u2192"
+check = "\u2713"
+pasteOpen = "\u2308"
+pasteClose = "\u230b"
+
+[settings.ui.thinkingAnimation]
+chars = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585"]
+width = 4
+intervalMs = 120
+
+[settings.ui.input]
+pasteThreshold = 3
+maxHistory = 100
+defaultTerminalWidth = 80
+narrowThreshold = 50
+narrowVisibleLines = 10
+normalVisibleLines = 20
+
+[settings.ui.menu]
+maxVisibleCommands = 5
+
+[settings.skills]
+compactionPolicy = "clearAll"
+showIndex = "always"
+
+[settings.memory]
+autoRetainInterval = 10
+retainModel = "claude-sonnet-4-6"
+
+[settings.git]
+protectedBranches = ["main", "master", "develop"]
+sessionBranchPolicy = "keep"
+mergeStrategy = "merge"
+autoSetUpstream = true
+crashRecoveryAbortTimeoutMs = 1800000
+opTimeoutNetworkMs = 60000
+opTimeoutLocalMs = 30000
+subagentConflictResolutionEnabled = true
+
+[settings.promptLibrary]
+historyEnabled = true
+historyMaxEntries = 10000
+historyMaxAgeDays = 0
+historyAutoPrune = true
+
+[settings.mcp]
+servers = []
+schemaRefreshTtlMs = 30000
 
 # Shared built-in auth registry/store for provider credentials owned by Tron.
 #
@@ -300,6 +528,7 @@ audit = true
 
 [processes."spawnSubagent.inProcess"]
 kind = "subagent"
+prompt = "prompts/core.md"
 modelPolicy = "inheritParent"
 contextPolicy = "cloudDefault"
 toolPolicy = "subagentInherited"
@@ -316,6 +545,7 @@ audit = true
 
 [processes."spawnSubagent.tmux"]
 kind = "subagent"
+prompt = "prompts/core.md"
 modelPolicy = "inheritParent"
 contextPolicy = "cloudDefault"
 toolPolicy = "subagentInherited"

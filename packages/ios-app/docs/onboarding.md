@@ -131,8 +131,8 @@ side effects:
 If step 4 fails, onboarding rolls back the local paired-server store and
 Keychain token for that attempt, restoring the previous token when a token
 refresh fails, then leaves the user on the pairing page.
-Pairing never writes the iOS server list to `settings.json`; the server only
-owns server runtime settings and secrets.
+Pairing never writes the iOS server list into server profile settings; the
+server only owns server runtime settings and secrets.
 
 ## Settings Setup Pages
 
@@ -193,13 +193,14 @@ small red X icon button. The Services group uses a stronger spaced header than
 individual provider rows so the sheet reads as two clear sections: model
 providers first, then search services.
 
-Provider credentials are written through `auth.*` RPCs, so secrets land
-in `auth.json`, not `settings.json`.
+Provider credentials are written through `auth.*` RPCs, so secrets land in
+`auth.json`, not profile settings.
 
-Server settings and app settings are intentionally separate. Settings backed
-by `~/.tron/profiles/user/settings.json` live behind the server-backed settings grid
-tiles and are enabled only after the active server connects and `settings.get`
-returns real values. The main Settings sheet starts at the medium detent and
+Server settings and app settings are intentionally separate. Server-backed
+settings live as sparse `[settings]` overrides in
+`~/.tron/profiles/user/profile.toml`; they remain behind the server-backed
+settings grid tiles and are enabled only after the active server connects and
+`settings.get` returns real values. The main Settings sheet starts at the medium detent and
 uses a 3x3 launcher grid: App, Server, and Providers for settings surfaces;
 Agent, Context, and MCP for agent behavior; then Clear Prompt History, Archive
 All Sessions, and Reset All Settings as the red destructive row with no separate

@@ -75,9 +75,15 @@ impl Provider for MockProvider {
 }
 
 fn test_context_manager(model: &str) -> ContextManager {
+    let spec = crate::core::profile::bundled_default_execution_spec();
     ContextManager::new(ContextManagerConfig {
         model: model.into(),
-        system_prompt: None,
+        system_prompt: Some("You are helpful.".into()),
+        context_policy:
+            crate::runtime::context::local_policy::ContextPolicy::from_provider_with_spec(
+                crate::core::messages::Provider::Anthropic,
+                &spec,
+            ),
         working_directory: None,
         tools: vec![],
         rules_content: None,
@@ -287,11 +293,30 @@ fn make_agent(provider: MockProvider) -> (TronAgent, JournalCleanup) {
     (agent, cleanup)
 }
 
+fn test_resolved_profile() -> Arc<crate::core::profile::ResolvedProfile> {
+    let tempdir = tempfile::tempdir().expect("profile tempdir");
+    let home = tempdir.path().join(".tron");
+    crate::core::constitution::ensure_tron_home_at(&home).expect("seed profile home");
+    let profile =
+        crate::core::profile::resolve_profile_at(&home, crate::core::profile::NORMAL_PROFILE)
+            .expect("normal profile");
+    std::mem::forget(tempdir);
+    Arc::new(profile)
+}
+
+fn run_context() -> RunContext {
+    RunContext {
+        profile_name: Some(crate::core::profile::NORMAL_PROFILE.to_string()),
+        resolved_profile: Some(test_resolved_profile()),
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn single_turn_text_only() {
     let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello!"));
 
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
 
     assert_eq!(result.turns_executed, 1);
     assert_eq!(result.stop_reason, StopReason::EndTurn);
@@ -367,7 +392,7 @@ async fn multi_turn_with_tools() {
         interactive: false,
     }));
 
-    let result = agent.run("Read the file", RunContext::default()).await;
+    let result = agent.run("Read the file", run_context()).await;
 
     assert_eq!(result.turns_executed, 2);
     assert_eq!(result.stop_reason, StopReason::EndTurn);
@@ -437,7 +462,7 @@ async fn max_turns_limit() {
         interactive: false,
     }));
 
-    let result = agent.run("Go", RunContext::default()).await;
+    let result = agent.run("Go", run_context()).await;
 
     assert_eq!(result.turns_executed, 2);
     assert_eq!(result.stop_reason, StopReason::MaxTurns);
@@ -460,7 +485,7 @@ async fn abort_mid_run() {
         })
     };
 
-    let result = agent.run("Go", RunContext::default()).await;
+    let result = agent.run("Go", run_context()).await;
 
     let _ = abort_agent.await;
     assert!(result.interrupted || result.turns_executed >= 1);
@@ -471,7 +496,7 @@ async fn concurrent_run_rejected() {
     let (mut agent, _journal) = make_agent(MockProvider::text_only("Hi"));
     agent.is_running.store(true, Ordering::SeqCst);
 
-    let result = agent.run("Go", RunContext::default()).await;
+    let result = agent.run("Go", run_context()).await;
 
     assert_eq!(result.stop_reason, StopReason::Error);
     assert!(result.error.is_some());
@@ -488,7 +513,7 @@ async fn is_running_reset_after_error() {
         sid,
     );
 
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
     assert_eq!(result.stop_reason, StopReason::Error);
 
     // is_running must be false after error (RunGuard resets it)
@@ -500,7 +525,7 @@ async fn run_result_includes_context_window_tokens() {
     // MockProvider.text_only returns input_tokens=10 — normalize computes
     // contextWindowTokens = input + cacheRead + cacheCreation = 10
     let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello!"));
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
     assert_eq!(result.last_context_window_tokens, Some(10));
 }
 
@@ -509,7 +534,7 @@ async fn run_result_context_window_tokens_none_without_usage() {
     let sid = unique_test_session_id();
     let _journal = JournalCleanup::new(&sid);
     let mut agent = TronAgent::new(AgentConfig::default(), make_deps(NoUsageProvider), sid);
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
     assert!(result.last_context_window_tokens.is_none());
 }
 
@@ -530,7 +555,7 @@ async fn subscribe_receives_events() {
     let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello"));
     let mut rx = agent.subscribe();
 
-    let _ = agent.run("Hi", RunContext::default()).await;
+    let _ = agent.run("Hi", run_context()).await;
 
     let mut event_types = vec![];
     while let Ok(event) = rx.try_recv() {
@@ -549,7 +574,7 @@ async fn empty_tool_list_works() {
     let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello"));
     assert!(agent.registry.is_empty());
 
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
     assert_eq!(result.stop_reason, StopReason::EndTurn);
     assert_eq!(result.turns_executed, 1);
 }
@@ -566,7 +591,7 @@ async fn provider_error_on_stream() {
         sid,
     );
 
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
 
     assert_eq!(result.stop_reason, StopReason::Error);
     assert!(result.error.is_some());
@@ -601,7 +626,7 @@ async fn external_abort_token_cancels_run() {
         token.cancel();
     }));
 
-    let result = agent.run("Go", RunContext::default()).await;
+    let result = agent.run("Go", run_context()).await;
     assert!(result.interrupted || result.turns_executed >= 1);
 }
 
@@ -612,7 +637,7 @@ async fn external_token_not_reset_between_runs() {
     agent.set_abort_token(token.clone());
 
     // run() should NOT reset the external token
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
     assert_eq!(result.stop_reason, StopReason::EndTurn);
 
     // The external token should still be the same one (not cancelled, not replaced)
@@ -636,7 +661,7 @@ fn make_event_store() -> Arc<crate::events::EventStore> {
 #[tokio::test]
 async fn agent_run_without_persister() {
     let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello"));
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
     assert_eq!(result.stop_reason, StopReason::EndTurn);
     assert_eq!(result.turns_executed, 1);
 }
@@ -679,7 +704,7 @@ async fn agent_set_persister() {
         Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()));
     agent.set_persister(Some(persister.clone()));
 
-    let result = agent.run("Hi", RunContext::default()).await;
+    let result = agent.run("Hi", run_context()).await;
     assert_eq!(result.stop_reason, StopReason::EndTurn);
 
     // Flush to ensure fire-and-forget events are written
@@ -787,7 +812,7 @@ async fn agent_multi_turn_persists_all_turns() {
         interactive: false,
     }));
 
-    let result = agent.run("Read the file", RunContext::default()).await;
+    let result = agent.run("Read the file", run_context()).await;
     assert_eq!(result.turns_executed, 2);
 
     persister.flush().await.unwrap();
@@ -836,7 +861,7 @@ async fn agent_persisted_event_has_indexed_columns() {
         Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()));
     agent.set_persister(Some(persister.clone()));
 
-    let _ = agent.run("Hi", RunContext::default()).await;
+    let _ = agent.run("Hi", run_context()).await;
     persister.flush().await.unwrap();
 
     // Query the raw EventRow to check indexed columns
@@ -1072,7 +1097,7 @@ async fn parallel_tools_execute_concurrently() {
     );
 
     let start = std::time::Instant::now();
-    let result = agent.run("go", RunContext::default()).await;
+    let result = agent.run("go", run_context()).await;
     let elapsed = start.elapsed();
 
     assert_eq!(result.turns_executed, 2);
@@ -1112,7 +1137,7 @@ async fn parallel_results_in_original_order() {
     );
 
     let mut rx = agent.subscribe();
-    let _ = agent.run("go", RunContext::default()).await;
+    let _ = agent.run("go", run_context()).await;
 
     // Collect ToolExecutionEnd events — they should be in original order
     let mut tool_end_names = vec![];
@@ -1179,7 +1204,7 @@ async fn tool_call_events_precede_tool_result_events() {
         Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()));
     agent.set_persister(Some(persister.clone()));
 
-    let _ = agent.run("go", RunContext::default()).await;
+    let _ = agent.run("go", run_context()).await;
     persister.flush().await.unwrap();
 
     let events = store
@@ -1248,7 +1273,7 @@ async fn cancellation_during_parallel_batch() {
     });
 
     let start = std::time::Instant::now();
-    let result = agent.run("go", RunContext::default()).await;
+    let result = agent.run("go", run_context()).await;
     let elapsed = start.elapsed();
 
     let _ = cancel_handle.await;
@@ -1283,7 +1308,7 @@ async fn stops_turn_in_parallel_batch() {
         ],
     );
 
-    let result = agent.run("go", RunContext::default()).await;
+    let result = agent.run("go", run_context()).await;
     assert_eq!(result.stop_reason, StopReason::ToolStop);
     assert_eq!(result.turns_executed, 1);
 
@@ -1330,7 +1355,7 @@ async fn serialized_tools_execute_sequentially() {
     );
 
     let start = std::time::Instant::now();
-    let result = agent.run("go", RunContext::default()).await;
+    let result = agent.run("go", run_context()).await;
     let elapsed = start.elapsed();
 
     assert_eq!(result.turns_executed, 2);
@@ -1378,7 +1403,7 @@ async fn single_tool_unchanged_behavior() {
         })],
     );
 
-    let result = agent.run("go", RunContext::default()).await;
+    let result = agent.run("go", run_context()).await;
     assert_eq!(result.turns_executed, 2);
     assert_eq!(result.stop_reason, StopReason::EndTurn);
 

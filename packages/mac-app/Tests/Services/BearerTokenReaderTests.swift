@@ -124,22 +124,28 @@ struct BearerTokenReaderTests {
         #expect(BearerTokenReader.permissionsAreSafe(at: path) == true)
     }
 
-    @Test("transcription setting writer preserves existing settings")
+    @Test("transcription setting writer preserves existing profile settings")
     func transcriptionSettingWriterPreservesExistingSettings() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("settings.json", isDirectory: false)
+        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        try Data(#"{"server":{"tailscaleIp":"100.64.0.1"},"theme":"dark"}"#.utf8).write(to: path)
+        try Data(
+            """
+            [settings.server]
+            tailscaleIp = "100.64.0.1"
+
+            [profileMetadata]
+            theme = "dark"
+            """.utf8
+        ).write(to: path)
 
         try ServerSettingsWriter.setTranscriptionEnabled(true, at: path)
 
-        let data = try Data(contentsOf: path)
-        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let server = try #require(root["server"] as? [String: Any])
-        let transcription = try #require(server["transcription"] as? [String: Any])
-        #expect(transcription["enabled"] as? Bool == true)
-        #expect(server["tailscaleIp"] as? String == "100.64.0.1")
-        #expect(root["theme"] as? String == "dark")
+        let text = try String(contentsOf: path, encoding: .utf8)
+        #expect(text.contains("[settings.server.transcription]"))
+        #expect(text.contains("enabled = true"))
+        #expect(text.contains(#"tailscaleIp = "100.64.0.1""#))
+        #expect(text.contains(#"theme = "dark""#))
     }
 }

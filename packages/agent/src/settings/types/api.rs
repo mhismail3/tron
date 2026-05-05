@@ -222,7 +222,7 @@ mod tests {
     }
 
     /// R1: legacy `google` field was removed and `deny_unknown_fields` was
-    /// added — any settings.json that still carries `google: {...}` must
+    /// added — any profile settings payload that still carries `google: {...}` must
     /// fail to load with an error naming the unknown field.
     #[test]
     fn google_field_rejected_on_load() {

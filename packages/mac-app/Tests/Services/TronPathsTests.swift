@@ -89,10 +89,10 @@ struct TronPathsTests {
         #expect(TronPaths.macWrapperLockFileName(bundleIdentifier: "com/tron/mac") == ".mac-wrapper.com-tron-mac.lock")
     }
 
-    @Test("settings.json lives in the user profile")
+    @Test("profile settings overlay lives in the user profile")
     func settingsShape() {
         let s = TronPaths.settingsPath.path
-        #expect(s.hasSuffix("/profiles/user/settings.json"))
+        #expect(s.hasSuffix("/profiles/user/profile.toml"))
     }
 
     @Test("transcription sidecar files live under internal/transcription")

@@ -28,7 +28,7 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 | Investigation workflows | Read `reference/workflows.md` |
 | Server health | `curl -s http://localhost:9847/health \| jq .` |
 | Deep health check | `curl -s http://localhost:9847/health/deep \| jq .` |
-| Settings | `cat ~/.tron/profiles/user/settings.json \| jq .` |
+| Settings | `sed -n '/^\[settings\]/,$p' ~/.tron/profiles/user/profile.toml` |
 | Auth providers | `cat ~/.tron/profiles/auth.json \| jq 'del(.. \| .accessToken?, .refreshToken?, .apiKey?, .clientSecret?)'` |
 
 ## ~/.tron/ Directory Layout

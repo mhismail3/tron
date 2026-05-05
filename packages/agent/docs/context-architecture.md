@@ -9,8 +9,10 @@ must resolve through.
 
 Tron builds model context through a layered runtime path:
 
-1. Startup initializes the profile-first Constitution home, settings, database, provider
-   factory, tool factory, skill registry, memory registry, and orchestrator.
+1. Startup initializes the profile-first Constitution home, compiles the active
+   `ProfileRuntime`, initializes settings from that compiled spec, then starts
+   the database, provider factory, tool factory, skill registry, memory
+   registry, and orchestrator.
 2. `agent.prompt` reconstructs session state, loads rules/memory/job results,
    refreshes skills, applies hook-injected context, and creates a per-run
    `TronAgent`.
@@ -34,7 +36,8 @@ typed context blocks, and provider payloads are captured with redacted previews.
 ```mermaid
 flowchart TD
     Start["main.rs startup"] --> Home["ensure_tron_home / profile seed + managed default recovery"]
-    Home --> Settings["settings defaults + sparse user settings + env overrides"]
+    Home --> ProfileRuntime["ProfileRuntime: compile active AgentExecutionSpec"]
+    ProfileRuntime --> Settings["settings snapshot from resolved profile + user overlay + env overrides"]
     Settings --> Services["EventStore, Orchestrator, ProviderFactory, ToolFactory, SkillRegistry, MemoryRegistry"]
     Services --> RPC["agent.prompt RPC handler"]
     RPC --> Reconstruct["Session reconstruction from events"]
@@ -61,13 +64,19 @@ steps are:
 
 - `init_directories()` calls `core::constitution::ensure_tron_home()`, which
   creates the five durable roots, seeds managed profile defaults, repairs
-  corrupt managed defaults, and validates the active profile before settings
-  and runtime services are used.
+  corrupt managed defaults, and validates the active profile before runtime
+  services are used.
+- `ProfileRuntime::load()` compiles the active profile into one
+  `AgentExecutionSpec` snapshot. Session and process creation consume plans
+  derived from this snapshot instead of resolving prompt/settings files at call
+  sites. The profile watcher hashes profile TOML/Markdown files and swaps in a
+  new snapshot only after strict validation succeeds.
 - The database path resolves through the settings DB path policy, then SQLite
   migrations create or upgrade the event store, including the Constitution
   audit tables.
-- `settings::init_settings()` loads Constitution-seeded defaults first, merges
-  sparse user settings over them, then applies environment overrides.
+- `settings::init_settings()` receives the settings embedded in the compiled
+  profile snapshot after sparse `profiles/user/profile.toml` settings and
+  environment overrides have been applied.
 - `build_tool_factory()` creates a fresh `ToolRegistry` for each agent run. It
   adds built-in tools, subagent/job tools, MCP tools, and an LLM-backed
   `web_fetch` variant.
@@ -270,9 +279,10 @@ profile-first home model:
 - Prompt files moved out of `runtime/context/system_prompts` and provider
   prompt locations into `packages/agent/defaults/profiles/default/**`,
   which seed `~/.tron/profiles/default/**`.
-- Settings now load from `~/.tron/profiles/default/settings/defaults.json`
-  plus sparse `~/.tron/profiles/user/settings.json`, instead of relying only on compiled
-  defaults and a monolithic user settings file.
+- Settings now live under `[settings]` in profile TOML. Managed defaults are in
+  `~/.tron/profiles/default/profile.toml`; sparse user/app overrides are in
+  `~/.tron/profiles/user/profile.toml`; environment variables remain the final
+  override layer.
 - Canonical path helpers in `core/foundation/paths.rs` describe the five
   top-level homes: `profiles`, `skills`, `memory`, `workspace`, and `internal`.
 - Provider adapters gained `audit_payload` support so the pre-adapter context
@@ -296,11 +306,18 @@ knowledge from runtime call sites:
   `managed_default!` macro whose include path and seeded path share the same
   relative source string.
 - Prompt, process, provider, tools, context, settings, and auth references are
-  profile-owned. Runtime helpers resolve files from the active profile and only
-  restore managed `default` files through the canonical recovery contract.
+  profile-owned. Runtime call sites consume compiled `SessionExecutionPlan` and
+  `ProcessExecutionPlan` snapshots; only the profile compiler resolves profile
+  files, and only managed profile defaults are restored through the canonical
+  recovery contract.
+- Profile hashes cover the merged TOML plus referenced prompt, provider,
+  context, tool, and auth-registry file hashes. Editing a referenced behavior
+  file changes the resolved spec hash even when `profile.toml` itself is
+  unchanged.
 - `profile.toml` is now a typed AgentExecutionSpec v2: entrypoints, unified
   processes, model/context/tool/permission/provider/cache/output/audit policies,
-  settings refs, and auth refs are validated before runtime starts.
+  profile-owned settings values, and auth refs are validated before runtime
+  starts.
 - Contributor shell paths are centralized in `scripts/tron-lib.sh`; the Mac
   wrapper resolves its data-root paths through `TronPaths.swift`; iOS settings
   remain RPC-backed instead of duplicating filesystem layout.
@@ -370,8 +387,9 @@ Current behavior:
   events, and errors through the event log.
 - Raw database state through read-only `sqlite3` against
   `~/.tron/internal/database/log.db`.
-- Settings through `~/.tron/profiles/default/settings/defaults.json`,
-  `~/.tron/profiles/user/settings.json`, settings RPCs, and env overrides.
+- Settings through `[settings]` in `~/.tron/profiles/default/profile.toml`,
+  sparse overrides in `~/.tron/profiles/user/profile.toml`, settings RPCs, and
+  environment overrides.
 - Memory through `~/.tron/memory/MEMORY.md`, `~/.tron/memory/rules/*.md`, and
   memory RPC handlers.
 - Prompt and provider defaults through `~/.tron/profiles/**` and
