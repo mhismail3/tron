@@ -947,7 +947,8 @@ async fn run_summarizer(
     transcript: String,
 ) -> SummarizerOutcome {
     let task = format!("Summarize the provided session transcript:\n\n{transcript}");
-    let process = crate::core::profile::active_process_spec("memoryRetain");
+    let process = crate::core::profile::active_process_spec("memoryRetain")
+        .expect("active profile must define memoryRetain process");
 
     match manager
         .spawn_subsession(SubsessionConfig {
@@ -959,19 +960,18 @@ async fn run_summarizer(
             ),
             working_directory: working_directory.to_owned(),
             timeout_ms: process
-                .as_ref()
-                .and_then(|p| p.timeout_ms)
-                .unwrap_or(30_000),
+                .timeout_ms
+                .expect("memoryRetain process must define timeoutMs"),
             inherit_tools: process
-                .as_ref()
-                .and_then(|p| p.inherit_tools)
-                .unwrap_or(false),
-            max_turns: process.as_ref().and_then(|p| p.max_turns).unwrap_or(1),
-            max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
-            blocking_timeout_ms: process
-                .as_ref()
-                .and_then(|p| p.blocking_timeout_ms)
-                .or(Some(30_000)),
+                .inherit_tools
+                .expect("memoryRetain process must define inheritTools"),
+            max_turns: process
+                .max_turns
+                .expect("memoryRetain process must define maxTurns"),
+            max_depth: process
+                .max_depth
+                .expect("memoryRetain process must define maxDepth"),
+            blocking_timeout_ms: process.blocking_timeout_ms,
             ..SubsessionConfig::default()
         })
         .await

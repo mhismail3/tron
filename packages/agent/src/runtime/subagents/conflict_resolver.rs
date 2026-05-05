@@ -43,13 +43,6 @@ use crate::worktree::types::ConflictedFile;
 /// the reconciler may observe an in-flight merge state.
 const CANCEL_DRAIN_MS: u64 = 30_000;
 
-/// Fallback tool allowlist used only if profile recovery is in progress.
-const FALLBACK_ALLOWED_TOOLS: &[&str] = &["Read", "Edit", "Write", "Bash"];
-/// Fallback maximum number of LLM turns used only during profile recovery.
-const FALLBACK_MAX_TURNS: u32 = 40;
-/// Fallback wall-clock cap used only during profile recovery.
-const FALLBACK_TIMEOUT_MS: u64 = 15 * 60 * 1000;
-
 /// System prompt for the conflict-resolver subagent.
 ///
 /// Rendered by [`build_prompt`] with the live merge context (source,
@@ -170,17 +163,13 @@ pub async fn spawn(
         strategy_label,
     );
 
-    let process = crate::core::profile::active_process_spec("conflictResolver");
+    let process = crate::core::profile::active_process_spec("conflictResolver")
+        .expect("active profile must define conflictResolver process");
     let working_directory = info.worktree_path.to_string_lossy().to_string();
     let allowed: Vec<String> = process
-        .as_ref()
-        .and_then(|p| p.allowed_tools.clone())
-        .unwrap_or_else(|| {
-            FALLBACK_ALLOWED_TOOLS
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect()
-        });
+        .allowed_tools
+        .clone()
+        .expect("conflictResolver process must define allowedTools");
 
     let config = SubsessionConfig {
         parent_session_id: parent_session_id.to_string(),
@@ -197,23 +186,19 @@ pub async fn spawn(
         // hardcoded 30 min which allowed runaway resolvers to keep
         // burning the model budget after they were clearly stuck.
         timeout_ms: process
-            .as_ref()
-            .and_then(|p| p.timeout_ms)
-            .unwrap_or(FALLBACK_TIMEOUT_MS),
+            .timeout_ms
+            .expect("conflictResolver process must define timeoutMs"),
         blocking_timeout_ms: None,
         max_turns: process
-            .as_ref()
-            .and_then(|p| p.max_turns)
-            .unwrap_or(FALLBACK_MAX_TURNS),
-        max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
+            .max_turns
+            .expect("conflictResolver process must define maxTurns"),
+        max_depth: process
+            .max_depth
+            .expect("conflictResolver process must define maxDepth"),
         inherit_tools: process
-            .as_ref()
-            .and_then(|p| p.inherit_tools)
-            .unwrap_or(true),
-        denied_tools: process
-            .as_ref()
-            .map(|p| p.denied_tools.clone())
-            .unwrap_or_default(),
+            .inherit_tools
+            .expect("conflictResolver process must define inheritTools"),
+        denied_tools: process.denied_tools.clone(),
         allowed_tools: Some(allowed),
         reasoning_level: None,
         spawn_type: SpawnType::Subsession,
@@ -436,14 +421,19 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_is_stable() {
-        // Guard rail — any change to the allowlist is a conscious one.
-        // The resolver drives git entirely through Bash; no typed git
-        // tools exist in the registry.
-        assert_eq!(FALLBACK_ALLOWED_TOOLS, &["Read", "Edit", "Write", "Bash"],);
+    fn default_profile_allowlist_is_stable() {
+        let spec = crate::core::profile::bundled_default_execution_spec();
+        let process = spec
+            .process("conflictResolver")
+            .expect("default profile must define conflictResolver");
+        let allowlist = process
+            .allowed_tools
+            .as_deref()
+            .expect("default conflictResolver must define allowedTools");
+        assert_eq!(allowlist, &["Read", "Edit", "Write", "Bash"]);
         // Must NOT expose SpawnSubagent to prevent recursive resolver
         // spawning.
-        assert!(!FALLBACK_ALLOWED_TOOLS.contains(&"SpawnSubagent"));
+        assert!(!allowlist.iter().any(|tool| tool == "SpawnSubagent"));
     }
 
     // ─── wait_or_cancel: wall-clock timeout tests (M9) ─────────────────

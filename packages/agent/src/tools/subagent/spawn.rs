@@ -20,10 +20,6 @@ use crate::tools::utils::validation::{
     get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
 };
 
-const FALLBACK_TIMEOUT_MS: u64 = 300_000;
-const FALLBACK_MAX_TURNS_IN_PROCESS: u32 = 50;
-const FALLBACK_MAX_TURNS_TMUX: u32 = 100;
-
 /// The `SpawnSubagent` tool launches child agent sessions.
 pub struct SpawnSubagentTool {
     spawner: Arc<dyn SubagentSpawner>,
@@ -43,23 +39,23 @@ fn process_id_for_mode(mode: &SubagentMode) -> &'static str {
     }
 }
 
-fn process_for_mode(mode: &SubagentMode) -> Option<crate::core::profile::ProcessSpec> {
+fn process_for_mode(mode: &SubagentMode) -> crate::core::profile::ProcessSpec {
     crate::core::profile::active_process_spec(process_id_for_mode(mode))
+        .expect("active profile must define SpawnSubagent process specs")
 }
 
 fn default_timeout_ms_for_mode(mode: &SubagentMode) -> u64 {
-    process_for_mode(mode)
-        .and_then(|process| process.timeout_ms.or(process.blocking_timeout_ms))
-        .unwrap_or(FALLBACK_TIMEOUT_MS)
+    let process = process_for_mode(mode);
+    process
+        .timeout_ms
+        .or(process.blocking_timeout_ms)
+        .expect("SpawnSubagent process must define timeoutMs or blockingTimeoutMs")
 }
 
 fn default_max_turns_for_mode(mode: &SubagentMode) -> u32 {
     process_for_mode(mode)
-        .and_then(|process| process.max_turns)
-        .unwrap_or(match mode {
-            SubagentMode::InProcess => FALLBACK_MAX_TURNS_IN_PROCESS,
-            SubagentMode::Tmux => FALLBACK_MAX_TURNS_TMUX,
-        })
+        .max_turns
+        .expect("SpawnSubagent process must define maxTurns")
 }
 
 #[async_trait]

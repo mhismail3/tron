@@ -186,35 +186,26 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     if let Some(persister) = persister {
         let context_blocks =
             crate::llm::context_composition::compose_context_audit_blocks(&context);
-        let resolved_profile = run_context.resolved_profile.clone().or_else(|| {
-            crate::core::profile::resolve_active_profile()
-                .ok()
-                .map(Arc::new)
+        let resolved_profile = run_context.resolved_profile.clone().unwrap_or_else(|| {
+            Arc::new(
+                crate::core::profile::resolve_active_profile()
+                    .expect("active profile must resolve before turn audit"),
+            )
         });
         let active_profile_name = run_context
             .profile_name
             .clone()
-            .or_else(|| {
-                resolved_profile
-                    .as_ref()
-                    .map(|profile| profile.name.clone())
-            })
-            .or_else(crate::core::constitution::active_profile_name);
-        let profile = active_profile_name.as_deref();
+            .unwrap_or_else(|| resolved_profile.name.clone());
+        let profile = Some(active_profile_name.as_str());
         let (context_policy_id, tool_policy_id, cache_policy_id) =
-            resolved_turn_policy_ids(resolved_profile.as_deref(), provider.provider_type());
+            resolved_turn_policy_ids(&resolved_profile, provider.provider_type());
         let metadata = serde_json::json!({
             "messageCount": context.messages.len(),
             "toolCount": context.tools.as_ref().map_or(0, Vec::len),
             "streamOptions": &stream_options,
             "providerSurface": "preAdapter",
-            "profileChain": resolved_profile
-                .as_ref()
-                .map(|profile| profile.profile_chain.clone())
-                .unwrap_or_default(),
-            "profileSpecHash": resolved_profile
-                .as_ref()
-                .map(|profile| profile.spec_hash.clone()),
+                "profileChain": resolved_profile.profile_chain.clone(),
+                "profileSpecHash": resolved_profile.spec_hash.clone(),
             "contextPolicy": context_policy_id,
             "toolPolicy": tool_policy_id,
         });
@@ -282,9 +273,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 payload: &provider_payload,
                 metadata: serde_json::json!({
                     "contextResolutionId": context_resolution_id,
-                    "profileSpecHash": resolved_profile
-                        .as_ref()
-                        .map(|profile| profile.spec_hash.clone()),
+                    "profileSpecHash": resolved_profile.spec_hash.clone(),
                     "cachePolicy": cache_policy_id,
                     "exactProviderEnvelope": provider_payload
                         .get("exactProviderEnvelope")
@@ -836,16 +825,10 @@ fn build_turn_context(
 }
 
 fn resolved_turn_policy_ids(
-    resolved_profile: Option<&crate::core::profile::ResolvedProfile>,
+    resolved_profile: &crate::core::profile::ResolvedProfile,
     provider_type: crate::core::messages::Provider,
 ) -> (String, String, String) {
-    let bundled_default;
-    let spec = if let Some(profile) = resolved_profile {
-        &profile.spec
-    } else {
-        bundled_default = crate::core::profile::bundled_default_execution_spec();
-        &bundled_default
-    };
+    let spec = &resolved_profile.spec;
     let entrypoint = spec
         .entrypoints
         .get("main")
@@ -862,11 +845,11 @@ fn resolved_turn_policy_ids(
         .map(String::from)
         .or_else(|| entrypoint.map(|entrypoint| entrypoint.tool_policy.clone()))
         .or_else(|| spec.tool_policies.keys().next().cloned())
-        .expect("bundled default profile must define a tool policy");
+        .expect("validated active profile must define a tool policy");
     let cache_policy_id = entrypoint
         .map(|entrypoint| entrypoint.cache_policy.clone())
         .or_else(|| spec.cache_policies.keys().next().cloned())
-        .expect("bundled default profile must define a cache policy");
+        .expect("validated active profile must define a cache policy");
 
     (context_policy_id, tool_policy_id, cache_policy_id)
 }

@@ -391,6 +391,12 @@ impl McpRouter {
 mod tests {
     use super::*;
 
+    fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
+        let path = dir.path().join("settings.json");
+        crate::settings::seed_settings_defaults_for_path(&path).unwrap();
+        path
+    }
+
     fn disabled_config(name: &str) -> McpServerConfig {
         McpServerConfig {
             name: name.into(),
@@ -418,7 +424,7 @@ mod tests {
     #[tokio::test]
     async fn new_with_empty_configs() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let router = McpRouter::new(Vec::new(), settings_path, 0).await;
         assert!(router.status().is_empty());
     }
@@ -426,7 +432,7 @@ mod tests {
     #[tokio::test]
     async fn search_delegates_to_index() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let mut router = McpRouter::new(Vec::new(), settings_path, 0).await;
 
         // Manually populate index for unit test
@@ -445,7 +451,7 @@ mod tests {
     #[tokio::test]
     async fn call_unknown_server_returns_error() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let mut router = McpRouter::new(Vec::new(), settings_path, 0).await;
 
         let result = router
@@ -458,7 +464,7 @@ mod tests {
     #[tokio::test]
     async fn status_returns_all_servers() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let router = McpRouter::new(Vec::new(), settings_path, 0).await;
         assert!(router.status().is_empty());
     }
@@ -466,7 +472,7 @@ mod tests {
     #[tokio::test]
     async fn reload_from_malformed_settings_returns_error_without_mutating_runtime() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let mut router =
             McpRouter::new(vec![disabled_config("disabled")], settings_path.clone(), 0).await;
         std::fs::write(&settings_path, "{broken").unwrap();
@@ -481,7 +487,7 @@ mod tests {
     #[tokio::test]
     async fn reload_from_failed_server_add_preserves_existing_runtime() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let existing = disabled_config("existing");
         let mut router = McpRouter::new(vec![existing.clone()], settings_path.clone(), 0).await;
         std::fs::write(
@@ -509,7 +515,7 @@ mod tests {
     #[tokio::test]
     async fn add_disabled_server_persists_without_starting_runtime() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
 
         let count = router
@@ -527,7 +533,7 @@ mod tests {
     #[tokio::test]
     async fn failed_enabled_add_preserves_existing_settings_and_runtime() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
         router
             .add_server(disabled_config("existing"))
@@ -551,7 +557,7 @@ mod tests {
     #[tokio::test]
     async fn failed_enable_preserves_disabled_config_and_settings() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
         router.add_server(disabled_config("broken")).await.unwrap();
 
@@ -567,7 +573,7 @@ mod tests {
     #[tokio::test]
     async fn remove_server_persists_before_runtime_removal() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
         let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
         router
             .add_server(disabled_config("remove-me"))

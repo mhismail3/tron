@@ -43,8 +43,8 @@ pub mod types;
 pub use errors::{Result, SettingsError};
 pub use loader::{
     deep_merge, load_settings, load_settings_defaults_for, load_settings_from_path,
-    seed_settings_defaults, seed_settings_defaults_at, settings_defaults_path, settings_path,
-    tron_home_dir,
+    seed_settings_defaults, seed_settings_defaults_at, seed_settings_defaults_for_path,
+    settings_defaults_path, settings_path, tron_home_dir,
 };
 pub use store::SettingsStore;
 pub use types::*;
@@ -166,6 +166,12 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    fn temp_settings_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        let path = dir.path().join("settings.json");
+        seed_settings_defaults_for_path(&path).unwrap();
+        path
+    }
+
     #[test]
     fn re_exports_work() {
         // Verify that key types are accessible through the crate root
@@ -236,7 +242,7 @@ mod tests {
 
         // Write a settings file that disables standalone files discovery
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(
             &path,
             r#"{"context": {"rules": {"discoverStandaloneFiles": false}}}"#,
@@ -258,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_from_nonexistent_path_falls_back_to_defaults() {
+    fn reload_from_missing_sparse_path_uses_managed_defaults() {
         let _lock = lock_settings();
         reset_settings();
 
@@ -267,13 +273,15 @@ mod tests {
         init_settings(custom);
         assert_eq!(get_settings().server.heartbeat_interval_ms, 77_000);
 
-        // Reload from a path that doesn't exist — should get defaults (not keep 77_000)
-        reload_settings_from_path(Path::new("/nonexistent/settings.json")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_settings_path(&dir);
+        // Reload from a sparse file that doesn't exist — should get managed defaults (not keep 77_000).
+        reload_settings_from_path(&path).unwrap();
 
         let s = get_settings();
         assert_eq!(
             s.server.heartbeat_interval_ms, 30_000,
-            "should fall back to defaults when file missing"
+            "should use managed defaults when sparse file is missing"
         );
 
         reset_settings();
@@ -290,7 +298,7 @@ mod tests {
 
         // Simulate iOS settings.update: write merged settings to disk
         let dir = tempfile::tempdir().unwrap();
-        let settings_path = dir.path().join("settings.json");
+        let settings_path = temp_settings_path(&dir);
 
         // First: read current file (empty — new install)
         let current = serde_json::json!({});

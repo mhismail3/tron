@@ -73,7 +73,8 @@ impl AgentFactory {
         config.subagent_max_depth = opts.subagent_max_depth;
 
         let mut registry = opts.tools;
-        let active_spec = crate::core::profile::active_execution_spec_or_default();
+        let active_spec = crate::core::profile::active_execution_spec()
+            .expect("active profile must resolve before agent creation");
         let default_tool_policy = active_spec.tool_policy("default");
         let unattended_tool_policy = active_spec.tool_policy("unattended");
 

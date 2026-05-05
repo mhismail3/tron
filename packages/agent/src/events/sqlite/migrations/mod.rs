@@ -48,14 +48,14 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("v002_constitution_audit.sql"),
     },
     Migration {
-        version: 3,
-        description: "Profile migration ledger",
-        sql: include_str!("v003_profile_migrations.sql"),
-    },
-    Migration {
         version: 4,
         description: "Session execution profile",
         sql: include_str!("v004_session_profile.sql"),
+    },
+    Migration {
+        version: 5,
+        description: "Drop retired profile migration ledger",
+        sql: include_str!("v005_drop_profile_migrations.sql"),
     },
 ];
 
@@ -279,7 +279,7 @@ mod tests {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
         assert_eq!(result.applied, 4);
-        assert_eq!(result.max_version_applied, 4);
+        assert_eq!(result.max_version_applied, 5);
 
         let tables: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -301,7 +301,6 @@ mod tests {
             "events",
             "logs",
             "notification_read_state",
-            "profile_migrations",
             "prompt_history",
             "prompt_snippets",
             "schema_version",
@@ -357,12 +356,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 4);
+        assert_eq!(current_version(&conn).unwrap(), 5);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 4);
+        assert_eq!(latest_version(), 5);
     }
 
     #[test]
@@ -400,20 +399,6 @@ mod tests {
 
         let (version, desc): (u32, String) = conn
             .query_row(
-                "SELECT version, description FROM schema_version WHERE version = 3",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-
-        assert_eq!(version, 3);
-        assert!(
-            desc.contains("Profile migration"),
-            "description missing expected text: {desc}"
-        );
-
-        let (version, desc): (u32, String) = conn
-            .query_row(
                 "SELECT version, description FROM schema_version WHERE version = 4",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
@@ -425,13 +410,27 @@ mod tests {
             desc.contains("Session execution profile"),
             "description missing expected text: {desc}"
         );
+
+        let (version, desc): (u32, String) = conn
+            .query_row(
+                "SELECT version, description FROM schema_version WHERE version = 5",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(version, 5);
+        assert!(
+            desc.contains("Drop retired profile migration ledger"),
+            "description missing expected text: {desc}"
+        );
     }
 
     #[test]
     fn session_profile_migration_backfills_chat_source() {
         let conn = open_memory();
         ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..3] {
+        for migration in &MIGRATIONS[..2] {
             apply_migration(&conn, migration).unwrap();
         }
 
@@ -526,9 +525,6 @@ mod tests {
             "idx_prompt_history_last_used",
             "idx_prompt_history_use_count",
             "idx_prompt_snippets_updated",
-            // profile migration retirement
-            "idx_profile_migrations_time",
-            "idx_profile_migrations_legacy",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
@@ -597,7 +593,13 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
 
-        for removed in &["projects", "areas", "tasks", "task_dependencies"] {
+        for removed in &[
+            "projects",
+            "areas",
+            "tasks",
+            "task_dependencies",
+            "profile_migrations",
+        ] {
             assert!(
                 !tables.contains(&removed.to_string()),
                 "{removed} should not exist"

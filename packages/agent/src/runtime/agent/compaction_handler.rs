@@ -60,7 +60,8 @@ impl crate::runtime::context::llm_summarizer::SubsessionSpawner for SubagentMana
         &self,
         task: &str,
     ) -> crate::runtime::context::llm_summarizer::SubsessionResult {
-        let process = crate::core::profile::active_process_spec("compaction");
+        let process = crate::core::profile::active_process_spec("compaction")
+            .expect("active profile must define compaction process");
         match self
             .manager
             .spawn_subsession(SubsessionConfig {
@@ -70,24 +71,25 @@ impl crate::runtime::context::llm_summarizer::SubsessionSpawner for SubagentMana
                 system_prompt: self.system_prompt.clone(),
                 working_directory: self.working_directory.clone(),
                 timeout_ms: process
-                    .as_ref()
-                    .and_then(|p| p.timeout_ms)
-                    .unwrap_or(30_000),
-                blocking_timeout_ms: process
-                    .as_ref()
-                    .and_then(|p| p.blocking_timeout_ms)
-                    .or(Some(30_000)),
+                    .timeout_ms
+                    .expect("compaction process must define timeoutMs"),
+                blocking_timeout_ms: process.blocking_timeout_ms,
                 inherit_tools: process
-                    .as_ref()
-                    .and_then(|p| p.inherit_tools)
-                    .unwrap_or(false),
-                max_turns: process.as_ref().and_then(|p| p.max_turns).unwrap_or(1),
-                max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
-                reasoning_level: process
-                    .as_ref()
-                    .and_then(|p| p.reasoning.as_deref())
-                    .and_then(ReasoningLevel::from_str_loose)
-                    .or(Some(ReasoningLevel::Medium)),
+                    .inherit_tools
+                    .expect("compaction process must define inheritTools"),
+                max_turns: process
+                    .max_turns
+                    .expect("compaction process must define maxTurns"),
+                max_depth: process
+                    .max_depth
+                    .expect("compaction process must define maxDepth"),
+                reasoning_level: Some(
+                    process
+                        .reasoning
+                        .as_deref()
+                        .and_then(ReasoningLevel::from_str_loose)
+                        .expect("compaction process must define reasoning"),
+                ),
                 ..SubsessionConfig::default()
             })
             .await
@@ -124,7 +126,8 @@ impl crate::tools::traits::ContentSummarizer for SubagentContentSummarizer {
         task: &str,
         parent_session_id: &str,
     ) -> Result<crate::tools::traits::SummarizerResult, crate::tools::errors::ToolError> {
-        let process = crate::core::profile::active_process_spec("webFetchSummarizer");
+        let process = crate::core::profile::active_process_spec("webFetchSummarizer")
+            .expect("active profile must define webFetchSummarizer process");
         let result = self
             .manager
             .spawn_subsession(SubsessionConfig {
@@ -135,26 +138,25 @@ impl crate::tools::traits::ContentSummarizer for SubagentContentSummarizer {
                     "webFetchSummarizer",
                 ),
                 working_directory: process
-                    .as_ref()
-                    .and_then(|p| p.working_directory.clone())
-                    .unwrap_or_else(|| "/tmp".into()),
+                    .working_directory
+                    .clone()
+                    .expect("webFetchSummarizer process must define workingDirectory"),
                 timeout_ms: process
-                    .as_ref()
-                    .and_then(|p| p.timeout_ms)
-                    .unwrap_or(30_000),
-                blocking_timeout_ms: process
-                    .as_ref()
-                    .and_then(|p| p.blocking_timeout_ms)
-                    .or(Some(30_000)),
+                    .timeout_ms
+                    .expect("webFetchSummarizer process must define timeoutMs"),
+                blocking_timeout_ms: process.blocking_timeout_ms,
                 inherit_tools: process
-                    .as_ref()
-                    .and_then(|p| p.inherit_tools)
-                    .unwrap_or(false),
-                max_turns: process.as_ref().and_then(|p| p.max_turns).unwrap_or(1),
-                max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
+                    .inherit_tools
+                    .expect("webFetchSummarizer process must define inheritTools"),
+                max_turns: process
+                    .max_turns
+                    .expect("webFetchSummarizer process must define maxTurns"),
+                max_depth: process
+                    .max_depth
+                    .expect("webFetchSummarizer process must define maxDepth"),
                 reasoning_level: process
-                    .as_ref()
-                    .and_then(|p| p.reasoning.as_deref())
+                    .reasoning
+                    .as_deref()
                     .and_then(ReasoningLevel::from_str_loose),
                 ..SubsessionConfig::default()
             })

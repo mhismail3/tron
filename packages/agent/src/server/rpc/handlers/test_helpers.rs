@@ -37,6 +37,14 @@ fn unique_test_path(name: &str, extension: &str) -> PathBuf {
     ))
 }
 
+fn unique_settings_path() -> PathBuf {
+    let dir = unique_test_path("settings", "dir");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("settings.json");
+    crate::settings::seed_settings_defaults_for_path(&path).unwrap();
+    path
+}
+
 /// A no-op mock provider for tests.
 pub struct MockProvider;
 #[async_trait]
@@ -147,7 +155,7 @@ pub fn make_test_context() -> RpcContext {
         event_store: store,
         skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
         memory_registry: Arc::new(Mutex::new(MemoryRegistry::new())),
-        settings_path: unique_test_path("settings", "json"),
+        settings_path: unique_settings_path(),
         agent_deps: None,
         server_start_time: Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),

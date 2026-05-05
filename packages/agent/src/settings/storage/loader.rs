@@ -14,7 +14,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::settings::errors::Result;
 use crate::settings::types::TronSettings;
@@ -39,15 +39,15 @@ pub fn auth_path() -> PathBuf {
     crate::core::paths::auth_path()
 }
 
-/// Repair-seed the default profile settings file if it is missing.
+/// Seed the default profile settings file if it is missing.
 pub fn seed_settings_defaults() -> Result<Option<PathBuf>> {
     seed_settings_defaults_at(&crate::core::paths::tron_home())
 }
 
-/// Repair-seed `<home>/profiles/default/settings/defaults.json` if it is missing.
+/// Seed `<home>/profiles/default/settings/defaults.json` if it is missing.
 ///
 /// Normal startup gets this file from the Constitution first-seed bundle.
-/// This helper remains available for explicit repair and tests.
+/// This helper remains available for explicit setup and tests.
 pub fn seed_settings_defaults_at(home: &Path) -> Result<Option<PathBuf>> {
     let path = home
         .join(crate::core::paths::dirs::PROFILES)
@@ -80,14 +80,42 @@ pub fn seed_settings_defaults_at(home: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(path))
 }
 
-fn bundled_settings_defaults_bytes() -> Result<Vec<u8>> {
-    if let Some(path) =
-        crate::core::constitution::bundled_default_file("profiles/default/settings/defaults.json")
-    {
-        return Ok(std::fs::read(path)?);
+/// Seed the managed defaults file corresponding to an arbitrary sparse settings path.
+///
+/// This is explicit setup, not a load-time fallback. Normal startup seeds the
+/// canonical profile defaults before settings resolution; tests and isolated
+/// stores use this helper to create the same managed-default layer beside their
+/// temporary sparse file.
+pub fn seed_settings_defaults_for_path(settings_path: &Path) -> Result<Option<PathBuf>> {
+    let path = defaults_path_for_settings_path(settings_path);
+    if path.exists() {
+        return Ok(None);
     }
-    warn!("bundled settings/defaults.json is missing; seeding emergency compiled defaults");
-    Ok(serde_json::to_string_pretty(&TronSettings::default())?.into_bytes())
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut defaults = bundled_settings_defaults_bytes()?;
+    if !defaults.ends_with(b"\n") {
+        defaults.push(b'\n');
+    }
+    let parent = path.parent().ok_or_else(|| {
+        crate::settings::errors::SettingsError::InvalidValue(
+            "settings defaults path must have a parent directory".to_string(),
+        )
+    })?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(".defaults.")
+        .suffix(".tmp")
+        .tempfile_in(parent)?;
+    temp.write_all(&defaults)?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(&path)
+        .map_err(|error| crate::settings::errors::SettingsError::Io(error.error))?;
+    Ok(Some(path))
+}
+
+fn bundled_settings_defaults_bytes() -> Result<Vec<u8>> {
+    Ok(include_bytes!("../../../defaults/profiles/default/settings/defaults.json").to_vec())
 }
 
 /// Load settings from the default path with env var overrides.
@@ -97,8 +125,8 @@ pub fn load_settings() -> Result<TronSettings> {
 
 /// Load settings from a specific path with env var overrides.
 ///
-/// If the file does not exist, returns defaults. If the file contains
-/// invalid JSON, returns an error.
+/// If the sparse user file does not exist, returns managed defaults. If any
+/// configured file contains invalid JSON, returns an error.
 pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     let defaults = load_settings_defaults_for(path)?;
     let mut settings = if path.exists() {
@@ -126,11 +154,9 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
 pub fn load_settings_defaults_for(settings_path: &Path) -> Result<TronSettings> {
     let path = defaults_path_for_settings_path(settings_path);
     if !path.exists() {
-        warn!(
-            ?path,
-            "settings defaults are missing; using emergency compiled defaults"
-        );
-        return Ok(TronSettings::default());
+        return Err(crate::settings::errors::SettingsError::InvalidValue(
+            format!("managed settings defaults are missing: {}", path.display()),
+        ));
     }
 
     debug!(?path, "loading settings defaults");
@@ -143,13 +169,15 @@ pub fn load_settings_defaults_for(settings_path: &Path) -> Result<TronSettings> 
 }
 
 fn defaults_path_for_settings_path(settings_path: &Path) -> PathBuf {
-    if settings_path == crate::core::paths::settings_path() {
-        return settings_defaults_path();
-    }
-
     if settings_path.file_name().and_then(|name| name.to_str())
         != Some(crate::core::paths::files::SETTINGS_JSON)
     {
+        return settings_path.with_file_name(crate::core::paths::files::DEFAULTS_JSON);
+    }
+
+    let tron_home_profiles =
+        crate::core::paths::tron_home().join(crate::core::paths::dirs::PROFILES);
+    if settings_path.starts_with(&tron_home_profiles) {
         return settings_defaults_path();
     }
 
@@ -166,9 +194,8 @@ fn defaults_path_for_settings_path(settings_path: &Path) -> PathBuf {
             .join(crate::core::paths::files::DEFAULTS_JSON);
     }
 
-    // Test/custom settings paths use a sibling defaults.json when present.
-    // If absent, load_settings_defaults_for falls back to emergency compiled
-    // defaults rather than reading the user's real Tron Home.
+    // Test/custom settings paths use a sibling defaults.json. Missing defaults
+    // are a configuration error, not an implicit fallback to built-in settings.
     settings_path.with_file_name(crate::core::paths::files::DEFAULTS_JSON)
 }
 
@@ -299,6 +326,12 @@ mod tests {
     use super::*;
     use crate::settings::errors::SettingsError;
 
+    fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
+        let path = dir.path().join("settings.json");
+        seed_settings_defaults_for_path(&path).unwrap();
+        path
+    }
+
     #[test]
     fn tron_home_dir_ends_with_dot_tron() {
         let dir = tron_home_dir();
@@ -418,9 +451,15 @@ mod tests {
     // ── load_settings_from_path ─────────────────────────────────────
 
     #[test]
-    fn load_missing_file_returns_defaults() {
-        let path = Path::new("/nonexistent/settings.json");
-        let settings = load_settings_from_path(path).unwrap();
+    fn load_missing_sparse_file_returns_managed_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            dir.path().join("defaults.json"),
+            serde_json::to_string(&TronSettings::default()).unwrap(),
+        )
+        .unwrap();
+        let settings = load_settings_from_path(&path).unwrap();
         let defaults = TronSettings::default();
         assert_eq!(settings.version, defaults.version);
         assert_eq!(settings.name, defaults.name);
@@ -465,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_settings_defaults_match_emergency_defaults() {
+    fn bundled_settings_defaults_match_rust_defaults() {
         let bundled: TronSettings =
             serde_json::from_slice(&bundled_settings_defaults_bytes().unwrap()).unwrap();
         let bundled_value = serde_json::to_value(bundled).unwrap();
@@ -515,7 +554,7 @@ mod tests {
     #[test]
     fn load_empty_json_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(&path, "{}").unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();
@@ -527,7 +566,7 @@ mod tests {
     #[test]
     fn load_partial_json_overrides() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(
             &path,
             r#"{"server": {"defaultModel": "custom-model"}, "retry": {"maxRetries": 5}}"#,
@@ -543,7 +582,7 @@ mod tests {
     #[test]
     fn load_deeply_nested_override() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(&path, r#"{"context": {"compactor": {"maxTokens": 50000}}}"#).unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();
@@ -554,7 +593,7 @@ mod tests {
     #[test]
     fn load_invalid_json_returns_error() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(&path, "not valid json").unwrap();
 
         let result = load_settings_from_path(&path);
@@ -565,7 +604,7 @@ mod tests {
     #[test]
     fn load_zero_heartbeat_interval_returns_error() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(&path, r#"{"server": {"heartbeatIntervalMs": 0}}"#).unwrap();
 
         let err = load_settings_from_path(&path).unwrap_err();
@@ -577,7 +616,7 @@ mod tests {
     #[test]
     fn load_with_guardrails() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(
             &path,
             r#"{"guardrails": {"audit": {"enabled": true, "maxEntries": 500}}}"#,
@@ -593,7 +632,7 @@ mod tests {
     #[test]
     fn load_array_replace_not_merge() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(
             &path,
             r#"{"tools": {"bash": {"dangerousPatterns": ["^rm -rf /"]}}}"#,
@@ -608,7 +647,7 @@ mod tests {
     #[test]
     fn load_validates_clamping() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(&path, r#"{"retry": {"jitterFactor": 5.0}}"#).unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();

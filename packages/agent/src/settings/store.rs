@@ -172,12 +172,18 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
+        let path = dir.path().join("settings.json");
+        crate::settings::seed_settings_defaults_for_path(&path).unwrap();
+        path
+    }
+
     #[test]
     fn missing_file_loads_defaults() {
         let _lock = lock_settings();
         crate::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
-        let store = SettingsStore::new(dir.path().join("settings.json"));
+        let store = SettingsStore::new(temp_settings_path(&dir));
         let value = store.load_value().unwrap();
         assert_eq!(value["server"]["heartbeatIntervalMs"], 30_000);
         crate::settings::reset_settings();
@@ -188,7 +194,7 @@ mod tests {
         let _lock = lock_settings();
         crate::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(&path, "{broken").unwrap();
         let store = SettingsStore::new(&path);
 
@@ -206,7 +212,7 @@ mod tests {
         let _lock = lock_settings();
         crate::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         std::fs::write(&path, "[]").unwrap();
         let store = SettingsStore::new(path);
 
@@ -221,7 +227,7 @@ mod tests {
         let _lock = lock_settings();
         crate::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         let original = json!({"server": {"defaultModel": "claude-sonnet-4-6"}});
         std::fs::write(&path, original.to_string()).unwrap();
         let store = SettingsStore::new(&path);
@@ -241,7 +247,7 @@ mod tests {
         let _lock = lock_settings();
         crate::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         let store = SettingsStore::new(&path);
 
         store
@@ -262,7 +268,7 @@ mod tests {
         let _lock = lock_settings();
         crate::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         let store = SettingsStore::new(&path);
 
         let a = {
@@ -295,7 +301,7 @@ mod tests {
         let _lock = lock_settings();
         crate::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
+        let path = temp_settings_path(&dir);
         let store = SettingsStore::new(&path);
         store
             .update(json!({"server": {"heartbeatIntervalMs": 12345}}))

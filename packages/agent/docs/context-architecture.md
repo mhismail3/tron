@@ -33,7 +33,7 @@ typed context blocks, and provider payloads are captured with redacted previews.
 
 ```mermaid
 flowchart TD
-    Start["main.rs startup"] --> Home["ensure_tron_home / profile seed + migration"]
+    Start["main.rs startup"] --> Home["ensure_tron_home / profile seed + managed default recovery"]
     Home --> Settings["settings defaults + sparse user settings + env overrides"]
     Settings --> Services["EventStore, Orchestrator, ProviderFactory, ToolFactory, SkillRegistry, MemoryRegistry"]
     Services --> RPC["agent.prompt RPC handler"]
@@ -60,8 +60,9 @@ flowchart TD
 steps are:
 
 - `init_directories()` calls `core::constitution::ensure_tron_home()`, which
-  seeds or migrates the durable `~/.tron` layout before settings and runtime
-  services are used.
+  creates the five durable roots, seeds managed profile defaults, repairs
+  corrupt managed defaults, and validates the active profile before settings
+  and runtime services are used.
 - The database path resolves through the settings DB path policy, then SQLite
   migrations create or upgrade the event store, including the Constitution
   audit tables.
@@ -288,9 +289,9 @@ profile-first home model:
 The profile-first pass deliberately removes duplicate path and behavior
 knowledge from runtime call sites:
 
-- Rust path construction resolves through `core/foundation/paths.rs`; startup and
-  migration use `core/foundation/constitution.rs`; execution behavior resolves
-  through `core/foundation/profile.rs`.
+- Rust path construction resolves through `core/foundation/paths.rs`; startup
+  seeding/recovery uses `core/foundation/constitution.rs`; execution behavior
+  resolves through `core/foundation/profile.rs`.
 - Managed defaults are listed once in `constitution.rs` through a
   `managed_default!` macro whose include path and seeded path share the same
   relative source string.
@@ -321,41 +322,25 @@ These findings were the original audit gaps that drove the profile-first pass.
 | No user-facing audit query surface existed | `context.getAuditTrace` exposes profile refs, context blocks, blob/hash refs, cache policy, and redacted provider payload previews. | `server/rpc/handlers/context.rs`; `server/rpc/context_queries.rs`; Constitution audit repo |
 | Existing users needed managed default recovery | Managed `default` files are restored from compiled defaults if missing or corrupt; user profiles fail validation and are not overwritten. | `core/foundation/constitution.rs`; `core/foundation/profile.rs` |
 
-## Migration Retirement Path
+## Migration Retirement Status
 
-The old-layout migration layer is intentionally temporary. It exists only in
-`core/foundation/constitution.rs::migrate_legacy_home` plus the temporary
-v1-to-v2 profile migrator and is guarded by path/reference tests. Runtime code
-must resolve through the v2 AgentExecutionSpec; old roots and v1 profile fields
-are allowed only in migration code, migration tests, and migration docs.
+The old-layout and profile-v1 compatibility layer has been removed. Startup no
+longer moves pre-profile-first homes, rewrites profile documents, or records a
+profile-migration ledger. Normal runtime supports only the five-root
+profile-first home and current `AgentExecutionSpec` schema.
 
-Live verification before removal:
+Current behavior:
 
-1. Start the server from the refactored build against the real `~/.tron`.
-2. Confirm the root contains only `internal`, `skills`, `profiles`, `memory`,
-   and `workspace`.
-3. Run representative flows: agent turn, provider auth, settings read/write,
-   skill activation, workspace artifact write, automation load, self-inspect,
-   and transcription setup if enabled.
-4. Confirm `context.getAuditTrace` returns profile refs, context blocks,
-   provider payload refs, and redacted payload previews for a fresh turn.
-5. Confirm no new old-root directories are created after at least two clean
-   restarts, and no new `profile_migrations.legacy_input_observed = 1` rows
-   appear after the first verified startup.
-
-Removal follow-up:
-
-1. Delete `migrate_legacy_home`, `migrate_profile_v1_to_v2`,
-   `quarantine_v1_profile_prompt_roots`, `move_path`, `merge_path`, and the
-   generated-transcription cleanup helper from `core/foundation/constitution.rs`.
-2. Delete legacy-layout/profile-v1 test fixtures and tighten guards so old roots
-   and v1 profile fields are disallowed everywhere except intentional repair
-   documentation such as `heal-skill`.
-3. Remove stale-path translation entries from managed skills once they are no
-   longer useful for user-imported legacy skills.
-4. Keep database schema migrations and audit tables, including
-   `profile_migrations`; those are durable product history, not temporary
-   runtime compatibility.
+1. Fresh homes are seeded from compiled managed defaults.
+2. Managed `profiles/default`, `profiles/normal`, `profiles/chat`,
+   `profiles/local`, shared auth files, and `profiles/active.toml` are repaired
+   if missing or corrupt.
+3. User/custom profiles are validated strictly and are never rewritten.
+4. Pre-profile-first homes fail diagnostically instead of being translated at
+   startup.
+5. SQLite schema migration `v005_drop_profile_migrations.sql` removes the
+   retired profile-migration ledger from existing databases; fresh databases do
+   not create it.
 
 ## Heavy Code Map
 

@@ -180,7 +180,7 @@ fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
 }
 
 #[test]
-fn legacy_tron_home_paths_are_migration_only() {
+fn legacy_tron_home_paths_are_absent() {
     let root = repo_root();
     let scan_roots = [
         root.join("AGENTS.md"),
@@ -219,8 +219,6 @@ fn legacy_tron_home_paths_are_migration_only() {
         "~/.tron/auto-deploy.lock",
         "~/.tron/tools/json-render",
     ];
-    let migration_only_files = ["packages/agent/src/core/foundation/constitution.rs"];
-
     let mut files = Vec::new();
     for scan_root in scan_roots {
         if scan_root.exists() {
@@ -234,9 +232,6 @@ fn legacy_tron_home_paths_are_migration_only() {
         let Ok(body) = std::fs::read_to_string(&file) else {
             continue;
         };
-        if migration_only_files.contains(&relative.as_str()) {
-            continue;
-        }
         for pattern in old_patterns {
             if body.contains(pattern) {
                 violations.push(format!("{relative}: contains {pattern}"));
@@ -246,7 +241,7 @@ fn legacy_tron_home_paths_are_migration_only() {
 
     assert!(
         violations.is_empty(),
-        "old Tron Home paths must stay confined to migration/repair surfaces:\n{}",
+        "old Tron Home paths must not appear in runtime, defaults, docs, skills, or scripts:\n{}",
         violations.join("\n")
     );
 }

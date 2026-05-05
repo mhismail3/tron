@@ -21,31 +21,12 @@
 
 use crate::core::messages::Provider;
 
-const FALLBACK_LOCAL_TOOLS: &[&str] = &[
-    "Read",
-    "Write",
-    "Edit",
-    "Bash",
-    "Search",
-    "Find",
-    "WebFetch",
-    "AskUserQuestion",
-];
-const FALLBACK_RULES_TRUNCATION_CHARS: usize = 500;
-const FALLBACK_RULES_TRUNCATION_SUFFIX: &str =
-    "\n\n[Truncated - full rules available via Read tool]";
-
 /// Tool names exposed to local models.
 #[must_use]
 pub fn local_model_tools() -> Vec<String> {
     ContextPolicy::local_default()
         .tool_filter()
-        .unwrap_or_else(|| {
-            FALLBACK_LOCAL_TOOLS
-                .iter()
-                .map(|tool| (*tool).to_string())
-                .collect()
-        })
+        .expect("active profile local tool policy must define allowedTools")
 }
 
 /// Rules truncation budget.
@@ -53,7 +34,7 @@ pub fn local_model_tools() -> Vec<String> {
 pub fn rules_truncation_chars() -> usize {
     ContextPolicy::local_default()
         .rules_truncation()
-        .unwrap_or(FALLBACK_RULES_TRUNCATION_CHARS)
+        .expect("active profile local context policy must define rulesTruncationChars")
 }
 
 /// Rules truncation suffix.
@@ -62,7 +43,7 @@ pub fn rules_truncation_suffix() -> String {
     ContextPolicy::local_default()
         .spec
         .rules_truncation_suffix
-        .unwrap_or_else(|| FALLBACK_RULES_TRUNCATION_SUFFIX.to_string())
+        .expect("active profile local context policy must define rulesTruncationSuffix")
 }
 
 /// Char budget for token estimation.
@@ -89,7 +70,8 @@ impl ContextPolicy {
     /// Derive the policy from a provider type.
     #[must_use]
     pub fn from_provider(p: Provider) -> Self {
-        let spec = crate::core::profile::active_execution_spec_or_default();
+        let spec = crate::core::profile::active_execution_spec()
+            .expect("active profile must resolve before local context policy selection");
         Self::from_provider_with_spec(p, &spec)
     }
 
@@ -141,7 +123,8 @@ impl ContextPolicy {
     /// The default local context policy from the active profile.
     #[must_use]
     pub fn local_default() -> Self {
-        let spec = crate::core::profile::active_execution_spec_or_default();
+        let spec = crate::core::profile::active_execution_spec()
+            .expect("active profile must resolve before local context policy selection");
         let (id, _) = spec
             .context_policies
             .iter()
@@ -153,7 +136,8 @@ impl ContextPolicy {
     /// The default cloud/chat context policy from the active profile.
     #[must_use]
     pub fn cloud_default() -> Self {
-        let spec = crate::core::profile::active_execution_spec_or_default();
+        let spec = crate::core::profile::active_execution_spec()
+            .expect("active profile must resolve before cloud context policy selection");
         let entrypoint = spec
             .entrypoints
             .get("main")
@@ -270,11 +254,9 @@ impl ContextPolicy {
         if rules.len() <= budget {
             return rules.to_string();
         }
-        let suffix = self
-            .spec
-            .rules_truncation_suffix
-            .clone()
-            .unwrap_or_else(|| FALLBACK_RULES_TRUNCATION_SUFFIX.to_string());
+        let suffix = self.spec.rules_truncation_suffix.clone().expect(
+            "profile context policy must define rulesTruncationSuffix when truncation is enabled",
+        );
         let cut = rules
             .char_indices()
             .take_while(|&(i, _)| i <= budget)

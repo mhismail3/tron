@@ -192,6 +192,7 @@ mod tests {
         let mut ctx = make_test_context();
         let dir = tempfile::tempdir().unwrap();
         ctx.settings_path = dir.path().join("settings.json");
+        crate::settings::seed_settings_defaults_for_path(&ctx.settings_path).unwrap();
         (ctx, dir)
     }
 
@@ -500,6 +501,7 @@ mod tests {
             .join("settings.json");
         let mut ctx = ctx;
         ctx.settings_path = nested_path.clone();
+        crate::settings::seed_settings_defaults_for_path(&ctx.settings_path).unwrap();
 
         let _ = UpdateSettingsHandler
             .handle(

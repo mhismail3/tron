@@ -2,8 +2,8 @@
 //!
 //! Normal Tron behavior is read from the active execution profile under
 //! `~/.tron/profiles/`, seeded from managed defaults during install/startup.
-//! This module has no normal embedded prompt fallback; if profile instruction
-//! files disappear, only the diagnostic emergency prompt is returned.
+//! This module does not embed normal prompt fallbacks; missing profile
+//! instruction files are configuration defects.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,23 +25,18 @@ pub fn default_prompt(name: &str) -> String {
 
 /// Read an entrypoint prompt through an explicit profile inheritance chain.
 #[must_use]
-pub fn entrypoint_prompt(profile_name: &str, entrypoint: &str, fallback_name: &str) -> String {
+pub fn entrypoint_prompt(profile_name: &str, entrypoint: &str, _fallback_name: &str) -> String {
     let home = crate::core::paths::tron_home();
-    let fallback = crate::core::paths::default_profile_dir()
-        .join(crate::core::paths::dirs::PROMPTS)
-        .join(format!("{fallback_name}.md"));
-    let path = crate::core::profile::resolve_profile_at(&home, profile_name)
-        .ok()
-        .and_then(|profile| {
-            profile
-                .spec
-                .entrypoint_prompt(entrypoint)
-                .map(str::to_owned)
-        })
-        .and_then(|relative| {
-            crate::core::profile::resolve_profile_file_at(&home, profile_name, &relative).ok()
-        })
-        .unwrap_or(fallback);
+    let profile = crate::core::profile::resolve_profile_at(&home, profile_name)
+        .expect("requested profile must resolve before entrypoint prompt loading");
+    let relative = profile
+        .spec
+        .entrypoint_prompt(entrypoint)
+        .unwrap_or_else(|| {
+            panic!("profile `{profile_name}` entrypoint `{entrypoint}` must define a prompt")
+        });
+    let path = crate::core::profile::resolve_profile_file_at(&home, profile_name, relative)
+        .expect("validated profile must provide entrypoint prompt");
     read_instruction_file(path)
 }
 
@@ -60,10 +55,18 @@ pub fn provider_prompt(provider: &str, name: &str) -> String {
 }
 
 fn read_instruction_file(path: PathBuf) -> String {
-    fs::read_to_string(path)
-        .ok()
-        .filter(|content| !content.trim().is_empty())
-        .unwrap_or_else(|| crate::core::constitution::EMERGENCY_REPAIR_PROMPT.to_owned())
+    let content = fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "validated profile instruction file must be readable: {} ({error})",
+            path.display()
+        )
+    });
+    assert!(
+        !content.trim().is_empty(),
+        "validated profile instruction file must not be empty: {}",
+        path.display()
+    );
+    content
 }
 
 // =============================================================================
@@ -326,10 +329,10 @@ mod tests {
     }
 
     #[test]
-    fn read_missing_instruction_file_uses_emergency_repair_prompt() {
+    #[should_panic(expected = "validated profile instruction file must be readable")]
+    fn read_missing_instruction_file_panics() {
         let dir = tempfile::tempdir().unwrap();
-        let prompt = read_instruction_file(dir.path().join("missing.md"));
-        assert!(prompt.contains("Tron profile instructions are missing"));
+        let _ = read_instruction_file(dir.path().join("missing.md"));
     }
 
     // ── Provider detection ───────────────────────────────────────────────

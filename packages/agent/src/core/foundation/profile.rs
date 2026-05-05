@@ -414,20 +414,24 @@ pub fn bundled_default_execution_spec() -> AgentExecutionSpec {
     .expect("bundled default profile.toml must be a valid AgentExecutionSpec")
 }
 
-/// Resolve the active spec, or fall back to compiled managed defaults for
-/// diagnostic/repair paths where the on-disk default is temporarily absent.
-#[must_use]
-pub fn active_execution_spec_or_default() -> AgentExecutionSpec {
-    resolve_active_profile()
-        .map(|profile| profile.spec)
-        .unwrap_or_else(|_| bundled_default_execution_spec())
+/// Resolve the active execution spec from `~/.tron/profiles/`.
+///
+/// Startup seeds and validates the managed default profile before runtime
+/// starts, so runtime callers should treat errors here as configuration
+/// defects, not as a reason to substitute hardcoded behavior.
+pub fn active_execution_spec() -> io::Result<AgentExecutionSpec> {
+    resolve_active_profile().map(|profile| profile.spec)
 }
 
-/// Resolve a named process from the active spec, falling back to compiled
-/// defaults if recovery is in progress.
-#[must_use]
-pub fn active_process_spec(name: &str) -> Option<ProcessSpec> {
-    active_execution_spec_or_default().process(name).cloned()
+/// Resolve a named process from the active spec.
+pub fn active_process_spec(name: &str) -> io::Result<ProcessSpec> {
+    let spec = active_execution_spec()?;
+    spec.process(name).cloned().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("active profile is missing process `{name}`"),
+        )
+    })
 }
 
 /// Read the active profile name from `profiles/active.toml`.
@@ -460,13 +464,29 @@ pub fn resolve_active_profile() -> io::Result<ResolvedProfile> {
 
 /// Resolve the active profile under a specific Tron home.
 pub fn resolve_active_profile_at(home: &Path) -> io::Result<ResolvedProfile> {
-    let name = active_profile_name_at(home).unwrap_or_else(|| DEFAULT_PROFILE.to_string());
+    let name = active_profile_name_at(home).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "missing active profile pointer: {}",
+                home.join(dirs::PROFILES).join(files::ACTIVE_TOML).display()
+            ),
+        )
+    })?;
     resolve_profile_at(home, &name)
 }
 
 /// Resolve a relative file reference through the active profile inheritance chain.
 pub fn resolve_active_file_at(home: &Path, rel: &str) -> io::Result<PathBuf> {
-    let name = active_profile_name_at(home).unwrap_or_else(|| DEFAULT_PROFILE.to_string());
+    let name = active_profile_name_at(home).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "missing active profile pointer: {}",
+                home.join(dirs::PROFILES).join(files::ACTIVE_TOML).display()
+            ),
+        )
+    })?;
     resolve_profile_file_at(home, &name, rel)
 }
 

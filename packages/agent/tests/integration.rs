@@ -47,6 +47,14 @@ fn unique_test_path(name: &str, extension: &str) -> PathBuf {
     ))
 }
 
+fn unique_settings_path() -> PathBuf {
+    let dir = unique_test_path("settings", "dir");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("settings.json");
+    tron::settings::seed_settings_defaults_for_path(&path).unwrap();
+    path
+}
+
 /// Boot a test server and return the WS URL + shutdown handle.
 async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let pool = tron::events::new_in_memory(&ConnectionConfig::default()).unwrap();
@@ -59,7 +67,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
-    let settings_path = unique_test_path("settings", "json");
+    let settings_path = unique_settings_path();
     tron::settings::reload_settings_from_path(&settings_path).unwrap();
 
     let rpc_context = RpcContext {
@@ -351,7 +359,7 @@ async fn boot_server_with_provider_and_handles(
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
-    let settings_path = unique_test_path("settings", "json");
+    let settings_path = unique_settings_path();
     tron::settings::reload_settings_from_path(&settings_path).unwrap();
 
     let rpc_context = RpcContext {

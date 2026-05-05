@@ -15,7 +15,7 @@
 //! | `rules_discovery` | Finds `.claude/rules/` files in project directories |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |
-//! | `instruction_prompts` | Active-profile prompt loading and emergency repair fallback |
+//! | `instruction_prompts` | Active-profile prompt loading with strict file validation |
 //! | `token_estimator` | Token counting and context budget calculations |
 //! | `path_extractor` | Extracts workspace paths from session context |
 //! | `constants` | Token limits, compaction thresholds |
