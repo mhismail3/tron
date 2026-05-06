@@ -515,6 +515,22 @@ mod tests {
     }
 
     #[test]
+    fn seeding_creates_empty_auth_json_sentinel() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+
+        ensure_tron_home_at(&home).unwrap();
+
+        let auth_path = home.join(dirs::PROFILES).join(files::AUTH_JSON);
+        let raw = fs::read_to_string(&auth_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(
+            parsed.as_object().is_some_and(serde_json::Map::is_empty),
+            "fresh Constitution seed must leave auth.json as the pristine install sentinel"
+        );
+    }
+
+    #[test]
     fn managed_default_is_repaired_when_corrupt() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");

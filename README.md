@@ -572,6 +572,8 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
 
 The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/llm/auth/types.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
+Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That sentinel is valid only as pristine install state: first server boot materializes it through the normal atomic `0o600` auth writer into `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten.
+
 ### Providers
 
 | Provider | Module | Auth Methods | Notes |
@@ -607,7 +609,7 @@ OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth c
 
 Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
-The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
+The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. If the installer seeded `{}`, startup rewrites that sentinel into the full auth schema at the same time. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
 
 ```bash
 # Rotate the token (forces every paired iOS device to pair again)

@@ -10,7 +10,9 @@
 //!   `tron auth rotate` (CLI) or the
 //!   menu-bar action in the Mac wrapper. File mode is `0o600` and writes
 //!   are owned by `llm::auth::storage` so provider credentials and the
-//!   pairing bearer share one secure auth document.
+//!   pairing bearer share one secure auth document. Fresh Mac installs seed
+//!   `auth.json` as `{}`; first server boot materializes that pristine
+//!   sentinel into the full auth schema plus `bearerToken`.
 //!
 //! - **`run/.onboarded`** sentinel at [`crate::core::paths::onboarded_marker_path()`].
 //!   Empty marker file. Touched by the Mac wizard at the end of its
@@ -89,11 +91,12 @@ pub fn generate_bearer_token() -> String {
 }
 
 /// Load the existing bearer token from `path`, or generate + persist a
-/// new one if the file is absent.
+/// new one if the file is absent or contains the fresh-install `{}` sentinel.
 ///
 /// Called at server startup so the daemon always has a token to compare
 /// against incoming `Authorization: Bearer` headers. The first call after
-/// install creates the file; every subsequent boot reads it back.
+/// install creates or materializes the file through the secure auth storage
+/// writer; every subsequent boot reads it back.
 pub fn load_or_create_bearer_token(path: &Path) -> io::Result<String> {
     if let Some(existing) = read_token(path)? {
         return Ok(existing);
@@ -309,6 +312,50 @@ mod tests {
         assert!(
             parsed.get("providers").is_some(),
             "existing auth.json keys must be preserved"
+        );
+    }
+
+    #[test]
+    fn load_or_create_materializes_empty_auth_sentinel() {
+        let (_dir, path) = temp_token_path();
+        std::fs::write(&path, "{}").expect("seed fresh install sentinel");
+
+        let token = load_or_create_bearer_token(&path).expect("sentinel materializes");
+
+        assert_eq!(token.len(), ENCODED_TOKEN_LEN);
+        let raw = std::fs::read_to_string(&path).expect("read materialized auth.json");
+        assert_ne!(raw.trim(), "{}", "sentinel must be rewritten");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("auth json");
+        assert_eq!(parsed["version"], 1);
+        assert_eq!(parsed["bearerToken"], token);
+        assert!(
+            parsed["providers"]
+                .as_object()
+                .is_some_and(|o| o.is_empty()),
+            "fresh install must preserve empty provider state"
+        );
+        assert!(
+            parsed["lastUpdated"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty()),
+            "materialized auth.json must include lastUpdated"
+        );
+    }
+
+    #[test]
+    fn load_or_create_refuses_and_preserves_malformed_non_empty_file() {
+        let (_dir, path) = temp_token_path();
+        let original = r#"{"version":1}"#;
+        std::fs::write(&path, original).expect("seed partial auth file");
+
+        let err = load_or_create_bearer_token(&path)
+            .expect_err("non-empty malformed auth file must fail");
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read after failed load"),
+            original,
+            "token creation must not overwrite malformed non-empty auth files"
         );
     }
 

@@ -1,6 +1,9 @@
 //! Auth storage file I/O.
 //!
-//! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions (0o600).
+//! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions
+//! (`0o600`). Fresh Mac installs intentionally seed this file as `{}`; the
+//! loader treats only that exact empty object as a pristine install sentinel and
+//! materializes the normal schema on the first write.
 
 use std::path::{Path, PathBuf};
 
@@ -21,17 +24,21 @@ pub fn auth_file_path(data_dir: &Path) -> PathBuf {
 /// Load auth storage from file (sync).
 ///
 /// * `Ok(None)`     — file does not exist (first-use on a clean machine).
-/// * `Ok(Some(..))` — file exists, parsed successfully, version matches.
+/// * `Ok(Some(..))` — file exists, parsed successfully, version matches. An
+///   exact empty JSON object (`{}`) returns a pristine [`AuthStorage::new()`]
+///   so fresh installer seeds can be materialized by the first write.
 /// * `Err(..)`      — read I/O failure, parse failure, or unsupported version.
 ///
 /// INVARIANT: A parse error surfaces as [`AuthError::MalformedAuthFile`] and
 /// is **never** silently treated as "no auth configured". Earlier versions
 /// returned `Option<AuthStorage>` and logged a `warn!` on parse failure,
 /// which silently masked the entire file and made a single malformed
-/// provider or service block look like a global "no auth" state. Callers
-/// must distinguish "not configured" (`Ok(None)`) from "broken on disk"
-/// (`Err(_)`) — especially writers, which would otherwise `unwrap_or_default()`
-/// and overwrite the user's real file with an empty default.
+/// provider or service block look like a global "no auth" state. The only
+/// present-file exception is the exact empty object sentinel (`{}`). Callers
+/// must distinguish "not configured" (`Ok(None)` or the pristine sentinel)
+/// from "broken on disk" (`Err(_)`) — especially writers, which would otherwise
+/// `unwrap_or_default()` and overwrite the user's real file with an empty
+/// default.
 pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
@@ -39,7 +46,17 @@ pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> 
         Err(e) => return Err(AuthError::Io(e)),
     };
 
-    match serde_json::from_str::<AuthStorage>(&data) {
+    let value = serde_json::from_str::<serde_json::Value>(&data).map_err(|e| {
+        AuthError::MalformedAuthFile {
+            path: path.display().to_string(),
+            details: e.to_string(),
+        }
+    })?;
+    if value.as_object().is_some_and(serde_json::Map::is_empty) {
+        return Ok(Some(AuthStorage::new()));
+    }
+
+    match serde_json::from_value::<AuthStorage>(value) {
         Ok(storage) if storage.version == 1 => Ok(Some(storage)),
         Ok(storage) => Err(AuthError::MalformedAuthFile {
             path: path.display().to_string(),
@@ -514,6 +531,39 @@ mod tests {
     }
 
     #[test]
+    fn load_empty_json_object_returns_pristine_storage() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        std::fs::write(&path, "{}").unwrap();
+
+        let storage = load_auth_storage(&path)
+            .expect("empty object sentinel must load")
+            .expect("present sentinel returns pristine storage");
+
+        assert_eq!(storage.version, 1);
+        assert!(storage.bearer_token.is_none());
+        assert!(storage.providers.is_empty());
+        assert!(storage.services.is_none());
+        assert!(storage.extra.is_empty());
+        assert!(
+            !storage.last_updated.trim().is_empty(),
+            "pristine storage must have a materializable lastUpdated"
+        );
+    }
+
+    #[test]
+    fn load_or_init_for_write_accepts_empty_json_object_sentinel() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        std::fs::write(&path, "{\n}\n").unwrap();
+
+        let storage = load_or_init_for_write(&path).unwrap();
+
+        assert_eq!(storage.version, 1);
+        assert!(storage.providers.is_empty());
+    }
+
+    #[test]
     fn load_invalid_json_returns_malformed_error() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
@@ -537,6 +587,22 @@ mod tests {
         let err = load_auth_storage(&path).expect_err("version mismatch must be a hard error");
         assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
         assert!(err.to_string().contains("version: 2"));
+    }
+
+    #[test]
+    fn load_partial_non_empty_object_returns_malformed_error() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        std::fs::write(&path, r#"{"version":1}"#).unwrap();
+
+        let err = load_auth_storage(&path)
+            .expect_err("only the exact empty object is a pristine sentinel");
+
+        assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
+        assert!(
+            err.to_string().contains("missing field"),
+            "partial auth objects must remain strict errors, got: {err}"
+        );
     }
 
     #[test]

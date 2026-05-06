@@ -4,7 +4,11 @@
 //! - **API key**: Direct key-based auth
 //! - **OAuth**: Token-based auth with auto-refresh (Anthropic, Google, `OpenAI`)
 //!
-//! Auth state is persisted to `~/.tron/profiles/auth.json` with secure file permissions.
+//! Auth state is persisted to `~/.tron/profiles/auth.json` with secure file
+//! permissions. Fresh Mac installs seed this file as `{}`; storage loading
+//! treats only that exact empty object as pristine empty auth state, and the
+//! first secure write materializes the full schema. Non-empty malformed auth
+//! files remain hard errors so real credentials are never silently overwritten.
 //!
 //! # Provider modules
 //!
