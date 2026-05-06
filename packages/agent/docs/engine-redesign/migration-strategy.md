@@ -215,9 +215,14 @@ Acceptance:
 - Success, handler error, panic, missing-function, schema, policy, and
   idempotency replay paths all produce invocation records.
 - All 167 current JSON-RPC methods have bridge specs.
-- The bridge is explicitly temporary: `HandlerOnly` moves to `EngineOwned`,
-  then `ThinAdapter`, then group-level `GenericTrigger`, then old handlers are
-  removed.
+- The bridge is explicitly temporary: `HandlerOnly` may use `EngineOwned` or
+  `ThinAdapter` as short parity checkpoints, but completed groups end at
+  `GenericTrigger` with old handlers removed. Low-risk groups should skip
+  intermediate states when tests can prove parity directly.
+- A migration package is incomplete unless it advances at least one method
+  group and deletes any superseded method-specific business logic. Mirroring,
+  thin adapters, or fallback paths are only acceptable as short-lived parity
+  checkpoints when the same package also reduces old behavior ownership.
 
 ## Phase 2: first engine-owned read RPC functions
 
@@ -282,6 +287,40 @@ Acceptance:
   current handler path, proving generic dispatch is opt-in by spec.
 - The old thin/read handler structs and duplicated business logic are deleted
   for every method in the completed generic-trigger set.
+
+## Phase 3.5: first delete-first mutating RPC migration
+
+Move the first mutating RPC method group directly into generic-trigger engine
+functions. This is the proof that the bridge is demolition scaffolding, not a
+second backend.
+
+Implemented generic-trigger writes:
+
+- `rpc::promptSnippet.create`
+- `rpc::promptSnippet.update`
+- `rpc::promptSnippet.delete`
+
+Semantics:
+
+- migrated reads carry `rpc.read`; migrated writes carry `rpc.write`;
+- prompt snippet writes use system-scoped engine-ledger idempotency because
+  snippets are local global state rather than session-owned state;
+- temporary JSON-RPC idempotency dedupes exact duplicate transports with a key
+  derived from method, request id, and canonical payload; reused request ids
+  with different payloads remain distinct commands;
+- `promptSnippet.delete` remains an irreversible side-effect capability and
+  carries approval-required authority metadata before system visibility.
+
+Acceptance:
+
+- Method registrations for the three prompt-snippet writes are generic-trigger
+  markers only.
+- The old `CreateSnippetHandler`, `UpdateSnippetHandler`, and
+  `DeleteSnippetHandler` business handlers are deleted.
+- Direct engine invocation and JSON-RPC dispatch return the same success/error
+  payloads for representative prompt-snippet write cases.
+- Duplicate create/update/delete transports replay through the engine ledger
+  without rerunning the store mutation.
 
 ## Phase 4: catalog watch, streams, and event unification
 

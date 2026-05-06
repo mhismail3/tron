@@ -54,21 +54,21 @@ impl RpcEngineDeps {
     }
 }
 
-pub(super) struct RpcReadFunctionHandler {
+pub(super) struct RpcFunctionHandler {
     pub(super) method: &'static str,
     pub(super) deps: RpcEngineDeps,
 }
 
 #[async_trait]
-impl InProcessFunctionHandler for RpcReadFunctionHandler {
+impl InProcessFunctionHandler for RpcFunctionHandler {
     async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
-        rpc_read_value(self.method, &invocation, &self.deps)
+        rpc_function_value(self.method, &invocation, &self.deps)
             .await
             .map_err(rpc_error_to_engine)
     }
 }
 
-async fn rpc_read_value(
+async fn rpc_function_value(
     method: &str,
     invocation: &Invocation,
     deps: &RpcEngineDeps,
@@ -94,6 +94,9 @@ async fn rpc_read_value(
         "promptHistory.list" => prompt_history_list_value(Some(payload), deps).await,
         "promptSnippet.list" => prompt_snippet_list_value(deps).await,
         "promptSnippet.get" => prompt_snippet_get_value(Some(payload), deps).await,
+        "promptSnippet.create" => prompt_snippet_create_value(Some(payload), deps).await,
+        "promptSnippet.update" => prompt_snippet_update_value(Some(payload), deps).await,
+        "promptSnippet.delete" => prompt_snippet_delete_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("RPC method {method} is not engine-owned"),
         }),
@@ -364,6 +367,62 @@ async fn prompt_snippet_get_value(
     Ok(json!({ "snippet": to_json_value(&snippet)? }))
 }
 
+async fn prompt_snippet_create_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let name = require_string_param(params, "name")?;
+    let text = require_string_param(params, "text")?;
+    validate_string_param(
+        &text,
+        "text",
+        crate::server::rpc::validation::MAX_PROMPT_LENGTH,
+    )?;
+
+    let snippet =
+        store::create_snippet(deps.event_store.pool(), &name, &text).map_err(map_store_err)?;
+    Ok(json!({ "snippet": to_json_value(&snippet)? }))
+}
+
+async fn prompt_snippet_update_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let id = require_string_param(params, "id")?;
+    let name = opt_string(params, "name");
+    let text = opt_string(params, "text");
+
+    if name.is_none() && text.is_none() {
+        return Err(RpcError::InvalidParams {
+            message: "update requires at least one of 'name' or 'text'".into(),
+        });
+    }
+    if let Some(ref text) = text {
+        validate_string_param(
+            text,
+            "text",
+            crate::server::rpc::validation::MAX_PROMPT_LENGTH,
+        )?;
+    }
+
+    let updated = store::update_snippet(deps.event_store.pool(), &id, name, text)
+        .map_err(map_store_err)?
+        .ok_or_else(|| RpcError::NotFound {
+            code: "SNIPPET_NOT_FOUND".into(),
+            message: format!("Snippet not found: {id}"),
+        })?;
+    Ok(json!({ "snippet": to_json_value(&updated)? }))
+}
+
+async fn prompt_snippet_delete_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let id = require_string_param(params, "id")?;
+    let deleted = store::delete_snippet(deps.event_store.pool(), &id).map_err(map_store_err)?;
+    Ok(json!({ "deleted": deleted }))
+}
+
 const DEFAULT_RECENT_LIMIT: u32 = 200;
 const MAX_RECENT_LIMIT: u32 = 1_000;
 const MAX_SEARCH_QUERY_LEN: usize = 200;
@@ -465,6 +524,9 @@ async fn recent_logs_value(params: Option<Value>, deps: &RpcEngineDeps) -> Resul
 
 fn map_store_err(e: crate::events::EventStoreError) -> RpcError {
     match e {
+        crate::events::EventStoreError::InvalidOperation(message) => {
+            RpcError::InvalidParams { message }
+        }
         crate::events::EventStoreError::Sqlite(err) => RpcError::Internal {
             message: format!("Database error: {err}"),
         },

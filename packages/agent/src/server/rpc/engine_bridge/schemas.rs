@@ -99,6 +99,39 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "promptSnippet.create" => json!({
+            "type": "object",
+            "required": ["name", "text"],
+            "additionalProperties": false,
+            "properties": {
+                "name": {"type": "string"},
+                "text": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "promptSnippet.update" => json!({
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"},
+                "text": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "promptSnippet.delete" => json!({
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": {
+                "id": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "system.getInfo" => json!({
             "type": "object",
             "additionalProperties": false,
@@ -269,6 +302,22 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
             "additionalProperties": false,
             "properties": {
                 "snippet": {"type": "object", "additionalProperties": true}
+            }
+        }),
+        "promptSnippet.create" | "promptSnippet.update" => json!({
+            "type": "object",
+            "required": ["snippet"],
+            "additionalProperties": false,
+            "properties": {
+                "snippet": {"type": "object", "additionalProperties": true}
+            }
+        }),
+        "promptSnippet.delete" => json!({
+            "type": "object",
+            "required": ["deleted"],
+            "additionalProperties": false,
+            "properties": {
+                "deleted": {"type": "boolean"}
             }
         }),
         _ => return None,

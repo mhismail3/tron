@@ -3,14 +3,16 @@ use std::collections::BTreeSet;
 use serde_json::json;
 
 use crate::engine::{
-    ActorId, AuthorityGrantId, EffectClass, EngineError, FunctionDefinition, FunctionId,
-    IdempotencyContract, Provenance, Result as EngineResult, RiskLevel, VisibilityScope,
-    WorkerDefinition, WorkerId, WorkerKind,
+    ActorId, AuthorityGrantId, AuthorityRequirement, EffectClass, EngineError, FunctionDefinition,
+    FunctionId, IdempotencyContract, Provenance, Result as EngineResult, RiskLevel,
+    VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
 };
 use crate::server::rpc::registry::{HandlerExecutionPolicy, MethodRegistry};
 
 use super::schemas::{request_schema_for_method, response_schema_for_method};
-use super::{RPC_AUTHORITY_GRANT, RPC_OWNER_ACTOR, RPC_READ_AUTHORITY, RPC_WORKER_ID};
+use super::{
+    RPC_AUTHORITY_GRANT, RPC_OWNER_ACTOR, RPC_READ_AUTHORITY, RPC_WORKER_ID, RPC_WRITE_AUTHORITY,
+};
 
 /// Migration state for one JSON-RPC method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -324,9 +326,9 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("promptHistory.clear"),
     generic_trigger!("promptSnippet.list"),
     generic_trigger!("promptSnippet.get"),
-    handler_only!("promptSnippet.create"),
-    handler_only!("promptSnippet.update"),
-    handler_only!("promptSnippet.delete"),
+    generic_trigger!("promptSnippet.create"),
+    generic_trigger!("promptSnippet.update"),
+    generic_trigger!("promptSnippet.delete"),
     handler_only!("cron.list"),
     handler_only!("cron.get"),
     handler_only!("cron.create"),
@@ -390,6 +392,27 @@ pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabi
                 spec.method
             )));
         }
+        if is_engine_routable(&spec) {
+            if spec.effect_class.is_mutating() {
+                if spec.authority_scope != Some(RPC_WRITE_AUTHORITY) {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "mutating generic-triggered RPC method {} must require rpc.write",
+                        spec.method
+                    )));
+                }
+                if spec.idempotency_mode == RpcIdempotencyMode::NotRequired {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "mutating generic-triggered RPC method {} lacks idempotency",
+                        spec.method
+                    )));
+                }
+            } else if spec.authority_scope != Some(RPC_READ_AUTHORITY) {
+                return Err(EngineError::PolicyViolation(format!(
+                    "read generic-triggered RPC method {} must require rpc.read",
+                    spec.method
+                )));
+            }
+        }
         specs.push(spec);
     }
     Ok(specs)
@@ -450,11 +473,7 @@ fn spec_from_seed(
         seed.migration_state,
         RpcMigrationState::ThinAdapter | RpcMigrationState::GenericTrigger
     );
-    let effect_class = if is_routable {
-        EffectClass::PureRead
-    } else {
-        effect_class_for_method(seed.method, policy)
-    };
+    let effect_class = effect_class_for_method(seed.method, policy);
     let visibility = if is_routable {
         VisibilityScope::System
     } else {
@@ -468,7 +487,11 @@ fn spec_from_seed(
         effect_class,
         risk_level: risk_for_method(seed.method, effect_class),
         visibility,
-        authority_scope: is_routable.then_some(RPC_READ_AUTHORITY),
+        authority_scope: is_routable.then_some(if effect_class.is_mutating() {
+            RPC_WRITE_AUTHORITY
+        } else {
+            RPC_READ_AUTHORITY
+        }),
         idempotency_mode: if effect_class.is_mutating() {
             RpcIdempotencyMode::JsonRpcRequestIdSeed
         } else {
@@ -538,12 +561,16 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
     .with_risk(spec.risk_level)
     .with_provenance(Provenance::system());
     if let Some(scope) = spec.authority_scope {
-        definition =
-            definition.with_required_authority(crate::engine::AuthorityRequirement::scope(scope));
+        let mut requirement = AuthorityRequirement::scope(scope);
+        if spec.visibility.is_agent_visible()
+            && spec.effect_class.requires_approval_for_agent_visibility()
+        {
+            requirement = requirement.with_approval_required();
+        }
+        definition = definition.with_required_authority(requirement);
     }
     if spec.effect_class.is_mutating() {
-        definition =
-            definition.with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+        definition = definition.with_idempotency(idempotency_contract_for_method(spec.method));
     }
     if spec.schema_mode == RpcSchemaMode::StrictJson {
         if let Some(request_schema) = request_schema_for_method(spec.method) {
@@ -565,6 +592,14 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
         "handlerModule": spec.handler_module,
     });
     definition
+}
+
+fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
+    if method.starts_with("promptSnippet.") {
+        IdempotencyContract::caller_system_engine_ledger()
+    } else {
+        IdempotencyContract::caller_session_engine_ledger()
+    }
 }
 
 pub(super) fn rpc_worker() -> WorkerDefinition {

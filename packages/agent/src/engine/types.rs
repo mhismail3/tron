@@ -316,6 +316,17 @@ impl IdempotencyContract {
             ledger_kind: LedgerKind::EngineLedger,
         }
     }
+
+    /// Caller-supplied system-scoped idempotency using the durable engine ledger.
+    #[must_use]
+    pub fn caller_system_engine_ledger() -> Self {
+        Self {
+            key_source: IdempotencyKeySource::Caller,
+            dedupe_scope: VisibilityScope::System,
+            replay_behavior: ReplayBehavior::ReturnPrevious,
+            ledger_kind: LedgerKind::EngineLedger,
+        }
+    }
 }
 
 /// Concrete dedupe scope attached to an invocation's idempotency key.

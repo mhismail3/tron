@@ -368,9 +368,18 @@ fn register_platform(registry: &mut MethodRegistry) {
         "promptSnippet.get",
         RpcGenericTriggerHandler::new("promptSnippet.get"),
     );
-    registry.register("promptSnippet.create", prompt_library::CreateSnippetHandler);
-    registry.register("promptSnippet.update", prompt_library::UpdateSnippetHandler);
-    registry.register("promptSnippet.delete", prompt_library::DeleteSnippetHandler);
+    registry.register(
+        "promptSnippet.create",
+        RpcGenericTriggerHandler::new("promptSnippet.create"),
+    );
+    registry.register(
+        "promptSnippet.update",
+        RpcGenericTriggerHandler::new("promptSnippet.update"),
+    );
+    registry.register(
+        "promptSnippet.delete",
+        RpcGenericTriggerHandler::new("promptSnippet.delete"),
+    );
 
     // Cron
     registry.register("cron.list", cron::ListHandler);

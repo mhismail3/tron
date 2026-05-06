@@ -23,13 +23,13 @@
 //! The context also owns the shared engine host handle. The RPC migration
 //! bridge registers one `rpc::<method>` engine function for every registered
 //! JSON-RPC method, with handler-only methods kept non-routable/internal until
-//! they are migrated. Generic-trigger reads now bypass method-specific
+//! they are migrated. Generic-trigger methods now bypass method-specific
 //! business handlers: the registry validates method existence/depth, then the
-//! bridge dispatches JSON-RPC as a transport trigger into engine functions for
-//! selected low-risk reads (`system.ping`, `system.getInfo`, `settings.get`,
-//! `model.list`, `skill.list`, `logs.recent`, `events.getHistory`,
-//! `events.getSince`, `filesystem.getHome`, `promptHistory.list`,
-//! `promptSnippet.list`, and `promptSnippet.get`).
+//! bridge dispatches JSON-RPC as a transport trigger into engine functions.
+//! Read triggers carry `rpc.read`; migrated write triggers carry `rpc.write`
+//! plus engine-ledger idempotency. The first write group is
+//! `promptSnippet.create`, `promptSnippet.update`, and
+//! `promptSnippet.delete`.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

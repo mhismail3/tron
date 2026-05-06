@@ -6,6 +6,9 @@ use crate::server::rpc::handlers::test_helpers::make_test_context;
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 use crate::server::rpc::types::{RpcErrorBody, RpcRequest};
 use serde_json::json;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static REQUEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 async fn dispatch_ok(
     ctx: &crate::server::rpc::context::RpcContext,
@@ -17,7 +20,10 @@ async fn dispatch_ok(
     let response = registry
         .dispatch(
             RpcRequest {
-                id: format!("test-{method}"),
+                id: format!(
+                    "test-{method}-{}",
+                    REQUEST_COUNTER.fetch_add(1, Ordering::SeqCst)
+                ),
                 method: method.to_owned(),
                 params,
             },
@@ -38,7 +44,10 @@ async fn dispatch_err(
     let response = registry
         .dispatch(
             RpcRequest {
-                id: format!("test-{method}"),
+                id: format!(
+                    "test-{method}-{}",
+                    REQUEST_COUNTER.fetch_add(1, Ordering::SeqCst)
+                ),
                 method: method.to_owned(),
                 params,
             },
@@ -233,10 +242,12 @@ async fn snippet_list_returns_sorted_items() {
 #[tokio::test]
 async fn snippet_create_returns_snippet() {
     let ctx = make_test_context();
-    let out = CreateSnippetHandler
-        .handle(Some(json!({ "name": "Greeting", "text": "Hello!" })), &ctx)
-        .await
-        .unwrap();
+    let out = dispatch_ok(
+        &ctx,
+        "promptSnippet.create",
+        Some(json!({ "name": "Greeting", "text": "Hello!" })),
+    )
+    .await;
     assert_eq!(out["snippet"]["name"], "Greeting");
     assert_eq!(out["snippet"]["text"], "Hello!");
     assert!(out["snippet"]["id"].is_string());
@@ -245,10 +256,12 @@ async fn snippet_create_returns_snippet() {
 #[tokio::test]
 async fn snippet_create_rejects_empty_name() {
     let ctx = make_test_context();
-    let err = CreateSnippetHandler
-        .handle(Some(json!({ "name": "   ", "text": "body" })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(
+        &ctx,
+        "promptSnippet.create",
+        Some(json!({ "name": "   ", "text": "body" })),
+    )
+    .await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
@@ -256,30 +269,51 @@ async fn snippet_create_rejects_empty_name() {
 async fn snippet_create_rejects_long_name() {
     let ctx = make_test_context();
     let long = "n".repeat(101);
-    let err = CreateSnippetHandler
-        .handle(Some(json!({ "name": long, "text": "body" })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(
+        &ctx,
+        "promptSnippet.create",
+        Some(json!({ "name": long, "text": "body" })),
+    )
+    .await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
 #[tokio::test]
 async fn snippet_create_rejects_empty_text() {
     let ctx = make_test_context();
-    let err = CreateSnippetHandler
-        .handle(Some(json!({ "name": "Name", "text": "" })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(
+        &ctx,
+        "promptSnippet.create",
+        Some(json!({ "name": "Name", "text": "" })),
+    )
+    .await;
+    assert!(matches!(err, RpcError::InvalidParams { .. }));
+}
+
+#[tokio::test]
+async fn snippet_create_rejects_overlong_text() {
+    let ctx = make_test_context();
+    let err = dispatch_err(
+        &ctx,
+        "promptSnippet.create",
+        Some(json!({
+            "name": "Name",
+            "text": "x".repeat(crate::server::rpc::validation::MAX_PROMPT_LENGTH + 1),
+        })),
+    )
+    .await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
 #[tokio::test]
 async fn snippet_create_rejects_missing_params() {
     let ctx = make_test_context();
-    let err = CreateSnippetHandler
-        .handle(Some(json!({ "name": "only-name" })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(
+        &ctx,
+        "promptSnippet.create",
+        Some(json!({ "name": "only-name" })),
+    )
+    .await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
@@ -291,10 +325,12 @@ async fn snippet_update_renames() {
     let pool = ctx.event_store.pool();
     let s = crate::prompt_library::store::create_snippet(pool, "old", "body").unwrap();
 
-    let out = UpdateSnippetHandler
-        .handle(Some(json!({ "id": s.id, "name": "new" })), &ctx)
-        .await
-        .unwrap();
+    let out = dispatch_ok(
+        &ctx,
+        "promptSnippet.update",
+        Some(json!({ "id": s.id, "name": "new" })),
+    )
+    .await;
     assert_eq!(out["snippet"]["name"], "new");
     assert_eq!(out["snippet"]["text"], "body");
 }
@@ -305,20 +341,34 @@ async fn snippet_update_with_no_mutating_fields_errors() {
     let pool = ctx.event_store.pool();
     let s = crate::prompt_library::store::create_snippet(pool, "n", "t").unwrap();
 
-    let err = UpdateSnippetHandler
-        .handle(Some(json!({ "id": s.id })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(&ctx, "promptSnippet.update", Some(json!({ "id": s.id }))).await;
+    assert!(matches!(err, RpcError::InvalidParams { .. }));
+}
+
+#[tokio::test]
+async fn snippet_update_rejects_invalid_text() {
+    let ctx = make_test_context();
+    let pool = ctx.event_store.pool();
+    let s = crate::prompt_library::store::create_snippet(pool, "n", "t").unwrap();
+
+    let err = dispatch_err(
+        &ctx,
+        "promptSnippet.update",
+        Some(json!({ "id": s.id, "text": "" })),
+    )
+    .await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
 #[tokio::test]
 async fn snippet_update_missing_id_returns_not_found() {
     let ctx = make_test_context();
-    let err = UpdateSnippetHandler
-        .handle(Some(json!({ "id": "nonexistent", "name": "new" })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(
+        &ctx,
+        "promptSnippet.update",
+        Some(json!({ "id": "nonexistent", "name": "new" })),
+    )
+    .await;
     assert!(matches!(err, RpcError::NotFound { .. }));
 }
 
@@ -330,26 +380,22 @@ async fn snippet_delete_returns_true_on_first_then_false() {
     let pool = ctx.event_store.pool();
     let s = crate::prompt_library::store::create_snippet(pool, "n", "t").unwrap();
 
-    let first = DeleteSnippetHandler
-        .handle(Some(json!({ "id": s.id.clone() })), &ctx)
-        .await
-        .unwrap();
+    let first = dispatch_ok(
+        &ctx,
+        "promptSnippet.delete",
+        Some(json!({ "id": s.id.clone() })),
+    )
+    .await;
     assert_eq!(first["deleted"], true);
 
-    let second = DeleteSnippetHandler
-        .handle(Some(json!({ "id": s.id })), &ctx)
-        .await
-        .unwrap();
+    let second = dispatch_ok(&ctx, "promptSnippet.delete", Some(json!({ "id": s.id }))).await;
     assert_eq!(second["deleted"], false);
 }
 
 #[tokio::test]
 async fn snippet_delete_rejects_missing_id() {
     let ctx = make_test_context();
-    let err = DeleteSnippetHandler
-        .handle(Some(json!({})), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(&ctx, "promptSnippet.delete", Some(json!({}))).await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 

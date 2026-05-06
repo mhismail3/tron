@@ -212,8 +212,11 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   one `rpc::<method>` function for all 167 current JSON-RPC methods.
   Handler-only methods are present as internal non-routable metadata. The first
   twelve low-risk reads are strict-schema `GenericTrigger` methods served by
-  registry-level JSON-RPC-to-engine dispatch, so their method-specific business
-  handlers have been deleted.
+  registry-level JSON-RPC-to-engine dispatch. The first write pilot,
+  `promptSnippet.create`, `promptSnippet.update`, and `promptSnippet.delete`,
+  is also generic-triggered with `rpc.write` authority and engine-ledger
+  idempotency. Superseded method-specific business handlers are deleted as each
+  group migrates.
 
 ## Phase 1 acceptance checklist
 
@@ -267,14 +270,20 @@ Implemented:
   `promptHistory.list`, `promptSnippet.list`, and `promptSnippet.get`, with
   tests proving direct engine invocation and JSON-RPC dispatch return the same
   wire payloads;
+- first generic-triggered write RPC functions for `promptSnippet.create`,
+  `promptSnippet.update`, and `promptSnippet.delete`; these use `rpc.write`,
+  strict schemas, system-scoped engine-ledger idempotency, and exact-duplicate
+  JSON-RPC transport dedupe while deleting the old prompt-snippet write
+  handlers;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
-  function id, actor `rpc-client`, authority grant `rpc-bridge`, `rpc.read`
-  scope, trace id, and optional session/workspace scope extracted from params;
+  function id, actor `rpc-client`, authority grant `rpc-bridge`, read/write
+  authority scope, trace id, optional idempotency key, and optional
+  session/workspace scope extracted from params;
 - cleanup of triggers that target an unregistered function.
 
 Still deferred:
 
-- write-side RPC migrations and broader generic-trigger conversion for the
+- broader write-side RPC migrations and generic-trigger conversion for the
   remaining handler-only method groups;
 - tool/runtime/client-native engine rewrites beyond the first read-side RPC
   adapters;

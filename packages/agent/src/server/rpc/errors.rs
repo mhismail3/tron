@@ -51,6 +51,8 @@ pub const ALREADY_EXISTS: &str = "ALREADY_EXISTS";
 pub const GIT_ERROR: &str = "GIT_ERROR";
 /// Session is currently processing a prompt from another connection.
 pub const SESSION_BUSY: &str = "SESSION_BUSY";
+/// Engine idempotency key replay/conflict could not be accepted.
+pub const IDEMPOTENCY_CONFLICT: &str = "IDEMPOTENCY_CONFLICT";
 
 // ── Typed git workflow errors ───────────────────────────────────────
 //

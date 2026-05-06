@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::engine::{ActorKind, DeliveryMode, EffectClass, Invocation, RiskLevel, VisibilityScope};
+use crate::engine::{
+    ActorKind, DeliveryMode, EffectClass, EngineError, Invocation, RiskLevel, VisibilityScope,
+};
 use crate::server::rpc::handlers;
 use crate::server::rpc::handlers::test_helpers::make_test_context;
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
@@ -23,6 +25,12 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "promptHistory.list",
     "promptSnippet.list",
     "promptSnippet.get",
+];
+
+const GENERIC_WRITE_METHODS: &[&str] = &[
+    "promptSnippet.create",
+    "promptSnippet.update",
+    "promptSnippet.delete",
 ];
 
 async fn direct_engine_value(ctx: &RpcContext, method: &'static str, params: Value) -> Value {
@@ -113,6 +121,42 @@ fn bridge_specs_classify_selected_reads_as_generic_triggers() {
             "{method} must declare a response schema"
         );
     }
+}
+
+#[test]
+fn bridge_specs_classify_prompt_snippet_writes_as_generic_triggers() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    for method in GENERIC_WRITE_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert!(spec.effect_class.is_mutating());
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert_eq!(spec.visibility, VisibilityScope::System);
+        assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(
+            spec.idempotency_mode,
+            RpcIdempotencyMode::JsonRpcRequestIdSeed
+        );
+        assert!(
+            super::schemas::request_schema_for_method(method).is_some(),
+            "{method} must declare a request schema"
+        );
+        assert!(
+            super::schemas::response_schema_for_method(method).is_some(),
+            "{method} must declare a response schema"
+        );
+    }
+
+    let delete = specs
+        .iter()
+        .find(|spec| spec.method == "promptSnippet.delete")
+        .unwrap();
+    assert_eq!(delete.effect_class, EffectClass::IrreversibleSideEffect);
+    let definition = specs::function_definition_for_spec(delete);
+    assert!(definition.required_authority.approval_required);
 }
 
 #[test]
@@ -214,6 +258,76 @@ fn rpc_engine_invocation_preserves_transport_metadata() {
         Some("workspace-a")
     );
     assert!(!envelope.causal_context.trace_id.as_str().is_empty());
+}
+
+#[test]
+fn rpc_engine_invocation_derives_write_authority_and_idempotency_key() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let payload = json!({"name": "Greeting", "text": "Hello!"});
+    let request = RpcRequest {
+        id: "write-1".to_owned(),
+        method: "promptSnippet.create".to_owned(),
+        params: Some(payload.clone()),
+    };
+    let first = RpcEngineInvocation::from_request(&registry, &ctx, &request)
+        .unwrap()
+        .unwrap();
+    let second = RpcEngineInvocation::from_request(&registry, &ctx, &request)
+        .unwrap()
+        .unwrap();
+
+    assert!(first.causal_context.has_scope(RPC_WRITE_AUTHORITY));
+    assert!(!first.causal_context.has_scope(RPC_READ_AUTHORITY));
+    assert_eq!(
+        first.causal_context.idempotency_key,
+        second.causal_context.idempotency_key
+    );
+    assert!(
+        first
+            .causal_context
+            .idempotency_key
+            .as_deref()
+            .unwrap()
+            .starts_with("json-rpc:v1:")
+    );
+
+    let changed = RpcEngineInvocation::from_request(
+        &registry,
+        &ctx,
+        &RpcRequest {
+            id: "write-1".to_owned(),
+            method: "promptSnippet.create".to_owned(),
+            params: Some(json!({"name": "Greeting 2", "text": "Hello!"})),
+        },
+    )
+    .unwrap()
+    .unwrap();
+    assert_ne!(
+        first.causal_context.idempotency_key,
+        changed.causal_context.idempotency_key
+    );
+    assert_eq!(first.params_payload, payload);
+}
+
+#[test]
+fn rpc_engine_invocation_rejects_empty_write_request_id() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let err = RpcEngineInvocation::from_request(
+        &registry,
+        &ctx,
+        &RpcRequest {
+            id: String::new(),
+            method: "promptSnippet.create".to_owned(),
+            params: Some(json!({"name": "n", "text": "t"})),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), errors::INVALID_PARAMS);
+    assert!(err.to_string().contains("request id"));
 }
 
 #[test]
@@ -385,6 +499,239 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
 }
 
 #[tokio::test]
+async fn prompt_snippet_write_outputs_match_direct_engine_outputs() {
+    let ctx = make_test_context();
+
+    let create_direct = direct_engine_value(
+        &ctx,
+        "promptSnippet.create",
+        json!({"name": "direct", "text": "body"}),
+    )
+    .await;
+    assert_eq!(create_direct["snippet"]["name"], "direct");
+
+    let create_rpc = rpc_dispatch_value(
+        &ctx,
+        "promptSnippet.create",
+        json!({"name": "rpc", "text": "body"}),
+    )
+    .await;
+    assert_eq!(create_rpc["snippet"]["name"], "rpc");
+
+    let created_id = create_rpc["snippet"]["id"].as_str().unwrap().to_owned();
+    let update_direct = direct_engine_value(
+        &ctx,
+        "promptSnippet.update",
+        json!({"id": created_id, "name": "renamed"}),
+    )
+    .await;
+    assert_eq!(update_direct["snippet"]["name"], "renamed");
+
+    let delete_direct = direct_engine_value(
+        &ctx,
+        "promptSnippet.delete",
+        json!({"id": update_direct["snippet"]["id"].as_str().unwrap()}),
+    )
+    .await;
+    assert_eq!(delete_direct, json!({"deleted": true}));
+}
+
+#[tokio::test]
+async fn prompt_snippet_write_duplicate_transport_replays_without_rerun() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let request = RpcRequest {
+        id: "snippet-create-retry".to_owned(),
+        method: "promptSnippet.create".to_owned(),
+        params: Some(json!({"name": "retry", "text": "body"})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+
+    let snippets = crate::prompt_library::store::list_snippets(ctx.event_store.pool()).unwrap();
+    assert_eq!(snippets.len(), 1);
+
+    let host = ctx.engine_host.lock().await;
+    let records = host.catalog().invocations();
+    let replay = records.last().unwrap();
+    assert!(replay.replayed_from.is_some());
+    assert_eq!(
+        replay
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+}
+
+#[tokio::test]
+async fn prompt_snippet_reused_request_id_with_different_payload_is_distinct_command() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+
+    for name in ["first", "second"] {
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "reused-id".to_owned(),
+                    method: "promptSnippet.create".to_owned(),
+                    params: Some(json!({"name": name, "text": "body"})),
+                },
+                &ctx,
+            )
+            .await;
+        assert!(response.success, "{:?}", response.error);
+    }
+
+    let snippets = crate::prompt_library::store::list_snippets(ctx.event_store.pool()).unwrap();
+    assert_eq!(snippets.len(), 2);
+}
+
+#[tokio::test]
+async fn prompt_snippet_update_duplicate_transport_replays_without_second_mutation() {
+    let ctx = make_test_context();
+    let snippet =
+        crate::prompt_library::store::create_snippet(ctx.event_store.pool(), "original", "body")
+            .unwrap();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let request = RpcRequest {
+        id: "update-retry".to_owned(),
+        method: "promptSnippet.update".to_owned(),
+        params: Some(json!({"id": snippet.id, "name": "renamed"})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(first.result.as_ref().unwrap()["snippet"]["name"], "renamed");
+
+    crate::prompt_library::store::update_snippet(
+        ctx.event_store.pool(),
+        first.result.as_ref().unwrap()["snippet"]["id"]
+            .as_str()
+            .unwrap(),
+        Some("outside-change".to_owned()),
+        None,
+    )
+    .unwrap();
+
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(second.result, first.result);
+
+    let stored = crate::prompt_library::store::get_snippet(
+        ctx.event_store.pool(),
+        first.result.as_ref().unwrap()["snippet"]["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(stored.name, "outside-change");
+}
+
+#[tokio::test]
+async fn prompt_snippet_delete_duplicate_transport_replays_true() {
+    let ctx = make_test_context();
+    let snippet =
+        crate::prompt_library::store::create_snippet(ctx.event_store.pool(), "delete", "body")
+            .unwrap();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let request = RpcRequest {
+        id: "delete-retry".to_owned(),
+        method: "promptSnippet.delete".to_owned(),
+        params: Some(json!({"id": snippet.id})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    let second = registry.dispatch(request, &ctx).await;
+    assert_eq!(first.result.unwrap(), json!({"deleted": true}));
+    assert_eq!(second.result.unwrap(), json!({"deleted": true}));
+}
+
+#[tokio::test]
+async fn prompt_snippet_write_errors_complete_idempotency_and_replay() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let request = RpcRequest {
+        id: "invalid-create-retry".to_owned(),
+        method: "promptSnippet.create".to_owned(),
+        params: Some(json!({"name": "   ", "text": "body"})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(!first.success);
+    assert!(!second.success);
+    assert_eq!(first.error.as_ref().unwrap().code, errors::INVALID_PARAMS);
+    assert_eq!(second.error.as_ref().unwrap().code, errors::INVALID_PARAMS);
+    assert_eq!(
+        first.error.as_ref().unwrap().message,
+        second.error.as_ref().unwrap().message
+    );
+
+    let host = ctx.engine_host.lock().await;
+    let records = host.catalog().invocations();
+    let replay = records.last().unwrap();
+    let original = records
+        .iter()
+        .find(|record| Some(record.invocation_id.clone()) == replay.replayed_from)
+        .unwrap();
+    assert!(!original.succeeded);
+    assert!(original.error.is_some());
+    assert!(!replay.succeeded);
+    assert!(replay.error.is_some());
+    assert_eq!(original.idempotency_key, replay.idempotency_key);
+    assert_eq!(
+        replay
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+}
+
+#[tokio::test]
+async fn prompt_snippet_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
+    let ctx = make_test_context();
+    let function_id = specs::function_id_for_method("promptSnippet.create").unwrap();
+    let first = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id.clone(),
+            json!({"name": "same", "text": "body"}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("explicit-key"),
+        ))
+        .await;
+    assert!(first.error.is_none(), "{:?}", first.error);
+
+    let conflict = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({"name": "different", "text": "body"}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("explicit-key"),
+        ))
+        .await;
+    assert!(matches!(
+        conflict.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+    let rpc = result_to_rpc(conflict).unwrap_err();
+    assert_eq!(rpc.code(), errors::IDEMPOTENCY_CONFLICT);
+}
+
+#[tokio::test]
 async fn handler_only_methods_pass_through_current_handlers() {
     let ctx = make_test_context();
     let result = rpc_dispatch_value(&ctx, "session.list", json!({})).await;
@@ -441,4 +788,44 @@ async fn generic_trigger_records_invocation_ledger_metadata() {
             .authority_scopes
             .contains(&RPC_READ_AUTHORITY.to_owned())
     );
+}
+
+#[tokio::test]
+async fn generic_write_records_invocation_ledger_metadata() {
+    let ctx = make_test_context();
+    let _ = rpc_dispatch_value(
+        &ctx,
+        "promptSnippet.create",
+        json!({"name": "ledger", "text": "body"}),
+    )
+    .await;
+    let host = ctx.engine_host.lock().await;
+    let record = host.catalog().invocations().last().unwrap();
+    assert_eq!(
+        record.function_id,
+        specs::function_id_for_method("promptSnippet.create").unwrap()
+    );
+    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(record.actor_kind, ActorKind::Client);
+    assert_eq!(record.delivery_mode, DeliveryMode::Sync);
+    assert!(
+        record
+            .authority_scopes
+            .contains(&RPC_WRITE_AUTHORITY.to_owned())
+    );
+    assert_eq!(
+        record
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+    assert!(
+        record
+            .idempotency_key
+            .as_deref()
+            .unwrap()
+            .starts_with("json-rpc:v1:")
+    );
+    assert!(record.result_value.is_some());
 }

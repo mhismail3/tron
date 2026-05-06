@@ -210,6 +210,37 @@ impl StoredEngineError {
     /// Convert a stored error into an engine result error for replay.
     #[must_use]
     pub fn to_replay_error(&self) -> EngineError {
+        if self.kind == "adapter_failure" {
+            let adapter = self
+                .details
+                .get("adapter")
+                .and_then(Value::as_str)
+                .unwrap_or("stored")
+                .to_owned();
+            let code = self
+                .details
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("STORED_INVOCATION_ERROR")
+                .to_owned();
+            let message = self
+                .details
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or(&self.message)
+                .to_owned();
+            let details = self
+                .details
+                .get("details")
+                .cloned()
+                .filter(|value| !value.is_null());
+            return EngineError::AdapterFailure {
+                adapter,
+                code,
+                message,
+                details,
+            };
+        }
         EngineError::StoredInvocationError {
             kind: self.kind.clone(),
             message: self.message.clone(),

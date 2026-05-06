@@ -2,9 +2,9 @@
 //!
 //! JSON-RPC is becoming a trigger transport into engine functions. This module
 //! owns the temporary migration inventory for that path: every registered RPC
-//! method has an explicit capability spec, selected read methods are
-//! engine-owned, and generic-trigger methods now bypass method-specific
-//! business handlers entirely.
+//! method has an explicit capability spec, selected methods are engine-owned,
+//! and generic-trigger methods now bypass method-specific business handlers
+//! entirely.
 //!
 //! # INVARIANT: the bridge is temporary demolition scaffolding
 //!
@@ -13,9 +13,12 @@
 //! remain non-routable internal catalog metadata until their behavior moves
 //! behind the engine boundary, then groups advance to generic triggers and the
 //! method-specific handlers are deleted.
+//! Every migration package must advance at least one method group and remove
+//! superseded business handlers; adding a mirror or fallback without deletion
+//! is not progress toward the collapsed architecture.
 
 mod dispatch;
-mod reads;
+mod functions;
 mod schemas;
 mod specs;
 
@@ -39,6 +42,7 @@ pub(super) const RPC_WORKER_ID: &str = "rpc";
 pub(super) const RPC_OWNER_ACTOR: &str = "system";
 pub(super) const RPC_AUTHORITY_GRANT: &str = "rpc-bridge";
 pub(super) const RPC_READ_AUTHORITY: &str = "rpc.read";
+pub(super) const RPC_WRITE_AUTHORITY: &str = "rpc.write";
 
 /// Register the in-process RPC worker and its current capability inventory.
 pub fn register_rpc_worker_for_context(
@@ -48,20 +52,20 @@ pub fn register_rpc_worker_for_context(
     register_rpc_worker(
         &ctx.engine_host,
         registry,
-        reads::RpcEngineDeps::from_context(ctx),
+        functions::RpcEngineDeps::from_context(ctx),
     )
 }
 
 fn register_rpc_worker(
     handle: &EngineHostHandle,
     registry: &MethodRegistry,
-    deps: reads::RpcEngineDeps,
+    deps: functions::RpcEngineDeps,
 ) -> EngineResult<()> {
     let specs = specs::capability_specs(registry)?;
     handle.register_worker_for_setup(specs::rpc_worker(), false)?;
     for spec in specs {
         let handler = specs::is_engine_routable(&spec).then(|| {
-            std::sync::Arc::new(reads::RpcReadFunctionHandler {
+            std::sync::Arc::new(functions::RpcFunctionHandler {
                 method: spec.method,
                 deps: deps.clone(),
             }) as std::sync::Arc<dyn crate::engine::InProcessFunctionHandler>
@@ -102,6 +106,19 @@ pub(super) fn engine_error_to_rpc(error: EngineError) -> RpcError {
         } => rpc_error_from_parts(&code, message, details),
         EngineError::SchemaViolation { message, .. } => RpcError::InvalidParams { message },
         EngineError::PolicyViolation(message) => RpcError::InvalidParams { message },
+        EngineError::IdempotencyConflict {
+            function_id,
+            key,
+            reason,
+        } => RpcError::Custom {
+            code: errors::IDEMPOTENCY_CONFLICT.to_owned(),
+            message: format!("Idempotency conflict for {function_id}: {reason}"),
+            details: Some(serde_json::json!({
+                "functionId": function_id,
+                "key": key,
+                "reason": reason,
+            })),
+        },
         EngineError::NotFound { id, .. } => RpcError::NotFound {
             code: errors::NOT_FOUND.to_owned(),
             message: format!("Engine function '{id}' not found"),
