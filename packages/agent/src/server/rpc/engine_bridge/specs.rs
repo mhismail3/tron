@@ -3,9 +3,10 @@ use std::collections::BTreeSet;
 use serde_json::json;
 
 use crate::engine::{
-    ActorId, AuthorityGrantId, AuthorityRequirement, EffectClass, EngineError, FunctionDefinition,
-    FunctionId, IdempotencyContract, Provenance, Result as EngineResult, RiskLevel,
-    VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+    ActorId, AuthorityGrantId, AuthorityRequirement, DeliveryMode, EffectClass, EngineError,
+    FunctionDefinition, FunctionId, IdempotencyContract, IdempotencyKeySource, Provenance,
+    Result as EngineResult, RiskLevel, TriggerDefinition, TriggerId, TriggerTypeDefinition,
+    TriggerTypeId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
 };
 use crate::server::rpc::registry::{HandlerExecutionPolicy, MethodRegistry};
 
@@ -122,6 +123,8 @@ pub struct RpcCapabilitySpec {
     pub function_id: FunctionId,
     /// Owner worker id.
     pub owner_worker: WorkerId,
+    /// Domain worker that owns the capability behavior.
+    pub domain_worker: WorkerId,
     /// Migration state.
     pub migration_state: RpcMigrationState,
     /// Effect class.
@@ -217,7 +220,7 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("events.getSince"),
     handler_only!("events.subscribe"),
     handler_only!("events.unsubscribe"),
-    handler_only!("events.append"),
+    generic_trigger!("events.append"),
     generic_trigger!("settings.get"),
     generic_trigger!("settings.update"),
     generic_trigger!("settings.resetToDefaults"),
@@ -244,15 +247,15 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("mcp.reload"),
     handler_only!("mcp.listTools"),
     generic_trigger!("skill.list"),
-    handler_only!("skill.get"),
-    handler_only!("skill.refresh"),
-    handler_only!("skill.activate"),
-    handler_only!("skill.deactivate"),
-    handler_only!("skill.active"),
-    handler_only!("filesystem.listDir"),
+    generic_trigger!("skill.get"),
+    generic_trigger!("skill.refresh"),
+    generic_trigger!("skill.activate"),
+    generic_trigger!("skill.deactivate"),
+    generic_trigger!("skill.active"),
+    generic_trigger!("filesystem.listDir"),
     generic_trigger!("filesystem.getHome"),
     handler_only!("filesystem.createDir"),
-    handler_only!("file.read"),
+    generic_trigger!("file.read"),
     handler_only!("tree.getVisualization"),
     handler_only!("tree.getBranches"),
     handler_only!("tree.getSubtree"),
@@ -293,9 +296,9 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("device.register"),
     handler_only!("device.unregister"),
     handler_only!("device.respond"),
-    handler_only!("plan.enter"),
-    handler_only!("plan.exit"),
-    handler_only!("plan.getState"),
+    generic_trigger!("plan.enter"),
+    generic_trigger!("plan.exit"),
+    generic_trigger!("plan.getState"),
     handler_only!("voiceNotes.save"),
     handler_only!("voiceNotes.list"),
     handler_only!("voiceNotes.delete"),
@@ -318,9 +321,9 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("sandbox.stopContainer"),
     handler_only!("sandbox.killContainer"),
     handler_only!("sandbox.removeContainer"),
-    handler_only!("notifications.list"),
-    handler_only!("notifications.markRead"),
-    handler_only!("notifications.markAllRead"),
+    generic_trigger!("notifications.list"),
+    generic_trigger!("notifications.markRead"),
+    generic_trigger!("notifications.markAllRead"),
     generic_trigger!("promptHistory.list"),
     generic_trigger!("promptHistory.delete"),
     generic_trigger!("promptHistory.clear"),
@@ -479,10 +482,16 @@ fn spec_from_seed(
     } else {
         VisibilityScope::Internal
     };
+    let owner_worker = if is_routable {
+        domain_worker_for_method(seed.method)?
+    } else {
+        worker_id(RPC_WORKER_ID)?
+    };
     Ok(RpcCapabilitySpec {
         method: seed.method,
         function_id: function_id_for_method(seed.method)?,
-        owner_worker: worker_id(RPC_WORKER_ID)?,
+        owner_worker: owner_worker.clone(),
+        domain_worker: domain_worker_for_method(seed.method)?,
         migration_state: seed.migration_state,
         effect_class,
         risk_level: risk_for_method(seed.method, effect_class),
@@ -591,6 +600,8 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
     definition.metadata = json!({
         "transport": "json_rpc",
         "method": spec.method,
+        "domainWorker": spec.domain_worker.as_str(),
+        "canonicalCapability": canonical_capability_for_method(spec.method),
         "migrationState": spec.migration_state.as_str(),
         "executionPolicy": spec.execution_policy.as_str(),
         "schemaMode": spec.schema_mode.as_str(),
@@ -602,8 +613,10 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
 
 fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
     if method.starts_with("logs.")
+        || method.starts_with("notifications.")
         || method.starts_with("promptHistory.")
         || method.starts_with("promptSnippet.")
+        || method == "skill.refresh"
         || method.starts_with("settings.")
     {
         IdempotencyContract::caller_system_engine_ledger()
@@ -626,8 +639,121 @@ pub(super) fn rpc_worker() -> WorkerDefinition {
     .with_namespace_claim(RPC_WORKER_ID)
 }
 
+pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
+    let domains = [
+        "system",
+        "settings",
+        "logs",
+        "prompt_library",
+        "skills",
+        "filesystem",
+        "events",
+        "notifications",
+        "plan",
+    ];
+    domains
+        .into_iter()
+        .map(|domain| {
+            Ok(WorkerDefinition::new(
+                worker_id(domain)?,
+                WorkerKind::InProcess,
+                actor_id(RPC_OWNER_ACTOR)?,
+                grant_id(RPC_AUTHORITY_GRANT)?,
+            )
+            .with_namespace_claim(RPC_WORKER_ID)
+            .with_namespace_claim(domain))
+        })
+        .collect()
+}
+
+pub(super) fn json_rpc_trigger_type() -> EngineResult<TriggerTypeDefinition> {
+    let mut definition = TriggerTypeDefinition::new(
+        TriggerTypeId::new("json_rpc")?,
+        worker_id(RPC_WORKER_ID)?,
+        "JSON-RPC request dispatch into an engine function",
+    );
+    definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
+    definition.visibility = VisibilityScope::Internal;
+    definition.config_schema = Some(json!({
+        "type": "object",
+        "required": ["method"],
+        "additionalProperties": false,
+        "properties": {
+            "method": {"type": "string"}
+        }
+    }));
+    Ok(definition)
+}
+
+pub(super) fn manual_trigger_type() -> EngineResult<TriggerTypeDefinition> {
+    let mut definition = TriggerTypeDefinition::new(
+        TriggerTypeId::new("manual")?,
+        worker_id(RPC_WORKER_ID)?,
+        "Manual in-process dispatch for tests and future agent tools",
+    );
+    definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
+    definition.visibility = VisibilityScope::Internal;
+    Ok(definition)
+}
+
+pub(super) fn json_rpc_trigger_for_spec(
+    spec: &RpcCapabilitySpec,
+) -> EngineResult<Option<TriggerDefinition>> {
+    if !is_engine_routable(spec) {
+        return Ok(None);
+    }
+    let mut trigger = TriggerDefinition::new(
+        json_rpc_trigger_id_for_method(spec.method)?,
+        worker_id(RPC_WORKER_ID)?,
+        TriggerTypeId::new("json_rpc")?,
+        spec.function_id.clone(),
+        grant_id(RPC_AUTHORITY_GRANT)?,
+    )
+    .with_delivery_mode(DeliveryMode::Sync);
+    trigger.config = json!({ "method": spec.method });
+    trigger.idempotency_key_strategy = if spec.effect_class.is_mutating() {
+        Some(IdempotencyKeySource::TriggerDerived)
+    } else {
+        None
+    };
+    trigger.visibility = VisibilityScope::Internal;
+    Ok(Some(trigger))
+}
+
+pub(super) fn json_rpc_trigger_id_for_method(method: &str) -> EngineResult<TriggerId> {
+    TriggerId::new(format!("json_rpc:{method}"))
+}
+
 pub(super) fn function_id_for_method(method: &str) -> EngineResult<FunctionId> {
     FunctionId::new(format!("rpc::{method}"))
+}
+
+fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
+    worker_id(match method {
+        method if method.starts_with("settings.") => "settings",
+        method if method.starts_with("logs.") => "logs",
+        method if method.starts_with("promptHistory.") || method.starts_with("promptSnippet.") => {
+            "prompt_library"
+        }
+        method if method.starts_with("skill.") => "skills",
+        method if method.starts_with("filesystem.") || method.starts_with("file.") => "filesystem",
+        method if method.starts_with("events.") => "events",
+        method if method.starts_with("notifications.") => "notifications",
+        method if method.starts_with("plan.") => "plan",
+        method if method.starts_with("system.") => "system",
+        _ => RPC_WORKER_ID,
+    })
+}
+
+fn canonical_capability_for_method(method: &str) -> String {
+    let (namespace, operation) = match method.split_once('.') {
+        Some(("promptHistory", operation)) => ("prompt_library", format!("history.{operation}")),
+        Some(("promptSnippet", operation)) => ("prompt_library", format!("snippet.{operation}")),
+        Some(("file", operation)) => ("filesystem", operation.to_owned()),
+        Some((namespace, operation)) => (namespace, operation.to_owned()),
+        None => (RPC_WORKER_ID, method.to_owned()),
+    };
+    format!("{namespace}::{operation}")
 }
 
 pub(super) fn worker_id(value: &str) -> EngineResult<WorkerId> {

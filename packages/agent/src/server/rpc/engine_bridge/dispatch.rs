@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::engine::{ActorKind, CausalContext, FunctionId, Invocation, TraceId};
+use crate::engine::{
+    ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, TraceId, TriggerDispatchRequest,
+    TriggerId,
+};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
@@ -20,6 +23,8 @@ pub struct RpcEngineInvocation {
     pub method: String,
     /// Engine function id (`rpc::<method>`).
     pub function_id: FunctionId,
+    /// JSON-RPC trigger id that caused the invocation.
+    pub trigger_id: TriggerId,
     /// Payload delivered to the engine function.
     pub params_payload: Value,
     /// Causal authority and trace metadata for the engine invocation.
@@ -77,6 +82,8 @@ impl RpcEngineInvocation {
             request_id: request.id.clone(),
             method: request.method.clone(),
             function_id: spec.function_id,
+            trigger_id: specs::json_rpc_trigger_id_for_method(spec.method)
+                .map_err(engine_error_to_rpc)?,
             params_payload,
             causal_context,
         }))
@@ -95,12 +102,25 @@ pub async fn try_dispatch_generic_rpc(
         Err(error) => return Some(rpc_error_response(&request.id, error)),
     };
 
-    let invocation = Invocation::new_sync(
-        envelope.function_id,
+    let actor_id = envelope.causal_context.actor_id.clone();
+    let actor_kind = envelope.causal_context.actor_kind;
+    let authority_scopes = envelope.causal_context.authority_scopes.clone();
+    let trace_id = Some(envelope.causal_context.trace_id.clone());
+    let session_id = envelope.causal_context.session_id.clone();
+    let workspace_id = envelope.causal_context.workspace_id.clone();
+    let idempotency_key = envelope.causal_context.idempotency_key.clone();
+    let mut dispatch = TriggerDispatchRequest::new(
+        envelope.trigger_id,
         envelope.params_payload,
-        envelope.causal_context,
+        actor_id,
+        actor_kind,
     );
-    let result = ctx.engine_host.invoke(invocation).await;
+    dispatch.authority_scopes = authority_scopes;
+    dispatch.trace_id = trace_id;
+    dispatch.session_id = session_id;
+    dispatch.workspace_id = workspace_id;
+    dispatch.idempotency_key = idempotency_key;
+    let result = EngineTriggerRuntime::dispatch(&ctx.engine_host, dispatch).await;
     Some(match result_to_rpc(result) {
         Ok(value) => RpcResponse::success(&envelope.request_id, value),
         Err(error) => rpc_error_response(&envelope.request_id, error),

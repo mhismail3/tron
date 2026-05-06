@@ -9,7 +9,7 @@
 //! - Context: getSnapshot, compact, clear, canAcceptTurn, shouldCompact
 //! - Events: getHistory, getSince, subscribe, append
 //! - Settings: get, update, resetToDefaults
-//! - Skills: list, get, refresh, remove
+//! - Skills: list, get, refresh, activate, deactivate, active
 //! - Plus: browser, device, task, transcription, worktree, tree
 //!
 //! Handler registration carries an execution policy. Quick and
@@ -27,9 +27,12 @@
 //! business handlers: the registry validates method existence/depth, then the
 //! bridge dispatches JSON-RPC as a transport trigger into engine functions.
 //! Read triggers carry `rpc.read`; migrated write triggers carry `rpc.write`
-//! plus engine-ledger idempotency. Prompt library, settings, and logs are now
-//! fully collapsed groups: their public methods are generic-triggered engine
-//! functions with marker-only JSON-RPC registrations.
+//! plus engine-ledger idempotency. Prompt library, settings, logs, skills,
+//! notifications, and plan are now fully collapsed groups: their public methods
+//! are generic-triggered engine functions with marker-only JSON-RPC
+//! registrations. Events append/history and read-safe filesystem methods are
+//! also generic-triggered, while event subscriptions and filesystem writes wait
+//! for stream and file-write primitives.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

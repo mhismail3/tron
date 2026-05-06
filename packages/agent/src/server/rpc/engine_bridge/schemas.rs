@@ -55,6 +55,45 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "skill.get" => json!({
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+                "name": {"type": "string"},
+                "workingDirectory": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "skill.refresh" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "workingDirectory": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "skill.activate" | "skill.deactivate" => json!({
+            "type": "object",
+            "required": ["sessionId", "skillName"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "skillName": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "skill.active" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "events.getHistory" => json!({
             "type": "object",
             "required": ["sessionId"],
@@ -79,8 +118,76 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "events.append" => json!({
+            "type": "object",
+            "required": ["sessionId", "type", "payload"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "type": {"type": "string"},
+                "payload": {},
+                "parentId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "filesystem.listDir" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "showHidden": {"type": "boolean"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "file.read" => json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "filesystem.getHome" | "promptSnippet.list" => json!({
             "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "notifications.list" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "limit": {"type": "integer"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "notifications.markRead" => json!({
+            "type": "object",
+            "required": ["eventId"],
+            "additionalProperties": false,
+            "properties": {
+                "eventId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "notifications.markAllRead" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "plan.enter" | "plan.exit" | "plan.getState" => json!({
+            "type": "object",
+            "required": ["sessionId"],
             "additionalProperties": false,
             "properties": {
                 "sessionId": {"type": "string"},
@@ -298,6 +405,52 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                 }
             }
         }),
+        "skill.get" => json!({
+            "type": "object",
+            "required": ["skill", "found"],
+            "additionalProperties": false,
+            "properties": {
+                "skill": {"type": "object", "additionalProperties": true},
+                "found": {"type": "boolean"}
+            }
+        }),
+        "skill.refresh" => json!({
+            "type": "object",
+            "required": ["success", "skillCount"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "skillCount": {"type": "integer"}
+            }
+        }),
+        "skill.activate" => json!({
+            "type": "object",
+            "required": ["success", "skill"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "alreadyActive": {"type": "boolean"},
+                "skill": {"type": "object", "additionalProperties": true}
+            }
+        }),
+        "skill.deactivate" => json!({
+            "type": "object",
+            "required": ["success", "wasActive", "deactivatedSkill"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "wasActive": {"type": "boolean"},
+                "deactivatedSkill": {"type": "string"}
+            }
+        }),
+        "skill.active" => json!({
+            "type": "object",
+            "required": ["skills"],
+            "additionalProperties": false,
+            "properties": {
+                "skills": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+            }
+        }),
         "logs.recent" => json!({
             "type": "object",
             "required": ["entries", "count"],
@@ -340,6 +493,25 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "nextCursor": {"type": ["string", "null"]}
             }
         }),
+        "events.append" => json!({
+            "type": "object",
+            "required": ["event", "newHeadEventId"],
+            "additionalProperties": false,
+            "properties": {
+                "event": {"type": "object", "additionalProperties": true},
+                "newHeadEventId": {"type": ["string", "null"]}
+            }
+        }),
+        "filesystem.listDir" => json!({
+            "type": "object",
+            "required": ["path", "parent", "entries"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "parent": {"type": ["string", "null"]},
+                "entries": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+            }
+        }),
         "filesystem.getHome" => json!({
             "type": "object",
             "required": ["homePath", "suggestedPaths"],
@@ -359,6 +531,48 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                         }
                     }
                 }
+            }
+        }),
+        "file.read" => json!({
+            "type": "object",
+            "required": ["content", "path"],
+            "additionalProperties": false,
+            "properties": {
+                "content": {"type": "string"},
+                "path": {"type": "string"}
+            }
+        }),
+        "notifications.list" => json!({
+            "type": "object",
+            "required": ["notifications", "unreadCount"],
+            "additionalProperties": false,
+            "properties": {
+                "notifications": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+                "unreadCount": {"type": "integer"}
+            }
+        }),
+        "notifications.markRead" => json!({
+            "type": "object",
+            "required": ["success"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"}
+            }
+        }),
+        "notifications.markAllRead" => json!({
+            "type": "object",
+            "required": ["marked"],
+            "additionalProperties": false,
+            "properties": {
+                "marked": {"type": "integer"}
+            }
+        }),
+        "plan.enter" | "plan.exit" | "plan.getState" => json!({
+            "type": "object",
+            "required": ["planMode"],
+            "additionalProperties": false,
+            "properties": {
+                "planMode": {"type": "boolean"}
             }
         }),
         "promptHistory.list" => json!({

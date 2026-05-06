@@ -652,7 +652,7 @@ mod tests {
         let ctx = make_test_context();
         let definition = crate::engine::FunctionDefinition::new(
             crate::engine::FunctionId::new("rpc::system.ping").unwrap(),
-            crate::engine::WorkerId::new("rpc").unwrap(),
+            crate::engine::WorkerId::new("system").unwrap(),
             "slow test rpc ping".to_owned(),
             crate::engine::VisibilityScope::System,
             crate::engine::EffectClass::PureRead,

@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::sync::{Barrier, Notify};
 
-use super::EngineHost;
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
@@ -26,6 +25,7 @@ use super::types::{
     Provenance, ReplayBehavior, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
+use super::{EngineHost, EngineHostHandle, EngineTriggerRuntime, TriggerDispatchRequest};
 
 fn wid(value: &str) -> WorkerId {
     WorkerId::new(value).unwrap()
@@ -2514,4 +2514,80 @@ async fn engine_promote_conflicting_duplicate_key_does_not_mutate_new_target() {
             .visibility,
         VisibilityScope::Session
     );
+}
+
+#[tokio::test]
+async fn trigger_runtime_manual_dispatch_records_trigger_metadata() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    handle
+        .register_trigger_type_for_setup(
+            TriggerTypeDefinition::new(
+                TriggerTypeId::new("manual").unwrap(),
+                wid("alpha"),
+                "manual",
+            ),
+            false,
+        )
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("alpha::echo", "alpha")
+                .with_required_authority(AuthorityRequirement::scope("manual.invoke")),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+    let trigger_id = TriggerId::new("manual:alpha.echo").unwrap();
+    handle
+        .register_trigger_for_setup(
+            TriggerDefinition::new(
+                trigger_id.clone(),
+                wid("alpha"),
+                TriggerTypeId::new("manual").unwrap(),
+                fid("alpha::echo"),
+                grant("manual-grant"),
+            ),
+            false,
+        )
+        .unwrap();
+
+    let mut request = TriggerDispatchRequest::new(
+        trigger_id.clone(),
+        json!({"value": 1}),
+        actor("agent"),
+        ActorKind::Agent,
+    );
+    request.authority_scopes = vec!["manual.invoke".to_owned()];
+    request.trace_id = Some(trace("trigger-trace"));
+    request.session_id = Some("session-a".to_owned());
+
+    let result = EngineTriggerRuntime::dispatch(&handle, request).await;
+    assert_eq!(result.error, None);
+    assert_eq!(result.value.unwrap()["echo"], json!({"value": 1}));
+
+    let host = handle.lock().await;
+    let record = host.catalog().invocations().last().unwrap();
+    assert_eq!(record.trigger_id, Some(trigger_id));
+    assert_eq!(record.authority_grant_id, grant("manual-grant"));
+    assert_eq!(record.trace_id, trace("trigger-trace"));
+    assert_eq!(record.delivery_mode, DeliveryMode::Sync);
+}
+
+#[tokio::test]
+async fn trigger_runtime_fails_closed_for_missing_trigger() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let result = EngineTriggerRuntime::dispatch(
+        &handle,
+        TriggerDispatchRequest::new(
+            TriggerId::new("manual:missing").unwrap(),
+            json!({}),
+            actor("agent"),
+            ActorKind::Agent,
+        ),
+    )
+    .await;
+    assert!(matches!(result.error, Some(EngineError::NotFound { .. })));
 }

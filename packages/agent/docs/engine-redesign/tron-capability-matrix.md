@@ -23,20 +23,18 @@ registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
 ## RPC surface
 
 The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
-167 methods. The exploration branch now registers a `rpc` compatibility worker
-with one `rpc::<method>` function for each method. Handler-only entries are
-internal/non-routable metadata. The first generic-triggered engine reads are
-`system.ping`, `system.getInfo`, `settings.get`, `model.list`, `skill.list`,
-`logs.ingest`, `logs.recent`, `events.getHistory`, `events.getSince`, `filesystem.getHome`,
-`promptHistory.list`, `promptSnippet.list`, and `promptSnippet.get`. The full
-prompt-library group is now generic-triggered: `promptHistory.delete`,
-`promptHistory.clear`, `promptSnippet.create`, `promptSnippet.update`, and
-`promptSnippet.delete` use `rpc.write` and system-scoped engine-ledger
-idempotency. The full settings group is also generic-triggered:
-`settings.update` and `settings.resetToDefaults` are high-risk reversible
-configuration writes with `rpc.write`, approval metadata, and system-scoped
-engine-ledger idempotency. Migrated groups delete their method-specific
-business handlers.
+167 methods. The exploration branch now registers a `rpc` transport
+compatibility worker, domain-owned in-process workers for migrated groups, one
+`rpc::<method>` compatibility function for each method, and `json_rpc` trigger
+bindings for every generic-triggered method. Handler-only entries are
+internal/non-routable metadata.
+
+Fully collapsed groups are prompt library, settings, logs, skills,
+notifications, and plan. The events group has generic-triggered
+history/since/append while subscribe/unsubscribe wait for stream primitives.
+Filesystem has generic-triggered home/list/read while create/write semantics
+wait for stricter path authority and idempotent file mutation contracts.
+Migrated groups delete their method-specific business handlers.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,
@@ -52,7 +50,7 @@ answers are explicit enough to test.
 | `agent` | 10 | `agent::*` functions and queue triggers. | Session by default. | Prompt/run/abort are mutating and require idempotency. | Turn id, parent invocation, catalog revision, and authority grant are mandatory. |
 | `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
 | `context` | 9 | `context::*` functions. | Session. | Reads plus compaction/context mutations. | Compaction ordering and event writes must remain deterministic. |
-| `events` | 5 | `event::*` worker functions and streams; `getHistory`/`getSince` are generic-triggered reads in the RPC bridge. | Session/workspace/admin. | Reads plus append-only event writes with dedupe. | Event append is the durable causal ledger path. |
+| `events` | 5 | `events` domain worker; `getHistory`, `getSince`, and `append` are generic-triggered compatibility functions. Subscribe/unsubscribe move when streams land. | Session/workspace/admin. | Reads plus append-only `events.append` with session-scoped idempotency. | Event append is the durable causal ledger path and records trigger/invocation metadata. |
 | `settings` | 3 | Fully generic-triggered `settings::*` state functions. | Admin/client. | Read plus high-risk reversible system writes with engine-ledger idempotency. | Must preserve iOS settings parity, strict validation, rollback, MCP reload, and Codex App Server reconfiguration causality. |
 | `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
 | `tool` | 1 | Tool-result compatibility function. | Session. | Append/update tool result; idempotent by tool call id. | Link to parent tool invocation and turn. |
@@ -60,8 +58,8 @@ answers are explicit enough to test.
 | `logs` | 2 | Fully generic-triggered `observability::logs::*` compatibility functions. | Admin/client filtered. | Ingest append-only with system idempotency; recent read. | Trace/log correlation mandatory; duplicate transport ingests replay before DB insertion. |
 | `memory` | 1 | `memory::retain`. | Session/workspace with policy. | Idempotent/append memory update. | User memory files remain governed; no hardcoded personal data. |
 | `mcp` | 8 | `mcp::*` worker functions. | Agent/client/admin filtered. | Lifecycle writes require idempotency; search/list are reads. | MCP tool calls inherit caller authority and trace. |
-| `skill` | 6 | `skill::*` registry and session state functions. | Session/workspace. | Activate/deactivate idempotent by session+skill. | Skill provenance and denied/allowed tools affect capability views. |
-| `filesystem` / `file` | 4 | `filesystem::*`; `getHome` is a generic-triggered read in the RPC bridge. | Session/workspace by path policy. | Reads plus idempotent create/write wrappers later. | Path guards, workspace scope, and file effect metadata required. |
+| `skill` | 6 | Fully generic-triggered `skills` domain worker functions over registry and session state. | Session/workspace. | Activate/deactivate are session-scoped idempotent writes; refresh is system-scoped. | Skill provenance and denied/allowed tools affect capability views; activation events are causally linked. |
+| `filesystem` / `file` | 4 | `filesystem` domain worker; home/list/read are generic-triggered compatibility functions, while createDir remains handler-owned. | Session/workspace by path policy. | Reads now; idempotent create/write wrappers later. | Path guards, workspace scope, and file effect metadata required before writes migrate. |
 | `tree` | 5 | `event_graph::*`. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
 | `import` | 4 | `import::*`. | Admin/workspace. | Preview/list reads; execute append-only/idempotent by import source. | Import provenance and dedupe tags mandatory. |
 | `browser` / `display` | 4 | `browser::*`, `display::*`, stream functions. | Session/client. | Stream lifecycle idempotent by stream id. | Link stream writes to session and actor. |
@@ -69,11 +67,11 @@ answers are explicit enough to test.
 | `worktree` | 23 | `worktree::*` functions and triggers. | Workspace/session. | Git mutations require idempotency, locks, and compensation where possible. | Branch/worktree state machine must stay auditable. |
 | `transcribe` | 3 | `transcription::*`. | Client/session. | Audio processing idempotent by input hash/request id. | Sidecar lifecycle and stream progress trace to request. |
 | `device` | 3 | `device::*` and approval triggers. | Client/session/admin. | Register/unregister/respond idempotent by token/request id. | Approval responses must link to pending invocation. |
-| `plan` | 3 | `plan::*` session-mode state. | Session. | Idempotent session state writes. | Plan transitions record actor and session. |
+| `plan` | 3 | Fully generic-triggered `plan` domain worker functions. | Session. | Idempotent session-scoped state writes. | Plan transitions record actor, session, trigger id, and idempotency context. |
 | `voiceNotes` | 3 | `voice_note::*`. | Client/session. | Save/delete idempotent by note id. | Link audio/transcription/provenance. |
 | `git` / `repo` | 7 | `git::*`, `repo::*`. | Workspace/admin. | Mutations require idempotency and locks. | Remote side effects need risk and approval policy. |
 | `sandbox` | 5 | `sandbox::*` worker lifecycle. | Session by default. | Lifecycle idempotent by sandbox id; high-risk execution gated. | Created workers inherit narrowed delegated authority. |
-| `notifications` | 3 | `notification::*`. | Client/session. | Mark read idempotent; list read. | Notification effects link to source invocation/event. |
+| `notifications` | 3 | Fully generic-triggered `notifications` domain worker functions. | Client/session. | Mark read/all-read are system-scoped idempotent writes; list is read. | Notification effects link to source invocation/event and trigger metadata. |
 | `promptHistory` / `promptSnippet` | 8 | `prompt_library::*`; all methods are generic-triggered in the RPC bridge. | Workspace/client. | Prompt-library writes use engine-ledger idempotency; delete/clear effects carry irreversible-risk metadata. | Prompt provenance and retention policy recorded. |
 | `cron` | 8 | `cron::*` trigger worker. | Admin/workspace. | Job definitions idempotent by job id; runs append-only. | Trigger fires record schedule, misfire/overlap policy, and target invocation. |
 

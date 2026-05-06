@@ -1,8 +1,8 @@
-//! Events handlers: subscribe, unsubscribe, append.
+//! Events handlers: subscribe and unsubscribe.
 //!
-//! `events.getHistory` and `events.getSince` are served by the engine bridge
-//! generic trigger. This module keeps shared wire helpers and mutating/event
-//! subscription handlers.
+//! `events.getHistory`, `events.getSince`, and `events.append` are served by
+//! engine-owned generic trigger functions. Real-time subscribe/unsubscribe
+//! acknowledgements remain handler-owned until stream primitives land.
 
 use crate::events::sqlite::row_types::EventRow;
 use async_trait::async_trait;
@@ -11,9 +11,7 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{
-    map_event_store_error, opt_string, require_param, require_string_param,
-};
+use crate::server::rpc::handlers::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 
 /// Convert an `EventRow` to wire format (camelCase).
@@ -100,51 +98,6 @@ impl MethodHandler for UnsubscribeHandler {
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let _session_id = require_string_param(params.as_ref(), "sessionId")?;
         Ok(serde_json::json!({ "unsubscribed": true }))
-    }
-}
-
-/// Append an event to a session.
-pub struct AppendHandler;
-
-#[async_trait]
-impl MethodHandler for AppendHandler {
-    #[instrument(skip(self, ctx), fields(method = "events.append", session_id))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let event_type_str = require_string_param(params.as_ref(), "type")?;
-        let payload = require_param(params.as_ref(), "payload")?;
-
-        let event_type: crate::events::EventType =
-            event_type_str
-                .parse()
-                .map_err(|_| RpcError::InvalidParams {
-                    message: format!("Unknown event type: {event_type_str}"),
-                })?;
-
-        let parent_id = opt_string(params.as_ref(), "parentId");
-
-        let event = ctx
-            .event_store
-            .append(&crate::events::AppendOptions {
-                session_id: &session_id,
-                event_type,
-                payload: payload.clone(),
-                parent_id: parent_id.as_deref(),
-                sequence: None,
-            })
-            .map_err(map_event_store_error)?;
-
-        let session = ctx
-            .event_store
-            .get_session(&session_id)
-            .map_err(map_event_store_error)?;
-
-        let new_head = session.and_then(|s| s.head_event_id);
-
-        Ok(serde_json::json!({
-            "event": event_row_to_wire(&event),
-            "newHeadEventId": new_head,
-        }))
     }
 }
 
@@ -446,17 +399,16 @@ mod tests {
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
-        let result = AppendHandler
-            .handle(
-                Some(json!({
-                    "sessionId": sid,
-                    "type": "message.user",
-                    "payload": {"text": "hello"}
-                })),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.append",
+            json!({
+                "sessionId": sid,
+                "type": "message.user",
+                "payload": {"text": "hello"}
+            }),
+        )
+        .await;
 
         assert!(result["event"]["id"].is_string());
         assert_eq!(result["event"]["type"], "message.user");
@@ -471,17 +423,16 @@ mod tests {
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
-        let result = AppendHandler
-            .handle(
-                Some(json!({
-                    "sessionId": sid,
-                    "type": "message.user",
-                    "payload": {"text": "hello"}
-                })),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.append",
+            json!({
+                "sessionId": sid,
+                "type": "message.user",
+                "payload": {"text": "hello"}
+            }),
+        )
+        .await;
 
         let event = &result["event"];
         // Check camelCase fields
@@ -498,27 +449,23 @@ mod tests {
         // disambiguate "wrong id" from "server bug" without parsing
         // the message string.
         let ctx = make_test_context();
-        let err = AppendHandler
-            .handle(
-                Some(json!({
-                    "sessionId": "nonexistent",
-                    "type": "message.user",
-                    "payload": {"text": "hi"}
-                })),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = dispatch_err(
+            &ctx,
+            "events.append",
+            json!({
+                "sessionId": "nonexistent",
+                "type": "message.user",
+                "payload": {"text": "hi"}
+            }),
+        )
+        .await;
         assert_eq!(err.code(), "SESSION_NOT_FOUND");
     }
 
     #[tokio::test]
     async fn append_missing_required_params() {
         let ctx = make_test_context();
-        let err = AppendHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
+        let err = dispatch_err(&ctx, "events.append", json!({"sessionId": "s1"})).await;
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 

@@ -2,11 +2,19 @@
 //!
 //! JSON-RPC is becoming a trigger transport into engine functions. This module
 //! owns the temporary migration inventory for that path: every registered RPC
-//! method has an explicit capability spec, selected methods are engine-owned,
-//! and generic-trigger methods now bypass method-specific business handlers
-//! entirely. Prompt library, settings, and logs are the first fully collapsed
-//! RPC groups: every method in those groups is marker-registered and executed
-//! through an engine-owned `rpc::<method>` function.
+//! method has an explicit capability spec, migrated specs register domain-owned
+//! in-process worker functions, and generic-trigger methods bypass
+//! method-specific business handlers entirely. Prompt library, settings, logs,
+//! skills, notifications, and plan are fully collapsed RPC groups. Events
+//! history/append and read-safe filesystem calls are also generic-triggered,
+//! while their stream and write-heavy peers remain handler-owned until the
+//! stream/file primitives are ready.
+//!
+//! The `rpc` worker is now transport compatibility only. Domain workers such as
+//! `skills`, `filesystem`, `events`, `notifications`, and `plan` own the
+//! function contracts and behavior metadata, while `json_rpc` trigger records
+//! capture the old client method name and dispatch into `rpc::<method>`
+//! compatibility function ids.
 //!
 //! # INVARIANT: the bridge is temporary demolition scaffolding
 //!
@@ -65,7 +73,12 @@ fn register_rpc_worker(
 ) -> EngineResult<()> {
     let specs = specs::capability_specs(registry)?;
     handle.register_worker_for_setup(specs::rpc_worker(), false)?;
-    for spec in specs {
+    for worker in specs::domain_workers()? {
+        handle.register_worker_for_setup(worker, false)?;
+    }
+    handle.register_trigger_type_for_setup(specs::json_rpc_trigger_type()?, false)?;
+    handle.register_trigger_type_for_setup(specs::manual_trigger_type()?, false)?;
+    for spec in &specs {
         let handler = specs::is_engine_routable(&spec).then(|| {
             std::sync::Arc::new(functions::RpcFunctionHandler {
                 method: spec.method,
@@ -77,6 +90,11 @@ fn register_rpc_worker(
             handler,
             false,
         )?;
+    }
+    for spec in &specs {
+        if let Some(trigger) = specs::json_rpc_trigger_for_spec(spec)? {
+            handle.register_trigger_for_setup(trigger, false)?;
+        }
     }
     Ok(())
 }

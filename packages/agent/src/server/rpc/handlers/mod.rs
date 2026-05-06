@@ -6,20 +6,23 @@
 //!
 //! `system` (ping, info, shutdown), `session` (CRUD, fork, archive),
 //! `agent` (prompt, abort, state), `model` (list, switch), `context`
-//! (snapshot, compaction), `events` (history, subscribe), `settings`,
-//! `tool` (result), `message`, `memory` (ledger, search), `logs`
+//! (snapshot, compaction), `events` (history/append generic, subscribe
+//! handlers), `settings`, `tool` (result), `message`, `memory`, `logs`
 //!
 //! ## `register_capabilities` — Domain features
 //!
-//! `skills` (list, get, refresh), `skill_session` (activate, deactivate,
-//! active — session-scoped skill state), `filesystem` (list, read, mkdir),
+//! `skills` and `skill_session` are fully generic-triggered engine functions;
+//! `filesystem` has generic read/list/home functions while mkdir remains a
+//! handler until file-write idempotency/path guardrails land;
+//!
+//! The remaining capability modules are
 //! `tree` (visualization, branches), `import` (listSources, listSessions,
 //! previewSession, execute), `mcp`, `prompt_library`, and `cron`
 //!
 //! ## `register_platform` — Platform-specific
 //!
 //! `browser` (stream), `worktree` (git), `transcription`,
-//! `device` (push tokens), `notifications` (inbox), `plan`,
+//! `device` (push tokens), `notifications` and `plan` (fully generic),
 //! `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
@@ -163,7 +166,10 @@ fn register_core(registry: &mut MethodRegistry) {
     );
     registry.register("events.subscribe", events::SubscribeHandler);
     registry.register("events.unsubscribe", events::UnsubscribeHandler);
-    registry.register("events.append", events::AppendHandler);
+    registry.register(
+        "events.append",
+        RpcGenericTriggerHandler::new("events.append"),
+    );
 
     // Settings
     registry.register(
@@ -217,22 +223,37 @@ fn register_capabilities(registry: &mut MethodRegistry) {
 
     // Skills
     registry.register("skill.list", RpcGenericTriggerHandler::new("skill.list"));
-    registry.register("skill.get", skills::GetSkillHandler);
-    registry.register("skill.refresh", skills::RefreshSkillsHandler);
+    registry.register("skill.get", RpcGenericTriggerHandler::new("skill.get"));
+    registry.register(
+        "skill.refresh",
+        RpcGenericTriggerHandler::new("skill.refresh"),
+    );
 
     // Session-scoped skill state
-    registry.register("skill.activate", skill_session::ActivateHandler);
-    registry.register("skill.deactivate", skill_session::DeactivateHandler);
-    registry.register("skill.active", skill_session::ActiveHandler);
+    registry.register(
+        "skill.activate",
+        RpcGenericTriggerHandler::new("skill.activate"),
+    );
+    registry.register(
+        "skill.deactivate",
+        RpcGenericTriggerHandler::new("skill.deactivate"),
+    );
+    registry.register(
+        "skill.active",
+        RpcGenericTriggerHandler::new("skill.active"),
+    );
 
     // Filesystem
-    registry.register("filesystem.listDir", filesystem::ListDirHandler);
+    registry.register(
+        "filesystem.listDir",
+        RpcGenericTriggerHandler::new("filesystem.listDir"),
+    );
     registry.register(
         "filesystem.getHome",
         RpcGenericTriggerHandler::new("filesystem.getHome"),
     );
     registry.register("filesystem.createDir", filesystem::CreateDirHandler);
-    registry.register("file.read", filesystem::ReadFileHandler);
+    registry.register("file.read", RpcGenericTriggerHandler::new("file.read"));
 
     // Tree
     registry.register("tree.getVisualization", tree::GetVisualizationHandler);
@@ -301,9 +322,12 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("device.respond", device::DeviceRespondHandler);
 
     // Plan
-    registry.register("plan.enter", plan::EnterPlanHandler);
-    registry.register("plan.exit", plan::ExitPlanHandler);
-    registry.register("plan.getState", plan::GetPlanStateHandler);
+    registry.register("plan.enter", RpcGenericTriggerHandler::new("plan.enter"));
+    registry.register("plan.exit", RpcGenericTriggerHandler::new("plan.exit"));
+    registry.register(
+        "plan.getState",
+        RpcGenericTriggerHandler::new("plan.getState"),
+    );
 
     // Voice Notes
     registry.register("voiceNotes.save", voice_notes::SaveHandler);
@@ -352,11 +376,17 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("sandbox.removeContainer", sandbox::RemoveContainerHandler);
 
     // Notifications
-    registry.register("notifications.list", notifications::ListHandler);
-    registry.register("notifications.markRead", notifications::MarkReadHandler);
+    registry.register(
+        "notifications.list",
+        RpcGenericTriggerHandler::new("notifications.list"),
+    );
+    registry.register(
+        "notifications.markRead",
+        RpcGenericTriggerHandler::new("notifications.markRead"),
+    );
     registry.register(
         "notifications.markAllRead",
-        notifications::MarkAllReadHandler,
+        RpcGenericTriggerHandler::new("notifications.markAllRead"),
     );
 
     // Prompt Library

@@ -155,6 +155,64 @@ impl EngineHostHandle {
             .register_function(definition, handler, volatile)
     }
 
+    /// Register or update a trigger type through the host boundary.
+    pub async fn register_trigger_type(
+        &self,
+        definition: TriggerTypeDefinition,
+        volatile: bool,
+    ) -> Result<()> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .register_trigger_type(definition, volatile)
+    }
+
+    /// Register or update a trigger type during single-threaded setup.
+    pub fn register_trigger_type_for_setup(
+        &self,
+        definition: TriggerTypeDefinition,
+        volatile: bool,
+    ) -> Result<()> {
+        self.inner
+            .try_lock()
+            .map_err(|_| {
+                EngineError::PolicyViolation(
+                    "engine host is busy during trigger-type setup".to_owned(),
+                )
+            })?
+            .catalog
+            .register_trigger_type(definition, volatile)
+    }
+
+    /// Register or update a trigger through the host boundary.
+    pub async fn register_trigger(
+        &self,
+        definition: TriggerDefinition,
+        volatile: bool,
+    ) -> Result<super::types::TriggerRevision> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .register_trigger(definition, volatile)
+    }
+
+    /// Register or update a trigger during single-threaded setup.
+    pub fn register_trigger_for_setup(
+        &self,
+        definition: TriggerDefinition,
+        volatile: bool,
+    ) -> Result<super::types::TriggerRevision> {
+        self.inner
+            .try_lock()
+            .map_err(|_| {
+                EngineError::PolicyViolation("engine host is busy during trigger setup".to_owned())
+            })?
+            .catalog
+            .register_trigger(definition, volatile)
+    }
+
     /// Discover visible functions through the host boundary.
     pub async fn discover(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
         self.inner.lock().await.catalog.discover_functions(query)

@@ -19,9 +19,10 @@ use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::{self, CLIENT_VERSION_UNSUPPORTED, RpcError, to_json_value};
 use crate::server::rpc::filesystem_service;
 use crate::server::rpc::handlers::{
-    events, map_event_store_error, model, opt_array, opt_string, opt_u64, require_param,
+    events, map_event_store_error, model, opt_array, opt_bool, opt_string, opt_u64, require_param,
     require_string_param, system,
 };
+use crate::server::rpc::notification_inbox::NotificationInboxService;
 use crate::server::rpc::types::RpcEvent;
 use crate::server::rpc::validation::validate_string_param;
 use crate::server::websocket::broadcast::BroadcastManager;
@@ -101,11 +102,25 @@ async fn rpc_function_value(
         "settings.resetToDefaults" => settings_reset_to_defaults_value(deps).await,
         "model.list" => model_list_value(payload, deps, allow_rpc_context).await,
         "skill.list" => Ok(skill_list_value(Some(payload), deps)),
+        "skill.get" => skill_get_value(Some(payload), deps),
+        "skill.refresh" => skill_refresh_value(Some(payload), deps).await,
+        "skill.activate" => skill_activate_value(Some(payload), deps),
+        "skill.deactivate" => skill_deactivate_value(Some(payload), deps),
+        "skill.active" => skill_active_value(Some(payload), deps),
         "logs.ingest" => ingest_logs_value(Some(payload), deps).await,
         "logs.recent" => recent_logs_value(Some(payload.clone()), deps).await,
         "events.getHistory" => events_get_history_value(Some(payload), deps).await,
         "events.getSince" => events_get_since_value(Some(payload), deps).await,
+        "events.append" => events_append_value(Some(payload), deps).await,
+        "filesystem.listDir" => filesystem_list_dir_value(Some(payload), deps).await,
         "filesystem.getHome" => filesystem_get_home_value(deps).await,
+        "file.read" => file_read_value(Some(payload), deps).await,
+        "notifications.list" => notifications_list_value(Some(payload), deps).await,
+        "notifications.markRead" => notifications_mark_read_value(Some(payload), deps).await,
+        "notifications.markAllRead" => notifications_mark_all_read_value(Some(payload), deps).await,
+        "plan.enter" => plan_set_value(Some(payload), deps, true),
+        "plan.exit" => plan_set_value(Some(payload), deps, false),
+        "plan.getState" => plan_get_state_value(Some(payload), deps),
         "promptHistory.list" => prompt_history_list_value(Some(payload), deps).await,
         "promptHistory.delete" => prompt_history_delete_value(Some(payload), deps).await,
         "promptHistory.clear" => prompt_history_clear_value(deps).await,
@@ -463,6 +478,217 @@ fn skill_list_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Value {
     json!({ "skills": skills })
 }
 
+fn skill_get_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let name = require_string_param(params, "name")?;
+    let working_dir = resolve_skill_working_dir(params, deps);
+
+    let mut registry = deps.skill_registry.write();
+    let _ = registry.refresh_if_stale(&working_dir);
+
+    let skill = registry.get(&name).ok_or_else(|| RpcError::NotFound {
+        code: errors::NOT_FOUND.into(),
+        message: format!("Skill '{name}' not found"),
+    })?;
+
+    Ok(json!({
+        "skill": skill_to_wire(skill),
+        "found": true,
+    }))
+}
+
+async fn skill_refresh_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let working_dir = resolve_skill_working_dir(params, deps);
+    let skill_registry = Arc::clone(&deps.skill_registry);
+    let count = run_blocking_task("skill.refresh", move || {
+        let mut registry = skill_registry.write();
+        registry.refresh(&working_dir);
+        Ok(registry.list(None).len())
+    })
+    .await?;
+    Ok(json!({ "success": true, "skillCount": count }))
+}
+
+fn skill_activate_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let skill_name = require_string_param(params, "skillName")?;
+
+    deps.session_manager
+        .get_session(&session_id)
+        .map_err(|error| RpcError::Internal {
+            message: error.to_string(),
+        })?
+        .ok_or_else(|| RpcError::NotFound {
+            code: errors::NOT_FOUND.into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+
+    let (source, service, tokens) = {
+        let registry = deps.skill_registry.read();
+        let skill = registry
+            .get(&skill_name)
+            .ok_or_else(|| RpcError::NotFound {
+                code: errors::NOT_FOUND.into(),
+                message: format!("Skill '{skill_name}' not found"),
+            })?;
+        (
+            skill.source.to_string(),
+            skill.service.clone(),
+            skill.content.len() as u64 / 4,
+        )
+    };
+
+    let already_active = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+        &deps.event_store,
+        &session_id,
+        &crate::settings::types::CompactionPolicy::ClearAll,
+    )
+    .has_skill(&skill_name);
+
+    if already_active {
+        return Ok(json!({
+            "success": true,
+            "alreadyActive": true,
+            "skill": {
+                "name": skill_name,
+                "source": source,
+                "service": service,
+                "tokens": tokens,
+            }
+        }));
+    }
+
+    let _ = deps.event_store.append(&crate::events::AppendOptions {
+        session_id: &session_id,
+        event_type: crate::events::EventType::SkillActivated,
+        payload: json!({
+            "skillName": skill_name,
+            "source": source,
+        }),
+        parent_id: None,
+        sequence: None,
+    });
+    deps.session_manager.invalidate_session(&session_id);
+
+    Ok(json!({
+        "success": true,
+        "skill": {
+            "name": skill_name,
+            "source": source,
+            "service": service,
+            "tokens": tokens,
+        }
+    }))
+}
+
+fn skill_deactivate_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let skill_name = require_string_param(params, "skillName")?;
+
+    deps.session_manager
+        .get_session(&session_id)
+        .map_err(|error| RpcError::Internal {
+            message: error.to_string(),
+        })?
+        .ok_or_else(|| RpcError::NotFound {
+            code: errors::NOT_FOUND.into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+
+    let is_active = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+        &deps.event_store,
+        &session_id,
+        &crate::settings::types::CompactionPolicy::ClearAll,
+    )
+    .has_skill(&skill_name);
+
+    if !is_active {
+        return Ok(json!({
+            "success": true,
+            "wasActive": false,
+            "deactivatedSkill": skill_name,
+        }));
+    }
+
+    let _ = deps.event_store.append(&crate::events::AppendOptions {
+        session_id: &session_id,
+        event_type: crate::events::EventType::SkillDeactivated,
+        payload: json!({ "skillName": skill_name }),
+        parent_id: None,
+        sequence: None,
+    });
+    deps.session_manager.invalidate_session(&session_id);
+
+    Ok(json!({
+        "success": true,
+        "wasActive": true,
+        "deactivatedSkill": skill_name,
+    }))
+}
+
+fn skill_active_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    deps.session_manager
+        .get_session(&session_id)
+        .map_err(|error| RpcError::Internal {
+            message: error.to_string(),
+        })?
+        .ok_or_else(|| RpcError::NotFound {
+            code: errors::NOT_FOUND.into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+
+    let tracker = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+        &deps.event_store,
+        &session_id,
+        &crate::settings::types::CompactionPolicy::ClearAll,
+    );
+    let registry = deps.skill_registry.read();
+    let skills: Vec<Value> = tracker
+        .added_skills()
+        .iter()
+        .map(|skill| {
+            let added_via = match skill.added_via {
+                crate::skills::types::SkillAddMethod::Mention => "mention",
+                crate::skills::types::SkillAddMethod::Explicit => "explicit",
+            };
+            let service = registry
+                .get(&skill.name)
+                .map(|metadata| metadata.service.clone())
+                .unwrap_or_else(|| "unknown".to_owned());
+            json!({
+                "name": skill.name,
+                "source": skill.source.to_string(),
+                "service": service,
+                "addedVia": added_via,
+                "tokens": skill.tokens,
+            })
+        })
+        .collect();
+
+    Ok(json!({ "skills": skills }))
+}
+
+fn skill_to_wire(skill: &crate::skills::types::SkillMetadata) -> Value {
+    let mut value = json!({
+        "name": skill.name,
+        "displayName": skill.display_name,
+        "description": skill.description,
+        "source": skill.source,
+        "service": skill.service,
+        "tags": skill.frontmatter.tags,
+        "content": skill.content,
+        "path": skill.path,
+        "additionalFiles": skill.additional_files,
+    });
+    if !skill.scope_dir.is_empty() {
+        value["scopeDir"] = json!(skill.scope_dir);
+    }
+    value
+}
+
 fn resolve_skill_working_dir(params: Option<&Value>, deps: &RpcEngineDeps) -> String {
     if let Some(wd) = params
         .and_then(|value| value.get("workingDirectory"))
@@ -578,12 +804,132 @@ async fn events_get_since_value(
     }))
 }
 
+async fn events_append_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let event_type_str = require_string_param(params, "type")?;
+    let payload = require_param(params, "payload")?;
+    let event_type: crate::events::EventType =
+        event_type_str
+            .parse()
+            .map_err(|_| RpcError::InvalidParams {
+                message: format!("Unknown event type: {event_type_str}"),
+            })?;
+    let parent_id = opt_string(params, "parentId");
+
+    let event = deps
+        .event_store
+        .append(&crate::events::AppendOptions {
+            session_id: &session_id,
+            event_type,
+            payload: payload.clone(),
+            parent_id: parent_id.as_deref(),
+            sequence: None,
+        })
+        .map_err(map_event_store_error)?;
+    let new_head = deps
+        .event_store
+        .get_session(&session_id)
+        .map_err(map_event_store_error)?
+        .and_then(|session| session.head_event_id);
+
+    Ok(json!({
+        "event": events::event_row_to_wire(&event),
+        "newHeadEventId": new_head,
+    }))
+}
+
+async fn filesystem_list_dir_value(
+    params: Option<&Value>,
+    _deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let home = crate::core::paths::home_dir();
+    let path = opt_string(params, "path").unwrap_or(home);
+    let show_hidden = opt_bool(params, "showHidden").unwrap_or(false);
+    run_blocking_task("filesystem.listDir", move || {
+        filesystem_service::list_dir(&path, show_hidden)
+    })
+    .await
+}
+
 async fn filesystem_get_home_value(_deps: &RpcEngineDeps) -> Result<Value, RpcError> {
     let home = crate::core::paths::home_dir();
     run_blocking_task("filesystem.getHome", move || {
         Ok(filesystem_service::get_home(&home))
     })
     .await
+}
+
+async fn file_read_value(params: Option<&Value>, _deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let path = require_string_param(params, "path")?;
+    run_blocking_task("file.read", move || filesystem_service::read_file(&path)).await
+}
+
+async fn notifications_list_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let limit = opt_u64(params, "limit", 50).min(100);
+    let pool = deps.event_store.pool().clone();
+    let result = run_blocking_task("notifications.list", move || {
+        let conn = pool.get().map_err(|error| RpcError::Internal {
+            message: format!("Failed to get DB connection: {error}"),
+        })?;
+        NotificationInboxService::list(&conn, limit)
+    })
+    .await?;
+    to_json_value(&result)
+}
+
+async fn notifications_mark_read_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let event_id = require_string_param(params, "eventId")?;
+    let pool = deps.event_store.pool().clone();
+    let result = run_blocking_task("notifications.mark_read", move || {
+        let conn = pool.get().map_err(|error| RpcError::Internal {
+            message: format!("Failed to get DB connection: {error}"),
+        })?;
+        NotificationInboxService::mark_read(&conn, &event_id)
+    })
+    .await?;
+    to_json_value(&result)
+}
+
+async fn notifications_mark_all_read_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = opt_string(params, "sessionId");
+    let pool = deps.event_store.pool().clone();
+    let result = run_blocking_task("notifications.mark_all_read", move || {
+        let conn = pool.get().map_err(|error| RpcError::Internal {
+            message: format!("Failed to get DB connection: {error}"),
+        })?;
+        NotificationInboxService::mark_all_read(&conn, session_id.as_deref())
+    })
+    .await?;
+    to_json_value(&result)
+}
+
+fn plan_set_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+    enabled: bool,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    deps.session_manager.set_plan_mode(&session_id, enabled);
+    Ok(json!({ "planMode": enabled }))
+}
+
+fn plan_get_state_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    Ok(json!({
+        "planMode": deps.session_manager.is_plan_mode(&session_id),
+    }))
 }
 
 async fn prompt_history_list_value(

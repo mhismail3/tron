@@ -164,6 +164,11 @@ HTTP routes, JSON-RPC compatibility calls, cron schedules, queue messages,
 state changes, event-store appends, UI actions, approval responses, stream
 events, and agent tool calls should all reduce to triggers.
 
+The first runtime supports only in-process `json_rpc` and `manual` trigger
+dispatch. That is intentional: it proves trigger metadata, authority,
+idempotency, revision, schema, and ledger behavior before adding durable queue,
+cron, stream, or external-worker delivery.
+
 ### Engine
 
 The engine is the live capability fabric. It owns:
@@ -380,8 +385,16 @@ isolation does.
 | Worker | Responsibility |
 |--------|----------------|
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
-| `rpc` | Compatibility worker for current JSON-RPC methods during migration. Function ids use `rpc::<method>`; selected read methods plus the full prompt-library, settings, and logs groups are already served by a generic JSON-RPC trigger, while handler-only methods remain internal/non-routable metadata until migrated and deleted. |
-| `event` | Session/event-store append, read, reconstruct, subscribe. |
+| `rpc` | Transport compatibility worker for current JSON-RPC methods during migration. It owns the `json_rpc` trigger type and trigger bindings, not long-term business behavior. |
+| `system` | Server status, ping, diagnostics, and future lifecycle/update capabilities. |
+| `settings` | Typed settings with iOS parity guarantees; currently fully generic-triggered for RPC compatibility. |
+| `logs` | Local observability reads and append-only client-log ingestion; currently fully generic-triggered for RPC compatibility. |
+| `prompt_library` | Prompt history/snippet reads and writes; currently fully generic-triggered for RPC compatibility. |
+| `skills` | Skill registry and session-scoped active-skill state; currently fully generic-triggered for RPC compatibility. |
+| `filesystem` | Home/list/read capabilities now generic-triggered; writes remain deferred until path authority and idempotent file mutation contracts are hardened. |
+| `events` | Session/event-store append, read, reconstruct, subscribe. History/since/append are generic-triggered now; subscribe/unsubscribe wait for stream primitives. |
+| `notifications` | Notification inbox read-state functions; currently fully generic-triggered for RPC compatibility. |
+| `plan` | Session plan-mode state; currently fully generic-triggered for RPC compatibility. |
 | `stream` | Durable subscriptions for session events, topology, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |
 | `queue` | Durable named queues, receipts, retries, cancellation, DLQ/redrive. |
@@ -390,9 +403,15 @@ isolation does.
 | `tool` | Built-in tool capabilities and tool invocation. |
 | `mcp` | MCP search/call and server lifecycle. |
 | `worktree` | Git/worktree capabilities and conflict workflows. |
-| `settings` | Typed settings with iOS parity guarantees. |
 | `auth` | Provider auth, client auth, future worker tokens and grants. |
 | `observability` | Logs, metrics, traces, causal graph queries, diagnostics. |
+
+During the compatibility period, migrated domain workers may still register
+`rpc::<method>` function ids so old JSON-RPC clients keep their stable method
+names. The metadata on each function records its canonical domain capability
+such as `skills::activate` or `events::append`. The end-state migration removes
+the `rpc::` compatibility ids after clients and agents invoke canonical domain
+capabilities directly.
 
 ## State, streams, queues, and events
 

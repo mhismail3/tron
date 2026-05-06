@@ -418,6 +418,69 @@ Acceptance:
 - `logs.recent` continues to read the entries written by the engine-owned
   ingest function.
 
+## Phase 3.9: domain workers and first trigger runtime
+
+Move the architecture's center of gravity away from the RPC bridge by making
+domain workers own migrated behavior and by routing JSON-RPC through explicit
+trigger definitions.
+
+Implemented in-process workers:
+
+- `system`
+- `settings`
+- `logs`
+- `prompt_library`
+- `skills`
+- `filesystem`
+- `events`
+- `notifications`
+- `plan`
+
+Implemented trigger foundation:
+
+- `json_rpc` trigger type for current WebSocket JSON-RPC requests;
+- `manual` trigger type for tests and future direct agent/human dispatch;
+- `EngineTriggerRuntime` dispatch that records trigger id, delivery mode,
+  actor, authority grant, trace, optional parent invocation, and idempotency
+  context before invoking the target function through `EngineHostHandle`.
+
+Newly collapsed groups/functions:
+
+- all `skill.*` methods;
+- read-safe filesystem functions `filesystem.listDir`, `filesystem.getHome`,
+  and `file.read`;
+- all `notifications.*` methods;
+- all `plan.*` methods;
+- `events.append`, alongside the already migrated `events.getHistory` and
+  `events.getSince`.
+
+Semantics:
+
+- the `rpc` worker is now transport compatibility only;
+- migrated domain workers own function contracts, schemas, effect/risk
+  metadata, and idempotency policy;
+- `rpc::<method>` function ids remain as compatibility ids during migration,
+  with canonical domain capability metadata recorded on each function;
+- read triggers carry `rpc.read`; write triggers carry `rpc.write`;
+- skill activation/deactivation and plan writes use session-scoped
+  idempotency, while global refresh/notification/log/settings/prompt-library
+  writes use system-scoped idempotency;
+- event append is an append-only event capability and preserves the existing
+  event payload contract.
+
+Acceptance:
+
+- migrated registrations are marker-only generic triggers;
+- old business handlers for the collapsed groups are deleted;
+- direct engine invocation and JSON-RPC dispatch agree for every newly
+  migrated method's success path and representative legacy errors;
+- duplicate transport retries replay from the engine ledger without rerunning
+  handlers;
+- catalog watch shows domain workers, functions, trigger types, and trigger
+  bindings as live catalog changes;
+- missing/stale/hidden/unhealthy/schema/policy/idempotency trigger failures
+  fail closed through the same invocation boundary.
+
 ## Phase 4: catalog watch, streams, and event unification
 
 Introduce engine streams while preserving WebSocket clients.

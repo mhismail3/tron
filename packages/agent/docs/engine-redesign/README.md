@@ -2,7 +2,7 @@
 
 Status: exploration branch artifact.
 
-Date: 2026-05-01.
+Date: 2026-05-06.
 
 Branch: `codex/iii-engine-redesign-exploration`.
 
@@ -204,19 +204,25 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   call, plus the invocation record shape stored by the engine ledger.
 - `schema.rs` enforces a deliberately small JSON-schema subset for request and
   response payloads: `type`, `required`, `properties`, `additionalProperties`,
-  `items`, and `enum`.
+  `items`, `maxItems`, and `enum`.
+- `triggers.rs` defines the first in-process trigger runtime. It dispatches
+  registered `json_rpc` and `manual` trigger definitions through
+  `EngineHostHandle`, preserving trigger id, delivery mode, actor, authority,
+  trace, parent invocation, session/workspace scope, and idempotency context in
+  the invocation ledger.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
 - `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
-  production adapter surface. They register a `rpc` compatibility worker and
-  one `rpc::<method>` function for all 167 current JSON-RPC methods.
-  Handler-only methods are present as internal non-routable metadata. The first
-  twelve low-risk reads are strict-schema `GenericTrigger` methods served by
-  registry-level JSON-RPC-to-engine dispatch. Prompt library, settings, and
-  logs are fully collapsed method groups: all public methods in those groups are
-  generic-triggered with `rpc.read`/`rpc.write`, strict schemas, and
-  engine-ledger idempotency for writes. Superseded method-specific business
-  handlers are deleted as each group migrates.
+  production adapter surface. They register the transport-only `rpc`
+  compatibility worker, domain-owned in-process workers, one `rpc::<method>`
+  compatibility function for all 167 current JSON-RPC methods, the `json_rpc`
+  and `manual` trigger types, and `json_rpc` trigger bindings for routable
+  methods. Handler-only methods are present as internal non-routable metadata.
+  Prompt library, settings, logs, skills, notifications, and plan are fully
+  collapsed method groups. Events history/since/append and read-safe filesystem
+  methods are also generic-triggered. Migrated writes use `rpc.write`, strict
+  schemas, and scoped engine-ledger idempotency; superseded method-specific
+  business handlers are deleted as each group migrates.
 
 ## Phase 1 acceptance checklist
 

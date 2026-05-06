@@ -20,16 +20,20 @@
 //! - `EngineHostHandle` gives server startup and adapters an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
-//! - the RPC bridge registers `rpc::<method>` compatibility functions so
-//!   JSON-RPC can be collapsed into a trigger transport incrementally;
-//! - Phase 1 executes only in-process synchronous calls.
+//! - the RPC bridge registers `rpc::<method>` compatibility functions and
+//!   `json_rpc` triggers so JSON-RPC can collapse into one transport over
+//!   engine functions;
+//! - the initial trigger runtime records trigger metadata and invokes
+//!   in-process functions synchronously; queue, stream, cron, and external
+//!   worker delivery stay deferred until this local fabric is solid.
 //!
 //! ## Module Position
 //!
 //! Depends on: `serde`, `serde_json`, `async_trait`, `thiserror`, `chrono`,
 //! `sha2`, `hex`, and `rusqlite` for the isolated durable ledger adapter.
-//! Does not depend on runtime, server, events, tools, or settings. Future
-//! modules will adapt those subsystems into engine workers.
+//! Does not depend on runtime, server, events, tools, or settings. Server-side
+//! adapters register those subsystems as in-process workers at startup without
+//! making the engine core depend on them.
 
 #![deny(unsafe_code)]
 
@@ -42,6 +46,7 @@ pub mod ledger;
 pub mod policy;
 pub mod registry;
 pub mod schema;
+pub mod triggers;
 pub mod types;
 
 pub use discovery::{ActorContext, ActorKind, FunctionQuery};
@@ -63,6 +68,7 @@ pub use ledger::{
     SqliteEngineLedgerStore, StoredEngineError, StoredInvocationOutcome,
 };
 pub use registry::LiveCatalog;
+pub use triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
     CatalogSubjectKind, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,

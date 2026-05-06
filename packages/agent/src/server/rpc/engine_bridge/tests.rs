@@ -25,10 +25,16 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "settings.get",
     "model.list",
     "skill.list",
+    "skill.get",
+    "skill.active",
     "logs.recent",
     "events.getHistory",
     "events.getSince",
+    "filesystem.listDir",
     "filesystem.getHome",
+    "file.read",
+    "notifications.list",
+    "plan.getState",
     "promptHistory.list",
     "promptSnippet.list",
     "promptSnippet.get",
@@ -36,8 +42,16 @@ const GENERIC_READ_METHODS: &[&str] = &[
 
 const GENERIC_WRITE_METHODS: &[&str] = &[
     "logs.ingest",
+    "events.append",
     "settings.update",
     "settings.resetToDefaults",
+    "skill.refresh",
+    "skill.activate",
+    "skill.deactivate",
+    "notifications.markRead",
+    "notifications.markAllRead",
+    "plan.enter",
+    "plan.exit",
     "promptHistory.delete",
     "promptHistory.clear",
     "promptSnippet.create",
@@ -52,6 +66,26 @@ const SETTINGS_METHODS: &[&str] = &[
 ];
 
 const LOGS_METHODS: &[&str] = &["logs.ingest", "logs.recent"];
+
+const SKILL_METHODS: &[&str] = &[
+    "skill.list",
+    "skill.get",
+    "skill.refresh",
+    "skill.activate",
+    "skill.deactivate",
+    "skill.active",
+];
+
+const FILESYSTEM_ENGINE_METHODS: &[&str] =
+    &["filesystem.getHome", "filesystem.listDir", "file.read"];
+
+const NOTIFICATION_METHODS: &[&str] = &[
+    "notifications.list",
+    "notifications.markRead",
+    "notifications.markAllRead",
+];
+
+const PLAN_METHODS: &[&str] = &["plan.enter", "plan.exit", "plan.getState"];
 
 const PROMPT_LIBRARY_METHODS: &[&str] = &[
     "promptHistory.list",
@@ -393,6 +427,56 @@ fn bridge_specs_classify_logs_ingest_as_guarded_append_only_trigger() {
         Some(VisibilityScope::System)
     );
     assert!(!definition.required_authority.approval_required);
+}
+
+#[test]
+fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    for method in SKILL_METHODS
+        .iter()
+        .chain(FILESYSTEM_ENGINE_METHODS)
+        .chain(NOTIFICATION_METHODS)
+        .chain(PLAN_METHODS)
+        .chain(["events.append"].iter())
+    {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+        assert!(super::schemas::request_schema_for_method(method).is_some());
+        assert!(super::schemas::response_schema_for_method(method).is_some());
+    }
+}
+
+#[test]
+fn bridge_specs_assign_generic_methods_to_domain_workers() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    for (method, worker) in [
+        ("system.ping", "system"),
+        ("settings.update", "settings"),
+        ("logs.ingest", "logs"),
+        ("promptSnippet.create", "prompt_library"),
+        ("skill.activate", "skills"),
+        ("filesystem.listDir", "filesystem"),
+        ("events.append", "events"),
+        ("notifications.markRead", "notifications"),
+        ("plan.enter", "plan"),
+    ] {
+        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
+        assert_eq!(spec.owner_worker, specs::worker_id(worker).unwrap());
+        assert_eq!(spec.domain_worker, specs::worker_id(worker).unwrap());
+        let definition = specs::function_definition_for_spec(spec);
+        assert_eq!(definition.owner_worker, specs::worker_id(worker).unwrap());
+        assert_eq!(definition.metadata["domainWorker"], worker);
+    }
 }
 
 #[test]
@@ -1396,6 +1480,84 @@ async fn prompt_history_reused_request_id_with_different_payload_is_distinct_com
 }
 
 #[tokio::test]
+async fn skill_activate_duplicate_transport_replays_without_second_event() {
+    let ctx = make_test_context();
+    ctx.skill_registry
+        .write()
+        .insert(crate::skills::types::SkillMetadata {
+            name: "browser".to_owned(),
+            display_name: "browser".to_owned(),
+            description: "browser skill".to_owned(),
+            content: "browser content".to_owned(),
+            frontmatter: crate::skills::types::SkillFrontmatter::default(),
+            source: crate::skills::types::SkillSource::Global,
+            service: "tron".to_owned(),
+            scope_dir: String::new(),
+            path: String::new(),
+            skill_md_path: String::new(),
+            additional_files: Vec::new(),
+            last_modified: 0,
+        });
+    let session_id = ctx
+        .session_manager
+        .create_session("model", "/tmp", Some("skills"), None)
+        .unwrap();
+    let payload = json!({"sessionId": session_id, "skillName": "browser"});
+
+    let first = rpc_dispatch_value(&ctx, "skill.activate", payload.clone()).await;
+    let second = rpc_dispatch_value(&ctx, "skill.activate", payload).await;
+    assert_eq!(first, second);
+
+    let events = ctx
+        .event_store
+        .get_events_by_type(&session_id, &["skill.activated"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    let host = ctx.engine_host.lock().await;
+    assert!(
+        host.catalog()
+            .invocations()
+            .last()
+            .unwrap()
+            .replayed_from
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn events_append_duplicate_transport_replays_without_second_append() {
+    let ctx = make_test_context();
+    let session_id = ctx
+        .session_manager
+        .create_session("model", "/tmp", Some("events"), None)
+        .unwrap();
+    let payload = json!({
+        "sessionId": session_id,
+        "type": "message.user",
+        "payload": {"text": "hello"}
+    });
+
+    let first = rpc_dispatch_value(&ctx, "events.append", payload.clone()).await;
+    let second = rpc_dispatch_value(&ctx, "events.append", payload).await;
+    assert_eq!(first, second);
+
+    let events = ctx
+        .event_store
+        .get_events_by_type(&session_id, &["message.user"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    let host = ctx.engine_host.lock().await;
+    assert!(
+        host.catalog()
+            .invocations()
+            .last()
+            .unwrap()
+            .replayed_from
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn prompt_history_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
     let ctx = make_test_context();
     let pool = ctx.event_store.pool();
@@ -1657,7 +1819,11 @@ async fn generic_trigger_records_invocation_ledger_metadata() {
         record.function_id,
         specs::function_id_for_method("system.ping").unwrap()
     );
-    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(record.worker_id, specs::worker_id("system").unwrap());
+    assert_eq!(
+        record.trigger_id,
+        Some(specs::json_rpc_trigger_id_for_method("system.ping").unwrap())
+    );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
     assert!(
@@ -1682,7 +1848,14 @@ async fn generic_write_records_invocation_ledger_metadata() {
         record.function_id,
         specs::function_id_for_method("promptSnippet.create").unwrap()
     );
-    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(
+        record.worker_id,
+        specs::worker_id("prompt_library").unwrap()
+    );
+    assert_eq!(
+        record.trigger_id,
+        Some(specs::json_rpc_trigger_id_for_method("promptSnippet.create").unwrap())
+    );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
     assert!(
@@ -1722,7 +1895,11 @@ async fn generic_logs_write_records_invocation_ledger_metadata() {
         record.function_id,
         specs::function_id_for_method("logs.ingest").unwrap()
     );
-    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(record.worker_id, specs::worker_id("logs").unwrap());
+    assert_eq!(
+        record.trigger_id,
+        Some(specs::json_rpc_trigger_id_for_method("logs.ingest").unwrap())
+    );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
     assert!(
@@ -1763,7 +1940,11 @@ async fn generic_settings_write_records_invocation_ledger_metadata() {
         record.function_id,
         specs::function_id_for_method("settings.update").unwrap()
     );
-    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(record.worker_id, specs::worker_id("settings").unwrap());
+    assert_eq!(
+        record.trigger_id,
+        Some(specs::json_rpc_trigger_id_for_method("settings.update").unwrap())
+    );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
     assert!(
@@ -1806,7 +1987,14 @@ async fn generic_prompt_history_write_records_invocation_ledger_metadata() {
         record.function_id,
         specs::function_id_for_method("promptHistory.delete").unwrap()
     );
-    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(
+        record.worker_id,
+        specs::worker_id("prompt_library").unwrap()
+    );
+    assert_eq!(
+        record.trigger_id,
+        Some(specs::json_rpc_trigger_id_for_method("promptHistory.delete").unwrap())
+    );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
     assert!(
