@@ -197,7 +197,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("message.delete", message::DeleteMessageHandler);
 
     // Logs
-    registry.register("logs.ingest", logs::IngestLogsHandler);
+    registry.register("logs.ingest", RpcGenericTriggerHandler::new("logs.ingest"));
     registry.register("logs.recent", RpcGenericTriggerHandler::new("logs.recent"));
 
     // Memory

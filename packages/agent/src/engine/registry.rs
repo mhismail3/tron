@@ -681,25 +681,6 @@ impl LiveCatalog {
             )));
         }
 
-        if let Some(schema) = &function.request_schema {
-            if let Err(err) =
-                schema::validate_payload(&function.id, "request", schema, &invocation.payload)
-            {
-                let result = InvocationResult::error(
-                    &invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    err,
-                );
-                return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
-                    &invocation,
-                    result,
-                    None,
-                )));
-            }
-        }
-
         let idempotency =
             match self.idempotency_lookup(&function, &invocation) {
                 Ok(idempotency) => idempotency,
@@ -754,8 +735,38 @@ impl LiveCatalog {
             }
         }
 
+        if let Some(schema) = &function.request_schema {
+            if let Err(err) =
+                schema::validate_payload(&function.id, "request", schema, &invocation.payload)
+            {
+                let mut result = InvocationResult::error(
+                    &invocation,
+                    function.owner_worker.clone(),
+                    function.revision,
+                    self.revision,
+                    err,
+                );
+                if let Some(reservation) = &idempotency
+                    && let Some(completion_error) = self.complete_invocation_idempotency(
+                        reservation,
+                        &invocation,
+                        &function,
+                        &result,
+                    )
+                {
+                    result = completion_error;
+                }
+                let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
+                return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
+                    &invocation,
+                    result,
+                    idempotency_scope,
+                )));
+            }
+        }
+
         let Some(handler) = handler else {
-            let result = InvocationResult::error(
+            let mut result = InvocationResult::error(
                 &invocation,
                 function.owner_worker.clone(),
                 function.revision,
@@ -765,10 +776,21 @@ impl LiveCatalog {
                     reason: "no in-process handler".to_owned(),
                 },
             );
+            if let Some(reservation) = &idempotency
+                && let Some(completion_error) = self.complete_invocation_idempotency(
+                    reservation,
+                    &invocation,
+                    &function,
+                    &result,
+                )
+            {
+                result = completion_error;
+            }
+            let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
             return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
                 &invocation,
                 result,
-                None,
+                idempotency_scope,
             )));
         };
 

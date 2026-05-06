@@ -93,6 +93,19 @@ fn validate_schema_node(
         validate_schema_node(function_id, direction, items, &format!("{path}.items"))?;
     }
 
+    if let Some(max_items) = object.get("maxItems") {
+        match max_items.as_u64() {
+            Some(_) => {}
+            None => {
+                return Err(invalid_schema(
+                    function_id,
+                    direction,
+                    format!("{path}.maxItems must be a non-negative integer"),
+                ));
+            }
+        }
+    }
+
     if let Some(enum_values) = object.get("enum") {
         if !enum_values.is_array() {
             return Err(invalid_schema(
@@ -233,6 +246,19 @@ fn validate_payload_node(
                     child_payload,
                     &format!("{path}.{key}"),
                 )?;
+            }
+        }
+    }
+
+    if let Some(items) = payload.as_array() {
+        if let Some(max_items) = object.get("maxItems").and_then(Value::as_u64) {
+            if items.len() as u64 > max_items {
+                return Err(schema_violation(
+                    function_id,
+                    direction,
+                    path,
+                    format!("array has more than {max_items} items"),
+                ));
             }
         }
     }

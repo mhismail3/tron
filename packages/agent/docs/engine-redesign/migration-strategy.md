@@ -385,6 +385,39 @@ Acceptance:
 - Settings is the second fully collapsed RPC group and the first migrated group
   whose write capabilities are high-risk reversible configuration effects.
 
+## Phase 3.8: append-only logs collapse
+
+Collapse the logs group so client log ingestion and log reads are owned by
+engine functions. This makes JSON-RPC only the transport trigger for local
+observability input.
+
+Implemented generic-trigger function:
+
+- `rpc::logs.ingest`
+
+Semantics:
+
+- both logs RPC methods are now `GenericTrigger`;
+- `logs.ingest` is an append-only event capability with `rpc.write`, strict
+  schemas, and system-scoped engine-ledger idempotency;
+- JSON-RPC request-id-derived idempotency replays exact duplicate transports
+  before opening the DB transaction, while row-level log dedupe remains a lower
+  defense for overlapping batches;
+- mutating invocation idempotency is reserved before request-schema validation
+  so rejected write attempts, including oversized batches, are recorded and
+  replayable.
+
+Acceptance:
+
+- `IngestLogsHandler` is deleted.
+- The logs group is marker-registered only.
+- Direct engine invocation and JSON-RPC dispatch return the same payloads for
+  ingest success cases.
+- Duplicate ingest transports replay through the engine ledger without
+  rerunning log insertion.
+- `logs.recent` continues to read the entries written by the engine-owned
+  ingest function.
+
 ## Phase 4: catalog watch, streams, and event unification
 
 Introduce engine streams while preserving WebSocket clients.

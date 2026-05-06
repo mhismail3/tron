@@ -3,10 +3,10 @@
 //! In-process live capability fabric for the Tron agent.
 //!
 //! This module is the Phase 1 foundation for the engine redesign documented in
-//! `packages/agent/docs/engine-redesign/`. It now routes the first low-risk
-//! production RPC reads through engine-owned functions while tool, runtime, and
-//! broader client traffic remain on their existing paths. The core invariants
-//! are:
+//! `packages/agent/docs/engine-redesign/`. It now routes selected production
+//! RPC reads and the first fully collapsed write groups through engine-owned
+//! functions while tool, runtime, and broader client traffic remain on their
+//! existing paths. The core invariants are:
 //!
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;

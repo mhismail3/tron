@@ -27,7 +27,7 @@ The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
 with one `rpc::<method>` function for each method. Handler-only entries are
 internal/non-routable metadata. The first generic-triggered engine reads are
 `system.ping`, `system.getInfo`, `settings.get`, `model.list`, `skill.list`,
-`logs.recent`, `events.getHistory`, `events.getSince`, `filesystem.getHome`,
+`logs.ingest`, `logs.recent`, `events.getHistory`, `events.getSince`, `filesystem.getHome`,
 `promptHistory.list`, `promptSnippet.list`, and `promptSnippet.get`. The full
 prompt-library group is now generic-triggered: `promptHistory.delete`,
 `promptHistory.clear`, `promptSnippet.create`, `promptSnippet.update`, and
@@ -57,7 +57,7 @@ answers are explicit enough to test.
 | `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
 | `tool` | 1 | Tool-result compatibility function. | Session. | Append/update tool result; idempotent by tool call id. | Link to parent tool invocation and turn. |
 | `message` | 1 | `message::delete`. | Session/client. | Idempotent write. | Event-sourced deletion marker. |
-| `logs` | 2 | `observability::logs::*`; `recent` is a generic-triggered read in the RPC bridge. | Admin/client filtered. | Ingest append-only; recent read. | Trace/log correlation mandatory. |
+| `logs` | 2 | Fully generic-triggered `observability::logs::*` compatibility functions. | Admin/client filtered. | Ingest append-only with system idempotency; recent read. | Trace/log correlation mandatory; duplicate transport ingests replay before DB insertion. |
 | `memory` | 1 | `memory::retain`. | Session/workspace with policy. | Idempotent/append memory update. | User memory files remain governed; no hardcoded personal data. |
 | `mcp` | 8 | `mcp::*` worker functions. | Agent/client/admin filtered. | Lifecycle writes require idempotency; search/list are reads. | MCP tool calls inherit caller authority and trace. |
 | `skill` | 6 | `skill::*` registry and session state functions. | Session/workspace. | Activate/deactivate idempotent by session+skill. | Skill provenance and denied/allowed tools affect capability views. |
@@ -141,7 +141,7 @@ Current durable database tables:
 |------------------|------------------|------|
 | `events` table | `event` worker and causal ledger. | Session truth remains append-only and reconstructable. |
 | WebSocket broadcasts | `stream` worker. | Transport-independent streams with cursors and trace metadata. |
-| `logs` table | `observability` worker. | Logs correlate to trace/invocation ids. |
+| `logs` table | `observability` worker. | Client log ingestion is append-only and engine-idempotent; logs correlate to trace/invocation ids. |
 | `cron_jobs` / `cron_runs` | `cron` trigger worker. | Definitions become triggers; run history remains durable. |
 | Prompt snippets/history | `prompt_library` functions. | Idempotent by id/hash with provenance. |
 | Device/read state | `device` and `notification` functions. | Approval responses link to pending invocations. |

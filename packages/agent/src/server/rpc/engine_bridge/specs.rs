@@ -232,7 +232,7 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("auth.removeApiKey"),
     handler_only!("tool.result"),
     handler_only!("message.delete"),
-    handler_only!("logs.ingest"),
+    generic_trigger!("logs.ingest"),
     generic_trigger!("logs.recent"),
     handler_only!("memory.retain"),
     handler_only!("mcp.status"),
@@ -601,7 +601,8 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
 }
 
 fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
-    if method.starts_with("promptHistory.")
+    if method.starts_with("logs.")
+        || method.starts_with("promptHistory.")
         || method.starts_with("promptSnippet.")
         || method.starts_with("settings.")
     {

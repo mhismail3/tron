@@ -210,6 +210,41 @@ impl StoredEngineError {
     /// Convert a stored error into an engine result error for replay.
     #[must_use]
     pub fn to_replay_error(&self) -> EngineError {
+        if self.kind == "schema_violation" {
+            return EngineError::SchemaViolation {
+                function_id: self
+                    .details
+                    .get("functionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("stored")
+                    .to_owned(),
+                direction: match self.details.get("direction").and_then(Value::as_str) {
+                    Some("response") => "response",
+                    _ => "request",
+                },
+                path: self
+                    .details
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("$")
+                    .to_owned(),
+                message: self
+                    .details
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&self.message)
+                    .to_owned(),
+            };
+        }
+        if self.kind == "policy_violation" {
+            return EngineError::PolicyViolation(
+                self.details
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&self.message)
+                    .to_owned(),
+            );
+        }
         if self.kind == "adapter_failure" {
             let adapter = self
                 .details

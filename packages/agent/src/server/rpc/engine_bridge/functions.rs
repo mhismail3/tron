@@ -14,6 +14,7 @@ use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::profile_runtime::ProfileRuntime;
 use crate::server::codex_app::CodexAppServerManager;
+use crate::server::rpc::client_logs::{ClientLogEntry, ClientLogsService};
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::{self, CLIENT_VERSION_UNSUPPORTED, RpcError, to_json_value};
 use crate::server::rpc::filesystem_service;
@@ -100,6 +101,7 @@ async fn rpc_function_value(
         "settings.resetToDefaults" => settings_reset_to_defaults_value(deps).await,
         "model.list" => model_list_value(payload, deps, allow_rpc_context).await,
         "skill.list" => Ok(skill_list_value(Some(payload), deps)),
+        "logs.ingest" => ingest_logs_value(Some(payload), deps).await,
         "logs.recent" => recent_logs_value(Some(payload.clone()), deps).await,
         "events.getHistory" => events_get_history_value(Some(payload), deps).await,
         "events.getSince" => events_get_since_value(Some(payload), deps).await,
@@ -734,6 +736,32 @@ struct RecentLogEntry {
     origin: Option<String>,
     session_id: Option<String>,
     error_message: Option<String>,
+}
+
+async fn ingest_logs_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let entries_value = params
+        .and_then(|value| value.get("entries"))
+        .ok_or_else(|| RpcError::InvalidParams {
+            message: "Missing required parameter: entries".to_owned(),
+        })?;
+    let entries: Vec<ClientLogEntry> =
+        serde_json::from_value(entries_value.clone()).map_err(|error| RpcError::InvalidParams {
+            message: format!("Invalid entries: {error}"),
+        })?;
+
+    let pool = deps.event_store.pool().clone();
+    let result = run_blocking_task("logs.ingest", move || {
+        let mut conn = pool.get().map_err(|error| RpcError::Internal {
+            message: format!("Failed to get DB connection: {error}"),
+        })?;
+        ClientLogsService::ingest(&mut conn, &entries)
+    })
+    .await?;
+
+    to_json_value(&result)
 }
 
 async fn recent_logs_value(params: Option<Value>, deps: &RpcEngineDeps) -> Result<Value, RpcError> {

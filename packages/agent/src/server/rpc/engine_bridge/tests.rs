@@ -35,6 +35,7 @@ const GENERIC_READ_METHODS: &[&str] = &[
 ];
 
 const GENERIC_WRITE_METHODS: &[&str] = &[
+    "logs.ingest",
     "settings.update",
     "settings.resetToDefaults",
     "promptHistory.delete",
@@ -49,6 +50,8 @@ const SETTINGS_METHODS: &[&str] = &[
     "settings.update",
     "settings.resetToDefaults",
 ];
+
+const LOGS_METHODS: &[&str] = &["logs.ingest", "logs.recent"];
 
 const PROMPT_LIBRARY_METHODS: &[&str] = &[
     "promptHistory.list",
@@ -342,6 +345,54 @@ fn bridge_specs_classify_settings_writes_as_guarded_reversible_triggers() {
             Some(VisibilityScope::System)
         );
     }
+}
+
+#[test]
+fn bridge_specs_classify_logs_as_fully_generic_triggered() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in LOGS_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+    }
+}
+
+#[test]
+fn bridge_specs_classify_logs_ingest_as_guarded_append_only_trigger() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    let spec = specs
+        .iter()
+        .find(|spec| spec.method == "logs.ingest")
+        .unwrap();
+    assert_eq!(spec.effect_class, EffectClass::AppendOnlyEvent);
+    assert_eq!(spec.risk_level, RiskLevel::Medium);
+    assert_eq!(spec.visibility, VisibilityScope::System);
+    assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+    assert_eq!(
+        spec.idempotency_mode,
+        RpcIdempotencyMode::JsonRpcRequestIdSeed
+    );
+    assert!(super::schemas::request_schema_for_method("logs.ingest").is_some());
+    assert!(super::schemas::response_schema_for_method("logs.ingest").is_some());
+    let definition = specs::function_definition_for_spec(spec);
+    assert_eq!(
+        definition
+            .idempotency
+            .as_ref()
+            .map(|contract| contract.dedupe_scope.clone()),
+        Some(VisibilityScope::System)
+    );
+    assert!(!definition.required_authority.approval_required);
 }
 
 #[test]
@@ -725,6 +776,29 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
 }
 
 #[tokio::test]
+async fn logs_ingest_outputs_match_direct_engine_outputs() {
+    let payload = json!({
+        "entries": [
+            {"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "WebSocket", "message": "connected"},
+            {"timestamp": "2026-03-03T14:30:05.200Z", "level": "verbose", "category": "RPC", "message": "sending ping"}
+        ]
+    });
+
+    let direct_ctx = make_test_context();
+    let direct = direct_engine_value(&direct_ctx, "logs.ingest", payload.clone()).await;
+    assert_eq!(direct, json!({"success": true, "inserted": 2}));
+
+    let rpc_ctx = make_test_context();
+    let rpc = rpc_dispatch_value(&rpc_ctx, "logs.ingest", payload).await;
+    assert_eq!(direct, rpc);
+
+    let recent = rpc_dispatch_value(&rpc_ctx, "logs.recent", json!({"limit": 2})).await;
+    assert_eq!(recent["count"], 2);
+    assert_eq!(recent["entries"][0]["component"], "ios.WebSocket");
+    assert_eq!(recent["entries"][1]["level"], "trace");
+}
+
+#[tokio::test]
 async fn settings_outputs_match_direct_engine_outputs() {
     let _guard = settings_test_guard();
 
@@ -865,6 +939,211 @@ async fn prompt_history_delete_missing_target_returns_false() {
     )
     .await;
     assert_eq!(value, json!({"deleted": false}));
+}
+
+#[tokio::test]
+async fn logs_ingest_duplicate_transport_replays_without_second_db_write() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let request = RpcRequest {
+        id: "logs-ingest-retry".to_owned(),
+        method: "logs.ingest".to_owned(),
+        params: Some(json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "first"},
+                {"timestamp": "2026-03-03T14:30:05.200Z", "level": "info", "category": "A", "message": "second"}
+            ]
+        })),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+    assert_eq!(
+        first.result.as_ref().unwrap(),
+        &json!({"success": true, "inserted": 2})
+    );
+
+    let conn = ctx.event_store.pool().get().unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+
+    let host = ctx.engine_host.lock().await;
+    let replay = host.catalog().invocations().last().unwrap();
+    assert!(replay.replayed_from.is_some());
+    assert_eq!(
+        replay
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+}
+
+#[tokio::test]
+async fn logs_ingest_errors_complete_idempotency_and_replay() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let entries: Vec<Value> = (0..10_001)
+        .map(|i| {
+            json!({"timestamp": format!("2026-03-03T14:30:{:02}.{:03}Z", i / 1000, i % 1000), "level": "info", "category": "A", "message": "x"})
+        })
+        .collect();
+    let request = RpcRequest {
+        id: "logs-ingest-invalid-retry".to_owned(),
+        method: "logs.ingest".to_owned(),
+        params: Some(json!({"entries": entries})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(!first.success);
+    assert!(!second.success);
+    assert_eq!(first.error.as_ref().unwrap().code, errors::INVALID_PARAMS);
+    assert_eq!(second.error.as_ref().unwrap().code, errors::INVALID_PARAMS);
+
+    let host = ctx.engine_host.lock().await;
+    let records = host.catalog().invocations();
+    let replay = records.last().unwrap();
+    let original = records
+        .iter()
+        .find(|record| Some(record.invocation_id.clone()) == replay.replayed_from)
+        .unwrap();
+    assert!(!original.succeeded);
+    assert!(!replay.succeeded);
+    assert_eq!(original.idempotency_key, replay.idempotency_key);
+    assert_eq!(
+        replay
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+}
+
+#[tokio::test]
+async fn logs_ingest_reused_request_id_with_different_payload_is_distinct_command() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+
+    for message in ["first", "second"] {
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "same-logs-request-id".to_owned(),
+                    method: "logs.ingest".to_owned(),
+                    params: Some(json!({
+                        "entries": [
+                            {"timestamp": format!("2026-03-03T14:30:05.{message}Z"), "level": "info", "category": "A", "message": message}
+                        ]
+                    })),
+                },
+                &ctx,
+            )
+            .await;
+        assert!(response.success, "{:?}", response.error);
+    }
+
+    let conn = ctx.event_store.pool().get().unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+}
+
+#[tokio::test]
+async fn logs_ingest_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
+    let ctx = make_test_context();
+    let function_id = specs::function_id_for_method("logs.ingest").unwrap();
+    let first = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id.clone(),
+            json!({"entries": [{"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "first"}]}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("logs-explicit-key"),
+        ))
+        .await;
+    assert!(first.error.is_none(), "{:?}", first.error);
+
+    let conflict = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({"entries": [{"timestamp": "2026-03-03T14:30:05.200Z", "level": "info", "category": "A", "message": "second"}]}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("logs-explicit-key"),
+        ))
+        .await;
+    assert!(matches!(
+        conflict.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+    let rpc = result_to_rpc(conflict).unwrap_err();
+    assert_eq!(rpc.code(), errors::IDEMPOTENCY_CONFLICT);
+}
+
+#[tokio::test]
+async fn logs_ingest_rejects_strict_schema_violations() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let cases = [
+        json!({}),
+        json!({"entries": "not-array"}),
+        json!({"entries": [{"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A"}]}),
+        json!({"entries": [{"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "x", "extra": true}]}),
+        json!({"entries": [], "unexpected": true}),
+    ];
+
+    for (index, params) in cases.into_iter().enumerate() {
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: format!("bad-logs-schema-{index}"),
+                    method: "logs.ingest".to_owned(),
+                    params: Some(params),
+                },
+                &ctx,
+            )
+            .await;
+        assert!(!response.success, "{index}: {:?}", response.result);
+        assert_eq!(response.error.unwrap().code, errors::INVALID_PARAMS);
+    }
+}
+
+#[tokio::test]
+async fn logs_ingest_rejects_empty_rpc_request_id() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let response = registry
+        .dispatch(
+            RpcRequest {
+                id: String::new(),
+                method: "logs.ingest".to_owned(),
+                params: Some(json!({"entries": []})),
+            },
+            &ctx,
+        )
+        .await;
+    assert!(!response.success);
+    assert_eq!(response.error.unwrap().code, errors::INVALID_PARAMS);
 }
 
 #[tokio::test]
@@ -1402,6 +1681,46 @@ async fn generic_write_records_invocation_ledger_metadata() {
     assert_eq!(
         record.function_id,
         specs::function_id_for_method("promptSnippet.create").unwrap()
+    );
+    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(record.actor_kind, ActorKind::Client);
+    assert_eq!(record.delivery_mode, DeliveryMode::Sync);
+    assert!(
+        record
+            .authority_scopes
+            .contains(&RPC_WRITE_AUTHORITY.to_owned())
+    );
+    assert_eq!(
+        record
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+    assert!(
+        record
+            .idempotency_key
+            .as_deref()
+            .unwrap()
+            .starts_with("json-rpc:v1:")
+    );
+    assert!(record.result_value.is_some());
+}
+
+#[tokio::test]
+async fn generic_logs_write_records_invocation_ledger_metadata() {
+    let ctx = make_test_context();
+    let _ = rpc_dispatch_value(
+        &ctx,
+        "logs.ingest",
+        json!({"entries": [{"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "ledger"}]}),
+    )
+    .await;
+    let host = ctx.engine_host.lock().await;
+    let record = host.catalog().invocations().last().unwrap();
+    assert_eq!(
+        record.function_id,
+        specs::function_id_for_method("logs.ingest").unwrap()
     );
     assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
     assert_eq!(record.actor_kind, ActorKind::Client);

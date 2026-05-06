@@ -22,6 +22,30 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "logs.ingest" => json!({
+            "type": "object",
+            "required": ["entries"],
+            "additionalProperties": false,
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "maxItems": 10_000,
+                    "items": {
+                        "type": "object",
+                        "required": ["timestamp", "level", "category", "message"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "timestamp": {"type": "string"},
+                            "level": {"type": "string"},
+                            "category": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                },
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "skill.list" => json!({
             "type": "object",
             "additionalProperties": false,
@@ -284,6 +308,15 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                     "items": {"type": "object", "additionalProperties": true}
                 },
                 "count": {"type": "integer"}
+            }
+        }),
+        "logs.ingest" => json!({
+            "type": "object",
+            "required": ["success", "inserted"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "inserted": {"type": "integer"}
             }
         }),
         "events.getHistory" => json!({

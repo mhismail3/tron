@@ -1,74 +1,57 @@
-//! Logs handlers.
+//! Logs RPC group.
 //!
-//! `logs.recent` is served by the engine bridge generic trigger. This module
-//! still owns the mutating `logs.ingest` handler.
-
-use async_trait::async_trait;
-use serde_json::Value;
-use tracing::instrument;
-
-use crate::server::rpc::client_logs::{ClientLogEntry, ClientLogsService};
-use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::errors::{RpcError, to_json_value};
-use crate::server::rpc::registry::MethodHandler;
-
-/// Ingest structured client logs into the database.
-pub struct IngestLogsHandler;
-
-#[async_trait]
-impl MethodHandler for IngestLogsHandler {
-    #[instrument(skip(self, ctx), fields(method = "logs.ingest"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let entries_val = params
-            .as_ref()
-            .and_then(|p| p.get("entries"))
-            .ok_or_else(|| RpcError::InvalidParams {
-                message: "Missing required parameter: entries".to_string(),
-            })?;
-
-        let entries: Vec<ClientLogEntry> =
-            serde_json::from_value(entries_val.clone()).map_err(|e| RpcError::InvalidParams {
-                message: format!("Invalid entries: {e}"),
-            })?;
-
-        let pool = ctx.event_store.pool().clone();
-        let result = ctx
-            .run_blocking("logs.ingest", move || {
-                let mut conn = pool.get().map_err(|e| RpcError::Internal {
-                    message: format!("Failed to get DB connection: {e}"),
-                })?;
-                ClientLogsService::ingest(&mut conn, &entries)
-            })
-            .await?;
-
-        to_json_value(&result)
-    }
-}
+//! `logs.ingest` and `logs.recent` are marker-registered in `handlers::mod`
+//! and executed by engine-owned `rpc::<method>` functions. This module remains
+//! as progressive disclosure docs plus wire-compatibility tests for the
+//! collapsed logs group.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::server::rpc::context::RpcContext;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::server::rpc::registry::MethodRegistry;
-    use crate::server::rpc::types::RpcRequest;
-    use serde_json::json;
+    use crate::server::rpc::types::{RpcErrorBody, RpcRequest, RpcResponse};
+    use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    async fn recent_logs_response(
+    fn next_request_id(method: &str) -> String {
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
+        format!("{method}-{}", NEXT_ID.fetch_add(1, Ordering::SeqCst))
+    }
+
+    async fn dispatch_logs_response(
         ctx: &RpcContext,
-        params: Value,
-    ) -> crate::server::rpc::types::RpcResponse {
+        method: &str,
+        params: Option<Value>,
+    ) -> RpcResponse {
         let mut registry = MethodRegistry::new();
         crate::server::rpc::handlers::register_all(&mut registry);
         registry
             .dispatch(
                 RpcRequest {
-                    id: "test-logs-recent".to_owned(),
-                    method: "logs.recent".to_owned(),
-                    params: Some(params),
+                    id: next_request_id(method),
+                    method: method.to_owned(),
+                    params,
                 },
                 ctx,
             )
             .await
+    }
+
+    async fn dispatch_logs_ok(ctx: &RpcContext, method: &str, params: Option<Value>) -> Value {
+        let response = dispatch_logs_response(ctx, method, params).await;
+        assert!(response.success, "{method}: {:?}", response.error);
+        response.result.unwrap()
+    }
+
+    async fn dispatch_logs_err(
+        ctx: &RpcContext,
+        method: &str,
+        params: Option<Value>,
+    ) -> RpcErrorBody {
+        let response = dispatch_logs_response(ctx, method, params).await;
+        assert!(!response.success, "{method}: {:?}", response.result);
+        response.error.unwrap()
     }
 
     #[tokio::test]
@@ -82,7 +65,7 @@ mod tests {
             ]
         });
 
-        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = dispatch_logs_ok(&ctx, "logs.ingest", Some(params)).await;
         assert_eq!(result["success"], true);
         assert_eq!(result["inserted"], 3);
 
@@ -109,10 +92,7 @@ mod tests {
     #[tokio::test]
     async fn ingest_logs_empty_entries() {
         let ctx = make_test_context();
-        let result = IngestLogsHandler
-            .handle(Some(json!({"entries": []})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_logs_ok(&ctx, "logs.ingest", Some(json!({"entries": []}))).await;
         assert_eq!(result["success"], true);
         assert_eq!(result["inserted"], 0);
     }
@@ -132,8 +112,8 @@ mod tests {
             ]
         });
 
-        let first_result = IngestLogsHandler.handle(Some(first), &ctx).await.unwrap();
-        let second_result = IngestLogsHandler.handle(Some(second), &ctx).await.unwrap();
+        let first_result = dispatch_logs_ok(&ctx, "logs.ingest", Some(first)).await;
+        let second_result = dispatch_logs_ok(&ctx, "logs.ingest", Some(second)).await;
 
         assert_eq!(first_result["inserted"], 1);
         assert_eq!(second_result["inserted"], 1);
@@ -152,11 +132,8 @@ mod tests {
     #[tokio::test]
     async fn ingest_logs_missing_entries_param() {
         let ctx = make_test_context();
-        let err = IngestLogsHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
+        let err = dispatch_logs_err(&ctx, "logs.ingest", Some(json!({}))).await;
+        assert_eq!(err.code, "INVALID_PARAMS");
     }
 
     #[tokio::test]
@@ -172,7 +149,7 @@ mod tests {
             ]
         });
 
-        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = dispatch_logs_ok(&ctx, "logs.ingest", Some(params)).await;
 
         assert_eq!(result["inserted"], 5);
         let conn = ctx.event_store.pool().get().unwrap();
@@ -197,7 +174,7 @@ mod tests {
             ]
         });
 
-        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = dispatch_logs_ok(&ctx, "logs.ingest", Some(params)).await;
 
         assert_eq!(result["inserted"], 1);
         let conn = ctx.event_store.pool().get().unwrap();
@@ -219,16 +196,13 @@ mod tests {
                 json!({"timestamp": format!("2026-03-03T14:30:{:02}.{:03}Z", i / 1000, i % 1000), "level": "info", "category": "A", "message": "x"})
             })
             .collect();
-        let err = IngestLogsHandler
-            .handle(Some(json!({"entries": entries})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-        assert!(err.to_string().contains("Too many entries"));
+        let err = dispatch_logs_err(&ctx, "logs.ingest", Some(json!({"entries": entries}))).await;
+        assert_eq!(err.code, "INVALID_PARAMS");
+        assert!(err.message.contains("more than 10000 items"));
     }
 
     #[tokio::test]
-    async fn ingest_logs_dedup_skips_old_entries() {
+    async fn ingest_logs_dedup_skips_old_entries_with_distinct_request_ids() {
         let ctx = make_test_context();
         let params = json!({
             "entries": [
@@ -238,13 +212,10 @@ mod tests {
             ]
         });
 
-        let r1 = IngestLogsHandler
-            .handle(Some(params.clone()), &ctx)
-            .await
-            .unwrap();
+        let r1 = dispatch_logs_ok(&ctx, "logs.ingest", Some(params.clone())).await;
         assert_eq!(r1["inserted"], 3);
 
-        let r2 = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let r2 = dispatch_logs_ok(&ctx, "logs.ingest", Some(params)).await;
         assert_eq!(r2["inserted"], 0);
     }
 
@@ -259,10 +230,7 @@ mod tests {
                 {"timestamp": "2026-03-03T14:30:05.300Z", "level": "info", "category": "A", "message": "c"},
             ]
         });
-        let r1 = IngestLogsHandler
-            .handle(Some(first_batch), &ctx)
-            .await
-            .unwrap();
+        let r1 = dispatch_logs_ok(&ctx, "logs.ingest", Some(first_batch)).await;
         assert_eq!(r1["inserted"], 3);
 
         let second_batch = json!({
@@ -274,10 +242,7 @@ mod tests {
                 {"timestamp": "2026-03-03T14:30:05.500Z", "level": "info", "category": "A", "message": "e"},
             ]
         });
-        let r2 = IngestLogsHandler
-            .handle(Some(second_batch), &ctx)
-            .await
-            .unwrap();
+        let r2 = dispatch_logs_ok(&ctx, "logs.ingest", Some(second_batch)).await;
         assert_eq!(r2["inserted"], 2);
 
         let conn = ctx.event_store.pool().get().unwrap();
@@ -300,7 +265,7 @@ mod tests {
             ]
         });
 
-        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = dispatch_logs_ok(&ctx, "logs.ingest", Some(params)).await;
 
         assert_eq!(result["inserted"], 1);
         let conn = ctx.event_store.pool().get().unwrap();
@@ -311,14 +276,12 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(level_num, 30); // Info
+        assert_eq!(level_num, 30);
     }
 
     #[tokio::test]
     async fn ingest_logs_first_export_no_watermark() {
         let ctx = make_test_context();
-
-        // Verify no ios-client logs exist yet
         let conn = ctx.event_store.pool().get().unwrap();
         let count: i64 = conn
             .query_row(
@@ -328,13 +291,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+        drop(conn);
 
         let params = json!({
             "entries": [
                 {"timestamp": "2026-03-03T14:30:05.000Z", "level": "info", "category": "A", "message": "first ever"},
             ]
         });
-        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = dispatch_logs_ok(&ctx, "logs.ingest", Some(params)).await;
         assert_eq!(result["inserted"], 1);
     }
 
@@ -360,9 +324,7 @@ mod tests {
             .unwrap();
         }
 
-        let response = recent_logs_response(&ctx, json!({ "limit": 2 })).await;
-        assert!(response.success, "{:?}", response.error);
-        let result = response.result.unwrap();
+        let result = dispatch_logs_ok(&ctx, "logs.recent", Some(json!({ "limit": 2 }))).await;
 
         assert_eq!(result["count"], 2);
         assert_eq!(result["entries"][0]["message"], "second");
@@ -373,9 +335,7 @@ mod tests {
     #[tokio::test]
     async fn recent_logs_rejects_excessive_limit() {
         let ctx = make_test_context();
-        let response = recent_logs_response(&ctx, json!({ "limit": 1_001 })).await;
-        assert!(!response.success);
-        let err = response.error.unwrap();
+        let err = dispatch_logs_err(&ctx, "logs.recent", Some(json!({ "limit": 1_001 }))).await;
 
         assert_eq!(err.code, "INVALID_PARAMS");
     }

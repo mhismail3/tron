@@ -212,8 +212,8 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   one `rpc::<method>` function for all 167 current JSON-RPC methods.
   Handler-only methods are present as internal non-routable metadata. The first
   twelve low-risk reads are strict-schema `GenericTrigger` methods served by
-  registry-level JSON-RPC-to-engine dispatch. Prompt library and settings are
-  fully collapsed method groups: all public methods in those groups are
+  registry-level JSON-RPC-to-engine dispatch. Prompt library, settings, and
+  logs are fully collapsed method groups: all public methods in those groups are
   generic-triggered with `rpc.read`/`rpc.write`, strict schemas, and
   engine-ledger idempotency for writes. Superseded method-specific business
   handlers are deleted as each group migrates.
@@ -283,9 +283,12 @@ Implemented:
 - full settings collapse: `settings.update` and `settings.resetToDefaults` now
   join `settings.get` on the generic-trigger path with strict schemas,
   `rpc.write`, system-scoped engine-ledger idempotency, approval metadata for
-  high-risk reversible configuration effects, and tests preserving rollback,
-  MCP reload, Codex App Server reconfiguration, and current JSON-RPC wire
-  behavior;
+  high-risk reversible configuration effects, and tests proving duplicate
+  transports do not rerun disk writes or reload side effects;
+- full logs collapse: `logs.ingest` now joins `logs.recent` on the
+  generic-trigger path with strict schemas, `rpc.write`, append-only effect
+  metadata, system-scoped engine-ledger idempotency, and tests proving duplicate
+  transports replay without reopening the log-ingest DB transaction;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   function id, actor `rpc-client`, authority grant `rpc-bridge`, read/write
   authority scope, trace id, optional idempotency key, and optional
@@ -294,10 +297,9 @@ Implemented:
 
 Still deferred:
 
-- write-side RPC migrations and generic-trigger conversion for the remaining
-  handler-only method groups beyond prompt library and settings;
-- tool/runtime/client-native engine rewrites beyond the first read-side RPC
-  adapters;
+- RPC migrations and generic-trigger conversion for the remaining handler-only
+  method groups beyond prompt library, settings, and logs;
+- tool/runtime/client-native engine rewrites beyond the first RPC adapters;
 - queue and void delivery execution;
 - external worker protocol, sandbox workers, and worker reconnect semantics;
 - trigger firing/runtime loop detection;

@@ -27,8 +27,8 @@
 //! business handlers: the registry validates method existence/depth, then the
 //! bridge dispatches JSON-RPC as a transport trigger into engine functions.
 //! Read triggers carry `rpc.read`; migrated write triggers carry `rpc.write`
-//! plus engine-ledger idempotency. Prompt library and settings are now fully
-//! collapsed groups: their public methods are generic-triggered engine
+//! plus engine-ledger idempotency. Prompt library, settings, and logs are now
+//! fully collapsed groups: their public methods are generic-triggered engine
 //! functions with marker-only JSON-RPC registrations.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)

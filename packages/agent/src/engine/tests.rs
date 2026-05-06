@@ -1227,6 +1227,96 @@ async fn schema_validation_checks_request_and_response_payloads() {
     ));
 }
 
+#[tokio::test]
+async fn schema_validation_enforces_array_max_items() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    catalog
+        .register_function(
+            read_function("alpha::bounded", "w1").with_request_schema(json!({
+                "type": "object",
+                "required": ["items"],
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "maxItems": 2,
+                        "items": {"type": "string"}
+                    }
+                },
+                "additionalProperties": false
+            })),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+
+    let valid = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::bounded"),
+            json!({"items": ["a", "b"]}),
+            causal(),
+        ))
+        .await;
+    assert!(valid.error.is_none());
+
+    let too_many = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::bounded"),
+            json!({"items": ["a", "b", "c"]}),
+            causal(),
+        ))
+        .await;
+    assert!(matches!(
+        too_many.error,
+        Some(EngineError::SchemaViolation {
+            direction: "request",
+            ..
+        })
+    ));
+
+    let invalid_schema = read_function("alpha::bad_max_items", "w1")
+        .with_request_schema(json!({"type": "array", "maxItems": -1}));
+    assert!(matches!(
+        catalog.register_function(invalid_schema, Some(handler()), true),
+        Err(EngineError::InvalidSchema { .. })
+    ));
+}
+
+#[tokio::test]
+async fn schema_validation_enforces_array_max_items_without_items_schema() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    catalog
+        .register_function(
+            read_function("alpha::bare_bounded", "w1").with_request_schema(json!({
+                "type": "array",
+                "maxItems": 1
+            })),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+
+    let too_many = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::bare_bounded"),
+            json!(["a", "b"]),
+            causal(),
+        ))
+        .await;
+    assert!(matches!(
+        too_many.error,
+        Some(EngineError::SchemaViolation {
+            direction: "request",
+            ..
+        })
+    ));
+}
+
 #[test]
 fn inspect_and_promotion_are_visibility_and_owner_checked() {
     let mut catalog = LiveCatalog::new();
