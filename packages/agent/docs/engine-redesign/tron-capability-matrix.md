@@ -29,12 +29,11 @@ canonical domain functions for generic-triggered methods, non-routable
 `rpc::<method>` metadata for handler-only inventory, and `json_rpc` trigger
 bindings from the legacy method names into the canonical functions.
 
-Fully collapsed groups are prompt library, settings, logs, skills,
-notifications, and plan. The events group has generic-triggered
-history/since/append while subscribe/unsubscribe wait for stream primitives.
-Filesystem has generic-triggered home/list/read while create/write semantics
-wait for stricter path authority and idempotent file mutation contracts.
-Migrated groups delete their method-specific business handlers.
+Fully collapsed groups now include prompt library, settings, logs, skills,
+notifications, plan, and events. Basic filesystem also has
+home/list/read/createDir generic-triggered. Safe session/context reads and
+job list/stream controls are generic-triggered. Migrated groups delete their
+method-specific business handlers as they move behind canonical functions.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,
@@ -46,11 +45,11 @@ answers are explicit enough to test.
 | `system` | 6 | `system::*` and `engine::*` functions. | Client/admin/system. | Mostly reads; shutdown/update checks need explicit risk metadata. | Trace client/system actor and server lifecycle effects. |
 | `codexApp` | 1 | `codex_app::*` lifecycle/status functions. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
 | `blob` | 1 | `blob::get`. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
-| `session` | 13 | `session::*` functions over event store. | Client/session/workspace. | Reads plus idempotent mutations for create/archive/delete/export. | Every mutation writes event-store causal records. |
+| `session` | 13 | `session` domain worker; safe reads are generic-triggered, mutations remain handler-owned for now. | Client/session/workspace. | Reads plus future idempotent mutations for create/archive/delete/export. | Reads preserve event-store reconstruction; mutations must write event-store causal records when migrated. |
 | `agent` | 10 | `agent::*` functions and queue triggers. | Session by default. | Prompt/run/abort are mutating and require idempotency. | Turn id, parent invocation, catalog revision, and authority grant are mandatory. |
 | `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
-| `context` | 9 | `context::*` functions. | Session. | Reads plus compaction/context mutations. | Compaction ordering and event writes must remain deterministic. |
-| `events` | 5 | `events` domain worker; `getHistory`, `getSince`, and `append` are generic-triggered compatibility functions. Subscribe/unsubscribe move when streams land. | Session/workspace/admin. | Reads plus append-only `events.append` with session-scoped idempotency. | Event append is the durable causal ledger path and records trigger/invocation metadata. |
+| `context` | 9 | `context` domain worker; safe reads are generic-triggered, compaction/clear remain handler-owned. | Session. | Reads plus future compaction/context mutations. | Compaction ordering and event writes must remain deterministic. |
+| `events` | 5 | Fully generic-triggered `events` domain worker functions, including stream-backed subscribe/unsubscribe. | Session/workspace/admin. | Reads plus append-only `events.append` and idempotent subscribe/unsubscribe. | Event append and stream subscription records carry trigger/invocation metadata. |
 | `settings` | 3 | Fully generic-triggered `settings::*` state functions. | Admin/client. | Read plus high-risk reversible system writes with engine-ledger idempotency. | Must preserve iOS settings parity, strict validation, rollback, MCP reload, and Codex App Server reconfiguration causality. |
 | `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
 | `tool` | 1 | Tool-result compatibility function. | Session. | Append/update tool result; idempotent by tool call id. | Link to parent tool invocation and turn. |
@@ -59,11 +58,11 @@ answers are explicit enough to test.
 | `memory` | 1 | `memory::retain`. | Session/workspace with policy. | Idempotent/append memory update. | User memory files remain governed; no hardcoded personal data. |
 | `mcp` | 8 | `mcp::*` worker functions. | Agent/client/admin filtered. | Lifecycle writes require idempotency; search/list are reads. | MCP tool calls inherit caller authority and trace. |
 | `skill` | 6 | Fully generic-triggered `skills` domain worker functions over registry and session state. | Session/workspace. | Activate/deactivate are session-scoped idempotent writes; refresh is system-scoped. | Skill provenance and denied/allowed tools affect capability views; activation events are causally linked. |
-| `filesystem` / `file` | 4 | `filesystem` domain worker; home/list/read are generic-triggered compatibility functions, while createDir remains handler-owned. | Session/workspace by path policy. | Reads now; idempotent create/write wrappers later. | Path guards, workspace scope, and file effect metadata required before writes migrate. |
+| `filesystem` / `file` | 4 | `filesystem` domain worker; home/list/read/createDir are generic-triggered compatibility functions. | Session/workspace by path policy. | Reads plus idempotent createDir; broader file writes later. | Path guards, workspace scope, and file effect metadata required before broader writes migrate. |
 | `tree` | 5 | `event_graph::*`. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
 | `import` | 4 | `import::*`. | Admin/workspace. | Preview/list reads; execute append-only/idempotent by import source. | Import provenance and dedupe tags mandatory. |
 | `browser` / `display` | 4 | `browser::*`, `display::*`, stream functions. | Session/client. | Stream lifecycle idempotent by stream id. | Link stream writes to session and actor. |
-| `job` | 5 | `job::*` and queue functions. | Session/client/agent filtered. | Queue/job mutations idempotent by receipt/job id. | Retry, cancel, output, and status records enter causal ledger. |
+| `job` | 5 | `job` domain worker for list/subscribe/unsubscribe plus queue functions; background/cancel deferred. | Session/client/agent filtered. | Subscription controls idempotent; future job mutations idempotent by receipt/job id. | Retry, cancel, output, and status records enter causal ledger. |
 | `worktree` | 23 | `worktree::*` functions and triggers. | Workspace/session. | Git mutations require idempotency, locks, and compensation where possible. | Branch/worktree state machine must stay auditable. |
 | `transcribe` | 3 | `transcription::*`. | Client/session. | Audio processing idempotent by input hash/request id. | Sidecar lifecycle and stream progress trace to request. |
 | `device` | 3 | `device::*` and approval triggers. | Client/session/admin. | Register/unregister/respond idempotent by token/request id. | Approval responses must link to pending invocation. |
@@ -105,9 +104,9 @@ capabilities.
 ## Tools and MCP
 
 The base tool factory currently registers filesystem, shell, search/find, UI,
-notification, web, display, computer-use, and MCP meta-tools. The runtime tool
-factory adds subagent spawning, job management, waiting, and an LLM-backed
-`WebFetch` override.
+notification, web, display, computer-use, engine capability tools, and MCP
+meta-tools. The runtime tool factory adds subagent spawning, job management,
+waiting, and an LLM-backed `WebFetch` override.
 
 Live fabric mapping:
 
@@ -119,6 +118,7 @@ Live fabric mapping:
 | UI confirmation/questions | `approval::*`, `device::*`. | Approval trigger resolves pending invocation. |
 | Notify/display/computer-use | `client::*`, `display::*`, `computer::*`. | Client/device effects with explicit visibility and risk. |
 | Web fetch/search | `web::*`. | External reads; auth and network policy recorded. |
+| Engine discover/inspect/watch/invoke | `engine::*` plus canonical domain functions. | Stable agent meta-tools over the live catalog; mutating invokes require explicit idempotency and approval-gated functions fail closed. |
 | SpawnSubagent | `agent::spawn`, `agent::run_turn`. | Delegated authority and session-scoped visibility. |
 | ManageJob/Wait | `job::*`. | Queue/job idempotency and causal status streams. |
 | MCP meta-tools | `mcp::search`, `mcp::call`. | Preserve compressed catalog for large MCP tool sets; calls inherit authority. |

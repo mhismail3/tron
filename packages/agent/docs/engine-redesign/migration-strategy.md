@@ -73,7 +73,7 @@ Deliverables:
 Acceptance:
 
 - No current RPC behavior changes.
-- No external worker protocol yet.
+- No external worker sockets or sandbox execution yet.
 - No queue/void execution yet beyond metadata.
 - Engine can be created in tests without starting the server.
 - Mutating functions without idempotency metadata are rejected.
@@ -436,6 +436,9 @@ Implemented in-process workers:
 - `skills`
 - `filesystem`
 - `events`
+- `session`
+- `context`
+- `job`
 - `notifications`
 - `plan`
 
@@ -453,11 +456,17 @@ Newly collapsed groups/functions:
 
 - all `skill.*` methods;
 - read-safe filesystem functions `filesystem.listDir`, `filesystem.getHome`,
-  and `file.read`;
+  `filesystem.createDir`, and `file.read`;
+- safe session reads `session.list`, `session.getHead`, `session.getState`,
+  `session.getHistory`, and `session.reconstruct`;
+- safe context reads `context.getSnapshot`, `context.getDetailedSnapshot`,
+  `context.getAuditTrace`, `context.shouldCompact`,
+  `context.previewCompaction`, and `context.canAcceptTurn`;
+- job list/subscription controls `job.list`, `job.subscribe`, and
+  `job.unsubscribe`;
 - all `notifications.*` methods;
 - all `plan.*` methods;
-- `events.append`, alongside the already migrated `events.getHistory` and
-  `events.getSince`.
+- all `events.*` methods, including stream-backed subscribe/unsubscribe.
 
 Semantics:
 
@@ -490,14 +499,48 @@ Acceptance:
 - missing/stale/hidden/unhealthy/schema/policy/idempotency trigger failures
   fail closed through the same invocation boundary.
 
-## Phase 4: catalog watch, streams, and event unification
+## Phase 3.10: agent tools and primitive workers
 
-Introduce engine streams while preserving WebSocket clients.
+Expose canonical capabilities directly to agents and land the first local
+primitive workers without changing client wire behavior.
+
+Implemented:
+
+- `AgentCapabilityClient` over `EngineHostHandle` with live discover, inspect,
+  watch, invoke, and manual trigger dispatch.
+- First-party agent tools `engine_discover`, `engine_inspect`,
+  `engine_watch`, and `engine_invoke`.
+- Stream worker functions `stream::subscribe`, `stream::poll`,
+  `stream::unsubscribe`, and internal `stream::publish`, with cursor-pull
+  semantics, scoped visibility, and in-memory/SQLite stores.
+- State worker functions `state::get`, `state::set`, `state::delete`,
+  `state::compare_and_set`, and `state::list`, scoped by system/workspace/
+  session, namespace, and key.
+- Queue worker functions `queue::enqueue`, `queue::claim`,
+  `queue::complete`, `queue::fail`, `queue::cancel`, `queue::get`, and
+  `queue::list`, plus `DeliveryMode::Enqueue` dispatch and a queue drain
+  runtime that preserves original trace/authority/idempotency context.
+- Loopback external-worker protocol message types and round-trip tests for
+  hello, registration, invocation, and related envelopes.
+
+Acceptance:
+
+- Agents discover canonical ids and reject `rpc::*` compatibility invocation.
+- Mutating agent invokes require explicit idempotency; approval-required
+  high-risk functions fail closed before handler execution.
+- Stream/state/queue stores have in-memory behavior tests and SQLite reopen
+  durability tests.
+- Enqueued triggers return receipts immediately and later target invocation
+  records preserve trigger id, trace id, authority scope, session/workspace,
+  and idempotency key.
+
+## Phase 4: stream push, event unification, and job output
+
+Build on the cursor-pull stream primitive while preserving WebSocket clients.
 
 Deliverables:
 
 - Catalog watch stream with subscription classes.
-- Stream worker abstraction with cursor/subscription model.
 - Session event stream backed by event ids.
 - Job/tool-output stream adapter.
 - Compatibility bridge from stream events to current WebSocket broadcasts.
@@ -509,16 +552,17 @@ Acceptance:
   subscribers, and catalog-change filtering.
 - Agent turn lifecycle ordering remains unchanged.
 
-## Phase 5: queue primitive
+## Phase 5: queue-backed agent/background workflows
 
-Create durable queue semantics before migrating agent/background workflows.
+Use the queue primitive for production workflows that currently have bespoke
+background execution paths.
 
 Deliverables:
 
-- Queue worker with enqueue, receipt, status, cancellation, retry, and DLQ.
 - Queue events/logs include invocation id, trace id, idempotency key, and
   effect metadata.
-- Existing job manager can be adapted to queue-backed execution.
+- Existing job manager and prompt queue can be adapted to queue-backed
+  execution.
 
 Acceptance:
 
@@ -590,11 +634,12 @@ Acceptance:
 
 ## Phase 9: external and sandbox workers
 
-Add external worker protocol only after the in-process live catalog is proven.
+Build runtime connections and sandbox execution on top of the loopback protocol
+types introduced in Phase 3.10.
 
 Deliverables:
 
-- Tron-owned JSON-over-WebSocket worker protocol.
+- Tron-owned JSON-over-WebSocket worker protocol transport.
 - Scoped worker tokens represented as authority grants.
 - Namespace registration policy.
 - Reconnect and re-registration behavior.

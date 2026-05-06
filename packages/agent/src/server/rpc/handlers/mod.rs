@@ -98,13 +98,28 @@ fn register_core(registry: &mut MethodRegistry) {
     // Session
     registry.register("session.create", session::CreateSessionHandler);
     registry.register("session.resume", session::ResumeSessionHandler);
-    registry.register("session.list", session::ListSessionsHandler);
+    registry.register(
+        "session.list",
+        RpcGenericTriggerHandler::new("session.list"),
+    );
     registry.register("session.delete", session::DeleteSessionHandler);
     registry.register("session.fork", session::ForkSessionHandler);
-    registry.register("session.getHead", session::GetHeadHandler);
-    registry.register("session.getState", session::GetStateHandler);
-    registry.register("session.getHistory", session::GetHistoryHandler);
-    registry.register("session.reconstruct", session::ReconstructHandler);
+    registry.register(
+        "session.getHead",
+        RpcGenericTriggerHandler::new("session.getHead"),
+    );
+    registry.register(
+        "session.getState",
+        RpcGenericTriggerHandler::new("session.getState"),
+    );
+    registry.register(
+        "session.getHistory",
+        RpcGenericTriggerHandler::new("session.getHistory"),
+    );
+    registry.register(
+        "session.reconstruct",
+        RpcGenericTriggerHandler::new("session.reconstruct"),
+    );
     registry.register("session.archive", session::ArchiveSessionHandler);
     registry.register("session.unarchive", session::UnarchiveSessionHandler);
     registry.register("session.archiveOlderThan", session::ArchiveOlderThanHandler);
@@ -136,22 +151,34 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("config.setReasoningLevel", model::SetReasoningLevelHandler);
 
     // Context
-    registry.register("context.getSnapshot", context::GetSnapshotHandler);
+    registry.register(
+        "context.getSnapshot",
+        RpcGenericTriggerHandler::new("context.getSnapshot"),
+    );
     registry.register(
         "context.getDetailedSnapshot",
-        context::GetDetailedSnapshotHandler,
+        RpcGenericTriggerHandler::new("context.getDetailedSnapshot"),
     );
-    registry.register("context.getAuditTrace", context::GetAuditTraceHandler);
-    registry.register("context.shouldCompact", context::ShouldCompactHandler);
+    registry.register(
+        "context.getAuditTrace",
+        RpcGenericTriggerHandler::new("context.getAuditTrace"),
+    );
+    registry.register(
+        "context.shouldCompact",
+        RpcGenericTriggerHandler::new("context.shouldCompact"),
+    );
     registry.register(
         "context.previewCompaction",
-        context::PreviewCompactionHandler,
+        RpcGenericTriggerHandler::new("context.previewCompaction"),
     );
     registry.register(
         "context.confirmCompaction",
         context::ConfirmCompactionHandler,
     );
-    registry.register("context.canAcceptTurn", context::CanAcceptTurnHandler);
+    registry.register(
+        "context.canAcceptTurn",
+        RpcGenericTriggerHandler::new("context.canAcceptTurn"),
+    );
     registry.register("context.clear", context::ClearHandler);
     registry.register("context.compact", context::CompactHandler);
 
@@ -164,8 +191,14 @@ fn register_core(registry: &mut MethodRegistry) {
         "events.getSince",
         RpcGenericTriggerHandler::new("events.getSince"),
     );
-    registry.register("events.subscribe", events::SubscribeHandler);
-    registry.register("events.unsubscribe", events::UnsubscribeHandler);
+    registry.register(
+        "events.subscribe",
+        RpcGenericTriggerHandler::new("events.subscribe"),
+    );
+    registry.register(
+        "events.unsubscribe",
+        RpcGenericTriggerHandler::new("events.unsubscribe"),
+    );
     registry.register(
         "events.append",
         RpcGenericTriggerHandler::new("events.append"),
@@ -252,7 +285,10 @@ fn register_capabilities(registry: &mut MethodRegistry) {
         "filesystem.getHome",
         RpcGenericTriggerHandler::new("filesystem.getHome"),
     );
-    registry.register("filesystem.createDir", filesystem::CreateDirHandler);
+    registry.register(
+        "filesystem.createDir",
+        RpcGenericTriggerHandler::new("filesystem.createDir"),
+    );
     registry.register("file.read", RpcGenericTriggerHandler::new("file.read"));
 
     // Tree
@@ -281,9 +317,15 @@ fn register_platform(registry: &mut MethodRegistry) {
     // Unified job management
     registry.register("job.background", job::BackgroundHandler);
     registry.register("job.cancel", job::CancelHandler);
-    registry.register("job.list", job::ListHandler);
-    registry.register("job.subscribe", job::SubscribeHandler);
-    registry.register("job.unsubscribe", job::UnsubscribeHandler);
+    registry.register("job.list", RpcGenericTriggerHandler::new("job.list"));
+    registry.register(
+        "job.subscribe",
+        RpcGenericTriggerHandler::new("job.subscribe"),
+    );
+    registry.register(
+        "job.unsubscribe",
+        RpcGenericTriggerHandler::new("job.unsubscribe"),
+    );
 
     // Worktree
     registry.register("worktree.getStatus", worktree::GetStatusHandler);

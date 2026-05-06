@@ -10,6 +10,7 @@ pub(super) async fn handle(
         "filesystem.listDir" => filesystem_list_dir_value(Some(payload), deps).await,
         "filesystem.getHome" => filesystem_get_home_value(deps).await,
         "file.read" => file_read_value(Some(payload), deps).await,
+        "filesystem.createDir" => filesystem_create_dir_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("filesystem method {method} is not engine-owned"),
         }),
@@ -40,4 +41,15 @@ async fn filesystem_get_home_value(_deps: &RpcEngineDeps) -> Result<Value, RpcEr
 async fn file_read_value(params: Option<&Value>, _deps: &RpcEngineDeps) -> Result<Value, RpcError> {
     let path = require_string_param(params, "path")?;
     run_blocking_task("file.read", move || filesystem_service::read_file(&path)).await
+}
+
+async fn filesystem_create_dir_value(
+    params: Option<&Value>,
+    _deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let path = require_string_param(params, "path")?;
+    run_blocking_task("filesystem.createDir", move || {
+        filesystem_service::create_dir(&path)
+    })
+    .await
 }

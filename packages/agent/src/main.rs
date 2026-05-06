@@ -481,6 +481,7 @@ async fn init_services(
     event_store: Arc<EventStore>,
     settings: &tron::settings::TronSettings,
     profile_runtime: Arc<tron::runtime::ProfileRuntime>,
+    engine_host: tron::engine::EngineHostHandle,
     origin: &str,
     push_service: PushServiceOption,
     mcp: McpState,
@@ -525,6 +526,7 @@ async fn init_services(
         sandbox_settings: settings.tools.bash.sandbox.clone(),
         computer_use_settings: settings.tools.computer_use.clone(),
         display_event_tx: Some(orchestrator.broadcast().sender()),
+        engine_host,
         mcp_search: mcp.search,
         mcp_call: mcp.call,
     });
@@ -988,6 +990,7 @@ async fn main() -> Result<()> {
         event_store,
         &settings,
         profile_runtime.clone(),
+        engine_host.clone(),
         &origin,
         push_service,
         mcp,

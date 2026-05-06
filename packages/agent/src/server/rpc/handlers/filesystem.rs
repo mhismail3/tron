@@ -1,42 +1,13 @@
 //! Filesystem RPC group.
 //!
-//! `filesystem.getHome`, `filesystem.listDir`, and `file.read` are
-//! marker-registered in `handlers::mod` and executed by canonical
-//! `filesystem::*` engine functions. `filesystem.createDir` remains
-//! handler-owned until the write path gets explicit path guardrails and
-//! idempotency policy.
-
-use async_trait::async_trait;
-use serde_json::Value;
-use tracing::instrument;
-
-use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::filesystem_service;
-use crate::server::rpc::handlers::require_string_param;
-use crate::server::rpc::registry::MethodHandler;
-
-/// Create a directory (recursive).
-///
-/// This remains on the legacy path until filesystem writes have a dedicated
-/// agent-native path authority model.
-pub struct CreateDirHandler;
-
-#[async_trait]
-impl MethodHandler for CreateDirHandler {
-    #[instrument(skip(self, ctx), fields(method = "filesystem.mkdir"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let path = require_string_param(params.as_ref(), "path")?;
-        ctx.run_blocking("filesystem.mkdir", move || {
-            filesystem_service::create_dir(&path)
-        })
-        .await
-    }
-}
+//! `filesystem.getHome`, `filesystem.listDir`, `filesystem.createDir`, and
+//! `file.read` are marker-registered in `handlers::mod` and executed by
+//! canonical `filesystem::*` engine functions. This module keeps
+//! wire-compatibility tests while business behavior lives behind the engine.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::server::rpc::context::RpcContext;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::server::rpc::registry::MethodRegistry;
     use crate::server::rpc::types::{RpcErrorBody, RpcRequest};

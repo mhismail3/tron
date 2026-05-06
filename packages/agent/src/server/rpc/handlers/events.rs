@@ -1,18 +1,11 @@
-//! Events handlers: subscribe and unsubscribe.
+//! Events RPC support helpers.
 //!
-//! `events.getHistory`, `events.getSince`, and `events.append` are served by
-//! canonical `events::*` engine functions. Real-time subscribe/unsubscribe
-//! acknowledgements remain handler-owned until stream primitives land.
+//! Every `events.*` method is marker-registered in `handlers::mod` and served
+//! by canonical `events::*` engine functions. This module keeps only shared
+//! wire-format helpers and wire-compatibility tests.
 
 use crate::events::sqlite::row_types::EventRow;
-use async_trait::async_trait;
 use serde_json::Value;
-use tracing::instrument;
-
-use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::require_string_param;
-use crate::server::rpc::registry::MethodHandler;
 
 /// Convert an `EventRow` to wire format (camelCase).
 pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
@@ -76,34 +69,11 @@ pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
     obj
 }
 
-/// Subscribe to real-time events for a session.
-pub struct SubscribeHandler;
-
-#[async_trait]
-impl MethodHandler for SubscribeHandler {
-    #[instrument(skip(self, _ctx), fields(method = "events.subscribe", session_id))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        // Subscription is handled at the WebSocket layer; this just acknowledges.
-        Ok(serde_json::json!({ "subscribed": true }))
-    }
-}
-
-/// Unsubscribe from real-time events for a session.
-pub struct UnsubscribeHandler;
-
-#[async_trait]
-impl MethodHandler for UnsubscribeHandler {
-    #[instrument(skip(self, _ctx), fields(method = "events.unsubscribe", session_id))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Ok(serde_json::json!({ "unsubscribed": true }))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::rpc::context::RpcContext;
+    use crate::server::rpc::errors::RpcError;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::server::rpc::registry::MethodRegistry;
     use crate::server::rpc::types::RpcRequest;
@@ -364,30 +334,21 @@ mod tests {
     #[tokio::test]
     async fn subscribe_returns_subscribed() {
         let ctx = make_test_context();
-        let result = SubscribeHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(&ctx, "events.subscribe", json!({"sessionId": "s1"})).await;
         assert_eq!(result["subscribed"], true);
     }
 
     #[tokio::test]
     async fn unsubscribe_returns_success() {
         let ctx = make_test_context();
-        let result = UnsubscribeHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(&ctx, "events.unsubscribe", json!({"sessionId": "s1"})).await;
         assert_eq!(result["unsubscribed"], true);
     }
 
     #[tokio::test]
     async fn unsubscribe_requires_session_id() {
         let ctx = make_test_context();
-        let err = UnsubscribeHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
+        let err = dispatch_err(&ctx, "events.unsubscribe", json!({})).await;
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 

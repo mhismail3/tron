@@ -11,6 +11,7 @@
 //! - **Search**: text/AST unified search
 //! - **Web**: `WebFetch`, `WebSearch`
 //! - **UI**: `AskUserQuestion`, `NotifyApp`
+//! - **Engine**: live capability discovery, inspection, watch, and invocation
 //! - **Subagent**: `SpawnSubagent`
 //!
 //! ## Module Position
@@ -28,6 +29,7 @@
 pub(crate) mod testutil;
 
 pub mod backends;
+pub mod engine;
 pub mod errors;
 pub mod registry;
 pub mod traits;

@@ -602,6 +602,7 @@ fn make_tool_config() -> ToolRegistryConfig {
         sandbox_settings: tron::settings::BashSandboxSettings::default(),
         computer_use_settings: tron::settings::ComputerUseSettings::default(),
         display_event_tx: None,
+        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         mcp_search: Arc::new(RegistryTestTool { name: "McpSearch" }),
         mcp_call: Arc::new(RegistryTestTool { name: "McpCall" }),
     }
@@ -625,8 +626,12 @@ fn tool_registry_order() {
     assert_eq!(names[10], "WebSearch");
     assert_eq!(names[11], "Display");
     assert_eq!(names[12], "ComputerUse");
-    assert_eq!(names[13], "McpSearch");
-    assert_eq!(names[14], "McpCall");
+    assert_eq!(names[13], "engine_discover");
+    assert_eq!(names[14], "engine_inspect");
+    assert_eq!(names[15], "engine_watch");
+    assert_eq!(names[16], "engine_invoke");
+    assert_eq!(names[17], "McpSearch");
+    assert_eq!(names[18], "McpCall");
 }
 
 #[test]
@@ -642,8 +647,8 @@ fn tool_registry_count() {
     let registry = create_tool_registry(&config);
     assert_eq!(
         registry.len(),
-        15,
-        "expected 15 base tools before subagent/job tools, got: {:?}",
+        19,
+        "expected 19 base tools before subagent/job tools, got: {:?}",
         registry.names()
     );
 }
@@ -654,6 +659,10 @@ fn tool_registry_always_includes_web_search_and_mcp_meta_tools() {
     let registry = create_tool_registry(&config);
     let names = registry.names();
     assert!(names.contains(&"WebSearch".to_string()));
+    assert!(names.contains(&"engine_discover".to_string()));
+    assert!(names.contains(&"engine_inspect".to_string()));
+    assert!(names.contains(&"engine_watch".to_string()));
+    assert!(names.contains(&"engine_invoke".to_string()));
     assert!(names.contains(&"McpSearch".to_string()));
     assert!(names.contains(&"McpCall".to_string()));
 }

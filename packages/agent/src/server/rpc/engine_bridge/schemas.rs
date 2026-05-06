@@ -130,6 +130,15 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "events.subscribe" | "events.unsubscribe" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "filesystem.listDir" => json!({
             "type": "object",
             "additionalProperties": false,
@@ -154,6 +163,109 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "filesystem.createDir" => json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "session.list" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "includeArchived": {"type": "boolean"},
+                "limit": {"type": "integer"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "session.getHead" | "session.getState" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "session.reconstruct" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "limit": {"type": "integer"},
+                "beforeSequence": {"type": "integer"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "session.getHistory" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "limit": {"type": "integer"},
+                "beforeId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "context.getSnapshot"
+        | "context.getDetailedSnapshot"
+        | "context.shouldCompact"
+        | "context.previewCompaction"
+        | "context.canAcceptTurn" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "context.getAuditTrace" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "turn": {"type": "integer"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "job.list" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "job.subscribe" => json!({
+            "type": "object",
+            "required": ["jobId", "sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "job.unsubscribe" => json!({
+            "type": "object",
+            "required": ["jobId"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
                 "sessionId": {"type": "string"},
                 "workspaceId": {"type": "string"}
             }
@@ -502,6 +614,18 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "newHeadEventId": {"type": ["string", "null"]}
             }
         }),
+        "events.subscribe" => json!({
+            "type": "object",
+            "required": ["subscribed"],
+            "additionalProperties": false,
+            "properties": {"subscribed": {"type": "boolean"}}
+        }),
+        "events.unsubscribe" => json!({
+            "type": "object",
+            "required": ["unsubscribed"],
+            "additionalProperties": false,
+            "properties": {"unsubscribed": {"type": "boolean"}}
+        }),
         "filesystem.listDir" => json!({
             "type": "object",
             "required": ["path", "parent", "entries"],
@@ -540,6 +664,53 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
             "properties": {
                 "content": {"type": "string"},
                 "path": {"type": "string"}
+            }
+        }),
+        "filesystem.createDir" => json!({
+            "type": "object",
+            "required": ["created", "path"],
+            "additionalProperties": false,
+            "properties": {
+                "created": {"type": "boolean"},
+                "path": {"type": "string"}
+            }
+        }),
+        "session.list"
+        | "session.getHead"
+        | "session.getState"
+        | "session.getHistory"
+        | "session.reconstruct"
+        | "context.getSnapshot"
+        | "context.getDetailedSnapshot"
+        | "context.getAuditTrace"
+        | "context.shouldCompact"
+        | "context.previewCompaction"
+        | "context.canAcceptTurn" => json!({
+            "type": "object",
+            "additionalProperties": true
+        }),
+        "job.list" => json!({
+            "type": "object",
+            "required": ["jobs"],
+            "additionalProperties": false,
+            "properties": {"jobs": {"type": "array"}}
+        }),
+        "job.subscribe" => json!({
+            "type": "object",
+            "required": ["subscribed", "jobId"],
+            "additionalProperties": false,
+            "properties": {
+                "subscribed": {"type": "boolean"},
+                "jobId": {"type": "string"}
+            }
+        }),
+        "job.unsubscribe" => json!({
+            "type": "object",
+            "required": ["jobId", "unsubscribed"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
+                "unsubscribed": {"type": "boolean"}
             }
         }),
         "notifications.list" => json!({

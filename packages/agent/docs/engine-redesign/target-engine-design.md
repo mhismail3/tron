@@ -392,8 +392,11 @@ isolation does.
 | `logs` | Local observability reads and append-only client-log ingestion; currently fully generic-triggered for RPC compatibility. |
 | `prompt_library` | Prompt history/snippet reads and writes; currently fully generic-triggered for RPC compatibility. |
 | `skills` | Skill registry and session-scoped active-skill state; currently fully generic-triggered for RPC compatibility. |
-| `filesystem` | Home/list/read capabilities now generic-triggered; writes remain deferred until path authority and idempotent file mutation contracts are hardened. |
-| `events` | Session/event-store append, read, reconstruct, subscribe. History/since/append are generic-triggered now; subscribe/unsubscribe wait for stream primitives. |
+| `filesystem` | Home/list/read/create-dir capabilities now generic-triggered; broader file writes remain deferred until path authority and idempotent file mutation contracts are hardened. |
+| `events` | Session/event-store append, read, reconstruct, subscribe/unsubscribe. All current `events.*` RPC methods are generic-triggered; subscribe/unsubscribe create stream subscription records while preserving current acknowledgements. |
+| `session` | Safe session reads (`list`, `getHead`, `getState`, `getHistory`, `reconstruct`) are generic-triggered; creation/deletion/fork/archive/export remain handler-owned until their mutation contracts collapse. |
+| `context` | Safe context reads are generic-triggered; compaction/clear mutations remain handler-owned until approval, ordering, and event-write contracts are hardened. |
+| `job` | Job list and output subscription controls are generic-triggered; background execution and cancel remain deferred until queue-backed job execution lands. |
 | `notifications` | Notification inbox read-state functions; currently fully generic-triggered for RPC compatibility. |
 | `plan` | Session plan-mode state; currently fully generic-triggered for RPC compatibility. |
 | `stream` | Durable subscriptions for session events, topology, jobs, tool output, browser/display, transcription, notifications. |

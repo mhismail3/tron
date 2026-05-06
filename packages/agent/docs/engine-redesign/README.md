@@ -159,12 +159,12 @@ self-modifying agent workflows safe and debuggable.
 
 ## Phase 1 source map
 
-The first in-repo implementation lives in `packages/agent/src/engine/`. The
-module proves the live fabric contracts before any existing workflow is
-migrated; WP4 wires the host into server startup as owned infrastructure while
-keeping production RPC, tools, runtime orchestration, and client traffic
-  unchanged through WP4; WP5-WP9 then add the first RPC bridge, generic
-  trigger, and read migrations:
+The in-repo implementation lives in `packages/agent/src/engine/`. The module
+proved the live fabric contracts before migration, then became server-owned
+infrastructure. Current work has moved beyond RPC bridge scaffolding: agents
+now have live engine tools, canonical domain functions are the executable
+surface for migrated methods, and stream/state/queue primitives exist as
+first-class workers.
 
 - `ids.rs` defines validated IDs for workers, functions, triggers, invocations,
   actors, authority grants, and traces.
@@ -212,6 +212,20 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   the invocation ledger. Dispatch failures before normal target execution are
   recorded too, so missing triggers, delivery mismatches, stale targets,
   schema/policy failures, and idempotency conflicts are causally visible.
+  `DeliveryMode::Enqueue` now stores a durable queue receipt and the queue
+  drain runtime replays the original trace/authority/idempotency context when
+  invoking the target later.
+- `streams.rs`, `state.rs`, and `queue.rs` define the first primitive workers:
+  cursor-pull streams, scoped revisioned state, and at-least-once queues with
+  leases, retry, cancellation, and dead-letter status. Each has in-memory and
+  SQLite-backed stores initialized in the isolated engine ledger database.
+- `capabilities.rs` defines `AgentCapabilityClient`, the typed agent-facing
+  adapter for live discover/inspect/watch/invoke/manual-dispatch flows. Agent
+  tools use this client and refuse `rpc::*` compatibility ids.
+- `protocol.rs` defines the loopback-only external worker message contract for
+  hello, catalog snapshot, function/trigger registration, invoke/result,
+  catalog change, heartbeat, and disconnect. It is protocol foundation only;
+  no sandbox or arbitrary worker execution has landed.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
 - `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
@@ -221,12 +235,16 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   handler-only inventory, the `json_rpc` and `manual` trigger types, and
   `json_rpc` trigger bindings from legacy method names into canonical targets.
   Handler-only methods remain internal/non-routable until their behavior moves.
-  Prompt library, settings, logs, skills, notifications, and plan are fully
-  collapsed method groups. Events history/since/append and read-safe filesystem
-  methods are also generic-triggered. Migrated writes use `rpc.write`, strict
+  Prompt library, settings, logs, skills, notifications, plan, events, basic
+  filesystem, safe session reads, safe context reads, and job list/subscription
+  controls are generic-triggered. Migrated writes use `rpc.write`, strict
   schemas, domain write scopes, and scoped engine-ledger idempotency;
   superseded method-specific business handlers are deleted as each group
   migrates.
+- `tools/engine` adds first-party agent tools: `engine_discover`,
+  `engine_inspect`, `engine_watch`, and `engine_invoke`. These are stable
+  meta-tools over the live canonical catalog; they do not expose frozen tool
+  snapshots or `rpc::*` compatibility names as the agent surface.
 
 ## Phase 1 acceptance checklist
 
@@ -300,6 +318,26 @@ Implemented:
   append-only effect metadata, system-scoped engine-ledger idempotency, and
   tests proving duplicate transports replay without reopening the log-ingest DB
   transaction;
+- agent-native engine tools over `AgentCapabilityClient`, giving agents live
+  discovery, inspection, cursor watch, and direct canonical invocation while
+  enforcing explicit idempotency for writes and approval-required errors for
+  high-risk capabilities;
+- stream, state, and queue primitive workers, with in-memory and SQLite-backed
+  stores, scoped visibility, idempotent mutations, cursor-pull stream polling,
+  compare-and-set state revisions, queue leases/retries/cancellation/DLQ, and
+  enqueue-trigger dispatch that preserves original causality when drained;
+- full events collapse: `events.subscribe` and `events.unsubscribe` now join
+  history/since/append on the canonical `events::*` path, backed by stream
+  subscription records while preserving current JSON-RPC acknowledgement
+  payloads;
+- basic filesystem collapse: `filesystem.createDir` now joins home/list/read
+  on the canonical `filesystem::*` path with strict schema, `rpc.write`,
+  `filesystem.write`, engine-ledger idempotency, and current path/error
+  behavior preserved through the existing filesystem service;
+- safe session/context/job reads and stream controls are generic-triggered:
+  `session.list/getHead/getState/getHistory/reconstruct`,
+  `context.getSnapshot/getDetailedSnapshot/getAuditTrace/shouldCompact/
+  previewCompaction/canAcceptTurn`, and `job.list/subscribe/unsubscribe`;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -311,10 +349,12 @@ Still deferred:
 
 - RPC migrations and generic-trigger conversion for the remaining handler-only
   method groups beyond prompt library, settings, logs, skills, notifications,
-  plan, events basics, and read-safe filesystem;
-- tool/runtime/client-native engine rewrites beyond the first RPC adapters;
-- queue and void delivery execution;
-- external worker protocol, sandbox workers, and worker reconnect semantics;
+  plan, events, basic filesystem, safe session/context reads, and job
+  read/stream controls;
+- runtime/client-native cutover beyond the first agent engine tools and RPC
+  adapters;
+- void delivery execution and production queue-backed agent/background jobs;
+- external worker sockets, sandbox workers, and worker reconnect semantics;
 - trigger firing/runtime loop detection;
 - reconstruction of live catalog definitions from durable ledger state.
 

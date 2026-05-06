@@ -293,7 +293,7 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registry`, with subagent and job tools added in the `tool_factory` closure in `main.rs`. To add or rename a tool, update both files.
 
-### Always-on (18)
+### Always-on (22)
 
 | Tool | Description |
 |------|-------------|
@@ -310,6 +310,10 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 | `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/profiles/auth.json`. |
 | `Display` | Render rich content (images, streams) for iOS clients via blob storage and `DisplayFrame` events. |
 | `ComputerUse` | Screenshot, click, type, keypress, scroll, window management. |
+| `engine_discover` | Search the live canonical engine capability catalog visible to the current agent/session. |
+| `engine_inspect` | Inspect an engine capability contract, schemas, risk, authority, health, and provenance. |
+| `engine_watch` | Poll live catalog changes after a catalog revision cursor. |
+| `engine_invoke` | Invoke canonical engine functions directly, with explicit idempotency required for writes. |
 | `McpSearch` | Meta-tool that searches across all configured MCP server tool catalogs by keyword. Registered with an empty result set when no MCP servers are configured. |
 | `McpCall` | Meta-tool that invokes a specific tool on an MCP server. Registered even before MCP servers are configured, so later settings changes do not require a daemon restart. |
 | `SpawnSubagent` | Spawn a child agent. Max depth controlled by `agent.subagent_max_depth` (default 3). |

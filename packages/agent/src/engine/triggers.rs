@@ -11,7 +11,13 @@ use super::errors::EngineError;
 use super::host::EngineHostHandle;
 use super::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
 use super::invocation::{CausalContext, Invocation, InvocationResult};
+use super::queue::EnqueueInvocation;
 use super::types::{DeliveryMode, FunctionRevision, TriggerDefinition};
+
+struct PreparedTriggerInvocation {
+    trigger: TriggerDefinition,
+    invocation: Invocation,
+}
 
 /// Request to fire a registered trigger.
 #[derive(Clone, Debug)]
@@ -75,7 +81,46 @@ impl EngineTriggerRuntime {
         request: TriggerDispatchRequest,
     ) -> InvocationResult {
         match Self::prepare_invocation(handle, request).await {
-            Ok(invocation) => handle.invoke(invocation).await,
+            Ok(prepared) if prepared.invocation.delivery_mode == DeliveryMode::Enqueue => {
+                let queue = prepared
+                    .trigger
+                    .config
+                    .get("queue")
+                    .and_then(Value::as_str)
+                    .unwrap_or("default")
+                    .to_owned();
+                let invocation = prepared.invocation;
+                let enqueue = EnqueueInvocation {
+                    queue,
+                    function_id: invocation.function_id.clone(),
+                    target_revision: invocation.expected_function_revision,
+                    payload: invocation.payload.clone(),
+                    actor_id: invocation.causal_context.actor_id.clone(),
+                    actor_kind: invocation.causal_context.actor_kind.clone(),
+                    authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+                    authority_scopes: invocation.causal_context.authority_scopes.clone(),
+                    trace_id: invocation.causal_context.trace_id.clone(),
+                    parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
+                    trigger_id: invocation.causal_context.trigger_id.clone(),
+                    session_id: invocation.causal_context.session_id.clone(),
+                    workspace_id: invocation.causal_context.workspace_id.clone(),
+                    idempotency_key: invocation.causal_context.idempotency_key.clone(),
+                };
+                match handle.enqueue_invocation(enqueue).await {
+                    Ok(item) => handle.record_enqueued_invocation(invocation, &item).await,
+                    Err(error) => {
+                        handle
+                            .record_trigger_prepare_failure(
+                                invocation,
+                                prepared.trigger.owner_worker,
+                                FunctionRevision(0),
+                                error,
+                            )
+                            .await
+                    }
+                }
+            }
+            Ok(prepared) => handle.invoke(prepared.invocation).await,
             Err((trigger, error, request)) => {
                 let worker_id = trigger.as_ref().map_or_else(
                     || WorkerId::new("engine").unwrap(),
@@ -129,7 +174,7 @@ impl EngineTriggerRuntime {
         handle: &EngineHostHandle,
         request: TriggerDispatchRequest,
     ) -> std::result::Result<
-        Invocation,
+        PreparedTriggerInvocation,
         (
             Option<TriggerDefinition>,
             EngineError,
@@ -186,6 +231,9 @@ impl EngineTriggerRuntime {
         if let Some(revision) = trigger.target_revision {
             invocation = invocation.expecting_revision(revision);
         }
-        Ok(invocation)
+        Ok(PreparedTriggerInvocation {
+            trigger,
+            invocation,
+        })
     }
 }

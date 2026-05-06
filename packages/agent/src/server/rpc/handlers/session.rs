@@ -1,4 +1,10 @@
-//! Session handlers: create, resume, list, delete, fork, getHead, getState, getHistory, reconstruct.
+//! Session handlers for command-owned operations.
+//!
+//! Safe session reads (`session.list`, `session.getHead`,
+//! `session.getState`, `session.getHistory`, and `session.reconstruct`) are
+//! collapsed into canonical engine functions and registered through generic
+//! JSON-RPC trigger markers. This module keeps session command handlers plus
+//! test-only read wrappers for the existing wire-format regression suite.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -10,6 +16,7 @@ use crate::server::rpc::handlers::{opt_bool, opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::session_commands::{CreateSessionRequest, SessionCommandService};
 use crate::server::rpc::session_queries::SessionQueryService;
+#[cfg(test)]
 use crate::server::rpc::session_reconstruct::SessionReconstructService;
 
 /// Create a new session.
@@ -55,8 +62,10 @@ impl MethodHandler for ResumeSessionHandler {
 }
 
 /// List sessions with optional filters.
+#[cfg(test)]
 pub struct ListSessionsHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ListSessionsHandler {
     #[instrument(skip(self, ctx), fields(method = "session.list"))]
@@ -100,8 +109,10 @@ impl MethodHandler for ForkSessionHandler {
 }
 
 /// Get the head event ID for a session.
+#[cfg(test)]
 pub struct GetHeadHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetHeadHandler {
     #[instrument(skip(self, ctx), fields(method = "session.getHead", session_id))]
@@ -112,8 +123,10 @@ impl MethodHandler for GetHeadHandler {
 }
 
 /// Get reconstructed state for a session.
+#[cfg(test)]
 pub struct GetStateHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetStateHandler {
     #[instrument(skip(self, ctx), fields(method = "session.getState", session_id))]
@@ -136,8 +149,10 @@ impl MethodHandler for ArchiveSessionHandler {
 }
 
 /// Get conversation history for a session (reconstructed messages).
+#[cfg(test)]
 pub struct GetHistoryHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetHistoryHandler {
     #[instrument(skip(self, ctx), fields(method = "session.getHistory", session_id))]
@@ -208,8 +223,10 @@ impl MethodHandler for ExportSessionHandler {
 }
 
 /// Reconstruct full session state for reconnection.
+#[cfg(test)]
 pub struct ReconstructHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ReconstructHandler {
     #[instrument(skip(self, ctx), fields(method = "session.reconstruct", session_id))]

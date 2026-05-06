@@ -1,6 +1,12 @@
-//! Context handlers: getSnapshot, getDetailedSnapshot, getAuditTrace,
-//! shouldCompact, previewCompaction, confirmCompaction, canAcceptTurn, clear,
-//! compact.
+//! Context handlers for command-owned operations.
+//!
+//! The read-only context surface (`context.getSnapshot`,
+//! `context.getDetailedSnapshot`, `context.getAuditTrace`,
+//! `context.shouldCompact`, `context.previewCompaction`, and
+//! `context.canAcceptTurn`) is collapsed into canonical engine functions and
+//! registered through generic JSON-RPC trigger markers. This module keeps the
+//! mutating context handlers plus test-only read wrappers for the existing
+//! wire-format regression suite.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -8,6 +14,7 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::context_commands::ContextCommandService;
+#[cfg(test)]
 use crate::server::rpc::context_queries::ContextQueryService;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{opt_string, require_string_param};
@@ -18,8 +25,10 @@ use crate::server::rpc::registry::MethodHandler;
 // =============================================================================
 
 /// Get context snapshot for a session.
+#[cfg(test)]
 pub struct GetSnapshotHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetSnapshotHandler {
     #[instrument(skip(self, ctx), fields(method = "context.getSnapshot", session_id))]
@@ -30,8 +39,10 @@ impl MethodHandler for GetSnapshotHandler {
 }
 
 /// Get detailed context snapshot.
+#[cfg(test)]
 pub struct GetDetailedSnapshotHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetDetailedSnapshotHandler {
     #[instrument(
@@ -45,8 +56,10 @@ impl MethodHandler for GetDetailedSnapshotHandler {
 }
 
 /// Get the latest Constitution/profile audit trace for a session turn.
+#[cfg(test)]
 pub struct GetAuditTraceHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetAuditTraceHandler {
     #[instrument(skip(self, ctx), fields(method = "context.getAuditTrace", session_id))]
@@ -66,8 +79,10 @@ impl MethodHandler for GetAuditTraceHandler {
 }
 
 /// Check if compaction is recommended.
+#[cfg(test)]
 pub struct ShouldCompactHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ShouldCompactHandler {
     #[instrument(skip(self, ctx), fields(method = "context.shouldCompact", session_id))]
@@ -78,8 +93,10 @@ impl MethodHandler for ShouldCompactHandler {
 }
 
 /// Preview what compaction would produce.
+#[cfg(test)]
 pub struct PreviewCompactionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for PreviewCompactionHandler {
     #[instrument(
@@ -109,8 +126,10 @@ impl MethodHandler for ConfirmCompactionHandler {
 }
 
 /// Check if the context can accept another turn.
+#[cfg(test)]
 pub struct CanAcceptTurnHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for CanAcceptTurnHandler {
     #[instrument(skip(self, ctx), fields(method = "context.canAcceptTurn", session_id))]

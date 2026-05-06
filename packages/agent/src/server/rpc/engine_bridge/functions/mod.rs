@@ -30,13 +30,16 @@ use crate::skills::registry::SkillRegistry;
 
 use super::rpc_error_to_engine;
 
+mod context;
 mod events;
 mod filesystem;
+mod job;
 mod logs;
 mod model;
 mod notifications;
 mod plan;
 mod prompt_library;
+mod session;
 mod settings;
 mod skills;
 mod system;
@@ -56,6 +59,11 @@ pub(super) struct RpcEngineDeps {
     codex_app_server: Option<Arc<CodexAppServerManager>>,
     ws_port: Arc<AtomicU16>,
     onboarded_marker_path: PathBuf,
+    engine_host: crate::engine::EngineHostHandle,
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 impl RpcEngineDeps {
@@ -74,6 +82,10 @@ impl RpcEngineDeps {
             codex_app_server: ctx.codex_app_server.clone(),
             ws_port: Arc::clone(&ctx.ws_port),
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),
+            engine_host: ctx.engine_host.clone(),
+            process_manager: ctx.process_manager.clone(),
+            job_manager: ctx.job_manager.clone(),
+            output_buffer_registry: ctx.output_buffer_registry.clone(),
         }
     }
 }
@@ -112,8 +124,24 @@ async fn rpc_function_value(
         "events.getHistory" | "events.getSince" | "events.append" => {
             events::handle(method, invocation, deps).await
         }
+        "events.subscribe" | "events.unsubscribe" => events::handle(method, invocation, deps).await,
         "filesystem.listDir" | "filesystem.getHome" | "file.read" => {
             filesystem::handle(method, invocation, deps).await
+        }
+        "filesystem.createDir" => filesystem::handle(method, invocation, deps).await,
+        "session.list"
+        | "session.getHead"
+        | "session.getState"
+        | "session.getHistory"
+        | "session.reconstruct" => session::handle(method, invocation, deps).await,
+        "context.getSnapshot"
+        | "context.getDetailedSnapshot"
+        | "context.getAuditTrace"
+        | "context.shouldCompact"
+        | "context.previewCompaction"
+        | "context.canAcceptTurn" => context::handle(method, invocation, deps).await,
+        "job.list" | "job.subscribe" | "job.unsubscribe" => {
+            job::handle(method, invocation, deps).await
         }
         "notifications.list" | "notifications.markRead" | "notifications.markAllRead" => {
             notifications::handle(method, invocation, deps).await

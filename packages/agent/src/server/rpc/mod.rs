@@ -29,11 +29,12 @@
 //! transport trigger into the canonical domain function. Read triggers carry
 //! `rpc.read` plus the domain read scope; migrated write triggers carry
 //! `rpc.write` plus the domain write scope and engine-ledger idempotency.
-//! Prompt library, settings, logs, skills, notifications, and plan are now
-//! fully collapsed groups with marker-only JSON-RPC registrations. Events
-//! append/history and read-safe filesystem methods are also generic-triggered,
-//! while event subscriptions and filesystem writes wait for stream and
-//! file-write primitives.
+//! Prompt library, settings, logs, skills, notifications, plan, events,
+//! read-safe session/context queries, job list/subscription controls, and basic
+//! filesystem reads/create-dir are now generic-triggered with marker-only
+//! JSON-RPC registrations. RPC remains a compatibility transport; the
+//! canonical capability surface is the domain function catalog agents discover
+//! through the engine tools.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

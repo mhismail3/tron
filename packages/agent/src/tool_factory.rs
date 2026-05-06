@@ -29,6 +29,8 @@ pub(crate) struct ToolRegistryConfig {
     pub computer_use_settings: tron::settings::ComputerUseSettings,
     /// Broadcast sender for Display tool streaming (DisplayFrame events).
     pub display_event_tx: Option<tokio::sync::broadcast::Sender<tron::core::events::TronEvent>>,
+    /// Shared live engine host used by agent-native capability tools.
+    pub engine_host: tron::engine::EngineHostHandle,
     /// `McpSearch` meta-tool (searches all MCP server tools by keyword).
     pub mcp_search: Arc<dyn tron::tools::traits::TronTool>,
     /// `McpCall` meta-tool (calls a tool on an MCP server).
@@ -146,6 +148,20 @@ pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry 
     // ManageJob + Wait — registered in the tool factory closure where
     // both ProcessManager and SubagentManager are available for JobManager creation.
     // See the `tool_factory` closure in main().
+
+    // 14–17: Live engine capability meta-tools.
+    registry.register(Arc::new(tron::tools::engine::EngineDiscoverTool::new(
+        config.engine_host.clone(),
+    )));
+    registry.register(Arc::new(tron::tools::engine::EngineInspectTool::new(
+        config.engine_host.clone(),
+    )));
+    registry.register(Arc::new(tron::tools::engine::EngineWatchTool::new(
+        config.engine_host.clone(),
+    )));
+    registry.register(Arc::new(tron::tools::engine::EngineInvokeTool::new(
+        config.engine_host.clone(),
+    )));
 
     // MCP meta-tools (McpSearch + McpCall replace individual tool registration).
     // They remain present with zero configured servers so settings changes can

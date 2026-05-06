@@ -25,7 +25,10 @@ use super::types::{
     Provenance, ReplayBehavior, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
-use super::{EngineHost, EngineHostHandle, EngineTriggerRuntime, TriggerDispatchRequest};
+use super::{
+    EngineHost, EngineHostHandle, EngineQueueRuntime, EngineTriggerRuntime, StreamActorScope,
+    StreamCursor, TriggerDispatchRequest,
+};
 
 fn wid(value: &str) -> WorkerId {
     WorkerId::new(value).unwrap()
@@ -2887,4 +2890,433 @@ async fn trigger_runtime_does_not_block_discovery_while_target_runs() {
     release.notify_waiters();
     let result = running.await.unwrap();
     assert_eq!(result.error, None);
+}
+
+#[tokio::test]
+async fn stream_primitive_subscribe_poll_and_unsubscribe_are_scoped() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let subscribe = handle
+        .invoke(host_invocation(
+            "stream::subscribe",
+            json!({
+                "subscriptionId": "sub-a",
+                "topic": "events.session",
+                "sessionId": "session-a"
+            }),
+            mutating_causal("stream-subscribe").with_scope("stream.write"),
+        ))
+        .await;
+    assert_eq!(subscribe.error, None);
+    assert_eq!(subscribe.value.as_ref().unwrap()["subscriptionId"], "sub-a");
+
+    handle
+        .publish_stream_event(super::PublishStreamEvent {
+            topic: "events.session".to_owned(),
+            payload: json!({"visible": true}),
+            visibility: VisibilityScope::Session,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: None,
+            producer: "test".to_owned(),
+            trace_id: Some(trace("stream-trace")),
+            parent_invocation_id: None,
+        })
+        .await
+        .unwrap();
+    handle
+        .publish_stream_event(super::PublishStreamEvent {
+            topic: "events.session".to_owned(),
+            payload: json!({"visible": false}),
+            visibility: VisibilityScope::Session,
+            session_id: Some("session-b".to_owned()),
+            workspace_id: None,
+            producer: "test".to_owned(),
+            trace_id: Some(trace("stream-trace")),
+            parent_invocation_id: None,
+        })
+        .await
+        .unwrap();
+
+    let poll = handle
+        .invoke(host_invocation(
+            "stream::poll",
+            json!({"subscriptionId": "sub-a", "limit": 10}),
+            causal()
+                .with_scope("stream.read")
+                .with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(poll.error, None);
+    let events = poll.value.as_ref().unwrap()["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["payload"], json!({"visible": true}));
+
+    let hidden = handle
+        .poll_stream(
+            "sub-a",
+            Some(StreamCursor(0)),
+            10,
+            &StreamActorScope::scoped(Some("session-b".to_owned()), None),
+        )
+        .await;
+    assert!(matches!(
+        hidden,
+        Err(EngineError::PolicyViolation(message)) if message.contains("not visible")
+    ));
+
+    let unsubscribe = handle
+        .invoke(host_invocation(
+            "stream::unsubscribe",
+            json!({"subscriptionId": "sub-a"}),
+            mutating_causal("stream-unsubscribe").with_scope("stream.write"),
+        ))
+        .await;
+    assert_eq!(unsubscribe.error, None);
+    assert_eq!(unsubscribe.value.as_ref().unwrap()["unsubscribed"], true);
+}
+
+#[tokio::test]
+async fn state_primitive_revisions_cas_list_and_delete_are_idempotent() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let context = |key: &str| {
+        mutating_causal(key)
+            .with_scope("state.write")
+            .with_session_id("session-a")
+    };
+    let set = handle
+        .invoke(host_invocation(
+            "state::set",
+            json!({
+                "scope": "session",
+                "namespace": "agent",
+                "key": "draft",
+                "value": {"text": "one"}
+            }),
+            context("state-set-1"),
+        ))
+        .await;
+    assert_eq!(set.error, None);
+    assert_eq!(set.value.as_ref().unwrap()["entry"]["revision"], 1);
+
+    let replay = handle
+        .invoke(host_invocation(
+            "state::set",
+            json!({
+                "scope": "session",
+                "namespace": "agent",
+                "key": "draft",
+                "value": {"text": "one"}
+            }),
+            context("state-set-1"),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    assert_eq!(replay.replayed_from, Some(set.invocation_id.clone()));
+
+    let cas = handle
+        .invoke(host_invocation(
+            "state::compare_and_set",
+            json!({
+                "scope": "session",
+                "namespace": "agent",
+                "key": "draft",
+                "expectedRevision": 1,
+                "value": {"text": "two"}
+            }),
+            context("state-cas-1"),
+        ))
+        .await;
+    assert_eq!(cas.error, None);
+    assert_eq!(cas.value.as_ref().unwrap()["entry"]["revision"], 2);
+
+    let stale = handle
+        .invoke(host_invocation(
+            "state::compare_and_set",
+            json!({
+                "scope": "session",
+                "namespace": "agent",
+                "key": "draft",
+                "expectedRevision": 1,
+                "value": {"text": "three"}
+            }),
+            context("state-cas-stale"),
+        ))
+        .await;
+    assert!(matches!(
+        stale.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("revision conflict")
+    ));
+
+    let listed = handle
+        .invoke(host_invocation(
+            "state::list",
+            json!({"scope": "session", "namespace": "agent", "keyPrefix": "dr"}),
+            causal()
+                .with_scope("state.read")
+                .with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(listed.error, None);
+    assert_eq!(
+        listed.value.as_ref().unwrap()["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let deleted = handle
+        .invoke(host_invocation(
+            "state::delete",
+            json!({"scope": "session", "namespace": "agent", "key": "draft"}),
+            context("state-delete-1"),
+        ))
+        .await;
+    assert_eq!(deleted.error, None);
+    assert_eq!(deleted.value.as_ref().unwrap()["deleted"], true);
+}
+
+#[tokio::test]
+async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    let mut trigger_type = TriggerTypeDefinition::new(
+        TriggerTypeId::new("manual").unwrap(),
+        wid("alpha"),
+        "manual",
+    );
+    trigger_type.allowed_delivery_modes = vec![DeliveryMode::Sync, DeliveryMode::Enqueue];
+    handle
+        .register_trigger_type_for_setup(trigger_type, false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("alpha::queued", "alpha")
+                .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
+                .with_required_authority(AuthorityRequirement::scope("queue.test")),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+    let trigger_id = TriggerId::new("manual:alpha.queued").unwrap();
+    handle
+        .register_trigger_for_setup(
+            TriggerDefinition::new(
+                trigger_id.clone(),
+                wid("alpha"),
+                TriggerTypeId::new("manual").unwrap(),
+                fid("alpha::queued"),
+                grant("manual-grant"),
+            )
+            .with_delivery_mode(DeliveryMode::Enqueue),
+            false,
+        )
+        .unwrap();
+
+    let mut request = TriggerDispatchRequest::new(
+        trigger_id.clone(),
+        json!({"queued": true}),
+        actor("agent"),
+        ActorKind::Agent,
+    );
+    request.delivery_mode = Some(DeliveryMode::Enqueue);
+    request.authority_scopes = vec!["queue.test".to_owned()];
+    request.trace_id = Some(trace("queued-trace"));
+    request.session_id = Some("session-a".to_owned());
+    request.idempotency_key = Some("queue-target-key".to_owned());
+    let queued = EngineTriggerRuntime::dispatch(&handle, request).await;
+    assert_eq!(queued.error, None);
+    let receipt = queued.value.as_ref().unwrap()["receiptId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(queued.value.as_ref().unwrap()["queued"], true);
+
+    let drained = EngineQueueRuntime::drain_once(&handle, "default", "worker-a")
+        .await
+        .unwrap()
+        .expect("queued item should drain");
+    assert_eq!(drained.error, None);
+    assert_eq!(
+        drained.value.as_ref().unwrap()["echo"],
+        json!({"queued": true})
+    );
+
+    let host = handle.lock().await;
+    let target_record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .rev()
+        .find(|record| record.function_id == fid("alpha::queued"))
+        .expect("queued target invocation should be recorded");
+    assert_eq!(target_record.trigger_id, Some(trigger_id));
+    assert_eq!(target_record.trace_id, trace("queued-trace"));
+    assert_eq!(target_record.delivery_mode, DeliveryMode::Sync);
+    assert_eq!(
+        target_record.idempotency_key.as_deref(),
+        Some("queue-target-key")
+    );
+    assert!(host.catalog().invocations().iter().any(|record| {
+        record.result_value.as_ref().is_some_and(|value| {
+            value.get("receiptId").and_then(Value::as_str) == Some(receipt.as_str())
+        })
+    }));
+}
+
+#[tokio::test]
+async fn sqlite_primitive_stores_persist_stream_state_and_queue_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("engine-ledger.sqlite");
+    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
+
+    let state_set = handle
+        .invoke(host_invocation(
+            "state::set",
+            json!({
+                "scope": "system",
+                "namespace": "agent",
+                "key": "boot",
+                "value": {"ready": true}
+            }),
+            mutating_causal("sqlite-state-set").with_scope("state.write"),
+        ))
+        .await;
+    assert_eq!(state_set.error, None);
+    handle
+        .subscribe_stream(
+            "sqlite-sub".to_owned(),
+            "catalog.changes".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::System,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    handle
+        .publish_stream_event(super::PublishStreamEvent {
+            topic: "catalog.changes".to_owned(),
+            payload: json!({"subject": "alpha::one"}),
+            visibility: VisibilityScope::System,
+            session_id: None,
+            workspace_id: None,
+            producer: "test".to_owned(),
+            trace_id: Some(trace("sqlite-stream-trace")),
+            parent_invocation_id: None,
+        })
+        .await
+        .unwrap();
+    let queued = handle
+        .invoke(host_invocation(
+            "queue::enqueue",
+            json!({
+                "queue": "durable",
+                "functionId": "state::get",
+                "payload": {"scope": "system", "namespace": "agent", "key": "boot"}
+            }),
+            mutating_causal("sqlite-queue-enqueue").with_scope("queue.write"),
+        ))
+        .await;
+    assert_eq!(queued.error, None);
+    let receipt = queued.value.as_ref().unwrap()["item"]["receiptId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    drop(handle);
+
+    let reopened = EngineHostHandle::open_sqlite(&path).unwrap();
+    let state_get = reopened
+        .invoke(host_invocation(
+            "state::get",
+            json!({"scope": "system", "namespace": "agent", "key": "boot"}),
+            causal().with_scope("state.read"),
+        ))
+        .await;
+    assert_eq!(state_get.error, None);
+    assert_eq!(
+        state_get.value.as_ref().unwrap()["entry"]["value"],
+        json!({"ready": true})
+    );
+    let stream_page = reopened
+        .poll_stream(
+            "sqlite-sub",
+            Some(StreamCursor(0)),
+            10,
+            &StreamActorScope::admin(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream_page.events.len(), 1);
+    assert_eq!(
+        stream_page.events[0].payload,
+        json!({"subject": "alpha::one"})
+    );
+    let queue_get = reopened
+        .invoke(host_invocation(
+            "queue::get",
+            json!({"receiptId": receipt}),
+            causal().with_scope("queue.read"),
+        ))
+        .await;
+    assert_eq!(queue_get.error, None);
+    assert_eq!(
+        queue_get.value.as_ref().unwrap()["item"]["queue"],
+        "durable"
+    );
+}
+
+#[test]
+fn external_worker_protocol_roundtrips_local_session_default_messages() {
+    let worker = WorkerDefinition::new(
+        wid("local-worker"),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("local");
+    let hello = super::WorkerProtocolMessage::Hello(super::WorkerHello {
+        protocol_version: super::WORKER_PROTOCOL_VERSION,
+        worker: worker.clone(),
+        loopback_only: true,
+    });
+    let function = FunctionDefinition::new(
+        fid("local::echo"),
+        wid("local-worker"),
+        "session-default external function",
+        VisibilityScope::Session,
+        EffectClass::PureRead,
+    )
+    .with_provenance(Provenance::system().with_session_id("session-a"));
+    let register = super::WorkerProtocolMessage::RegisterFunction(super::RegisterFunction {
+        definition: function,
+        default_visibility: VisibilityScope::Session,
+    });
+    if let super::WorkerProtocolMessage::RegisterFunction(message) = &register {
+        assert_eq!(message.default_visibility, VisibilityScope::Session);
+        assert_eq!(message.definition.visibility, VisibilityScope::Session);
+    }
+    let trigger = super::WorkerProtocolMessage::RegisterTrigger(super::RegisterTrigger {
+        definition: TriggerDefinition::new(
+            TriggerId::new("manual:local.echo").unwrap(),
+            wid("local-worker"),
+            TriggerTypeId::new("manual").unwrap(),
+            fid("local::echo"),
+            grant("external-grant"),
+        ),
+    });
+    let invoke = super::WorkerProtocolMessage::Invoke(super::WorkerInvoke {
+        invocation_id: super::InvocationId::generate(),
+        function_id: fid("local::echo"),
+        payload: json!({"hello": "worker"}),
+        actor_kind: ActorKind::Agent,
+        trace_id: trace("worker-trace"),
+        trigger_id: Some(TriggerId::new("manual:local.echo").unwrap()),
+    });
+    for message in [hello, register, trigger, invoke] {
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: super::WorkerProtocolMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, message);
+    }
 }

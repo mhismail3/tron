@@ -31,9 +31,21 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "logs.recent",
     "events.getHistory",
     "events.getSince",
+    "session.list",
+    "session.getHead",
+    "session.getState",
+    "session.getHistory",
+    "session.reconstruct",
+    "context.getSnapshot",
+    "context.getDetailedSnapshot",
+    "context.getAuditTrace",
+    "context.shouldCompact",
+    "context.previewCompaction",
+    "context.canAcceptTurn",
     "filesystem.listDir",
     "filesystem.getHome",
     "file.read",
+    "job.list",
     "notifications.list",
     "plan.getState",
     "promptHistory.list",
@@ -44,11 +56,16 @@ const GENERIC_READ_METHODS: &[&str] = &[
 const GENERIC_WRITE_METHODS: &[&str] = &[
     "logs.ingest",
     "events.append",
+    "events.subscribe",
+    "events.unsubscribe",
     "settings.update",
     "settings.resetToDefaults",
     "skill.refresh",
     "skill.activate",
     "skill.deactivate",
+    "filesystem.createDir",
+    "job.subscribe",
+    "job.unsubscribe",
     "notifications.markRead",
     "notifications.markAllRead",
     "plan.enter",
@@ -77,8 +94,31 @@ const SKILL_METHODS: &[&str] = &[
     "skill.active",
 ];
 
-const FILESYSTEM_ENGINE_METHODS: &[&str] =
-    &["filesystem.getHome", "filesystem.listDir", "file.read"];
+const FILESYSTEM_ENGINE_METHODS: &[&str] = &[
+    "filesystem.getHome",
+    "filesystem.listDir",
+    "filesystem.createDir",
+    "file.read",
+];
+
+const SESSION_METHODS: &[&str] = &[
+    "session.list",
+    "session.getHead",
+    "session.getState",
+    "session.getHistory",
+    "session.reconstruct",
+];
+
+const CONTEXT_READ_METHODS: &[&str] = &[
+    "context.getSnapshot",
+    "context.getDetailedSnapshot",
+    "context.getAuditTrace",
+    "context.shouldCompact",
+    "context.previewCompaction",
+    "context.canAcceptTurn",
+];
+
+const JOB_METHODS: &[&str] = &["job.list", "job.subscribe", "job.unsubscribe"];
 
 const NOTIFICATION_METHODS: &[&str] = &[
     "notifications.list",
@@ -98,6 +138,14 @@ const PROMPT_LIBRARY_METHODS: &[&str] = &[
     "promptSnippet.update",
     "promptSnippet.delete",
 ];
+
+const MIGRATION_PARITY_TIMEOUT: Duration = Duration::from_secs(180);
+
+fn migration_parity_registry() -> MethodRegistry {
+    let mut registry = MethodRegistry::with_handler_timeout(MIGRATION_PARITY_TIMEOUT);
+    handlers::register_all(&mut registry);
+    registry
+}
 
 struct SettingsTestGuard {
     _guard: std::sync::MutexGuard<'static, ()>,
@@ -170,8 +218,7 @@ fn attach_codex_manager(
 }
 
 async fn direct_engine_value(ctx: &RpcContext, method: &'static str, params: Value) -> Value {
-    let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    let registry = migration_parity_registry();
     let request = RpcRequest {
         id: format!("direct-{method}"),
         method: method.to_owned(),
@@ -193,8 +240,7 @@ async fn direct_engine_value(ctx: &RpcContext, method: &'static str, params: Val
 }
 
 async fn rpc_dispatch_value(ctx: &RpcContext, method: &str, params: Value) -> Value {
-    let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    let registry = migration_parity_registry();
     let response = registry
         .dispatch(
             RpcRequest {
@@ -220,8 +266,7 @@ fn normalize_unstable_fields(method: &str, mut value: Value) -> Value {
 }
 
 fn domain_scope_for_method(method: &str) -> &'static str {
-    let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    let registry = migration_parity_registry();
     let spec = specs::capability_spec_for_method(&registry, method)
         .unwrap()
         .unwrap();
@@ -257,6 +302,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
         .collect::<BTreeSet<_>>();
     let registry_methods = registry.methods().into_iter().collect::<BTreeSet<_>>();
     assert_eq!(spec_methods, registry_methods);
+    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 51);
 }
 
 #[test]
@@ -475,9 +521,12 @@ fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
     for method in SKILL_METHODS
         .iter()
         .chain(FILESYSTEM_ENGINE_METHODS)
+        .chain(SESSION_METHODS)
+        .chain(CONTEXT_READ_METHODS)
+        .chain(JOB_METHODS)
         .chain(NOTIFICATION_METHODS)
         .chain(PLAN_METHODS)
-        .chain(["events.append"].iter())
+        .chain(["events.append", "events.subscribe", "events.unsubscribe"].iter())
     {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
         assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
@@ -862,7 +911,7 @@ fn handler_only_methods_do_not_build_generic_envelopes() {
     handlers::register_all(&mut registry);
     let request = RpcRequest {
         id: "req-handler".to_owned(),
-        method: "session.list".to_owned(),
+        method: "session.create".to_owned(),
         params: Some(json!({})),
     };
     assert!(
@@ -878,7 +927,7 @@ async fn handler_only_engine_functions_are_not_client_routable() {
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
-            specs::function_id_for_method("session.list").unwrap(),
+            specs::function_id_for_method("session.create").unwrap(),
             json!({}),
             super::dispatch::rpc_causal_context(),
         ))
@@ -997,6 +1046,25 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
             "events.getSince",
             json!({"sessionId": session_id, "afterSequence": 0}),
         ),
+        ("events.subscribe", json!({"sessionId": session_id})),
+        ("events.unsubscribe", json!({"sessionId": session_id})),
+        ("session.list", json!({})),
+        ("session.getHead", json!({"sessionId": session_id})),
+        ("session.getState", json!({"sessionId": session_id})),
+        ("session.getHistory", json!({"sessionId": session_id})),
+        ("session.reconstruct", json!({"sessionId": session_id})),
+        ("context.getSnapshot", json!({"sessionId": session_id})),
+        (
+            "context.getDetailedSnapshot",
+            json!({"sessionId": session_id}),
+        ),
+        ("context.shouldCompact", json!({"sessionId": session_id})),
+        (
+            "context.previewCompaction",
+            json!({"sessionId": session_id}),
+        ),
+        ("context.canAcceptTurn", json!({"sessionId": session_id})),
+        ("job.list", json!({"sessionId": session_id})),
         ("promptSnippet.get", json!({"id": snippet.id})),
     ];
 

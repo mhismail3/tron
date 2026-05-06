@@ -92,8 +92,11 @@ impl MethodRegistry {
     /// Maximum time a single RPC handler is allowed to run.
     const HANDLER_TIMEOUT: Duration = Duration::from_secs(60);
 
+    /// Build a registry with a custom timeout for tests that intentionally
+    /// exercise timeout policy or run broad parity checks under full-suite
+    /// blocking-pool contention.
     #[cfg(test)]
-    fn with_handler_timeout(timeout: Duration) -> Self {
+    pub(crate) fn with_handler_timeout(timeout: Duration) -> Self {
         Self {
             handlers: HashMap::new(),
             handler_timeout: timeout,

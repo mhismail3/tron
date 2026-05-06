@@ -11,11 +11,48 @@ pub(super) async fn handle(
     match method {
         "events.getHistory" => events_get_history_value(Some(payload), deps).await,
         "events.getSince" => events_get_since_value(Some(payload), deps).await,
-        "events.append" => events_append_value(Some(payload), deps).await,
+        "events.append" => events_append_value(Some(payload), invocation, deps).await,
+        "events.subscribe" => events_subscribe_value(Some(payload), invocation, deps).await,
+        "events.unsubscribe" => events_unsubscribe_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("events method {method} is not engine-owned"),
         }),
     }
+}
+
+async fn events_subscribe_value(
+    params: Option<&Value>,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let subscription_id = format!("events.session:{session_id}");
+    deps.engine_host
+        .subscribe_stream(
+            subscription_id,
+            "events.session".to_owned(),
+            crate::engine::StreamCursor(0),
+            crate::engine::VisibilityScope::Session,
+            Some(session_id),
+            invocation.causal_context.workspace_id.clone(),
+        )
+        .await
+        .map_err(super::super::engine_error_to_rpc)?;
+    Ok(json!({ "subscribed": true }))
+}
+
+async fn events_unsubscribe_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let subscription_id = format!("events.session:{session_id}");
+    let _ = deps
+        .engine_host
+        .unsubscribe_stream(&subscription_id)
+        .await
+        .map_err(super::super::engine_error_to_rpc)?;
+    Ok(json!({ "unsubscribed": true }))
 }
 
 async fn events_get_history_value(
@@ -117,6 +154,7 @@ async fn events_get_since_value(
 
 async fn events_append_value(
     params: Option<&Value>,
+    invocation: &Invocation,
     deps: &RpcEngineDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
@@ -145,9 +183,26 @@ async fn events_append_value(
         .get_session(&session_id)
         .map_err(map_event_store_error)?
         .and_then(|session| session.head_event_id);
+    let _ = deps
+        .engine_host
+        .publish_stream_event(crate::engine::PublishStreamEvent {
+            topic: "events.session".to_owned(),
+            payload: rpc_events::event_row_to_wire(&event),
+            visibility: crate::engine::VisibilityScope::Session,
+            session_id: Some(session_id.clone()),
+            workspace_id: invocation_workspace(params),
+            producer: "events::append".to_owned(),
+            trace_id: Some(invocation.causal_context.trace_id.clone()),
+            parent_invocation_id: Some(invocation.id.clone()),
+        })
+        .await;
 
     Ok(json!({
         "event": rpc_events::event_row_to_wire(&event),
         "newHeadEventId": new_head,
     }))
+}
+
+fn invocation_workspace(params: Option<&Value>) -> Option<String> {
+    opt_string(params, "workspaceId")
 }
