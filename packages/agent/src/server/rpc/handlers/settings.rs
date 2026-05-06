@@ -116,17 +116,6 @@ async fn reload_profile_runtime_or_rollback(
     }
 }
 
-/// Get current settings.
-pub struct GetSettingsHandler;
-
-#[async_trait]
-impl MethodHandler for GetSettingsHandler {
-    #[instrument(skip(self, ctx), fields(method = "settings.get"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "settings.get", _params).await
-    }
-}
-
 /// Reset all settings to defaults.
 pub struct ResetSettingsHandler;
 
@@ -276,6 +265,8 @@ mod tests {
         CodexAppServerSpawner, CodexAppServerState,
     };
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::types::RpcRequest;
     use crate::settings::CodexAppServerSettings;
     use async_trait::async_trait;
     use serde_json::json;
@@ -312,6 +303,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _ = std::fs::remove_file(&ctx.settings_path);
         (ctx, dir)
+    }
+
+    async fn get_settings_result(ctx: &RpcContext) -> Value {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "test-settings-get".to_owned(),
+                    method: "settings.get".to_owned(),
+                    params: Some(json!({})),
+                },
+                ctx,
+            )
+            .await;
+        assert!(response.success, "settings.get: {:?}", response.error);
+        response.result.unwrap()
     }
 
     #[derive(Default)]
@@ -370,7 +378,7 @@ mod tests {
     async fn get_settings_returns_defaults() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
         assert!(result.is_object());
         assert!(result.get("server").is_some());
     }
@@ -387,7 +395,7 @@ mod tests {
             .join(crate::core::paths::files::PROFILE_TOML);
         std::fs::write(profile_path, "{broken").unwrap();
 
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
 
         assert_eq!(result["server"]["defaultModel"], "claude-sonnet-4-6");
     }
@@ -396,7 +404,7 @@ mod tests {
     async fn get_settings_has_no_models_key() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
         // ModelSettings removed — default_model lives in server, subagent_model in agent
         assert!(result.get("models").is_none());
         assert!(result["server"]["defaultModel"].is_string());
@@ -407,7 +415,7 @@ mod tests {
     async fn get_settings_has_server() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
         assert!(result["server"].is_object());
     }
 
@@ -415,7 +423,7 @@ mod tests {
     async fn get_settings_wire_format() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
         assert!(result.get("version").is_some());
         assert!(result.get("server").is_some());
         assert!(result.get("context").is_some());
@@ -425,7 +433,7 @@ mod tests {
     async fn get_settings_returns_default_model_in_server_section() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
         assert_eq!(result["server"]["defaultModel"], "claude-sonnet-4-6");
     }
 
@@ -433,7 +441,7 @@ mod tests {
     async fn get_settings_returns_compaction_in_context_section() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
         assert!(result["context"]["compactor"].is_object());
         assert!(result["context"]["compactor"]["maxTokens"].is_number());
     }
@@ -442,7 +450,7 @@ mod tests {
     async fn get_settings_returns_tools() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
+        let result = get_settings_result(&ctx).await;
         assert!(result["tools"].is_object());
     }
 

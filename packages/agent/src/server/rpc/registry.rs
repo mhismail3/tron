@@ -126,6 +126,47 @@ impl MethodRegistry {
         }
 
         let start = std::time::Instant::now();
+        let generic_response = match entry.policy.timeout(self.handler_timeout) {
+            Some(timeout) => {
+                match tokio::time::timeout(
+                    timeout,
+                    crate::server::rpc::engine_bridge::try_dispatch_generic_rpc(
+                        self, ctx, &request,
+                    ),
+                )
+                .await
+                {
+                    Ok(response) => response,
+                    Err(_elapsed) => {
+                        counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "timeout")
+                            .increment(1);
+                        tracing::error!(
+                            method,
+                            "RPC handler timed out after {:?}",
+                            self.handler_timeout
+                        );
+                        record_dispatch_duration(&method, start);
+                        return RpcResponse::error(
+                            &request.id,
+                            errors::INTERNAL_ERROR,
+                            format!("Handler for '{method}' timed out"),
+                        );
+                    }
+                }
+            }
+            None => {
+                crate::server::rpc::engine_bridge::try_dispatch_generic_rpc(self, ctx, &request)
+                    .await
+            }
+        };
+        if let Some(response) = generic_response {
+            if let Some(error) = &response.error {
+                counter!("rpc_errors_total", "method" => method.clone(), "error_type" => error.code.clone()).increment(1);
+            }
+            record_dispatch_duration(&method, start);
+            return response;
+        }
+
         let result = match entry.policy.timeout(self.handler_timeout) {
             Some(timeout) => {
                 tokio::time::timeout(timeout, entry.handler.handle(request.params, ctx))
@@ -167,17 +208,7 @@ impl MethodRegistry {
             }
         };
 
-        let duration = start.elapsed();
-        histogram!("rpc_request_duration_seconds", "method" => method.clone())
-            .record(duration.as_secs_f64());
-
-        if duration.as_secs() >= 5 {
-            warn!(
-                method,
-                duration_secs = duration.as_secs_f64(),
-                "slow RPC request"
-            );
-        }
+        record_dispatch_duration(&method, start);
 
         response
     }
@@ -261,6 +292,20 @@ impl MethodRegistry {
         }
 
         HandlerExecutionPolicy::Mutating
+    }
+}
+
+fn record_dispatch_duration(method: &str, start: std::time::Instant) {
+    let duration = start.elapsed();
+    histogram!("rpc_request_duration_seconds", "method" => method.to_owned())
+        .record(duration.as_secs_f64());
+
+    if duration.as_secs() >= 5 {
+        warn!(
+            method,
+            duration_secs = duration.as_secs_f64(),
+            "slow RPC request"
+        );
     }
 }
 
@@ -521,6 +566,21 @@ mod tests {
         delay: std::time::Duration,
     }
 
+    struct SlowEngineFunction {
+        delay: std::time::Duration,
+    }
+
+    #[async_trait]
+    impl crate::engine::InProcessFunctionHandler for SlowEngineFunction {
+        async fn invoke(
+            &self,
+            _invocation: crate::engine::Invocation,
+        ) -> Result<Value, crate::engine::EngineError> {
+            tokio::time::sleep(self.delay).await;
+            Ok(json!({"done": true}))
+        }
+    }
+
     #[async_trait]
     impl MethodHandler for SlowHandler {
         async fn handle(
@@ -567,6 +627,47 @@ mod tests {
 
         assert!(!resp.success);
         assert_eq!(resp.id, "r-timeout");
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, "INTERNAL_ERROR");
+        assert!(err.message.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn generic_dispatch_preserves_registry_timeout() {
+        let ctx = make_test_context();
+        let definition = crate::engine::FunctionDefinition::new(
+            crate::engine::FunctionId::new("rpc::system.ping").unwrap(),
+            crate::engine::WorkerId::new("rpc").unwrap(),
+            "slow test rpc ping".to_owned(),
+            crate::engine::VisibilityScope::System,
+            crate::engine::EffectClass::PureRead,
+        )
+        .with_required_authority(crate::engine::AuthorityRequirement::scope("rpc.read"));
+        ctx.engine_host
+            .register_function_for_setup(
+                definition,
+                Some(Arc::new(SlowEngineFunction {
+                    delay: std::time::Duration::from_millis(30),
+                })),
+                false,
+            )
+            .unwrap();
+
+        let mut reg = MethodRegistry::with_handler_timeout(std::time::Duration::from_millis(1));
+        crate::server::rpc::handlers::register_all(&mut reg);
+        let resp = reg
+            .dispatch(
+                make_request(
+                    "r-generic-timeout",
+                    "system.ping",
+                    Some(json!({"protocolVersion": 1})),
+                ),
+                &ctx,
+            )
+            .await;
+
+        assert!(!resp.success);
+        assert_eq!(resp.id, "r-generic-timeout");
         let err = resp.error.unwrap();
         assert_eq!(err.code, "INTERNAL_ERROR");
         assert!(err.message.contains("timed out"));

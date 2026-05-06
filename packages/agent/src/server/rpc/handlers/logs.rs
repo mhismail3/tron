@@ -1,4 +1,7 @@
-//! Logs handler: ingest client logs into the database.
+//! Logs handlers.
+//!
+//! `logs.recent` is served by the engine bridge generic trigger. This module
+//! still owns the mutating `logs.ingest` handler.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -11,9 +14,6 @@ use crate::server::rpc::registry::MethodHandler;
 
 /// Ingest structured client logs into the database.
 pub struct IngestLogsHandler;
-
-/// Fetch recent server/client logs from the event database.
-pub struct RecentLogsHandler;
 
 #[async_trait]
 impl MethodHandler for IngestLogsHandler {
@@ -45,19 +45,31 @@ impl MethodHandler for IngestLogsHandler {
     }
 }
 
-#[async_trait]
-impl MethodHandler for RecentLogsHandler {
-    #[instrument(skip(self, ctx), fields(method = "logs.recent"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "logs.recent", params).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::types::RpcRequest;
     use serde_json::json;
+
+    async fn recent_logs_response(
+        ctx: &RpcContext,
+        params: Value,
+    ) -> crate::server::rpc::types::RpcResponse {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        registry
+            .dispatch(
+                RpcRequest {
+                    id: "test-logs-recent".to_owned(),
+                    method: "logs.recent".to_owned(),
+                    params: Some(params),
+                },
+                ctx,
+            )
+            .await
+    }
 
     #[tokio::test]
     async fn ingest_logs_inserts_entries() {
@@ -348,10 +360,9 @@ mod tests {
             .unwrap();
         }
 
-        let result = RecentLogsHandler
-            .handle(Some(json!({ "limit": 2 })), &ctx)
-            .await
-            .unwrap();
+        let response = recent_logs_response(&ctx, json!({ "limit": 2 })).await;
+        assert!(response.success, "{:?}", response.error);
+        let result = response.result.unwrap();
 
         assert_eq!(result["count"], 2);
         assert_eq!(result["entries"][0]["message"], "second");
@@ -362,11 +373,10 @@ mod tests {
     #[tokio::test]
     async fn recent_logs_rejects_excessive_limit() {
         let ctx = make_test_context();
-        let err = RecentLogsHandler
-            .handle(Some(json!({ "limit": 1_001 })), &ctx)
-            .await
-            .unwrap_err();
+        let response = recent_logs_response(&ctx, json!({ "limit": 1_001 })).await;
+        assert!(!response.success);
+        let err = response.error.unwrap();
 
-        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert_eq!(err.code, "INVALID_PARAMS");
     }
 }

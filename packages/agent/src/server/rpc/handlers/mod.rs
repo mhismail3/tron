@@ -60,6 +60,7 @@ pub mod tree;
 pub mod voice_notes;
 pub mod worktree;
 
+use crate::server::rpc::engine_bridge::RpcGenericTriggerHandler;
 use crate::server::rpc::registry::MethodRegistry;
 
 /// Register all RPC handlers with the registry.
@@ -72,8 +73,11 @@ pub fn register_all(registry: &mut MethodRegistry) {
 
 fn register_core(registry: &mut MethodRegistry) {
     // System
-    registry.register("system.ping", system::PingHandler);
-    registry.register("system.getInfo", system::GetInfoHandler);
+    registry.register("system.ping", RpcGenericTriggerHandler::new("system.ping"));
+    registry.register(
+        "system.getInfo",
+        RpcGenericTriggerHandler::new("system.getInfo"),
+    );
     registry.register("system.getDiagnostics", system::GetDiagnosticsHandler);
     registry.register("system.shutdown", system::ShutdownHandler);
     // System — user-mode update checks/downloads.
@@ -124,7 +128,7 @@ fn register_core(registry: &mut MethodRegistry) {
     );
 
     // Model
-    registry.register("model.list", model::ListModelsHandler);
+    registry.register("model.list", RpcGenericTriggerHandler::new("model.list"));
     registry.register("model.switch", model::SwitchModelHandler);
     registry.register("config.setReasoningLevel", model::SetReasoningLevelHandler);
 
@@ -149,14 +153,23 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("context.compact", context::CompactHandler);
 
     // Events
-    registry.register("events.getHistory", events::GetHistoryHandler);
-    registry.register("events.getSince", events::GetSinceHandler);
+    registry.register(
+        "events.getHistory",
+        RpcGenericTriggerHandler::new("events.getHistory"),
+    );
+    registry.register(
+        "events.getSince",
+        RpcGenericTriggerHandler::new("events.getSince"),
+    );
     registry.register("events.subscribe", events::SubscribeHandler);
     registry.register("events.unsubscribe", events::UnsubscribeHandler);
     registry.register("events.append", events::AppendHandler);
 
     // Settings
-    registry.register("settings.get", settings::GetSettingsHandler);
+    registry.register(
+        "settings.get",
+        RpcGenericTriggerHandler::new("settings.get"),
+    );
     registry.register("settings.update", settings::UpdateSettingsHandler);
     registry.register("settings.resetToDefaults", settings::ResetSettingsHandler);
 
@@ -179,7 +192,7 @@ fn register_core(registry: &mut MethodRegistry) {
 
     // Logs
     registry.register("logs.ingest", logs::IngestLogsHandler);
-    registry.register("logs.recent", logs::RecentLogsHandler);
+    registry.register("logs.recent", RpcGenericTriggerHandler::new("logs.recent"));
 
     // Memory
     registry.register("memory.retain", memory::RetainMemoryHandler);
@@ -197,7 +210,7 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("mcp.listTools", mcp::McpListToolsHandler);
 
     // Skills
-    registry.register("skill.list", skills::ListSkillsHandler);
+    registry.register("skill.list", RpcGenericTriggerHandler::new("skill.list"));
     registry.register("skill.get", skills::GetSkillHandler);
     registry.register("skill.refresh", skills::RefreshSkillsHandler);
 
@@ -208,7 +221,10 @@ fn register_capabilities(registry: &mut MethodRegistry) {
 
     // Filesystem
     registry.register("filesystem.listDir", filesystem::ListDirHandler);
-    registry.register("filesystem.getHome", filesystem::GetHomeHandler);
+    registry.register(
+        "filesystem.getHome",
+        RpcGenericTriggerHandler::new("filesystem.getHome"),
+    );
     registry.register("filesystem.createDir", filesystem::CreateDirHandler);
     registry.register("file.read", filesystem::ReadFileHandler);
 
@@ -338,11 +354,20 @@ fn register_platform(registry: &mut MethodRegistry) {
     );
 
     // Prompt Library
-    registry.register("promptHistory.list", prompt_library::ListHistoryHandler);
+    registry.register(
+        "promptHistory.list",
+        RpcGenericTriggerHandler::new("promptHistory.list"),
+    );
     registry.register("promptHistory.delete", prompt_library::DeleteHistoryHandler);
     registry.register("promptHistory.clear", prompt_library::ClearHistoryHandler);
-    registry.register("promptSnippet.list", prompt_library::ListSnippetsHandler);
-    registry.register("promptSnippet.get", prompt_library::GetSnippetHandler);
+    registry.register(
+        "promptSnippet.list",
+        RpcGenericTriggerHandler::new("promptSnippet.list"),
+    );
+    registry.register(
+        "promptSnippet.get",
+        RpcGenericTriggerHandler::new("promptSnippet.get"),
+    );
     registry.register("promptSnippet.create", prompt_library::CreateSnippetHandler);
     registry.register("promptSnippet.update", prompt_library::UpdateSnippetHandler);
     registry.register("promptSnippet.delete", prompt_library::DeleteSnippetHandler);

@@ -222,16 +222,19 @@ Acceptance:
 ## Phase 2: first engine-owned read RPC functions
 
 Move low-risk read behavior into engine-owned functions while keeping the
-existing WebSocket JSON-RPC transport and client wire payloads stable.
+existing WebSocket JSON-RPC transport and client wire payloads stable. This
+phase originally used method-specific thin adapters as the validation bridge.
+The first completed read group has now advanced past thin adapters to the
+generic JSON-RPC trigger.
 
 Deliverables:
 
 - Engine-owned implementations for `system.ping`, `system.getInfo`,
   `settings.get`, `model.list`, `skill.list`, and `logs.recent`.
 - Strict request/response schemas for those migrated reads.
-- Method-specific RPC handlers become thin adapters that invoke the engine
-  function and map structured engine/adapter errors back to the existing
-  `RpcErrorBody` shape.
+- Method-specific thin adapters may be used as a short-lived parity step, but
+  completed read groups should advance to generic-trigger dispatch and delete
+  the old business handlers.
 - Direct engine invocations and JSON-RPC dispatch return identical payloads
   except deliberately unstable fields such as timestamps and uptime.
 
@@ -244,33 +247,41 @@ Acceptance:
   function revision, delivery mode, and result for migrated reads.
 - README RPC counts remain reconciled with `server/rpc/handlers/mod.rs`.
 
-## Phase 3: remaining read functions and generic trigger preparation
+## Phase 3: first generic RPC trigger and next read wave
 
-Migrate the next batch of isolated read-only capabilities and prepare the first
-group-level generic RPC trigger.
+Migrate the next batch of isolated read-only capabilities and replace
+method-specific thin adapters with the first group-level generic RPC trigger.
 
-Candidate functions:
+Implemented generic-trigger functions:
 
-- `system::ping`
-- `system::get_info`
-- `model::list`
-- `skill::list`
-- `settings::get`
-- `events::get_history`
-- `logs::recent`
-- `filesystem::get_home`
-- `prompt_snippet::list`
-- `prompt_history::list`
+- `rpc::system.ping`
+- `rpc::system.getInfo`
+- `rpc::settings.get`
+- `rpc::model.list`
+- `rpc::skill.list`
+- `rpc::logs.recent`
+- `rpc::events.getHistory`
+- `rpc::events.getSince`
+- `rpc::filesystem.getHome`
+- `rpc::promptHistory.list`
+- `rpc::promptSnippet.list`
+- `rpc::promptSnippet.get`
 
 Acceptance:
 
 - Each migrated read has schema metadata, authority metadata, visibility, and
   causal records.
-- Current RPC adapters call the engine implementation, not duplicate logic.
-- Focused tests cover direct engine invocation and current RPC compatibility.
-- A method group can be switched from method-specific thin handlers to generic
-  RPC trigger dispatch only after every method in the group is engine-owned and
-  tests prove the old handler module is deletable.
+- `MethodRegistry::dispatch` validates method existence and JSON depth, then
+  lets `try_dispatch_generic_rpc` intercept `GenericTrigger` specs before the
+  marker handler can run.
+- `RpcGenericTriggerHandler` is only a loud marker; if it executes, registry
+  interception failed.
+- Direct engine invocation and JSON-RPC dispatch return identical payloads for
+  all twelve reads, including stateful event and prompt-library reads.
+- Handler-only methods and custom local test methods still pass through the
+  current handler path, proving generic dispatch is opt-in by spec.
+- The old thin/read handler structs and duplicated business logic are deleted
+  for every method in the completed generic-trigger set.
 
 ## Phase 4: catalog watch, streams, and event unification
 

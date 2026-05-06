@@ -1,4 +1,7 @@
-//! Model handlers: list, switch.
+//! Model handlers: switch and reasoning-level updates.
+//!
+//! `model.list` is served by the engine bridge generic trigger; the provider
+//! catalog helpers in this file remain the source of truth for its response.
 //!
 //! Model data is derived from the provider registries (single source of truth).
 //! See `anthropic/types.rs`, `openai/types.rs`, `google/types.rs`, `minimax/types.rs`.
@@ -68,17 +71,6 @@ fn is_model_deprecated(model_id: &str) -> bool {
 pub(crate) fn active_openai_auth_path(ctx: &RpcContext) -> OpenAIAuthPath {
     crate::llm::auth::openai::infer_auth_path(&ctx.auth_path, None)
         .unwrap_or(OpenAIAuthPath::ChatGptCodex)
-}
-
-/// List available models.
-pub struct ListModelsHandler;
-
-#[async_trait]
-impl MethodHandler for ListModelsHandler {
-    #[instrument(skip(self, ctx), fields(method = "model.list"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "model.list", _params).await
-    }
 }
 
 /// Switch the model for a session.
@@ -280,12 +272,31 @@ impl MethodHandler for SetReasoningLevelHandler {
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::types::RpcRequest;
     use serde_json::json;
+
+    async fn list_models_result(ctx: &RpcContext) -> Value {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "test-model-list".to_owned(),
+                    method: "model.list".to_owned(),
+                    params: Some(json!({})),
+                },
+                ctx,
+            )
+            .await;
+        assert!(response.success, "model.list: {:?}", response.error);
+        response.result.unwrap()
+    }
 
     #[tokio::test]
     async fn list_models_returns_array() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         assert!(result["models"].is_array());
         assert!(!result["models"].as_array().unwrap().is_empty());
     }
@@ -293,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_includes_all_anthropic() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-7"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-6"));
@@ -328,7 +339,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_includes_all_openai() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         assert!(models.iter().any(|m| m["id"] == "gpt-5.5"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.4"));
@@ -365,7 +376,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         let gpt55 = models.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
         assert_eq!(gpt55["contextWindow"], 1_050_000);
@@ -389,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_includes_all_google() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         assert!(models.iter().any(|m| m["id"] == "gemini-3.1-pro-preview"));
         assert!(models.iter().any(|m| m["id"] == "gemini-3-pro-preview"));
@@ -409,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_includes_all_minimax() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.7"));
         assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.7-highspeed"));
@@ -425,7 +436,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_minimax_no_images() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         for model in models.iter().filter(|m| m["provider"] == "minimax") {
             assert_eq!(
@@ -439,7 +450,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_minimax_has_required_fields() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         for model in models.iter().filter(|m| m["provider"] == "minimax") {
             assert!(model["id"].is_string());
@@ -452,7 +463,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_has_required_fields() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         for model in models {
             assert!(model["id"].is_string());
@@ -470,7 +481,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_has_capabilities() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         for model in models {
             assert!(model.get("supportsThinking").is_some());
@@ -487,7 +498,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_all_models_emit_required_metadata() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         assert!(!models.is_empty(), "registry produced no models");
         for model in models {
@@ -527,7 +538,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_has_pricing() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         for model in models {
             assert!(model["inputCostPerMillion"].is_number());
@@ -538,7 +549,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_has_client_metadata() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         let opus = models
             .iter()
@@ -557,7 +568,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_anthropic_reasoning_levels() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         let opus = models
             .iter()
@@ -571,7 +582,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_google_thinking_levels() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         let gemini = models.iter().find(|m| m["id"] == "gemini-2.5-pro").unwrap();
         assert!(gemini["thinkingLevel"].is_string());
@@ -952,7 +963,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_deprecated_fields() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
 
         // Gemini 3 Pro should be deprecated
@@ -1185,7 +1196,7 @@ mod tests {
     #[tokio::test]
     async fn list_models_has_provider_display_fields() {
         let ctx = make_test_context();
-        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_models_result(&ctx).await;
         let models = result["models"].as_array().unwrap();
         for model in models {
             assert!(

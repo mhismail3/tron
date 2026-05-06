@@ -1,4 +1,8 @@
-//! Skills handlers: list, get, refresh, remove.
+//! Skills handlers: get and refresh.
+//!
+//! `skill.list` is served by the engine bridge generic trigger; the remaining
+//! handlers here keep skill lookup/mutation behavior on the legacy path until
+//! those capabilities are explicitly migrated.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -46,17 +50,6 @@ fn resolve_working_dir(params: Option<&Value>, ctx: &RpcContext) -> String {
         }
     }
     "/tmp".to_string()
-}
-
-/// List available skills.
-pub struct ListSkillsHandler;
-
-#[async_trait]
-impl MethodHandler for ListSkillsHandler {
-    #[instrument(skip(self, ctx), fields(method = "skill.list"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "skill.list", params).await
-    }
 }
 
 /// Get a specific skill by name.
@@ -110,8 +103,27 @@ impl MethodHandler for RefreshSkillsHandler {
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::types::RpcRequest;
     use crate::skills::types::{SkillFrontmatter, SkillMetadata, SkillSource};
     use serde_json::json;
+
+    async fn list_skills_result(ctx: &RpcContext, params: Value) -> Value {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "test-skill-list".to_owned(),
+                    method: "skill.list".to_owned(),
+                    params: Some(params),
+                },
+                ctx,
+            )
+            .await;
+        assert!(response.success, "skill.list: {:?}", response.error);
+        response.result.unwrap()
+    }
 
     fn make_skill(name: &str) -> SkillMetadata {
         SkillMetadata {
@@ -141,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn list_skills_returns_array() {
         let ctx = make_test_context();
-        let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
+        let result = list_skills_result(&ctx, json!({})).await;
         assert!(result["skills"].is_array());
     }
 
@@ -217,10 +229,7 @@ mod tests {
         ctx.skill_registry.write().insert(make_skill("zebra"));
         ctx.skill_registry.write().insert(make_skill("alpha"));
 
-        let result = ListSkillsHandler
-            .handle(Some(json!({"workingDirectory": working_dir})), &ctx)
-            .await
-            .unwrap();
+        let result = list_skills_result(&ctx, json!({"workingDirectory": working_dir})).await;
         let names: Vec<&str> = result["skills"]
             .as_array()
             .unwrap()
@@ -260,10 +269,7 @@ mod tests {
         ctx.skill_registry.write().insert(make_skill("alpha"));
         ctx.skill_registry.write().insert(make_skill("beta"));
 
-        let result = ListSkillsHandler
-            .handle(Some(json!({"workingDirectory": working_dir})), &ctx)
-            .await
-            .unwrap();
+        let result = list_skills_result(&ctx, json!({"workingDirectory": working_dir})).await;
         let skills = result["skills"].as_array().unwrap();
         assert!(skills.iter().any(|s| s["name"] == "alpha"));
         assert!(skills.iter().any(|s| s["name"] == "beta"));

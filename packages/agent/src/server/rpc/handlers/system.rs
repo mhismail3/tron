@@ -1,4 +1,8 @@
-//! System handlers: ping, getInfo, shutdown, getDiagnostics, update checks.
+//! System handlers: shutdown, getDiagnostics, update checks.
+//!
+//! `system.ping` and `system.getInfo` are served by the engine bridge generic
+//! trigger; keep their protocol constants here because diagnostics and the
+//! engine-owned read implementation share them.
 //!
 //! The updater handlers below (`system.checkForUpdates`,
 //! `system.getUpdateStatus`) support GitHub Releases checks and verified DMG
@@ -34,54 +38,6 @@ pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
 /// must send this field in `system.ping`; missing or malformed values are
 /// rejected as invalid params instead of being treated as an older client.
 pub const MIN_CLIENT_PROTOCOL_VERSION: u32 = 1;
-
-/// Returns a pong with the current server timestamp.
-///
-/// When the client sends `{ protocolVersion, clientVersion? }`, the
-/// handler also performs a compatibility check:
-/// - `protocolVersion < MIN_CLIENT_PROTOCOL_VERSION` →
-///   [`RpcError::Custom`] with code [`CLIENT_VERSION_UNSUPPORTED`] and
-///   details pointing the client at the upgrade path.
-/// - `protocolVersion >= MIN_CLIENT_PROTOCOL_VERSION` → success reply
-///   that echoes the server's protocol version so a future client can
-///   feature-gate on it.
-/// - No params / no numeric `protocolVersion` → [`RpcError::InvalidParams`].
-pub struct PingHandler;
-
-#[async_trait]
-impl MethodHandler for PingHandler {
-    #[instrument(skip(self, _ctx), fields(method = "system.ping"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        crate::server::rpc::engine_bridge::invoke_thin_adapter(_ctx, "system.ping", params).await
-    }
-}
-
-/// Returns server version, platform, and capability information.
-///
-/// Phase 2.6 added three new fields used by the iOS pairing UI:
-///
-/// - `port` — the server's WebSocket listening port. iOS displays
-///   `host:port` together; previously the port had to be inferred from the
-///   active preset, which broke when the user typed the host without a port.
-/// - `tailscaleIp` — the cached Tailscale IPv4 from
-///   `~/.tron/profiles/user/profile.toml:[settings.server].tailscaleIp`. Surfaced as a
-///   recommended host on the iOS pairing screen. Optional — `null` when the
-///   server hasn't been wrapped by `Tron.app` yet.
-/// - `paired` — `true` once the `~/.tron/internal/run/.onboarded` sentinel
-///   exists. Lets iOS distinguish "fresh server, run wizard" from
-///   "established server, just verify the bearer token."
-///
-/// All three are additive — older iOS clients that don't decode them are
-/// unaffected.
-pub struct GetInfoHandler;
-
-#[async_trait]
-impl MethodHandler for GetInfoHandler {
-    #[instrument(skip(self, ctx), fields(method = "system.getInfo"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "system.getInfo", _params).await
-    }
-}
 
 /// Returns a structured snapshot of server state for the debug-only iOS
 /// Diagnostics page. Includes server identity (version, protocol, pid,
@@ -324,6 +280,46 @@ impl MethodHandler for GetUpdateStatusHandler {
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::types::RpcRequest;
+
+    async fn dispatch_ok(ctx: &RpcContext, method: &str, params: Option<Value>) -> Value {
+        let mut registry = MethodRegistry::new();
+        super::super::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: format!("test-{method}"),
+                    method: method.to_owned(),
+                    params,
+                },
+                ctx,
+            )
+            .await;
+        assert!(response.success, "{method}: {:?}", response.error);
+        response.result.unwrap()
+    }
+
+    async fn dispatch_err(ctx: &RpcContext, method: &str, params: Option<Value>) -> RpcError {
+        let mut registry = MethodRegistry::new();
+        super::super::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: format!("test-{method}"),
+                    method: method.to_owned(),
+                    params,
+                },
+                ctx,
+            )
+            .await;
+        assert!(!response.success, "{method}: {:?}", response.result);
+        let body = response.error.unwrap();
+        RpcError::Custom {
+            code: body.code,
+            message: body.message,
+            details: body.details,
+        }
+    }
 
     fn ping_params(version: u32) -> Value {
         serde_json::json!({
@@ -335,10 +331,12 @@ mod tests {
     #[tokio::test]
     async fn ping_returns_pong() {
         let ctx = make_test_context();
-        let result = PingHandler
-            .handle(Some(ping_params(CURRENT_PROTOCOL_VERSION)), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "system.ping",
+            Some(ping_params(CURRENT_PROTOCOL_VERSION)),
+        )
+        .await;
         assert_eq!(result["pong"], true);
         assert!(result["timestamp"].is_string());
     }
@@ -346,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn get_info_returns_version() {
         let ctx = make_test_context();
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert!(result["version"].is_string());
         assert!(result["platform"].is_string());
         assert_eq!(result["runtime"], "agent");
@@ -355,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn get_info_returns_uptime() {
         let ctx = make_test_context();
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         let uptime = result["uptime"].as_u64().unwrap();
         assert!(uptime < 5);
     }
@@ -367,14 +365,14 @@ mod tests {
             .session_manager
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert_eq!(result["activeSessions"], 1);
     }
 
     #[tokio::test]
     async fn get_info_retains_extra_fields() {
         let ctx = make_test_context();
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert!(result["platform"].is_string());
         assert!(result["arch"].is_string());
         assert_eq!(result["runtime"], "agent");
@@ -390,7 +388,7 @@ mod tests {
     async fn get_info_returns_port() {
         let ctx = make_test_context();
         ctx.set_ws_port(19_847);
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert_eq!(
             result["port"].as_u64(),
             Some(19_847),
@@ -413,7 +411,7 @@ mod tests {
         let ctx = make_test_context();
 
         // Case 1: setting absent → null (Option::None serializes to JSON null).
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert!(
             result.get("tailscaleIp").is_some(),
             "tailscaleIp key must always be present (was: {result:?})"
@@ -428,7 +426,7 @@ mod tests {
         let mut populated = crate::settings::TronSettings::default();
         populated.server.tailscale_ip = Some("100.64.213.113".into());
         write_settings_file(&ctx, &populated);
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert_eq!(
             result["tailscaleIp"].as_str(),
             Some("100.64.213.113"),
@@ -448,7 +446,7 @@ mod tests {
         ctx.onboarded_marker_path = marker.clone();
 
         // Sentinel absent → paired:false.
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert_eq!(
             result["paired"], false,
             "missing sentinel must report paired:false"
@@ -456,7 +454,7 @@ mod tests {
 
         // Sentinel present → paired:true.
         crate::server::onboarding::mark_onboarded(&marker).expect("mark");
-        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.getInfo", None).await;
         assert_eq!(
             result["paired"], true,
             "present sentinel must report paired:true"
@@ -486,10 +484,12 @@ mod tests {
     #[tokio::test]
     async fn ping_timestamp_is_iso8601() {
         let ctx = make_test_context();
-        let result = PingHandler
-            .handle(Some(ping_params(CURRENT_PROTOCOL_VERSION)), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "system.ping",
+            Some(ping_params(CURRENT_PROTOCOL_VERSION)),
+        )
+        .await;
         let ts = result["timestamp"].as_str().unwrap();
         assert!(ts.contains('T'));
         assert!(ts.ends_with('Z'));
@@ -502,8 +502,8 @@ mod tests {
     #[tokio::test]
     async fn ping_without_protocol_version_is_rejected() {
         let ctx = make_test_context();
-        let err = PingHandler.handle(None, &ctx).await.unwrap_err();
-        assert!(matches!(err, RpcError::InvalidParams { .. }));
+        let err = dispatch_err(&ctx, "system.ping", None).await;
+        assert_eq!(err.code(), crate::server::rpc::errors::INVALID_PARAMS);
     }
 
     /// Stale client that explicitly advertises a too-old protocol
@@ -517,7 +517,7 @@ mod tests {
             "protocolVersion": 0u32,
             "clientVersion": "0.0.1",
         });
-        let err = PingHandler.handle(Some(params), &ctx).await.unwrap_err();
+        let err = dispatch_err(&ctx, "system.ping", Some(params)).await;
         assert_eq!(err.code(), CLIENT_VERSION_UNSUPPORTED);
 
         let body = err.to_error_body();
@@ -553,7 +553,7 @@ mod tests {
             "protocolVersion": CURRENT_PROTOCOL_VERSION,
             "clientVersion": "1.2.3",
         });
-        let result = PingHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.ping", Some(params)).await;
         assert_eq!(result["pong"], true);
         assert_eq!(result["compatible"], true);
         assert_eq!(
@@ -578,7 +578,7 @@ mod tests {
             "protocolVersion": CURRENT_PROTOCOL_VERSION + 42,
             "clientVersion": "99.0.0",
         });
-        let result = PingHandler.handle(Some(params), &ctx).await.unwrap();
+        let result = dispatch_ok(&ctx, "system.ping", Some(params)).await;
         assert_eq!(result["pong"], true);
         assert_eq!(result["compatible"], true);
     }
@@ -591,8 +591,8 @@ mod tests {
         let params = serde_json::json!({
             "protocolVersion": "not a number",
         });
-        let err = PingHandler.handle(Some(params), &ctx).await.unwrap_err();
-        assert!(matches!(err, RpcError::InvalidParams { .. }));
+        let err = dispatch_err(&ctx, "system.ping", Some(params)).await;
+        assert_eq!(err.code(), crate::server::rpc::errors::INVALID_PARAMS);
     }
 
     // ── L11: diagnostics ────────────────────────────────────────────

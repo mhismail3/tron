@@ -163,7 +163,8 @@ The first in-repo implementation lives in `packages/agent/src/engine/`. The
 module proves the live fabric contracts before any existing workflow is
 migrated; WP4 wires the host into server startup as owned infrastructure while
 keeping production RPC, tools, runtime orchestration, and client traffic
-  unchanged through WP4; WP5-WP7 then add the first RPC bridge/adapters:
+  unchanged through WP4; WP5-WP9 then add the first RPC bridge, generic
+  trigger, and read migrations:
 
 - `ids.rs` defines validated IDs for workers, functions, triggers, invocations,
   actors, authority grants, and traces.
@@ -206,12 +207,13 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   `items`, and `enum`.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
-- `server/rpc/engine_bridge.rs` is the first production adapter. It registers a
-  `rpc` compatibility worker and one `rpc::<method>` function for all 167
-  current JSON-RPC methods. Handler-only methods are present as internal
-  non-routable metadata; `system.ping`, `system.getInfo`, `settings.get`,
-  `model.list`, `skill.list`, and `logs.recent` are strict-schema thin adapters
-  whose existing RPC handlers call engine-owned functions.
+- `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
+  production adapter surface. They register a `rpc` compatibility worker and
+  one `rpc::<method>` function for all 167 current JSON-RPC methods.
+  Handler-only methods are present as internal non-routable metadata. The first
+  twelve low-risk reads are strict-schema `GenericTrigger` methods served by
+  registry-level JSON-RPC-to-engine dispatch, so their method-specific business
+  handlers have been deleted.
 
 ## Phase 1 acceptance checklist
 
@@ -259,16 +261,21 @@ Implemented:
   error, and panic paths;
 - RPC migration bridge specs for every current RPC method, with drift guards
   that fail if a method is registered without classification;
-- first engine-owned read RPC functions for `system.ping`, `system.getInfo`,
-  `settings.get`, `model.list`, `skill.list`, and `logs.recent`, with tests
-  proving direct engine invocation and existing JSON-RPC dispatch return the
-  same wire payloads;
+- first generic-triggered read RPC functions for `system.ping`,
+  `system.getInfo`, `settings.get`, `model.list`, `skill.list`, `logs.recent`,
+  `events.getHistory`, `events.getSince`, `filesystem.getHome`,
+  `promptHistory.list`, `promptSnippet.list`, and `promptSnippet.get`, with
+  tests proving direct engine invocation and JSON-RPC dispatch return the same
+  wire payloads;
+- `RpcEngineInvocation` envelopes that preserve request id, method, params,
+  function id, actor `rpc-client`, authority grant `rpc-bridge`, `rpc.read`
+  scope, trace id, and optional session/workspace scope extracted from params;
 - cleanup of triggers that target an unregistered function.
 
 Still deferred:
 
-- write-side RPC migrations and the generic RPC trigger that removes
-  method-specific handlers;
+- write-side RPC migrations and broader generic-trigger conversion for the
+  remaining handler-only method groups;
 - tool/runtime/client-native engine rewrites beyond the first read-side RPC
   adapters;
 - queue and void delivery execution;

@@ -339,7 +339,7 @@ Messages use the server's WebSocket RPC framing. Request IDs are strings and are
 {"id":"ping-1","success":true,"result":{"pong":true,"timestamp":"…","serverVersion":"0.1.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}
 ```
 
-`system.ping` requires `{"protocolVersion": <u32>, "clientVersion": <str>}` params. Clients that omit `protocolVersion` or send a non-numeric value receive `INVALID_PARAMS`; clients below `minClientProtocolVersion` receive `CLIENT_VERSION_UNSUPPORTED` with details naming both versions.
+`system.ping` requires `{"protocolVersion": <u32>}` params and accepts optional `clientVersion` as a string. Clients that omit `protocolVersion` or send a non-numeric value receive `INVALID_PARAMS`; clients below `minClientProtocolVersion` receive `CLIENT_VERSION_UNSUPPORTED` with details naming both versions.
 
 `system.getInfo` returns the running daemon's `version`, `uptime` (seconds), `activeSessions` count, `platform` / `arch`, plus three additive fields used by the iOS pairing flow:
 

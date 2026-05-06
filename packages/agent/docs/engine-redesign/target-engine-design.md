@@ -380,7 +380,7 @@ isolation does.
 | Worker | Responsibility |
 |--------|----------------|
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
-| `rpc` | Compatibility worker for current JSON-RPC methods during migration. Function ids use `rpc::<method>` so the old transport can collapse into a generic trigger later. |
+| `rpc` | Compatibility worker for current JSON-RPC methods during migration. Function ids use `rpc::<method>`; selected read methods are already served by a generic JSON-RPC trigger, while handler-only methods remain internal/non-routable metadata until migrated. |
 | `event` | Session/event-store append, read, reconstruct, subscribe. |
 | `stream` | Durable subscriptions for session events, topology, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |
@@ -436,10 +436,11 @@ The final client API can break, but transition should be controlled:
 
 1. Keep current `/ws` JSON-RPC while compatibility functions mirror it.
 2. Register every current method as a classified `rpc::<method>` capability.
-3. Move selected method behavior into engine-owned functions and leave current
-   handlers as thin adapters.
-4. Replace all thin adapters in a method group with a generic RPC trigger once
-   tests prove parity.
+3. Move selected method behavior into engine-owned functions. Use
+   method-specific thin adapters only as temporary parity scaffolding when a
+   method group is not ready for generic dispatch.
+4. Replace thin adapters in a method group with a generic RPC trigger as soon
+   as tests prove parity.
 5. Add live catalog discovery and catalog streams behind the server.
 6. Move selected client flows to engine-native calls once stable.
 7. Remove compatibility handlers only after Mac/iOS clients consume the new

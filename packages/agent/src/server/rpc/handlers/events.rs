@@ -1,4 +1,8 @@
-//! Events handlers: getHistory, getSince, subscribe, append.
+//! Events handlers: subscribe, unsubscribe, append.
+//!
+//! `events.getHistory` and `events.getSince` are served by the engine bridge
+//! generic trigger. This module keeps shared wire helpers and mutating/event
+//! subscription handlers.
 
 use crate::events::sqlite::row_types::EventRow;
 use async_trait::async_trait;
@@ -6,9 +10,9 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::errors::{self, RpcError};
+use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{
-    map_event_store_error, opt_array, opt_string, require_param, require_string_param,
+    map_event_store_error, opt_string, require_param, require_string_param,
 };
 use crate::server::rpc::registry::MethodHandler;
 
@@ -72,148 +76,6 @@ pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
     }
 
     obj
-}
-
-/// Get full event history for a session.
-pub struct GetHistoryHandler;
-
-#[async_trait]
-impl MethodHandler for GetHistoryHandler {
-    #[instrument(skip(self, ctx), fields(method = "events.getHistory", session_id))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        // Verify session exists
-        let _ = ctx
-            .event_store
-            .get_session(&session_id)
-            .map_err(map_event_store_error)?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        // Extract optional filters
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(Value::as_i64);
-
-        let type_filter: Option<Vec<String>> = opt_array(params.as_ref(), "types").map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        });
-
-        let before_event_id = opt_string(params.as_ref(), "beforeEventId");
-
-        let events = if let Some(ref types) = type_filter {
-            let type_strs: Vec<&str> = types.iter().map(String::as_str).collect();
-            ctx.event_store
-                .get_events_by_type(&session_id, &type_strs, limit)
-                .map_err(map_event_store_error)?
-        } else {
-            let opts = crate::events::sqlite::repositories::event::ListEventsOptions {
-                limit,
-                offset: None,
-            };
-            ctx.event_store
-                .get_events_by_session(&session_id, &opts)
-                .map_err(map_event_store_error)?
-        };
-
-        // Apply beforeEventId filter (pagination backward)
-        let events = if let Some(before_id) = before_event_id {
-            events
-                .into_iter()
-                .take_while(|e| e.id != before_id)
-                .collect::<Vec<_>>()
-        } else {
-            events
-        };
-
-        let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
-
-        // Include oldestEventId for cursor-based pagination
-        let oldest_event_id = events.first().map(|e| e.id.clone());
-
-        let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
-
-        // Enrich GetConfirmation/AskUserQuestion tool.call events with
-        // server-parsed status so iOS can render them without scanning
-        // event history. Same pass used by session.reconstruct.
-        crate::server::rpc::interactive_tool_enrichment::enrich_interactive_tool_statuses(
-            &mut wire_events,
-        );
-
-        Ok(serde_json::json!({
-            "sessionId": session_id,
-            "events": wire_events,
-            "hasMore": has_more,
-            "oldestEventId": oldest_event_id,
-        }))
-    }
-}
-
-/// Get events since a cursor (afterEventId or afterSequence).
-pub struct GetSinceHandler;
-
-#[async_trait]
-impl MethodHandler for GetSinceHandler {
-    #[instrument(skip(self, ctx), fields(method = "events.getSince", session_id))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-
-        // Resolve cursor: prefer afterEventId, fall back to afterSequence
-        // Default -1 so `sequence > -1` returns ALL events including session.start (seq 0)
-        let after_sequence = if let Some(event_id) = opt_string(params.as_ref(), "afterEventId") {
-            // Look up the event to get its sequence number
-            ctx.event_store
-                .get_event(&event_id)
-                .map_err(map_event_store_error)?
-                .map_or(-1, |row| row.sequence)
-        } else {
-            params
-                .as_ref()
-                .and_then(|p| p.get("afterSequence"))
-                .and_then(Value::as_i64)
-                .unwrap_or(-1)
-        };
-
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(Value::as_i64);
-
-        let mut events = ctx
-            .event_store
-            .get_events_since(&session_id, after_sequence)
-            .map_err(map_event_store_error)?;
-
-        let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
-
-        if let Some(l) = limit {
-            events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
-        }
-
-        let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
-
-        // Enrich GetConfirmation/AskUserQuestion tool.call events — same
-        // pass applied by session.reconstruct and events.getHistory, so
-        // incremental sync sees consistent enriched payloads.
-        crate::server::rpc::interactive_tool_enrichment::enrich_interactive_tool_statuses(
-            &mut wire_events,
-        );
-
-        // Include nextCursor for incremental sync
-        let next_cursor = events.last().map(|e| e.id.clone());
-
-        Ok(serde_json::json!({
-            "events": wire_events,
-            "hasMore": has_more,
-            "nextCursor": next_cursor,
-        }))
-    }
 }
 
 /// Subscribe to real-time events for a session.
@@ -290,7 +152,48 @@ impl MethodHandler for AppendHandler {
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::types::RpcRequest;
     use serde_json::json;
+
+    async fn dispatch_ok(ctx: &RpcContext, method: &str, params: Value) -> Value {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: format!("test-{method}"),
+                    method: method.to_owned(),
+                    params: Some(params),
+                },
+                ctx,
+            )
+            .await;
+        assert!(response.success, "{method}: {:?}", response.error);
+        response.result.unwrap()
+    }
+
+    async fn dispatch_err(ctx: &RpcContext, method: &str, params: Value) -> RpcError {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: format!("test-{method}"),
+                    method: method.to_owned(),
+                    params: Some(params),
+                },
+                ctx,
+            )
+            .await;
+        assert!(!response.success, "{method}: {:?}", response.result);
+        let body = response.error.unwrap();
+        RpcError::Custom {
+            code: body.code,
+            message: body.message,
+            details: body.details,
+        }
+    }
 
     #[tokio::test]
     async fn get_history_empty_session() {
@@ -300,10 +203,7 @@ mod tests {
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
-        let result = GetHistoryHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(&ctx, "events.getHistory", json!({"sessionId": sid})).await;
 
         let events = result["events"].as_array().unwrap();
         // Should have the session.start root event
@@ -331,10 +231,7 @@ mod tests {
             })
             .unwrap();
 
-        let result = GetHistoryHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(&ctx, "events.getHistory", json!({"sessionId": sid})).await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 2); // session.start + message.user
@@ -361,13 +258,12 @@ mod tests {
             })
             .unwrap();
 
-        let result = GetHistoryHandler
-            .handle(
-                Some(json!({"sessionId": sid, "types": ["message.user"]})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getHistory",
+            json!({"sessionId": sid, "types": ["message.user"]}),
+        )
+        .await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 1);
@@ -395,10 +291,12 @@ mod tests {
                 .unwrap();
         }
 
-        let result = GetHistoryHandler
-            .handle(Some(json!({"sessionId": sid, "limit": 3})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getHistory",
+            json!({"sessionId": sid, "limit": 3}),
+        )
+        .await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 3);
@@ -408,10 +306,7 @@ mod tests {
     #[tokio::test]
     async fn get_history_missing_session() {
         let ctx = make_test_context();
-        let err = GetHistoryHandler
-            .handle(Some(json!({"sessionId": "nope"})), &ctx)
-            .await
-            .unwrap_err();
+        let err = dispatch_err(&ctx, "events.getHistory", json!({"sessionId": "nope"})).await;
         assert_eq!(err.code(), "SESSION_NOT_FOUND");
     }
 
@@ -424,12 +319,28 @@ mod tests {
             .unwrap();
 
         // afterSequence=999 → nothing after that
-        let result = GetSinceHandler
-            .handle(Some(json!({"sessionId": sid, "afterSequence": 999})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getSince",
+            json!({"sessionId": sid, "afterSequence": 999}),
+        )
+        .await;
 
         assert!(result["events"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_since_unknown_session_matches_legacy_empty_page() {
+        let ctx = make_test_context();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getSince",
+            json!({"sessionId": "missing-session"}),
+        )
+        .await;
+        assert!(result["events"].as_array().unwrap().is_empty());
+        assert_eq!(result["hasMore"], false);
+        assert_eq!(result["nextCursor"], Value::Null);
     }
 
     #[tokio::test]
@@ -452,10 +363,12 @@ mod tests {
             .unwrap();
 
         // afterSequence=0 → get events after the root event
-        let result = GetSinceHandler
-            .handle(Some(json!({"sessionId": sid, "afterSequence": 0})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getSince",
+            json!({"sessionId": sid, "afterSequence": 0}),
+        )
+        .await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 1);
@@ -483,13 +396,12 @@ mod tests {
                 .unwrap();
         }
 
-        let result = GetSinceHandler
-            .handle(
-                Some(json!({"sessionId": sid, "afterSequence": 0, "limit": 2})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getSince",
+            json!({"sessionId": sid, "afterSequence": 0, "limit": 2}),
+        )
+        .await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 2);
@@ -713,13 +625,12 @@ mod tests {
         }
 
         // Use afterEventId to get events after the first user message
-        let result = GetSinceHandler
-            .handle(
-                Some(json!({"sessionId": sid, "afterEventId": event_ids[0]})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getSince",
+            json!({"sessionId": sid, "afterEventId": event_ids[0]}),
+        )
+        .await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 2); // msg 1 and msg 2 (after msg 0)
@@ -746,10 +657,7 @@ mod tests {
             .unwrap();
 
         // No afterEventId or afterSequence → returns ALL events including session.start
-        let result = GetSinceHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(&ctx, "events.getSince", json!({"sessionId": sid})).await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 2); // session.start + message.user
@@ -765,13 +673,12 @@ mod tests {
             .unwrap();
 
         // Unknown afterEventId → returns all events
-        let result = GetSinceHandler
-            .handle(
-                Some(json!({"sessionId": sid, "afterEventId": "nonexistent"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = dispatch_ok(
+            &ctx,
+            "events.getSince",
+            json!({"sessionId": sid, "afterEventId": "nonexistent"}),
+        )
+        .await;
 
         let events = result["events"].as_array().unwrap();
         assert_eq!(events.len(), 1); // session.start
@@ -785,10 +692,7 @@ mod tests {
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
-        let result = GetHistoryHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(&ctx, "events.getHistory", json!({"sessionId": sid})).await;
 
         assert!(result["oldestEventId"].is_string());
     }
@@ -812,10 +716,7 @@ mod tests {
             })
             .unwrap();
 
-        let result = GetSinceHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
+        let result = dispatch_ok(&ctx, "events.getSince", json!({"sessionId": sid})).await;
 
         // nextCursor should be the ID of the last event returned
         let events = result["events"].as_array().unwrap();

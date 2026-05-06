@@ -1,4 +1,6 @@
-//! Filesystem handlers: listDir, getHome, createDir, file.read.
+//! Filesystem handlers: listDir, createDir, file.read.
+//!
+//! `filesystem.getHome` is served by the engine bridge generic trigger.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -23,21 +25,6 @@ impl MethodHandler for ListDirHandler {
 
         ctx.run_blocking("filesystem.listDir", move || {
             filesystem_service::list_dir(&path, show_hidden)
-        })
-        .await
-    }
-}
-
-/// Get user home directory.
-pub struct GetHomeHandler;
-
-#[async_trait]
-impl MethodHandler for GetHomeHandler {
-    #[instrument(skip(self, ctx), fields(method = "filesystem.getHome"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let home = crate::core::paths::home_dir();
-        ctx.run_blocking("filesystem.getHome", move || {
-            Ok(filesystem_service::get_home(&home))
         })
         .await
     }
@@ -75,7 +62,26 @@ impl MethodHandler for ReadFileHandler {
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::types::RpcRequest;
     use serde_json::json;
+
+    async fn get_home_result(ctx: &RpcContext) -> Value {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "test-filesystem-get-home".to_owned(),
+                    method: "filesystem.getHome".to_owned(),
+                    params: Some(json!({})),
+                },
+                ctx,
+            )
+            .await;
+        assert!(response.success, "filesystem.getHome: {:?}", response.error);
+        response.result.unwrap()
+    }
 
     #[tokio::test]
     async fn list_dir_success() {
@@ -161,7 +167,7 @@ mod tests {
     #[tokio::test]
     async fn get_home() {
         let ctx = make_test_context();
-        let result = GetHomeHandler.handle(None, &ctx).await.unwrap();
+        let result = get_home_result(&ctx).await;
         assert!(result["homePath"].is_string());
         assert!(!result["homePath"].as_str().unwrap().is_empty());
         assert!(result["suggestedPaths"].is_array());

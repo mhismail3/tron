@@ -1,20 +1,77 @@
 //! RPC handler tests for the Prompt Library.
 
 use super::*;
-use crate::server::rpc::errors::RpcError;
+use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::handlers::test_helpers::make_test_context;
-use crate::server::rpc::registry::MethodHandler;
+use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
+use crate::server::rpc::types::{RpcErrorBody, RpcRequest};
 use serde_json::json;
+
+async fn dispatch_ok(
+    ctx: &crate::server::rpc::context::RpcContext,
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut registry = MethodRegistry::new();
+    crate::server::rpc::handlers::register_all(&mut registry);
+    let response = registry
+        .dispatch(
+            RpcRequest {
+                id: format!("test-{method}"),
+                method: method.to_owned(),
+                params,
+            },
+            ctx,
+        )
+        .await;
+    assert!(response.success, "{method}: {:?}", response.error);
+    response.result.unwrap()
+}
+
+async fn dispatch_err(
+    ctx: &crate::server::rpc::context::RpcContext,
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> RpcError {
+    let mut registry = MethodRegistry::new();
+    crate::server::rpc::handlers::register_all(&mut registry);
+    let response = registry
+        .dispatch(
+            RpcRequest {
+                id: format!("test-{method}"),
+                method: method.to_owned(),
+                params,
+            },
+            ctx,
+        )
+        .await;
+    assert!(!response.success, "{method}: {:?}", response.result);
+    rpc_error_from_body(response.error.unwrap())
+}
+
+fn rpc_error_from_body(body: RpcErrorBody) -> RpcError {
+    match body.code.as_str() {
+        errors::INVALID_PARAMS => RpcError::InvalidParams {
+            message: body.message,
+        },
+        errors::NOT_FOUND | "SNIPPET_NOT_FOUND" => RpcError::NotFound {
+            code: body.code,
+            message: body.message,
+        },
+        _ => RpcError::Custom {
+            code: body.code,
+            message: body.message,
+            details: body.details,
+        },
+    }
+}
 
 // ─── promptHistory.list ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn history_list_empty_store_returns_empty_page() {
     let ctx = make_test_context();
-    let out = ListHistoryHandler
-        .handle(Some(json!({})), &ctx)
-        .await
-        .unwrap();
+    let out = dispatch_ok(&ctx, "promptHistory.list", Some(json!({}))).await;
     assert_eq!(out["items"].as_array().unwrap().len(), 0);
     assert!(out["nextCursor"].is_null());
 }
@@ -32,10 +89,7 @@ async fn history_list_returns_recorded_prompts_newest_first() {
         }
     }
 
-    let out = ListHistoryHandler
-        .handle(Some(json!({ "limit": 10 })), &ctx)
-        .await
-        .unwrap();
+    let out = dispatch_ok(&ctx, "promptHistory.list", Some(json!({ "limit": 10 }))).await;
     let items = out["items"].as_array().unwrap();
     assert_eq!(items.len(), 3);
     assert_eq!(items[0]["text"], "third");
@@ -45,30 +99,31 @@ async fn history_list_returns_recorded_prompts_newest_first() {
 #[tokio::test]
 async fn history_list_rejects_limit_too_large() {
     let ctx = make_test_context();
-    let err = ListHistoryHandler
-        .handle(Some(json!({ "limit": 500 })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(&ctx, "promptHistory.list", Some(json!({ "limit": 500 }))).await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
 #[tokio::test]
 async fn history_list_rejects_malformed_cursor() {
     let ctx = make_test_context();
-    let err = ListHistoryHandler
-        .handle(Some(json!({ "cursor": "!!!not-base64!!!" })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(
+        &ctx,
+        "promptHistory.list",
+        Some(json!({ "cursor": "!!!not-base64!!!" })),
+    )
+    .await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
 #[tokio::test]
 async fn history_list_rejects_overlong_query() {
     let ctx = make_test_context();
-    let err = ListHistoryHandler
-        .handle(Some(json!({ "query": "x".repeat(500) })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(
+        &ctx,
+        "promptHistory.list",
+        Some(json!({ "query": "x".repeat(500) })),
+    )
+    .await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
@@ -82,17 +137,16 @@ async fn history_list_pagination_roundtrip() {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 
-    let page1 = ListHistoryHandler
-        .handle(Some(json!({ "limit": 2 })), &ctx)
-        .await
-        .unwrap();
+    let page1 = dispatch_ok(&ctx, "promptHistory.list", Some(json!({ "limit": 2 }))).await;
     let cursor = page1["nextCursor"].as_str().unwrap().to_string();
     assert_eq!(page1["items"].as_array().unwrap().len(), 2);
 
-    let page2 = ListHistoryHandler
-        .handle(Some(json!({ "limit": 10, "cursor": cursor })), &ctx)
-        .await
-        .unwrap();
+    let page2 = dispatch_ok(
+        &ctx,
+        "promptHistory.list",
+        Some(json!({ "limit": 10, "cursor": cursor })),
+    )
+    .await;
     assert_eq!(page2["items"].as_array().unwrap().len(), 3);
     assert!(page2["nextCursor"].is_null());
 }
@@ -156,7 +210,7 @@ async fn history_clear_removes_all_rows() {
 #[tokio::test]
 async fn snippet_list_empty_returns_empty_items() {
     let ctx = make_test_context();
-    let out = ListSnippetsHandler.handle(None, &ctx).await.unwrap();
+    let out = dispatch_ok(&ctx, "promptSnippet.list", Some(json!({}))).await;
     assert_eq!(out["items"].as_array().unwrap().len(), 0);
 }
 
@@ -168,7 +222,7 @@ async fn snippet_list_returns_sorted_items() {
     std::thread::sleep(std::time::Duration::from_millis(5));
     crate::prompt_library::store::create_snippet(pool, "second", "beta").unwrap();
 
-    let out = ListSnippetsHandler.handle(None, &ctx).await.unwrap();
+    let out = dispatch_ok(&ctx, "promptSnippet.list", Some(json!({}))).await;
     let items = out["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["name"], "second");
@@ -307,19 +361,18 @@ async fn snippet_get_returns_snippet() {
     let pool = ctx.event_store.pool();
     let s = crate::prompt_library::store::create_snippet(pool, "n", "t").unwrap();
 
-    let out = GetSnippetHandler
-        .handle(Some(json!({ "id": s.id.clone() })), &ctx)
-        .await
-        .unwrap();
+    let out = dispatch_ok(
+        &ctx,
+        "promptSnippet.get",
+        Some(json!({ "id": s.id.clone() })),
+    )
+    .await;
     assert_eq!(out["snippet"]["id"], s.id);
 }
 
 #[tokio::test]
 async fn snippet_get_missing_returns_not_found() {
     let ctx = make_test_context();
-    let err = GetSnippetHandler
-        .handle(Some(json!({ "id": "nope" })), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(&ctx, "promptSnippet.get", Some(json!({ "id": "nope" }))).await;
     assert!(matches!(err, RpcError::NotFound { .. }));
 }
