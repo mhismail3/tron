@@ -1005,6 +1005,12 @@ mod tests {
             AcquireResult::Acquired(_) => {}
             other => panic!("expected Acquired, got {other:?}"),
         };
+        let home = crate::server::rpc::handlers::test_helpers::unique_tron_home();
+        let settings_path =
+            crate::server::rpc::handlers::test_helpers::test_user_profile_path(&home);
+        let profile_runtime =
+            crate::server::rpc::handlers::test_helpers::test_profile_runtime(&home);
+        let auth_path = crate::server::rpc::handlers::test_helpers::test_auth_path(&home);
 
         let ctx = RpcContext {
             orchestrator: orch,
@@ -1014,10 +1020,8 @@ mod tests {
             memory_registry: Arc::new(parking_lot::Mutex::new(
                 crate::runtime::memory::MemoryRegistry::new(),
             )),
-            settings_path: std::path::PathBuf::from("/tmp/tron-test-profile.toml"),
-            profile_runtime: std::sync::Arc::new(
-                crate::runtime::ProfileRuntime::load(crate::core::paths::tron_home()).unwrap(),
-            ),
+            settings_path,
+            profile_runtime,
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             transcription_engine: Arc::new(std::sync::OnceLock::new()),
@@ -1030,7 +1034,7 @@ mod tests {
             worktree_coordinator: Some(coord.clone()),
             device_request_broker: None,
             context_artifacts: Arc::new(ContextArtifactsService::new()),
-            auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
+            auth_path,
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,

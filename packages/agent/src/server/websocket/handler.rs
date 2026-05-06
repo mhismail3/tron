@@ -99,6 +99,12 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store.clone()));
         let orch = Arc::new(Orchestrator::new(mgr.clone()));
+        let home = crate::server::rpc::handlers::test_helpers::unique_tron_home();
+        let settings_path =
+            crate::server::rpc::handlers::test_helpers::test_user_profile_path(&home);
+        let profile_runtime =
+            crate::server::rpc::handlers::test_helpers::test_profile_runtime(&home);
+        let auth_path = crate::server::rpc::handlers::test_helpers::test_auth_path(&home);
         RpcContext {
             orchestrator: orch,
             session_manager: mgr,
@@ -109,10 +115,8 @@ mod tests {
             memory_registry: Arc::new(parking_lot::Mutex::new(
                 crate::runtime::memory::MemoryRegistry::new(),
             )),
-            settings_path: std::path::PathBuf::from("/tmp/tron-test-profile.toml"),
-            profile_runtime: std::sync::Arc::new(
-                crate::runtime::ProfileRuntime::load(crate::core::paths::tron_home()).unwrap(),
-            ),
+            settings_path,
+            profile_runtime,
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             transcription_engine: std::sync::Arc::new(std::sync::OnceLock::new()),
@@ -127,7 +131,7 @@ mod tests {
             context_artifacts: Arc::new(
                 crate::server::rpc::session_context::ContextArtifactsService::new(),
             ),
-            auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
+            auth_path,
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,

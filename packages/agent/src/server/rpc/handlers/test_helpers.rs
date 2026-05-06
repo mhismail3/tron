@@ -6,7 +6,7 @@
 //! their own file (instead of an inline `#[cfg(test)] mod` in `mod.rs`)
 //! lets the dispatch table file stay focused on registry wiring.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -29,7 +29,7 @@ use crate::tools::registry::ToolRegistry;
 
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn unique_test_path(name: &str, extension: &str) -> PathBuf {
+pub(crate) fn unique_test_path(name: &str, extension: &str) -> PathBuf {
     let id = TEST_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
         "tron-test-{name}-{}-{id}.{extension}",
@@ -37,11 +37,26 @@ fn unique_test_path(name: &str, extension: &str) -> PathBuf {
     ))
 }
 
-fn unique_tron_home() -> PathBuf {
+pub(crate) fn unique_tron_home() -> PathBuf {
     let dir = unique_test_path("tron-home", "dir");
     let home = dir.join(".tron");
     crate::core::constitution::ensure_tron_home_at(&home).unwrap();
     home
+}
+
+pub(crate) fn test_user_profile_path(home: &Path) -> PathBuf {
+    home.join(crate::core::paths::dirs::PROFILES)
+        .join(crate::core::profile::USER_PROFILE)
+        .join(crate::core::paths::files::PROFILE_TOML)
+}
+
+pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
+    home.join(crate::core::paths::dirs::PROFILES)
+        .join(crate::core::paths::files::AUTH_JSON)
+}
+
+pub(crate) fn test_profile_runtime(home: &Path) -> Arc<crate::runtime::ProfileRuntime> {
+    Arc::new(crate::runtime::ProfileRuntime::load(home).unwrap())
 }
 
 /// A no-op mock provider for tests.
@@ -149,11 +164,9 @@ pub fn make_test_context() -> RpcContext {
     let mgr = Arc::new(SessionManager::new(store.clone()));
     let orch = Arc::new(Orchestrator::new(mgr.clone()));
     let home = unique_tron_home();
-    let settings_path = home
-        .join(crate::core::paths::dirs::PROFILES)
-        .join(crate::core::profile::USER_PROFILE)
-        .join(crate::core::paths::files::PROFILE_TOML);
-    let profile_runtime = Arc::new(crate::runtime::ProfileRuntime::load(&home).unwrap());
+    let settings_path = test_user_profile_path(&home);
+    let auth_path = test_auth_path(&home);
+    let profile_runtime = test_profile_runtime(&home);
     RpcContext {
         orchestrator: orch,
         session_manager: mgr,
@@ -174,7 +187,7 @@ pub fn make_test_context() -> RpcContext {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(ContextArtifactsService::new()),
-        auth_path: unique_test_path("auth", "json"),
+        auth_path,
         broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
