@@ -134,6 +134,14 @@ mod tests {
         }
     }
 
+    fn stable_working_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("create stable skill test working dir")
+    }
+
+    fn working_dir_string(dir: &tempfile::TempDir) -> String {
+        dir.path().to_string_lossy().into_owned()
+    }
+
     #[tokio::test]
     async fn list_skills_returns_array() {
         let ctx = make_test_context();
@@ -182,12 +190,17 @@ mod tests {
     #[tokio::test]
     async fn get_skill_returns_wrapped_response() {
         let ctx = make_test_context();
+        let dir = stable_working_dir();
+        let working_dir = working_dir_string(&dir);
         // Pre-refresh so refresh_if_stale is a no-op, then insert our test skill
-        ctx.skill_registry.write().refresh("/tmp");
+        ctx.skill_registry.write().refresh(&working_dir);
         ctx.skill_registry.write().insert(make_skill("my-skill"));
 
         let result = GetSkillHandler
-            .handle(Some(json!({"name": "my-skill"})), &ctx)
+            .handle(
+                Some(json!({"name": "my-skill", "workingDirectory": working_dir})),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -201,12 +214,17 @@ mod tests {
     #[tokio::test]
     async fn list_skills_sorted_alphabetically() {
         let ctx = make_test_context();
+        let dir = stable_working_dir();
+        let working_dir = working_dir_string(&dir);
         // Pre-refresh so refresh_if_stale is a no-op, then insert test skills
-        ctx.skill_registry.write().refresh("/tmp");
+        ctx.skill_registry.write().refresh(&working_dir);
         ctx.skill_registry.write().insert(make_skill("zebra"));
         ctx.skill_registry.write().insert(make_skill("alpha"));
 
-        let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
+        let result = ListSkillsHandler
+            .handle(Some(json!({"workingDirectory": working_dir})), &ctx)
+            .await
+            .unwrap();
         let names: Vec<&str> = result["skills"]
             .as_array()
             .unwrap()
@@ -239,12 +257,17 @@ mod tests {
     #[tokio::test]
     async fn list_skills_returns_canonical_shape() {
         let ctx = make_test_context();
+        let dir = stable_working_dir();
+        let working_dir = working_dir_string(&dir);
         // Pre-refresh so refresh_if_stale is a no-op, then insert test skills
-        ctx.skill_registry.write().refresh("/tmp");
+        ctx.skill_registry.write().refresh(&working_dir);
         ctx.skill_registry.write().insert(make_skill("alpha"));
         ctx.skill_registry.write().insert(make_skill("beta"));
 
-        let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
+        let result = ListSkillsHandler
+            .handle(Some(json!({"workingDirectory": working_dir})), &ctx)
+            .await
+            .unwrap();
         let skills = result["skills"].as_array().unwrap();
         assert!(skills.iter().any(|s| s["name"] == "alpha"));
         assert!(skills.iter().any(|s| s["name"] == "beta"));
@@ -258,13 +281,18 @@ mod tests {
     #[tokio::test]
     async fn get_skill_wire_includes_all_ios_fields() {
         let ctx = make_test_context();
-        ctx.skill_registry.write().refresh("/tmp");
+        let dir = stable_working_dir();
+        let working_dir = working_dir_string(&dir);
+        ctx.skill_registry.write().refresh(&working_dir);
         let mut meta = make_skill("xcode");
         meta.service = "claude".to_string();
         ctx.skill_registry.write().insert(meta);
 
         let result = GetSkillHandler
-            .handle(Some(json!({"name": "xcode"})), &ctx)
+            .handle(
+                Some(json!({"name": "xcode", "workingDirectory": working_dir})),
+                &ctx,
+            )
             .await
             .unwrap();
 
