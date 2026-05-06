@@ -27,11 +27,14 @@
 //! - stream, state, and queue workers are registered as first-class primitive
 //!   workers with in-memory and SQLite-backed stores scoped outside the
 //!   production event-store migration;
+//! - approval is a first-class primitive: high-risk agent-visible functions can
+//!   pause into `approval::*` records and scoped stream events before execution;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
-//! - the external worker protocol is loopback/protocol-only for now; sandbox
-//!   execution and arbitrary external processes remain deferred.
+//! - the local external-worker runtime speaks the loopback protocol, registers
+//!   session-visible volatile functions/triggers, and unregisters them on
+//!   disconnect; sandbox execution and remote workers remain deferred.
 //!
 //! ## Module Position
 //!
@@ -43,9 +46,11 @@
 
 #![deny(unsafe_code)]
 
+pub mod approval;
 pub mod capabilities;
 pub mod discovery;
 pub mod errors;
+pub mod external;
 pub mod host;
 pub mod ids;
 pub mod invocation;
@@ -60,9 +65,14 @@ pub mod streams;
 pub mod triggers;
 pub mod types;
 
+pub use approval::{
+    ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
+    InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
+};
 pub use capabilities::AgentCapabilityClient;
 pub use discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use errors::{EngineError, Result};
+pub use external::{EngineExternalWorkerRuntime, ExternalWorkerConnection};
 pub use host::{
     EngineHost, EngineHostHandle, EngineWatchRequest, EngineWatchResponse,
     engine_ledger_path_for_event_db,
@@ -85,8 +95,8 @@ pub use protocol::{
     WorkerInvoke, WorkerProtocolMessage,
 };
 pub use queue::{
-    EngineQueueItem, EngineQueueRuntime, EnqueueInvocation, InMemoryEngineQueueStore,
-    QueueItemStatus, SqliteEngineQueueStore,
+    EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime, EnqueueInvocation,
+    InMemoryEngineQueueStore, QueueItemStatus, SqliteEngineQueueStore,
 };
 pub use registry::LiveCatalog;
 pub use state::{

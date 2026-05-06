@@ -7,15 +7,47 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
+        "session.create" => session_create_value(Some(payload), deps).await,
         "session.list" => session_list_value(Some(payload), deps).await,
+        "session.delete" => session_delete_value(Some(payload), deps).await,
+        "session.fork" => session_fork_value(Some(payload), deps).await,
         "session.getHead" => session_get_head_value(Some(payload), deps).await,
         "session.getState" => session_get_state_value(Some(payload), deps).await,
         "session.getHistory" => session_get_history_value(Some(payload), deps).await,
         "session.reconstruct" => session_reconstruct_value(Some(payload), deps).await,
+        "session.archive" => session_archive_value(Some(payload), deps).await,
+        "session.unarchive" => session_unarchive_value(Some(payload), deps).await,
+        "session.archiveOlderThan" => session_archive_older_than_value(Some(payload), deps).await,
+        "session.export" => session_export_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("session method {method} is not engine-owned"),
         }),
     }
+}
+
+async fn session_create_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let working_directory = require_string_param(params, "workingDirectory")?;
+    let model =
+        opt_string(params, "model").unwrap_or_else(|| "claude-sonnet-4-20250514".to_owned());
+    let title = opt_string(params, "title");
+    let source = opt_string(params, "source");
+    let profile = opt_string(params, "profile");
+    let use_worktree = opt_bool(params, "useWorktree");
+    crate::server::rpc::session_commands::SessionCommandService::create(
+        &rpc_context_view(deps),
+        crate::server::rpc::session_commands::CreateSessionRequest {
+            working_directory,
+            model,
+            title,
+            source,
+            profile,
+            use_worktree,
+        },
+    )
+    .await
 }
 
 async fn session_list_value(
@@ -43,6 +75,34 @@ async fn session_get_head_value(
     crate::server::rpc::session_queries::SessionQueryService::get_head(
         &rpc_context_view(deps),
         session_id,
+    )
+    .await
+}
+
+async fn session_delete_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    crate::server::rpc::session_commands::SessionCommandService::delete(
+        &rpc_context_view(deps),
+        session_id,
+    )
+    .await
+}
+
+async fn session_fork_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let from_event_id = opt_string(params, "fromEventId");
+    let title = opt_string(params, "title");
+    crate::server::rpc::session_commands::SessionCommandService::fork(
+        &rpc_context_view(deps),
+        session_id,
+        from_event_id,
+        title,
     )
     .await
 }
@@ -95,6 +155,60 @@ async fn session_reconstruct_value(
         session_id,
         limit,
         before_sequence,
+    )
+    .await
+}
+
+async fn session_archive_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    crate::server::rpc::session_commands::SessionCommandService::archive(
+        &rpc_context_view(deps),
+        session_id,
+    )
+    .await
+}
+
+async fn session_unarchive_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    crate::server::rpc::session_commands::SessionCommandService::unarchive(
+        &rpc_context_view(deps),
+        session_id,
+    )
+    .await
+}
+
+async fn session_archive_older_than_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let days_raw = params
+        .and_then(|p| p.get("days"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| RpcError::InvalidParams {
+            message: "missing required parameter 'days' (non-negative integer)".into(),
+        })?;
+    let days = u32::try_from(days_raw).unwrap_or(u32::MAX);
+    crate::server::rpc::session_commands::SessionCommandService::archive_older_than(
+        &rpc_context_view(deps),
+        days,
+    )
+    .await
+}
+
+async fn session_export_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    crate::server::rpc::session_queries::SessionQueryService::export(
+        &rpc_context_view(deps),
+        session_id,
     )
     .await
 }

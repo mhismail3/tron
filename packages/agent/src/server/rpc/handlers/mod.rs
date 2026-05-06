@@ -4,16 +4,15 @@
 //!
 //! ## `register_core` — Session and agent lifecycle
 //!
-//! `system` (ping, info, shutdown), `session` (CRUD, fork, archive),
-//! `agent` (prompt, abort, state), `model` (list, switch), `context`
-//! (snapshot, compaction), `events` (history/append generic, subscribe
-//! handlers), `settings`, `tool` (result), `message`, `memory`, `logs`
+//! `system` (ping, info, shutdown), `session` (CRUD, fork, archive, export
+//! generic except resume), `agent` (prompt/abort direct; queue controls
+//! generic), `model` (list, switch), `context` (snapshot and compaction
+//! generic), `events`, `settings`, `tool` (result), `message`, `memory`, `logs`
 //!
 //! ## `register_capabilities` — Domain features
 //!
-//! `skills` and `skill_session` are fully generic-triggered engine functions;
-//! `filesystem` has generic read/list/home functions while mkdir remains a
-//! handler until file-write idempotency/path guardrails land;
+//! `skills`, `skill_session`, and basic filesystem operations are fully
+//! generic-triggered engine functions;
 //!
 //! The remaining capability modules are
 //! `tree` (visualization, branches), `import` (listSources, listSessions,
@@ -21,9 +20,9 @@
 //!
 //! ## `register_platform` — Platform-specific
 //!
-//! `browser` (stream), `worktree` (git), `transcription`,
-//! `device` (push tokens), `notifications` and `plan` (fully generic),
-//! `voice_notes`, `git`, `sandbox`
+//! `browser` (stream), `worktree` (git), `job` (fully generic),
+//! `transcription`, `device` (push tokens), `notifications` and `plan`
+//! (fully generic), `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
 pub mod agent_confirmation;
@@ -96,14 +95,23 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("blob.get", blob::GetBlobHandler);
 
     // Session
-    registry.register("session.create", session::CreateSessionHandler);
+    registry.register(
+        "session.create",
+        RpcGenericTriggerHandler::new("session.create"),
+    );
     registry.register("session.resume", session::ResumeSessionHandler);
     registry.register(
         "session.list",
         RpcGenericTriggerHandler::new("session.list"),
     );
-    registry.register("session.delete", session::DeleteSessionHandler);
-    registry.register("session.fork", session::ForkSessionHandler);
+    registry.register(
+        "session.delete",
+        RpcGenericTriggerHandler::new("session.delete"),
+    );
+    registry.register(
+        "session.fork",
+        RpcGenericTriggerHandler::new("session.fork"),
+    );
     registry.register(
         "session.getHead",
         RpcGenericTriggerHandler::new("session.getHead"),
@@ -120,18 +128,39 @@ fn register_core(registry: &mut MethodRegistry) {
         "session.reconstruct",
         RpcGenericTriggerHandler::new("session.reconstruct"),
     );
-    registry.register("session.archive", session::ArchiveSessionHandler);
-    registry.register("session.unarchive", session::UnarchiveSessionHandler);
-    registry.register("session.archiveOlderThan", session::ArchiveOlderThanHandler);
-    registry.register("session.export", session::ExportSessionHandler);
+    registry.register(
+        "session.archive",
+        RpcGenericTriggerHandler::new("session.archive"),
+    );
+    registry.register(
+        "session.unarchive",
+        RpcGenericTriggerHandler::new("session.unarchive"),
+    );
+    registry.register(
+        "session.archiveOlderThan",
+        RpcGenericTriggerHandler::new("session.archiveOlderThan"),
+    );
+    registry.register(
+        "session.export",
+        RpcGenericTriggerHandler::new("session.export"),
+    );
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
     registry.register("agent.abort", agent::AbortHandler);
     registry.register("agent.abortTool", agent::AbortToolHandler);
     registry.register("agent.status", agent::StatusHandler);
-    registry.register("agent.queuePrompt", agent_queue::QueuePromptHandler);
-    registry.register("agent.dequeuePrompt", agent_queue::DequeuePromptHandler);
-    registry.register("agent.clearQueue", agent_queue::ClearQueueHandler);
+    registry.register(
+        "agent.queuePrompt",
+        RpcGenericTriggerHandler::new("agent.queuePrompt"),
+    );
+    registry.register(
+        "agent.dequeuePrompt",
+        RpcGenericTriggerHandler::new("agent.dequeuePrompt"),
+    );
+    registry.register(
+        "agent.clearQueue",
+        RpcGenericTriggerHandler::new("agent.clearQueue"),
+    );
     registry.register(
         "agent.deliverSubagentResults",
         agent_subagent::DeliverSubagentResultsHandler,
@@ -173,14 +202,20 @@ fn register_core(registry: &mut MethodRegistry) {
     );
     registry.register(
         "context.confirmCompaction",
-        context::ConfirmCompactionHandler,
+        RpcGenericTriggerHandler::new("context.confirmCompaction"),
     );
     registry.register(
         "context.canAcceptTurn",
         RpcGenericTriggerHandler::new("context.canAcceptTurn"),
     );
-    registry.register("context.clear", context::ClearHandler);
-    registry.register("context.compact", context::CompactHandler);
+    registry.register(
+        "context.clear",
+        RpcGenericTriggerHandler::new("context.clear"),
+    );
+    registry.register(
+        "context.compact",
+        RpcGenericTriggerHandler::new("context.compact"),
+    );
 
     // Events
     registry.register(
@@ -315,8 +350,11 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("display.stopStream", display::StopStreamHandler);
 
     // Unified job management
-    registry.register("job.background", job::BackgroundHandler);
-    registry.register("job.cancel", job::CancelHandler);
+    registry.register(
+        "job.background",
+        RpcGenericTriggerHandler::new("job.background"),
+    );
+    registry.register("job.cancel", RpcGenericTriggerHandler::new("job.cancel"));
     registry.register("job.list", RpcGenericTriggerHandler::new("job.list"));
     registry.register(
         "job.subscribe",

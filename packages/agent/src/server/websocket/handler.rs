@@ -4,6 +4,7 @@
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::registry::MethodRegistry;
 use crate::server::rpc::types::{RpcRequest, RpcResponse};
+use serde_json::json;
 use tracing::{debug, instrument, warn};
 
 /// Fallback JSON for when response serialization itself fails.
@@ -29,7 +30,19 @@ pub async fn handle_message(
     registry: &MethodRegistry,
     ctx: &RpcContext,
 ) -> HandleResult {
-    let request: RpcRequest = match serde_json::from_str(message) {
+    handle_message_with_transport(message, registry, ctx, None).await
+}
+
+/// Handle an incoming WebSocket message with a transport discriminator for
+/// migration idempotency keys that need per-connection isolation.
+#[instrument(skip_all, fields(method, session_id))]
+pub async fn handle_message_with_transport(
+    message: &str,
+    registry: &MethodRegistry,
+    ctx: &RpcContext,
+    transport_id: Option<&str>,
+) -> HandleResult {
+    let mut request: RpcRequest = match serde_json::from_str(message) {
         Ok(r) => r,
         Err(e) => {
             warn!("invalid JSON received");
@@ -47,6 +60,7 @@ pub async fn handle_message(
         }
     };
 
+    attach_transport_context(&mut request, transport_id);
     let method = request.method.clone();
     let id = &request.id;
     let _ = tracing::Span::current().record("method", method.as_str());
@@ -74,6 +88,25 @@ pub async fn handle_message(
         method,
         response,
     }
+}
+
+fn attach_transport_context(request: &mut RpcRequest, transport_id: Option<&str>) {
+    let Some(transport_id) = transport_id else {
+        return;
+    };
+    if request.method != "session.create" {
+        return;
+    }
+    let payload = request.params.get_or_insert_with(|| json!({}));
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "__rpcContext".to_owned(),
+        json!({
+            "transportId": transport_id,
+        }),
+    );
 }
 
 #[cfg(test)]
@@ -320,6 +353,26 @@ mod tests {
         assert!(resp.success);
         let result = resp.result.unwrap();
         assert_eq!(result["big"].as_str().unwrap().len(), 10_000);
+    }
+
+    #[test]
+    fn session_create_transport_context_overwrites_client_payload() {
+        let mut request = RpcRequest {
+            id: "1".to_owned(),
+            method: "session.create".to_owned(),
+            params: Some(json!({
+                "workingDirectory": "/tmp",
+                "__rpcContext": {"transportId": "client-supplied"}
+            })),
+        };
+
+        attach_transport_context(&mut request, Some("ws-client-a"));
+
+        let params = request.params.unwrap();
+        assert_eq!(
+            params["__rpcContext"]["transportId"].as_str(),
+            Some("ws-client-a")
+        );
     }
 
     #[test]

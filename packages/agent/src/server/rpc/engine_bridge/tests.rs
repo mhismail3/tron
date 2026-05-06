@@ -36,6 +36,7 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "session.getState",
     "session.getHistory",
     "session.reconstruct",
+    "session.export",
     "context.getSnapshot",
     "context.getDetailedSnapshot",
     "context.getAuditTrace",
@@ -58,6 +59,20 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "events.append",
     "events.subscribe",
     "events.unsubscribe",
+    "session.create",
+    "session.delete",
+    "session.fork",
+    "session.archive",
+    "session.unarchive",
+    "session.archiveOlderThan",
+    "agent.queuePrompt",
+    "agent.dequeuePrompt",
+    "agent.clearQueue",
+    "context.confirmCompaction",
+    "context.clear",
+    "context.compact",
+    "job.background",
+    "job.cancel",
     "settings.update",
     "settings.resetToDefaults",
     "skill.refresh",
@@ -107,6 +122,13 @@ const SESSION_METHODS: &[&str] = &[
     "session.getState",
     "session.getHistory",
     "session.reconstruct",
+    "session.create",
+    "session.delete",
+    "session.fork",
+    "session.archive",
+    "session.unarchive",
+    "session.archiveOlderThan",
+    "session.export",
 ];
 
 const CONTEXT_READ_METHODS: &[&str] = &[
@@ -118,7 +140,25 @@ const CONTEXT_READ_METHODS: &[&str] = &[
     "context.canAcceptTurn",
 ];
 
-const JOB_METHODS: &[&str] = &["job.list", "job.subscribe", "job.unsubscribe"];
+const CONTEXT_COMMAND_METHODS: &[&str] = &[
+    "context.confirmCompaction",
+    "context.clear",
+    "context.compact",
+];
+
+const AGENT_QUEUE_METHODS: &[&str] = &[
+    "agent.queuePrompt",
+    "agent.dequeuePrompt",
+    "agent.clearQueue",
+];
+
+const JOB_METHODS: &[&str] = &[
+    "job.background",
+    "job.cancel",
+    "job.list",
+    "job.subscribe",
+    "job.unsubscribe",
+];
 
 const NOTIFICATION_METHODS: &[&str] = &[
     "notifications.list",
@@ -262,6 +302,14 @@ fn normalize_unstable_fields(method: &str, mut value: Value) -> Value {
     if method == "system.getInfo" {
         value["uptime"] = json!(0);
     }
+    if method == "session.create" {
+        value["sessionId"] = json!("<session>");
+        value["createdAt"] = json!("<createdAt>");
+    }
+    if method == "agent.queuePrompt" {
+        value["queueId"] = json!("<queue>");
+        value["timestamp"] = json!("<timestamp>");
+    }
     value
 }
 
@@ -302,7 +350,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
         .collect::<BTreeSet<_>>();
     let registry_methods = registry.methods().into_iter().collect::<BTreeSet<_>>();
     assert_eq!(spec_methods, registry_methods);
-    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 51);
+    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 66);
 }
 
 #[test]
@@ -523,6 +571,8 @@ fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
         .chain(FILESYSTEM_ENGINE_METHODS)
         .chain(SESSION_METHODS)
         .chain(CONTEXT_READ_METHODS)
+        .chain(CONTEXT_COMMAND_METHODS)
+        .chain(AGENT_QUEUE_METHODS)
         .chain(JOB_METHODS)
         .chain(NOTIFICATION_METHODS)
         .chain(PLAN_METHODS)
@@ -911,7 +961,7 @@ fn handler_only_methods_do_not_build_generic_envelopes() {
     handlers::register_all(&mut registry);
     let request = RpcRequest {
         id: "req-handler".to_owned(),
-        method: "session.create".to_owned(),
+        method: "session.resume".to_owned(),
         params: Some(json!({})),
     };
     assert!(
@@ -927,7 +977,7 @@ async fn handler_only_engine_functions_are_not_client_routable() {
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
-            specs::function_id_for_method("session.create").unwrap(),
+            specs::function_id_for_method("session.resume").unwrap(),
             json!({}),
             super::dispatch::rpc_causal_context(),
         ))
@@ -1073,6 +1123,71 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
         let rpc = rpc_dispatch_value(&ctx, method, payload).await;
         assert_eq!(direct, rpc, "{method}");
     }
+}
+
+#[tokio::test]
+async fn session_create_outputs_match_direct_engine_outputs() {
+    let params = json!({
+        "workingDirectory": "/tmp",
+        "model": "claude-opus-4-6",
+        "title": "engine session"
+    });
+    let direct_ctx = make_test_context();
+    let direct = normalize_unstable_fields(
+        "session.create",
+        direct_engine_value(&direct_ctx, "session.create", params.clone()).await,
+    );
+    let rpc_ctx = make_test_context();
+    let rpc = normalize_unstable_fields(
+        "session.create",
+        rpc_dispatch_value(&rpc_ctx, "session.create", params).await,
+    );
+    assert_eq!(direct, rpc);
+}
+
+#[tokio::test]
+async fn agent_queue_prompt_outputs_match_direct_engine_and_replays_rpc_retry() {
+    let direct_ctx = make_test_context();
+    let direct_session = direct_ctx
+        .event_store
+        .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+        .unwrap()
+        .session
+        .id;
+    let direct_payload = json!({"sessionId": direct_session, "prompt": "queued by engine"});
+    let direct = normalize_unstable_fields(
+        "agent.queuePrompt",
+        direct_engine_value(&direct_ctx, "agent.queuePrompt", direct_payload).await,
+    );
+
+    let rpc_ctx = make_test_context();
+    let rpc_session = rpc_ctx
+        .event_store
+        .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+        .unwrap()
+        .session
+        .id;
+    let rpc_payload = json!({"sessionId": rpc_session, "prompt": "queued by engine"});
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: "queue-retry".to_owned(),
+        method: "agent.queuePrompt".to_owned(),
+        params: Some(rpc_payload.clone()),
+    };
+    let first = registry.dispatch(request.clone(), &rpc_ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(request, &rpc_ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+    let rpc = normalize_unstable_fields("agent.queuePrompt", first.result.unwrap());
+    assert_eq!(direct, rpc);
+
+    let pending = crate::server::rpc::prompt_queue::PromptQueueService::get_pending_queue(
+        &rpc_ctx.event_store,
+        &rpc_session,
+    )
+    .unwrap();
+    assert_eq!(pending.len(), 1, "idempotent retry must not enqueue twice");
 }
 
 #[tokio::test]

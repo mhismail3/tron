@@ -5,14 +5,15 @@
 //! method has an explicit capability spec, migrated specs register domain-owned
 //! in-process worker functions, and generic-trigger methods bypass
 //! method-specific business handlers entirely. Prompt library, settings, logs,
-//! skills, notifications, plan, events, basic filesystem, safe session reads,
-//! safe context reads, and job list/subscription controls now run through this
-//! generic-trigger path.
+//! skills, notifications, plan, events, basic filesystem, all job methods,
+//! agent queue controls, session create/delete/fork/archive/export except
+//! `session.resume`, and all context snapshot/compaction/clear methods now run
+//! through this generic-trigger path.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
-//! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, and
-//! `system` own executable function contracts and behavior metadata.
+//! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
+//! and `system` own executable function contracts and behavior metadata.
 //! `json_rpc` trigger records capture the old client method name and dispatch
 //! directly into canonical ids such as `skills::activate` or
 //! `session::reconstruct`; `rpc::<method>` names remain compatibility metadata

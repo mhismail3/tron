@@ -5,6 +5,7 @@
 
 use serde_json::Value;
 
+use super::approval::EngineApprovalRequest;
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::host::{EngineHostHandle, EngineWatchRequest, EngineWatchResponse};
@@ -109,17 +110,48 @@ impl AgentCapabilityClient {
             && function.required_authority.approval_required
             && function.risk_level >= RiskLevel::High
         {
-            let invocation =
-                Invocation::new_sync(function_id, payload, self.causal_context(idempotency_key));
+            let invocation = Invocation::new_sync(
+                function_id.clone(),
+                payload.clone(),
+                self.causal_context(idempotency_key),
+            );
+            let approval = self
+                .handle
+                .request_approval(EngineApprovalRequest {
+                    function_id: function_id.clone(),
+                    payload,
+                    causal_context: invocation.causal_context.clone(),
+                    delivery_mode: invocation.delivery_mode,
+                })
+                .await;
+            let details = match approval {
+                Ok(record) => serde_json::json!({
+                    "code": "APPROVAL_REQUIRED",
+                    "approvalId": record.approval_id,
+                    "status": record.status,
+                    "functionId": function_id.as_str(),
+                    "traceId": record.trace_id.as_str(),
+                }),
+                Err(error) => serde_json::json!({
+                    "code": "APPROVAL_REQUEST_FAILED",
+                    "functionId": function_id.as_str(),
+                    "error": error.to_string(),
+                }),
+            };
             return InvocationResult::error(
                 &invocation,
                 function.owner_worker,
                 function.revision,
                 super::types::CatalogRevision(0),
-                EngineError::PolicyViolation(format!(
-                    "approval required before agent invocation of {}",
-                    invocation.function_id
-                )),
+                EngineError::AdapterFailure {
+                    adapter: "approval".to_owned(),
+                    code: "APPROVAL_REQUIRED".to_owned(),
+                    message: format!(
+                        "approval required before agent invocation of {}",
+                        invocation.function_id
+                    ),
+                    details: Some(details),
+                },
             );
         }
         let mut context = self.causal_context(idempotency_key);

@@ -15,6 +15,10 @@ use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
 
+use super::approval::{
+    ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
+    InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
+};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
@@ -60,6 +64,12 @@ const WATCH_MAX_LIMIT: usize = 500;
 const STREAM_WORKER_ID: &str = "stream";
 const STATE_WORKER_ID: &str = "state";
 const QUEUE_WORKER_ID: &str = "queue";
+const APPROVAL_WORKER_ID: &str = "approval";
+
+const APPROVAL_REQUEST_FUNCTION: &str = "approval::request";
+const APPROVAL_RESOLVE_FUNCTION: &str = "approval::resolve";
+const APPROVAL_GET_FUNCTION: &str = "approval::get";
+const APPROVAL_LIST_FUNCTION: &str = "approval::list";
 
 struct PreparedDelegatedInvocation {
     meta_invocation: Invocation,
@@ -266,11 +276,68 @@ impl QueueStoreBackend {
     }
 }
 
+enum ApprovalStoreBackend {
+    InMemory(InMemoryEngineApprovalStore),
+    Sqlite(SqliteEngineApprovalStore),
+}
+
+impl ApprovalStoreBackend {
+    fn request(&mut self, request: EngineApprovalRequest) -> Result<EngineApprovalRecord> {
+        match self {
+            Self::InMemory(store) => store.request(request),
+            Self::Sqlite(store) => store.request(request),
+        }
+    }
+
+    fn get(&self, approval_id: &str) -> Result<Option<EngineApprovalRecord>> {
+        match self {
+            Self::InMemory(store) => store.get(approval_id),
+            Self::Sqlite(store) => store.get(approval_id),
+        }
+    }
+
+    fn list(
+        &self,
+        status: Option<ApprovalStatus>,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<EngineApprovalRecord>> {
+        match self {
+            Self::InMemory(store) => store.list(status, session_id, limit),
+            Self::Sqlite(store) => store.list(status, session_id, limit),
+        }
+    }
+
+    fn resolve(
+        &mut self,
+        approval_id: &str,
+        decision: ApprovalDecision,
+        actor_id: ActorId,
+    ) -> Result<EngineApprovalRecord> {
+        match self {
+            Self::InMemory(store) => store.resolve(approval_id, decision, actor_id),
+            Self::Sqlite(store) => store.resolve(approval_id, decision, actor_id),
+        }
+    }
+
+    fn complete(
+        &mut self,
+        approval_id: &str,
+        result: &InvocationResult,
+    ) -> Result<EngineApprovalRecord> {
+        match self {
+            Self::InMemory(store) => store.complete(approval_id, result),
+            Self::Sqlite(store) => store.complete(approval_id, result),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct PrimitiveStores {
     streams: Arc<StdMutex<StreamStoreBackend>>,
     state: Arc<StdMutex<StateStoreBackend>>,
     queue: Arc<StdMutex<QueueStoreBackend>>,
+    approvals: Arc<StdMutex<ApprovalStoreBackend>>,
 }
 
 impl PrimitiveStores {
@@ -285,6 +352,9 @@ impl PrimitiveStores {
             queue: Arc::new(StdMutex::new(QueueStoreBackend::InMemory(
                 InMemoryEngineQueueStore::new(),
             ))),
+            approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::InMemory(
+                InMemoryEngineApprovalStore::new(),
+            ))),
         }
     }
 
@@ -298,6 +368,9 @@ impl PrimitiveStores {
             ))),
             queue: Arc::new(StdMutex::new(QueueStoreBackend::Sqlite(
                 SqliteEngineQueueStore::open(path)?,
+            ))),
+            approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::Sqlite(
+                SqliteEngineApprovalStore::open(path)?,
             ))),
         })
     }
@@ -345,6 +418,15 @@ impl EngineHostHandle {
             .await
             .catalog
             .register_worker(definition, volatile)
+    }
+
+    /// Unregister a worker and clean up its volatile owned entries.
+    pub async fn unregister_worker(&self, id: &WorkerId, owner_actor: &str) -> Result<()> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .unregister_worker(id, owner_actor)
     }
 
     /// Register or update a worker during single-threaded startup/test setup.
@@ -519,6 +601,12 @@ impl EngineHostHandle {
         if invocation.function_id.as_str() == INVOKE_FUNCTION {
             return self.invoke_delegated_unlocked(invocation).await;
         }
+        if invocation.function_id.as_str() == APPROVAL_REQUEST_FUNCTION {
+            return self.invoke_approval_request_unlocked(invocation).await;
+        }
+        if invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
+            return self.invoke_approval_resolve_unlocked(invocation).await;
+        }
         if invocation.function_id.namespace() == ENGINE_WORKER_ID {
             return self.inner.lock().await.invoke(invocation).await;
         }
@@ -549,6 +637,68 @@ impl EngineHostHandle {
             .finish_prepared_sync_invocation(*prepared, handler_result)
     }
 
+    async fn invoke_approval_request_unlocked(&self, invocation: Invocation) -> InvocationResult {
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_sync_invocation(invocation)
+        };
+        let prepared = match prepared {
+            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
+            PreparedSyncInvocationDecision::Finished(result) => return *result,
+        };
+        let request = match approval_request_from_invocation(&prepared.invocation) {
+            Ok(request) => request,
+            Err(error) => {
+                return self
+                    .finish_prepared_approval_request(*prepared, Err(error))
+                    .await;
+            }
+        };
+        let result = self
+            .request_approval(request)
+            .await
+            .map(|record| json!({ "approval": record }));
+        self.finish_prepared_approval_request(*prepared, result)
+            .await
+    }
+
+    async fn finish_prepared_approval_request(
+        &self,
+        prepared: super::registry::PreparedSyncInvocation,
+        result: Result<Value>,
+    ) -> InvocationResult {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .finish_prepared_sync_invocation(prepared, result)
+    }
+
+    async fn invoke_prepared_regular_unlocked(&self, invocation: Invocation) -> InvocationResult {
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_sync_invocation(invocation)
+        };
+        let prepared = match prepared {
+            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
+            PreparedSyncInvocationDecision::Finished(result) => return *result,
+        };
+        let handler_result = AssertUnwindSafe(prepared.handler.invoke(prepared.invocation.clone()))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|payload| {
+                Err(EngineError::HandlerFailed(format!(
+                    "handler panicked: {}",
+                    panic_payload_message(payload)
+                )))
+            });
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .finish_prepared_sync_invocation(*prepared, handler_result)
+    }
+
     /// Record a trigger dispatch attempt that failed before normal invocation
     /// preparation could attach a target function contract.
     pub async fn record_trigger_prepare_failure(
@@ -568,6 +718,61 @@ impl EngineHostHandle {
         );
         host.catalog
             .record_invocation_result(&invocation, result, None)
+    }
+
+    /// Create or replay an approval request and publish a pending approval
+    /// stream event.
+    pub async fn request_approval(
+        &self,
+        request: EngineApprovalRequest,
+    ) -> Result<EngineApprovalRecord> {
+        let store = self.inner.lock().await.primitives.approvals.clone();
+        let record = store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
+            .request(request)?;
+        let _ = self
+            .publish_stream_event(PublishStreamEvent {
+                topic: "approvals".to_owned(),
+                payload: json!({
+                    "type": "approval.pending",
+                    "approval": record,
+                }),
+                visibility: record
+                    .session_id
+                    .as_ref()
+                    .map_or(VisibilityScope::System, |_| VisibilityScope::Session),
+                session_id: record.session_id.clone(),
+                workspace_id: record.workspace_id.clone(),
+                producer: APPROVAL_REQUEST_FUNCTION.to_owned(),
+                trace_id: Some(record.trace_id.clone()),
+                parent_invocation_id: record.parent_invocation_id.clone(),
+            })
+            .await;
+        Ok(record)
+    }
+
+    /// Get one approval record.
+    pub async fn get_approval(&self, approval_id: &str) -> Result<Option<EngineApprovalRecord>> {
+        let store = self.inner.lock().await.primitives.approvals.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
+            .get(approval_id)
+    }
+
+    /// List approval records.
+    pub async fn list_approvals(
+        &self,
+        status: Option<ApprovalStatus>,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<EngineApprovalRecord>> {
+        let store = self.inner.lock().await.primitives.approvals.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
+            .list(status, session_id, limit)
     }
 
     /// Publish directly to the engine stream store.
@@ -751,6 +956,135 @@ impl EngineHostHandle {
         )
     }
 
+    async fn invoke_approval_resolve_unlocked(&self, invocation: Invocation) -> InvocationResult {
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_sync_invocation(invocation)
+        };
+        let prepared = match prepared {
+            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
+            PreparedSyncInvocationDecision::Finished(result) => return *result,
+        };
+
+        let approval_id = match required_str(&prepared.invocation.payload, "approvalId") {
+            Ok(value) => value.to_owned(),
+            Err(error) => {
+                return self
+                    .finish_prepared_approval_resolve(*prepared, Err(error))
+                    .await;
+            }
+        };
+        let decision = match required_str(&prepared.invocation.payload, "decision")
+            .and_then(parse_approval_decision)
+        {
+            Ok(decision) => decision,
+            Err(error) => {
+                return self
+                    .finish_prepared_approval_resolve(*prepared, Err(error))
+                    .await;
+            }
+        };
+        if !can_resolve_approval(&prepared.invocation.causal_context.actor_kind) {
+            return self
+                .finish_prepared_approval_resolve(
+                    *prepared,
+                    Err(EngineError::PolicyViolation(
+                        "approval resolution requires an admin, system, or user-authorized actor"
+                            .to_owned(),
+                    )),
+                )
+                .await;
+        }
+        let resolver = prepared.invocation.causal_context.actor_id.clone();
+        let approval_store = self.inner.lock().await.primitives.approvals.clone();
+        let mut resolved = match {
+            approval_store
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))
+                .and_then(|mut approvals| approvals.resolve(&approval_id, decision, resolver))
+        } {
+            Ok(record) => record,
+            Err(error) => {
+                return self
+                    .finish_prepared_approval_resolve(*prepared, Err(error))
+                    .await;
+            }
+        };
+
+        let child_result = if decision == ApprovalDecision::Approve
+            && resolved.status == ApprovalStatus::Approved
+        {
+            let child_invocation = Invocation::new_sync(
+                resolved.function_id.clone(),
+                resolved.payload.clone(),
+                resolved.causal_context(),
+            )
+            .with_delivery_mode(resolved.delivery_mode);
+            let result = self
+                .invoke_prepared_regular_unlocked(child_invocation)
+                .await;
+            let completed = approval_store
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))
+                .and_then(|mut approvals| approvals.complete(&approval_id, &result));
+            match completed {
+                Ok(record) => {
+                    resolved = record;
+                    Some(result)
+                }
+                Err(error) => {
+                    return self
+                        .finish_prepared_approval_resolve(*prepared, Err(error))
+                        .await;
+                }
+            }
+        } else {
+            None
+        };
+
+        let child_value = child_result.as_ref().map(invocation_result_value);
+        let _ = self
+            .publish_stream_event(PublishStreamEvent {
+                topic: "approvals".to_owned(),
+                payload: json!({
+                    "type": "approval.resolved",
+                    "approval": resolved,
+                    "child": child_value,
+                }),
+                visibility: resolved
+                    .session_id
+                    .as_ref()
+                    .map_or(VisibilityScope::System, |_| VisibilityScope::Session),
+                session_id: resolved.session_id.clone(),
+                workspace_id: resolved.workspace_id.clone(),
+                producer: APPROVAL_RESOLVE_FUNCTION.to_owned(),
+                trace_id: Some(prepared.invocation.causal_context.trace_id.clone()),
+                parent_invocation_id: Some(prepared.invocation.id.clone()),
+            })
+            .await;
+
+        self.finish_prepared_approval_resolve(
+            *prepared,
+            Ok(json!({
+                "approval": resolved,
+                "child": child_result.map(|result| invocation_result_value(&result)),
+            })),
+        )
+        .await
+    }
+
+    async fn finish_prepared_approval_resolve(
+        &self,
+        prepared: super::registry::PreparedSyncInvocation,
+        result: Result<Value>,
+    ) -> InvocationResult {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .finish_prepared_sync_invocation(prepared, result)
+    }
+
     /// Lock the host for deep test inspection or narrow migration setup.
     ///
     /// Production invocation/discovery paths should use the intent-shaped
@@ -778,6 +1112,10 @@ fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
     } else {
         "non-string panic payload".to_owned()
     }
+}
+
+fn can_resolve_approval(actor_kind: &ActorKind) -> bool {
+    actor_kind.is_admin_like() || matches!(actor_kind, ActorKind::User)
 }
 
 /// Cursor-pull request for catalog changes.
@@ -1603,6 +1941,13 @@ fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
             grant_id(ENGINE_AUTHORITY_GRANT)?,
         )
         .with_namespace_claim(QUEUE_WORKER_ID),
+        WorkerDefinition::new(
+            worker_id(APPROVAL_WORKER_ID)?,
+            WorkerKind::System,
+            actor_id(ENGINE_OWNER_ACTOR)?,
+            grant_id(ENGINE_AUTHORITY_GRANT)?,
+        )
+        .with_namespace_claim(APPROVAL_WORKER_ID),
     ])
 }
 
@@ -1617,6 +1962,9 @@ fn primitive_function_definitions(
     });
     let queue_handler = Arc::new(QueuePrimitiveHandler {
         store: stores.queue.clone(),
+    });
+    let approval_handler = Arc::new(ApprovalPrimitiveHandler {
+        store: stores.approvals.clone(),
     });
 
     Ok(vec![
@@ -1848,6 +2196,71 @@ fn primitive_function_definitions(
                 "properties": {"items": {"type": "array"}}
             })),
             queue_handler,
+        ),
+        (
+            primitive_function(
+                APPROVAL_REQUEST_FUNCTION,
+                APPROVAL_WORKER_ID,
+                "request approval for a high-risk invocation",
+                EffectClass::IdempotentWrite,
+                "approval.request",
+            )
+            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .with_risk(RiskLevel::Medium)
+            .with_request_schema(approval_request_schema())
+            .with_response_schema(approval_record_response_schema()),
+            approval_handler.clone(),
+        ),
+        (
+            primitive_function(
+                APPROVAL_RESOLVE_FUNCTION,
+                APPROVAL_WORKER_ID,
+                "resolve and optionally resume an approval",
+                EffectClass::IdempotentWrite,
+                "approval.resolve",
+            )
+            .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .with_risk(RiskLevel::High)
+            .with_request_schema(approval_resolve_schema())
+            .with_response_schema(json!({
+                "type": "object",
+                "required": ["approval", "child"],
+                "additionalProperties": false,
+                "properties": {
+                    "approval": {"type": "object"},
+                    "child": {}
+                }
+            })),
+            approval_handler.clone(),
+        ),
+        (
+            primitive_function(
+                APPROVAL_GET_FUNCTION,
+                APPROVAL_WORKER_ID,
+                "get one approval record",
+                EffectClass::PureRead,
+                "approval.read",
+            )
+            .with_request_schema(approval_get_schema())
+            .with_response_schema(approval_nullable_response_schema()),
+            approval_handler.clone(),
+        ),
+        (
+            primitive_function(
+                APPROVAL_LIST_FUNCTION,
+                APPROVAL_WORKER_ID,
+                "list approval records",
+                EffectClass::PureRead,
+                "approval.read",
+            )
+            .with_request_schema(approval_list_schema())
+            .with_response_schema(json!({
+                "type": "object",
+                "required": ["approvals"],
+                "additionalProperties": false,
+                "properties": {"approvals": {"type": "array"}}
+            })),
+            approval_handler,
         ),
     ])
 }
@@ -2111,6 +2524,62 @@ impl InProcessFunctionHandler for QueuePrimitiveHandler {
             }),
         }
     }
+}
+
+struct ApprovalPrimitiveHandler {
+    store: Arc<StdMutex<ApprovalStoreBackend>>,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for ApprovalPrimitiveHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?;
+        match invocation.function_id.as_str() {
+            APPROVAL_REQUEST_FUNCTION => {
+                let record = store.request(approval_request_from_invocation(&invocation)?)?;
+                Ok(json!({ "approval": record }))
+            }
+            APPROVAL_GET_FUNCTION => {
+                let approval_id = required_str(&invocation.payload, "approvalId")?;
+                Ok(json!({ "approval": store.get(approval_id)? }))
+            }
+            APPROVAL_LIST_FUNCTION => {
+                let status = optional_string(invocation.payload.get("status"))?
+                    .map(|value| parse_approval_status(&value))
+                    .transpose()?;
+                let session_id = optional_string(invocation.payload.get("sessionId"))?;
+                let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
+                Ok(json!({
+                    "approvals": store.list(status, session_id.as_deref(), limit)?
+                }))
+            }
+            APPROVAL_RESOLVE_FUNCTION => Err(EngineError::PolicyViolation(
+                "approval::resolve must execute through EngineHostHandle so the target invocation can resume".to_owned(),
+            )),
+            _ => Err(EngineError::NotFound {
+                kind: "function",
+                id: invocation.function_id.to_string(),
+            }),
+        }
+    }
+}
+
+fn approval_request_from_invocation(invocation: &Invocation) -> Result<EngineApprovalRequest> {
+    let function_id = function_id(required_str(&invocation.payload, "functionId")?)?;
+    let payload = invocation
+        .payload
+        .get("payload")
+        .cloned()
+        .unwrap_or(Value::Null);
+    Ok(EngineApprovalRequest {
+        function_id,
+        payload,
+        causal_context: invocation.causal_context.clone(),
+        delivery_mode: invocation.delivery_mode,
+    })
 }
 
 fn state_scope_from_payload(invocation: &Invocation) -> Result<EngineStateScope> {
@@ -2386,6 +2855,69 @@ fn queue_item_response_schema() -> Value {
     })
 }
 
+fn approval_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["functionId"],
+        "additionalProperties": false,
+        "properties": {
+            "functionId": {"type": "string"},
+            "payload": {}
+        }
+    })
+}
+
+fn approval_resolve_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["approvalId", "decision"],
+        "additionalProperties": false,
+        "properties": {
+            "approvalId": {"type": "string"},
+            "decision": {"type": "string", "enum": ["approve", "deny"]}
+        }
+    })
+}
+
+fn approval_get_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["approvalId"],
+        "additionalProperties": false,
+        "properties": {"approvalId": {"type": "string"}}
+    })
+}
+
+fn approval_list_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "status": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "limit": {"type": "integer"}
+        }
+    })
+}
+
+fn approval_record_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["approval"],
+        "additionalProperties": false,
+        "properties": {"approval": {"type": "object"}}
+    })
+}
+
+fn approval_nullable_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["approval"],
+        "additionalProperties": false,
+        "properties": {"approval": {}}
+    })
+}
+
 fn actor_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
@@ -2523,6 +3055,29 @@ fn optional_string(value: Option<&Value>) -> Result<Option<String>> {
             })
         })
         .transpose()
+}
+
+fn parse_approval_decision(value: &str) -> Result<ApprovalDecision> {
+    match value {
+        "approve" => Ok(ApprovalDecision::Approve),
+        "deny" => Ok(ApprovalDecision::Deny),
+        other => Err(EngineError::PolicyViolation(format!(
+            "unsupported approval decision {other}"
+        ))),
+    }
+}
+
+fn parse_approval_status(value: &str) -> Result<ApprovalStatus> {
+    match value {
+        "pending" => Ok(ApprovalStatus::Pending),
+        "approved" => Ok(ApprovalStatus::Approved),
+        "denied" => Ok(ApprovalStatus::Denied),
+        "executed" => Ok(ApprovalStatus::Executed),
+        "failed" => Ok(ApprovalStatus::Failed),
+        other => Err(EngineError::PolicyViolation(format!(
+            "unsupported approval status {other}"
+        ))),
+    }
 }
 
 fn required_u64(payload: &Value, field: &str) -> Result<u64> {

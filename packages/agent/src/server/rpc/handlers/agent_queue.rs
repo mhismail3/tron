@@ -1,20 +1,38 @@
-//! Agent queue handlers: queuePrompt, dequeuePrompt, clearQueue.
+//! Agent queue RPC compatibility tests.
+//!
+//! `agent.queuePrompt`, `agent.dequeuePrompt`, and `agent.clearQueue` are
+//! collapsed into canonical `agent::*` engine functions and registered through
+//! generic JSON-RPC trigger markers. The handler structs below are test-only
+//! wire regression fixtures until those tests move fully to direct engine
+//! parity assertions.
 
+#[cfg(test)]
 use async_trait::async_trait;
+#[cfg(test)]
 use serde_json::Value;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use crate::core::events::{BaseEvent, TronEvent};
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
 use crate::server::rpc::errors::RpcError;
+#[cfg(test)]
 use crate::server::rpc::handlers::require_string_param;
+#[cfg(test)]
 use crate::server::rpc::prompt_queue::PromptQueueService;
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
+#[cfg(test)]
 use crate::server::rpc::validation;
 
 /// Queue a prompt for later delivery when the agent becomes ready.
+#[cfg(test)]
 pub struct QueuePromptHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for QueuePromptHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.queuePrompt", session_id))]
@@ -48,8 +66,10 @@ impl MethodHandler for QueuePromptHandler {
 }
 
 /// Cancel a specific queued prompt.
+#[cfg(test)]
 pub struct DequeuePromptHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for DequeuePromptHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.dequeuePrompt", session_id))]
@@ -80,8 +100,10 @@ impl MethodHandler for DequeuePromptHandler {
 }
 
 /// Clear all queued prompts for a session.
+#[cfg(test)]
 pub struct ClearQueueHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ClearQueueHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.clearQueue", session_id))]

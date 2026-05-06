@@ -313,7 +313,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 | `engine_discover` | Search the live canonical engine capability catalog visible to the current agent/session. |
 | `engine_inspect` | Inspect an engine capability contract, schemas, risk, authority, health, and provenance. |
 | `engine_watch` | Poll live catalog changes after a catalog revision cursor. |
-| `engine_invoke` | Invoke canonical engine functions directly, with explicit idempotency required for writes. |
+| `engine_invoke` | Invoke canonical engine functions directly, with explicit idempotency required for writes and structured approval-required responses for high-risk capabilities. |
 | `McpSearch` | Meta-tool that searches across all configured MCP server tool catalogs by keyword. Registered with an empty result set when no MCP servers are configured. |
 | `McpCall` | Meta-tool that invokes a specific tool on an MCP server. Registered even before MCP servers are configured, so later settings changes do not require a daemon restart. |
 | `SpawnSubagent` | Spawn a child agent. Max depth controlled by `agent.subagent_max_depth` (default 3). |

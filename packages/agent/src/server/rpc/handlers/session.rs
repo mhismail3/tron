@@ -12,16 +12,21 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{opt_bool, opt_string, require_string_param};
+use crate::server::rpc::handlers::require_string_param;
+#[cfg(test)]
+use crate::server::rpc::handlers::{opt_bool, opt_string};
 use crate::server::rpc::registry::MethodHandler;
+#[cfg(test)]
 use crate::server::rpc::session_commands::{CreateSessionRequest, SessionCommandService};
 use crate::server::rpc::session_queries::SessionQueryService;
 #[cfg(test)]
 use crate::server::rpc::session_reconstruct::SessionReconstructService;
 
 /// Create a new session.
+#[cfg(test)]
 pub struct CreateSessionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for CreateSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.create"))]
@@ -83,8 +88,10 @@ impl MethodHandler for ListSessionsHandler {
 }
 
 /// Delete a session.
+#[cfg(test)]
 pub struct DeleteSessionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for DeleteSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.delete", session_id))]
@@ -95,8 +102,10 @@ impl MethodHandler for DeleteSessionHandler {
 }
 
 /// Fork a session at the current head (or a specific event).
+#[cfg(test)]
 pub struct ForkSessionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ForkSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.fork", session_id))]
@@ -137,8 +146,10 @@ impl MethodHandler for GetStateHandler {
 }
 
 /// Archive a session.
+#[cfg(test)]
 pub struct ArchiveSessionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ArchiveSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.archive", session_id))]
@@ -172,8 +183,10 @@ impl MethodHandler for GetHistoryHandler {
 }
 
 /// Unarchive a session.
+#[cfg(test)]
 pub struct UnarchiveSessionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for UnarchiveSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.unarchive", session_id))]
@@ -187,8 +200,10 @@ impl MethodHandler for UnarchiveSessionHandler {
 /// `days` days. Returns a batch report — `archivedCount`,
 /// `archivedSessionIds`, and `skipped` — so callers can surface partial
 /// success without another round-trip.
+#[cfg(test)]
 pub struct ArchiveOlderThanHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ArchiveOlderThanHandler {
     #[instrument(skip(self, ctx), fields(method = "session.archiveOlderThan"))]
@@ -211,8 +226,10 @@ impl MethodHandler for ArchiveOlderThanHandler {
 /// `format: "tron.session.v1"` envelope. Backs the "Export" user action
 /// so users can back up or inspect a session offline without touching
 /// `~/.tron/internal/database/` directly.
+#[cfg(test)]
 pub struct ExportSessionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ExportSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.export", session_id))]

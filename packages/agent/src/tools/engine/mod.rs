@@ -267,11 +267,16 @@ impl TronTool for EngineInvokeTool {
             )
             .await;
         if let Some(error) = result.error {
+            let engine_details = match &error {
+                crate::engine::EngineError::AdapterFailure { details, .. } => details.clone(),
+                _ => None,
+            };
             return Ok(json_error_result(
                 error.to_string(),
                 json!({
                     "invocationId": result.invocation_id,
                     "functionId": function_id,
+                    "engine": engine_details,
                 }),
             ));
         }
@@ -302,7 +307,7 @@ fn agent_client(
     Ok(client)
 }
 
-fn agent_authority_scopes() -> [&'static str; 35] {
+fn agent_authority_scopes() -> [&'static str; 37] {
     [
         "engine.discover",
         "engine.inspect",
@@ -339,6 +344,8 @@ fn agent_authority_scopes() -> [&'static str; 35] {
         "queue.read",
         "queue.write",
         "queue.admin",
+        "approval.read",
+        "approval.request",
     ]
 }
 

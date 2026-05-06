@@ -15,7 +15,7 @@ use tracing::{debug, instrument, warn};
 
 use super::broadcast::BroadcastManager;
 use super::connection::{ClientConnection, ConnectionLimits, stamp_broadcast_seq};
-use super::handler::handle_message;
+use super::handler::handle_message_with_transport;
 
 /// How long to wait for the outbound forwarder to drain after disconnect.
 const OUTBOUND_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -197,7 +197,7 @@ pub(crate) async fn run_ws_session_with_limits(
 
         let Some(text) = text else { continue };
 
-        let result = handle_message(text, &registry, &ctx).await;
+        let result = handle_message_with_transport(text, &registry, &ctx, Some(&client_id)).await;
 
         // Bind session on create/resume
         if (result.method == "session.create" || result.method == "session.resume")

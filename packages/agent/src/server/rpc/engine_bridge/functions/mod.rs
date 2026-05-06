@@ -30,6 +30,7 @@ use crate::skills::registry::SkillRegistry;
 
 use super::rpc_error_to_engine;
 
+mod agent;
 mod context;
 mod events;
 mod filesystem;
@@ -120,6 +121,9 @@ async fn rpc_function_value(
         "model.list" => model::handle(method, invocation, deps, allow_rpc_context).await,
         "skill.list" | "skill.get" | "skill.refresh" | "skill.activate" | "skill.deactivate"
         | "skill.active" => skills::handle(method, invocation, deps).await,
+        "agent.queuePrompt" | "agent.dequeuePrompt" | "agent.clearQueue" => {
+            agent::handle(method, invocation, deps).await
+        }
         "logs.ingest" | "logs.recent" => logs::handle(method, invocation, deps).await,
         "events.getHistory" | "events.getSince" | "events.append" => {
             events::handle(method, invocation, deps).await
@@ -130,17 +134,27 @@ async fn rpc_function_value(
         }
         "filesystem.createDir" => filesystem::handle(method, invocation, deps).await,
         "session.list"
+        | "session.create"
+        | "session.delete"
+        | "session.fork"
         | "session.getHead"
         | "session.getState"
         | "session.getHistory"
-        | "session.reconstruct" => session::handle(method, invocation, deps).await,
+        | "session.reconstruct"
+        | "session.archive"
+        | "session.unarchive"
+        | "session.archiveOlderThan"
+        | "session.export" => session::handle(method, invocation, deps).await,
         "context.getSnapshot"
         | "context.getDetailedSnapshot"
         | "context.getAuditTrace"
         | "context.shouldCompact"
         | "context.previewCompaction"
-        | "context.canAcceptTurn" => context::handle(method, invocation, deps).await,
-        "job.list" | "job.subscribe" | "job.unsubscribe" => {
+        | "context.canAcceptTurn"
+        | "context.confirmCompaction"
+        | "context.clear"
+        | "context.compact" => context::handle(method, invocation, deps).await,
+        "job.background" | "job.cancel" | "job.list" | "job.subscribe" | "job.unsubscribe" => {
             job::handle(method, invocation, deps).await
         }
         "notifications.list" | "notifications.markRead" | "notifications.markAllRead" => {

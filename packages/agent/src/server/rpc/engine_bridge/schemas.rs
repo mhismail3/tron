@@ -187,6 +187,58 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "session.create" => json!({
+            "type": "object",
+            "required": ["workingDirectory"],
+            "additionalProperties": false,
+            "properties": {
+                "workingDirectory": {"type": "string"},
+                "model": {"type": "string"},
+                "title": {"type": "string"},
+                "source": {"type": "string"},
+                "profile": {"type": "string"},
+                "useWorktree": {"type": "boolean"},
+                "__rpcContext": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "transportId": {"type": "string"}
+                    }
+                },
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "session.delete" | "session.archive" | "session.unarchive" | "session.export" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "session.fork" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "fromEventId": {"type": "string"},
+                "title": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "session.archiveOlderThan" => json!({
+            "type": "object",
+            "required": ["days"],
+            "additionalProperties": false,
+            "properties": {
+                "days": {"type": "integer"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "session.getHead" | "session.getState" => json!({
             "type": "object",
             "required": ["sessionId"],
@@ -241,11 +293,69 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "context.confirmCompaction" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "editedSummary": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "context.clear" | "context.compact" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "agent.queuePrompt" => json!({
+            "type": "object",
+            "required": ["sessionId", "prompt"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "prompt": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "agent.dequeuePrompt" => json!({
+            "type": "object",
+            "required": ["sessionId", "queueId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "queueId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "agent.clearQueue" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "job.list" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
             "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "job.background" | "job.cancel" => json!({
+            "type": "object",
+            "required": ["jobId", "sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
                 "sessionId": {"type": "string"},
                 "workspaceId": {"type": "string"}
             }
@@ -676,18 +786,49 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
             }
         }),
         "session.list"
+        | "session.create"
+        | "session.delete"
+        | "session.fork"
         | "session.getHead"
         | "session.getState"
         | "session.getHistory"
         | "session.reconstruct"
+        | "session.archive"
+        | "session.unarchive"
+        | "session.archiveOlderThan"
+        | "session.export"
         | "context.getSnapshot"
         | "context.getDetailedSnapshot"
         | "context.getAuditTrace"
         | "context.shouldCompact"
         | "context.previewCompaction"
-        | "context.canAcceptTurn" => json!({
+        | "context.canAcceptTurn"
+        | "context.confirmCompaction"
+        | "context.clear"
+        | "context.compact"
+        | "agent.queuePrompt"
+        | "agent.dequeuePrompt"
+        | "agent.clearQueue" => json!({
             "type": "object",
             "additionalProperties": true
+        }),
+        "job.background" => json!({
+            "type": "object",
+            "required": ["jobId", "backgrounded"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
+                "backgrounded": {"type": "boolean"}
+            }
+        }),
+        "job.cancel" => json!({
+            "type": "object",
+            "required": ["jobId", "cancelled"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
+                "cancelled": {"type": "boolean"}
+            }
         }),
         "job.list" => json!({
             "type": "object",

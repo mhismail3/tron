@@ -8,16 +8,26 @@
 //! mutating context handlers plus test-only read wrappers for the existing
 //! wire-format regression suite.
 
+#[cfg(test)]
 use async_trait::async_trait;
+#[cfg(test)]
 use serde_json::Value;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
 use crate::server::rpc::context_commands::ContextCommandService;
 #[cfg(test)]
 use crate::server::rpc::context_queries::ContextQueryService;
+#[cfg(test)]
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{opt_string, require_string_param};
+#[cfg(test)]
+use crate::server::rpc::handlers::opt_string;
+#[cfg(test)]
+use crate::server::rpc::handlers::require_string_param;
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 
 // =============================================================================
@@ -110,8 +120,10 @@ impl MethodHandler for PreviewCompactionHandler {
 }
 
 /// Confirm and execute compaction with optional edited summary.
+#[cfg(test)]
 pub struct ConfirmCompactionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ConfirmCompactionHandler {
     #[instrument(
@@ -140,8 +152,10 @@ impl MethodHandler for CanAcceptTurnHandler {
 }
 
 /// Clear context for a session.
+#[cfg(test)]
 pub struct ClearHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ClearHandler {
     #[instrument(skip(self, ctx), fields(method = "context.clear", session_id))]
@@ -152,8 +166,10 @@ impl MethodHandler for ClearHandler {
 }
 
 /// Trigger compaction for a session (without edited summary).
+#[cfg(test)]
 pub struct CompactHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for CompactHandler {
     #[instrument(skip(self, ctx), fields(method = "context.compact", session_id))]

@@ -527,12 +527,78 @@ Acceptance:
 
 - Agents discover canonical ids and reject `rpc::*` compatibility invocation.
 - Mutating agent invokes require explicit idempotency; approval-required
-  high-risk functions fail closed before handler execution.
+  high-risk functions create pending approval records and stream events instead
+  of returning a generic policy denial.
 - Stream/state/queue stores have in-memory behavior tests and SQLite reopen
   durability tests.
 - Enqueued triggers return receipts immediately and later target invocation
   records preserve trigger id, trace id, authority scope, session/workspace,
   and idempotency key.
+
+## Phase 3.11: approval runtime, local external runtime, and command collapse
+
+Make the primitive layer participate in real server behavior instead of only
+metadata tests, while continuing to shrink handler-owned RPC code.
+
+Implemented primitives:
+
+- `approval` worker with `approval::request`, `approval::resolve`,
+  `approval::get`, and `approval::list`.
+- Approval records persist in the isolated engine ledger DB alongside stream,
+  state, queue, idempotency, invocation, and catalog-change records.
+- Agent `engine_invoke` creates a pending approval for high-risk
+  approval-required functions, publishes an `approvals` stream event, and
+  returns a structured `APPROVAL_REQUIRED` envelope containing the approval id.
+- `approval::resolve` resumes the original invocation with the original trace,
+  parent, authority scopes, session/workspace, and idempotency key, then
+  records the child outcome on the approval. Agents do not receive
+  `approval.resolve`; resolving an approval requires a system/admin or
+  user-authorized actor with the approval scope.
+- `EngineExternalWorkerRuntime` accepts loopback-only `hello`,
+  session-default function/trigger registration, heartbeat, and disconnect
+  cleanup over the existing protocol message types. External registrations are
+  volatile and session-visible until explicitly promoted.
+
+Newly collapsed command groups:
+
+- `session.create`, `session.delete`, `session.fork`, `session.archive`,
+  `session.unarchive`, `session.archiveOlderThan`, and `session.export`;
+- `agent.queuePrompt`, `agent.dequeuePrompt`, and `agent.clearQueue`;
+- `context.confirmCompaction`, `context.clear`, and `context.compact`;
+- `job.background` and `job.cancel`.
+
+Semantics:
+
+- these methods now execute as canonical domain functions such as
+  `session::create`, `agent::queue_prompt`, `context::compact`, and
+  `job::cancel`;
+- JSON-RPC remains only the `json_rpc` trigger transport and still returns the
+  existing wire payloads;
+- writes carry `rpc.write` plus the domain write scope, strict schemas, risk
+  metadata, and engine-ledger idempotency;
+- session-created operations that lack a prior session id, such as
+  `session.create`, use system-scoped idempotency; session-scoped commands use
+  session idempotency; job controls use system idempotency by job/request;
+- WebSocket `session.create` injects a server-owned transport discriminator
+  into the migration idempotency seed so duplicate retries on one connection
+  replay while two clients that both use JSON-RPC id `1` do not collapse into
+  the same created session;
+- approval-required command capabilities are discoverable with explicit risk
+  metadata, but autonomous agent invocation pauses in the approval primitive.
+
+Acceptance:
+
+- generic-trigger count rises from 51 to 66 while the public JSON-RPC method
+  count stays 167;
+- the old job business handlers are deleted, and migrated session/context/
+  agent-queue handlers are test-only wire fixtures until their remaining
+  regression tests move fully to engine parity;
+- focused tests prove approval request/resolve causality, SQLite approval
+  durability, local external-worker disconnect cleanup, session create parity,
+  and agent queue retry idempotency;
+- approval, job, agent queue, and event paths publish scoped stream events that
+  future WebSocket pumps can consume without making WebSocket the source of
+  truth.
 
 ## Phase 4: stream push, event unification, and job output
 

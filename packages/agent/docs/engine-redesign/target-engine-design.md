@@ -164,10 +164,33 @@ HTTP routes, JSON-RPC compatibility calls, cron schedules, queue messages,
 state changes, event-store appends, UI actions, approval responses, stream
 events, and agent tool calls should all reduce to triggers.
 
-The first runtime supports only in-process `json_rpc` and `manual` trigger
-dispatch. That is intentional: it proves trigger metadata, authority,
-idempotency, revision, schema, and ledger behavior before adding durable queue,
-cron, stream, or external-worker delivery.
+The current runtime supports in-process `json_rpc` and `manual` trigger
+dispatch plus queued delivery handoff. That is intentional: it proves trigger
+metadata, authority, idempotency, revision, schema, queue receipts, and ledger
+behavior before adding cron and remote external-worker delivery.
+
+### Approval
+
+Approval is a first-class primitive, not a UI-only confirmation path.
+
+Required properties:
+
+- approval id;
+- target function id and payload fingerprint;
+- original actor, authority grant, authority scopes, trace, parent invocation,
+  trigger id, session/workspace, delivery mode, and idempotency key;
+- status: pending, approved, denied, executed, failed;
+- decision actor and timestamps;
+- final result or structured error.
+
+Agent-visible high-risk functions with approval-required authority metadata do
+not run autonomously. The agent-facing invocation path creates a pending
+approval, publishes an `approvals` stream event, and returns a structured
+`APPROVAL_REQUIRED` envelope. Resolving the approval resumes the original
+invocation with its original causal context and records the child result on the
+approval record. Agents may request approvals but cannot resolve their own
+approval gates; resolution is reserved for system/admin or user-authorized
+actors with the approval scope.
 
 ### Engine
 
@@ -182,6 +205,7 @@ The engine is the live capability fabric. It owns:
 - trace propagation;
 - idempotency ledgers;
 - topology streams;
+- approval records and approval lifecycle streams;
 - health and observability surfaces.
 
 The engine should not hide system liveness from agents. It should expose
@@ -217,6 +241,22 @@ the SQLite engine ledger at `engine-ledger.sqlite` beside the resolved event DB
 path, and future adapters receive the handle through `RpcContext`. This makes
 the engine lifecycle real without adding a client-facing API before the
 compatibility mirror exists.
+
+The agent capability client now treats approval-required high-risk functions as
+pausable autonomous actions. A model can discover and inspect those functions,
+but invocation produces a pending approval record instead of executing the
+handler. This keeps the catalog live and agent-native without pretending that
+all high-risk side effects are safe just because they have schemas and
+idempotency keys.
+
+## Local external workers
+
+External workers begin loopback-only. A local worker can say hello, receive a
+catalog snapshot, register session-visible volatile functions/triggers, send
+heartbeats, and disconnect. Disconnect unregisters only that worker's volatile
+catalog entries and emits normal availability changes. Workspace/system
+visibility still requires explicit promotion, so agent-created local workers
+do not silently become global capabilities.
 
 Agents choose catalog-change subscriptions by task/session:
 
@@ -394,16 +434,17 @@ isolation does.
 | `skills` | Skill registry and session-scoped active-skill state; currently fully generic-triggered for RPC compatibility. |
 | `filesystem` | Home/list/read/create-dir capabilities now generic-triggered; broader file writes remain deferred until path authority and idempotent file mutation contracts are hardened. |
 | `events` | Session/event-store append, read, reconstruct, subscribe/unsubscribe. All current `events.*` RPC methods are generic-triggered; subscribe/unsubscribe create stream subscription records while preserving current acknowledgements. |
-| `session` | Safe session reads (`list`, `getHead`, `getState`, `getHistory`, `reconstruct`) are generic-triggered; creation/deletion/fork/archive/export remain handler-owned until their mutation contracts collapse. |
-| `context` | Safe context reads are generic-triggered; compaction/clear mutations remain handler-owned until approval, ordering, and event-write contracts are hardened. |
-| `job` | Job list and output subscription controls are generic-triggered; background execution and cancel remain deferred until queue-backed job execution lands. |
+| `session` | Session create/delete/fork/archive/unarchive/archiveOlderThan/export plus safe reads are generic-triggered canonical functions; `session.resume` remains handler-owned because it is still coupled to transport/session lifecycle. |
+| `context` | Snapshot/audit/compaction/clear/canAcceptTurn methods are generic-triggered canonical functions with approval metadata on destructive commands. |
+| `agent` | Queue controls are generic-triggered canonical functions; prompt execution, abort, subagent delivery, and confirmation/answer submission remain deferred until turn execution and approval streams are fully engine-owned. |
+| `job` | Background/cancel/list/subscribe/unsubscribe are generic-triggered canonical functions; current background/cancel behavior is preserved while queue-backed job execution becomes the next hardening step. |
 | `notifications` | Notification inbox read-state functions; currently fully generic-triggered for RPC compatibility. |
 | `plan` | Session plan-mode state; currently fully generic-triggered for RPC compatibility. |
-| `stream` | Durable subscriptions for session events, topology, jobs, tool output, browser/display, transcription, notifications. |
+| `approval` | Pending/approved/denied/executed approval records for high-risk agent-visible invocations, with scoped approval lifecycle stream events. |
+| `stream` | Durable subscriptions for catalog, session events, approvals, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |
 | `queue` | Durable named queues, receipts, retries, cancellation, DLQ/redrive. |
 | `cron` | Cron trigger type backed by current automations definitions and SQLite runtime state. |
-| `agent` | Prompt handling, turn execution, subagents, context, memory, hooks. |
 | `tool` | Built-in tool capabilities and tool invocation. |
 | `mcp` | MCP search/call and server lifecycle. |
 | `worktree` | Git/worktree capabilities and conflict workflows. |

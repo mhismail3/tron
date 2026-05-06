@@ -64,6 +64,32 @@ pub(super) async fn handle(
             )
             .await
         }
+        "context.confirmCompaction" => {
+            let session_id = require_string_param(Some(payload), "sessionId")?;
+            let edited_summary = opt_string(Some(payload), "editedSummary");
+            crate::server::rpc::context_commands::ContextCommandService::confirm_compaction(
+                &session::rpc_context_view(deps),
+                session_id,
+                edited_summary,
+            )
+            .await
+        }
+        "context.clear" => {
+            let session_id = require_string_param(Some(payload), "sessionId")?;
+            crate::server::rpc::context_commands::ContextCommandService::clear(
+                &session::rpc_context_view(deps),
+                session_id,
+            )
+            .await
+        }
+        "context.compact" => {
+            let session_id = require_string_param(Some(payload), "sessionId")?;
+            crate::server::rpc::context_commands::ContextCommandService::compact(
+                &session::rpc_context_view(deps),
+                session_id,
+            )
+            .await
+        }
         _ => Err(RpcError::Internal {
             message: format!("context method {method} is not engine-owned"),
         }),

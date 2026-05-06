@@ -183,26 +183,26 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("system.getUpdateStatus"),
     handler_only!("codexApp.status"),
     handler_only!("blob.get"),
-    handler_only!("session.create"),
+    generic_trigger!("session.create"),
     handler_only!("session.resume"),
     generic_trigger!("session.list"),
-    handler_only!("session.delete"),
-    handler_only!("session.fork"),
+    generic_trigger!("session.delete"),
+    generic_trigger!("session.fork"),
     generic_trigger!("session.getHead"),
     generic_trigger!("session.getState"),
     generic_trigger!("session.getHistory"),
     generic_trigger!("session.reconstruct"),
-    handler_only!("session.archive"),
-    handler_only!("session.unarchive"),
-    handler_only!("session.archiveOlderThan"),
-    handler_only!("session.export"),
+    generic_trigger!("session.archive"),
+    generic_trigger!("session.unarchive"),
+    generic_trigger!("session.archiveOlderThan"),
+    generic_trigger!("session.export"),
     handler_only!("agent.prompt"),
     handler_only!("agent.abort"),
     handler_only!("agent.abortTool"),
     handler_only!("agent.status"),
-    handler_only!("agent.queuePrompt"),
-    handler_only!("agent.dequeuePrompt"),
-    handler_only!("agent.clearQueue"),
+    generic_trigger!("agent.queuePrompt"),
+    generic_trigger!("agent.dequeuePrompt"),
+    generic_trigger!("agent.clearQueue"),
     handler_only!("agent.deliverSubagentResults"),
     handler_only!("agent.submitConfirmation"),
     handler_only!("agent.submitAnswers"),
@@ -214,10 +214,10 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("context.previewCompaction"),
     generic_trigger!("context.getAuditTrace"),
     generic_trigger!("context.shouldCompact"),
-    handler_only!("context.confirmCompaction"),
+    generic_trigger!("context.confirmCompaction"),
     generic_trigger!("context.canAcceptTurn"),
-    handler_only!("context.clear"),
-    handler_only!("context.compact"),
+    generic_trigger!("context.clear"),
+    generic_trigger!("context.compact"),
     generic_trigger!("events.getHistory"),
     generic_trigger!("events.getSince"),
     generic_trigger!("events.subscribe"),
@@ -271,8 +271,8 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("browser.stopStream"),
     handler_only!("browser.getStatus"),
     handler_only!("display.stopStream"),
-    handler_only!("job.background"),
-    handler_only!("job.cancel"),
+    generic_trigger!("job.background"),
+    generic_trigger!("job.cancel"),
     generic_trigger!("job.list"),
     generic_trigger!("job.subscribe"),
     generic_trigger!("job.unsubscribe"),
@@ -535,7 +535,13 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
     if policy != HandlerExecutionPolicy::Mutating {
         return EffectClass::PureRead;
     }
-    if matches!(method, "settings.update" | "settings.resetToDefaults") {
+    if matches!(
+        method,
+        "settings.update"
+            | "settings.resetToDefaults"
+            | "context.confirmCompaction"
+            | "context.compact"
+    ) {
         return EffectClass::ReversibleSideEffect;
     }
     if matches!(method, "events.append" | "logs.ingest") {
@@ -549,6 +555,8 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
             | "promptHistory.delete"
             | "promptHistory.clear"
             | "promptSnippet.delete"
+            | "session.delete"
+            | "context.clear"
             | "worktree.deleteBranch"
             | "worktree.discardFiles"
             | "sandbox.killContainer"
@@ -572,7 +580,17 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
 fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
     if matches!(method, "git.push" | "system.shutdown") {
         RiskLevel::Critical
-    } else if matches!(method, "settings.update" | "settings.resetToDefaults") {
+    } else if matches!(
+        method,
+        "settings.update"
+            | "settings.resetToDefaults"
+            | "context.confirmCompaction"
+            | "context.clear"
+            | "context.compact"
+            | "session.delete"
+            | "session.archiveOlderThan"
+            | "job.cancel"
+    ) {
         RiskLevel::High
     } else if matches!(effect, EffectClass::IrreversibleSideEffect) {
         RiskLevel::High
@@ -640,6 +658,10 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
     if method.starts_with("logs.")
         || method == "filesystem.createDir"
         || method == "job.unsubscribe"
+        || method == "job.background"
+        || method == "job.cancel"
+        || method == "session.create"
+        || method == "session.archiveOlderThan"
         || method.starts_with("notifications.")
         || method.starts_with("promptHistory.")
         || method.starts_with("promptSnippet.")
@@ -653,7 +675,15 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
 }
 
 fn settings_write_requires_approval(method: &str) -> bool {
-    matches!(method, "settings.update" | "settings.resetToDefaults")
+    matches!(
+        method,
+        "settings.update"
+            | "settings.resetToDefaults"
+            | "context.confirmCompaction"
+            | "context.compact"
+            | "session.archiveOlderThan"
+            | "job.cancel"
+    )
 }
 
 pub(super) fn rpc_worker() -> WorkerDefinition {
@@ -679,6 +709,7 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
         "session",
         "context",
         "job",
+        "agent",
         "notifications",
         "plan",
     ];
@@ -779,6 +810,7 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("session.") => "session",
         method if method.starts_with("context.") => "context",
         method if method.starts_with("job.") => "job",
+        method if method.starts_with("agent.") => "agent",
         method if method.starts_with("notifications.") => "notifications",
         method if method.starts_with("plan.") => "plan",
         method if method.starts_with("system.") => "system",
@@ -822,12 +854,27 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "session.getState" => ("session", "get_state".to_owned()),
         "session.getHistory" => ("session", "get_history".to_owned()),
         "session.reconstruct" => ("session", "reconstruct".to_owned()),
+        "session.create" => ("session", "create".to_owned()),
+        "session.delete" => ("session", "delete".to_owned()),
+        "session.fork" => ("session", "fork".to_owned()),
+        "session.archive" => ("session", "archive".to_owned()),
+        "session.unarchive" => ("session", "unarchive".to_owned()),
+        "session.archiveOlderThan" => ("session", "archive_older_than".to_owned()),
+        "session.export" => ("session", "export".to_owned()),
+        "agent.queuePrompt" => ("agent", "queue_prompt".to_owned()),
+        "agent.dequeuePrompt" => ("agent", "dequeue_prompt".to_owned()),
+        "agent.clearQueue" => ("agent", "clear_queue".to_owned()),
         "context.getSnapshot" => ("context", "get_snapshot".to_owned()),
         "context.getDetailedSnapshot" => ("context", "get_detailed_snapshot".to_owned()),
         "context.getAuditTrace" => ("context", "get_audit_trace".to_owned()),
         "context.shouldCompact" => ("context", "should_compact".to_owned()),
         "context.previewCompaction" => ("context", "preview_compaction".to_owned()),
         "context.canAcceptTurn" => ("context", "can_accept_turn".to_owned()),
+        "context.confirmCompaction" => ("context", "confirm_compaction".to_owned()),
+        "context.clear" => ("context", "clear".to_owned()),
+        "context.compact" => ("context", "compact".to_owned()),
+        "job.background" => ("job", "background".to_owned()),
+        "job.cancel" => ("job", "cancel".to_owned()),
         "job.list" => ("job", "list".to_owned()),
         "job.subscribe" => ("job", "subscribe".to_owned()),
         "job.unsubscribe" => ("job", "unsubscribe".to_owned()),
@@ -861,6 +908,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "session" => "session",
                     "context" => "context",
                     "job" => "job",
+                    "agent" => "agent",
                     "logs" => "logs",
                     "model" => "model",
                     "notifications" => "notifications",
@@ -911,6 +959,8 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("context"), "write") => "context.write",
         (Some("job"), "read") => "job.read",
         (Some("job"), "write") => "job.write",
+        (Some("agent"), "read") => "agent.read",
+        (Some("agent"), "write") => "agent.write",
         (Some("notifications"), "read") => "notifications.read",
         (Some("notifications"), "write") => "notifications.write",
         (Some("plan"), "read") => "plan.read",

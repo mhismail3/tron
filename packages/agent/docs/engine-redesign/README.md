@@ -222,10 +222,11 @@ first-class workers.
 - `capabilities.rs` defines `AgentCapabilityClient`, the typed agent-facing
   adapter for live discover/inspect/watch/invoke/manual-dispatch flows. Agent
   tools use this client and refuse `rpc::*` compatibility ids.
-- `protocol.rs` defines the loopback-only external worker message contract for
-  hello, catalog snapshot, function/trigger registration, invoke/result,
-  catalog change, heartbeat, and disconnect. It is protocol foundation only;
-  no sandbox or arbitrary worker execution has landed.
+- `protocol.rs` and `external.rs` define the loopback-only external worker
+  contract/runtime for hello, catalog snapshot, session-default
+  function/trigger registration, invoke/result, catalog change, heartbeat, and
+  disconnect cleanup. No sandbox or arbitrary remote worker execution has
+  landed.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
 - `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
@@ -334,10 +335,26 @@ Implemented:
   on the canonical `filesystem::*` path with strict schema, `rpc.write`,
   `filesystem.write`, engine-ledger idempotency, and current path/error
   behavior preserved through the existing filesystem service;
-- safe session/context/job reads and stream controls are generic-triggered:
-  `session.list/getHead/getState/getHistory/reconstruct`,
+- session command/read collapse: `session.create/delete/fork/archive/
+  unarchive/archiveOlderThan/export` now join
+  `session.list/getHead/getState/getHistory/reconstruct` on canonical
+  `session::*` functions; `session.resume` remains handler-owned because it is
+  still tied to transport/session lifecycle;
+- context command/read collapse:
   `context.getSnapshot/getDetailedSnapshot/getAuditTrace/shouldCompact/
-  previewCompaction/canAcceptTurn`, and `job.list/subscribe/unsubscribe`;
+  previewCompaction/canAcceptTurn/confirmCompaction/clear/compact` are now
+  canonical `context::*` functions with approval metadata on high-risk effects;
+- job collapse: `job.background/cancel/list/subscribe/unsubscribe` are
+  canonical `job::*` functions that preserve current job/process-manager
+  behavior, publish job stream events, and use engine-ledger idempotency;
+- agent queue collapse: `agent.queuePrompt/dequeuePrompt/clearQueue` are
+  canonical `agent::*` functions with session-scoped idempotency and stream
+  publication while prompt execution/abort remain deferred;
+- approval runtime: `approval::request/resolve/get/list` records high-risk
+  agent-visible pauses in the engine ledger, publishes scoped approval stream
+  events, and resumes approved invocations with their original trace/authority/
+  parent/idempotency context; agents can request approvals but resolution is
+  reserved for system/admin or user-authorized actors;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -349,12 +366,13 @@ Still deferred:
 
 - RPC migrations and generic-trigger conversion for the remaining handler-only
   method groups beyond prompt library, settings, logs, skills, notifications,
-  plan, events, basic filesystem, safe session/context reads, and job
-  read/stream controls;
+  plan, events, basic filesystem, session commands/reads except resume, context
+  commands/reads, job controls, and agent queue controls;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
 - void delivery execution and production queue-backed agent/background jobs;
-- external worker sockets, sandbox workers, and worker reconnect semantics;
+- sandbox workers, remote worker sockets, and durable reconnect semantics for
+  external workers beyond the local loopback runtime;
 - trigger firing/runtime loop detection;
 - reconstruction of live catalog definitions from durable ledger state.
 

@@ -332,6 +332,21 @@ impl EngineQueueRuntime {
     }
 }
 
+/// Service-shaped queue drainer for production owners that want a named
+/// boundary instead of calling the lower-level queue runtime directly.
+pub struct EngineQueueDrainer;
+
+impl EngineQueueDrainer {
+    /// Claim and execute one queue item.
+    pub async fn drain_once(
+        handle: &EngineHostHandle,
+        queue: &str,
+        lease_owner: &str,
+    ) -> Result<Option<InvocationResult>> {
+        EngineQueueRuntime::drain_once(handle, queue, lease_owner).await
+    }
+}
+
 impl SqliteEngineQueueStore {
     /// Open a queue store in the engine ledger database.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
