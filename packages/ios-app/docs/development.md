@@ -151,12 +151,14 @@ review when Apple marks the build `READY_FOR_BETA_SUBMISSION`, and then branches
 on the returned App Store Connect state. If Apple reports `WAITING_FOR_BETA_REVIEW`
 or `WAITING_FOR_REVIEW`, CI exits successfully as a pending-review checkpoint
 instead of waiting for the 1-2 day first-build review window. If the build is
-already externally testable, CI verifies the configured internal group has access
-to all builds and assigns the processed build to the public external group. App
-Store Connect does not allow direct API assignment to an internal group, so the
-internal group must have all-build access. The group validation step supports
-both `asc testflight beta-groups list` and older `asc testflight groups list`
-CLI shapes. Reruns use `asc builds list` to reuse an existing Apple build number
+already externally testable, CI verifies the configured public-link group used by
+Mac onboarding and assigns the processed build to that public external group.
+The optional internal group id is diagnostic only: App Store Connect does not
+allow direct API assignment to an internal group, so CI warns when the configured
+internal group is stale or lacks all-build access but does not block a successful
+public TestFlight release. The group validation step supports both
+`asc testflight beta-groups list` and older `asc testflight groups list` CLI
+shapes. Reruns use `asc builds list` to reuse an existing Apple build number
 instead of uploading a duplicate binary.
 
 The app and share extension Info.plists set
@@ -202,8 +204,13 @@ Required repository variables:
 
 | Variable | Purpose |
 |---|---|
-| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Internal TestFlight group id |
 | `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Public TestFlight group id used by the Mac onboarding QR link |
+
+Optional repository variables:
+
+| Variable | Purpose |
+|---|---|
+| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Internal TestFlight group id; warnings only because public TestFlight distribution does not assign internal groups directly |
 
 To reuse the local App Store Connect API key, `asc auth status --verbose` shows
 the current profile and key id, and `asc auth doctor` shows the `.p8` path. The

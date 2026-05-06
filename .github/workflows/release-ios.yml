@@ -20,8 +20,9 @@
 #   IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64 base64-encoded App Store profile for com.tron.mobile.ShareExtension
 #
 # Required repository variables:
-#   ASC_TESTFLIGHT_INTERNAL_GROUP_ID existing internal TestFlight group id
 #   ASC_TESTFLIGHT_PUBLIC_GROUP_ID   existing public TestFlight group id
+# Optional repository variables:
+#   ASC_TESTFLIGHT_INTERNAL_GROUP_ID existing internal TestFlight group id
 #
 # Real releases archive the Prod app, export with Apple's app-store-connect
 # method, then upload with `asc builds upload`. Exports use explicit manual
@@ -121,7 +122,6 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
-          INTERNAL_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_INTERNAL_GROUP_ID }}
           PUBLIC_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_PUBLIC_GROUP_ID }}
         run: |
           set -euo pipefail
@@ -132,9 +132,9 @@ jobs:
             flag="false"
           fi
           if [[ -z "$ASC_KEY_ID" || -z "$ASC_ISSUER_ID" || -z "$ASC_KEY_P8_BASE64" \
-             || -z "$INTERNAL_GROUP_ID" || -z "$PUBLIC_GROUP_ID" ]]; then
+             || -z "$PUBLIC_GROUP_ID" ]]; then
             flag="true"
-            echo "::notice::ASC secrets or TestFlight group variables missing -> forcing dry-run"
+            echo "::notice::ASC secrets or public TestFlight group variable missing -> forcing dry-run"
           fi
           echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
           echo "Dry-run=$flag"
@@ -1032,43 +1032,20 @@ jobs:
             exit 1
           fi
 
-          internal_kind="$(
-            jq -r --arg id "$INTERNAL_GROUP_ID" '
+          public_group="$(
+            jq -c --arg id "$PUBLIC_GROUP_ID" '
               (.data // [])
               | map(select(.id == $id))
-              | .[0].attributes.isInternalGroup // empty
+              | .[0] // empty
             ' "$groups_json"
           )"
-          internal_all_builds="$(
-            jq -r --arg id "$INTERNAL_GROUP_ID" '
-              (.data // [])
-              | map(select(.id == $id))
-              | .[0].attributes.hasAccessToAllBuilds // empty
-            ' "$groups_json"
-          )"
-          public_kind="$(
-            jq -r --arg id "$PUBLIC_GROUP_ID" '
-              (.data // [])
-              | map(select(.id == $id))
-              | .[0].attributes.isInternalGroup // false
-            ' "$groups_json"
-          )"
-          public_link="$(
-            jq -r --arg id "$PUBLIC_GROUP_ID" '
-              (.data // [])
-              | map(select(.id == $id))
-              | .[0].attributes.publicLinkEnabled // false
-            ' "$groups_json"
-          )"
-
-          if [[ "$internal_kind" != "true" ]]; then
-            echo "::error::ASC_TESTFLIGHT_INTERNAL_GROUP_ID does not identify an internal TestFlight group"
+          if [[ -z "$public_group" ]]; then
+            echo "::error::ASC_TESTFLIGHT_PUBLIC_GROUP_ID does not match any TestFlight group returned by ASC"
             exit 1
           fi
-          if [[ "$internal_all_builds" != "true" ]]; then
-            echo "::error::internal TestFlight groups cannot be directly assigned by the ASC API; enable access to all builds for ASC_TESTFLIGHT_INTERNAL_GROUP_ID"
-            exit 1
-          fi
+          public_kind="$(jq -r '.attributes.isInternalGroup // false' <<< "$public_group")"
+          public_link="$(jq -r '.attributes.publicLinkEnabled // false' <<< "$public_group")"
+          public_name="$(jq -r '.attributes.name // "<unnamed public group>"' <<< "$public_group")"
           if [[ "$public_kind" == "true" ]]; then
             echo "::error::ASC_TESTFLIGHT_PUBLIC_GROUP_ID points at an internal TestFlight group"
             exit 1
@@ -1078,7 +1055,33 @@ jobs:
             exit 1
           fi
 
-          echo "::notice::internal TestFlight group has access to all builds; assigning the processed build to the public group"
+          if [[ -n "${INTERNAL_GROUP_ID:-}" ]]; then
+            internal_group="$(
+              jq -c --arg id "$INTERNAL_GROUP_ID" '
+                (.data // [])
+                | map(select(.id == $id))
+                | .[0] // empty
+              ' "$groups_json"
+            )"
+            if [[ -z "$internal_group" ]]; then
+              echo "::warning::ASC_TESTFLIGHT_INTERNAL_GROUP_ID does not match any TestFlight group returned by ASC; public TestFlight distribution can continue"
+            else
+              internal_kind="$(jq -r '.attributes.isInternalGroup // false' <<< "$internal_group")"
+              internal_all_builds="$(jq -r '.attributes.hasAccessToAllBuilds // false' <<< "$internal_group")"
+              internal_name="$(jq -r '.attributes.name // "<unnamed internal group>"' <<< "$internal_group")"
+              if [[ "$internal_kind" != "true" ]]; then
+                echo "::warning::ASC_TESTFLIGHT_INTERNAL_GROUP_ID points at '$internal_name', which ASC reports as external; public TestFlight distribution can continue"
+              elif [[ "$internal_all_builds" != "true" ]]; then
+                echo "::warning::internal TestFlight group '$internal_name' does not have access to all builds; public TestFlight distribution can continue"
+              else
+                echo "::notice::internal TestFlight group '$internal_name' has access to all builds"
+              fi
+            fi
+          else
+            echo "::notice::ASC_TESTFLIGHT_INTERNAL_GROUP_ID not configured; relying on public TestFlight group assignment"
+          fi
+
+          echo "::notice::assigning the processed build to public TestFlight group '$public_name'"
           echo "external_group_ids=$PUBLIC_GROUP_ID" >> "$GITHUB_OUTPUT"
 
       - name: Distribute to TestFlight groups

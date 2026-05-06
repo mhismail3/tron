@@ -348,3 +348,45 @@ fn mac_release_workflow_notarizes_dmg_before_stapling() {
         "Notarize DMG step should submit the generated DMG artifact"
     );
 }
+
+#[test]
+fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
+    let root = repo_root();
+    let workflow_path = root.join(".github/workflows/release-ios.yml");
+    let workflow = std::fs::read_to_string(&workflow_path).unwrap();
+
+    let validate = workflow
+        .find("- name: Validate TestFlight groups")
+        .unwrap_or_else(|| {
+            panic!(
+                "{} should validate TestFlight groups",
+                workflow_path.display()
+            )
+        });
+    let distribute = workflow
+        .find("- name: Distribute to TestFlight groups")
+        .unwrap_or_else(|| {
+            panic!(
+                "{} should distribute processed builds to TestFlight groups",
+                workflow_path.display()
+            )
+        });
+    let body = &workflow[validate..distribute];
+
+    assert!(
+        body.contains("ASC_TESTFLIGHT_PUBLIC_GROUP_ID must be the public-link TestFlight group"),
+        "public TestFlight group remains the hard distribution gate"
+    );
+    assert!(
+        body.contains("::warning::ASC_TESTFLIGHT_INTERNAL_GROUP_ID"),
+        "stale internal TestFlight group config should warn instead of failing release"
+    );
+    assert!(
+        !body.contains("::error::ASC_TESTFLIGHT_INTERNAL_GROUP_ID"),
+        "internal TestFlight group validation must not block an otherwise successful public release"
+    );
+    assert!(
+        body.contains("echo \"external_group_ids=$PUBLIC_GROUP_ID\""),
+        "workflow should publish only the public TestFlight group through the ASC API"
+    );
+}
