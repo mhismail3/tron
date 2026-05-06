@@ -3,9 +3,10 @@
 //! In-process live capability fabric for the Tron agent.
 //!
 //! This module is the Phase 1 foundation for the engine redesign documented in
-//! `packages/agent/docs/engine-redesign/`. It does not route production RPC,
-//! tool, runtime, or client traffic yet. Instead it proves the core invariants
-//! in isolation:
+//! `packages/agent/docs/engine-redesign/`. It now routes the first low-risk
+//! production RPC reads through engine-owned functions while tool, runtime, and
+//! broader client traffic remain on their existing paths. The core invariants
+//! are:
 //!
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;
@@ -16,8 +17,11 @@
 //! - session capabilities can be explicitly promoted to workspace/system scope;
 //! - `EngineHost` exposes privileged `engine::*` meta-capabilities for live
 //!   discovery, inspection, cursor watch, delegated invocation, and promotion;
-//! - `EngineHostHandle` gives server startup a cloneable owner for the host
-//!   without exposing new RPC or client behavior yet;
+//! - `EngineHostHandle` gives server startup and adapters an intent-shaped
+//!   boundary that prepares under lock, executes direct and delegated handlers
+//!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
+//! - the RPC bridge registers `rpc::<method>` compatibility functions so
+//!   JSON-RPC can be collapsed into a trigger transport incrementally;
 //! - Phase 1 executes only in-process synchronous calls.
 //!
 //! ## Module Position

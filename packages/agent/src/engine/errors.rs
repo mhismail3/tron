@@ -155,6 +155,19 @@ pub enum EngineError {
         reason: String,
     },
 
+    /// A transport or subsystem adapter preserved its native error envelope.
+    #[error("adapter {adapter} failed with {code}: {message}")]
+    AdapterFailure {
+        /// Adapter namespace, such as `rpc`.
+        adapter: String,
+        /// Stable adapter error code.
+        code: String,
+        /// Adapter error message.
+        message: String,
+        /// Adapter-specific structured details.
+        details: Option<serde_json::Value>,
+    },
+
     /// The handler returned an application failure.
     #[error("handler failed: {0}")]
     HandlerFailed(String),

@@ -12,7 +12,9 @@ use serde_json::Value;
 use tracing::{instrument, warn};
 
 use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::errors::{CLIENT_VERSION_UNSUPPORTED, RpcError};
+#[cfg(test)]
+use crate::server::rpc::errors::CLIENT_VERSION_UNSUPPORTED;
+use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
 
@@ -50,51 +52,7 @@ pub struct PingHandler;
 impl MethodHandler for PingHandler {
     #[instrument(skip(self, _ctx), fields(method = "system.ping"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let client_protocol_raw = params
-            .as_ref()
-            .and_then(|p| p.get("protocolVersion"))
-            .and_then(Value::as_u64)
-            .ok_or_else(|| RpcError::InvalidParams {
-                message: "system.ping requires numeric protocolVersion".into(),
-            })?;
-        let client_protocol =
-            u32::try_from(client_protocol_raw).map_err(|_| RpcError::InvalidParams {
-                message: "system.ping protocolVersion is too large".into(),
-            })?;
-        let client_version = params
-            .as_ref()
-            .and_then(|p| p.get("clientVersion"))
-            .and_then(Value::as_str)
-            .map(String::from);
-
-        if client_protocol < MIN_CLIENT_PROTOCOL_VERSION {
-            // Explicit rejection with an actionable message. Details
-            // carry the numeric versions so the iOS UI can render an
-            // "upgrade required" dialog with the exact numbers.
-            return Err(RpcError::Custom {
-                code: CLIENT_VERSION_UNSUPPORTED.to_string(),
-                message: format!(
-                    "Client protocol version {client_protocol} is below the minimum supported version \
-                     {MIN_CLIENT_PROTOCOL_VERSION}. Please upgrade the Tron client."
-                ),
-                details: Some(serde_json::json!({
-                    "clientProtocolVersion": client_protocol,
-                    "minClientProtocolVersion": MIN_CLIENT_PROTOCOL_VERSION,
-                    "serverProtocolVersion": CURRENT_PROTOCOL_VERSION,
-                    "serverVersion": env!("CARGO_PKG_VERSION"),
-                    "clientVersion": client_version,
-                })),
-            });
-        }
-
-        Ok(serde_json::json!({
-            "pong": true,
-            "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            "serverVersion": env!("CARGO_PKG_VERSION"),
-            "serverProtocolVersion": CURRENT_PROTOCOL_VERSION,
-            "minClientProtocolVersion": MIN_CLIENT_PROTOCOL_VERSION,
-            "compatible": true,
-        }))
+        crate::server::rpc::engine_bridge::invoke_thin_adapter(_ctx, "system.ping", params).await
     }
 }
 
@@ -121,23 +79,7 @@ pub struct GetInfoHandler;
 impl MethodHandler for GetInfoHandler {
     #[instrument(skip(self, ctx), fields(method = "system.getInfo"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let uptime = ctx.server_start_time.elapsed().as_secs();
-        let active_sessions = ctx.orchestrator.active_session_count();
-        let tailscale_ip = load_settings(ctx).server.tailscale_ip;
-        let paired = crate::server::onboarding::is_onboarded(&ctx.onboarded_marker_path);
-
-        Ok(serde_json::json!({
-            "version": env!("CARGO_PKG_VERSION"),
-            "uptime": uptime,
-            "activeSessions": active_sessions,
-            "platform": std::env::consts::OS,
-            "arch": std::env::consts::ARCH,
-            "runtime": "agent",
-            // ── Phase 2.6 additive fields (see struct docs) ──
-            "port": ctx.ws_port(),
-            "tailscaleIp": tailscale_ip,
-            "paired": paired,
-        }))
+        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "system.getInfo", _params).await
     }
 }
 

@@ -5,24 +5,31 @@
 //! visible as normal catalog functions while executing them through privileged
 //! host code that cannot be replaced by ordinary workers.
 
+use std::any::Any;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
-use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, WorkerId};
-use super::invocation::{CausalContext, Invocation, InvocationResult};
+use super::ids::{
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
+    WorkerId,
+};
+use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
 use super::ledger::{
     EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
-use super::registry::{InvocationIdempotencyDecision, LiveCatalog};
+use super::registry::{InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocationDecision};
 use super::types::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, DeliveryMode,
     EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    Provenance, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
+    Provenance, RiskLevel, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
+    WorkerDefinition, WorkerKind, WorkerRevision,
 };
 use super::{policy, schema};
 
@@ -38,6 +45,17 @@ const PROMOTE_FUNCTION: &str = "engine::promote";
 
 const WATCH_DEFAULT_LIMIT: usize = 100;
 const WATCH_MAX_LIMIT: usize = 500;
+
+struct PreparedDelegatedInvocation {
+    meta_invocation: Invocation,
+    meta_function: FunctionDefinition,
+    child: PreparedSyncInvocationDecision,
+}
+
+enum PreparedDelegatedInvocationDecision {
+    Execute(Box<PreparedDelegatedInvocation>),
+    Finished(Box<InvocationResult>),
+}
 
 /// Host for the in-process live capability engine.
 pub struct EngineHost {
@@ -72,7 +90,209 @@ impl EngineHostHandle {
         }
     }
 
-    /// Lock the host for mutation or discovery.
+    /// Register or update a worker through the host boundary.
+    pub async fn register_worker(
+        &self,
+        definition: WorkerDefinition,
+        volatile: bool,
+    ) -> Result<WorkerRevision> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .register_worker(definition, volatile)
+    }
+
+    /// Register or update a worker during single-threaded startup/test setup.
+    ///
+    /// This fails closed if the host is already in use, keeping setup code from
+    /// blocking on a global engine mutex.
+    pub fn register_worker_for_setup(
+        &self,
+        definition: WorkerDefinition,
+        volatile: bool,
+    ) -> Result<WorkerRevision> {
+        self.inner
+            .try_lock()
+            .map_err(|_| {
+                EngineError::PolicyViolation("engine host is busy during worker setup".to_owned())
+            })?
+            .catalog
+            .register_worker(definition, volatile)
+    }
+
+    /// Register or update a function through the host boundary.
+    pub async fn register_function(
+        &self,
+        definition: FunctionDefinition,
+        handler: Option<Arc<dyn InProcessFunctionHandler>>,
+        volatile: bool,
+    ) -> Result<FunctionRevision> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .register_function(definition, handler, volatile)
+    }
+
+    /// Register or update a function during single-threaded startup/test setup.
+    ///
+    /// This is the synchronous counterpart to [`Self::register_function`] for
+    /// builders that assemble a full server context before any async work has
+    /// started.
+    pub fn register_function_for_setup(
+        &self,
+        definition: FunctionDefinition,
+        handler: Option<Arc<dyn InProcessFunctionHandler>>,
+        volatile: bool,
+    ) -> Result<FunctionRevision> {
+        self.inner
+            .try_lock()
+            .map_err(|_| {
+                EngineError::PolicyViolation("engine host is busy during function setup".to_owned())
+            })?
+            .catalog
+            .register_function(definition, handler, volatile)
+    }
+
+    /// Discover visible functions through the host boundary.
+    pub async fn discover(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
+        self.inner.lock().await.catalog.discover_functions(query)
+    }
+
+    /// Inspect a visible function through the host boundary.
+    pub async fn inspect_function(
+        &self,
+        id: &FunctionId,
+        actor: Option<&ActorContext>,
+    ) -> Result<FunctionDefinition> {
+        self.inner.lock().await.catalog.inspect_function(id, actor)
+    }
+
+    /// Inspect a worker through the host boundary.
+    pub async fn inspect_worker(&self, id: &WorkerId) -> Result<WorkerDefinition> {
+        self.inner.lock().await.catalog.inspect_worker(id)
+    }
+
+    /// Inspect a trigger through the host boundary.
+    pub async fn inspect_trigger(&self, id: &TriggerId) -> Result<TriggerDefinition> {
+        self.inner.lock().await.catalog.inspect_trigger(id)
+    }
+
+    /// Inspect a trigger type through the host boundary.
+    pub async fn inspect_trigger_type(&self, id: &TriggerTypeId) -> Result<TriggerTypeDefinition> {
+        self.inner.lock().await.catalog.inspect_trigger_type(id)
+    }
+
+    /// Watch catalog changes through the host boundary.
+    pub async fn watch(
+        &self,
+        actor: &ActorContext,
+        request: EngineWatchRequest,
+    ) -> Result<EngineWatchResponse> {
+        self.inner.lock().await.watch_catalog(actor, request)
+    }
+
+    /// Promote function visibility through the host boundary.
+    pub async fn promote_function_visibility(
+        &self,
+        id: &FunctionId,
+        owner: &WorkerId,
+        target: VisibilityScope,
+        workspace_id: Option<String>,
+    ) -> Result<FunctionRevision> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .promote_function_visibility(id, owner, target, workspace_id)
+    }
+
+    /// Invoke a function through the host boundary.
+    ///
+    /// Non-privileged functions are prepared under the host lock, executed
+    /// outside it, then finished under the lock so long-running handlers do not
+    /// block live discovery or catalog watches.
+    pub async fn invoke(&self, invocation: Invocation) -> InvocationResult {
+        if invocation.function_id.as_str() == INVOKE_FUNCTION {
+            return self.invoke_delegated_unlocked(invocation).await;
+        }
+        if invocation.function_id.namespace() == ENGINE_WORKER_ID {
+            return self.inner.lock().await.invoke(invocation).await;
+        }
+
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_sync_invocation(invocation)
+        };
+        let prepared = match prepared {
+            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
+            PreparedSyncInvocationDecision::Finished(result) => return *result,
+        };
+
+        let handler_result = AssertUnwindSafe(prepared.handler.invoke(prepared.invocation.clone()))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|payload| {
+                Err(EngineError::HandlerFailed(format!(
+                    "handler panicked: {}",
+                    panic_payload_message(payload)
+                )))
+            });
+
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .finish_prepared_sync_invocation(*prepared, handler_result)
+    }
+
+    async fn invoke_delegated_unlocked(&self, invocation: Invocation) -> InvocationResult {
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            host.prepare_delegated_invocation(invocation)
+        };
+        let prepared = match prepared {
+            PreparedDelegatedInvocationDecision::Execute(prepared) => prepared,
+            PreparedDelegatedInvocationDecision::Finished(result) => return *result,
+        };
+
+        let child_result = match prepared.child {
+            PreparedSyncInvocationDecision::Execute(child) => {
+                let handler_result =
+                    AssertUnwindSafe(child.handler.invoke(child.invocation.clone()))
+                        .catch_unwind()
+                        .await
+                        .unwrap_or_else(|payload| {
+                            Err(EngineError::HandlerFailed(format!(
+                                "handler panicked: {}",
+                                panic_payload_message(payload)
+                            )))
+                        });
+                self.inner
+                    .lock()
+                    .await
+                    .catalog
+                    .finish_prepared_sync_invocation(*child, handler_result)
+            }
+            PreparedSyncInvocationDecision::Finished(result) => *result,
+        };
+
+        let mut host = self.inner.lock().await;
+        let value = delegated_invoke_value(host.catalog.revision(), &child_result);
+        host.finish_meta_invocation(
+            prepared.meta_invocation,
+            prepared.meta_function,
+            Ok(value),
+            None,
+        )
+    }
+
+    /// Lock the host for deep test inspection or narrow migration setup.
+    ///
+    /// Production invocation/discovery paths should use the intent-shaped
+    /// methods on this handle so they do not hold the host mutex across handler
+    /// execution.
     pub async fn lock(&self) -> MutexGuard<'_, EngineHost> {
         self.inner.lock().await
     }
@@ -85,6 +305,16 @@ pub fn engine_ledger_path_for_event_db(event_db_path: &Path) -> PathBuf {
         || PathBuf::from("engine-ledger.sqlite"),
         |parent| parent.join("engine-ledger.sqlite"),
     )
+}
+
+fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    }
 }
 
 /// Cursor-pull request for catalog changes.
@@ -334,6 +564,35 @@ impl EngineHost {
         self.finish_meta_invocation(invocation, function, value, None)
     }
 
+    fn prepare_delegated_invocation(
+        &mut self,
+        mut invocation: Invocation,
+    ) -> PreparedDelegatedInvocationDecision {
+        let function = match self.prepare_meta_invocation(&mut invocation) {
+            Ok(function) => function,
+            Err(err) => {
+                return PreparedDelegatedInvocationDecision::Finished(Box::new(
+                    self.meta_error(&invocation, err),
+                ));
+            }
+        };
+
+        let child = match delegated_child_invocation(&invocation) {
+            Ok(child) => child,
+            Err(err) => {
+                return PreparedDelegatedInvocationDecision::Finished(Box::new(
+                    self.finish_meta_invocation(invocation, function, Err(err), None),
+                ));
+            }
+        };
+        let child = self.catalog.prepare_sync_invocation(child);
+        PreparedDelegatedInvocationDecision::Execute(Box::new(PreparedDelegatedInvocation {
+            meta_invocation: invocation,
+            meta_function: function,
+            child,
+        }))
+    }
+
     fn prepare_meta_invocation(&self, invocation: &mut Invocation) -> Result<FunctionDefinition> {
         let function = self
             .catalog
@@ -533,30 +792,12 @@ impl EngineHost {
     }
 
     async fn meta_invoke_child(&mut self, invocation: &Invocation) -> Result<Value> {
-        let target_id = function_id(required_str(&invocation.payload, "functionId")?)?;
-        let payload = invocation
-            .payload
-            .get("payload")
-            .cloned()
-            .unwrap_or(Value::Null);
-        let expected_revision =
-            optional_u64(invocation.payload.get("expectedFunctionRevision"))?.map(FunctionRevision);
-        let delivery_mode = optional_delivery_mode(invocation.payload.get("deliveryMode"))?
-            .unwrap_or(DeliveryMode::Sync);
-        let idempotency_key = optional_string(invocation.payload.get("idempotencyKey"))?;
-
-        let mut child_context = invocation.causal_context.clone();
-        child_context.parent_invocation_id = Some(invocation.id.clone());
-        child_context.idempotency_key = idempotency_key;
-        child_context.delivery_mode = delivery_mode;
-        let mut child = Invocation::new_sync(target_id, payload, child_context)
-            .with_delivery_mode(delivery_mode);
-        child.expected_function_revision = expected_revision;
+        let child = delegated_child_invocation(invocation)?;
         let child_result = self.catalog.invoke_sync(child).await;
-        Ok(json!({
-            "catalogRevision": self.catalog.revision().0,
-            "child": invocation_result_value(&child_result),
-        }))
+        Ok(delegated_invoke_value(
+            self.catalog.revision(),
+            &child_result,
+        ))
     }
 
     fn meta_promote(&mut self, invocation: &Invocation) -> Result<Value> {
@@ -882,6 +1123,39 @@ fn invocation_result_value(result: &InvocationResult) -> Value {
         "error": result.error.as_ref().map(error_value),
         "replayedFrom": result.replayed_from.as_ref().map(InvocationId::as_str),
     })
+}
+
+fn delegated_invoke_value(
+    catalog_revision: CatalogRevision,
+    child_result: &InvocationResult,
+) -> Value {
+    json!({
+        "catalogRevision": catalog_revision.0,
+        "child": invocation_result_value(child_result),
+    })
+}
+
+fn delegated_child_invocation(invocation: &Invocation) -> Result<Invocation> {
+    let target_id = function_id(required_str(&invocation.payload, "functionId")?)?;
+    let payload = invocation
+        .payload
+        .get("payload")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let expected_revision =
+        optional_u64(invocation.payload.get("expectedFunctionRevision"))?.map(FunctionRevision);
+    let delivery_mode = optional_delivery_mode(invocation.payload.get("deliveryMode"))?
+        .unwrap_or(DeliveryMode::Sync);
+    let idempotency_key = optional_string(invocation.payload.get("idempotencyKey"))?;
+
+    let mut child_context = invocation.causal_context.clone();
+    child_context.parent_invocation_id = Some(invocation.id.clone());
+    child_context.idempotency_key = idempotency_key;
+    child_context.delivery_mode = delivery_mode;
+    let mut child =
+        Invocation::new_sync(target_id, payload, child_context).with_delivery_mode(delivery_mode);
+    child.expected_function_revision = expected_revision;
+    Ok(child)
 }
 
 fn error_value(error: &EngineError) -> Value {

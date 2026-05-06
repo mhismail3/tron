@@ -184,6 +184,21 @@ impl StoredEngineError {
                     "reason": reason,
                 }),
             },
+            EngineError::AdapterFailure {
+                adapter,
+                code,
+                message,
+                details,
+            } => Self {
+                kind: "adapter_failure".to_owned(),
+                message: error.to_string(),
+                details: serde_json::json!({
+                    "adapter": adapter,
+                    "code": code,
+                    "message": message,
+                    "details": details,
+                }),
+            },
             EngineError::HandlerFailed(message) => Self {
                 kind: "handler_failed".to_owned(),
                 message: error.to_string(),

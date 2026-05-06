@@ -150,7 +150,9 @@ in-process expression of the live capability fabric:
 - function metadata for effect class, risk, visibility, idempotency, health,
   provenance, and revision;
 - async sync-call invocation only, with queue/void/external workers deferred;
-- no RPC, tool, runtime, or client behavior changes yet.
+- no broad tool, runtime, or client rewrite yet; RPC migration begins only
+  with classified compatibility functions and low-risk read adapters that keep
+  existing wire payloads stable.
 
 That keeps Phase 1 small while encoding the invariants that make later
 self-modifying agent workflows safe and debuggable.
@@ -161,7 +163,7 @@ The first in-repo implementation lives in `packages/agent/src/engine/`. The
 module proves the live fabric contracts before any existing workflow is
 migrated; WP4 wires the host into server startup as owned infrastructure while
 keeping production RPC, tools, runtime orchestration, and client traffic
-unchanged:
+  unchanged through WP4; WP5-WP7 then add the first RPC bridge/adapters:
 
 - `ids.rs` defines validated IDs for workers, functions, triggers, invocations,
   actors, authority grants, and traces.
@@ -176,7 +178,10 @@ unchanged:
   derives a sibling `engine-ledger.sqlite` path from the resolved event DB, and
   executes live discovery, scoped inspection, cursor watch, delegated
   invocation, and promotion without exposing those built-ins to ordinary worker
-  replacement.
+  replacement. The handle is now the adapter boundary: it prepares invocation
+  policy/idempotency/schema under lock, executes in-process handlers outside
+  the host lock, catches panics as structured errors, and finishes ledger
+  records under lock.
 - `ledger.rs` defines the pluggable engine-ledger boundary plus in-memory and
   isolated SQLite implementations for catalog-change audit records,
   invocation records, and idempotency reservations/results. Its SQLite schema
@@ -201,6 +206,12 @@ unchanged:
   `items`, and `enum`.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
+- `server/rpc/engine_bridge.rs` is the first production adapter. It registers a
+  `rpc` compatibility worker and one `rpc::<method>` function for all 167
+  current JSON-RPC methods. Handler-only methods are present as internal
+  non-routable metadata; `system.ping`, `system.getInfo`, `settings.get`,
+  `model.list`, `skill.list`, and `logs.recent` are strict-schema thin adapters
+  whose existing RPC handlers call engine-owned functions.
 
 ## Phase 1 acceptance checklist
 
@@ -239,11 +250,27 @@ Implemented:
 - server-owned `EngineHostHandle` startup using a SQLite engine ledger beside
   the resolved event-store database, with test contexts defaulting to an
   in-memory host;
+- intent-shaped `EngineHostHandle` registration, discovery, inspect, watch,
+  promote, and invoke methods so production adapters do not take the raw host
+  mutex;
+- direct function invocation and `engine::invoke` delegated child invocation
+  that do not hold the host lock while handler futures run, including
+  structured panic capture and idempotency completion for success, handler
+  error, and panic paths;
+- RPC migration bridge specs for every current RPC method, with drift guards
+  that fail if a method is registered without classification;
+- first engine-owned read RPC functions for `system.ping`, `system.getInfo`,
+  `settings.get`, `model.list`, `skill.list`, and `logs.recent`, with tests
+  proving direct engine invocation and existing JSON-RPC dispatch return the
+  same wire payloads;
 - cleanup of triggers that target an unregistered function.
 
 Still deferred:
 
-- production RPC/tool/runtime/client adapters that invoke engine functions;
+- write-side RPC migrations and the generic RPC trigger that removes
+  method-specific handlers;
+- tool/runtime/client-native engine rewrites beyond the first read-side RPC
+  adapters;
 - queue and void delivery execution;
 - external worker protocol, sandbox workers, and worker reconnect semantics;
 - trigger firing/runtime loop detection;

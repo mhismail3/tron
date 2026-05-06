@@ -182,29 +182,72 @@ Acceptance:
   host.
 - RPC method registration count and wire behavior remain unchanged.
 
-## Phase 2: RPC compatibility mirror
+## Phase 1.95: host hardening and RPC migration bridge
 
-Expose current RPC handlers through engine functions while keeping the existing
-WebSocket RPC transport.
+Harden the host boundary, then make JSON-RPC an explicit migration surface
+rather than an untracked parallel layer.
 
 Deliverables:
 
-- `rpc_compat` worker that registers one function per current RPC method.
-- Metadata links each function to its legacy method name, policy, visibility,
-  effect class, risk, and idempotency contract.
-- Compatibility invocation can call the existing handler path.
-- Discovery can list current RPC-compatible functions filtered by actor.
+- `EngineHostHandle` intent methods for worker/function registration,
+  discovery, inspection, watch, promotion, and invocation.
+- Prepare/execute/finish invocation lifecycle: routing, policy, schema, and
+  idempotency reservation happen under lock; handler futures run outside the
+  host lock; response schema, idempotency completion, and invocation ledger
+  records finish under lock.
+- Handler panics are caught and stored as structured engine errors so
+  idempotency replay does not rerun a panicking mutating function.
+- `rpc` compatibility worker with one `rpc::<method>` function for each
+  registered JSON-RPC method.
+- `RpcCapabilitySpec` metadata for every method: method name, function id,
+  migration state, effect class, risk, visibility, authority, idempotency mode,
+  execution policy, schema mode, and handler module.
+- Drift guards: a registered method without a spec fails; a spec without a
+  registered method fails unless it is marked removed; agent-visible mutating
+  methods require idempotency.
+- Handler-only methods are internal and non-routable through the engine until
+  their behavior is migrated.
+
+Acceptance:
+
+- Slow in-process engine handlers do not block discovery/watch on the shared
+  host handle.
+- Success, handler error, panic, missing-function, schema, policy, and
+  idempotency replay paths all produce invocation records.
+- All 167 current JSON-RPC methods have bridge specs.
+- The bridge is explicitly temporary: `HandlerOnly` moves to `EngineOwned`,
+  then `ThinAdapter`, then group-level `GenericTrigger`, then old handlers are
+  removed.
+
+## Phase 2: first engine-owned read RPC functions
+
+Move low-risk read behavior into engine-owned functions while keeping the
+existing WebSocket JSON-RPC transport and client wire payloads stable.
+
+Deliverables:
+
+- Engine-owned implementations for `system.ping`, `system.getInfo`,
+  `settings.get`, `model.list`, `skill.list`, and `logs.recent`.
+- Strict request/response schemas for those migrated reads.
+- Method-specific RPC handlers become thin adapters that invoke the engine
+  function and map structured engine/adapter errors back to the existing
+  `RpcErrorBody` shape.
+- Direct engine invocations and JSON-RPC dispatch return identical payloads
+  except deliberately unstable fields such as timestamps and uptime.
 
 Acceptance:
 
 - Existing client tests pass unchanged.
-- New tests prove selected RPC methods work through both legacy dispatch and
-  engine invocation.
+- Focused tests prove selected RPC methods work through both JSON-RPC dispatch
+  and direct engine invocation.
+- Invocation ledger records actor, trace, authority scopes, catalog revision,
+  function revision, delivery mode, and result for migrated reads.
 - README RPC counts remain reconciled with `server/rpc/handlers/mod.rs`.
 
-## Phase 3: low-risk read functions
+## Phase 3: remaining read functions and generic trigger preparation
 
-Migrate isolated read-only capabilities first.
+Migrate the next batch of isolated read-only capabilities and prepare the first
+group-level generic RPC trigger.
 
 Candidate functions:
 
@@ -223,8 +266,11 @@ Acceptance:
 
 - Each migrated read has schema metadata, authority metadata, visibility, and
   causal records.
-- Legacy RPC adapters call the engine implementation, not duplicate logic.
-- Focused tests cover direct engine invocation and legacy RPC compatibility.
+- Current RPC adapters call the engine implementation, not duplicate logic.
+- Focused tests cover direct engine invocation and current RPC compatibility.
+- A method group can be switched from method-specific thin handlers to generic
+  RPC trigger dispatch only after every method in the group is engine-owned and
+  tests prove the old handler module is deletable.
 
 ## Phase 4: catalog watch, streams, and event unification
 
@@ -344,7 +390,7 @@ Acceptance:
 - Spawned workers inherit narrowed authority.
 - Invocation timeout/cancellation behavior is tested.
 
-## Phase 10: client cutover and legacy removal
+## Phase 10: client cutover and old-path removal
 
 Cut clients over once the server contract is stable.
 

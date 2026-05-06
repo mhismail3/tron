@@ -23,8 +23,11 @@ registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
 ## RPC surface
 
 The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
-165 methods. These should migrate through a compatibility worker before the
-client API changes.
+167 methods. The exploration branch now registers a `rpc` compatibility worker
+with one `rpc::<method>` function for each method. Handler-only entries are
+internal/non-routable metadata; the first engine-owned read adapters are
+`system.ping`, `system.getInfo`, `settings.get`, `model.list`, `skill.list`,
+and `logs.recent`.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,
@@ -34,11 +37,12 @@ answers are explicit enough to test.
 | Prefix | Count | Future mapping | Default visibility | Effect/idempotency | Authority and causality |
 |--------|------:|----------------|--------------------|--------------------|-------------------------|
 | `system` | 6 | `system::*` and `engine::*` functions. | Client/admin/system. | Mostly reads; shutdown/update checks need explicit risk metadata. | Trace client/system actor and server lifecycle effects. |
+| `codexApp` | 1 | `codex_app::*` lifecycle/status functions. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
 | `blob` | 1 | `blob::get`. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
 | `session` | 13 | `session::*` functions over event store. | Client/session/workspace. | Reads plus idempotent mutations for create/archive/delete/export. | Every mutation writes event-store causal records. |
 | `agent` | 10 | `agent::*` functions and queue triggers. | Session by default. | Prompt/run/abort are mutating and require idempotency. | Turn id, parent invocation, catalog revision, and authority grant are mandatory. |
 | `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
-| `context` | 8 | `context::*` functions. | Session. | Reads plus compaction/context mutations. | Compaction ordering and event writes must remain deterministic. |
+| `context` | 9 | `context::*` functions. | Session. | Reads plus compaction/context mutations. | Compaction ordering and event writes must remain deterministic. |
 | `events` | 5 | `event::*` worker functions and streams. | Session/workspace/admin. | Reads plus append-only event writes with dedupe. | Event append is the durable causal ledger path. |
 | `settings` | 3 | `settings::*` state functions. | Admin/client. | Idempotent system write. | Must preserve iOS settings parity and strict validation. |
 | `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
@@ -181,4 +185,4 @@ Before migrating any row above, define:
 - idempotency key source and dedupe scope;
 - causal records written on success, failure, retry, and cancellation;
 - behavior when the owner worker disconnects or the function revision changes;
-- tests proving the legacy RPC path and engine path agree during migration.
+- tests proving the current RPC path and engine path agree during migration.

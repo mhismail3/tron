@@ -30,7 +30,7 @@ use crate::server::rpc::registry::MethodHandler;
 ///
 /// Ollama models include live availability status from the local Ollama server.
 /// Adding a new model? Update the provider's `types.rs` — it appears here automatically.
-async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value> {
+pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value> {
     let mut models = all_claude_models_api_json();
     models.extend(all_openai_models_api_json_for_auth_path(openai_auth_path));
     models.extend(all_gemini_models_api_json());
@@ -65,7 +65,7 @@ fn is_model_deprecated(model_id: &str) -> bool {
     false
 }
 
-fn active_openai_auth_path(ctx: &RpcContext) -> OpenAIAuthPath {
+pub(crate) fn active_openai_auth_path(ctx: &RpcContext) -> OpenAIAuthPath {
     crate::llm::auth::openai::infer_auth_path(&ctx.auth_path, None)
         .unwrap_or(OpenAIAuthPath::ChatGptCodex)
 }
@@ -77,7 +77,7 @@ pub struct ListModelsHandler;
 impl MethodHandler for ListModelsHandler {
     #[instrument(skip(self, ctx), fields(method = "model.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        Ok(serde_json::json!({ "models": known_models(active_openai_auth_path(ctx)).await }))
+        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "model.list", _params).await
     }
 }
 

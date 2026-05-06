@@ -15,12 +15,6 @@ fn settings_error(error: crate::settings::SettingsError) -> RpcError {
     }
 }
 
-fn serde_settings_error(error: serde_json::Error) -> RpcError {
-    RpcError::Internal {
-        message: error.to_string(),
-    }
-}
-
 async fn refresh_codex_app_server_if_needed(
     ctx: &RpcContext,
     updates: &Value,
@@ -129,7 +123,7 @@ pub struct GetSettingsHandler;
 impl MethodHandler for GetSettingsHandler {
     #[instrument(skip(self, ctx), fields(method = "settings.get"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        serde_json::to_value(&ctx.profile_runtime.current().settings).map_err(serde_settings_error)
+        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "settings.get", _params).await
     }
 }
 

@@ -55,11 +55,7 @@ pub struct ListSkillsHandler;
 impl MethodHandler for ListSkillsHandler {
     #[instrument(skip(self, ctx), fields(method = "skill.list"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let working_dir = resolve_working_dir(params.as_ref(), ctx);
-        let mut registry = ctx.skill_registry.write();
-        let _ = registry.refresh_if_stale(&working_dir);
-        let skills = registry.list(None);
-        Ok(serde_json::json!({ "skills": skills }))
+        crate::server::rpc::engine_bridge::invoke_thin_adapter(ctx, "skill.list", params).await
     }
 }
 

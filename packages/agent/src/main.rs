@@ -1015,6 +1015,8 @@ async fn main() -> Result<()> {
     // Phase 5: Build and start server
     let mut registry = MethodRegistry::new();
     tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::engine_bridge::register_rpc_worker_for_context(&rpc_context, &registry)
+        .context("Failed to register RPC engine bridge")?;
     let method_count = registry.methods().len();
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);

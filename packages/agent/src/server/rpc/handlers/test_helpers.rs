@@ -167,7 +167,7 @@ pub fn make_test_context() -> RpcContext {
     let settings_path = test_user_profile_path(&home);
     let auth_path = test_auth_path(&home);
     let profile_runtime = test_profile_runtime(&home);
-    RpcContext {
+    let ctx = RpcContext {
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,
@@ -201,5 +201,9 @@ pub fn make_test_context() -> RpcContext {
         onboarded_marker_path: unique_test_path("onboarded", "marker"),
         release_fetcher: None,
         updater_state_path: unique_test_path("updater-state", "json"),
-    }
+    };
+    let mut registry = crate::server::rpc::registry::MethodRegistry::new();
+    crate::server::rpc::handlers::register_all(&mut registry);
+    crate::server::rpc::engine_bridge::register_rpc_worker_for_context(&ctx, &registry).unwrap();
+    ctx
 }

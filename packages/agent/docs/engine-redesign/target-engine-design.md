@@ -380,7 +380,7 @@ isolation does.
 | Worker | Responsibility |
 |--------|----------------|
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
-| `rpc_compat` | Mirrors current RPC handlers during migration. |
+| `rpc` | Compatibility worker for current JSON-RPC methods during migration. Function ids use `rpc::<method>` so the old transport can collapse into a generic trigger later. |
 | `event` | Session/event-store append, read, reconstruct, subscribe. |
 | `stream` | Durable subscriptions for session events, topology, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |
@@ -435,9 +435,14 @@ specific namespace and function set, not its full authority.
 The final client API can break, but transition should be controlled:
 
 1. Keep current `/ws` JSON-RPC while compatibility functions mirror it.
-2. Add live catalog discovery and catalog streams behind the server.
-3. Move selected client flows to engine-native calls once stable.
-4. Remove compatibility handlers only after Mac/iOS clients consume the new
+2. Register every current method as a classified `rpc::<method>` capability.
+3. Move selected method behavior into engine-owned functions and leave current
+   handlers as thin adapters.
+4. Replace all thin adapters in a method group with a generic RPC trigger once
+   tests prove parity.
+5. Add live catalog discovery and catalog streams behind the server.
+6. Move selected client flows to engine-native calls once stable.
+7. Remove compatibility handlers only after Mac/iOS clients consume the new
    contract.
 
 Compatibility is for migration and validation, not a permanent second system.

@@ -5,6 +5,7 @@ use std::sync::{
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use tokio::sync::{Barrier, Notify};
 
 use super::EngineHost;
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
@@ -114,6 +115,24 @@ struct FailHandler;
 impl InProcessFunctionHandler for FailHandler {
     async fn invoke(&self, _invocation: Invocation) -> Result<Value> {
         Err(EngineError::HandlerFailed("boom".to_owned()))
+    }
+}
+
+#[derive(Clone)]
+struct BlockingHandler {
+    started: Arc<Barrier>,
+    release: Arc<Notify>,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for BlockingHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
+        self.started.wait().await;
+        self.release.notified().await;
+        Ok(json!({
+            "payload": invocation.payload,
+            "catalogRevision": invocation.causal_context.catalog_revision.0,
+        }))
     }
 }
 
@@ -1554,12 +1573,224 @@ async fn engine_host_handle_bootstraps_in_memory_host() {
     }
 }
 
+#[tokio::test]
+async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
+    let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker(worker("w1", "alpha"), true)
+        .await
+        .unwrap();
+
+    let started = Arc::new(Barrier::new(2));
+    let release = Arc::new(Notify::new());
+    handle
+        .register_function(
+            read_function("alpha::slow", "w1"),
+            Some(Arc::new(BlockingHandler {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            })),
+            true,
+        )
+        .await
+        .unwrap();
+
+    let invocation = Invocation::new_sync(fid("alpha::slow"), json!({"x": 1}), causal());
+    let running = {
+        let handle = handle.clone();
+        tokio::spawn(async move { handle.invoke(invocation).await })
+    };
+
+    started.wait().await;
+    let functions = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        handle.discover(&FunctionQuery {
+            actor: Some(ActorContext::new(
+                actor("agent"),
+                ActorKind::Agent,
+                grant("grant"),
+            )),
+            ..FunctionQuery::default()
+        }),
+    )
+    .await
+    .expect("discovery should not wait for slow handler");
+    assert!(
+        functions
+            .iter()
+            .any(|function| function.id == fid("alpha::slow"))
+    );
+    handle
+        .register_function(
+            read_function("alpha::new_read", "w1"),
+            Some(handler()),
+            true,
+        )
+        .await
+        .expect("catalog updates should not wait for slow handler");
+
+    release.notify_waiters();
+    let result = running.await.unwrap();
+    assert_eq!(result.value.as_ref().unwrap()["payload"], json!({"x": 1}));
+    let host = handle.lock().await;
+    assert!(
+        result.catalog_revision < host.catalog().revision(),
+        "finished invocation should preserve the catalog revision captured before the concurrent update"
+    );
+}
+
+#[tokio::test]
+async fn engine_invoke_meta_does_not_block_discovery_while_child_runs() {
+    let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker(worker("w1", "alpha"), true)
+        .await
+        .unwrap();
+
+    let started = Arc::new(Barrier::new(2));
+    let release = Arc::new(Notify::new());
+    handle
+        .register_function(
+            read_function("alpha::slow", "w1"),
+            Some(Arc::new(BlockingHandler {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            })),
+            true,
+        )
+        .await
+        .unwrap();
+
+    let invocation = Invocation::new_sync(
+        fid("engine::invoke"),
+        json!({
+            "functionId": "alpha::slow",
+            "payload": {"x": 1}
+        }),
+        causal(),
+    );
+    let running = {
+        let handle = handle.clone();
+        tokio::spawn(async move { handle.invoke(invocation).await })
+    };
+
+    started.wait().await;
+    let functions = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        handle.discover(&FunctionQuery {
+            actor: Some(ActorContext::new(
+                actor("agent"),
+                ActorKind::Agent,
+                grant("grant"),
+            )),
+            ..FunctionQuery::default()
+        }),
+    )
+    .await
+    .expect("engine::invoke child execution should not block discovery");
+    assert!(
+        functions
+            .iter()
+            .any(|function| function.id == fid("alpha::slow"))
+    );
+    handle
+        .register_function(
+            read_function("alpha::new_read", "w1"),
+            Some(handler()),
+            true,
+        )
+        .await
+        .expect("catalog updates should not wait for delegated child execution");
+
+    release.notify_waiters();
+    let result = running.await.unwrap();
+    assert_eq!(
+        result.value.as_ref().unwrap()["child"]["value"]["payload"],
+        json!({"x": 1})
+    );
+    let host = handle.lock().await;
+    let child_record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .find(|record| record.function_id == fid("alpha::slow"))
+        .unwrap();
+    assert_eq!(
+        child_record.parent_invocation_id,
+        Some(result.invocation_id.clone())
+    );
+    assert!(
+        child_record.catalog_revision < host.catalog().revision(),
+        "delegated child should preserve the catalog revision captured before the concurrent update"
+    );
+}
+
+#[tokio::test]
+async fn engine_host_handle_records_panics_and_replays_panic_errors() {
+    let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker(worker("w1", "alpha"), true)
+        .await
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    #[derive(Clone)]
+    struct CountingPanicHandler {
+        calls: Arc<AtomicUsize>,
+    }
+    #[async_trait]
+    impl InProcessFunctionHandler for CountingPanicHandler {
+        async fn invoke(&self, _invocation: Invocation) -> Result<Value> {
+            let _ = self.calls.fetch_add(1, Ordering::SeqCst);
+            panic!("panic stored for replay");
+        }
+    }
+
+    handle
+        .register_function(
+            write_function("alpha::panic", "w1"),
+            Some(Arc::new(CountingPanicHandler {
+                calls: Arc::clone(&calls),
+            })),
+            true,
+        )
+        .await
+        .unwrap();
+
+    let first = handle
+        .invoke(Invocation::new_sync(
+            fid("alpha::panic"),
+            json!({"x": 1}),
+            mutating_causal("same-key"),
+        ))
+        .await;
+    assert!(matches!(
+        first.error,
+        Some(EngineError::HandlerFailed(message))
+            if message.contains("handler panicked") && message.contains("panic stored for replay")
+    ));
+
+    let duplicate = handle
+        .invoke(Invocation::new_sync(
+            fid("alpha::panic"),
+            json!({"x": 1}),
+            mutating_causal("same-key"),
+        ))
+        .await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(duplicate.replayed_from, Some(first.invocation_id));
+    assert!(matches!(
+        duplicate.error,
+        Some(EngineError::StoredInvocationError { message, .. })
+            if message.contains("handler failed")
+    ));
+}
+
 #[test]
 fn engine_ledger_path_is_sibling_of_event_database() {
-    let db_path = std::path::Path::new("/tmp/tron/system/database/log.db");
+    let db_path = std::path::Path::new("/tmp/tron/internal/database/log.db");
     assert_eq!(
         super::host::engine_ledger_path_for_event_db(db_path),
-        std::path::PathBuf::from("/tmp/tron/system/database/engine-ledger.sqlite")
+        std::path::PathBuf::from("/tmp/tron/internal/database/engine-ledger.sqlite")
     );
     assert_eq!(
         super::host::engine_ledger_path_for_event_db(std::path::Path::new("log.db")),

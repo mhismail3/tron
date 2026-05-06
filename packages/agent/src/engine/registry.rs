@@ -74,6 +74,28 @@ pub(in crate::engine) enum InvocationIdempotencyDecision {
     },
 }
 
+/// A sync invocation that passed routing, policy, schema, and idempotency
+/// reservation checks and is ready to execute outside the catalog lock.
+pub(in crate::engine) struct PreparedSyncInvocation {
+    /// Invocation with its causal catalog revision captured at prepare time.
+    pub invocation: Invocation,
+    /// Function contract captured at prepare time.
+    pub function: FunctionDefinition,
+    /// In-process handler captured at prepare time.
+    pub handler: Arc<dyn InProcessFunctionHandler>,
+    /// Fresh idempotency reservation, when the function is mutating.
+    pub idempotency: Option<IdempotencyReservation>,
+}
+
+/// Prepare result for a sync invocation.
+pub(in crate::engine) enum PreparedSyncInvocationDecision {
+    /// The handler should be executed outside the catalog lock.
+    Execute(Box<PreparedSyncInvocation>),
+    /// The invocation already finished during prepare, usually due to policy,
+    /// schema, routing, or idempotency replay/conflict behavior.
+    Finished(Box<InvocationResult>),
+}
+
 /// In-memory live catalog.
 pub struct LiveCatalog {
     revision: CatalogRevision,
@@ -585,7 +607,21 @@ impl LiveCatalog {
     }
 
     /// Invoke an in-process function synchronously.
-    pub async fn invoke_sync(&mut self, mut invocation: Invocation) -> InvocationResult {
+    pub async fn invoke_sync(&mut self, invocation: Invocation) -> InvocationResult {
+        match self.prepare_sync_invocation(invocation) {
+            PreparedSyncInvocationDecision::Finished(result) => *result,
+            PreparedSyncInvocationDecision::Execute(prepared) => {
+                let result = prepared.handler.invoke(prepared.invocation.clone()).await;
+                self.finish_prepared_sync_invocation(*prepared, result)
+            }
+        }
+    }
+
+    /// Prepare an in-process sync invocation without executing the handler.
+    pub(in crate::engine) fn prepare_sync_invocation(
+        &mut self,
+        mut invocation: Invocation,
+    ) -> PreparedSyncInvocationDecision {
         let Some(entry) = self.functions.get(&invocation.function_id) else {
             let worker_id = WorkerId::new("missing").expect("valid static id");
             let result = InvocationResult::error(
@@ -598,7 +634,11 @@ impl LiveCatalog {
                     id: invocation.function_id.to_string(),
                 },
             );
-            return self.finish_invocation(&invocation, result, None);
+            return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
+                &invocation,
+                result,
+                None,
+            )));
         };
         let function = entry.definition.clone();
         let handler = entry.handler.clone();
@@ -618,7 +658,11 @@ impl LiveCatalog {
                         actual: function.revision.0,
                     },
                 );
-                return self.finish_invocation(&invocation, result, None);
+                return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
+                    &invocation,
+                    result,
+                    None,
+                )));
             }
         }
 
@@ -630,7 +674,11 @@ impl LiveCatalog {
                 self.revision,
                 err,
             );
-            return self.finish_invocation(&invocation, result, None);
+            return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
+                &invocation,
+                result,
+                None,
+            )));
         }
 
         if let Some(schema) = &function.request_schema {
@@ -644,23 +692,30 @@ impl LiveCatalog {
                     self.revision,
                     err,
                 );
-                return self.finish_invocation(&invocation, result, None);
+                return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
+                    &invocation,
+                    result,
+                    None,
+                )));
             }
         }
 
-        let idempotency = match self.idempotency_lookup(&function, &invocation) {
-            Ok(idempotency) => idempotency,
-            Err(err) => {
-                let result = InvocationResult::error(
-                    &invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    err,
-                );
-                return self.finish_invocation(&invocation, result, None);
-            }
-        };
+        let idempotency =
+            match self.idempotency_lookup(&function, &invocation) {
+                Ok(idempotency) => idempotency,
+                Err(err) => {
+                    let result = InvocationResult::error(
+                        &invocation,
+                        function.owner_worker.clone(),
+                        function.revision,
+                        self.revision,
+                        err,
+                    );
+                    return PreparedSyncInvocationDecision::Finished(Box::new(
+                        self.finish_invocation(&invocation, result, None),
+                    ));
+                }
+            };
 
         if let Some(reservation) = &idempotency {
             match self.ledger.reserve_idempotency(reservation.clone()) {
@@ -672,11 +727,13 @@ impl LiveCatalog {
                         &existing,
                         &reservation.payload_fingerprint,
                     );
-                    return self.finish_invocation(
-                        &invocation,
-                        result,
-                        Some(existing.key.scope.clone()),
-                    );
+                    return PreparedSyncInvocationDecision::Finished(Box::new(
+                        self.finish_invocation(
+                            &invocation,
+                            result,
+                            Some(existing.key.scope.clone()),
+                        ),
+                    ));
                 }
                 Err(err) => {
                     let result = InvocationResult::error(
@@ -686,11 +743,13 @@ impl LiveCatalog {
                         self.revision,
                         err,
                     );
-                    return self.finish_invocation(
-                        &invocation,
-                        result,
-                        Some(reservation.key.scope.clone()),
-                    );
+                    return PreparedSyncInvocationDecision::Finished(Box::new(
+                        self.finish_invocation(
+                            &invocation,
+                            result,
+                            Some(reservation.key.scope.clone()),
+                        ),
+                    ));
                 }
             }
         }
@@ -706,10 +765,37 @@ impl LiveCatalog {
                     reason: "no in-process handler".to_owned(),
                 },
             );
-            return self.finish_invocation(&invocation, result, None);
+            return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
+                &invocation,
+                result,
+                None,
+            )));
         };
 
-        let result = match handler.invoke(invocation.clone()).await {
+        PreparedSyncInvocationDecision::Execute(Box::new(PreparedSyncInvocation {
+            invocation,
+            function,
+            handler,
+            idempotency,
+        }))
+    }
+
+    /// Finish an invocation whose handler already executed outside the catalog
+    /// lock.
+    pub(in crate::engine) fn finish_prepared_sync_invocation(
+        &mut self,
+        prepared: PreparedSyncInvocation,
+        handler_result: Result<Value>,
+    ) -> InvocationResult {
+        let PreparedSyncInvocation {
+            invocation,
+            function,
+            idempotency,
+            ..
+        } = prepared;
+        let captured_revision = invocation.causal_context.catalog_revision;
+
+        let result = match handler_result {
             Ok(value) => {
                 if let Some(schema) = &function.response_schema {
                     if let Err(err) =
@@ -719,7 +805,7 @@ impl LiveCatalog {
                             &invocation,
                             function.owner_worker.clone(),
                             function.revision,
-                            self.revision,
+                            captured_revision,
                             err,
                         )
                     } else {
@@ -727,7 +813,7 @@ impl LiveCatalog {
                             &invocation,
                             function.owner_worker.clone(),
                             function.revision,
-                            self.revision,
+                            captured_revision,
                             value,
                         )
                     }
@@ -736,7 +822,7 @@ impl LiveCatalog {
                         &invocation,
                         function.owner_worker.clone(),
                         function.revision,
-                        self.revision,
+                        captured_revision,
                         value,
                     )
                 }
@@ -745,7 +831,7 @@ impl LiveCatalog {
                 &invocation,
                 function.owner_worker.clone(),
                 function.revision,
-                self.revision,
+                captured_revision,
                 err,
             ),
         };
@@ -760,7 +846,7 @@ impl LiveCatalog {
                     &invocation,
                     function.owner_worker.clone(),
                     function.revision,
-                    self.revision,
+                    captured_revision,
                     err,
                 );
                 return self.finish_invocation(

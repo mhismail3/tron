@@ -20,9 +20,13 @@
 //! [`context::RpcContext::run_blocking`], which enforces concurrency
 //! limits and drains through server shutdown.
 //!
-//! The context also owns the shared engine host handle. WP4 wires that host into
-//! startup as infrastructure only; no production RPC method invokes engine
-//! capabilities until a later compatibility-mirror package.
+//! The context also owns the shared engine host handle. The RPC migration
+//! bridge registers one `rpc::<method>` engine function for every registered
+//! JSON-RPC method, with handler-only methods kept non-routable/internal until
+//! they are migrated. The first low-risk reads (`system.ping`,
+//! `system.getInfo`, `settings.get`, `model.list`, `skill.list`, and
+//! `logs.recent`) are thin adapters that call engine-owned functions while
+//! preserving current wire output.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!
@@ -45,6 +49,7 @@ pub mod context;
 pub(crate) mod context_commands;
 pub(crate) mod context_queries;
 pub(crate) mod context_service;
+pub mod engine_bridge;
 pub mod errors;
 pub(crate) mod filesystem_service;
 pub(crate) mod git_service;
