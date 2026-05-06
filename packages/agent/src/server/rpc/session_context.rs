@@ -14,7 +14,6 @@ use crate::runtime::context::rules_discovery::{
 };
 use crate::runtime::context::rules_index::RulesIndex;
 
-const GLOBAL_RULE_NAMES: &[&str] = &["CLAUDE.md", "claude.md", "AGENTS.md", "agents.md"];
 const RULES_AGENT_DIRS: &[&str] = &[".claude", ".tron", ".agent"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,7 +369,7 @@ fn load_rules(
         }
     });
 
-    let global_rules = home_dir.and_then(load_global_rules_with_path);
+    let global_rules = home_dir.and_then(loader::load_global_rules_with_path);
     let merged_content = loader::merge_rules(
         global_rules.as_ref().map(|(_, content)| content.clone()),
         project_rules,
@@ -386,7 +385,7 @@ fn load_rules(
             .to_string();
         files.push(RuleFile {
             path,
-            relative_path: format!(".tron/{file_name}"),
+            relative_path: format!(".tron/memory/rules/{file_name}"),
             level: RuleFileLevel::Global,
             depth: 0,
             size_bytes: content.len(),
@@ -416,24 +415,6 @@ fn load_rules(
         merged_content,
         files,
     }
-}
-
-fn load_global_rules_with_path(home_dir: &Path) -> Option<(PathBuf, String)> {
-    let tron_dir = home_dir.join(".tron");
-    for name in GLOBAL_RULE_NAMES {
-        let path = tron_dir.join(name);
-        if !path.is_file() {
-            continue;
-        }
-        let Ok(content) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        if content.trim().is_empty() {
-            continue;
-        }
-        return Some((path, content));
-    }
-    None
 }
 
 fn discover_rules_state(
@@ -599,9 +580,9 @@ mod tests {
         settings.context.rules.discover_standalone_files = true;
 
         let home_dir = tempfile::tempdir().unwrap();
-        let tron_dir = home_dir.path().join(".tron");
-        std::fs::create_dir_all(&tron_dir).unwrap();
-        std::fs::write(tron_dir.join("AGENTS.md"), "global rules").unwrap();
+        let rules_dir = home_dir.path().join(".tron").join("memory").join("rules");
+        std::fs::create_dir_all(&rules_dir).unwrap();
+        std::fs::write(rules_dir.join("AGENTS.md"), "global rules").unwrap();
 
         let working_dir = tempfile::tempdir().unwrap();
         let agent_dir = working_dir.path().join(".agent");
@@ -622,6 +603,13 @@ mod tests {
                 .files
                 .iter()
                 .any(|f| f.level == RuleFileLevel::Global)
+        );
+        assert!(
+            artifacts.rules.files.iter().any(|f| {
+                f.level == RuleFileLevel::Global
+                    && f.relative_path == ".tron/memory/rules/AGENTS.md"
+            }),
+            "global rules should resolve from ~/.tron/memory/rules"
         );
         assert!(
             artifacts

@@ -1,8 +1,9 @@
 //! Hierarchical context file loader.
 //!
-//! Loads AGENTS.md / agents.md / CLAUDE.md / claude.md from project-level
-//! and directory-level locations, merges them in depth order, and supports
-//! caching with freshness validation.
+//! Loads AGENTS.md / agents.md / CLAUDE.md / claude.md from project-level,
+//! directory-level, and `~/.tron/memory/rules/` global-rule locations. Project
+//! files merge in depth order and global rules are prepended when present.
+//! Supports caching with freshness validation.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -294,26 +295,27 @@ impl ContextLoader {
 // =============================================================================
 
 /// File names to search for global rules (in priority order).
-const GLOBAL_RULE_NAMES: &[&str] = &["CLAUDE.md", "claude.md", "AGENTS.md", "agents.md"];
+pub const GLOBAL_RULE_NAMES: &[&str] = &["CLAUDE.md", "claude.md", "AGENTS.md", "agents.md"];
 
 /// Load global rules from `~/.tron/memory/rules/` directory.
 ///
 /// Searches for CLAUDE.md, claude.md, AGENTS.md, agents.md in priority order.
 /// Returns `None` if no file is found or all files are empty.
 pub fn load_global_rules(home_dir: &Path) -> Option<String> {
+    load_global_rules_with_path(home_dir).map(|(_, content)| content)
+}
+
+/// Load global rules and return the selected source path.
+pub fn load_global_rules_with_path(home_dir: &Path) -> Option<(PathBuf, String)> {
     use crate::core::paths::dirs;
-    let tron_dir = home_dir
-        .join(".tron")
-        .join(dirs::WORKSPACE)
-        .join(dirs::MEMORY)
-        .join(dirs::RULES);
+    let tron_dir = home_dir.join(".tron").join(dirs::MEMORY).join(dirs::RULES);
     for name in GLOBAL_RULE_NAMES {
         let path = tron_dir.join(name);
         if path.is_file()
             && let Ok(content) = std::fs::read_to_string(&path)
             && !content.trim().is_empty()
         {
-            return Some(content);
+            return Some((path, content));
         }
     }
     None
@@ -388,6 +390,12 @@ mod tests {
 
     fn cleanup(dir: &Path) {
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn memory_rules_dir_for_test(home: &Path) -> PathBuf {
+        home.join(".tron")
+            .join(crate::core::paths::dirs::MEMORY)
+            .join(crate::core::paths::dirs::RULES)
     }
 
     // -- load_project_context --
@@ -689,13 +697,9 @@ mod tests {
     // -- load_global_rules --
 
     #[test]
-    fn load_global_rules_from_tron_dir() {
+    fn load_global_rules_from_memory_rules_dir() {
         let home = create_temp_project();
-        let tron_dir = home
-            .join(".tron")
-            .join(crate::core::paths::dirs::WORKSPACE)
-            .join(crate::core::paths::dirs::MEMORY)
-            .join(crate::core::paths::dirs::RULES);
+        let tron_dir = memory_rules_dir_for_test(&home);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("CLAUDE.md"), "# Global Rules").unwrap();
 
@@ -715,11 +719,7 @@ mod tests {
     #[test]
     fn load_global_rules_skips_empty_file() {
         let home = create_temp_project();
-        let tron_dir = home
-            .join(".tron")
-            .join(crate::core::paths::dirs::WORKSPACE)
-            .join(crate::core::paths::dirs::MEMORY)
-            .join(crate::core::paths::dirs::RULES);
+        let tron_dir = memory_rules_dir_for_test(&home);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("CLAUDE.md"), "   \n  ").unwrap();
 
@@ -730,11 +730,7 @@ mod tests {
     #[test]
     fn load_global_rules_priority_order() {
         let home = create_temp_project();
-        let tron_dir = home
-            .join(".tron")
-            .join(crate::core::paths::dirs::WORKSPACE)
-            .join(crate::core::paths::dirs::MEMORY)
-            .join(crate::core::paths::dirs::RULES);
+        let tron_dir = memory_rules_dir_for_test(&home);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("CLAUDE.md"), "claude rules").unwrap();
         fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
@@ -748,11 +744,7 @@ mod tests {
     #[test]
     fn load_global_rules_falls_back_to_agents() {
         let home = create_temp_project();
-        let tron_dir = home
-            .join(".tron")
-            .join(crate::core::paths::dirs::WORKSPACE)
-            .join(crate::core::paths::dirs::MEMORY)
-            .join(crate::core::paths::dirs::RULES);
+        let tron_dir = memory_rules_dir_for_test(&home);
         fs::create_dir_all(&tron_dir).unwrap();
         fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
 

@@ -242,7 +242,7 @@ mod tests {
     fn total_count_sums_global_and_scoped() {
         let index = RulesIndex::new(vec![
             make_global(".claude/CLAUDE.md"),
-            make_global(".tron/AGENTS.md"),
+            make_global(".tron/memory/rules/AGENTS.md"),
             make_scoped("packages/agent", "packages/agent/.claude/CLAUDE.md"),
         ]);
 

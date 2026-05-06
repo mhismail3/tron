@@ -10,9 +10,9 @@
 //! | `llm_summarizer` | Subagent-based summarization for compaction |
 //! | `summarizer` | Summarizer trait and fallback implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
-//! | `loader` | Loads context parts (rules, skills) from disk/DB |
+//! | `loader` | Loads project rules and global `~/.tron/memory/rules/{CLAUDE,AGENTS}.md` overlays |
 //! | `local_policy` | Profile-backed local-model policy adapter: provider ids, tool allow-list, rules truncation |
-//! | `rules_discovery` | Finds `.claude/rules/` files in project directories |
+//! | `rules_discovery` | Finds path-scoped `CLAUDE.md` / `AGENTS.md` files in project agent dirs |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |
 //! | `instruction_prompts` | Project/global prompt overlay loading; normal profile prompts arrive through `ProfileRuntime` plans |
