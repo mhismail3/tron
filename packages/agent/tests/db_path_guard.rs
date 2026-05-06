@@ -374,8 +374,12 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
     let body = &workflow[validate..distribute];
 
     assert!(
-        body.contains("ASC_TESTFLIGHT_PUBLIC_GROUP_ID must be the public-link TestFlight group"),
-        "public TestFlight group remains the hard distribution gate"
+        body.contains("attempting public-link auto-discovery"),
+        "stale public TestFlight group config should fall back to ASC public-link discovery"
+    );
+    assert!(
+        body.contains("no public TestFlight group id resolved; skipping API group assignment"),
+        "unresolvable TestFlight group config should not fail an uploaded/processed release"
     );
     assert!(
         body.contains("::warning::ASC_TESTFLIGHT_INTERNAL_GROUP_ID"),
@@ -386,7 +390,7 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
         "internal TestFlight group validation must not block an otherwise successful public release"
     );
     assert!(
-        body.contains("echo \"external_group_ids=$PUBLIC_GROUP_ID\""),
-        "workflow should publish only the public TestFlight group through the ASC API"
+        body.contains("echo \"external_group_ids=$public_group_id\""),
+        "workflow should publish only the resolved public TestFlight group through the ASC API"
     );
 }

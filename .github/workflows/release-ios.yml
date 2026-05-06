@@ -19,9 +19,8 @@
 #   IOS_APPSTORE_PROFILE_BASE64                 base64-encoded App Store profile for com.tron.mobile
 #   IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64 base64-encoded App Store profile for com.tron.mobile.ShareExtension
 #
-# Required repository variables:
-#   ASC_TESTFLIGHT_PUBLIC_GROUP_ID   existing public TestFlight group id
 # Optional repository variables:
+#   ASC_TESTFLIGHT_PUBLIC_GROUP_ID   existing public TestFlight group id
 #   ASC_TESTFLIGHT_INTERNAL_GROUP_ID existing internal TestFlight group id
 #
 # Real releases archive the Prod app, export with Apple's app-store-connect
@@ -122,7 +121,6 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
-          PUBLIC_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_PUBLIC_GROUP_ID }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
@@ -131,10 +129,9 @@ jobs:
           else
             flag="false"
           fi
-          if [[ -z "$ASC_KEY_ID" || -z "$ASC_ISSUER_ID" || -z "$ASC_KEY_P8_BASE64" \
-             || -z "$PUBLIC_GROUP_ID" ]]; then
+          if [[ -z "$ASC_KEY_ID" || -z "$ASC_ISSUER_ID" || -z "$ASC_KEY_P8_BASE64" ]]; then
             flag="true"
-            echo "::notice::ASC secrets or public TestFlight group variable missing -> forcing dry-run"
+            echo "::notice::ASC secrets missing -> forcing dry-run"
           fi
           echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
           echo "Dry-run=$flag"
@@ -1032,27 +1029,56 @@ jobs:
             exit 1
           fi
 
-          public_group="$(
-            jq -c --arg id "$PUBLIC_GROUP_ID" '
-              (.data // [])
-              | map(select(.id == $id))
-              | .[0] // empty
-            ' "$groups_json"
-          )"
+          public_group=""
+          public_group_id=""
+
+          if [[ -n "${PUBLIC_GROUP_ID:-}" ]]; then
+            public_group="$(
+              jq -c --arg id "$PUBLIC_GROUP_ID" '
+                (.data // [])
+                | map(select(.id == $id))
+                | .[0] // empty
+              ' "$groups_json"
+            )"
+            if [[ -z "$public_group" ]]; then
+              echo "::warning::ASC_TESTFLIGHT_PUBLIC_GROUP_ID does not match any TestFlight group returned by ASC; attempting public-link auto-discovery"
+            else
+              public_kind="$(jq -r '.attributes.isInternalGroup // false' <<< "$public_group")"
+              public_link="$(jq -r '.attributes.publicLinkEnabled // false' <<< "$public_group")"
+              public_name="$(jq -r '.attributes.name // "<unnamed public group>"' <<< "$public_group")"
+              if [[ "$public_kind" == "true" ]]; then
+                echo "::warning::ASC_TESTFLIGHT_PUBLIC_GROUP_ID points at internal group '$public_name'; attempting public-link auto-discovery"
+                public_group=""
+              elif [[ "$public_link" != "true" ]]; then
+                echo "::warning::ASC_TESTFLIGHT_PUBLIC_GROUP_ID points at '$public_name', which is not the public-link group; attempting public-link auto-discovery"
+                public_group=""
+              else
+                public_group_id="$PUBLIC_GROUP_ID"
+              fi
+            fi
+          else
+            echo "::notice::ASC_TESTFLIGHT_PUBLIC_GROUP_ID not configured; attempting public-link auto-discovery"
+          fi
+
           if [[ -z "$public_group" ]]; then
-            echo "::error::ASC_TESTFLIGHT_PUBLIC_GROUP_ID does not match any TestFlight group returned by ASC"
-            exit 1
-          fi
-          public_kind="$(jq -r '.attributes.isInternalGroup // false' <<< "$public_group")"
-          public_link="$(jq -r '.attributes.publicLinkEnabled // false' <<< "$public_group")"
-          public_name="$(jq -r '.attributes.name // "<unnamed public group>"' <<< "$public_group")"
-          if [[ "$public_kind" == "true" ]]; then
-            echo "::error::ASC_TESTFLIGHT_PUBLIC_GROUP_ID points at an internal TestFlight group"
-            exit 1
-          fi
-          if [[ "$public_link" != "true" ]]; then
-            echo "::error::ASC_TESTFLIGHT_PUBLIC_GROUP_ID must be the public-link TestFlight group used by onboarding"
-            exit 1
+            public_candidates="$(
+              jq -c '
+                [(.data // [])[]
+                | select((.attributes.isInternalGroup // false) == false)
+                | select((.attributes.publicLinkEnabled // false) == true)]
+              ' "$groups_json"
+            )"
+            public_count="$(jq -r 'length' <<< "$public_candidates")"
+            if [[ "$public_count" == "1" ]]; then
+              public_group="$(jq -c '.[0]' <<< "$public_candidates")"
+              public_group_id="$(jq -r '.id' <<< "$public_group")"
+              public_name="$(jq -r '.attributes.name // "<unnamed public group>"' <<< "$public_group")"
+              echo "::warning::using auto-discovered public-link TestFlight group '$public_name'; update ASC_TESTFLIGHT_PUBLIC_GROUP_ID to $public_group_id"
+            elif [[ "$public_count" == "0" ]]; then
+              echo "::warning::no public-link TestFlight group was returned by ASC; build remains uploaded/processed, but CI will skip API group assignment"
+            else
+              echo "::warning::multiple public-link TestFlight groups were returned by ASC; build remains uploaded/processed, but CI will skip ambiguous API group assignment"
+            fi
           fi
 
           if [[ -n "${INTERNAL_GROUP_ID:-}" ]]; then
@@ -1081,8 +1107,13 @@ jobs:
             echo "::notice::ASC_TESTFLIGHT_INTERNAL_GROUP_ID not configured; relying on public TestFlight group assignment"
           fi
 
-          echo "::notice::assigning the processed build to public TestFlight group '$public_name'"
-          echo "external_group_ids=$PUBLIC_GROUP_ID" >> "$GITHUB_OUTPUT"
+          if [[ -n "$public_group_id" ]]; then
+            public_name="$(jq -r '.attributes.name // "<unnamed public group>"' <<< "$public_group")"
+            echo "::notice::assigning the processed build to public TestFlight group '$public_name'"
+          else
+            echo "::notice::no public TestFlight group id resolved; skipping API group assignment"
+          fi
+          echo "external_group_ids=$public_group_id" >> "$GITHUB_OUTPUT"
 
       - name: Distribute to TestFlight groups
         if: steps.drymode.outputs.dry_run != 'true' && steps.beta_review.outputs.external_ready == 'true'
@@ -1093,7 +1124,10 @@ jobs:
         run: |
           set -euo pipefail
           groups="$EXTERNAL_GROUP_IDS"
-          test -n "$groups" || { echo "::error::no external TestFlight groups resolved"; exit 1; }
+          if [[ -z "$groups" ]]; then
+            echo "::notice::no external TestFlight groups resolved; treating uploaded/processed build as the release checkpoint"
+            exit 0
+          fi
           notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}."
           asc publish testflight \
             --app "$ASC_APP_ID" \
