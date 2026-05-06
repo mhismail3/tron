@@ -1,9 +1,10 @@
 //! Filesystem RPC group.
 //!
 //! `filesystem.getHome`, `filesystem.listDir`, and `file.read` are
-//! marker-registered in `handlers::mod` and executed by engine-owned generic
-//! trigger functions. `filesystem.createDir` remains handler-owned until the
-//! write path gets explicit path guardrails and idempotency policy.
+//! marker-registered in `handlers::mod` and executed by canonical
+//! `filesystem::*` engine functions. `filesystem.createDir` remains
+//! handler-owned until the write path gets explicit path guardrails and
+//! idempotency policy.
 
 use async_trait::async_trait;
 use serde_json::Value;

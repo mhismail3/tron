@@ -651,13 +651,13 @@ mod tests {
     async fn generic_dispatch_preserves_registry_timeout() {
         let ctx = make_test_context();
         let definition = crate::engine::FunctionDefinition::new(
-            crate::engine::FunctionId::new("rpc::system.ping").unwrap(),
+            crate::engine::FunctionId::new("system::ping").unwrap(),
             crate::engine::WorkerId::new("system").unwrap(),
             "slow test rpc ping".to_owned(),
             crate::engine::VisibilityScope::System,
             crate::engine::EffectClass::PureRead,
         )
-        .with_required_authority(crate::engine::AuthorityRequirement::scope("rpc.read"));
+        .with_required_authority(crate::engine::AuthorityRequirement::scope("system.read"));
         ctx.engine_host
             .register_function_for_setup(
                 definition,

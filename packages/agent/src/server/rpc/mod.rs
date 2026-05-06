@@ -21,18 +21,19 @@
 //! limits and drains through server shutdown.
 //!
 //! The context also owns the shared engine host handle. The RPC migration
-//! bridge registers one `rpc::<method>` engine function for every registered
-//! JSON-RPC method, with handler-only methods kept non-routable/internal until
-//! they are migrated. Generic-trigger methods now bypass method-specific
-//! business handlers: the registry validates method existence/depth, then the
-//! bridge dispatches JSON-RPC as a transport trigger into engine functions.
-//! Read triggers carry `rpc.read`; migrated write triggers carry `rpc.write`
-//! plus engine-ledger idempotency. Prompt library, settings, logs, skills,
-//! notifications, and plan are now fully collapsed groups: their public methods
-//! are generic-triggered engine functions with marker-only JSON-RPC
-//! registrations. Events append/history and read-safe filesystem methods are
-//! also generic-triggered, while event subscriptions and filesystem writes wait
-//! for stream and file-write primitives.
+//! bridge classifies every registered JSON-RPC method, keeps handler-only
+//! entries as non-routable `rpc::<method>` metadata, and registers canonical
+//! domain functions such as `skills::activate` for migrated methods. Generic
+//! trigger methods bypass method-specific business handlers: the registry
+//! validates method existence/depth, then dispatches JSON-RPC as a `json_rpc`
+//! transport trigger into the canonical domain function. Read triggers carry
+//! `rpc.read` plus the domain read scope; migrated write triggers carry
+//! `rpc.write` plus the domain write scope and engine-ledger idempotency.
+//! Prompt library, settings, logs, skills, notifications, and plan are now
+//! fully collapsed groups with marker-only JSON-RPC registrations. Events
+//! append/history and read-safe filesystem methods are also generic-triggered,
+//! while event subscriptions and filesystem writes wait for stream and
+//! file-write primitives.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

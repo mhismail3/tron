@@ -21,7 +21,7 @@ pub struct RpcEngineInvocation {
     pub request_id: String,
     /// Original JSON-RPC method.
     pub method: String,
-    /// Engine function id (`rpc::<method>`).
+    /// Canonical domain function id targeted by the JSON-RPC trigger.
     pub function_id: FunctionId,
     /// JSON-RPC trigger id that caused the invocation.
     pub trigger_id: TriggerId,
@@ -49,13 +49,22 @@ impl RpcEngineInvocation {
         }
 
         let params_payload = payload_for_rpc_method(ctx, spec.method, request.params.clone());
-        let authority_scope = spec.authority_scope.ok_or_else(|| RpcError::Internal {
+        let transport_authority_scope =
+            spec.transport_authority_scope
+                .ok_or_else(|| RpcError::Internal {
+                    message: format!(
+                        "generic RPC trigger {} is missing a transport authority scope",
+                        spec.method
+                    ),
+                })?;
+        let domain_authority_scope = spec.authority_scope.ok_or_else(|| RpcError::Internal {
             message: format!(
-                "generic RPC trigger {} is missing an authority scope",
+                "generic RPC trigger {} is missing a domain authority scope",
                 spec.method
             ),
         })?;
-        let mut causal_context = rpc_causal_context_for_scope(authority_scope);
+        let mut causal_context = rpc_causal_context_for_scope(transport_authority_scope)
+            .with_scope(domain_authority_scope);
         if let Some(session_id) = extract_string(&params_payload, "sessionId") {
             causal_context = causal_context.with_session_id(session_id);
         }

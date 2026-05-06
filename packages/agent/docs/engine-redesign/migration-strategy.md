@@ -197,11 +197,13 @@ Deliverables:
   records finish under lock.
 - Handler panics are caught and stored as structured engine errors so
   idempotency replay does not rerun a panicking mutating function.
-- `rpc` compatibility worker with one `rpc::<method>` function for each
-  registered JSON-RPC method.
-- `RpcCapabilitySpec` metadata for every method: method name, function id,
-  migration state, effect class, risk, visibility, authority, idempotency mode,
-  execution policy, schema mode, and handler module.
+- `rpc` compatibility worker with classified specs for every registered
+  JSON-RPC method, non-routable `rpc::<method>` metadata for handler-only
+  inventory, and canonical domain function ids for migrated methods.
+- `RpcCapabilitySpec` metadata for every method: method name, executable or
+  compatibility function id, canonical domain owner, migration state, effect
+  class, risk, visibility, transport authority, domain authority, idempotency
+  mode, execution policy, schema mode, and handler module.
 - Drift guards: a registered method without a spec fails; a spec without a
   registered method fails unless it is marked removed; agent-visible mutating
   methods require idempotency.
@@ -257,20 +259,20 @@ Acceptance:
 Migrate the next batch of isolated read-only capabilities and replace
 method-specific thin adapters with the first group-level generic RPC trigger.
 
-Implemented generic-trigger functions:
+Implemented generic-trigger functions now execute as canonical domain ids:
 
-- `rpc::system.ping`
-- `rpc::system.getInfo`
-- `rpc::settings.get`
-- `rpc::model.list`
-- `rpc::skill.list`
-- `rpc::logs.recent`
-- `rpc::events.getHistory`
-- `rpc::events.getSince`
-- `rpc::filesystem.getHome`
-- `rpc::promptHistory.list`
-- `rpc::promptSnippet.list`
-- `rpc::promptSnippet.get`
+- `system::ping`
+- `system::get_info`
+- `settings::get`
+- `model::list`
+- `skills::list`
+- `logs::recent`
+- `events::get_history`
+- `events::get_since`
+- `filesystem::get_home`
+- `prompt_library::history_list`
+- `prompt_library::snippet_list`
+- `prompt_library::snippet_get`
 
 Acceptance:
 
@@ -294,15 +296,16 @@ Move the first mutating RPC method group directly into generic-trigger engine
 functions. This is the proof that the bridge is demolition scaffolding, not a
 second backend.
 
-Implemented generic-trigger writes:
+Implemented generic-trigger writes now execute as canonical domain ids:
 
-- `rpc::promptSnippet.create`
-- `rpc::promptSnippet.update`
-- `rpc::promptSnippet.delete`
+- `prompt_library::snippet_create`
+- `prompt_library::snippet_update`
+- `prompt_library::snippet_delete`
 
 Semantics:
 
-- migrated reads carry `rpc.read`; migrated writes carry `rpc.write`;
+- migrated reads carry `rpc.read` plus domain read scope; migrated writes carry
+  `rpc.write` plus domain write scope;
 - prompt snippet writes use system-scoped engine-ledger idempotency because
   snippets are local global state rather than session-owned state;
 - temporary JSON-RPC idempotency dedupes exact duplicate transports with a key
@@ -329,14 +332,14 @@ that subsystem.
 
 Implemented generic-trigger functions:
 
-- `rpc::promptHistory.delete`
-- `rpc::promptHistory.clear`
+- `prompt_library::history_delete`
+- `prompt_library::history_clear`
 
 Semantics:
 
 - all eight prompt-library RPC methods are now `GenericTrigger`;
-- prompt history writes use `rpc.write`, strict schemas, and system-scoped
-  engine-ledger idempotency;
+- prompt history writes use `rpc.write`, `prompt_library.write`, strict
+  schemas, and system-scoped engine-ledger idempotency;
 - `promptHistory.delete`, `promptHistory.clear`, and `promptSnippet.delete`
   remain irreversible side-effect capabilities with approval-required metadata;
 - generic-trigger registrations are marker-only, and tests fail if a completed
@@ -360,14 +363,14 @@ functions, not method-specific JSON-RPC handlers.
 
 Implemented generic-trigger functions:
 
-- `rpc::settings.update`
-- `rpc::settings.resetToDefaults`
+- `settings::update`
+- `settings::reset_to_defaults`
 
 Semantics:
 
 - all three settings RPC methods are now `GenericTrigger`;
-- settings writes use `rpc.write`, strict schemas, and system-scoped
-  engine-ledger idempotency;
+- settings writes use `rpc.write`, `settings.write`, strict schemas, and
+  system-scoped engine-ledger idempotency;
 - settings writes are high-risk reversible side-effect capabilities with
   approval-required metadata because they can reconfigure MCP servers, model
   defaults, runtime policy, and the managed Codex App Server;
@@ -393,13 +396,13 @@ observability input.
 
 Implemented generic-trigger function:
 
-- `rpc::logs.ingest`
+- `logs::ingest`
 
 Semantics:
 
 - both logs RPC methods are now `GenericTrigger`;
-- `logs.ingest` is an append-only event capability with `rpc.write`, strict
-  schemas, and system-scoped engine-ledger idempotency;
+- `logs.ingest` is an append-only event capability with `rpc.write`,
+  `logs.write`, strict schemas, and system-scoped engine-ledger idempotency;
 - JSON-RPC request-id-derived idempotency replays exact duplicate transports
   before opening the DB transaction, while row-level log dedupe remains a lower
   defense for overlapping batches;
@@ -442,7 +445,9 @@ Implemented trigger foundation:
 - `manual` trigger type for tests and future direct agent/human dispatch;
 - `EngineTriggerRuntime` dispatch that records trigger id, delivery mode,
   actor, authority grant, trace, optional parent invocation, and idempotency
-  context before invoking the target function through `EngineHostHandle`.
+  context before invoking the target function through `EngineHostHandle`;
+- trigger dispatch failure records for missing triggers, delivery mismatches,
+  stale targets, schema/policy failures, and idempotency conflicts.
 
 Newly collapsed groups/functions:
 
@@ -459,9 +464,13 @@ Semantics:
 - the `rpc` worker is now transport compatibility only;
 - migrated domain workers own function contracts, schemas, effect/risk
   metadata, and idempotency policy;
-- `rpc::<method>` function ids remain as compatibility ids during migration,
-  with canonical domain capability metadata recorded on each function;
-- read triggers carry `rpc.read`; write triggers carry `rpc.write`;
+- generic-triggered methods now execute as canonical domain ids such as
+  `skills::activate`, `events::append`, `filesystem::read_file`, and
+  `prompt_library::snippet_create`;
+- `rpc::<method>` ids remain as compatibility metadata for handler-only
+  inventory until those methods migrate;
+- read triggers carry `rpc.read` plus domain read scope; write triggers carry
+  `rpc.write` plus domain write scope;
 - skill activation/deactivation and plan writes use session-scoped
   idempotency, while global refresh/notification/log/settings/prompt-library
   writes use system-scoped idempotency;

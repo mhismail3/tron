@@ -209,20 +209,24 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   registered `json_rpc` and `manual` trigger definitions through
   `EngineHostHandle`, preserving trigger id, delivery mode, actor, authority,
   trace, parent invocation, session/workspace scope, and idempotency context in
-  the invocation ledger.
+  the invocation ledger. Dispatch failures before normal target execution are
+  recorded too, so missing triggers, delivery mismatches, stale targets,
+  schema/policy failures, and idempotency conflicts are causally visible.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
 - `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
   production adapter surface. They register the transport-only `rpc`
-  compatibility worker, domain-owned in-process workers, one `rpc::<method>`
-  compatibility function for all 167 current JSON-RPC methods, the `json_rpc`
-  and `manual` trigger types, and `json_rpc` trigger bindings for routable
-  methods. Handler-only methods are present as internal non-routable metadata.
+  compatibility worker, domain-owned in-process workers, canonical domain
+  functions for migrated methods, non-routable `rpc::<method>` metadata for
+  handler-only inventory, the `json_rpc` and `manual` trigger types, and
+  `json_rpc` trigger bindings from legacy method names into canonical targets.
+  Handler-only methods remain internal/non-routable until their behavior moves.
   Prompt library, settings, logs, skills, notifications, and plan are fully
   collapsed method groups. Events history/since/append and read-safe filesystem
   methods are also generic-triggered. Migrated writes use `rpc.write`, strict
-  schemas, and scoped engine-ledger idempotency; superseded method-specific
-  business handlers are deleted as each group migrates.
+  schemas, domain write scopes, and scoped engine-ledger idempotency;
+  superseded method-specific business handlers are deleted as each group
+  migrates.
 
 ## Phase 1 acceptance checklist
 
@@ -278,33 +282,36 @@ Implemented:
   wire payloads;
 - first generic-triggered write RPC functions for `promptSnippet.create`,
   `promptSnippet.update`, and `promptSnippet.delete`; these use `rpc.write`,
-  strict schemas, system-scoped engine-ledger idempotency, and exact-duplicate
-  JSON-RPC transport dedupe while deleting the old prompt-snippet write
-  handlers;
+  `prompt_library.write`, strict schemas, system-scoped engine-ledger
+  idempotency, and exact-duplicate JSON-RPC transport dedupe while deleting the
+  old prompt-snippet write handlers;
 - full prompt-library collapse: `promptHistory.delete` and
   `promptHistory.clear` now join the generic-trigger path with `rpc.write`,
-  strict schemas, system-scoped engine-ledger idempotency, approval metadata for
-  irreversible effects, and tests proving generic-trigger registrations are
-  marker-only;
+  `prompt_library.write`, strict schemas, system-scoped engine-ledger
+  idempotency, approval metadata for irreversible effects, and tests proving
+  generic-trigger registrations are marker-only;
 - full settings collapse: `settings.update` and `settings.resetToDefaults` now
   join `settings.get` on the generic-trigger path with strict schemas,
-  `rpc.write`, system-scoped engine-ledger idempotency, approval metadata for
-  high-risk reversible configuration effects, and tests proving duplicate
-  transports do not rerun disk writes or reload side effects;
+  `rpc.write`, `settings.write`, system-scoped engine-ledger idempotency,
+  approval metadata for high-risk reversible configuration effects, and tests
+  proving duplicate transports do not rerun disk writes or reload side effects;
 - full logs collapse: `logs.ingest` now joins `logs.recent` on the
-  generic-trigger path with strict schemas, `rpc.write`, append-only effect
-  metadata, system-scoped engine-ledger idempotency, and tests proving duplicate
-  transports replay without reopening the log-ingest DB transaction;
+  generic-trigger path with strict schemas, `rpc.write`, `logs.write`,
+  append-only effect metadata, system-scoped engine-ledger idempotency, and
+  tests proving duplicate transports replay without reopening the log-ingest DB
+  transaction;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
-  function id, actor `rpc-client`, authority grant `rpc-bridge`, read/write
-  authority scope, trace id, optional idempotency key, and optional
-  session/workspace scope extracted from params;
+  canonical domain function id, actor `rpc-client`, authority grant
+  `rpc-bridge`, transport read/write authority scope, domain authority scope,
+  trace id, optional idempotency key, and optional session/workspace scope
+  extracted from params;
 - cleanup of triggers that target an unregistered function.
 
 Still deferred:
 
 - RPC migrations and generic-trigger conversion for the remaining handler-only
-  method groups beyond prompt library, settings, and logs;
+  method groups beyond prompt library, settings, logs, skills, notifications,
+  plan, events basics, and read-safe filesystem;
 - tool/runtime/client-native engine rewrites beyond the first RPC adapters;
 - queue and void delivery execution;
 - external worker protocol, sandbox workers, and worker reconnect semantics;

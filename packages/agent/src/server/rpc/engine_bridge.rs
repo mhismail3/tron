@@ -11,18 +11,21 @@
 //! stream/file primitives are ready.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
-//! `skills`, `filesystem`, `events`, `notifications`, and `plan` own the
-//! function contracts and behavior metadata, while `json_rpc` trigger records
-//! capture the old client method name and dispatch into `rpc::<method>`
-//! compatibility function ids.
+//! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
+//! `logs`, `prompt_library`, `model`, and `system` own the executable function
+//! contracts and behavior metadata. `json_rpc` trigger records capture the old
+//! client method name and dispatch directly into canonical ids such as
+//! `skills::activate`; `rpc::<method>` names remain compatibility metadata for
+//! handler-only inventory during the migration.
 //!
 //! # INVARIANT: the bridge is temporary demolition scaffolding
 //!
 //! The desired end state is a collapsed engine architecture where JSON-RPC is
-//! only a transport trigger over `rpc::<method>` functions. Handler-only specs
+//! only a transport trigger over canonical domain functions. Handler-only specs
 //! remain non-routable internal catalog metadata until their behavior moves
 //! behind the engine boundary, then groups advance to generic triggers and the
-//! method-specific handlers are deleted.
+//! method-specific handlers are deleted. Compatibility ids must not become the
+//! agent-facing surface again.
 //! Every migration package must advance at least one method group and remove
 //! superseded business handlers; adding a mirror or fallback without deletion
 //! is not progress toward the collapsed architecture.

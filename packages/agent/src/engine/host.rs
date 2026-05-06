@@ -305,6 +305,27 @@ impl EngineHostHandle {
             .finish_prepared_sync_invocation(*prepared, handler_result)
     }
 
+    /// Record a trigger dispatch attempt that failed before normal invocation
+    /// preparation could attach a target function contract.
+    pub async fn record_trigger_prepare_failure(
+        &self,
+        invocation: Invocation,
+        worker_id: WorkerId,
+        function_revision: FunctionRevision,
+        error: EngineError,
+    ) -> InvocationResult {
+        let mut host = self.inner.lock().await;
+        let result = InvocationResult::error(
+            &invocation,
+            worker_id,
+            function_revision,
+            host.catalog.revision(),
+            error,
+        );
+        host.catalog
+            .record_invocation_result(&invocation, result, None)
+    }
+
     async fn invoke_delegated_unlocked(&self, invocation: Invocation) -> InvocationResult {
         let prepared = {
             let mut host = self.inner.lock().await;

@@ -2,7 +2,7 @@
 //!
 //! `notifications.list`, `notifications.markRead`, and
 //! `notifications.markAllRead` are marker-registered in `handlers::mod` and
-//! executed by engine-owned generic trigger functions.
+//! executed by canonical `notifications::*` engine functions.
 
 #[cfg(test)]
 mod tests {

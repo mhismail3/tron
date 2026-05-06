@@ -1,8 +1,8 @@
 //! Skills RPC group.
 //!
-//! `skill.list`, `skill.get`, and `skill.refresh` are marker-registered in
-//! `handlers::mod` and executed by engine-owned generic trigger functions.
-//! Session skill state lives in [`super::skill_session`].
+//! All `skill.*` methods are marker-registered in `handlers::mod` and executed
+//! by canonical `skills::*` engine functions. Session skill state lives in
+//! [`super::skill_session`].
 
 #[cfg(test)]
 mod tests {

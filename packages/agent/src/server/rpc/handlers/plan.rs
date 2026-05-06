@@ -1,7 +1,7 @@
 //! Plan RPC group.
 //!
 //! `plan.enter`, `plan.exit`, and `plan.getState` are marker-registered in
-//! `handlers::mod` and executed by engine-owned generic trigger functions.
+//! `handlers::mod` and executed by canonical `plan::*` engine functions.
 //! This module remains as progressive disclosure docs plus wire-compatibility
 //! tests for the collapsed plan group.
 

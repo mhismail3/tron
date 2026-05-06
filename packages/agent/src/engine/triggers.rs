@@ -9,9 +9,9 @@ use serde_json::Value;
 use super::discovery::ActorKind;
 use super::errors::EngineError;
 use super::host::EngineHostHandle;
-use super::ids::{ActorId, InvocationId, TraceId, TriggerId};
+use super::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
 use super::invocation::{CausalContext, Invocation, InvocationResult};
-use super::types::{DeliveryMode, TriggerDefinition};
+use super::types::{DeliveryMode, FunctionRevision, TriggerDefinition};
 
 /// Request to fire a registered trigger.
 #[derive(Clone, Debug)]
@@ -78,11 +78,11 @@ impl EngineTriggerRuntime {
             Ok(invocation) => handle.invoke(invocation).await,
             Err((trigger, error, request)) => {
                 let worker_id = trigger.as_ref().map_or_else(
-                    || super::ids::WorkerId::new("missing").unwrap(),
+                    || WorkerId::new("engine").unwrap(),
                     |trigger| trigger.owner_worker.clone(),
                 );
                 let function_id = trigger.as_ref().map_or_else(
-                    || super::ids::FunctionId::new("missing::trigger").unwrap(),
+                    || FunctionId::new("engine::trigger_dispatch").unwrap(),
                     |trigger| trigger.target_function.clone(),
                 );
                 let mut context = CausalContext::new(
@@ -113,13 +113,14 @@ impl EngineTriggerRuntime {
                 context.delivery_mode = request.delivery_mode.unwrap_or(DeliveryMode::Sync);
                 let invocation = Invocation::new_sync(function_id, request.payload, context)
                     .with_delivery_mode(request.delivery_mode.unwrap_or(DeliveryMode::Sync));
-                InvocationResult::error(
-                    &invocation,
-                    worker_id,
-                    super::types::FunctionRevision(0),
-                    super::types::CatalogRevision(0),
-                    error,
-                )
+                handle
+                    .record_trigger_prepare_failure(
+                        invocation,
+                        worker_id,
+                        FunctionRevision(0),
+                        error,
+                    )
+                    .await
             }
         }
     }

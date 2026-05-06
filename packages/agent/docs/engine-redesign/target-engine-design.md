@@ -387,6 +387,7 @@ isolation does.
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
 | `rpc` | Transport compatibility worker for current JSON-RPC methods during migration. It owns the `json_rpc` trigger type and trigger bindings, not long-term business behavior. |
 | `system` | Server status, ping, diagnostics, and future lifecycle/update capabilities. |
+| `model` | Model catalog reads and future model/profile selection capabilities. |
 | `settings` | Typed settings with iOS parity guarantees; currently fully generic-triggered for RPC compatibility. |
 | `logs` | Local observability reads and append-only client-log ingestion; currently fully generic-triggered for RPC compatibility. |
 | `prompt_library` | Prompt history/snippet reads and writes; currently fully generic-triggered for RPC compatibility. |
@@ -406,11 +407,12 @@ isolation does.
 | `auth` | Provider auth, client auth, future worker tokens and grants. |
 | `observability` | Logs, metrics, traces, causal graph queries, diagnostics. |
 
-During the compatibility period, migrated domain workers may still register
-`rpc::<method>` function ids so old JSON-RPC clients keep their stable method
-names. The metadata on each function records its canonical domain capability
-such as `skills::activate` or `events::append`. The end-state migration removes
-the `rpc::` compatibility ids after clients and agents invoke canonical domain
+During the compatibility period, old JSON-RPC clients keep their stable method
+names as `json_rpc` trigger ids and trigger config. Migrated methods execute as
+canonical domain function ids such as `skills::activate` or `events::append`;
+handler-only methods may still appear as internal `rpc::<method>` metadata so
+the migration inventory remains complete. The end-state migration removes that
+compatibility inventory after clients and agents invoke canonical domain
 capabilities directly.
 
 ## State, streams, queues, and events
@@ -453,13 +455,15 @@ specific namespace and function set, not its full authority.
 
 The final client API can break, but transition should be controlled:
 
-1. Keep current `/ws` JSON-RPC while compatibility functions mirror it.
-2. Register every current method as a classified `rpc::<method>` capability.
-3. Move selected method behavior into engine-owned functions. Use
+1. Keep current `/ws` JSON-RPC while compatibility triggers preserve it.
+2. Register every current method as a classified bridge spec; handler-only
+   methods may keep internal `rpc::<method>` metadata, while migrated methods
+   register canonical domain functions.
+3. Move selected method behavior into domain-owned engine functions. Use
    method-specific thin adapters only as temporary parity scaffolding when a
    method group is not ready for generic dispatch.
-4. Replace thin adapters in a method group with a generic RPC trigger as soon
-   as tests prove parity.
+4. Replace thin adapters in a method group with `json_rpc` triggers targeting
+   canonical domain functions as soon as tests prove parity.
 5. Add live catalog discovery and catalog streams behind the server.
 6. Move selected client flows to engine-native calls once stable.
 7. Remove compatibility handlers only after Mac/iOS clients consume the new

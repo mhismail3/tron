@@ -24,10 +24,10 @@ registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
 
 The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
 167 methods. The exploration branch now registers a `rpc` transport
-compatibility worker, domain-owned in-process workers for migrated groups, one
-`rpc::<method>` compatibility function for each method, and `json_rpc` trigger
-bindings for every generic-triggered method. Handler-only entries are
-internal/non-routable metadata.
+compatibility worker, domain-owned in-process workers for migrated groups,
+canonical domain functions for generic-triggered methods, non-routable
+`rpc::<method>` metadata for handler-only inventory, and `json_rpc` trigger
+bindings from the legacy method names into the canonical functions.
 
 Fully collapsed groups are prompt library, settings, logs, skills,
 notifications, and plan. The events group has generic-triggered

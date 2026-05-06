@@ -135,6 +135,8 @@ pub struct RpcCapabilitySpec {
     pub visibility: VisibilityScope,
     /// Optional authority scope required to invoke.
     pub authority_scope: Option<&'static str>,
+    /// Optional JSON-RPC transport authority scope granted by the trigger.
+    pub transport_authority_scope: Option<&'static str>,
     /// Idempotency mode.
     pub idempotency_mode: RpcIdempotencyMode,
     /// Execution policy.
@@ -397,9 +399,15 @@ pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabi
         }
         if is_engine_routable(&spec) {
             if spec.effect_class.is_mutating() {
-                if spec.authority_scope != Some(RPC_WRITE_AUTHORITY) {
+                if spec.transport_authority_scope != Some(RPC_WRITE_AUTHORITY) {
                     return Err(EngineError::PolicyViolation(format!(
-                        "mutating generic-triggered RPC method {} must require rpc.write",
+                        "mutating generic-triggered RPC method {} must grant rpc.write",
+                        spec.method
+                    )));
+                }
+                if spec.authority_scope.is_none() {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "mutating generic-triggered RPC method {} must require a domain authority scope",
                         spec.method
                     )));
                 }
@@ -409,9 +417,14 @@ pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabi
                         spec.method
                     )));
                 }
-            } else if spec.authority_scope != Some(RPC_READ_AUTHORITY) {
+            } else if spec.transport_authority_scope != Some(RPC_READ_AUTHORITY) {
                 return Err(EngineError::PolicyViolation(format!(
-                    "read generic-triggered RPC method {} must require rpc.read",
+                    "read generic-triggered RPC method {} must grant rpc.read",
+                    spec.method
+                )));
+            } else if spec.authority_scope.is_none() {
+                return Err(EngineError::PolicyViolation(format!(
+                    "read generic-triggered RPC method {} must require a domain authority scope",
                     spec.method
                 )));
             }
@@ -489,14 +502,20 @@ fn spec_from_seed(
     };
     Ok(RpcCapabilitySpec {
         method: seed.method,
-        function_id: function_id_for_method(seed.method)?,
+        function_id: if is_routable {
+            function_id_for_method(seed.method)?
+        } else {
+            compat_function_id_for_method(seed.method)?
+        },
         owner_worker: owner_worker.clone(),
         domain_worker: domain_worker_for_method(seed.method)?,
         migration_state: seed.migration_state,
         effect_class,
         risk_level: risk_for_method(seed.method, effect_class),
         visibility,
-        authority_scope: is_routable.then_some(if effect_class.is_mutating() {
+        authority_scope: is_routable
+            .then_some(domain_authority_scope_for_method(seed.method, effect_class)),
+        transport_authority_scope: is_routable.then_some(if effect_class.is_mutating() {
             RPC_WRITE_AUTHORITY
         } else {
             RPC_READ_AUTHORITY
@@ -568,7 +587,10 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
     let mut definition = FunctionDefinition::new(
         spec.function_id.clone(),
         spec.owner_worker.clone(),
-        format!("RPC compatibility capability for {}", spec.method),
+        format!(
+            "Canonical domain capability for JSON-RPC method {}",
+            spec.method
+        ),
         spec.visibility.clone(),
         spec.effect_class,
     )
@@ -600,8 +622,11 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
     definition.metadata = json!({
         "transport": "json_rpc",
         "method": spec.method,
+        "compatFunctionId": compat_function_id_for_method(spec.method).map(|id| id.to_string()).unwrap_or_default(),
+        "transportAuthorityScope": spec.transport_authority_scope,
         "domainWorker": spec.domain_worker.as_str(),
-        "canonicalCapability": canonical_capability_for_method(spec.method),
+        "canonicalCapability": spec.function_id.as_str(),
+        "domainAuthorityScope": spec.authority_scope,
         "migrationState": spec.migration_state.as_str(),
         "executionPolicy": spec.execution_policy.as_str(),
         "schemaMode": spec.schema_mode.as_str(),
@@ -642,6 +667,7 @@ pub(super) fn rpc_worker() -> WorkerDefinition {
 pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
     let domains = [
         "system",
+        "model",
         "settings",
         "logs",
         "prompt_library",
@@ -660,7 +686,6 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
                 actor_id(RPC_OWNER_ACTOR)?,
                 grant_id(RPC_AUTHORITY_GRANT)?,
             )
-            .with_namespace_claim(RPC_WORKER_ID)
             .with_namespace_claim(domain))
         })
         .collect()
@@ -725,7 +750,15 @@ pub(super) fn json_rpc_trigger_id_for_method(method: &str) -> EngineResult<Trigg
 }
 
 pub(super) fn function_id_for_method(method: &str) -> EngineResult<FunctionId> {
+    canonical_function_id_for_method(method)
+}
+
+pub(super) fn compat_function_id_for_method(method: &str) -> EngineResult<FunctionId> {
     FunctionId::new(format!("rpc::{method}"))
+}
+
+pub(super) fn canonical_function_id_for_method(method: &str) -> EngineResult<FunctionId> {
+    FunctionId::new(canonical_capability_for_method(method))
 }
 
 fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
@@ -741,19 +774,116 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("notifications.") => "notifications",
         method if method.starts_with("plan.") => "plan",
         method if method.starts_with("system.") => "system",
+        method if method.starts_with("model.") => "model",
         _ => RPC_WORKER_ID,
     })
 }
 
 fn canonical_capability_for_method(method: &str) -> String {
-    let (namespace, operation) = match method.split_once('.') {
-        Some(("promptHistory", operation)) => ("prompt_library", format!("history.{operation}")),
-        Some(("promptSnippet", operation)) => ("prompt_library", format!("snippet.{operation}")),
-        Some(("file", operation)) => ("filesystem", operation.to_owned()),
-        Some((namespace, operation)) => (namespace, operation.to_owned()),
-        None => (RPC_WORKER_ID, method.to_owned()),
-    };
+    let (namespace, operation) = canonical_parts_for_method(method);
     format!("{namespace}::{operation}")
+}
+
+fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
+    match method {
+        "system.ping" => ("system", "ping".to_owned()),
+        "system.getInfo" => ("system", "get_info".to_owned()),
+        "model.list" => ("model", "list".to_owned()),
+        "settings.get" => ("settings", "get".to_owned()),
+        "settings.update" => ("settings", "update".to_owned()),
+        "settings.resetToDefaults" => ("settings", "reset_to_defaults".to_owned()),
+        "logs.ingest" => ("logs", "ingest".to_owned()),
+        "logs.recent" => ("logs", "recent".to_owned()),
+        "skill.list" => ("skills", "list".to_owned()),
+        "skill.get" => ("skills", "get".to_owned()),
+        "skill.refresh" => ("skills", "refresh".to_owned()),
+        "skill.activate" => ("skills", "activate".to_owned()),
+        "skill.deactivate" => ("skills", "deactivate".to_owned()),
+        "skill.active" => ("skills", "active".to_owned()),
+        "filesystem.listDir" => ("filesystem", "list_dir".to_owned()),
+        "filesystem.getHome" => ("filesystem", "get_home".to_owned()),
+        "file.read" => ("filesystem", "read_file".to_owned()),
+        "events.getHistory" => ("events", "get_history".to_owned()),
+        "events.getSince" => ("events", "get_since".to_owned()),
+        "events.append" => ("events", "append".to_owned()),
+        "notifications.list" => ("notifications", "list".to_owned()),
+        "notifications.markRead" => ("notifications", "mark_read".to_owned()),
+        "notifications.markAllRead" => ("notifications", "mark_all_read".to_owned()),
+        "plan.enter" => ("plan", "enter".to_owned()),
+        "plan.exit" => ("plan", "exit".to_owned()),
+        "plan.getState" => ("plan", "get_state".to_owned()),
+        "promptHistory.list" => ("prompt_library", "history_list".to_owned()),
+        "promptHistory.delete" => ("prompt_library", "history_delete".to_owned()),
+        "promptHistory.clear" => ("prompt_library", "history_clear".to_owned()),
+        "promptSnippet.list" => ("prompt_library", "snippet_list".to_owned()),
+        "promptSnippet.get" => ("prompt_library", "snippet_get".to_owned()),
+        "promptSnippet.create" => ("prompt_library", "snippet_create".to_owned()),
+        "promptSnippet.update" => ("prompt_library", "snippet_update".to_owned()),
+        "promptSnippet.delete" => ("prompt_library", "snippet_delete".to_owned()),
+        _ => match method.split_once('.') {
+            Some(("promptHistory", operation)) => {
+                ("prompt_library", format!("history_{operation}"))
+            }
+            Some(("promptSnippet", operation)) => {
+                ("prompt_library", format!("snippet_{operation}"))
+            }
+            Some(("file", operation)) => ("filesystem", operation.to_owned()),
+            Some(("skill", operation)) => ("skills", operation.to_owned()),
+            Some((namespace, operation)) => {
+                let namespace = match namespace {
+                    "events" => "events",
+                    "filesystem" => "filesystem",
+                    "logs" => "logs",
+                    "model" => "model",
+                    "notifications" => "notifications",
+                    "plan" => "plan",
+                    "settings" => "settings",
+                    "system" => "system",
+                    _ => RPC_WORKER_ID,
+                };
+                (namespace, operation.to_owned())
+            }
+            None => (RPC_WORKER_ID, method.to_owned()),
+        },
+    }
+}
+
+fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) -> &'static str {
+    let access = if effect_class.is_mutating() {
+        "write"
+    } else {
+        "read"
+    };
+    match (
+        domain_worker_for_method(method)
+            .ok()
+            .as_ref()
+            .map(WorkerId::as_str),
+        access,
+    ) {
+        (Some("system"), "read") => "system.read",
+        (Some("system"), "write") => "system.write",
+        (Some("model"), "read") => "model.read",
+        (Some("model"), "write") => "model.write",
+        (Some("settings"), "read") => "settings.read",
+        (Some("settings"), "write") => "settings.write",
+        (Some("logs"), "read") => "logs.read",
+        (Some("logs"), "write") => "logs.write",
+        (Some("prompt_library"), "read") => "prompt_library.read",
+        (Some("prompt_library"), "write") => "prompt_library.write",
+        (Some("skills"), "read") => "skills.read",
+        (Some("skills"), "write") => "skills.write",
+        (Some("filesystem"), "read") => "filesystem.read",
+        (Some("filesystem"), "write") => "filesystem.write",
+        (Some("events"), "read") => "events.read",
+        (Some("events"), "write") => "events.write",
+        (Some("notifications"), "read") => "notifications.read",
+        (Some("notifications"), "write") => "notifications.write",
+        (Some("plan"), "read") => "plan.read",
+        (Some("plan"), "write") => "plan.write",
+        (_, "write") => "rpc.write",
+        _ => "rpc.read",
+    }
 }
 
 pub(super) fn worker_id(value: &str) -> EngineResult<WorkerId> {

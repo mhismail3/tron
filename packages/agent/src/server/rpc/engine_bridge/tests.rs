@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::engine::{
-    ActorKind, DeliveryMode, EffectClass, EngineError, Invocation, RiskLevel, VisibilityScope,
+    ActorContext, ActorKind, DeliveryMode, EffectClass, EngineError, FunctionQuery, Invocation,
+    RiskLevel, VisibilityScope,
 };
 use crate::server::codex_app::{
     CodexAppServerChild, CodexAppServerExit, CodexAppServerLaunchSpec, CodexAppServerManager,
@@ -218,6 +219,30 @@ fn normalize_unstable_fields(method: &str, mut value: Value) -> Value {
     value
 }
 
+fn domain_scope_for_method(method: &str) -> &'static str {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let spec = specs::capability_spec_for_method(&registry, method)
+        .unwrap()
+        .unwrap();
+    spec.authority_scope.unwrap()
+}
+
+fn rpc_and_domain_context(
+    method: &str,
+    transport_scope: &'static str,
+) -> crate::engine::CausalContext {
+    super::dispatch::rpc_causal_context_for_scope(transport_scope)
+        .with_scope(domain_scope_for_method(method))
+}
+
+fn assert_scope(scopes: &[String], scope: &str) {
+    assert!(
+        scopes.contains(&scope.to_owned()),
+        "expected scope {scope} in {scopes:?}"
+    );
+}
+
 #[test]
 fn bridge_specs_cover_every_registered_rpc_method() {
     let mut registry = MethodRegistry::new();
@@ -246,7 +271,12 @@ fn bridge_specs_classify_selected_reads_as_generic_triggers() {
         assert_eq!(spec.effect_class, EffectClass::PureRead);
         assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert_eq!(spec.visibility, VisibilityScope::System);
-        assert_eq!(spec.authority_scope, Some(RPC_READ_AUTHORITY));
+        assert_eq!(spec.transport_authority_scope, Some(RPC_READ_AUTHORITY));
+        assert!(
+            spec.authority_scope
+                .is_some_and(|scope| scope.ends_with(".read")),
+            "{method} must require a domain read scope"
+        );
         assert!(
             super::schemas::request_schema_for_method(method).is_some(),
             "{method} must declare a request schema"
@@ -270,7 +300,12 @@ fn bridge_specs_classify_generic_writes_as_generic_triggers() {
         assert!(spec.effect_class.is_mutating());
         assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert_eq!(spec.visibility, VisibilityScope::System);
-        assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert!(
+            spec.authority_scope
+                .is_some_and(|scope| scope.ends_with(".write")),
+            "{method} must require a domain write scope"
+        );
         assert_eq!(
             spec.idempotency_mode,
             RpcIdempotencyMode::JsonRpcRequestIdSeed
@@ -322,7 +357,8 @@ fn bridge_specs_classify_prompt_history_writes_as_guarded_irreversible_triggers(
         assert_eq!(spec.effect_class, EffectClass::IrreversibleSideEffect);
         assert_eq!(spec.risk_level, RiskLevel::High);
         assert_eq!(spec.visibility, VisibilityScope::System);
-        assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(spec.authority_scope, Some("prompt_library.write"));
         assert_eq!(
             spec.idempotency_mode,
             RpcIdempotencyMode::JsonRpcRequestIdSeed
@@ -362,7 +398,8 @@ fn bridge_specs_classify_settings_writes_as_guarded_reversible_triggers() {
         assert_eq!(spec.effect_class, EffectClass::ReversibleSideEffect);
         assert_eq!(spec.risk_level, RiskLevel::High);
         assert_eq!(spec.visibility, VisibilityScope::System);
-        assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(spec.authority_scope, Some("settings.write"));
         assert_eq!(
             spec.idempotency_mode,
             RpcIdempotencyMode::JsonRpcRequestIdSeed
@@ -411,7 +448,8 @@ fn bridge_specs_classify_logs_ingest_as_guarded_append_only_trigger() {
     assert_eq!(spec.effect_class, EffectClass::AppendOnlyEvent);
     assert_eq!(spec.risk_level, RiskLevel::Medium);
     assert_eq!(spec.visibility, VisibilityScope::System);
-    assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+    assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+    assert_eq!(spec.authority_scope, Some("logs.write"));
     assert_eq!(
         spec.idempotency_mode,
         RpcIdempotencyMode::JsonRpcRequestIdSeed
@@ -477,6 +515,114 @@ fn bridge_specs_assign_generic_methods_to_domain_workers() {
         assert_eq!(definition.owner_worker, specs::worker_id(worker).unwrap());
         assert_eq!(definition.metadata["domainWorker"], worker);
     }
+}
+
+#[test]
+fn generic_trigger_specs_use_canonical_domain_function_ids() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    for spec in specs.iter().filter(|spec| specs::is_engine_routable(spec)) {
+        assert_ne!(
+            spec.function_id.namespace(),
+            RPC_WORKER_ID,
+            "{} must execute as a canonical domain function",
+            spec.method
+        );
+        let definition = specs::function_definition_for_spec(spec);
+        assert_eq!(
+            definition.metadata["canonicalCapability"],
+            spec.function_id.as_str()
+        );
+        assert_eq!(
+            definition.metadata["compatFunctionId"],
+            specs::compat_function_id_for_method(spec.method)
+                .unwrap()
+                .as_str()
+        );
+    }
+}
+
+#[tokio::test]
+async fn json_rpc_triggers_target_canonical_domain_functions() {
+    let ctx = make_test_context();
+    for (method, target) in [
+        ("system.ping", "system::ping"),
+        ("settings.update", "settings::update"),
+        ("logs.ingest", "logs::ingest"),
+        ("skill.activate", "skills::activate"),
+        ("filesystem.getHome", "filesystem::get_home"),
+        ("file.read", "filesystem::read_file"),
+        ("events.append", "events::append"),
+        ("notifications.markAllRead", "notifications::mark_all_read"),
+        ("plan.getState", "plan::get_state"),
+        ("promptSnippet.create", "prompt_library::snippet_create"),
+    ] {
+        let trigger = ctx
+            .engine_host
+            .inspect_trigger(&specs::json_rpc_trigger_id_for_method(method).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(trigger.target_function.as_str(), target);
+    }
+}
+
+#[tokio::test]
+async fn canonical_functions_are_agent_discoverable_without_rpc_compat_surface() {
+    let ctx = make_test_context();
+    let actor = ActorContext::new(
+        specs::actor_id("agent").unwrap(),
+        ActorKind::Agent,
+        specs::grant_id("agent-grant").unwrap(),
+    )
+    .with_scope("skills.read")
+    .with_scope("skills.write");
+    let functions = ctx
+        .engine_host
+        .discover(&FunctionQuery {
+            actor: Some(actor),
+            namespace_prefix: Some("skills".to_owned()),
+            ..FunctionQuery::default()
+        })
+        .await;
+    let ids = functions
+        .iter()
+        .map(|function| function.id.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    assert!(ids.contains("skills::activate"));
+    assert!(ids.contains("skills::list"));
+    assert!(
+        ids.iter().all(|id| !id.starts_with("rpc::")),
+        "agent-facing skills discovery must not expose rpc compatibility ids: {ids:?}"
+    );
+}
+
+#[tokio::test]
+async fn direct_canonical_invocation_requires_domain_scope() {
+    let ctx = make_test_context();
+    let function_id = specs::function_id_for_method("skill.list").unwrap();
+    let missing_domain_scope = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id.clone(),
+            json!({}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_READ_AUTHORITY),
+        ))
+        .await;
+    assert!(matches!(
+        missing_domain_scope.error,
+        Some(EngineError::PolicyViolation(_))
+    ));
+
+    let ok = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({}),
+            rpc_and_domain_context("skill.list", RPC_READ_AUTHORITY),
+        ))
+        .await;
+    assert!(ok.error.is_none(), "{:?}", ok.error);
 }
 
 #[test]
@@ -572,6 +718,7 @@ fn rpc_engine_invocation_preserves_transport_metadata() {
         RPC_AUTHORITY_GRANT
     );
     assert!(envelope.causal_context.has_scope(RPC_READ_AUTHORITY));
+    assert!(envelope.causal_context.has_scope("events.read"));
     assert_eq!(
         envelope.causal_context.session_id.as_deref(),
         Some("session-a")
@@ -602,6 +749,7 @@ fn rpc_engine_invocation_derives_write_authority_and_idempotency_key() {
         .unwrap();
 
     assert!(first.causal_context.has_scope(RPC_WRITE_AUTHORITY));
+    assert!(first.causal_context.has_scope("prompt_library.write"));
     assert!(!first.causal_context.has_scope(RPC_READ_AUTHORITY));
     assert_eq!(
         first.causal_context.idempotency_key,
@@ -1159,7 +1307,7 @@ async fn logs_ingest_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id.clone(),
             json!({"entries": [{"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "first"}]}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("logs.ingest", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("logs-explicit-key"),
         ))
         .await;
@@ -1170,7 +1318,7 @@ async fn logs_ingest_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id,
             json!({"entries": [{"timestamp": "2026-03-03T14:30:05.200Z", "level": "info", "category": "A", "message": "second"}]}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("logs.ingest", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("logs-explicit-key"),
         ))
         .await;
@@ -1571,7 +1719,7 @@ async fn prompt_history_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id.clone(),
             json!({"id": page.items[0].id}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("promptHistory.delete", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("history-explicit-key"),
         ))
         .await;
@@ -1582,7 +1730,7 @@ async fn prompt_history_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id,
             json!({"id": page.items[1].id}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("promptHistory.delete", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("history-explicit-key"),
         ))
         .await;
@@ -1715,7 +1863,7 @@ async fn settings_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id.clone(),
             json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("settings.update", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("settings-explicit-key"),
         ))
         .await;
@@ -1726,7 +1874,7 @@ async fn settings_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id,
             json!({"settings": {"server": {"heartbeatIntervalMs": 45_000}}}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("settings.update", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("settings-explicit-key"),
         ))
         .await;
@@ -1747,7 +1895,7 @@ async fn prompt_snippet_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id.clone(),
             json!({"name": "same", "text": "body"}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("promptSnippet.create", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("explicit-key"),
         ))
         .await;
@@ -1758,7 +1906,7 @@ async fn prompt_snippet_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
         .invoke(Invocation::new_sync(
             function_id,
             json!({"name": "different", "text": "body"}),
-            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+            rpc_and_domain_context("promptSnippet.create", RPC_WRITE_AUTHORITY)
                 .with_idempotency_key("explicit-key"),
         ))
         .await;
@@ -1826,11 +1974,8 @@ async fn generic_trigger_records_invocation_ledger_metadata() {
     );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
-    assert!(
-        record
-            .authority_scopes
-            .contains(&RPC_READ_AUTHORITY.to_owned())
-    );
+    assert_scope(&record.authority_scopes, RPC_READ_AUTHORITY);
+    assert_scope(&record.authority_scopes, "system.read");
 }
 
 #[tokio::test]
@@ -1858,11 +2003,8 @@ async fn generic_write_records_invocation_ledger_metadata() {
     );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
-    assert!(
-        record
-            .authority_scopes
-            .contains(&RPC_WRITE_AUTHORITY.to_owned())
-    );
+    assert_scope(&record.authority_scopes, RPC_WRITE_AUTHORITY);
+    assert_scope(&record.authority_scopes, "prompt_library.write");
     assert_eq!(
         record
             .idempotency_scope
@@ -1902,11 +2044,8 @@ async fn generic_logs_write_records_invocation_ledger_metadata() {
     );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
-    assert!(
-        record
-            .authority_scopes
-            .contains(&RPC_WRITE_AUTHORITY.to_owned())
-    );
+    assert_scope(&record.authority_scopes, RPC_WRITE_AUTHORITY);
+    assert_scope(&record.authority_scopes, "logs.write");
     assert_eq!(
         record
             .idempotency_scope
@@ -1947,11 +2086,8 @@ async fn generic_settings_write_records_invocation_ledger_metadata() {
     );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
-    assert!(
-        record
-            .authority_scopes
-            .contains(&RPC_WRITE_AUTHORITY.to_owned())
-    );
+    assert_scope(&record.authority_scopes, RPC_WRITE_AUTHORITY);
+    assert_scope(&record.authority_scopes, "settings.write");
     assert_eq!(
         record
             .idempotency_scope
@@ -1997,11 +2133,8 @@ async fn generic_prompt_history_write_records_invocation_ledger_metadata() {
     );
     assert_eq!(record.actor_kind, ActorKind::Client);
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
-    assert!(
-        record
-            .authority_scopes
-            .contains(&RPC_WRITE_AUTHORITY.to_owned())
-    );
+    assert_scope(&record.authority_scopes, RPC_WRITE_AUTHORITY);
+    assert_scope(&record.authority_scopes, "prompt_library.write");
     assert_eq!(
         record
             .idempotency_scope

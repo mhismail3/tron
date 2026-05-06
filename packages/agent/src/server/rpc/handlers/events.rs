@@ -1,7 +1,7 @@
 //! Events handlers: subscribe and unsubscribe.
 //!
 //! `events.getHistory`, `events.getSince`, and `events.append` are served by
-//! engine-owned generic trigger functions. Real-time subscribe/unsubscribe
+//! canonical `events::*` engine functions. Real-time subscribe/unsubscribe
 //! acknowledgements remain handler-owned until stream primitives land.
 
 use crate::events::sqlite::row_types::EventRow;

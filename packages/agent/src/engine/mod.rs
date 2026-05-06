@@ -20,12 +20,13 @@
 //! - `EngineHostHandle` gives server startup and adapters an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
-//! - the RPC bridge registers `rpc::<method>` compatibility functions and
-//!   `json_rpc` triggers so JSON-RPC can collapse into one transport over
-//!   engine functions;
-//! - the initial trigger runtime records trigger metadata and invokes
-//!   in-process functions synchronously; queue, stream, cron, and external
-//!   worker delivery stay deferred until this local fabric is solid.
+//! - the RPC bridge keeps legacy method names as trigger metadata while
+//!   migrated methods execute as canonical domain functions such as
+//!   `events::append` and `skills::activate`;
+//! - the initial trigger runtime records trigger metadata, transport/domain
+//!   authority scopes, and prepare failures before invoking in-process
+//!   functions synchronously; queue, stream, cron, and external worker delivery
+//!   stay deferred until this local fabric is solid.
 //!
 //! ## Module Position
 //!

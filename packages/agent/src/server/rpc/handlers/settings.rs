@@ -2,8 +2,9 @@
 //!
 //! `settings.get`, `settings.update`, and `settings.resetToDefaults` are
 //! marker-registered in `handlers::mod` and executed by engine-owned
-//! `rpc::<method>` functions. This module remains as progressive disclosure
-//! docs plus wire-compatibility tests for the collapsed settings group.
+//! canonical functions under `settings::*`. This module remains as progressive
+//! disclosure docs plus wire-compatibility tests for the collapsed settings
+//! group.
 
 #[cfg(test)]
 mod tests {

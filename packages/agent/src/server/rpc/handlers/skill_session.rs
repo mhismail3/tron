@@ -1,8 +1,8 @@
 //! Session-scoped skill state.
 //!
 //! `skill.activate`, `skill.deactivate`, and `skill.active` are
-//! marker-registered in `handlers::mod` and executed by engine-owned generic
-//! trigger functions. This module keeps the event-sourced reconstruction helper
+//! marker-registered in `handlers::mod` and executed by canonical `skills::*`
+//! engine functions. This module keeps the event-sourced reconstruction helper
 //! used by runtime prompt assembly and wire-compatibility tests for the
 //! collapsed skill-session group.
 

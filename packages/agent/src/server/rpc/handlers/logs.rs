@@ -1,9 +1,9 @@
 //! Logs RPC group.
 //!
 //! `logs.ingest` and `logs.recent` are marker-registered in `handlers::mod`
-//! and executed by engine-owned `rpc::<method>` functions. This module remains
-//! as progressive disclosure docs plus wire-compatibility tests for the
-//! collapsed logs group.
+//! and executed by canonical engine functions `logs::ingest` and
+//! `logs::recent`. This module remains as progressive disclosure docs plus
+//! wire-compatibility tests for the collapsed logs group.
 
 #[cfg(test)]
 mod tests {
