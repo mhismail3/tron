@@ -380,7 +380,7 @@ isolation does.
 | Worker | Responsibility |
 |--------|----------------|
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
-| `rpc` | Compatibility worker for current JSON-RPC methods during migration. Function ids use `rpc::<method>`; selected read methods and the first prompt-snippet write group are already served by a generic JSON-RPC trigger, while handler-only methods remain internal/non-routable metadata until migrated and deleted. |
+| `rpc` | Compatibility worker for current JSON-RPC methods during migration. Function ids use `rpc::<method>`; selected read methods and the full prompt-library group are already served by a generic JSON-RPC trigger, while handler-only methods remain internal/non-routable metadata until migrated and deleted. |
 | `event` | Session/event-store append, read, reconstruct, subscribe. |
 | `stream` | Durable subscriptions for session events, topology, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |

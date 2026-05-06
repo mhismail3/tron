@@ -322,8 +322,8 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("notifications.markRead"),
     handler_only!("notifications.markAllRead"),
     generic_trigger!("promptHistory.list"),
-    handler_only!("promptHistory.delete"),
-    handler_only!("promptHistory.clear"),
+    generic_trigger!("promptHistory.delete"),
+    generic_trigger!("promptHistory.clear"),
     generic_trigger!("promptSnippet.list"),
     generic_trigger!("promptSnippet.get"),
     generic_trigger!("promptSnippet.create"),
@@ -595,7 +595,7 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
 }
 
 fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
-    if method.starts_with("promptSnippet.") {
+    if method.starts_with("promptHistory.") || method.starts_with("promptSnippet.") {
         IdempotencyContract::caller_system_engine_ledger()
     } else {
         IdempotencyContract::caller_session_engine_ledger()

@@ -212,11 +212,11 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   one `rpc::<method>` function for all 167 current JSON-RPC methods.
   Handler-only methods are present as internal non-routable metadata. The first
   twelve low-risk reads are strict-schema `GenericTrigger` methods served by
-  registry-level JSON-RPC-to-engine dispatch. The first write pilot,
-  `promptSnippet.create`, `promptSnippet.update`, and `promptSnippet.delete`,
-  is also generic-triggered with `rpc.write` authority and engine-ledger
-  idempotency. Superseded method-specific business handlers are deleted as each
-  group migrates.
+  registry-level JSON-RPC-to-engine dispatch. The prompt-library RPC group is
+  the first fully collapsed method group: all prompt history/snippet reads and
+  writes are generic-triggered with `rpc.read`/`rpc.write`, strict schemas, and
+  engine-ledger idempotency for writes. Superseded method-specific business
+  handlers are deleted as each group migrates.
 
 ## Phase 1 acceptance checklist
 
@@ -275,6 +275,11 @@ Implemented:
   strict schemas, system-scoped engine-ledger idempotency, and exact-duplicate
   JSON-RPC transport dedupe while deleting the old prompt-snippet write
   handlers;
+- full prompt-library collapse: `promptHistory.delete` and
+  `promptHistory.clear` now join the generic-trigger path with `rpc.write`,
+  strict schemas, system-scoped engine-ledger idempotency, approval metadata for
+  irreversible effects, and tests proving generic-trigger registrations are
+  marker-only;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   function id, actor `rpc-client`, authority grant `rpc-bridge`, read/write
   authority scope, trace id, optional idempotency key, and optional
@@ -283,8 +288,8 @@ Implemented:
 
 Still deferred:
 
-- broader write-side RPC migrations and generic-trigger conversion for the
-  remaining handler-only method groups;
+- write-side RPC migrations and generic-trigger conversion for the remaining
+  handler-only method groups beyond prompt library;
 - tool/runtime/client-native engine rewrites beyond the first read-side RPC
   adapters;
 - queue and void delivery execution;

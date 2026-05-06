@@ -131,6 +131,11 @@ impl MethodHandler for RpcGenericTriggerHandler {
             ),
         })
     }
+
+    #[cfg(test)]
+    fn is_generic_trigger_marker(&self) -> bool {
+        true
+    }
 }
 
 pub(super) fn payload_for_rpc_method(

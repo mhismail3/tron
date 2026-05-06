@@ -27,9 +27,9 @@
 //! business handlers: the registry validates method existence/depth, then the
 //! bridge dispatches JSON-RPC as a transport trigger into engine functions.
 //! Read triggers carry `rpc.read`; migrated write triggers carry `rpc.write`
-//! plus engine-ledger idempotency. The first write group is
-//! `promptSnippet.create`, `promptSnippet.update`, and
-//! `promptSnippet.delete`.
+//! plus engine-ledger idempotency. The prompt-library group is the first fully
+//! collapsed group: all prompt history/snippet methods are generic-triggered
+//! engine functions with marker-only JSON-RPC registrations.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

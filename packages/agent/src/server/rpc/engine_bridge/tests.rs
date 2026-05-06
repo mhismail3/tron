@@ -28,6 +28,19 @@ const GENERIC_READ_METHODS: &[&str] = &[
 ];
 
 const GENERIC_WRITE_METHODS: &[&str] = &[
+    "promptHistory.delete",
+    "promptHistory.clear",
+    "promptSnippet.create",
+    "promptSnippet.update",
+    "promptSnippet.delete",
+];
+
+const PROMPT_LIBRARY_METHODS: &[&str] = &[
+    "promptHistory.list",
+    "promptHistory.delete",
+    "promptHistory.clear",
+    "promptSnippet.list",
+    "promptSnippet.get",
     "promptSnippet.create",
     "promptSnippet.update",
     "promptSnippet.delete",
@@ -124,7 +137,7 @@ fn bridge_specs_classify_selected_reads_as_generic_triggers() {
 }
 
 #[test]
-fn bridge_specs_classify_prompt_snippet_writes_as_generic_triggers() {
+fn bridge_specs_classify_generic_writes_as_generic_triggers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -157,6 +170,46 @@ fn bridge_specs_classify_prompt_snippet_writes_as_generic_triggers() {
     assert_eq!(delete.effect_class, EffectClass::IrreversibleSideEffect);
     let definition = specs::function_definition_for_spec(delete);
     assert!(definition.required_authority.approval_required);
+}
+
+#[test]
+fn bridge_specs_classify_prompt_library_as_fully_generic_triggered() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in PROMPT_LIBRARY_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+    }
+}
+
+#[test]
+fn bridge_specs_classify_prompt_history_writes_as_guarded_irreversible_triggers() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    for method in ["promptHistory.delete", "promptHistory.clear"] {
+        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
+        assert_eq!(spec.effect_class, EffectClass::IrreversibleSideEffect);
+        assert_eq!(spec.risk_level, RiskLevel::High);
+        assert_eq!(spec.visibility, VisibilityScope::System);
+        assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(
+            spec.idempotency_mode,
+            RpcIdempotencyMode::JsonRpcRequestIdSeed
+        );
+        assert!(super::schemas::request_schema_for_method(method).is_some());
+        assert!(super::schemas::response_schema_for_method(method).is_some());
+        let definition = specs::function_definition_for_spec(spec);
+        assert!(definition.required_authority.approval_required);
+    }
 }
 
 #[test]
@@ -323,6 +376,25 @@ fn rpc_engine_invocation_rejects_empty_write_request_id() {
             id: String::new(),
             method: "promptSnippet.create".to_owned(),
             params: Some(json!({"name": "n", "text": "t"})),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), errors::INVALID_PARAMS);
+    assert!(err.to_string().contains("request id"));
+}
+
+#[test]
+fn rpc_engine_invocation_rejects_empty_prompt_history_write_request_id() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let err = RpcEngineInvocation::from_request(
+        &registry,
+        &ctx,
+        &RpcRequest {
+            id: " ".to_owned(),
+            method: "promptHistory.delete".to_owned(),
+            params: Some(json!({"id": "history-1"})),
         },
     )
     .unwrap_err();
@@ -537,6 +609,63 @@ async fn prompt_snippet_write_outputs_match_direct_engine_outputs() {
 }
 
 #[tokio::test]
+async fn prompt_history_write_outputs_match_direct_engine_outputs() {
+    let direct_delete_ctx = make_test_context();
+    let direct_delete_pool = direct_delete_ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(direct_delete_pool, "delete me").unwrap();
+    let direct_delete_page =
+        crate::prompt_library::store::list_history(direct_delete_pool, 10, None, None).unwrap();
+    let delete_direct = direct_engine_value(
+        &direct_delete_ctx,
+        "promptHistory.delete",
+        json!({"id": direct_delete_page.items[0].id}),
+    )
+    .await;
+    assert_eq!(delete_direct, json!({"deleted": true}));
+
+    let rpc_delete_ctx = make_test_context();
+    let rpc_delete_pool = rpc_delete_ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(rpc_delete_pool, "delete me").unwrap();
+    let rpc_delete_page =
+        crate::prompt_library::store::list_history(rpc_delete_pool, 10, None, None).unwrap();
+    let delete_rpc = rpc_dispatch_value(
+        &rpc_delete_ctx,
+        "promptHistory.delete",
+        json!({"id": rpc_delete_page.items[0].id}),
+    )
+    .await;
+    assert_eq!(delete_direct, delete_rpc);
+
+    let direct_clear_ctx = make_test_context();
+    let direct_clear_pool = direct_clear_ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(direct_clear_pool, "clear a").unwrap();
+    crate::prompt_library::store::record_prompt(direct_clear_pool, "clear b").unwrap();
+    let clear_direct =
+        direct_engine_value(&direct_clear_ctx, "promptHistory.clear", json!({})).await;
+    assert_eq!(clear_direct, json!({"deletedCount": 2}));
+
+    let rpc_clear_ctx = make_test_context();
+    let rpc_clear_pool = rpc_clear_ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(rpc_clear_pool, "clear a").unwrap();
+    crate::prompt_library::store::record_prompt(rpc_clear_pool, "clear b").unwrap();
+    let clear_rpc = rpc_dispatch_value(&rpc_clear_ctx, "promptHistory.clear", json!({})).await;
+    assert_eq!(clear_rpc, json!({"deletedCount": 2}));
+    assert_eq!(clear_direct, clear_rpc);
+}
+
+#[tokio::test]
+async fn prompt_history_delete_missing_target_returns_false() {
+    let ctx = make_test_context();
+    let value = rpc_dispatch_value(
+        &ctx,
+        "promptHistory.delete",
+        json!({"id": "missing-history-id"}),
+    )
+    .await;
+    assert_eq!(value, json!({"deleted": false}));
+}
+
+#[tokio::test]
 async fn prompt_snippet_write_duplicate_transport_replays_without_rerun() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
@@ -700,6 +829,129 @@ async fn prompt_snippet_write_errors_complete_idempotency_and_replay() {
 }
 
 #[tokio::test]
+async fn prompt_history_delete_duplicate_transport_replays_without_second_delete() {
+    let ctx = make_test_context();
+    let pool = ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(pool, "delete retry").unwrap();
+    let page = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
+    let id = page.items[0].id.clone();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let request = RpcRequest {
+        id: "history-delete-retry".to_owned(),
+        method: "promptHistory.delete".to_owned(),
+        params: Some(json!({"id": id})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    let second = registry.dispatch(request, &ctx).await;
+    assert_eq!(first.result.unwrap(), json!({"deleted": true}));
+    assert_eq!(second.result.unwrap(), json!({"deleted": true}));
+}
+
+#[tokio::test]
+async fn prompt_history_clear_duplicate_transport_replays_original_count() {
+    let ctx = make_test_context();
+    let pool = ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(pool, "first").unwrap();
+    crate::prompt_library::store::record_prompt(pool, "second").unwrap();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let request = RpcRequest {
+        id: "history-clear-retry".to_owned(),
+        method: "promptHistory.clear".to_owned(),
+        params: Some(json!({})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert_eq!(first.result.as_ref().unwrap(), &json!({"deletedCount": 2}));
+    crate::prompt_library::store::record_prompt(pool, "after first clear").unwrap();
+
+    let second = registry.dispatch(request, &ctx).await;
+    assert_eq!(second.result.as_ref().unwrap(), &json!({"deletedCount": 2}));
+    let host = ctx.engine_host.lock().await;
+    let replay = host.catalog().invocations().last().unwrap();
+    assert!(replay.replayed_from.is_some());
+    assert_eq!(
+        replay
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+
+    let remaining = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
+    assert_eq!(remaining.items.len(), 1);
+    assert_eq!(remaining.items[0].text, "after first clear");
+}
+
+#[tokio::test]
+async fn prompt_history_reused_request_id_with_different_payload_is_distinct_command() {
+    let ctx = make_test_context();
+    let pool = ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(pool, "first").unwrap();
+    crate::prompt_library::store::record_prompt(pool, "second").unwrap();
+    let page = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+
+    for item in page.items.iter().take(2) {
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "same-history-request-id".to_owned(),
+                    method: "promptHistory.delete".to_owned(),
+                    params: Some(json!({"id": item.id})),
+                },
+                &ctx,
+            )
+            .await;
+        assert!(response.success, "{:?}", response.error);
+        assert_eq!(response.result.as_ref().unwrap(), &json!({"deleted": true}));
+    }
+
+    let remaining = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
+    assert_eq!(remaining.items.len(), 0);
+}
+
+#[tokio::test]
+async fn prompt_history_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
+    let ctx = make_test_context();
+    let pool = ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(pool, "first").unwrap();
+    crate::prompt_library::store::record_prompt(pool, "second").unwrap();
+    let page = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
+    let function_id = specs::function_id_for_method("promptHistory.delete").unwrap();
+
+    let first = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id.clone(),
+            json!({"id": page.items[0].id}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("history-explicit-key"),
+        ))
+        .await;
+    assert!(first.error.is_none(), "{:?}", first.error);
+
+    let conflict = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({"id": page.items[1].id}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("history-explicit-key"),
+        ))
+        .await;
+    assert!(matches!(
+        conflict.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+    let rpc = result_to_rpc(conflict).unwrap_err();
+    assert_eq!(rpc.code(), errors::IDEMPOTENCY_CONFLICT);
+}
+
+#[tokio::test]
 async fn prompt_snippet_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
     let ctx = make_test_context();
     let function_id = specs::function_id_for_method("promptSnippet.create").unwrap();
@@ -804,6 +1056,49 @@ async fn generic_write_records_invocation_ledger_metadata() {
     assert_eq!(
         record.function_id,
         specs::function_id_for_method("promptSnippet.create").unwrap()
+    );
+    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(record.actor_kind, ActorKind::Client);
+    assert_eq!(record.delivery_mode, DeliveryMode::Sync);
+    assert!(
+        record
+            .authority_scopes
+            .contains(&RPC_WRITE_AUTHORITY.to_owned())
+    );
+    assert_eq!(
+        record
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+    assert!(
+        record
+            .idempotency_key
+            .as_deref()
+            .unwrap()
+            .starts_with("json-rpc:v1:")
+    );
+    assert!(record.result_value.is_some());
+}
+
+#[tokio::test]
+async fn generic_prompt_history_write_records_invocation_ledger_metadata() {
+    let ctx = make_test_context();
+    let pool = ctx.event_store.pool();
+    crate::prompt_library::store::record_prompt(pool, "ledger").unwrap();
+    let page = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
+    let _ = rpc_dispatch_value(
+        &ctx,
+        "promptHistory.delete",
+        json!({"id": page.items[0].id}),
+    )
+    .await;
+    let host = ctx.engine_host.lock().await;
+    let record = host.catalog().invocations().last().unwrap();
+    assert_eq!(
+        record.function_id,
+        specs::function_id_for_method("promptHistory.delete").unwrap()
     );
     assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
     assert_eq!(record.actor_kind, ActorKind::Client);

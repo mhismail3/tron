@@ -89,6 +89,24 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "promptHistory.delete" => json!({
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": {
+                "id": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "promptHistory.clear" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "promptSnippet.get" => json!({
             "type": "object",
             "required": ["id"],
@@ -286,6 +304,22 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
             "properties": {
                 "items": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
                 "nextCursor": {"type": ["string", "null"]}
+            }
+        }),
+        "promptHistory.delete" => json!({
+            "type": "object",
+            "required": ["deleted"],
+            "additionalProperties": false,
+            "properties": {
+                "deleted": {"type": "boolean"}
+            }
+        }),
+        "promptHistory.clear" => json!({
+            "type": "object",
+            "required": ["deletedCount"],
+            "additionalProperties": false,
+            "properties": {
+                "deletedCount": {"type": "integer"}
             }
         }),
         "promptSnippet.list" => json!({

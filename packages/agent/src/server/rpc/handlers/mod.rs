@@ -358,8 +358,14 @@ fn register_platform(registry: &mut MethodRegistry) {
         "promptHistory.list",
         RpcGenericTriggerHandler::new("promptHistory.list"),
     );
-    registry.register("promptHistory.delete", prompt_library::DeleteHistoryHandler);
-    registry.register("promptHistory.clear", prompt_library::ClearHistoryHandler);
+    registry.register(
+        "promptHistory.delete",
+        RpcGenericTriggerHandler::new("promptHistory.delete"),
+    );
+    registry.register(
+        "promptHistory.clear",
+        RpcGenericTriggerHandler::new("promptHistory.clear"),
+    );
     registry.register(
         "promptSnippet.list",
         RpcGenericTriggerHandler::new("promptSnippet.list"),

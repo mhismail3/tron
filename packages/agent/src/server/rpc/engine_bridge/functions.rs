@@ -92,6 +92,8 @@ async fn rpc_function_value(
         "events.getSince" => events_get_since_value(Some(payload), deps).await,
         "filesystem.getHome" => filesystem_get_home_value(deps).await,
         "promptHistory.list" => prompt_history_list_value(Some(payload), deps).await,
+        "promptHistory.delete" => prompt_history_delete_value(Some(payload), deps).await,
+        "promptHistory.clear" => prompt_history_clear_value(deps).await,
         "promptSnippet.list" => prompt_snippet_list_value(deps).await,
         "promptSnippet.get" => prompt_snippet_get_value(Some(payload), deps).await,
         "promptSnippet.create" => prompt_snippet_create_value(Some(payload), deps).await,
@@ -346,6 +348,20 @@ async fn prompt_history_list_value(
         "items": to_json_value(&page.items)?,
         "nextCursor": page.next_cursor,
     }))
+}
+
+async fn prompt_history_delete_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let id = require_string_param(params, "id")?;
+    let deleted = store::delete_history(deps.event_store.pool(), &id).map_err(map_store_err)?;
+    Ok(json!({ "deleted": deleted }))
+}
+
+async fn prompt_history_clear_value(deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let deleted_count = store::clear_history(deps.event_store.pool()).map_err(map_store_err)?;
+    Ok(json!({ "deletedCount": deleted_count }))
 }
 
 async fn prompt_snippet_list_value(deps: &RpcEngineDeps) -> Result<Value, RpcError> {

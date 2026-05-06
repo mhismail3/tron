@@ -28,11 +28,11 @@ with one `rpc::<method>` function for each method. Handler-only entries are
 internal/non-routable metadata. The first generic-triggered engine reads are
 `system.ping`, `system.getInfo`, `settings.get`, `model.list`, `skill.list`,
 `logs.recent`, `events.getHistory`, `events.getSince`, `filesystem.getHome`,
-`promptHistory.list`, `promptSnippet.list`, and `promptSnippet.get`. The first
-generic-triggered engine writes are `promptSnippet.create`,
-`promptSnippet.update`, and `promptSnippet.delete`, using `rpc.write` and
-system-scoped engine-ledger idempotency. Migrated groups delete their
-method-specific business handlers.
+`promptHistory.list`, `promptSnippet.list`, and `promptSnippet.get`. The full
+prompt-library group is now generic-triggered: `promptHistory.delete`,
+`promptHistory.clear`, `promptSnippet.create`, `promptSnippet.update`, and
+`promptSnippet.delete` use `rpc.write` and system-scoped engine-ledger
+idempotency. Migrated groups delete their method-specific business handlers.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,
@@ -70,7 +70,7 @@ answers are explicit enough to test.
 | `git` / `repo` | 7 | `git::*`, `repo::*`. | Workspace/admin. | Mutations require idempotency and locks. | Remote side effects need risk and approval policy. |
 | `sandbox` | 5 | `sandbox::*` worker lifecycle. | Session by default. | Lifecycle idempotent by sandbox id; high-risk execution gated. | Created workers inherit narrowed delegated authority. |
 | `notifications` | 3 | `notification::*`. | Client/session. | Mark read idempotent; list read. | Notification effects link to source invocation/event. |
-| `promptHistory` / `promptSnippet` | 8 | `prompt_library::*`; snippet reads and writes plus history list are generic-triggered in the RPC bridge. | Workspace/client. | Snippet writes use engine-ledger idempotency; history writes remain to migrate. | Prompt provenance and retention policy recorded. |
+| `promptHistory` / `promptSnippet` | 8 | `prompt_library::*`; all methods are generic-triggered in the RPC bridge. | Workspace/client. | Prompt-library writes use engine-ledger idempotency; delete/clear effects carry irreversible-risk metadata. | Prompt provenance and retention policy recorded. |
 | `cron` | 8 | `cron::*` trigger worker. | Admin/workspace. | Job definitions idempotent by job id; runs append-only. | Trigger fires record schedule, misfire/overlap policy, and target invocation. |
 
 ## Runtime and agent loop

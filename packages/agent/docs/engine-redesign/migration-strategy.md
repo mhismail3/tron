@@ -322,6 +322,37 @@ Acceptance:
 - Duplicate create/update/delete transports replay through the engine ledger
   without rerunning the store mutation.
 
+## Phase 3.6: first fully collapsed RPC group
+
+Finish the prompt-library group so JSON-RPC is only a transport trigger for
+that subsystem.
+
+Implemented generic-trigger functions:
+
+- `rpc::promptHistory.delete`
+- `rpc::promptHistory.clear`
+
+Semantics:
+
+- all eight prompt-library RPC methods are now `GenericTrigger`;
+- prompt history writes use `rpc.write`, strict schemas, and system-scoped
+  engine-ledger idempotency;
+- `promptHistory.delete`, `promptHistory.clear`, and `promptSnippet.delete`
+  remain irreversible side-effect capabilities with approval-required metadata;
+- generic-trigger registrations are marker-only, and tests fail if a completed
+  group keeps hidden method-specific business handlers.
+
+Acceptance:
+
+- `DeleteHistoryHandler` and `ClearHistoryHandler` are deleted.
+- Direct engine invocation and JSON-RPC dispatch return the same payloads for
+  history delete/clear success and representative validation cases.
+- Duplicate delete/clear transports replay through the engine ledger without
+  rerunning store mutations.
+- The prompt-library group is the first complete proof of the end state:
+  method-specific JSON-RPC business handlers can disappear once functions own
+  behavior.
+
 ## Phase 4: catalog watch, streams, and event unification
 
 Introduce engine streams while preserving WebSocket clients.

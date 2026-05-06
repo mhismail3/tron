@@ -40,6 +40,12 @@ impl HandlerExecutionPolicy {
 pub trait MethodHandler: Send + Sync {
     /// Execute the handler with the given params and context.
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError>;
+
+    /// Whether this handler is only a generic engine-trigger marker.
+    #[cfg(test)]
+    fn is_generic_trigger_marker(&self) -> bool {
+        false
+    }
 }
 
 struct HandlerEntry {
@@ -228,6 +234,15 @@ impl MethodRegistry {
     /// Return the configured execution policy for a registered method.
     pub fn method_policy(&self, method: &str) -> Option<HandlerExecutionPolicy> {
         self.handlers.get(method).map(|entry| entry.policy)
+    }
+
+    /// Test-only guardrail: generic-triggered methods must register marker
+    /// handlers, not hidden method-specific business logic.
+    #[cfg(test)]
+    pub fn is_generic_trigger_marker(&self, method: &str) -> bool {
+        self.handlers
+            .get(method)
+            .is_some_and(|entry| entry.handler.is_generic_trigger_marker())
     }
 
     fn policy_for_method(method: &str) -> HandlerExecutionPolicy {

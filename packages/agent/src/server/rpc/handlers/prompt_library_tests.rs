@@ -1,9 +1,8 @@
 //! RPC handler tests for the Prompt Library.
 
-use super::*;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::handlers::test_helpers::make_test_context;
-use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
+use crate::server::rpc::registry::MethodRegistry;
 use crate::server::rpc::types::{RpcErrorBody, RpcRequest};
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -170,30 +169,26 @@ async fn history_delete_existing_returns_true() {
     let page = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
     let id = page.items[0].id.clone();
 
-    let out = DeleteHistoryHandler
-        .handle(Some(json!({ "id": id })), &ctx)
-        .await
-        .unwrap();
+    let out = dispatch_ok(&ctx, "promptHistory.delete", Some(json!({ "id": id }))).await;
     assert_eq!(out["deleted"], true);
 }
 
 #[tokio::test]
 async fn history_delete_missing_returns_false() {
     let ctx = make_test_context();
-    let out = DeleteHistoryHandler
-        .handle(Some(json!({ "id": "nonexistent" })), &ctx)
-        .await
-        .unwrap();
+    let out = dispatch_ok(
+        &ctx,
+        "promptHistory.delete",
+        Some(json!({ "id": "nonexistent" })),
+    )
+    .await;
     assert_eq!(out["deleted"], false);
 }
 
 #[tokio::test]
 async fn history_delete_rejects_missing_id() {
     let ctx = make_test_context();
-    let err = DeleteHistoryHandler
-        .handle(Some(json!({})), &ctx)
-        .await
-        .unwrap_err();
+    let err = dispatch_err(&ctx, "promptHistory.delete", Some(json!({}))).await;
     assert!(matches!(err, RpcError::InvalidParams { .. }));
 }
 
@@ -207,7 +202,7 @@ async fn history_clear_removes_all_rows() {
         crate::prompt_library::store::record_prompt(pool, t).unwrap();
     }
 
-    let out = ClearHistoryHandler.handle(None, &ctx).await.unwrap();
+    let out = dispatch_ok(&ctx, "promptHistory.clear", None).await;
     assert_eq!(out["deletedCount"], 3);
 
     let remaining = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
