@@ -151,9 +151,8 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | AUTOMATIONS | `~/.tron/workspace/automations/` | `automations.json` + per-job dirs: `<slug>/output/`, `state/`, `scripts/` |
 | REPORTS | `~/.tron/workspace/reports/` | Investigation reports, analysis results |
 | SCRATCH | `~/.tron/workspace/scratch/` | Throwaway output, experiments |
-| RENDERS | `~/.tron/workspace/artifacts/renders/` | Rendered pages displayed in chat |
-| SCREENSHOTS | `~/.tron/workspace/artifacts/screenshots/` | Computer-use screenshots |
-| EXPORTS | `~/.tron/workspace/artifacts/exports/` | Exported artifacts |
+| RENDERS | `~/.tron/workspace/renders/` | Rendered pages displayed in chat |
+| SCREENSHOTS | `~/.tron/workspace/screenshots/` | Computer-use screenshots |
 | VOICE_NOTES | `~/.tron/workspace/inbox/voice-notes/` | Transcribed voice notes |
 | LABS | `~/.tron/workspace/labs/` | Manifested experiments and trial spaces |
 

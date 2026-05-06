@@ -260,16 +260,8 @@ fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
         home.join(dirs::WORKSPACE).join(dirs::AUTOMATIONS),
         home.join(dirs::WORKSPACE).join(dirs::PLANS),
         home.join(dirs::WORKSPACE).join(dirs::REPORTS),
-        home.join(dirs::WORKSPACE).join(dirs::ARTIFACTS),
-        home.join(dirs::WORKSPACE)
-            .join(dirs::ARTIFACTS)
-            .join(dirs::RENDERS),
-        home.join(dirs::WORKSPACE)
-            .join(dirs::ARTIFACTS)
-            .join(dirs::SCREENSHOTS),
-        home.join(dirs::WORKSPACE)
-            .join(dirs::ARTIFACTS)
-            .join(dirs::EXPORTS),
+        home.join(dirs::WORKSPACE).join(dirs::RENDERS),
+        home.join(dirs::WORKSPACE).join(dirs::SCREENSHOTS),
         home.join(dirs::WORKSPACE).join(dirs::SCRATCH),
         home.join(dirs::WORKSPACE).join(dirs::LABS),
         home.join(dirs::WORKSPACE).join(dirs::ARCHIVE),
@@ -510,6 +502,10 @@ mod tests {
         );
         assert!(home.join(dirs::WORKSPACE).join(dirs::KNOWLEDGE).exists());
         assert!(home.join(dirs::WORKSPACE).join(dirs::VAULT).exists());
+        assert!(home.join(dirs::WORKSPACE).join(dirs::RENDERS).exists());
+        assert!(home.join(dirs::WORKSPACE).join(dirs::SCREENSHOTS).exists());
+        assert!(!home.join(dirs::WORKSPACE).join("artifacts").exists());
+        assert!(!home.join(dirs::WORKSPACE).join("exports").exists());
         assert!(!home.join("instructions").exists());
         assert!(!home.join("settings").exists());
     }

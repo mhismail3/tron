@@ -935,10 +935,8 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- automations/               Cron job definitions and working directories
 |   +-- plans/                     Plan files and TODOs
 |   +-- reports/                   Analysis and investigation reports
-|   +-- artifacts/
-|   |   +-- renders/               Rendered pages displayed in chat
-|   |   +-- screenshots/           Saved screenshots from the computer-use tool
-|   |   +-- exports/               Exported artifacts
+|   +-- renders/                   Rendered pages displayed in chat
+|   +-- screenshots/               Saved screenshots from the computer-use tool
 |   +-- scratch/                   Downloads, temp files, experiments
 |   +-- labs/                      Manifested experimental spaces
 |   +-- archive/                   Retired workspace material

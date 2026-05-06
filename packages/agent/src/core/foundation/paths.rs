@@ -65,12 +65,8 @@ pub mod dirs {
     pub const AUTOMATIONS: &str = "automations";
     /// Plans written during planning workflows.
     pub const PLANS: &str = "plans";
-    /// Generated render/export/screenshot artifacts.
-    pub const ARTIFACTS: &str = "artifacts";
     /// Rendered pages displayed in the app.
     pub const RENDERS: &str = "renders";
-    /// Exported documents/assets.
-    pub const EXPORTS: &str = "exports";
     /// Throwaway output and intermediate results.
     pub const SCRATCH: &str = "scratch";
     /// Saved screenshots from computer-use tool.
@@ -313,24 +309,14 @@ pub fn scratch_dir() -> PathBuf {
     workspace_dir().join(dirs::SCRATCH)
 }
 
-/// `~/.tron/workspace/artifacts/`
-pub fn artifacts_dir() -> PathBuf {
-    workspace_dir().join(dirs::ARTIFACTS)
-}
-
-/// `~/.tron/workspace/artifacts/renders/`
+/// `~/.tron/workspace/renders/`
 pub fn renders_dir() -> PathBuf {
-    artifacts_dir().join(dirs::RENDERS)
+    workspace_dir().join(dirs::RENDERS)
 }
 
-/// `~/.tron/workspace/artifacts/screenshots/`
+/// `~/.tron/workspace/screenshots/`
 pub fn screenshots_dir() -> PathBuf {
-    artifacts_dir().join(dirs::SCREENSHOTS)
-}
-
-/// `~/.tron/workspace/artifacts/exports/`
-pub fn exports_dir() -> PathBuf {
-    artifacts_dir().join(dirs::EXPORTS)
+    workspace_dir().join(dirs::SCREENSHOTS)
 }
 
 /// `~/.tron/workspace/plans/`
@@ -877,12 +863,13 @@ mod tests {
     #[test]
     fn screenshots_dir_chains_correctly() {
         let p = screenshots_dir();
-        assert!(p.ends_with(format!(
-            "{}/{}/{}",
-            dirs::WORKSPACE,
-            dirs::ARTIFACTS,
-            dirs::SCREENSHOTS
-        )));
+        assert!(p.ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::SCREENSHOTS)));
+    }
+
+    #[test]
+    fn renders_dir_chains_correctly() {
+        let p = renders_dir();
+        assert!(p.ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::RENDERS)));
     }
 
     // ── Composite file paths ───────────────────────────────────────
