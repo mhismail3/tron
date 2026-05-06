@@ -51,8 +51,8 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "6"
-        TRON_CANONICAL_VERSION: "0.1.0-beta.6"
+        CURRENT_PROJECT_VERSION: "7"
+        TRON_CANONICAL_VERSION: "0.1.0-beta.7"
         SWIFT_EMIT_LOC_STRINGS: YES
       configs:
         Beta:
@@ -76,8 +76,8 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_VERSION: "6.0"
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "6"
-        TRON_CANONICAL_VERSION: "0.1.0-beta.6"
+        CURRENT_PROJECT_VERSION: "7"
+        TRON_CANONICAL_VERSION: "0.1.0-beta.7"
       configs:
         Beta:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.beta.ShareExtension
