@@ -32,7 +32,11 @@ internal/non-routable metadata. The first generic-triggered engine reads are
 prompt-library group is now generic-triggered: `promptHistory.delete`,
 `promptHistory.clear`, `promptSnippet.create`, `promptSnippet.update`, and
 `promptSnippet.delete` use `rpc.write` and system-scoped engine-ledger
-idempotency. Migrated groups delete their method-specific business handlers.
+idempotency. The full settings group is also generic-triggered:
+`settings.update` and `settings.resetToDefaults` are high-risk reversible
+configuration writes with `rpc.write`, approval metadata, and system-scoped
+engine-ledger idempotency. Migrated groups delete their method-specific
+business handlers.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,
@@ -49,7 +53,7 @@ answers are explicit enough to test.
 | `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
 | `context` | 9 | `context::*` functions. | Session. | Reads plus compaction/context mutations. | Compaction ordering and event writes must remain deterministic. |
 | `events` | 5 | `event::*` worker functions and streams; `getHistory`/`getSince` are generic-triggered reads in the RPC bridge. | Session/workspace/admin. | Reads plus append-only event writes with dedupe. | Event append is the durable causal ledger path. |
-| `settings` | 3 | `settings::*` state functions. | Admin/client. | Idempotent system write. | Must preserve iOS settings parity and strict validation. |
+| `settings` | 3 | Fully generic-triggered `settings::*` state functions. | Admin/client. | Read plus high-risk reversible system writes with engine-ledger idempotency. | Must preserve iOS settings parity, strict validation, rollback, MCP reload, and Codex App Server reconfiguration causality. |
 | `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
 | `tool` | 1 | Tool-result compatibility function. | Session. | Append/update tool result; idempotent by tool call id. | Link to parent tool invocation and turn. |
 | `message` | 1 | `message::delete`. | Session/client. | Idempotent write. | Event-sourced deletion marker. |

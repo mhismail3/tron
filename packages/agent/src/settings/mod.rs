@@ -326,7 +326,7 @@ discoverStandaloneFiles = false
 "#,
         );
 
-        // Reload (what UpdateSettingsHandler should do)
+        // Reload (what the engine-owned settings.update RPC function should do)
         reload_settings_from_path(&settings_path).unwrap();
 
         // Now get_settings should reflect the iOS toggle

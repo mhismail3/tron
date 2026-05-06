@@ -4,9 +4,9 @@
 //! owns the temporary migration inventory for that path: every registered RPC
 //! method has an explicit capability spec, selected methods are engine-owned,
 //! and generic-trigger methods now bypass method-specific business handlers
-//! entirely. Prompt library is the first fully collapsed RPC group: every
-//! prompt history/snippet method is marker-registered and executed through an
-//! engine-owned `rpc::<method>` function.
+//! entirely. Prompt library and settings are the first fully collapsed RPC
+//! groups: every method in those groups is marker-registered and executed
+//! through an engine-owned `rpc::<method>` function.
 //!
 //! # INVARIANT: the bridge is temporary demolition scaffolding
 //!

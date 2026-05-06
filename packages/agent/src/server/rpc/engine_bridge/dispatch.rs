@@ -143,6 +143,9 @@ pub(super) fn payload_for_rpc_method(
     method: &'static str,
     params: Option<Value>,
 ) -> Value {
+    if method == "settings.resetToDefaults" {
+        return json!({});
+    }
     let mut payload = params.unwrap_or_else(|| json!({}));
     if !payload.is_object() {
         return payload;

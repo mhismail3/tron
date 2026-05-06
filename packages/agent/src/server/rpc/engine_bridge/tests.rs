@@ -1,4 +1,7 @@
 use std::collections::BTreeSet;
+use std::io;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -6,6 +9,10 @@ use serde_json::{Value, json};
 use super::*;
 use crate::engine::{
     ActorKind, DeliveryMode, EffectClass, EngineError, Invocation, RiskLevel, VisibilityScope,
+};
+use crate::server::codex_app::{
+    CodexAppServerChild, CodexAppServerExit, CodexAppServerLaunchSpec, CodexAppServerManager,
+    CodexAppServerSpawner, CodexAppServerState,
 };
 use crate::server::rpc::handlers;
 use crate::server::rpc::handlers::test_helpers::make_test_context;
@@ -28,11 +35,19 @@ const GENERIC_READ_METHODS: &[&str] = &[
 ];
 
 const GENERIC_WRITE_METHODS: &[&str] = &[
+    "settings.update",
+    "settings.resetToDefaults",
     "promptHistory.delete",
     "promptHistory.clear",
     "promptSnippet.create",
     "promptSnippet.update",
     "promptSnippet.delete",
+];
+
+const SETTINGS_METHODS: &[&str] = &[
+    "settings.get",
+    "settings.update",
+    "settings.resetToDefaults",
 ];
 
 const PROMPT_LIBRARY_METHODS: &[&str] = &[
@@ -45,6 +60,76 @@ const PROMPT_LIBRARY_METHODS: &[&str] = &[
     "promptSnippet.update",
     "promptSnippet.delete",
 ];
+
+struct SettingsTestGuard {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for SettingsTestGuard {
+    fn drop(&mut self) {
+        crate::settings::init_settings(crate::settings::TronSettings::default());
+    }
+}
+
+fn settings_test_guard() -> SettingsTestGuard {
+    let guard = crate::settings::test_settings_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    crate::settings::init_settings(crate::settings::TronSettings::default());
+    SettingsTestGuard { _guard: guard }
+}
+
+#[derive(Default)]
+struct SettingsFakeSpawner {
+    specs: Mutex<Vec<CodexAppServerLaunchSpec>>,
+}
+
+#[async_trait]
+impl CodexAppServerSpawner for SettingsFakeSpawner {
+    async fn spawn(
+        &self,
+        spec: CodexAppServerLaunchSpec,
+    ) -> io::Result<Box<dyn CodexAppServerChild>> {
+        self.specs.lock().unwrap().push(spec);
+        Ok(Box::new(SettingsFakeChild))
+    }
+}
+
+struct SettingsFakeChild;
+
+#[async_trait]
+impl CodexAppServerChild for SettingsFakeChild {
+    fn id(&self) -> Option<u32> {
+        Some(456)
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<CodexAppServerExit>> {
+        Ok(None)
+    }
+
+    async fn terminate(&mut self, _timeout: Duration) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn attach_codex_manager(
+    ctx: &mut crate::server::rpc::context::RpcContext,
+    token_dir: &tempfile::TempDir,
+) -> (Arc<CodexAppServerManager>, Arc<SettingsFakeSpawner>) {
+    let spawner = Arc::new(SettingsFakeSpawner::default());
+    let manager = Arc::new(
+        CodexAppServerManager::with_deps(
+            crate::settings::CodexAppServerSettings::default(),
+            token_dir.path().join("codex-token"),
+            spawner.clone(),
+            Duration::ZERO,
+            Duration::from_millis(1),
+        )
+        .unwrap(),
+    );
+    ctx.codex_app_server = Some(manager.clone());
+    (manager, spawner)
+}
 
 async fn direct_engine_value(ctx: &RpcContext, method: &'static str, params: Value) -> Value {
     let mut registry = MethodRegistry::new();
@@ -213,6 +298,53 @@ fn bridge_specs_classify_prompt_history_writes_as_guarded_irreversible_triggers(
 }
 
 #[test]
+fn bridge_specs_classify_settings_as_fully_generic_triggered() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in SETTINGS_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+    }
+}
+
+#[test]
+fn bridge_specs_classify_settings_writes_as_guarded_reversible_triggers() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    for method in ["settings.update", "settings.resetToDefaults"] {
+        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
+        assert_eq!(spec.effect_class, EffectClass::ReversibleSideEffect);
+        assert_eq!(spec.risk_level, RiskLevel::High);
+        assert_eq!(spec.visibility, VisibilityScope::System);
+        assert_eq!(spec.authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(
+            spec.idempotency_mode,
+            RpcIdempotencyMode::JsonRpcRequestIdSeed
+        );
+        assert!(super::schemas::request_schema_for_method(method).is_some());
+        assert!(super::schemas::response_schema_for_method(method).is_some());
+        let definition = specs::function_definition_for_spec(spec);
+        assert!(definition.required_authority.approval_required);
+        assert_eq!(
+            definition
+                .idempotency
+                .as_ref()
+                .map(|contract| contract.dedupe_scope.clone()),
+            Some(VisibilityScope::System)
+        );
+    }
+}
+
+#[test]
 fn bridge_specs_classify_representative_effect_and_risk_levels() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
@@ -224,8 +356,11 @@ fn bridge_specs_classify_representative_effect_and_risk_levels() {
     assert_eq!(session_list.risk_level, RiskLevel::Low);
 
     let settings_update = find("settings.update");
-    assert_eq!(settings_update.effect_class, EffectClass::IdempotentWrite);
-    assert_eq!(settings_update.risk_level, RiskLevel::Medium);
+    assert_eq!(
+        settings_update.effect_class,
+        EffectClass::ReversibleSideEffect
+    );
+    assert_eq!(settings_update.risk_level, RiskLevel::High);
 
     let events_append = find("events.append");
     assert_eq!(events_append.effect_class, EffectClass::AppendOnlyEvent);
@@ -403,6 +538,25 @@ fn rpc_engine_invocation_rejects_empty_prompt_history_write_request_id() {
 }
 
 #[test]
+fn rpc_engine_invocation_rejects_empty_settings_write_request_id() {
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let err = RpcEngineInvocation::from_request(
+        &registry,
+        &ctx,
+        &RpcRequest {
+            id: " ".to_owned(),
+            method: "settings.update".to_owned(),
+            params: Some(json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}})),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), errors::INVALID_PARAMS);
+    assert!(err.to_string().contains("request id"));
+}
+
+#[test]
 fn rpc_engine_invocation_defaults_missing_params_to_empty_object() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
@@ -568,6 +722,54 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
         let rpc = rpc_dispatch_value(&ctx, method, payload).await;
         assert_eq!(direct, rpc, "{method}");
     }
+}
+
+#[tokio::test]
+async fn settings_outputs_match_direct_engine_outputs() {
+    let _guard = settings_test_guard();
+
+    let get_ctx = make_test_context();
+    let get_direct = direct_engine_value(&get_ctx, "settings.get", json!({})).await;
+    let get_rpc = rpc_dispatch_value(&get_ctx, "settings.get", json!({})).await;
+    assert_eq!(get_direct, get_rpc);
+
+    let update_ctx = make_test_context();
+    let update_direct = direct_engine_value(
+        &update_ctx,
+        "settings.update",
+        json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}}),
+    )
+    .await;
+    assert_eq!(update_direct, json!({"success": true}));
+
+    let update_rpc_ctx = make_test_context();
+    let update_rpc = rpc_dispatch_value(
+        &update_rpc_ctx,
+        "settings.update",
+        json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}}),
+    )
+    .await;
+    assert_eq!(update_direct, update_rpc);
+
+    let reset_ctx = make_test_context();
+    let _ = direct_engine_value(
+        &reset_ctx,
+        "settings.update",
+        json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}}),
+    )
+    .await;
+    let reset_direct = direct_engine_value(&reset_ctx, "settings.resetToDefaults", json!({})).await;
+    assert_eq!(reset_direct["server"]["heartbeatIntervalMs"], 30_000);
+
+    let reset_rpc_ctx = make_test_context();
+    let _ = rpc_dispatch_value(
+        &reset_rpc_ctx,
+        "settings.update",
+        json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}}),
+    )
+    .await;
+    let reset_rpc = rpc_dispatch_value(&reset_rpc_ctx, "settings.resetToDefaults", json!({})).await;
+    assert_eq!(reset_direct, reset_rpc);
 }
 
 #[tokio::test]
@@ -952,6 +1154,150 @@ async fn prompt_history_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
 }
 
 #[tokio::test]
+async fn settings_update_duplicate_transport_replays_without_second_side_effect() {
+    let _guard = settings_test_guard();
+    let mut ctx = make_test_context();
+    let token_dir = tempfile::tempdir().unwrap();
+    let (manager, spawner) = attach_codex_manager(&mut ctx, &token_dir);
+    ctx.engine_host = crate::engine::EngineHostHandle::new_in_memory().unwrap();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    register_rpc_worker_for_context(&ctx, &registry).unwrap();
+    let request = RpcRequest {
+        id: "settings-update-retry".to_owned(),
+        method: "settings.update".to_owned(),
+        params: Some(json!({"settings": {"server": {"codexAppServer": {"port": 4517}}}})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+    assert_eq!(spawner.specs.lock().unwrap().len(), 1);
+    let status = manager.status().await;
+    assert_eq!(status.state, CodexAppServerState::Running);
+    assert_eq!(status.endpoint.unwrap().port, 4517);
+
+    let host = ctx.engine_host.lock().await;
+    let replay = host.catalog().invocations().last().unwrap();
+    assert!(replay.replayed_from.is_some());
+    assert_eq!(
+        replay
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+}
+
+#[tokio::test]
+async fn settings_reset_duplicate_transport_replays_without_second_reset() {
+    let _guard = settings_test_guard();
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+
+    let seed = registry
+        .dispatch(
+            RpcRequest {
+                id: "settings-seed".to_owned(),
+                method: "settings.update".to_owned(),
+                params: Some(json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}})),
+            },
+            &ctx,
+        )
+        .await;
+    assert!(seed.success, "{:?}", seed.error);
+
+    let request = RpcRequest {
+        id: "settings-reset-retry".to_owned(),
+        method: "settings.resetToDefaults".to_owned(),
+        params: Some(json!({})),
+    };
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(
+        first.result.as_ref().unwrap()["server"]["heartbeatIntervalMs"],
+        30_000
+    );
+
+    crate::settings::SettingsStore::new(&ctx.settings_path)
+        .update(json!({"server": {"heartbeatIntervalMs": 55_000}}))
+        .unwrap();
+
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(second.result, first.result);
+    let saved = crate::settings::SettingsStore::new(&ctx.settings_path)
+        .read_sparse_value()
+        .unwrap();
+    assert_eq!(saved["server"]["heartbeatIntervalMs"], 55_000);
+}
+
+#[tokio::test]
+async fn settings_update_reused_request_id_with_different_payload_is_distinct_command() {
+    let _guard = settings_test_guard();
+    let ctx = make_test_context();
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+
+    for interval in [40_000, 45_000] {
+        let response = registry
+            .dispatch(
+                RpcRequest {
+                    id: "same-settings-request-id".to_owned(),
+                    method: "settings.update".to_owned(),
+                    params: Some(
+                        json!({"settings": {"server": {"heartbeatIntervalMs": interval}}}),
+                    ),
+                },
+                &ctx,
+            )
+            .await;
+        assert!(response.success, "{:?}", response.error);
+    }
+
+    let saved = crate::settings::SettingsStore::new(&ctx.settings_path)
+        .read_sparse_value()
+        .unwrap();
+    assert_eq!(saved["server"]["heartbeatIntervalMs"], 45_000);
+}
+
+#[tokio::test]
+async fn settings_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
+    let _guard = settings_test_guard();
+    let ctx = make_test_context();
+    let function_id = specs::function_id_for_method("settings.update").unwrap();
+    let first = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id.clone(),
+            json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("settings-explicit-key"),
+        ))
+        .await;
+    assert!(first.error.is_none(), "{:?}", first.error);
+
+    let conflict = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({"settings": {"server": {"heartbeatIntervalMs": 45_000}}}),
+            super::dispatch::rpc_causal_context_for_scope(RPC_WRITE_AUTHORITY)
+                .with_idempotency_key("settings-explicit-key"),
+        ))
+        .await;
+    assert!(matches!(
+        conflict.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+    let rpc = result_to_rpc(conflict).unwrap_err();
+    assert_eq!(rpc.code(), errors::IDEMPOTENCY_CONFLICT);
+}
+
+#[tokio::test]
 async fn prompt_snippet_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
     let ctx = make_test_context();
     let function_id = specs::function_id_for_method("promptSnippet.create").unwrap();
@@ -1056,6 +1402,47 @@ async fn generic_write_records_invocation_ledger_metadata() {
     assert_eq!(
         record.function_id,
         specs::function_id_for_method("promptSnippet.create").unwrap()
+    );
+    assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
+    assert_eq!(record.actor_kind, ActorKind::Client);
+    assert_eq!(record.delivery_mode, DeliveryMode::Sync);
+    assert!(
+        record
+            .authority_scopes
+            .contains(&RPC_WRITE_AUTHORITY.to_owned())
+    );
+    assert_eq!(
+        record
+            .idempotency_scope
+            .as_ref()
+            .map(|scope| scope.kind.as_str()),
+        Some("system")
+    );
+    assert!(
+        record
+            .idempotency_key
+            .as_deref()
+            .unwrap()
+            .starts_with("json-rpc:v1:")
+    );
+    assert!(record.result_value.is_some());
+}
+
+#[tokio::test]
+async fn generic_settings_write_records_invocation_ledger_metadata() {
+    let _guard = settings_test_guard();
+    let ctx = make_test_context();
+    let _ = rpc_dispatch_value(
+        &ctx,
+        "settings.update",
+        json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}}),
+    )
+    .await;
+    let host = ctx.engine_host.lock().await;
+    let record = host.catalog().invocations().last().unwrap();
+    assert_eq!(
+        record.function_id,
+        specs::function_id_for_method("settings.update").unwrap()
     );
     assert_eq!(record.worker_id, specs::worker_id(RPC_WORKER_ID).unwrap());
     assert_eq!(record.actor_kind, ActorKind::Client);

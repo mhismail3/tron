@@ -212,9 +212,9 @@ keeping production RPC, tools, runtime orchestration, and client traffic
   one `rpc::<method>` function for all 167 current JSON-RPC methods.
   Handler-only methods are present as internal non-routable metadata. The first
   twelve low-risk reads are strict-schema `GenericTrigger` methods served by
-  registry-level JSON-RPC-to-engine dispatch. The prompt-library RPC group is
-  the first fully collapsed method group: all prompt history/snippet reads and
-  writes are generic-triggered with `rpc.read`/`rpc.write`, strict schemas, and
+  registry-level JSON-RPC-to-engine dispatch. Prompt library and settings are
+  fully collapsed method groups: all public methods in those groups are
+  generic-triggered with `rpc.read`/`rpc.write`, strict schemas, and
   engine-ledger idempotency for writes. Superseded method-specific business
   handlers are deleted as each group migrates.
 
@@ -280,6 +280,12 @@ Implemented:
   strict schemas, system-scoped engine-ledger idempotency, approval metadata for
   irreversible effects, and tests proving generic-trigger registrations are
   marker-only;
+- full settings collapse: `settings.update` and `settings.resetToDefaults` now
+  join `settings.get` on the generic-trigger path with strict schemas,
+  `rpc.write`, system-scoped engine-ledger idempotency, approval metadata for
+  high-risk reversible configuration effects, and tests preserving rollback,
+  MCP reload, Codex App Server reconfiguration, and current JSON-RPC wire
+  behavior;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   function id, actor `rpc-client`, authority grant `rpc-bridge`, read/write
   authority scope, trace id, optional idempotency key, and optional
@@ -289,7 +295,7 @@ Implemented:
 Still deferred:
 
 - write-side RPC migrations and generic-trigger conversion for the remaining
-  handler-only method groups beyond prompt library;
+  handler-only method groups beyond prompt library and settings;
 - tool/runtime/client-native engine rewrites beyond the first read-side RPC
   adapters;
 - queue and void delivery execution;

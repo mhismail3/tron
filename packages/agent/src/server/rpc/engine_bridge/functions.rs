@@ -13,14 +13,17 @@ use crate::prompt_library::store;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::profile_runtime::ProfileRuntime;
+use crate::server::codex_app::CodexAppServerManager;
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::{self, CLIENT_VERSION_UNSUPPORTED, RpcError, to_json_value};
 use crate::server::rpc::filesystem_service;
 use crate::server::rpc::handlers::{
-    events, map_event_store_error, model, opt_array, opt_string, opt_u64, require_string_param,
-    system,
+    events, map_event_store_error, model, opt_array, opt_string, opt_u64, require_param,
+    require_string_param, system,
 };
+use crate::server::rpc::types::RpcEvent;
 use crate::server::rpc::validation::validate_string_param;
+use crate::server::websocket::broadcast::BroadcastManager;
 use crate::skills::registry::SkillRegistry;
 
 use super::rpc_error_to_engine;
@@ -33,7 +36,11 @@ pub(super) struct RpcEngineDeps {
     skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
     profile_runtime: Arc<ProfileRuntime>,
     server_start_time: Instant,
+    settings_path: PathBuf,
     auth_path: PathBuf,
+    mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
+    broadcast_manager: Option<Arc<BroadcastManager>>,
+    codex_app_server: Option<Arc<CodexAppServerManager>>,
     ws_port: Arc<AtomicU16>,
     onboarded_marker_path: PathBuf,
 }
@@ -47,7 +54,11 @@ impl RpcEngineDeps {
             skill_registry: Arc::clone(&ctx.skill_registry),
             profile_runtime: Arc::clone(&ctx.profile_runtime),
             server_start_time: ctx.server_start_time,
+            settings_path: ctx.settings_path.clone(),
             auth_path: ctx.auth_path.clone(),
+            mcp_router: ctx.mcp_router.clone(),
+            broadcast_manager: ctx.broadcast_manager.clone(),
+            codex_app_server: ctx.codex_app_server.clone(),
             ws_port: Arc::clone(&ctx.ws_port),
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),
         }
@@ -85,6 +96,8 @@ async fn rpc_function_value(
                 }
             })
         }
+        "settings.update" => settings_update_value(Some(payload), deps).await,
+        "settings.resetToDefaults" => settings_reset_to_defaults_value(deps).await,
         "model.list" => model_list_value(payload, deps, allow_rpc_context).await,
         "skill.list" => Ok(skill_list_value(Some(payload), deps)),
         "logs.recent" => recent_logs_value(Some(payload.clone()), deps).await,
@@ -170,6 +183,255 @@ fn system_info_value(payload: &Value, deps: &RpcEngineDeps, allow_rpc_context: b
         "tailscaleIp": deps.profile_runtime.current().settings.server.tailscale_ip,
         "paired": crate::server::onboarding::is_onboarded(&marker_path),
     })
+}
+
+fn settings_error(error: crate::settings::SettingsError) -> RpcError {
+    RpcError::Internal {
+        message: error.to_string(),
+    }
+}
+
+async fn settings_update_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let updates = require_param(params, "settings")?.clone();
+    let codex_updates = updates.clone();
+    let has_codex_changes = updates.pointer("/server/codexAppServer").is_some();
+    let has_mcp_changes = updates.get("mcp").is_some();
+    let settings_path = deps.settings_path.clone();
+
+    if has_mcp_changes && let Some(ref router) = deps.mcp_router {
+        let mut router_guard = router.write().await;
+        let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
+        let previous_sparse = read_sparse_settings_snapshot(deps).await?;
+        let previous_codex_app_server = deps
+            .profile_runtime
+            .current()
+            .settings
+            .server
+            .codex_app_server
+            .clone();
+        run_blocking_task("settings.update", move || {
+            crate::settings::SettingsStore::new(settings_path)
+                .update(updates)
+                .map_err(settings_error)
+        })
+        .await?;
+
+        if let Err(message) = router_guard.reload_from_settings().await {
+            rollback_sparse_settings(deps, previous_sparse, "settings.rollbackMcpUpdate").await?;
+            return Err(RpcError::Internal { message });
+        }
+        if let Err(error) = deps.profile_runtime.reload_now("settings.update") {
+            rollback_sparse_settings(
+                deps,
+                previous_sparse,
+                "settings.rollbackAfterProfileRuntimeFailure",
+            )
+            .await?;
+            if let Err(rollback_error) = router_guard.reload_from_settings().await {
+                tracing::warn!(
+                    error = %rollback_error,
+                    "MCP router failed to reload after profile-runtime rollback"
+                );
+            }
+            return Err(RpcError::Internal {
+                message: format!(
+                    "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
+                ),
+            });
+        }
+        drop(router_guard);
+        broadcast_mcp_status_changed(deps).await;
+        refresh_codex_app_server_if_needed(
+            deps,
+            &codex_updates,
+            previous_sparse,
+            previous_codex_app_server,
+        )
+        .await?;
+        return Ok(json!({ "success": true }));
+    }
+
+    let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
+    let previous_sparse = read_sparse_settings_snapshot(deps).await?;
+    let previous_codex_app_server = deps
+        .profile_runtime
+        .current()
+        .settings
+        .server
+        .codex_app_server
+        .clone();
+    run_blocking_task("settings.update", move || {
+        crate::settings::SettingsStore::new(settings_path)
+            .update(updates)
+            .map_err(settings_error)
+    })
+    .await?;
+    reload_profile_runtime_or_rollback(deps, previous_sparse.clone(), "settings.update").await?;
+
+    if has_codex_changes {
+        refresh_codex_app_server_if_needed(
+            deps,
+            &codex_updates,
+            previous_sparse,
+            previous_codex_app_server,
+        )
+        .await?;
+    }
+
+    Ok(json!({ "success": true }))
+}
+
+async fn settings_reset_to_defaults_value(deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
+    let previous_sparse = read_sparse_settings_snapshot(deps).await?;
+    let previous_codex_app_server = deps
+        .profile_runtime
+        .current()
+        .settings
+        .server
+        .codex_app_server
+        .clone();
+    let settings_path = deps.settings_path.clone();
+    let result = run_blocking_task("settings.resetToDefaults", move || {
+        crate::settings::SettingsStore::new(settings_path)
+            .reset()
+            .map_err(settings_error)
+    })
+    .await?;
+    reload_profile_runtime_or_rollback(deps, previous_sparse.clone(), "settings.resetToDefaults")
+        .await?;
+
+    refresh_codex_app_server_if_needed(
+        deps,
+        &json!({"server": {"codexAppServer": true}}),
+        previous_sparse,
+        previous_codex_app_server,
+    )
+    .await?;
+
+    Ok(result)
+}
+
+async fn read_sparse_settings_snapshot(deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let path = deps.settings_path.clone();
+    run_blocking_task("settings.readSparseSnapshot", move || {
+        crate::settings::SettingsStore::new(path)
+            .read_sparse_value()
+            .map_err(settings_error)
+    })
+    .await
+}
+
+async fn restore_sparse_settings_file(
+    deps: &RpcEngineDeps,
+    previous_sparse: Value,
+    reason: &str,
+) -> Result<(), RpcError> {
+    let path = deps.settings_path.clone();
+    run_blocking_task("settings.rollbackSparseSettings", move || {
+        crate::settings::SettingsStore::new(path)
+            .restore_sparse_value_for_rollback(previous_sparse)
+            .map_err(settings_error)
+    })
+    .await?;
+    tracing::warn!(reason, "settings sparse overlay restored");
+    Ok(())
+}
+
+async fn rollback_sparse_settings(
+    deps: &RpcEngineDeps,
+    previous_sparse: Value,
+    reason: &str,
+) -> Result<(), RpcError> {
+    restore_sparse_settings_file(deps, previous_sparse, reason).await?;
+    crate::settings::init_settings(deps.profile_runtime.current().settings.clone());
+    Ok(())
+}
+
+async fn reload_profile_runtime_or_rollback(
+    deps: &RpcEngineDeps,
+    previous_sparse: Value,
+    reason: &'static str,
+) -> Result<(), RpcError> {
+    match deps.profile_runtime.reload_now(reason) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            rollback_sparse_settings(deps, previous_sparse, reason).await?;
+            Err(RpcError::Internal {
+                message: format!(
+                    "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
+                ),
+            })
+        }
+    }
+}
+
+async fn refresh_codex_app_server_if_needed(
+    deps: &RpcEngineDeps,
+    updates: &Value,
+    previous_sparse: Value,
+    previous_settings: crate::settings::CodexAppServerSettings,
+) -> Result<(), RpcError> {
+    if updates.pointer("/server/codexAppServer").is_none() {
+        return Ok(());
+    }
+
+    let Some(manager) = &deps.codex_app_server else {
+        return Ok(());
+    };
+
+    let settings = crate::settings::get_settings();
+    if let Err(error) = manager
+        .reconfigure(settings.server.codex_app_server.clone())
+        .await
+    {
+        restore_sparse_settings_file(
+            deps,
+            previous_sparse,
+            "settings.rollbackCodexAppServerUpdate",
+        )
+        .await?;
+        deps.profile_runtime
+            .reload_now("settings.rollbackCodexAppServerUpdate")
+            .map_err(|rollback_error| RpcError::Internal {
+                message: format!(
+                    "Codex App Server reconfiguration failed ({error}); sparse settings were restored, but profile runtime reload failed during rollback: {rollback_error}"
+                ),
+            })?;
+        if let Err(rollback_error) = manager.reconfigure(previous_settings).await {
+            tracing::warn!(
+                error = %rollback_error,
+                "Codex App Server failed to reconfigure back to previous settings after rollback"
+            );
+        }
+        return Err(RpcError::Internal {
+            message: format!(
+                "Codex App Server reconfiguration failed; sparse settings were rolled back: {error}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+async fn broadcast_mcp_status_changed(deps: &RpcEngineDeps) {
+    let Some(ref router_arc) = deps.mcp_router else {
+        return;
+    };
+    let Some(ref bm) = deps.broadcast_manager else {
+        return;
+    };
+
+    let router = router_arc.read().await;
+    let status = router.status();
+    let event = RpcEvent::new(
+        "mcp.status_changed",
+        None,
+        Some(serde_json::to_value(status).unwrap_or_default()),
+    );
+    bm.broadcast_all(&event).await;
 }
 
 async fn model_list_value(

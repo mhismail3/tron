@@ -219,8 +219,8 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("events.unsubscribe"),
     handler_only!("events.append"),
     generic_trigger!("settings.get"),
-    handler_only!("settings.update"),
-    handler_only!("settings.resetToDefaults"),
+    generic_trigger!("settings.update"),
+    generic_trigger!("settings.resetToDefaults"),
     handler_only!("auth.get"),
     handler_only!("auth.update"),
     handler_only!("auth.clear"),
@@ -507,6 +507,9 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
     if policy != HandlerExecutionPolicy::Mutating {
         return EffectClass::PureRead;
     }
+    if matches!(method, "settings.update" | "settings.resetToDefaults") {
+        return EffectClass::ReversibleSideEffect;
+    }
     if matches!(method, "events.append" | "logs.ingest") {
         return EffectClass::AppendOnlyEvent;
     }
@@ -541,6 +544,8 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
 fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
     if matches!(method, "git.push" | "system.shutdown") {
         RiskLevel::Critical
+    } else if matches!(method, "settings.update" | "settings.resetToDefaults") {
+        RiskLevel::High
     } else if matches!(effect, EffectClass::IrreversibleSideEffect) {
         RiskLevel::High
     } else if effect.is_mutating() {
@@ -563,7 +568,8 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
     if let Some(scope) = spec.authority_scope {
         let mut requirement = AuthorityRequirement::scope(scope);
         if spec.visibility.is_agent_visible()
-            && spec.effect_class.requires_approval_for_agent_visibility()
+            && (spec.effect_class.requires_approval_for_agent_visibility()
+                || settings_write_requires_approval(spec.method))
         {
             requirement = requirement.with_approval_required();
         }
@@ -595,11 +601,18 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
 }
 
 fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
-    if method.starts_with("promptHistory.") || method.starts_with("promptSnippet.") {
+    if method.starts_with("promptHistory.")
+        || method.starts_with("promptSnippet.")
+        || method.starts_with("settings.")
+    {
         IdempotencyContract::caller_system_engine_ledger()
     } else {
         IdempotencyContract::caller_session_engine_ledger()
     }
+}
+
+fn settings_write_requires_approval(method: &str) -> bool {
+    matches!(method, "settings.update" | "settings.resetToDefaults")
 }
 
 pub(super) fn rpc_worker() -> WorkerDefinition {

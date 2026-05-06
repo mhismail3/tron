@@ -55,13 +55,32 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "filesystem.getHome" | "settings.get" | "promptSnippet.list" => json!({
+        "filesystem.getHome" | "promptSnippet.list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
                 "sessionId": {"type": "string"},
                 "workspaceId": {"type": "string"}
             }
+        }),
+        "settings.get" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+        }),
+        "settings.update" => json!({
+            "type": "object",
+            "required": ["settings"],
+            "additionalProperties": false,
+            "properties": {
+                "settings": {"type": "object", "additionalProperties": true},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "settings.resetToDefaults" => json!({
+            "type": "object",
+            "additionalProperties": true
         }),
         "model.list" => json!({
             "type": "object",
@@ -218,6 +237,18 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
             }
         }),
         "settings.get" => json!({
+            "type": "object",
+            "additionalProperties": true
+        }),
+        "settings.update" => json!({
+            "type": "object",
+            "required": ["success"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"}
+            }
+        }),
+        "settings.resetToDefaults" => json!({
             "type": "object",
             "additionalProperties": true
         }),

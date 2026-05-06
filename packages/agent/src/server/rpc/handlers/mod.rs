@@ -170,8 +170,14 @@ fn register_core(registry: &mut MethodRegistry) {
         "settings.get",
         RpcGenericTriggerHandler::new("settings.get"),
     );
-    registry.register("settings.update", settings::UpdateSettingsHandler);
-    registry.register("settings.resetToDefaults", settings::ResetSettingsHandler);
+    registry.register(
+        "settings.update",
+        RpcGenericTriggerHandler::new("settings.update"),
+    );
+    registry.register(
+        "settings.resetToDefaults",
+        RpcGenericTriggerHandler::new("settings.resetToDefaults"),
+    );
 
     // Auth
     registry.register("auth.get", auth::GetAuthHandler);

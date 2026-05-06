@@ -353,6 +353,38 @@ Acceptance:
   method-specific JSON-RPC business handlers can disappear once functions own
   behavior.
 
+## Phase 3.7: high-risk reversible settings collapse
+
+Collapse the settings group so local configuration is owned by engine
+functions, not method-specific JSON-RPC handlers.
+
+Implemented generic-trigger functions:
+
+- `rpc::settings.update`
+- `rpc::settings.resetToDefaults`
+
+Semantics:
+
+- all three settings RPC methods are now `GenericTrigger`;
+- settings writes use `rpc.write`, strict schemas, and system-scoped
+  engine-ledger idempotency;
+- settings writes are high-risk reversible side-effect capabilities with
+  approval-required metadata because they can reconfigure MCP servers, model
+  defaults, runtime policy, and the managed Codex App Server;
+- the engine function preserves serialized settings writes, sparse-overlay
+  rollback, profile-runtime reload, MCP router reload/broadcast, and Codex App
+  Server reconfiguration semantics.
+
+Acceptance:
+
+- `UpdateSettingsHandler` and `ResetSettingsHandler` are deleted.
+- Direct engine invocation and JSON-RPC dispatch return the same payloads for
+  settings get/update/reset success cases.
+- Duplicate update/reset transports replay through the engine ledger without
+  rerunning disk writes, MCP reloads, or Codex App Server reconfiguration.
+- Settings is the second fully collapsed RPC group and the first migrated group
+  whose write capabilities are high-risk reversible configuration effects.
+
 ## Phase 4: catalog watch, streams, and event unification
 
 Introduce engine streams while preserving WebSocket clients.

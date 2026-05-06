@@ -8,7 +8,7 @@
 //! - Model: list, switch
 //! - Context: getSnapshot, compact, clear, canAcceptTurn, shouldCompact
 //! - Events: getHistory, getSince, subscribe, append
-//! - Settings: get, update
+//! - Settings: get, update, resetToDefaults
 //! - Skills: list, get, refresh, remove
 //! - Plus: browser, device, task, transcription, worktree, tree
 //!
@@ -27,9 +27,9 @@
 //! business handlers: the registry validates method existence/depth, then the
 //! bridge dispatches JSON-RPC as a transport trigger into engine functions.
 //! Read triggers carry `rpc.read`; migrated write triggers carry `rpc.write`
-//! plus engine-ledger idempotency. The prompt-library group is the first fully
-//! collapsed group: all prompt history/snippet methods are generic-triggered
-//! engine functions with marker-only JSON-RPC registrations.
+//! plus engine-ledger idempotency. Prompt library and settings are now fully
+//! collapsed groups: their public methods are generic-triggered engine
+//! functions with marker-only JSON-RPC registrations.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!
