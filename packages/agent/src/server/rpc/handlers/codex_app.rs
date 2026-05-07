@@ -1,8 +1,10 @@
-//! Codex App Server management RPCs.
+//! Legacy Codex App Server status RPC handler fixture.
 //!
-//! These methods do not proxy Codex thread/turn traffic through Tron. They only
-//! expose the Tron-owned child process lifecycle status and WebSocket endpoint
-//! so iOS can connect directly to the managed `codex app-server`.
+//! Production `codexApp.status` is a generic JSON-RPC trigger into canonical
+//! `codex_app::status`. This test-only fixture keeps the old status payload
+//! available for regression cases.
+
+#![cfg(test)]
 
 use async_trait::async_trait;
 use serde_json::Value;

@@ -19,7 +19,7 @@ use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::{self, CLIENT_VERSION_UNSUPPORTED, RpcError, to_json_value};
 use crate::server::rpc::filesystem_service;
 use crate::server::rpc::handlers::{
-    map_event_store_error, opt_array, opt_bool, opt_string, opt_u64, require_param,
+    map_cron_error, map_event_store_error, opt_array, opt_bool, opt_string, opt_u64, require_param,
     require_string_param,
 };
 use crate::server::rpc::notification_inbox::NotificationInboxService;
@@ -31,13 +31,17 @@ use crate::skills::registry::SkillRegistry;
 use super::rpc_error_to_engine;
 
 mod agent;
+mod blob;
+mod codex_app;
 mod context;
+pub(super) mod cron;
 mod events;
 mod filesystem;
 mod import;
 mod job;
 mod logs;
 mod mcp;
+mod message;
 mod model;
 mod notifications;
 mod plan;
@@ -48,6 +52,7 @@ mod session;
 mod settings;
 mod skills;
 mod system;
+mod tool;
 mod tree;
 
 #[derive(Clone)]
@@ -67,6 +72,7 @@ pub(super) struct RpcEngineDeps {
     codex_app_server: Option<Arc<CodexAppServerManager>>,
     ws_port: Arc<AtomicU16>,
     onboarded_marker_path: PathBuf,
+    updater_state_path: PathBuf,
     engine_host: crate::engine::EngineHostHandle,
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
@@ -92,6 +98,7 @@ impl RpcEngineDeps {
             codex_app_server: ctx.codex_app_server.clone(),
             ws_port: Arc::clone(&ctx.ws_port),
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),
+            updater_state_path: ctx.updater_state_path.clone(),
             engine_host: ctx.engine_host.clone(),
             process_manager: ctx.process_manager.clone(),
             job_manager: ctx.job_manager.clone(),
@@ -124,6 +131,22 @@ async fn rpc_function_value(
         "system.ping" | "system.getInfo" => {
             system::handle(method, invocation, deps, allow_rpc_context).await
         }
+        "system.getDiagnostics" | "system.getUpdateStatus" => {
+            system::handle(method, invocation, deps, allow_rpc_context).await
+        }
+        "codexApp.status" => codex_app::handle(method, invocation, deps).await,
+        "blob.get" => blob::handle(method, invocation, deps).await,
+        "tool.result" => tool::handle(method, invocation, deps).await,
+        "message.delete" => message::handle(method, invocation, deps).await,
+        "cron.list"
+        | "cron.get"
+        | "cron.create"
+        | "cron.update"
+        | "cron.delete"
+        | "cron.run"
+        | "cron.status"
+        | "cron.getRuns"
+        | "cron.scheduled_fire" => cron::handle(method, invocation, deps).await,
         "settings.get" | "settings.update" | "settings.resetToDefaults" => {
             settings::handle(method, invocation, deps).await
         }

@@ -32,6 +32,10 @@ use crate::tools::traits::{ToolContext, TronTool};
 const GENERIC_READ_METHODS: &[&str] = &[
     "system.ping",
     "system.getInfo",
+    "system.getDiagnostics",
+    "system.getUpdateStatus",
+    "codexApp.status",
+    "blob.get",
     "settings.get",
     "model.list",
     "skill.list",
@@ -66,6 +70,10 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "promptHistory.list",
     "promptSnippet.list",
     "promptSnippet.get",
+    "cron.list",
+    "cron.get",
+    "cron.status",
+    "cron.getRuns",
     "tree.getVisualization",
     "tree.getBranches",
     "tree.getSubtree",
@@ -131,6 +139,12 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "promptSnippet.create",
     "promptSnippet.update",
     "promptSnippet.delete",
+    "tool.result",
+    "message.delete",
+    "cron.create",
+    "cron.update",
+    "cron.delete",
+    "cron.run",
 ];
 
 const SETTINGS_METHODS: &[&str] = &[
@@ -231,6 +245,26 @@ const PROMPT_LIBRARY_METHODS: &[&str] = &[
     "promptSnippet.delete",
 ];
 
+const CRON_METHODS: &[&str] = &[
+    "cron.list",
+    "cron.get",
+    "cron.create",
+    "cron.update",
+    "cron.delete",
+    "cron.run",
+    "cron.status",
+    "cron.getRuns",
+];
+
+const RUNTIME_TAIL_METHODS: &[&str] = &[
+    "system.getDiagnostics",
+    "system.getUpdateStatus",
+    "codexApp.status",
+    "blob.get",
+    "tool.result",
+    "message.delete",
+];
+
 const SAFE_READ_COLLAPSE_METHODS: &[&str] = &[
     "tree.getVisualization",
     "tree.getBranches",
@@ -262,6 +296,67 @@ fn make_prompt_context() -> crate::server::rpc::context::RpcContext {
     let registry = migration_parity_registry();
     super::register_rpc_worker_for_context(&ctx, &registry).unwrap();
     ctx
+}
+
+fn make_cron_context() -> (crate::server::rpc::context::RpcContext, tempfile::TempDir) {
+    let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        crate::events::run_migrations(&conn).unwrap();
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("automations.json");
+    let backup_path = dir.path().join("automations.json.bak");
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let deps = crate::cron::ExecutorDeps {
+        agent_executor: None,
+        broadcaster: std::sync::OnceLock::new(),
+        push_notifier: None,
+        event_injector: None,
+        http_client: reqwest::Client::new(),
+        pool: pool.clone(),
+    };
+
+    let scheduler = Arc::new(crate::cron::CronScheduler::new(
+        pool.clone(),
+        Arc::new(crate::cron::SystemClock),
+        deps,
+        config_path,
+        backup_path,
+        cancel,
+    ));
+
+    let mut ctx = make_test_context();
+    ctx.cron_scheduler = Some(scheduler);
+    let registry = migration_parity_registry();
+    register_rpc_worker_for_context(&ctx, &registry).unwrap();
+    ctx.cron_scheduler
+        .as_ref()
+        .unwrap()
+        .set_engine_host(ctx.engine_host.clone());
+    (ctx, dir)
+}
+
+async fn dispatch_ok(
+    ctx: &crate::server::rpc::context::RpcContext,
+    method: &str,
+    params: Option<Value>,
+) -> Value {
+    let registry = migration_parity_registry();
+    let response = registry
+        .dispatch(
+            RpcRequest {
+                id: format!("test-{method}"),
+                method: method.to_owned(),
+                params,
+            },
+            ctx,
+        )
+        .await;
+    assert!(response.success, "{method}: {:?}", response.error);
+    response.result.unwrap()
 }
 
 struct SettingsTestGuard {
@@ -520,6 +615,10 @@ fn normalize_unstable_fields(method: &str, mut value: Value) -> Value {
     if method == "system.getInfo" {
         value["uptime"] = json!(0);
     }
+    if method == "system.getDiagnostics" {
+        value["server"]["uptimeSeconds"] = json!(0);
+        value["timestamp"] = json!("<timestamp>");
+    }
     if method == "session.create" {
         value["sessionId"] = json!("<session>");
         value["createdAt"] = json!("<createdAt>");
@@ -531,7 +630,45 @@ fn normalize_unstable_fields(method: &str, mut value: Value) -> Value {
     if method == "agent.prompt" {
         value["runId"] = json!("<run>");
     }
+    if method == "cron.create" || method == "cron.update" {
+        value["job"]["id"] = json!("<cron>");
+        value["job"]["createdAt"] = json!("<created>");
+        value["job"]["updatedAt"] = json!("<updated>");
+    }
+    if method.starts_with("cron.") {
+        normalize_cron_ids(&mut value);
+    }
+    if method == "cron.run" {
+        value["jobId"] = json!("<cron>");
+    }
+    if method == "message.delete" {
+        value["deletionEventId"] = json!("<deletion>");
+    }
     value
+}
+
+fn normalize_cron_ids(value: &mut Value) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                normalize_cron_ids(value);
+            }
+        }
+        Value::Object(object) => {
+            for (key, value) in object.iter_mut() {
+                if matches!(key.as_str(), "id" | "jobId")
+                    && value.as_str().is_some_and(|id| id.starts_with("cron_"))
+                {
+                    *value = json!("<cron>");
+                } else if matches!(key.as_str(), "createdAt" | "updatedAt") {
+                    *value = json!("<timestamp>");
+                } else {
+                    normalize_cron_ids(value);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn domain_scope_for_method(method: &str) -> &'static str {
@@ -571,7 +708,10 @@ fn bridge_specs_cover_every_registered_rpc_method() {
         .collect::<BTreeSet<_>>();
     let registry_methods = registry.methods().into_iter().collect::<BTreeSet<_>>();
     assert_eq!(spec_methods, registry_methods);
-    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 98);
+    assert_eq!(
+        GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(),
+        112
+    );
 }
 
 #[test]
@@ -904,6 +1044,193 @@ fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
         .chain(SAFE_READ_COLLAPSE_METHODS)
         .chain(["events.append", "events.subscribe", "events.unsubscribe"].iter())
     {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+        assert!(super::schemas::request_schema_for_method(method).is_some());
+        assert!(super::schemas::response_schema_for_method(method).is_some());
+    }
+}
+
+#[test]
+fn bridge_specs_classify_cron_as_fully_generic_triggered() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in CRON_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert_eq!(spec.owner_worker, specs::worker_id("cron").unwrap());
+        assert_eq!(spec.domain_worker, specs::worker_id("cron").unwrap());
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+        assert!(super::schemas::request_schema_for_method(method).is_some());
+        assert!(super::schemas::response_schema_for_method(method).is_some());
+    }
+}
+
+#[test]
+fn bridge_specs_classify_cron_writes_as_guarded_trigger_capabilities() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in ["cron.create", "cron.update", "cron.delete", "cron.run"] {
+        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
+        assert!(spec.effect_class.is_mutating());
+        assert_eq!(spec.risk_level, RiskLevel::High);
+        assert_eq!(spec.visibility, VisibilityScope::System);
+        assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(spec.authority_scope, Some("cron.write"));
+        assert_eq!(
+            spec.idempotency_mode,
+            RpcIdempotencyMode::JsonRpcRequestIdSeed
+        );
+        let definition = specs::function_definition_for_spec(spec);
+        assert!(definition.required_authority.approval_required);
+        assert_eq!(
+            definition
+                .idempotency
+                .as_ref()
+                .map(|contract| contract.dedupe_scope.clone()),
+            Some(VisibilityScope::System)
+        );
+    }
+}
+
+#[tokio::test]
+async fn cron_registers_schedule_trigger_type_and_live_job_triggers() {
+    let (ctx, _dir) = make_cron_context();
+    let registry = migration_parity_registry();
+    register_rpc_worker_for_context(&ctx, &registry).unwrap();
+
+    let trigger_type = ctx
+        .engine_host
+        .inspect_trigger_type(&crate::engine::TriggerTypeId::new("cron_schedule").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(trigger_type.owner_worker, specs::worker_id("cron").unwrap());
+    assert_eq!(trigger_type.visibility, VisibilityScope::Internal);
+
+    let created = dispatch_ok(
+        &ctx,
+        "cron.create",
+        Some(json!({
+            "job": {
+                "name": "Projected",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo hi"}
+            }
+        })),
+    )
+    .await;
+    let job_id = created["job"]["id"].as_str().unwrap();
+
+    let trigger = ctx
+        .engine_host
+        .inspect_trigger(&crate::engine::TriggerId::new(format!("cron_schedule:{job_id}")).unwrap())
+        .await
+        .expect("created cron jobs should be projected into live trigger definitions");
+    assert_eq!(trigger.owner_worker, specs::worker_id("cron").unwrap());
+    assert_eq!(
+        trigger.target_function,
+        FunctionId::new("cron::scheduled_fire").unwrap()
+    );
+    assert_eq!(trigger.config["jobName"], "Projected");
+    let system_actor = ActorContext::new(
+        crate::engine::ActorId::new("system").unwrap(),
+        ActorKind::System,
+        crate::engine::AuthorityGrantId::new("system").unwrap(),
+    );
+    let hidden = ctx
+        .engine_host
+        .inspect_function(
+            &FunctionId::new("cron::scheduled_fire").unwrap(),
+            Some(&system_actor),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hidden.visibility, VisibilityScope::Internal);
+    assert!(
+        hidden.metadata["hiddenCronScheduleFunction"]
+            .as_bool()
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn cron_schedule_trigger_dispatch_records_ledger_and_replays_duplicate_fire() {
+    let (ctx, _dir) = make_cron_context();
+    let created = dispatch_ok(
+        &ctx,
+        "cron.create",
+        Some(json!({
+            "job": {
+                "name": "Scheduled",
+                "schedule": {"type": "every", "intervalSecs": 60},
+                "payload": {"type": "shellCommand", "command": "echo scheduled"}
+            }
+        })),
+    )
+    .await;
+    let job_id = created["job"]["id"].as_str().unwrap();
+    let scheduled_at = chrono::Utc::now();
+    let trigger_id = crate::cron::CronScheduler::schedule_trigger_id(job_id).unwrap();
+    let idempotency_key = format!(
+        "cron-schedule:v1:{job_id}:{}",
+        scheduled_at.timestamp_millis()
+    );
+    let mut request = crate::engine::TriggerDispatchRequest::new(
+        trigger_id.clone(),
+        json!({"jobId": job_id, "scheduledAt": scheduled_at.to_rfc3339()}),
+        crate::engine::ActorId::new("cron-scheduler").unwrap(),
+        ActorKind::System,
+    );
+    request.authority_scopes = vec!["cron.write".to_owned()];
+    request.idempotency_key = Some(idempotency_key.clone());
+    request.delivery_mode = Some(DeliveryMode::Sync);
+    let first =
+        crate::engine::EngineTriggerRuntime::dispatch(&ctx.engine_host, request.clone()).await;
+    assert!(first.error.is_none(), "{:?}", first.error);
+
+    let replay = crate::engine::EngineTriggerRuntime::dispatch(&ctx.engine_host, request).await;
+    assert!(replay.error.is_none(), "{:?}", replay.error);
+    assert!(replay.replayed_from.is_some());
+
+    let host = ctx.engine_host.lock().await;
+    let records = host.catalog().invocations();
+    let record = records
+        .iter()
+        .rev()
+        .find(|record| record.function_id == FunctionId::new("cron::scheduled_fire").unwrap())
+        .unwrap();
+    assert_eq!(record.trigger_id, Some(trigger_id));
+    assert_eq!(record.actor_kind, ActorKind::System);
+    assert_eq!(record.delivery_mode, DeliveryMode::Sync);
+    assert_scope(&record.authority_scopes, "cron.write");
+    assert_eq!(
+        record.idempotency_key.as_ref().map(String::as_str),
+        Some(idempotency_key.as_str())
+    );
+}
+
+#[test]
+fn bridge_specs_classify_runtime_tail_as_generic_triggered() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in RUNTIME_TAIL_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
         assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
         assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
@@ -1749,6 +2076,161 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
         let rpc = rpc_dispatch_value(&ctx, method, payload).await;
         assert_eq!(direct, rpc, "{method}");
     }
+}
+
+#[tokio::test]
+async fn cron_rpc_outputs_match_direct_engine_outputs_and_replay_writes() {
+    let (direct_ctx, _direct_dir) = make_cron_context();
+    let (rpc_ctx, _rpc_dir) = make_cron_context();
+    let create = json!({
+        "job": {
+            "name": "Engine Cron",
+            "schedule": {"type": "every", "intervalSecs": 60},
+            "payload": {"type": "shellCommand", "command": "echo hi"}
+        }
+    });
+
+    let direct_create = normalize_unstable_fields(
+        "cron.create",
+        direct_engine_value(&direct_ctx, "cron.create", create.clone()).await,
+    );
+    let rpc_create = normalize_unstable_fields(
+        "cron.create",
+        rpc_dispatch_value(&rpc_ctx, "cron.create", create).await,
+    );
+    assert_eq!(direct_create, rpc_create);
+
+    let direct_job_id = direct_ctx
+        .cron_scheduler
+        .as_ref()
+        .unwrap()
+        .with_jobs(|jobs| jobs.values().next().unwrap().id.clone());
+    let rpc_job_id = rpc_ctx
+        .cron_scheduler
+        .as_ref()
+        .unwrap()
+        .with_jobs(|jobs| jobs.values().next().unwrap().id.clone());
+
+    for (method, direct_payload, rpc_payload) in [
+        ("cron.list", json!({}), json!({})),
+        (
+            "cron.get",
+            json!({"jobId": direct_job_id.clone()}),
+            json!({"jobId": rpc_job_id.clone()}),
+        ),
+        ("cron.status", json!({}), json!({})),
+        (
+            "cron.getRuns",
+            json!({"jobId": direct_job_id.clone()}),
+            json!({"jobId": rpc_job_id.clone()}),
+        ),
+        (
+            "cron.update",
+            json!({"jobId": direct_job_id.clone(), "name": "Updated Cron", "enabled": false}),
+            json!({"jobId": rpc_job_id.clone(), "name": "Updated Cron", "enabled": false}),
+        ),
+        (
+            "cron.run",
+            json!({"jobId": direct_job_id.clone()}),
+            json!({"jobId": rpc_job_id.clone()}),
+        ),
+    ] {
+        let direct = normalize_unstable_fields(
+            method,
+            direct_engine_value(&direct_ctx, method, direct_payload).await,
+        );
+        let rpc = normalize_unstable_fields(
+            method,
+            rpc_dispatch_value(&rpc_ctx, method, rpc_payload).await,
+        );
+        assert_eq!(direct, rpc, "{method}");
+    }
+
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: "cron-delete-retry".to_owned(),
+        method: "cron.delete".to_owned(),
+        params: Some(json!({"jobId": rpc_job_id})),
+    };
+    let first = registry.dispatch(request.clone(), &rpc_ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(request, &rpc_ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+}
+
+#[tokio::test]
+async fn runtime_tail_rpc_outputs_match_direct_engine_outputs() {
+    let ctx = make_test_context();
+    let blob_id = {
+        let conn = ctx.event_store.pool().get().unwrap();
+        crate::events::sqlite::repositories::blob::BlobRepo::store(
+            &conn,
+            b"hello engine",
+            "text/plain",
+        )
+        .unwrap()
+    };
+    for (method, payload) in [
+        ("system.getDiagnostics", json!({})),
+        ("system.getUpdateStatus", json!({})),
+        ("codexApp.status", json!({})),
+        ("blob.get", json!({"blobId": blob_id})),
+    ] {
+        let direct = normalize_unstable_fields(
+            method,
+            direct_engine_value(&ctx, method, payload.clone()).await,
+        );
+        let rpc =
+            normalize_unstable_fields(method, rpc_dispatch_value(&ctx, method, payload).await);
+        assert_eq!(direct, rpc, "{method}");
+    }
+}
+
+#[tokio::test]
+async fn runtime_tail_writes_replay_without_rerunning_handlers() {
+    let ctx = make_test_context();
+    let _pending = ctx.orchestrator.register_tool_call("tool-call-1");
+    let registry = migration_parity_registry();
+    let tool_request = RpcRequest {
+        id: "tool-result-retry".to_owned(),
+        method: "tool.result".to_owned(),
+        params: Some(json!({
+            "sessionId": "s1",
+            "toolUseId": "tool-call-1",
+            "result": {"output": "ok"}
+        })),
+    };
+    let first = registry.dispatch(tool_request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(tool_request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+
+    let session_id = ctx
+        .session_manager
+        .create_session("m", "/tmp", Some("message"), None)
+        .unwrap();
+    let event = ctx
+        .event_store
+        .append(&crate::events::AppendOptions {
+            session_id: &session_id,
+            event_type: crate::events::EventType::MessageUser,
+            payload: json!({"text": "hello"}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    let delete_request = RpcRequest {
+        id: "message-delete-retry".to_owned(),
+        method: "message.delete".to_owned(),
+        params: Some(json!({"sessionId": session_id, "targetEventId": event.id})),
+    };
+    let first = registry.dispatch(delete_request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(delete_request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
 }
 
 #[tokio::test]

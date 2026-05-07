@@ -1,4 +1,11 @@
-//! Tool handler: result.
+//! Legacy `tool.result` RPC handler fixture.
+//!
+//! Production `tool.result` is a generic JSON-RPC trigger into canonical
+//! `tool::result`, so tool-result submission now records engine causality and
+//! idempotency metadata before resolving the orchestrator tool call. This
+//! module is test-only while older handler tests are retained.
+
+#![cfg(test)]
 
 use async_trait::async_trait;
 use serde_json::Value;

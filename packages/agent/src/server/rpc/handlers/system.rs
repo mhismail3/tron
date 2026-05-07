@@ -1,14 +1,16 @@
-//! System handlers: shutdown, getDiagnostics, update checks.
+//! System handlers and legacy read fixtures.
 //!
-//! `system.ping` and `system.getInfo` are served by the engine bridge generic
-//! trigger; keep their protocol constants here because diagnostics and the
-//! engine-owned read implementation share them.
+//! `system.ping`, `system.getInfo`, `system.getDiagnostics`, and
+//! `system.getUpdateStatus` are served by generic JSON-RPC triggers into
+//! canonical `system::*` engine functions. Keep their protocol constants here
+//! because diagnostics and the engine-owned read implementation share them.
 //!
-//! The updater handlers below (`system.checkForUpdates`,
-//! `system.getUpdateStatus`) support GitHub Releases checks and verified DMG
-//! downloads. They do not mutate the running app bundle; production updates are
-//! DMG replacement until a full app-bundle updater exists.
+//! `system.checkForUpdates` and `system.shutdown` remain handler-owned. Update
+//! checks support GitHub Releases checks and verified DMG downloads. They do
+//! not mutate the running app bundle; production updates are DMG replacement
+//! until a full app-bundle updater exists.
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
@@ -19,8 +21,14 @@ use crate::server::rpc::context::RpcContext;
 #[cfg(test)]
 use crate::server::rpc::errors::CLIENT_VERSION_UNSUPPORTED;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
-use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
+use crate::server::rpc::registry::MethodHandler;
+#[cfg(test)]
+use crate::server::rpc::registry::MethodRegistry;
+#[cfg(test)]
+use crate::server::updater::UpdaterState;
+#[cfg(test)]
+use crate::server::updater::read_update_state;
+use crate::server::updater::{UpdateDecision, check_for_update};
 
 fn load_settings(ctx: &RpcContext) -> crate::settings::TronSettings {
     ctx.profile_runtime.current().settings.clone()
@@ -48,8 +56,10 @@ pub const MIN_CLIENT_PROTOCOL_VERSION: u32 = 1;
 /// page exposes this only behind a `#if DEBUG` gate so production users
 /// don't see it, but the shape is stable so a support engineer can ask
 /// "send me the diagnostics JSON" and get something actionable.
+#[cfg(test)]
 pub struct GetDiagnosticsHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetDiagnosticsHandler {
     #[instrument(skip(self, ctx), fields(method = "system.getDiagnostics"))]
@@ -129,6 +139,7 @@ impl MethodHandler for ShutdownHandler {
 /// `live_outcome` is the fresh check result (if one is available in the
 /// current RPC) — `None` means the handler is building a pure
 /// status-from-disk response.
+#[cfg(test)]
 fn build_status_value(
     current_version: &str,
     settings_update: &crate::settings::types::UpdateSettings,
@@ -249,8 +260,10 @@ impl MethodHandler for CheckForUpdatesHandler {
 ///
 /// Reads a missing state file as the `UpdaterState::default()` so a
 /// brand-new install surfaces "no check yet" instead of an error.
+#[cfg(test)]
 pub struct GetUpdateStatusHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetUpdateStatusHandler {
     #[instrument(skip(self, ctx), fields(method = "system.getUpdateStatus"))]

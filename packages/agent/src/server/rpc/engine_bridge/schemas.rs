@@ -46,6 +46,114 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "system.getDiagnostics" | "system.getUpdateStatus" | "codexApp.status" | "cron.status" => {
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "sessionId": {"type": "string"},
+                    "workspaceId": {"type": "string"}
+                }
+            })
+        }
+        "blob.get" => json!({
+            "type": "object",
+            "required": ["blobId"],
+            "additionalProperties": false,
+            "properties": {
+                "blobId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "tool.result" => json!({
+            "type": "object",
+            "required": ["sessionId", "toolUseId", "result"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "toolUseId": {"type": "string"},
+                "result": {},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "message.delete" => json!({
+            "type": "object",
+            "required": ["sessionId", "targetEventId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "targetEventId": {"type": "string"},
+                "reason": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "cron.list" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {"type": "boolean"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "workspaceId": {"type": "string"},
+                "sessionId": {"type": "string"}
+            }
+        }),
+        "cron.get" | "cron.delete" | "cron.run" => json!({
+            "type": "object",
+            "required": ["jobId"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "cron.getRuns" => json!({
+            "type": "object",
+            "required": ["jobId"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
+                "status": {"type": "string"},
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "cron.create" => json!({
+            "type": "object",
+            "required": ["job"],
+            "additionalProperties": false,
+            "properties": {
+                "job": {"type": "object", "additionalProperties": true},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "cron.update" => json!({
+            "type": "object",
+            "required": ["jobId"],
+            "additionalProperties": false,
+            "properties": {
+                "jobId": {"type": "string"},
+                "name": {"type": "string"},
+                "description": {"type": ["string", "null"]},
+                "enabled": {"type": "boolean"},
+                "schedule": {"type": "object", "additionalProperties": true},
+                "payload": {"type": "object", "additionalProperties": true},
+                "delivery": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+                "overlapPolicy": {"type": "string"},
+                "misfirePolicy": {"type": "string"},
+                "maxRetries": {"type": "integer"},
+                "autoDisableAfter": {"type": "integer"},
+                "stuckTimeoutSecs": {"type": "integer"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "toolRestrictions": {"type": ["object", "null"], "additionalProperties": true},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": ["string", "null"]}
+            }
+        }),
         "skill.list" => json!({
             "type": "object",
             "additionalProperties": false,
@@ -950,6 +1058,63 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
             "properties": {
                 "success": {"type": "boolean"},
                 "inserted": {"type": "integer"}
+            }
+        }),
+        "system.getDiagnostics"
+        | "system.getUpdateStatus"
+        | "codexApp.status"
+        | "cron.list"
+        | "cron.get"
+        | "cron.create"
+        | "cron.update"
+        | "cron.status"
+        | "cron.getRuns" => json!({
+            "type": "object",
+            "additionalProperties": true
+        }),
+        "blob.get" => json!({
+            "type": "object",
+            "required": ["blobId", "mimeType", "data", "sizeBytes"],
+            "additionalProperties": false,
+            "properties": {
+                "blobId": {"type": "string"},
+                "mimeType": {"type": "string"},
+                "data": {"type": "string"},
+                "sizeBytes": {"type": "integer"}
+            }
+        }),
+        "tool.result" => json!({
+            "type": "object",
+            "required": ["success", "toolCallId"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "toolCallId": {"type": "string"}
+            }
+        }),
+        "message.delete" => json!({
+            "type": "object",
+            "required": ["success", "deletionEventId", "targetType"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "deletionEventId": {"type": "string"},
+                "targetType": {"type": "string"}
+            }
+        }),
+        "cron.delete" => json!({
+            "type": "object",
+            "required": ["deleted"],
+            "additionalProperties": false,
+            "properties": {"deleted": {"type": "boolean"}}
+        }),
+        "cron.run" => json!({
+            "type": "object",
+            "required": ["triggered", "jobId"],
+            "additionalProperties": false,
+            "properties": {
+                "triggered": {"type": "boolean"},
+                "jobId": {"type": "string"}
             }
         }),
         "events.getHistory" => json!({

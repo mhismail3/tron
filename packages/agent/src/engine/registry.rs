@@ -537,6 +537,25 @@ impl LiveCatalog {
             })
     }
 
+    /// Unregister a trigger owned by a worker.
+    pub fn unregister_trigger(&mut self, id: &TriggerId, owner_worker: &WorkerId) -> Result<bool> {
+        let Some(entry) = self.triggers.get(id) else {
+            return Ok(false);
+        };
+        if &entry.definition.owner_worker != owner_worker {
+            return Err(EngineError::OwnerMismatch {
+                kind: "trigger",
+                id: id.to_string(),
+                owner: entry.definition.owner_worker.to_string(),
+                attempted_owner: owner_worker.to_string(),
+            });
+        }
+        let subject = trigger_change_subject(&entry.definition);
+        self.record_change(CatalogChangeKind::TriggerUnregistered, subject)?;
+        let _ = self.triggers.remove(id);
+        Ok(true)
+    }
+
     /// List triggers in deterministic order.
     #[must_use]
     pub fn triggers(&self) -> Vec<TriggerDefinition> {

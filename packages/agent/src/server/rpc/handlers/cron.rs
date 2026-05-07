@@ -1,6 +1,11 @@
-//! Cron scheduling RPC handlers.
+//! Legacy cron scheduling RPC handler fixtures.
 //!
-//! Eight methods for managing cron jobs and viewing execution history:
+//! Production registrations for the eight cron methods are generic-trigger
+//! markers into canonical `cron::*` engine functions. This module is compiled
+//! only for tests so older wire-compatibility cases can compare behavior while
+//! the regression suite finishes moving to direct engine parity.
+//!
+//! The covered methods are:
 //!
 //! - `cron.list` — List jobs (filterable by enabled/tags/workspace)
 //! - `cron.get` — Get a single job with runtime state and recent runs
@@ -10,6 +15,8 @@
 //! - `cron.run` — Trigger immediate execution
 //! - `cron.status` — Scheduler health/status
 //! - `cron.getRuns` — Paginated run history for a job
+
+#![cfg(test)]
 
 use async_trait::async_trait;
 use serde_json::Value;

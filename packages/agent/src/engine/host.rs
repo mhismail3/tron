@@ -560,6 +560,19 @@ impl EngineHostHandle {
             .register_trigger(definition, volatile)
     }
 
+    /// Unregister a trigger through the host boundary.
+    pub async fn unregister_trigger(
+        &self,
+        id: &TriggerId,
+        owner_worker: &WorkerId,
+    ) -> Result<bool> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .unregister_trigger(id, owner_worker)
+    }
+
     /// Discover visible functions through the host boundary.
     pub async fn discover(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
         self.inner.lock().await.catalog.discover_functions(query)

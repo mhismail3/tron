@@ -1,4 +1,12 @@
-//! Message handler: delete.
+//! Legacy `message.delete` RPC handler fixture.
+//!
+//! Production `message.delete` is a generic JSON-RPC trigger into canonical
+//! `message::delete`. The engine-owned function preserves the event-store
+//! deletion marker and broadcast behavior while adding session-scoped
+//! idempotency, risk metadata, and approval-required metadata for autonomous
+//! agent visibility.
+
+#![cfg(test)]
 
 use async_trait::async_trait;
 use serde_json::Value;

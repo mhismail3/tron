@@ -1029,6 +1029,8 @@ async fn main() -> Result<()> {
         server.registry(),
     )
     .context("Failed to register RPC engine bridge")?;
+    cron.scheduler
+        .set_engine_host(server.rpc_context().engine_host.clone());
     register_blocking_supervisor_shutdown(server.shutdown());
     if let Some(codex_app_server) = server.rpc_context().codex_app_server.clone() {
         if let Err(error) = codex_app_server.start().await {

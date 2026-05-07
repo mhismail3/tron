@@ -164,10 +164,11 @@ HTTP routes, JSON-RPC compatibility calls, cron schedules, queue messages,
 state changes, event-store appends, UI actions, approval responses, stream
 events, and agent tool calls should all reduce to triggers.
 
-The current runtime supports in-process `json_rpc` and `manual` trigger
-dispatch plus queued delivery handoff. That is intentional: it proves trigger
-metadata, authority, idempotency, revision, schema, queue receipts, and ledger
-behavior before adding cron and remote external-worker delivery.
+The current runtime supports in-process `json_rpc`, `manual`, and
+`cron_schedule` trigger dispatch plus queued delivery handoff. That is
+intentional: it proves trigger metadata, authority, idempotency, revision,
+schema, queue receipts, schedule-fire metadata, and ledger behavior before
+remote external-worker delivery becomes broadly executable.
 
 ### Approval
 
@@ -430,7 +431,7 @@ isolation does.
 |--------|----------------|
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
 | `rpc` | Transport compatibility worker for current JSON-RPC methods during migration. It owns the `json_rpc` trigger type and trigger bindings, not long-term business behavior. |
-| `system` | Server status, ping, diagnostics, and future lifecycle/update capabilities. |
+| `system` | Server status, ping, diagnostics, and update status are canonical generic-trigger reads; shutdown and active update checks remain handler-owned high-risk lifecycle effects. |
 | `model` | Model catalog reads and future model/profile selection capabilities. |
 | `settings` | Typed settings with iOS parity guarantees; currently fully generic-triggered for RPC compatibility. |
 | `logs` | Local observability reads and append-only client-log ingestion; currently fully generic-triggered for RPC compatibility. |
@@ -448,7 +449,7 @@ isolation does.
 | `stream` | Durable subscriptions for catalog, session events, approvals, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |
 | `queue` | Durable named queues, receipts, retries, cancellation, DLQ/redrive. |
-| `cron` | Cron trigger type backed by current automations definitions and SQLite runtime state. |
+| `cron` | Canonical `cron::*` job management functions plus a `cron_schedule` trigger type backed by current automations definitions and SQLite runtime state. Scheduled fires target hidden `cron::scheduled_fire`, preserving existing overlap/misfire/retry execution while recording trigger id, actor, authority, schedule time, idempotency key, and ledger outcome. |
 | `tool` | Built-in tools are registered as canonical `tool::*` capabilities with strict schema metadata, effect/risk/authority/provenance, model-facing names/order, and model tool-call idempotency. Provider requests resolve tool schemas from the live catalog on every model call; prompt-time execution invokes those functions through the engine while handing off the exact runtime `ToolContext`, so progress output, cancellation, hooks, process/job managers, and event persistence survive the collapse. |
 | `mcp` | MCP server lifecycle, search/list, and discovered server tools. Public `mcp.*` RPC methods are marker triggers into canonical `mcp::*`; discovered MCP tools register/unregister live capabilities with conservative classifier metadata, read-only downgrades only when obvious, and approval-required external-side-effect defaults otherwise. |
 | `tree` | Event tree visualization and branch/subtree/ancestor comparison reads are canonical generic-trigger functions. |
@@ -461,6 +462,27 @@ isolation does.
 | `worktree` | Git/worktree capabilities and conflict workflows. |
 | `auth` | Provider auth, client auth, future worker tokens and grants. |
 | `observability` | Logs, metrics, traces, causal graph queries, diagnostics. |
+
+## High-Risk Migration Contracts
+
+Deferred high-risk groups must not become `GenericTrigger` merely because a
+wire-compatible adapter exists. Each group needs a first-principles contract
+before migration:
+
+| Area | Required contract before collapse |
+|------|-----------------------------------|
+| Auth and provider accounts | Admin/user actor only, explicit approval, credential redaction, token-store idempotency, and audit records that never persist secrets. |
+| Git/worktree mutation | Workspace locks, branch/repo provenance, reversible or compensating actions, idempotent command ids, and conflict/error replay semantics. |
+| Sandbox lifecycle/execution | Session-default visibility, explicit delegated authority, resource/network limits, teardown cleanup, and approval for code execution. |
+| Transcription audio/download | Input hash idempotency, sidecar health, file-size and privacy policy, progress streams, and cancellation records. |
+| Browser/display stream mutation | Device/session authority, stream ownership, reconnect cleanup, and no cross-session visual leakage. |
+| Voice-note mutation | Audio blob provenance, retention/deletion policy, transcription linkage, and irreversible delete approval. |
+| Device mutation | Pairing-token authority, per-device idempotency, revocation cleanup, and approval-response causality. |
+| Import execution | Source provenance, append-only event dedupe, preview-to-execute revision checks, and rollback/compensation story. |
+| Memory retention | User-memory governance, no personal literals in code/tests/docs, explicit retention reason, and idempotency by memory key/content hash. |
+| System shutdown/update checks | User/system actor only, high-risk approval, no autonomous shutdown, update artifact verification, and lifecycle stream records. |
+| Model/config mutation | Settings parity, runtime reload rollback, provider authority, and explicit approval for changes that affect future agent behavior. |
+| `session.resume` | Transport/session ownership, turn-state preconditions, idempotent resume token, and stream/event ordering guarantees. |
 
 During the compatibility period, old JSON-RPC clients keep their stable method
 names as `json_rpc` trigger ids and trigger config. Migrated methods execute as

@@ -6,9 +6,18 @@
 //!
 //! - **Config file** (`~/.tron/workspace/automations/automations.json`): Canonical job definitions
 //! - **`SQLite`** (`log.db`): Runtime state (`next_run_at`, failures, runs)
-//! - **Scheduler**: Timer-based loop that fires due jobs
+//! - **Engine projection**: enabled jobs register live `cron_schedule` trigger definitions
+//! - **Scheduler**: Timer-based loop that dispatches due jobs through `EngineTriggerRuntime`
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
 //! - **Delivery**: Result notification (silent, WebSocket, APNS, webhook)
+//!
+//! Public `cron.*` JSON-RPC methods are marker-only triggers into canonical
+//! `cron::*` functions. Schedule fires target hidden `cron::scheduled_fire`,
+//! which preserves the existing overlap, misfire, retry, timeout, delivery, and
+//! run-history behavior while adding engine trigger/idempotency/ledger records.
+//! `automations.json` and cron runtime SQLite remain durable truth for job
+//! definitions and run history in this package; engine triggers are the live
+//! invocation/watch surface.
 //!
 //! ## Invariants
 //!
@@ -32,6 +41,11 @@
 //!   legacy `deniedTools` JSON is rejected at parse time.
 //! - **Full-file hashing**: The config watcher hashes the entire file, not a prefix.
 //! - **Minimum timeout**: Shell (1s–3600s) and webhook (1s–300s) payloads reject 0s timeout.
+//! - **Engine-attached fires**: In production, `main.rs` attaches the engine
+//!   host before `start()`. When attached, scheduled fires must dispatch
+//!   through `cron_schedule:<job_id>` rather than directly spawning execution.
+//!   The direct start path remains for isolated scheduler tests that do not
+//!   bootstrap the engine host.
 //!
 //! ## Module Boundaries
 //!

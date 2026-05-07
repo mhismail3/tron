@@ -33,7 +33,8 @@ Fully collapsed groups now include prompt library, settings, logs, MCP, skills,
 notifications, plan, events, approval get/list/resolve, job controls, all
 current agent controls including `agent.prompt`, basic filesystem, tree reads,
 repo divergence reads, import browse/preview reads, browser status, voice-note
-listing, transcription model listing, and sandbox listing.
+listing, transcription model listing, sandbox listing, cron, and runtime-tail
+status/blob/message/tool methods.
 Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
 context compaction/clear commands are also generic-triggered canonical
 functions. Migrated groups delete their method-specific business handlers as
@@ -48,9 +49,9 @@ answers are explicit enough to test.
 
 | Prefix | Count | Future mapping | Default visibility | Effect/idempotency | Authority and causality |
 |--------|------:|----------------|--------------------|--------------------|-------------------------|
-| `system` | 6 | `system::*` and `engine::*` functions. | Client/admin/system. | Mostly reads; shutdown/update checks need explicit risk metadata. | Trace client/system actor and server lifecycle effects. |
-| `codexApp` | 1 | `codex_app::*` lifecycle/status functions. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
-| `blob` | 1 | `blob::get`. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
+| `system` | 6 | `system::ping/get_info/get_diagnostics/get_update_status` are generic-triggered; shutdown/checkForUpdates remain handler-owned until lifecycle contracts harden. | Client/admin/system. | Reads are pure; shutdown/update effects need explicit high-risk contracts. | Trace client/system actor and server lifecycle effects. |
+| `codexApp` | 1 | `codex_app::status` is a generic-triggered status function. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
+| `blob` | 1 | `blob::get` is a generic-triggered read. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
 | `session` | 13 | `session` domain worker; all create/delete/fork/archive/export plus safe reads are generic-triggered except resume. | Client/session/workspace. | Reads plus idempotent mutations; create/archiveOlderThan use system idempotency, session-specific commands use session idempotency. | Reads preserve event-store reconstruction; mutations call the existing command service behind canonical functions and preserve broadcasts/worktree cleanup. |
 | `agent` | 10 | `agent::*` functions and queue triggers; prompt, status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered. | Session by default. | Prompt and other writes are session-scoped idempotent commands; high-risk prompt/abort carry approval metadata for autonomous agent visibility. | Prompt acceptance records trigger/idempotency causality, enqueues hidden `agent::prompt_apply`, completion enqueues hidden `agent::prompt_queue_drain`, and event-store turn truth remains authoritative. |
 | `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
@@ -59,8 +60,8 @@ answers are explicit enough to test.
 | `settings` | 3 | Fully generic-triggered `settings::*` state functions. | Admin/client. | Read plus high-risk reversible system writes with engine-ledger idempotency. | Must preserve iOS settings parity, strict validation, rollback, MCP reload, and Codex App Server reconfiguration causality. |
 | `approval` | 3 | Public `approval.get/list/resolve` JSON-RPC triggers over the engine approval primitive; `approval.request` remains agent/tool-only. | Client/user/admin; resolution requires user/system/admin actor kind. | Reads plus system-idempotent resolve. | Pending/approved/denied/executed records preserve original actor, trace, parent, trigger, scopes, payload fingerprint, and idempotency key. |
 | `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
-| `tool` | 1 | Tool-result compatibility function. | Session. | Append/update tool result; idempotent by tool call id. | Link to parent tool invocation and turn. |
-| `message` | 1 | `message::delete`. | Session/client. | Idempotent write. | Event-sourced deletion marker. |
+| `tool` | 1 | `tool::result` is a generic-triggered runtime write. | Session. | Append/update tool result; session-scoped idempotency by request/tool call id. | Link to parent tool invocation and turn. |
+| `message` | 1 | `message::delete` is a generic-triggered message command. | Session/client. | Session-scoped irreversible side effect with idempotency and approval metadata for agent visibility. | Event-sourced deletion marker plus trigger/invocation ledger metadata. |
 | `logs` | 2 | Fully generic-triggered `observability::logs::*` compatibility functions. | Admin/client filtered. | Ingest append-only with system idempotency; recent read. | Trace/log correlation mandatory; duplicate transport ingests replay before DB insertion. |
 | `memory` | 1 | `memory::retain`. | Session/workspace with policy. | Idempotent/append memory update. | User memory files remain governed; no hardcoded personal data. |
 | `mcp` | 8 | Fully generic-triggered `mcp` domain worker functions plus live discovered MCP tool functions. | Agent/client/admin filtered; discovered tools are system-visible until a safer server/tool policy is available. | Lifecycle writes use system idempotency; status/list are reads; discovered MCP tools default to approval-required external side effects. | Server lifecycle changes refresh the live catalog, unregister absent tools, publish catalog/status stream records, and MCP tool calls inherit caller authority and trace. |
@@ -79,7 +80,7 @@ answers are explicit enough to test.
 | `sandbox` | 5 | `sandbox::list_containers` is generic-triggered; lifecycle/execution remain deferred. | Session by default. | List is pure read; lifecycle idempotent by sandbox id; high-risk execution gated. | Created workers inherit narrowed delegated authority. |
 | `notifications` | 3 | Fully generic-triggered `notifications` domain worker functions. | Client/session. | Mark read/all-read are system-scoped idempotent writes; list is read. | Notification effects link to source invocation/event and trigger metadata. |
 | `promptHistory` / `promptSnippet` | 8 | `prompt_library::*`; all methods are generic-triggered in the RPC bridge. | Workspace/client. | Prompt-library writes use engine-ledger idempotency; delete/clear effects carry irreversible-risk metadata. | Prompt provenance and retention policy recorded. |
-| `cron` | 8 | `cron::*` trigger worker. | Admin/workspace. | Job definitions idempotent by job id; runs append-only. | Trigger fires record schedule, misfire/overlap policy, and target invocation. |
+| `cron` | 8 | Fully generic-triggered `cron::*` functions plus live `cron_schedule` trigger definitions. | Admin/workspace. | Reads are pure; create/update/delete/run are high-risk system-idempotent writes; scheduled fires use trigger-derived idempotency. | Trigger fires dispatch through hidden `cron::scheduled_fire` and record schedule time, trigger id, actor, authority, function/catalog revision, overlap/misfire policy, and run outcome. |
 
 ## Runtime and agent loop
 

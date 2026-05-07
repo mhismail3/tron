@@ -177,12 +177,12 @@ macro_rules! generic_trigger {
 const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("system.ping"),
     generic_trigger!("system.getInfo"),
-    handler_only!("system.getDiagnostics"),
+    generic_trigger!("system.getDiagnostics"),
     handler_only!("system.shutdown"),
     handler_only!("system.checkForUpdates"),
-    handler_only!("system.getUpdateStatus"),
-    handler_only!("codexApp.status"),
-    handler_only!("blob.get"),
+    generic_trigger!("system.getUpdateStatus"),
+    generic_trigger!("codexApp.status"),
+    generic_trigger!("blob.get"),
     generic_trigger!("session.create"),
     handler_only!("session.resume"),
     generic_trigger!("session.list"),
@@ -238,8 +238,8 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("auth.setActive"),
     handler_only!("auth.removeAccount"),
     handler_only!("auth.removeApiKey"),
-    handler_only!("tool.result"),
-    handler_only!("message.delete"),
+    generic_trigger!("tool.result"),
+    generic_trigger!("message.delete"),
     generic_trigger!("logs.ingest"),
     generic_trigger!("logs.recent"),
     handler_only!("memory.retain"),
@@ -337,14 +337,14 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("promptSnippet.create"),
     generic_trigger!("promptSnippet.update"),
     generic_trigger!("promptSnippet.delete"),
-    handler_only!("cron.list"),
-    handler_only!("cron.get"),
-    handler_only!("cron.create"),
-    handler_only!("cron.update"),
-    handler_only!("cron.delete"),
-    handler_only!("cron.run"),
-    handler_only!("cron.status"),
-    handler_only!("cron.getRuns"),
+    generic_trigger!("cron.list"),
+    generic_trigger!("cron.get"),
+    generic_trigger!("cron.create"),
+    generic_trigger!("cron.update"),
+    generic_trigger!("cron.delete"),
+    generic_trigger!("cron.run"),
+    generic_trigger!("cron.status"),
+    generic_trigger!("cron.getRuns"),
 ];
 
 /// Build and validate the complete bridge spec set for a registry.
@@ -564,10 +564,12 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
             | "context.compact"
             | "agent.abort"
             | "agent.abortTool"
+            | "cron.create"
+            | "cron.update"
     ) {
         return EffectClass::ReversibleSideEffect;
     }
-    if method == "agent.prompt" {
+    if matches!(method, "agent.prompt" | "cron.run") {
         return EffectClass::ExternalSideEffect;
     }
     if matches!(method, "events.append" | "logs.ingest") {
@@ -577,6 +579,7 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
         method,
         "system.shutdown"
             | "message.delete"
+            | "cron.delete"
             | "voiceNotes.delete"
             | "promptHistory.delete"
             | "promptHistory.clear"
@@ -618,6 +621,11 @@ fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
             | "approval.resolve"
             | "agent.prompt"
             | "agent.abort"
+            | "message.delete"
+            | "cron.create"
+            | "cron.update"
+            | "cron.delete"
+            | "cron.run"
     ) {
         RiskLevel::High
     } else if matches!(effect, EffectClass::IrreversibleSideEffect) {
@@ -697,6 +705,7 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
         || method.starts_with("promptSnippet.")
         || method == "skill.refresh"
         || method.starts_with("settings.")
+        || method.starts_with("cron.")
     {
         IdempotencyContract::caller_system_engine_ledger()
     } else {
@@ -715,12 +724,17 @@ fn settings_write_requires_approval(method: &str) -> bool {
             | "job.cancel"
             | "agent.prompt"
             | "agent.abort"
+            | "message.delete"
             | "mcp.addServer"
             | "mcp.removeServer"
             | "mcp.enableServer"
             | "mcp.disableServer"
             | "mcp.restartServer"
             | "mcp.reload"
+            | "cron.create"
+            | "cron.update"
+            | "cron.delete"
+            | "cron.run"
     )
 }
 
@@ -758,6 +772,11 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
         "voice_notes",
         "transcription",
         "sandbox",
+        "cron",
+        "blob",
+        "codex_app",
+        "tool",
+        "message",
     ];
     domains
         .into_iter()
@@ -800,6 +819,29 @@ pub(super) fn manual_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     );
     definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
     definition.visibility = VisibilityScope::Internal;
+    Ok(definition)
+}
+
+pub(super) fn cron_schedule_trigger_type() -> EngineResult<TriggerTypeDefinition> {
+    let mut definition = TriggerTypeDefinition::new(
+        TriggerTypeId::new("cron_schedule")?,
+        worker_id("cron")?,
+        "Cron schedule projection into an engine trigger",
+    );
+    definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
+    definition.visibility = VisibilityScope::Internal;
+    definition.config_schema = Some(json!({
+        "type": "object",
+        "required": ["jobId", "jobName", "enabled", "payloadKind"],
+        "additionalProperties": true,
+        "properties": {
+            "jobId": {"type": "string"},
+            "jobName": {"type": "string"},
+            "enabled": {"type": "boolean"},
+            "payloadKind": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    }));
     Ok(definition)
 }
 
@@ -868,6 +910,11 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("voiceNotes.") => "voice_notes",
         method if method.starts_with("transcribe.") => "transcription",
         method if method.starts_with("sandbox.") => "sandbox",
+        method if method.starts_with("cron.") => "cron",
+        method if method.starts_with("blob.") => "blob",
+        method if method.starts_with("codexApp.") => "codex_app",
+        method if method.starts_with("tool.") => "tool",
+        method if method.starts_with("message.") => "message",
         method if method.starts_with("system.") => "system",
         method if method.starts_with("model.") => "model",
         _ => RPC_WORKER_ID,
@@ -883,6 +930,20 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
     match method {
         "system.ping" => ("system", "ping".to_owned()),
         "system.getInfo" => ("system", "get_info".to_owned()),
+        "system.getDiagnostics" => ("system", "get_diagnostics".to_owned()),
+        "system.getUpdateStatus" => ("system", "get_update_status".to_owned()),
+        "codexApp.status" => ("codex_app", "status".to_owned()),
+        "blob.get" => ("blob", "get".to_owned()),
+        "tool.result" => ("tool", "result".to_owned()),
+        "message.delete" => ("message", "delete".to_owned()),
+        "cron.list" => ("cron", "list".to_owned()),
+        "cron.get" => ("cron", "get".to_owned()),
+        "cron.create" => ("cron", "create".to_owned()),
+        "cron.update" => ("cron", "update".to_owned()),
+        "cron.delete" => ("cron", "delete".to_owned()),
+        "cron.run" => ("cron", "run".to_owned()),
+        "cron.status" => ("cron", "status".to_owned()),
+        "cron.getRuns" => ("cron", "get_runs".to_owned()),
         "model.list" => ("model", "list".to_owned()),
         "settings.get" => ("settings", "get".to_owned()),
         "settings.update" => ("settings", "update".to_owned()),
@@ -1009,6 +1070,11 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "voiceNotes" => "voice_notes",
                     "transcribe" => "transcription",
                     "sandbox" => "sandbox",
+                    "cron" => "cron",
+                    "blob" => "blob",
+                    "codexApp" => "codex_app",
+                    "tool" => "tool",
+                    "message" => "message",
                     "settings" => "settings",
                     "system" => "system",
                     _ => RPC_WORKER_ID,
@@ -1079,6 +1145,16 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("transcription"), "write") => "transcription.write",
         (Some("sandbox"), "read") => "sandbox.read",
         (Some("sandbox"), "write") => "sandbox.write",
+        (Some("cron"), "read") => "cron.read",
+        (Some("cron"), "write") => "cron.write",
+        (Some("blob"), "read") => "blob.read",
+        (Some("blob"), "write") => "blob.write",
+        (Some("codex_app"), "read") => "codex_app.read",
+        (Some("codex_app"), "write") => "codex_app.write",
+        (Some("tool"), "read") => "tool.read",
+        (Some("tool"), "write") => "tool.write",
+        (Some("message"), "read") => "message.read",
+        (Some("message"), "write") => "message.write",
         (_, "write") => "rpc.write",
         _ => "rpc.read",
     }

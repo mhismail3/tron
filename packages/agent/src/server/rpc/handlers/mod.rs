@@ -83,19 +83,28 @@ fn register_core(registry: &mut MethodRegistry) {
         "system.getInfo",
         RpcGenericTriggerHandler::new("system.getInfo"),
     );
-    registry.register("system.getDiagnostics", system::GetDiagnosticsHandler);
+    registry.register(
+        "system.getDiagnostics",
+        RpcGenericTriggerHandler::new("system.getDiagnostics"),
+    );
     registry.register("system.shutdown", system::ShutdownHandler);
     // System — user-mode update checks/downloads.
     registry.register("system.checkForUpdates", system::CheckForUpdatesHandler);
-    registry.register("system.getUpdateStatus", system::GetUpdateStatusHandler);
+    registry.register(
+        "system.getUpdateStatus",
+        RpcGenericTriggerHandler::new("system.getUpdateStatus"),
+    );
 
     // Codex App Server lifecycle discovery. Codex traffic remains direct iOS
     // -> managed `codex app-server`; this RPC only returns the server-owned
     // endpoint/token/status.
-    registry.register("codexApp.status", codex_app::CodexAppStatusHandler);
+    registry.register(
+        "codexApp.status",
+        RpcGenericTriggerHandler::new("codexApp.status"),
+    );
 
     // Blob
-    registry.register("blob.get", blob::GetBlobHandler);
+    registry.register("blob.get", RpcGenericTriggerHandler::new("blob.get"));
 
     // Session
     registry.register(
@@ -291,10 +300,13 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("auth.removeApiKey", auth::RemoveApiKeyHandler);
 
     // Tool
-    registry.register("tool.result", tool::ToolResultHandler);
+    registry.register("tool.result", RpcGenericTriggerHandler::new("tool.result"));
 
     // Message
-    registry.register("message.delete", message::DeleteMessageHandler);
+    registry.register(
+        "message.delete",
+        RpcGenericTriggerHandler::new("message.delete"),
+    );
 
     // Logs
     registry.register("logs.ingest", RpcGenericTriggerHandler::new("logs.ingest"));
@@ -590,14 +602,17 @@ fn register_platform(registry: &mut MethodRegistry) {
     );
 
     // Cron
-    registry.register("cron.list", cron::ListHandler);
-    registry.register("cron.get", cron::GetHandler);
-    registry.register("cron.create", cron::CreateHandler);
-    registry.register("cron.update", cron::UpdateHandler);
-    registry.register("cron.delete", cron::DeleteHandler);
-    registry.register("cron.run", cron::RunHandler);
-    registry.register("cron.status", cron::StatusHandler);
-    registry.register("cron.getRuns", cron::GetRunsHandler);
+    registry.register("cron.list", RpcGenericTriggerHandler::new("cron.list"));
+    registry.register("cron.get", RpcGenericTriggerHandler::new("cron.get"));
+    registry.register("cron.create", RpcGenericTriggerHandler::new("cron.create"));
+    registry.register("cron.update", RpcGenericTriggerHandler::new("cron.update"));
+    registry.register("cron.delete", RpcGenericTriggerHandler::new("cron.delete"));
+    registry.register("cron.run", RpcGenericTriggerHandler::new("cron.run"));
+    registry.register("cron.status", RpcGenericTriggerHandler::new("cron.status"));
+    registry.register(
+        "cron.getRuns",
+        RpcGenericTriggerHandler::new("cron.getRuns"),
+    );
 }
 
 // Param extraction helpers (require_param, opt_string, etc.) live in

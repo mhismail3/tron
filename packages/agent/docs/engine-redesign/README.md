@@ -397,6 +397,14 @@ Implemented:
   sandbox listing are now marker-only generic triggers into canonical domain
   functions, raising generic-trigger coverage to 98 while the public JSON-RPC
   method count stays 170;
+- cron and runtime-tail collapse: all eight public `cron.*` methods are
+  marker-only `json_rpc` triggers into canonical `cron::*` functions, cron jobs
+  project live `cron_schedule` triggers into hidden `cron::scheduled_fire`, and
+  scheduled fires now dispatch through `EngineTriggerRuntime` before starting
+  existing payload execution. `system.getDiagnostics`,
+  `system.getUpdateStatus`, `codexApp.status`, `blob.get`, `tool.result`, and
+  `message.delete` are canonical functions as well, raising generic-trigger
+  coverage to 112 while the public JSON-RPC method count stays 170;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -406,8 +414,12 @@ Implemented:
 
 Still deferred:
 
-- RPC migrations and generic-trigger conversion for the remaining handler-only
-  method groups beyond the current collapsed set;
+- RPC migrations and generic-trigger conversion for the remaining high-risk
+  handler-only groups beyond the current collapsed set, especially auth,
+  git/worktree mutation, sandbox lifecycle/execution, transcription mutation,
+  browser/display mutation, voice-note mutation, device mutation, import
+  execution, memory retention, system shutdown/update actions,
+  model/config mutation, and `session.resume`;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
 - replacement of the compatibility EventBridge fallback and provider-native

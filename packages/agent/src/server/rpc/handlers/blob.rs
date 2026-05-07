@@ -1,8 +1,10 @@
-//! Blob retrieval RPC handler.
+//! Legacy blob retrieval RPC handler fixture.
 //!
-//! Allows the iOS app to fetch binary content (images, etc.) stored in blob
-//! storage. The Display tool stores images as blobs and includes only the
-//! `blobId` in event details; the client fetches the actual data via this RPC.
+//! Production `blob.get` is a generic JSON-RPC trigger into canonical
+//! `blob::get`. This test-only fixture preserves the old wire behavior while
+//! direct engine parity tests own the production contract.
+
+#![cfg(test)]
 
 use async_trait::async_trait;
 use serde_json::Value;

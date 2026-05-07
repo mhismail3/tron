@@ -711,20 +711,72 @@ Acceptance:
 Convert cron execution to trigger semantics while keeping current automation
 definition files.
 
-Deliverables:
+Delivered:
 
-- Cron trigger type.
-- Adapter from `automations.json` job definitions to trigger registrations.
-- Cron execution invokes engine functions with queue policy where appropriate.
-- Run history remains in SQLite.
+- `cron` in-process domain worker with canonical `cron::list`,
+  `cron::get`, `cron::status`, `cron::get_runs`, `cron::create`,
+  `cron::update`, `cron::delete`, and `cron::run` functions.
+- `cron_schedule` trigger type owned by the `cron` worker.
+- Live projection from `automations.json` job definitions to trigger
+  registrations, including schedule, payload kind, enabled state,
+  workspace id, overlap policy, and misfire policy metadata.
+- Hidden `cron::scheduled_fire` function for scheduled fires. Production
+  startup attaches the engine host before the scheduler starts; startup and
+  config reload project enabled jobs into live trigger definitions, and due
+  fires dispatch through `EngineTriggerRuntime` before execution starts.
+- Current `automations.json` definitions and cron runtime SQLite remain the
+  durable truth for job definitions and run history in this package. Engine
+  triggers are the live invocation/watch/ledger path.
+- `cron.create`, `cron.update`, `cron.delete`, and `cron.run` use strict
+  schemas, `rpc.write`, `cron.write`, system-scoped engine-ledger idempotency,
+  high-risk metadata, and approval-required metadata for autonomous agent
+  visibility.
+- `cron.run` keeps its existing compatibility behavior by scheduling an
+  immediate fire; duplicate JSON-RPC retries replay the first trigger result
+  and do not schedule the job twice.
 
 Acceptance:
 
 - Existing cron tests pass.
-- Tests cover shell/webhook/agent/system-event payloads through the trigger
-  path.
+- Engine bridge tests prove the cron group is fully generic-triggered,
+  `cron_schedule` triggers target hidden `cron::scheduled_fire`, scheduled
+  dispatch records trigger/authority/idempotency ledger metadata, and duplicate
+  scheduled fires replay through the engine ledger.
 - Misfire, overlap, retry, corrupt-row, idempotency, and causality invariants
   remain documented and tested.
+
+### WP59-WP66 cron and runtime-tail collapse
+
+The runtime-tail methods below are now canonical functions too, raising the
+generic-trigger count from 98 to 112 while keeping the public JSON-RPC method
+count at 170:
+
+- `system::get_diagnostics`
+- `system::get_update_status`
+- `codex_app::status`
+- `blob::get`
+- `tool::result`
+- `message::delete`
+
+Semantics:
+
+- `system.getDiagnostics`, `system.getUpdateStatus`, `codexApp.status`, and
+  `blob.get` are pure reads with strict schemas and domain read scopes.
+- `tool.result` is a session-scoped runtime write with `tool.write` and
+  engine-ledger idempotency, preserving pending tool-call resolution behavior.
+- `message.delete` is a session-scoped irreversible side effect with
+  `message.write`, strict schema, idempotency, and approval-required metadata
+  for autonomous agent visibility.
+- The old cron/blob/codex-app/tool/message handlers are test-only fixtures;
+  production registrations are marker-only generic triggers.
+
+High-risk deferred groups stay explicitly blocked from migration until their
+contracts cover strict schema, domain authority, idempotency, risk metadata,
+approval metadata where required, and marker-only registration. Those groups
+include auth, git/worktree mutation, sandbox lifecycle/execution,
+transcription audio/download, browser/display stream mutation, voice-note
+mutation, device mutation, import execution, memory retention, system
+shutdown/update actions, model/config mutation, and `session.resume`.
 
 ## Phase 7: tools, MCP, approvals, and effects
 

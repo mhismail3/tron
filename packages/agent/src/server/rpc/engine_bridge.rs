@@ -10,10 +10,15 @@
 //! create/delete/fork/archive/export except `session.resume`, all context
 //! snapshot/compaction/clear methods, and safe read groups for tree, repo,
 //! import, browser status, voice notes, transcription models, and sandbox
-//! listing now run through this generic-trigger path. The MCP group is also
-//! collapsed: `mcp.*` methods route to canonical `mcp::*` functions, and
+//! listing now run through this generic-trigger path. The MCP and cron groups
+//! are also collapsed: `mcp.*` methods route to canonical `mcp::*` functions,
 //! discovered MCP tools are projected into the live catalog with conservative
-//! effect/risk classification.
+//! effect/risk classification, and `cron.*` methods route to canonical
+//! `cron::*` functions while schedule fires dispatch through the
+//! `cron_schedule` trigger type into the hidden `cron::scheduled_fire`
+//! function. Runtime-tail methods such as `system.getDiagnostics`,
+//! `system.getUpdateStatus`, `codexApp.status`, `blob.get`, `tool.result`,
+//! and `message.delete` are now domain-owned functions too.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
@@ -26,8 +31,9 @@
 //! fabric instead of through a frozen `ToolRegistry` snapshot.
 //! `json_rpc` trigger records capture the old client method name and dispatch
 //! directly into canonical ids such as `skills::activate` or
-//! `session::reconstruct`; `rpc::<method>` names remain compatibility metadata
-//! for handler-only inventory during the migration.
+//! `session::reconstruct`; `cron_schedule` trigger records capture scheduled
+//! automation fires; `rpc::<method>` names remain compatibility metadata for
+//! handler-only inventory during the migration.
 //!
 //! # INVARIANT: the bridge is temporary demolition scaffolding
 //!
@@ -101,6 +107,7 @@ fn register_rpc_worker(
     }
     handle.register_trigger_type_for_setup(specs::json_rpc_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(specs::manual_trigger_type()?, false)?;
+    handle.register_trigger_type_for_setup(specs::cron_schedule_trigger_type()?, false)?;
     for spec in &specs {
         if specs::uses_existing_engine_primitive(spec) {
             continue;
@@ -119,11 +126,13 @@ fn register_rpc_worker(
     }
     register_hidden_job_apply_functions(handle, &deps)?;
     register_hidden_agent_prompt_functions(handle, &deps)?;
+    register_hidden_cron_schedule_function(handle, &deps)?;
     for spec in &specs {
         if let Some(trigger) = specs::json_rpc_trigger_for_spec(spec)? {
             handle.register_trigger_for_setup(trigger, false)?;
         }
     }
+    functions::cron::project_all_cron_triggers_for_setup(handle, &deps)?;
     Ok(())
 }
 
@@ -550,6 +559,59 @@ fn register_hidden_job_apply_functions(
             false,
         )?;
     }
+    Ok(())
+}
+
+fn register_hidden_cron_schedule_function(
+    handle: &EngineHostHandle,
+    deps: &functions::RpcEngineDeps,
+) -> EngineResult<()> {
+    let mut definition = FunctionDefinition::new(
+        FunctionId::new("cron::scheduled_fire")?,
+        specs::worker_id("cron")?,
+        "apply one cron schedule fire through the engine trigger runtime",
+        VisibilityScope::Internal,
+        EffectClass::ExternalSideEffect,
+    )
+    .with_risk(RiskLevel::High)
+    .with_required_authority(AuthorityRequirement::scope("cron.write"))
+    .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_provenance(Provenance::system())
+    .with_request_schema(json!({
+        "type": "object",
+        "required": ["jobId", "scheduledAt"],
+        "additionalProperties": false,
+        "properties": {
+            "jobId": {"type": "string"},
+            "scheduledAt": {"type": ["string", "integer"]}
+        }
+    }))
+    .with_response_schema(json!({
+        "type": "object",
+        "required": ["started", "skipped", "jobId", "scheduledAt"],
+        "additionalProperties": false,
+        "properties": {
+            "started": {"type": "boolean"},
+            "skipped": {"type": "boolean"},
+            "reason": {"type": "string"},
+            "jobId": {"type": "string"},
+            "scheduledAt": {"type": "string"},
+            "nextRunAt": {"type": ["string", "null"]}
+        }
+    }));
+    definition.metadata = serde_json::json!({
+        "internal": true,
+        "canonicalCapability": "cron::scheduled_fire",
+        "hiddenCronScheduleFunction": true,
+    });
+    handle.register_function_for_setup(
+        definition,
+        Some(std::sync::Arc::new(functions::RpcFunctionHandler {
+            method: "cron.scheduled_fire",
+            deps: deps.clone(),
+        })),
+        false,
+    )?;
     Ok(())
 }
 

@@ -1,13 +1,14 @@
 //! Main cron scheduling loop.
 //!
 //! [`CronScheduler`] owns the in-memory job state, the scheduling timer,
-//! config file watcher, and execution task spawner. It coordinates between
-//! the config file (canonical definitions), `SQLite` (runtime state), and
-//! the executor (payload execution).
+//! config file watcher, engine trigger projection, and execution task spawner.
+//! It coordinates between the config file (canonical definitions), `SQLite`
+//! (runtime state), the engine trigger runtime (causal scheduled-fire path),
+//! and the executor (payload execution).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use crate::events::ConnectionPool;
@@ -25,6 +26,11 @@ use crate::cron::executor::{self, ExecutorDeps};
 use crate::cron::schedule::compute_next_run;
 use crate::cron::store;
 use crate::cron::types::{CronJob, JobRuntimeState, MisfirePolicy, OverlapPolicy, RunStatus};
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, DeliveryMode, EngineHostHandle, EngineTriggerRuntime,
+    FunctionId, IdempotencyKeySource, Provenance, TriggerDefinition, TriggerDispatchRequest,
+    TriggerId, TriggerTypeId, VisibilityScope, WorkerId,
+};
 
 /// Concurrency limit for heavyweight payloads (`AgentTurn`, `ShellCommand`).
 ///
@@ -76,6 +82,14 @@ pub struct CronScheduler {
     delivery_semaphore: Arc<tokio::sync::Semaphore>,
     /// Executor dependencies.
     deps: Arc<ExecutorDeps>,
+    /// Live engine host used by production cron fires.
+    ///
+    /// INVARIANT: when this is set, scheduled fires route through
+    /// `EngineTriggerRuntime`; direct execution is retained only for isolated
+    /// scheduler tests that do not bootstrap the engine.
+    engine_host: OnceLock<EngineHostHandle>,
+    /// Spawned cron execution tasks.
+    active_tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
     /// Path to `automations.json`.
     config_path: PathBuf,
     /// Path to `automations.json.bak` beside the automations config.
@@ -104,6 +118,8 @@ impl CronScheduler {
             execution_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_EXECUTION_LIMIT)),
             delivery_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_DELIVERY_LIMIT)),
             deps: Arc::new(deps),
+            engine_host: OnceLock::new(),
+            active_tasks: tokio::sync::Mutex::new(tokio::task::JoinSet::new()),
             config_path,
             backup_path,
         }
@@ -115,6 +131,15 @@ impl CronScheduler {
     /// scheduler. Uses `OnceLock` internally — calling twice is a no-op.
     pub fn set_broadcaster(&self, broadcaster: Arc<dyn crate::cron::executor::EventBroadcaster>) {
         let _ = self.deps.broadcaster.set(broadcaster);
+    }
+
+    /// Attach the engine host used for scheduled trigger dispatch.
+    ///
+    /// The scheduler is constructed before the RPC/engine bridge. Production
+    /// startup must call this after the bridge registers `cron::*` functions
+    /// and before `start()`.
+    pub fn set_engine_host(&self, handle: EngineHostHandle) {
+        let _ = self.engine_host.set(handle);
     }
 
     /// Get the reschedule notify handle (for RPC handlers to wake the scheduler).
@@ -165,6 +190,37 @@ impl CronScheduler {
     /// Get a single job by ID (avoids cloning the entire map).
     pub fn get_job(&self, job_id: &str) -> Option<CronJob> {
         self.jobs.read().get(job_id).cloned()
+    }
+
+    /// Build the live engine trigger id for a cron job.
+    pub fn schedule_trigger_id(job_id: &str) -> crate::engine::Result<TriggerId> {
+        TriggerId::new(format!("cron_schedule:{job_id}"))
+    }
+
+    /// Build the live engine trigger definition for a cron job.
+    pub fn schedule_trigger_definition(job: &CronJob) -> crate::engine::Result<TriggerDefinition> {
+        let mut trigger = TriggerDefinition::new(
+            Self::schedule_trigger_id(&job.id)?,
+            WorkerId::new("cron")?,
+            TriggerTypeId::new("cron_schedule")?,
+            FunctionId::new("cron::scheduled_fire")?,
+            AuthorityGrantId::new("cron-scheduler")?,
+        )
+        .with_delivery_mode(DeliveryMode::Sync);
+        trigger.visibility = VisibilityScope::Internal;
+        trigger.idempotency_key_strategy = Some(IdempotencyKeySource::TriggerDerived);
+        trigger.provenance = Provenance::system();
+        trigger.config = serde_json::json!({
+            "jobId": job.id,
+            "jobName": job.name,
+            "enabled": job.enabled,
+            "payloadKind": job.payload.kind_name(),
+            "workspaceId": job.workspace_id,
+            "schedule": job.schedule,
+            "overlapPolicy": job.overlap_policy,
+            "misfirePolicy": job.misfire_policy,
+        });
+        Ok(trigger)
     }
 
     /// Get runtime state for a job.
@@ -361,6 +417,8 @@ impl CronScheduler {
             );
         }
 
+        self.project_engine_triggers_for_jobs(&config.jobs).await?;
+
         Ok(())
     }
 
@@ -374,8 +432,6 @@ impl CronScheduler {
         tracing::info!(job_count = self.job_count(), "cron scheduler started");
 
         let mut last_maintenance = self.clock.now_utc();
-        let mut active_tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
-
         loop {
             let now = self.clock.now_utc();
 
@@ -424,69 +480,14 @@ impl CronScheduler {
                         if i > 0 && due_jobs.len() > 5 {
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
-                        // Check overlap policy
-                        if job.overlap_policy == OverlapPolicy::Skip
-                            && let Ok(running) = store::count_running_runs(&self.pool, &job.id)
-                                && running > 0 {
-                                    tracing::debug!(job_id = %job.id, "skipping overlapping execution");
-                                    // Still update next_run_at
-                                    if let Some(next) = compute_next_run(&job.schedule, *scheduled_at) {
-                                        if let Err(e) = store::update_next_run_at(&self.pool, &job.id, Some(next)) {
-                                            tracing::error!(job_id = %job.id, error = %e, "failed to update next_run_at on overlap skip");
-                                        } else {
-                                            let _ = self.runtime.write().entry(job.id.clone()).and_modify(|s| s.next_run_at = Some(next));
-                                        }
-                                    }
-                                    continue;
-                                }
-
-                        // Acquire the pool matching this payload kind —
-                        // heavyweight (AgentTurn, ShellCommand) and
-                        // lightweight delivery (Webhook, SystemEvent) have
-                        // separate budgets so neither starves the other.
-                        let sem = self.semaphore_for_payload(&job.payload);
-                        let Ok(permit) = sem.try_acquire_owned() else {
-                            tracing::warn!(
+                        if let Err(error) = self.fire_due_job(job, *scheduled_at).await {
+                            tracing::error!(
                                 job_id = %job.id,
-                                payload_kind = job.payload.kind_name(),
-                                "concurrency pool saturated, skipping"
+                                scheduled_at = %scheduled_at,
+                                error = %error,
+                                "cron scheduled fire failed"
                             );
-                            continue;
-                        };
-
-                        // Capture job_id before moving job into the async block
-                        let job_id = job.id.clone();
-                        let is_oneshot = matches!(job.schedule, crate::cron::types::Schedule::OneShot { .. });
-
-                        // Update next_run_at immediately (before spawn)
-                        let next = compute_next_run(&job.schedule, *scheduled_at);
-                        if let Err(e) = store::update_next_run_at(&self.pool, &job_id, next) {
-                            tracing::error!(job_id = %job_id, error = %e, "failed to update next_run_at, skipping execution");
-                            continue;
                         }
-                        let _ = self.runtime.write().entry(job_id.clone()).and_modify(|s| s.next_run_at = next);
-
-                        // Auto-disable one-shot after scheduling
-                        if is_oneshot {
-                            if let Err(e) = store::disable_job(&self.pool, &job_id) {
-                                tracing::error!(job_id = %job_id, error = %e, "failed to disable one-shot job, skipping execution");
-                                continue;
-                            }
-                            let _ = self.jobs.write().entry(job_id.clone()).and_modify(|j| j.enabled = false);
-                        }
-
-                        // Spawn execution
-                        let job = job.clone();
-                        let deps = self.deps.clone();
-                        let pool = self.pool.clone();
-                        let clock = self.clock.clone();
-                        let cancel = self.cancel.child_token();
-                        let runtime = self.runtime_ref();
-
-                        let _ = active_tasks.spawn(async move {
-                            let _permit = permit;
-                            execute_job(&job, &deps, &pool, clock.as_ref(), cancel, &runtime).await;
-                        });
                     }
 
                     // Periodic maintenance (every 5 minutes)
@@ -502,7 +503,7 @@ impl CronScheduler {
                     }
 
                     // Drain completed tasks
-                    while active_tasks.try_join_next().is_some() {}
+                    self.drain_completed_tasks().await;
                 }
 
                 () = self.config_notify.notified() => {
@@ -517,6 +518,7 @@ impl CronScheduler {
 
                 () = self.cancel.cancelled() => {
                     tracing::info!("cron scheduler shutting down");
+                    let mut active_tasks = self.active_tasks.lock().await;
                     while let Some(result) = active_tasks.join_next().await {
                         if let Err(e) = result {
                             tracing::warn!(error = %e, "cron task error during shutdown");
@@ -554,50 +556,64 @@ impl CronScheduler {
         let (added, updated, removed) = store::sync_from_config(&self.pool, &config.jobs)?;
         tracing::info!(added, updated, removed, "config reloaded");
 
-        // Update in-memory state
-        let mut jobs = self.jobs.write();
         let config_ids: std::collections::HashSet<String> =
             config.jobs.iter().map(|j| j.id.clone()).collect();
-
-        // Remove jobs no longer in config
-        jobs.retain(|id, _| config_ids.contains(id));
-
-        // Add/update jobs from config
         let now = self.clock.now_utc();
-        for job in config.jobs {
-            if job.enabled {
-                let schedule_changed = jobs
-                    .get(&job.id)
-                    .is_none_or(|old| old.schedule != job.schedule);
-                let has_runtime = self
-                    .runtime
-                    .read()
-                    .get(&job.id)
-                    .and_then(|s| s.next_run_at)
-                    .is_some();
 
-                if schedule_changed || !has_runtime {
-                    let next = compute_next_run(&job.schedule, now);
-                    if let Err(e) = store::update_next_run_at(&self.pool, &job.id, next) {
-                        tracing::error!(job_id = %job.id, error = %e, "failed to update next_run_at during reload");
-                    } else {
-                        let _ = self
-                            .runtime
-                            .write()
-                            .entry(job.id.clone())
-                            .and_modify(|s| s.next_run_at = next)
-                            .or_insert(JobRuntimeState {
-                                job_id: job.id.clone(),
-                                next_run_at: next,
-                                last_run_at: None,
-                                consecutive_failures: 0,
-                                running_since: None,
-                            });
+        let removed_ids = {
+            // Update in-memory state.
+            let mut jobs = self.jobs.write();
+
+            // Remove jobs no longer in config.
+            let removed_ids: Vec<String> = jobs
+                .keys()
+                .filter(|id| !config_ids.contains(*id))
+                .cloned()
+                .collect();
+            jobs.retain(|id, _| config_ids.contains(id));
+
+            // Add/update jobs from config.
+            for job in config.jobs {
+                if job.enabled {
+                    let schedule_changed = jobs
+                        .get(&job.id)
+                        .is_none_or(|old| old.schedule != job.schedule);
+                    let has_runtime = self
+                        .runtime
+                        .read()
+                        .get(&job.id)
+                        .and_then(|s| s.next_run_at)
+                        .is_some();
+
+                    if schedule_changed || !has_runtime {
+                        let next = compute_next_run(&job.schedule, now);
+                        if let Err(e) = store::update_next_run_at(&self.pool, &job.id, next) {
+                            tracing::error!(job_id = %job.id, error = %e, "failed to update next_run_at during reload");
+                        } else {
+                            let _ = self
+                                .runtime
+                                .write()
+                                .entry(job.id.clone())
+                                .and_modify(|s| s.next_run_at = next)
+                                .or_insert(JobRuntimeState {
+                                    job_id: job.id.clone(),
+                                    next_run_at: next,
+                                    last_run_at: None,
+                                    consecutive_failures: 0,
+                                    running_since: None,
+                                });
+                        }
                     }
                 }
+                let _ = jobs.insert(job.id.clone(), job);
             }
-            let _ = jobs.insert(job.id.clone(), job);
+            removed_ids
+        };
+
+        for job_id in removed_ids {
+            self.unproject_engine_trigger(&job_id).await?;
         }
+        self.project_engine_triggers_for_current_jobs().await?;
 
         Ok(())
     }
@@ -668,6 +684,174 @@ impl CronScheduler {
 
         Ok(())
     }
+}
+
+impl CronScheduler {
+    async fn fire_due_job(
+        &self,
+        job: &CronJob,
+        scheduled_at: DateTime<Utc>,
+    ) -> Result<(), CronError> {
+        if let Some(handle) = self.engine_host.get() {
+            let trigger_id = Self::schedule_trigger_id(&job.id)
+                .map_err(|error| CronError::Execution(error.to_string()))?;
+            let mut request = TriggerDispatchRequest::new(
+                trigger_id,
+                serde_json::json!({
+                    "jobId": job.id,
+                    "scheduledAt": scheduled_at,
+                }),
+                ActorId::new("cron-scheduler")
+                    .map_err(|error| CronError::Execution(error.to_string()))?,
+                ActorKind::System,
+            );
+            request.authority_scopes = vec!["cron.write".to_owned()];
+            request.idempotency_key = Some(format!(
+                "cron-schedule:v1:{}:{}",
+                job.id,
+                scheduled_at.timestamp_millis()
+            ));
+            request.delivery_mode = Some(DeliveryMode::Sync);
+            let result = EngineTriggerRuntime::dispatch(handle, request).await;
+            if let Some(error) = result.error {
+                return Err(CronError::Execution(error.to_string()));
+            }
+            Ok(())
+        } else {
+            self.start_due_job(job.clone(), scheduled_at)
+                .await
+                .map(|_| ())
+        }
+    }
+
+    /// Start a due cron job after scheduler or engine-trigger validation.
+    pub async fn start_due_job(
+        &self,
+        job: CronJob,
+        scheduled_at: DateTime<Utc>,
+    ) -> Result<CronScheduledFireOutcome, CronError> {
+        if job.overlap_policy == OverlapPolicy::Skip
+            && let Ok(running) = store::count_running_runs(&self.pool, &job.id)
+            && running > 0
+        {
+            tracing::debug!(job_id = %job.id, "skipping overlapping execution");
+            if let Some(next) = compute_next_run(&job.schedule, scheduled_at) {
+                store::update_next_run_at(&self.pool, &job.id, Some(next))?;
+                let _ = self
+                    .runtime
+                    .write()
+                    .entry(job.id.clone())
+                    .and_modify(|state| state.next_run_at = Some(next));
+                return Ok(CronScheduledFireOutcome::SkippedOverlap {
+                    job_id: job.id,
+                    next_run_at: Some(next),
+                });
+            }
+        }
+
+        let sem = self.semaphore_for_payload(&job.payload);
+        let permit = sem.try_acquire_owned().map_err(|_| {
+            CronError::Execution(format!(
+                "concurrency pool saturated for {} payload",
+                job.payload.kind_name()
+            ))
+        })?;
+
+        let job_id = job.id.clone();
+        let is_oneshot = matches!(job.schedule, crate::cron::types::Schedule::OneShot { .. });
+        let next = compute_next_run(&job.schedule, scheduled_at);
+        store::update_next_run_at(&self.pool, &job_id, next)?;
+        let _ = self
+            .runtime
+            .write()
+            .entry(job_id.clone())
+            .and_modify(|state| state.next_run_at = next);
+
+        if is_oneshot {
+            store::disable_job(&self.pool, &job_id)?;
+            let _ = self
+                .jobs
+                .write()
+                .entry(job_id.clone())
+                .and_modify(|state| state.enabled = false);
+        }
+
+        let deps = self.deps.clone();
+        let pool = self.pool.clone();
+        let clock = self.clock.clone();
+        let cancel = self.cancel.child_token();
+        let runtime = self.runtime_ref();
+        let spawned_job = job.clone();
+        self.active_tasks.lock().await.spawn(async move {
+            let _permit = permit;
+            execute_job(&spawned_job, &deps, &pool, clock.as_ref(), cancel, &runtime).await;
+        });
+
+        Ok(CronScheduledFireOutcome::Started {
+            job_id,
+            next_run_at: next,
+        })
+    }
+
+    async fn project_engine_triggers_for_current_jobs(&self) -> Result<(), CronError> {
+        let jobs = self.jobs();
+        let jobs: Vec<_> = jobs.values().cloned().collect();
+        self.project_engine_triggers_for_jobs(&jobs).await
+    }
+
+    async fn project_engine_triggers_for_jobs(&self, jobs: &[CronJob]) -> Result<(), CronError> {
+        let Some(handle) = self.engine_host.get() else {
+            return Ok(());
+        };
+        for job in jobs {
+            let trigger = Self::schedule_trigger_definition(job)
+                .map_err(|error| CronError::Execution(error.to_string()))?;
+            handle
+                .register_trigger(trigger, false)
+                .await
+                .map_err(|error| CronError::Execution(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    async fn unproject_engine_trigger(&self, job_id: &str) -> Result<(), CronError> {
+        let Some(handle) = self.engine_host.get() else {
+            return Ok(());
+        };
+        let trigger_id = Self::schedule_trigger_id(job_id)
+            .map_err(|error| CronError::Execution(error.to_string()))?;
+        let owner =
+            WorkerId::new("cron").map_err(|error| CronError::Execution(error.to_string()))?;
+        handle
+            .unregister_trigger(&trigger_id, &owner)
+            .await
+            .map_err(|error| CronError::Execution(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn drain_completed_tasks(&self) {
+        let mut active_tasks = self.active_tasks.lock().await;
+        while active_tasks.try_join_next().is_some() {}
+    }
+}
+
+/// Result of accepting a scheduled cron fire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CronScheduledFireOutcome {
+    /// The job was started and a task was spawned.
+    Started {
+        /// Job id.
+        job_id: String,
+        /// Next scheduled run after the accepted fire.
+        next_run_at: Option<DateTime<Utc>>,
+    },
+    /// The job was skipped because another run is already active.
+    SkippedOverlap {
+        /// Job id.
+        job_id: String,
+        /// Next scheduled run after the skipped fire.
+        next_run_at: Option<DateTime<Utc>>,
+    },
 }
 
 /// Execute a single job (runs in a spawned task).
