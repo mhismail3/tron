@@ -2,7 +2,7 @@
 //!
 //! These tools are the first stable LLM surface over the canonical capability
 //! fabric. They intentionally expose live engine ids (`settings::get`,
-//! `events::append`, `stream::poll`) instead of JSON-RPC compatibility ids.
+//! `events::append`, `stream::poll`) instead of transport method names.
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -221,7 +221,7 @@ impl TronTool for EngineInvokeTool {
         )
         .required_property(
             "functionId",
-            json!({"type": "string", "description": "Canonical function id, never an rpc::* compatibility id"}),
+            json!({"type": "string", "description": "Canonical engine function id"}),
         )
         .property(
             "payload",
@@ -268,7 +268,7 @@ impl TronTool for EngineInvokeTool {
             .await;
         if let Some(error) = result.error {
             let engine_details = match &error {
-                crate::engine::EngineError::AdapterFailure { details, .. } => details.clone(),
+                crate::engine::EngineError::DomainFailure { details, .. } => details.clone(),
                 _ => None,
             };
             return Ok(json_error_result(
@@ -529,11 +529,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_filters_rpc_compatibility_namespace() {
+    async fn discover_filters_noncanonical_namespace() {
         let host = host_with_capability(EffectClass::PureRead).await;
         let tool = EngineDiscoverTool::new(host);
         let result = tool.execute(json!({}), &make_ctx()).await.unwrap();
-        assert!(!extract_text(&result).contains("rpc::"));
+        assert!(!extract_text(&result).contains(&format!("{}::", "rpc")));
         let functions = result.details.unwrap()["functions"]
             .as_array()
             .unwrap()

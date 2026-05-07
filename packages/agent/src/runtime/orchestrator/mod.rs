@@ -28,7 +28,7 @@
 //! is initialized on session create (start=0) or resume (start=MAX from DB), and
 //! threaded through: `Orchestrator → AgentRunner → TronAgent → TurnRunner →
 //! StreamProcessor / ToolExecutor`. All emitted events carry `sequence` in both
-//! the `TronEvent` (via `BaseEvent.sequence`) and `RpcEvent.sequence` fields.
+//! the `TronEvent` (via `BaseEvent.sequence`) and `JsonRpcEvent.sequence` fields.
 //!
 //! ## Streaming Journal (Crash Recovery)
 //!

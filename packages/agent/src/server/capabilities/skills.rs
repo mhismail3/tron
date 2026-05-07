@@ -7,12 +7,12 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "skill.list" => Ok(skill_list_value(Some(payload), deps)),
-        "skill.get" => skill_get_value(Some(payload), deps),
-        "skill.refresh" => skill_refresh_value(Some(payload), deps).await,
-        "skill.activate" => skill_activate_value(Some(payload), deps),
-        "skill.deactivate" => skill_deactivate_value(Some(payload), deps),
-        "skill.active" => skill_active_value(Some(payload), deps),
+        "skills::list" => Ok(skill_list_value(Some(payload), deps)),
+        "skills::get" => skill_get_value(Some(payload), deps),
+        "skills::refresh" => skill_refresh_value(Some(payload), deps).await,
+        "skills::activate" => skill_activate_value(Some(payload), deps),
+        "skills::deactivate" => skill_deactivate_value(Some(payload), deps),
+        "skills::active" => skill_active_value(Some(payload), deps),
         _ => Err(RpcError::Internal {
             message: format!("skills method {method} is not engine-owned"),
         }),
@@ -51,7 +51,7 @@ async fn skill_refresh_value(
 ) -> Result<Value, RpcError> {
     let working_dir = resolve_skill_working_dir(params, deps);
     let skill_registry = Arc::clone(&deps.skill_registry);
-    let count = run_blocking_task("skill.refresh", move || {
+    let count = run_blocking_task("skills::refresh", move || {
         let mut registry = skill_registry.write();
         registry.refresh(&working_dir);
         Ok(registry.list(None).len())
@@ -92,7 +92,7 @@ fn skill_activate_value(
         )
     };
 
-    let already_active = crate::server::rpc::skill_state::reconstruct_tracker(
+    let already_active = crate::server::services::skill_state::reconstruct_tracker(
         &deps.event_store,
         &session_id,
         &crate::settings::types::CompactionPolicy::ClearAll,
@@ -152,7 +152,7 @@ fn skill_deactivate_value(
             message: format!("Session '{session_id}' not found"),
         })?;
 
-    let is_active = crate::server::rpc::skill_state::reconstruct_tracker(
+    let is_active = crate::server::services::skill_state::reconstruct_tracker(
         &deps.event_store,
         &session_id,
         &crate::settings::types::CompactionPolicy::ClearAll,
@@ -198,7 +198,7 @@ fn skill_active_value(
             message: format!("Session '{session_id}' not found"),
         })?;
 
-    let tracker = crate::server::rpc::skill_state::reconstruct_tracker(
+    let tracker = crate::server::services::skill_state::reconstruct_tracker(
         &deps.event_store,
         &session_id,
         &crate::settings::types::CompactionPolicy::ClearAll,

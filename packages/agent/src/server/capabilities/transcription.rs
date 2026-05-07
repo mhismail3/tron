@@ -3,7 +3,7 @@ use super::*;
 use base64::Engine;
 use tracing::{debug, warn};
 
-use crate::server::rpc::params::opt_string;
+use crate::server::transport::json_rpc::params::opt_string;
 use crate::transcription::TranscriptionResult;
 
 const MAX_AUDIO_SIZE: usize = 150 * 1024 * 1024;
@@ -28,8 +28,8 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "transcribe.audio" => transcribe_audio_value(&invocation.payload, deps).await,
-        "transcribe.downloadModel" => download_model_value(deps),
+        "transcription::audio" => transcribe_audio_value(&invocation.payload, deps).await,
+        "transcription::download_model" => download_model_value(deps),
         _ => Err(RpcError::Internal {
             message: format!("transcription method {method} is not engine-owned"),
         }),
@@ -68,14 +68,14 @@ async fn transcribe_audio_value(
         mime_type, "transcribe.audio received payload"
     );
 
-    let response = transcribe_audio_full(&deps.rpc_context, &audio_bytes, mime_type).await?;
+    let response = transcribe_audio_full(&deps.capability_context, &audio_bytes, mime_type).await?;
     serde_json::to_value(&response).map_err(|error| RpcError::Internal {
         message: format!("serialize response: {error}"),
     })
 }
 
 fn download_model_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
-    let engine_loaded = deps.rpc_context.transcription_engine.get().is_some();
+    let engine_loaded = deps.capability_context.transcription_engine.get().is_some();
     let enabled = crate::settings::get_settings().server.transcription.enabled;
 
     if !enabled {
@@ -108,7 +108,7 @@ pub(super) fn normalize_base64(input: &str) -> &str {
 }
 
 pub(super) async fn transcribe_audio(
-    ctx: &crate::server::rpc::context::RpcContext,
+    ctx: &crate::server::services::context::ServerCapabilityContext,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> TranscriptionResult {
@@ -130,7 +130,7 @@ pub(super) async fn transcribe_audio(
 }
 
 async fn transcribe_audio_full(
-    ctx: &crate::server::rpc::context::RpcContext,
+    ctx: &crate::server::services::context::ServerCapabilityContext,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> Result<TranscribeResponse, RpcError> {

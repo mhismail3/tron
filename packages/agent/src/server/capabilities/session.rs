@@ -7,19 +7,21 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "session.create" => session_create_value(Some(payload), deps).await,
-        "session.resume" => session_resume_value(Some(payload), deps).await,
-        "session.list" => session_list_value(Some(payload), deps).await,
-        "session.delete" => session_delete_value(Some(payload), deps).await,
-        "session.fork" => session_fork_value(Some(payload), deps).await,
-        "session.getHead" => session_get_head_value(Some(payload), deps).await,
-        "session.getState" => session_get_state_value(Some(payload), deps).await,
-        "session.getHistory" => session_get_history_value(Some(payload), deps).await,
-        "session.reconstruct" => session_reconstruct_value(Some(payload), deps).await,
-        "session.archive" => session_archive_value(Some(payload), deps).await,
-        "session.unarchive" => session_unarchive_value(Some(payload), deps).await,
-        "session.archiveOlderThan" => session_archive_older_than_value(Some(payload), deps).await,
-        "session.export" => session_export_value(Some(payload), deps).await,
+        "session::create" => session_create_value(Some(payload), deps).await,
+        "session::resume" => session_resume_value(Some(payload), deps).await,
+        "session::list" => session_list_value(Some(payload), deps).await,
+        "session::delete" => session_delete_value(Some(payload), deps).await,
+        "session::fork" => session_fork_value(Some(payload), deps).await,
+        "session::get_head" => session_get_head_value(Some(payload), deps).await,
+        "session::get_state" => session_get_state_value(Some(payload), deps).await,
+        "session::get_history" => session_get_history_value(Some(payload), deps).await,
+        "session::reconstruct" => session_reconstruct_value(Some(payload), deps).await,
+        "session::archive" => session_archive_value(Some(payload), deps).await,
+        "session::unarchive" => session_unarchive_value(Some(payload), deps).await,
+        "session::archive_older_than" => {
+            session_archive_older_than_value(Some(payload), deps).await
+        }
+        "session::export" => session_export_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("session method {method} is not engine-owned"),
         }),
@@ -31,8 +33,8 @@ async fn session_resume_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    crate::server::rpc::session_queries::SessionQueryService::resume(
-        &rpc_context_view(deps),
+    crate::server::services::session_queries::SessionQueryService::resume(
+        &capability_context_view(deps),
         session_id,
     )
     .await
@@ -49,9 +51,9 @@ async fn session_create_value(
     let source = opt_string(params, "source");
     let profile = opt_string(params, "profile");
     let use_worktree = opt_bool(params, "useWorktree");
-    crate::server::rpc::session_commands::SessionCommandService::create(
-        &rpc_context_view(deps),
-        crate::server::rpc::session_commands::CreateSessionRequest {
+    crate::server::services::session_commands::SessionCommandService::create(
+        &capability_context_view(deps),
+        crate::server::services::session_commands::CreateSessionRequest {
             working_directory,
             model,
             title,
@@ -72,8 +74,8 @@ async fn session_list_value(
         .and_then(|p| p.get("limit"))
         .and_then(Value::as_u64)
         .map(|value| value as usize);
-    crate::server::rpc::session_queries::SessionQueryService::list(
-        &rpc_context_view(deps),
+    crate::server::services::session_queries::SessionQueryService::list(
+        &capability_context_view(deps),
         include_archived,
         limit,
     )
@@ -85,8 +87,8 @@ async fn session_get_head_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    crate::server::rpc::session_queries::SessionQueryService::get_head(
-        &rpc_context_view(deps),
+    crate::server::services::session_queries::SessionQueryService::get_head(
+        &capability_context_view(deps),
         session_id,
     )
     .await
@@ -97,8 +99,8 @@ async fn session_delete_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    crate::server::rpc::session_commands::SessionCommandService::delete(
-        &rpc_context_view(deps),
+    crate::server::services::session_commands::SessionCommandService::delete(
+        &capability_context_view(deps),
         session_id,
     )
     .await
@@ -111,8 +113,8 @@ async fn session_fork_value(
     let session_id = require_string_param(params, "sessionId")?;
     let from_event_id = opt_string(params, "fromEventId");
     let title = opt_string(params, "title");
-    crate::server::rpc::session_commands::SessionCommandService::fork(
-        &rpc_context_view(deps),
+    crate::server::services::session_commands::SessionCommandService::fork(
+        &capability_context_view(deps),
         session_id,
         from_event_id,
         title,
@@ -125,8 +127,8 @@ async fn session_get_state_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    crate::server::rpc::session_queries::SessionQueryService::get_state(
-        &rpc_context_view(deps),
+    crate::server::services::session_queries::SessionQueryService::get_state(
+        &capability_context_view(deps),
         session_id,
     )
     .await
@@ -142,8 +144,8 @@ async fn session_get_history_value(
         .and_then(Value::as_u64)
         .map(|value| value as usize);
     let before_id = opt_string(params, "beforeId");
-    crate::server::rpc::session_queries::SessionQueryService::get_history(
-        &rpc_context_view(deps),
+    crate::server::services::session_queries::SessionQueryService::get_history(
+        &capability_context_view(deps),
         session_id,
         limit,
         before_id,
@@ -163,8 +165,8 @@ async fn session_reconstruct_value(
     let before_sequence = params
         .and_then(|p| p.get("beforeSequence"))
         .and_then(Value::as_i64);
-    crate::server::rpc::session_reconstruct::SessionReconstructService::reconstruct(
-        &rpc_context_view(deps),
+    crate::server::services::session_reconstruct::SessionReconstructService::reconstruct(
+        &capability_context_view(deps),
         session_id,
         limit,
         before_sequence,
@@ -177,8 +179,8 @@ async fn session_archive_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    crate::server::rpc::session_commands::SessionCommandService::archive(
-        &rpc_context_view(deps),
+    crate::server::services::session_commands::SessionCommandService::archive(
+        &capability_context_view(deps),
         session_id,
     )
     .await
@@ -189,8 +191,8 @@ async fn session_unarchive_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    crate::server::rpc::session_commands::SessionCommandService::unarchive(
-        &rpc_context_view(deps),
+    crate::server::services::session_commands::SessionCommandService::unarchive(
+        &capability_context_view(deps),
         session_id,
     )
     .await
@@ -207,8 +209,8 @@ async fn session_archive_older_than_value(
             message: "missing required parameter 'days' (non-negative integer)".into(),
         })?;
     let days = u32::try_from(days_raw).unwrap_or(u32::MAX);
-    crate::server::rpc::session_commands::SessionCommandService::archive_older_than(
-        &rpc_context_view(deps),
+    crate::server::services::session_commands::SessionCommandService::archive_older_than(
+        &capability_context_view(deps),
         days,
     )
     .await
@@ -219,15 +221,15 @@ async fn session_export_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    crate::server::rpc::session_queries::SessionQueryService::export(
-        &rpc_context_view(deps),
+    crate::server::services::session_queries::SessionQueryService::export(
+        &capability_context_view(deps),
         session_id,
     )
     .await
 }
 
-pub(super) fn rpc_context_view(deps: &EngineCapabilityDeps) -> RpcContext {
-    RpcContext {
+pub(super) fn capability_context_view(deps: &EngineCapabilityDeps) -> ServerCapabilityContext {
+    ServerCapabilityContext {
         orchestrator: Arc::clone(&deps.orchestrator),
         session_manager: Arc::clone(&deps.session_manager),
         event_store: Arc::clone(&deps.event_store),
@@ -250,7 +252,7 @@ pub(super) fn rpc_context_view(deps: &EngineCapabilityDeps) -> RpcContext {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            crate::server::rpc::session_context::ContextArtifactsService::new(),
+            crate::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: deps.auth_path.clone(),
         broadcast_manager: deps.broadcast_manager.clone(),

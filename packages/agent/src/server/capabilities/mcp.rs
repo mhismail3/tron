@@ -19,14 +19,14 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "mcp.status" => mcp_status_value(deps).await,
-        "mcp.addServer" => mcp_add_server_value(Some(payload), invocation, deps).await,
-        "mcp.removeServer" => mcp_remove_server_value(Some(payload), invocation, deps).await,
-        "mcp.enableServer" => mcp_enable_server_value(Some(payload), invocation, deps).await,
-        "mcp.disableServer" => mcp_disable_server_value(Some(payload), invocation, deps).await,
-        "mcp.restartServer" => mcp_restart_server_value(Some(payload), invocation, deps).await,
-        "mcp.reload" => mcp_reload_value(invocation, deps).await,
-        "mcp.listTools" => mcp_list_tools_value(Some(payload), deps).await,
+        "mcp::status" => mcp_status_value(deps).await,
+        "mcp::add_server" => mcp_add_server_value(Some(payload), invocation, deps).await,
+        "mcp::remove_server" => mcp_remove_server_value(Some(payload), invocation, deps).await,
+        "mcp::enable_server" => mcp_enable_server_value(Some(payload), invocation, deps).await,
+        "mcp::disable_server" => mcp_disable_server_value(Some(payload), invocation, deps).await,
+        "mcp::restart_server" => mcp_restart_server_value(Some(payload), invocation, deps).await,
+        "mcp::reload" => mcp_reload_value(invocation, deps).await,
+        "mcp::list_tools" => mcp_list_tools_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("mcp method {method} is not engine-owned"),
         }),
@@ -246,8 +246,8 @@ async fn publish_mcp_status_changed(invocation: &Invocation, deps: &EngineCapabi
     let Ok(status) = mcp_status_value(deps).await else {
         return;
     };
-    let event = RpcEvent::new("mcp.status_changed", None, Some(status));
-    super::publish_rpc_event_or_broadcast(deps, "mcp", "mcp", event, Some(invocation)).await;
+    let event = JsonRpcEvent::new("mcp.status_changed", None, Some(status));
+    super::publish_engine_stream_event(deps, "mcp", "mcp", event, Some(invocation)).await;
 }
 
 async fn refresh_mcp_tool_catalog(deps: &EngineCapabilityDeps) {
@@ -524,8 +524,8 @@ impl InProcessFunctionHandler for McpToolFunctionHandler {
         let result = guard
             .call(&self.server, &self.tool, invocation.payload)
             .await
-            .map_err(|error| crate::engine::EngineError::AdapterFailure {
-                adapter: "mcp".to_owned(),
+            .map_err(|error| crate::engine::EngineError::DomainFailure {
+                domain: "mcp".to_owned(),
                 code: "MCP_TOOL_ERROR".to_owned(),
                 message: error.to_string(),
                 details: Some(json!({

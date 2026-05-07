@@ -7,8 +7,8 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "logs.ingest" => ingest_logs_value(Some(payload), deps).await,
-        "logs.recent" => recent_logs_value(Some(payload.clone()), deps).await,
+        "logs::ingest" => ingest_logs_value(Some(payload), deps).await,
+        "logs::recent" => recent_logs_value(Some(payload.clone()), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("logs method {method} is not engine-owned"),
         }),
@@ -64,7 +64,7 @@ async fn ingest_logs_value(
         })?;
 
     let pool = deps.event_store.pool().clone();
-    let result = run_blocking_task("logs.ingest", move || {
+    let result = run_blocking_task("logs::ingest", move || {
         let mut conn = pool.get().map_err(|error| RpcError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;
@@ -96,7 +96,7 @@ async fn recent_logs_value(
 
     let limit = i64::from(params.limit);
     let pool = deps.event_store.pool().clone();
-    let result = run_blocking_task("logs.recent", move || {
+    let result = run_blocking_task("logs::recent", move || {
         let conn = pool.get().map_err(|error| RpcError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;

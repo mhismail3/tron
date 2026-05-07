@@ -52,7 +52,7 @@ fn startup_log_on_all_interfaces_names_trust_boundary() {
         "bind address must appear: {msg}"
     );
     assert!(
-        msg.contains("42 RPC methods"),
+        msg.contains("42 JSON-RPC transport methods"),
         "method count must appear: {msg}"
     );
     assert!(
@@ -443,7 +443,7 @@ async fn server_boots_and_responds() {
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
-    let rpc_context = RpcContext {
+    let capability_context = ServerCapabilityContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
@@ -466,7 +466,7 @@ async fn server_boots_and_responds() {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::rpc::session_context::ContextArtifactsService::new(),
+            tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: dir.path().join("auth.json"),
         broadcast_manager: None,
@@ -483,14 +483,14 @@ async fn server_boots_and_responds() {
         updater_state_path: dir.path().join("updater-state.json"),
     };
 
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::bindings::register_all(&mut registry);
+    let mut registry = JsonRpcTransportRegistry::new();
+    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
 
     let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = TronServer::new(config, registry, rpc_context, metrics_handle);
+    let server = TronServer::new(config, registry, capability_context, metrics_handle);
 
     let bridge = EventBridge::new(
         orchestrator.subscribe(),
@@ -680,17 +680,28 @@ async fn init_mcp_registers_meta_tools_without_servers() {
 }
 
 #[test]
-fn server_registers_all_rpc_methods() {
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::bindings::register_all(&mut registry);
-    // Should have a substantial number of methods registered
-    assert!(registry.methods().len() >= 50);
+fn server_registers_public_engine_transport_methods_only() {
+    let mut registry = JsonRpcTransportRegistry::new();
+    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
+    let mut methods = registry.methods();
+    methods.sort();
+    assert_eq!(
+        methods,
+        vec![
+            "engine.discover",
+            "engine.inspect",
+            "engine.invoke",
+            "engine.promote",
+            "engine.watch",
+        ],
+        "public JSON-RPC is intentionally limited to the engine transport surface"
+    );
 }
 
 #[test]
 fn readme_rpc_count_matches_registry() {
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::bindings::register_all(&mut registry);
+    let mut registry = JsonRpcTransportRegistry::new();
+    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
@@ -721,7 +732,7 @@ async fn server_graceful_shutdown() {
     let home = test_tron_home(&dir);
     let settings_path = test_settings_path(&home);
 
-    let rpc_context = RpcContext {
+    let capability_context = ServerCapabilityContext {
         orchestrator,
         session_manager,
         event_store,
@@ -744,7 +755,7 @@ async fn server_graceful_shutdown() {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::rpc::session_context::ContextArtifactsService::new(),
+            tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: dir.path().join("auth.json"),
         broadcast_manager: None,
@@ -761,8 +772,8 @@ async fn server_graceful_shutdown() {
         updater_state_path: dir.path().join("updater-state.json"),
     };
 
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::bindings::register_all(&mut registry);
+    let mut registry = JsonRpcTransportRegistry::new();
+    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
 
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
@@ -770,7 +781,7 @@ async fn server_graceful_shutdown() {
     let server = TronServer::new(
         ServerConfig::default(),
         registry,
-        rpc_context,
+        capability_context,
         metrics_handle,
     );
     let (_, handle) = server.listen().await.unwrap();

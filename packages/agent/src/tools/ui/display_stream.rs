@@ -19,7 +19,7 @@ use crate::core::events::{BaseEvent, TronEvent};
 /// Registry of active display streams, keyed by stream ID.
 ///
 /// Shared between the `DisplayTool` (which inserts/removes entries) and
-/// the `display.stopStream` RPC handler (which cancels streams on demand).
+/// the `display.stopStream` canonical capability function (which cancels streams on demand).
 #[derive(Clone, Default)]
 pub struct ActiveStreamRegistry {
     inner: Arc<Mutex<HashMap<String, CancellationToken>>>,

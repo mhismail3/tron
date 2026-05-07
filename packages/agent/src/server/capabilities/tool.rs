@@ -6,7 +6,7 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "tool.result" => tool_result_value(&invocation.payload, deps).await,
+        "tool::result" => tool_result_value(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("tool method {method} is not engine-owned"),
         }),

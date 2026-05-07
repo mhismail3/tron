@@ -3,9 +3,8 @@
 //! JSON-RPC and WebSocket remain transports: queue draining and stream fan-out
 //! live here so the engine's durable queue/stream primitives, not handlers, are
 //! the source of truth for delayed work and push delivery.
-//! The `agent` queue drains hidden prompt apply/drain functions so `agent.prompt`
-//! can remain wire-compatible while startup and queued follow-up prompts run
-//! through canonical engine functions. The stream pump now owns the migrated
+//! The `agent` queue drains hidden prompt apply/drain functions so startup and
+//! queued follow-up prompts run through canonical engine functions. The stream pump now owns the migrated
 //! broadcast topics for approvals, auth/settings/MCP/device/cron/update/memory
 //! status, jobs, agent queue, session events, sandbox/display lifecycle, and
 //! catalog changes. The heartbeat service unregisters stale volatile local
@@ -16,9 +15,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::engine::{EngineHostHandle, EngineQueueDrainer, StreamActorScope, StreamCursor};
-use crate::server::rpc::types::RpcEvent;
 use crate::server::server::TronServer;
 use crate::server::shutdown::ShutdownCoordinator;
+use crate::server::transport::json_rpc::types::JsonRpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
 use chrono::SecondsFormat;
 use serde_json::Value;
@@ -36,7 +35,7 @@ pub struct EngineRuntimeServices;
 impl EngineRuntimeServices {
     /// Start engine services and register them with server shutdown.
     pub fn start(server: &TronServer) {
-        let host = server.rpc_context().engine_host.clone();
+        let host = server.capability_context().engine_host.clone();
         let shutdown = server.shutdown().clone();
         for queue in ["default", "jobs", "agent"] {
             let service = EngineQueueDrainerService::new(
@@ -228,11 +227,14 @@ impl EngineStreamPump {
                         ).await {
                             Ok(page) => {
                                 for event in &page.events {
-                                    let rpc_event = stream_event_to_rpc_event(event);
-                                    if let Some(session_id) = rpc_event.session_id.as_deref() {
-                                        self.broadcast.broadcast_to_session(session_id, &rpc_event).await;
-                                    } else {
-                                        self.broadcast.broadcast_all(&rpc_event).await;
+                                    let (rpc_event, target) = stream_event_to_rpc_event(event);
+                                    match target {
+                                        StreamBroadcastTarget::All => {
+                                            self.broadcast.broadcast_all(&rpc_event).await;
+                                        }
+                                        StreamBroadcastTarget::Session(session_id) => {
+                                            self.broadcast.broadcast_to_session(&session_id, &rpc_event).await;
+                                        }
                                     }
                                 }
                                 let _ = cursors.insert(topic.clone(), page.next_cursor);
@@ -250,11 +252,19 @@ fn stream_pump_subscription_id(topic: &str) -> String {
     format!("server-stream-pump:{topic}")
 }
 
-fn stream_event_to_rpc_event(event: &crate::engine::EngineStreamEvent) -> RpcEvent {
+enum StreamBroadcastTarget {
+    All,
+    Session(String),
+}
+
+fn stream_event_to_rpc_event(
+    event: &crate::engine::EngineStreamEvent,
+) -> (JsonRpcEvent, StreamBroadcastTarget) {
     if let Some(wrapped) = event.payload.get("__rpcEvent")
-        && let Ok(rpc_event) = serde_json::from_value::<RpcEvent>(wrapped.clone())
+        && let Ok(rpc_event) = serde_json::from_value::<JsonRpcEvent>(wrapped.clone())
     {
-        return rpc_event;
+        let target = stream_broadcast_target(event, &rpc_event);
+        return (rpc_event, target);
     }
     let event_type = event
         .payload
@@ -262,7 +272,7 @@ fn stream_event_to_rpc_event(event: &crate::engine::EngineStreamEvent) -> RpcEve
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("engine.{}", event.topic.replace('.', "_")));
-    RpcEvent {
+    let rpc_event = JsonRpcEvent {
         event_type,
         session_id: event.session_id.clone(),
         timestamp: event
@@ -271,5 +281,28 @@ fn stream_event_to_rpc_event(event: &crate::engine::EngineStreamEvent) -> RpcEve
         data: Some(event.payload.clone()),
         run_id: None,
         sequence: None,
+    };
+    let target = stream_broadcast_target(event, &rpc_event);
+    (rpc_event, target)
+}
+
+fn stream_broadcast_target(
+    event: &crate::engine::EngineStreamEvent,
+    rpc_event: &JsonRpcEvent,
+) -> StreamBroadcastTarget {
+    if let Some(scope) = event.payload.get("__broadcastScope") {
+        if scope.get("kind").and_then(Value::as_str) == Some("all") {
+            return StreamBroadcastTarget::All;
+        }
+        if scope.get("kind").and_then(Value::as_str) == Some("session")
+            && let Some(session_id) = scope.get("sessionId").and_then(Value::as_str)
+        {
+            return StreamBroadcastTarget::Session(session_id.to_owned());
+        }
     }
+    rpc_event
+        .session_id
+        .clone()
+        .map(StreamBroadcastTarget::Session)
+        .unwrap_or(StreamBroadcastTarget::All)
 }

@@ -333,7 +333,7 @@ impl EngineQueueRuntime {
         Self::execute_claimed_item(handle, item).await.map(Some)
     }
 
-    /// Claim and execute a specific receipt. Used by compatibility surfaces
+    /// Claim and execute a specific receipt. Used by transport surfaces
     /// that must synchronously preserve an existing wire contract without
     /// racing unrelated queued work.
     pub async fn drain_receipt(

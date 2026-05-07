@@ -9,14 +9,14 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "promptHistory.list" => prompt_history_list_value(Some(payload), deps).await,
-        "promptHistory.delete" => prompt_history_delete_value(Some(payload), deps).await,
-        "promptHistory.clear" => prompt_history_clear_value(deps).await,
-        "promptSnippet.list" => prompt_snippet_list_value(deps).await,
-        "promptSnippet.get" => prompt_snippet_get_value(Some(payload), deps).await,
-        "promptSnippet.create" => prompt_snippet_create_value(Some(payload), deps).await,
-        "promptSnippet.update" => prompt_snippet_update_value(Some(payload), deps).await,
-        "promptSnippet.delete" => prompt_snippet_delete_value(Some(payload), deps).await,
+        "prompt_library::history_list" => prompt_history_list_value(Some(payload), deps).await,
+        "prompt_library::history_delete" => prompt_history_delete_value(Some(payload), deps).await,
+        "prompt_library::history_clear" => prompt_history_clear_value(deps).await,
+        "prompt_library::snippet_list" => prompt_snippet_list_value(deps).await,
+        "prompt_library::snippet_get" => prompt_snippet_get_value(Some(payload), deps).await,
+        "prompt_library::snippet_create" => prompt_snippet_create_value(Some(payload), deps).await,
+        "prompt_library::snippet_update" => prompt_snippet_update_value(Some(payload), deps).await,
+        "prompt_library::snippet_delete" => prompt_snippet_delete_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("prompt-library method {method} is not engine-owned"),
         }),
@@ -93,7 +93,7 @@ async fn prompt_snippet_create_value(
     validate_string_param(
         &text,
         "text",
-        crate::server::rpc::validation::MAX_PROMPT_LENGTH,
+        crate::server::transport::json_rpc::validation::MAX_PROMPT_LENGTH,
     )?;
 
     let snippet =
@@ -118,7 +118,7 @@ async fn prompt_snippet_update_value(
         validate_string_param(
             text,
             "text",
-            crate::server::rpc::validation::MAX_PROMPT_LENGTH,
+            crate::server::transport::json_rpc::validation::MAX_PROMPT_LENGTH,
         )?;
     }
 

@@ -122,7 +122,7 @@ impl WorktreeCoordinator {
     /// session runs directly on the repo's working dir, e.g. a fresh
     /// session on `main` or a post-finalize session that never rebranched).
     ///
-    /// All git-workflow RPCs that previously required an active
+    /// All git-workflow capability calls that previously required an active
     /// `WorktreeInfo` now call this so they work for on-main sessions too.
     pub(super) async fn repo_root_or_cwd(
         &self,

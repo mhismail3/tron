@@ -8,7 +8,7 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "blob.get" => blob_get_value(&invocation.payload, deps).await,
+        "blob::get" => blob_get_value(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("blob method {method} is not engine-owned"),
         }),
@@ -24,8 +24,8 @@ async fn blob_get_value(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
         })?
         .to_owned();
     let pool = deps.event_store.pool().clone();
-    deps.rpc_context
-        .run_blocking("blob.get", move || {
+    deps.capability_context
+        .run_blocking("blob::get", move || {
             let conn = pool.get().map_err(|error| RpcError::Internal {
                 message: format!("database connection error: {error}"),
             })?;

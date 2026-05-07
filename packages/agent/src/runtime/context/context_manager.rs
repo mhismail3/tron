@@ -602,7 +602,7 @@ impl ContextManager {
     /// H15 invariant check: inside an active turn (generation > 0), the
     /// snapshot readers require `set_volatile_tokens` to have run during
     /// the current generation. Outside a turn (generation 0), snapshots
-    /// are accepted as-is — RPC context queries, resume reconstructors,
+    /// are accepted as-is — capability context queries, resume reconstructors,
     /// and tests construct a ContextManager and take snapshots without
     /// ever entering the turn loop, and forcing them to set dummy
     /// volatile values would be pure noise.

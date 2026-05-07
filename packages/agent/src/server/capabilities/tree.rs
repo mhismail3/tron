@@ -8,11 +8,11 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "tree.getVisualization" => get_visualization(&invocation.payload, deps).await,
-        "tree.getBranches" => get_branches(&invocation.payload, deps).await,
-        "tree.getSubtree" => get_subtree(&invocation.payload, deps).await,
-        "tree.getAncestors" => get_ancestors(&invocation.payload, deps).await,
-        "tree.compareBranches" => compare_branches(&invocation.payload).await,
+        "tree::get_visualization" => get_visualization(&invocation.payload, deps).await,
+        "tree::get_branches" => get_branches(&invocation.payload, deps).await,
+        "tree::get_subtree" => get_subtree(&invocation.payload, deps).await,
+        "tree::get_ancestors" => get_ancestors(&invocation.payload, deps).await,
+        "tree::compare_branches" => compare_branches(&invocation.payload).await,
         _ => Err(RpcError::Internal {
             message: format!("tree method {method} is not engine-owned"),
         }),

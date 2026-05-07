@@ -1,5 +1,44 @@
 use super::*;
 use crate::core::events::{BaseEvent, agent_start_event};
+use crate::engine::{EngineHostHandle, StreamActorScope, StreamCursor, VisibilityScope};
+
+async fn subscribe_test_stream(host: &EngineHostHandle, subscription_id: &str) {
+    host.subscribe_stream(
+        subscription_id.to_owned(),
+        "events.session".to_owned(),
+        StreamCursor(0),
+        VisibilityScope::System,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+}
+
+async fn poll_test_stream_event(
+    host: &EngineHostHandle,
+    subscription_id: &str,
+) -> (JsonRpcEvent, serde_json::Value) {
+    for _ in 0..20 {
+        let page = host
+            .poll_stream(
+                subscription_id,
+                Some(StreamCursor(0)),
+                10,
+                &StreamActorScope::admin(),
+            )
+            .await
+            .unwrap();
+        if let Some(event) = page.events.first() {
+            let rpc_event: JsonRpcEvent =
+                serde_json::from_value(event.payload["__rpcEvent"].clone()).unwrap();
+            let scope = event.payload["__broadcastScope"].clone();
+            return (rpc_event, scope);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("stream event was not published");
+}
 
 #[test]
 fn converts_agent_start() {
@@ -146,11 +185,14 @@ fn session_saved_stays_session_scoped() {
 }
 
 #[tokio::test]
-async fn bridge_routes_session_events() {
+async fn bridge_publishes_session_events_to_engine_stream() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
+    let host = EngineHostHandle::new_in_memory().unwrap();
+    subscribe_test_stream(&host, "event-bridge-session").await;
 
-    // Two clients: C1 bound to "s1", C2 unbound (dashboard)
+    // Stream-owned events publish to the engine stream; WebSocket delivery is
+    // performed by the stream pump, not by this bridge.
     let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
     conn1.bind_session("s1");
@@ -166,19 +208,17 @@ async fn bridge_routes_session_events() {
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
-    );
+    )
+    .with_engine_streams(host.clone());
     let handle = tokio::spawn(bridge.run());
 
-    // AgentStart is NOT in the global list — should only reach C1 (bound to "s1")
     let _ = tx.send(agent_start_event("s1")).unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let msg = conn1_rx.try_recv();
-    assert!(msg.is_ok());
-    let parsed: serde_json::Value = serde_json::from_str(&msg.unwrap()).unwrap();
-    assert_eq!(parsed["type"], "agent.start");
-
-    // C2 should NOT receive AgentStart (session-scoped)
+    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-session").await;
+    assert_eq!(streamed.event_type, "agent.start");
+    assert_eq!(scope["kind"], "session");
+    assert_eq!(scope["sessionId"], "s1");
+    assert!(conn1_rx.try_recv().is_err());
     assert!(conn2_rx.try_recv().is_err());
 
     drop(tx);
@@ -237,9 +277,11 @@ async fn bridge_broadcasts_session_lifecycle_to_all() {
 }
 
 #[tokio::test]
-async fn bridge_broadcasts_turn_start_to_all() {
+async fn bridge_publishes_global_turn_scope_to_engine_stream() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
+    let host = EngineHostHandle::new_in_memory().unwrap();
+    subscribe_test_stream(&host, "event-bridge-turn-start").await;
 
     let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
@@ -256,29 +298,33 @@ async fn bridge_broadcasts_turn_start_to_all() {
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
-    );
+    )
+    .with_engine_streams(host.clone());
     let handle = tokio::spawn(bridge.run());
 
-    // TurnStart for "s1" — both clients should receive it (global)
     let _ = tx
         .send(TronEvent::TurnStart {
             base: BaseEvent::now("s1"),
             turn: 1,
         })
         .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    assert!(conn1_rx.try_recv().is_ok(), "C1 should receive turn_start");
-    assert!(conn2_rx.try_recv().is_ok(), "C2 should receive turn_start");
+    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-turn-start").await;
+    assert_eq!(streamed.event_type, "agent.turn_start");
+    assert_eq!(scope["kind"], "all");
+    assert!(conn1_rx.try_recv().is_err());
+    assert!(conn2_rx.try_recv().is_err());
 
     drop(tx);
     let _ = handle.await;
 }
 
 #[tokio::test]
-async fn bridge_keeps_content_events_session_scoped() {
+async fn bridge_publishes_content_events_with_session_scope() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
+    let host = EngineHostHandle::new_in_memory().unwrap();
+    subscribe_test_stream(&host, "event-bridge-content").await;
 
     let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
@@ -295,35 +341,34 @@ async fn bridge_keeps_content_events_session_scoped() {
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
-    );
+    )
+    .with_engine_streams(host.clone());
     let handle = tokio::spawn(bridge.run());
 
-    // MessageUpdate for "s1" — only C1 should receive it
     let _ = tx
         .send(TronEvent::MessageUpdate {
             base: BaseEvent::now("s1"),
             content: "hello".into(),
         })
         .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    assert!(
-        conn1_rx.try_recv().is_ok(),
-        "C1 should receive message_update"
-    );
-    assert!(
-        conn2_rx.try_recv().is_err(),
-        "C2 should NOT receive message_update"
-    );
+    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-content").await;
+    assert_eq!(streamed.event_type, "agent.text_delta");
+    assert_eq!(scope["kind"], "session");
+    assert_eq!(scope["sessionId"], "s1");
+    assert!(conn1_rx.try_recv().is_err());
+    assert!(conn2_rx.try_recv().is_err());
 
     drop(tx);
     let _ = handle.await;
 }
 
 #[tokio::test]
-async fn bridge_routes_global_events() {
+async fn bridge_publishes_global_events_to_engine_stream() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
+    let host = EngineHostHandle::new_in_memory().unwrap();
+    subscribe_test_stream(&host, "event-bridge-global").await;
 
     let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
@@ -335,20 +380,20 @@ async fn bridge_routes_global_events() {
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
-    );
+    )
+    .with_engine_streams(host.clone());
     let handle = tokio::spawn(bridge.run());
 
-    // Send event with empty session_id (global)
     let _ = tx
         .send(TronEvent::AgentReady {
             base: BaseEvent::now(""),
         })
         .unwrap();
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let msg = conn_rx.try_recv();
-    assert!(msg.is_ok());
+    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-global").await;
+    assert_eq!(streamed.event_type, "agent.ready");
+    assert_eq!(scope["kind"], "all");
+    assert!(conn_rx.try_recv().is_err());
 
     drop(tx);
     let _ = handle.await;
@@ -1262,7 +1307,7 @@ fn tool_output_wire_type_and_data() {
     let data = rpc.data.unwrap();
     assert_eq!(data["toolCallId"], "tc_1");
     assert_eq!(data["output"], "running...");
-    // Verify no legacy "update" field
+    // Verify the obsolete "update" field is not emitted.
     assert!(data.get("update").is_none());
 }
 

@@ -26,8 +26,7 @@ use super::compensation::{
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
-    WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TriggerId, TriggerTypeId, WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
 use super::leases::{
@@ -1371,7 +1370,7 @@ impl EngineHostHandle {
             .finish_prepared_sync_invocation(prepared, result)
     }
 
-    /// Lock the host for deep test inspection or narrow migration setup.
+    /// Lock the host for deep test inspection or narrow bootstrap setup.
     ///
     /// Production invocation/discovery paths should use the intent-shaped
     /// methods on this handle so they do not hold the host mutex across handler
@@ -1603,7 +1602,7 @@ impl EngineHost {
         &self.catalog
     }
 
-    /// Mutably borrow the live catalog for test/migration setup.
+    /// Mutably borrow the live catalog for tests and bootstrap setup.
     pub fn catalog_mut(&mut self) -> &mut LiveCatalog {
         &mut self.catalog
     }
@@ -3784,14 +3783,4 @@ fn actor_id(value: &str) -> Result<ActorId> {
 
 fn grant_id(value: &str) -> Result<AuthorityGrantId> {
     AuthorityGrantId::new(value)
-}
-
-#[allow(dead_code)]
-fn trace_id(value: &str) -> Result<TraceId> {
-    TraceId::new(value)
-}
-
-#[allow(dead_code)]
-fn invocation_id(value: &str) -> Result<InvocationId> {
-    InvocationId::new(value)
 }

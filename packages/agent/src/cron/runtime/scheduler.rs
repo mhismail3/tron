@@ -135,19 +135,19 @@ impl CronScheduler {
 
     /// Attach the engine host used for scheduled trigger dispatch.
     ///
-    /// The scheduler is constructed before the RPC/engine bridge. Production
-    /// startup must call this after the bridge registers `cron::*` functions
-    /// and before `start()`.
+    /// The scheduler is constructed before the engine transport is attached.
+    /// Production startup must call this after `cron::*` functions are
+    /// registered and before `start()`.
     pub fn set_engine_host(&self, handle: EngineHostHandle) {
         let _ = self.engine_host.set(handle);
     }
 
-    /// Get the reschedule notify handle (for RPC handlers to wake the scheduler).
+    /// Get the reschedule notify handle for cron capability functions.
     pub fn reschedule_notify(&self) -> Arc<tokio::sync::Notify> {
         self.reschedule_notify.clone()
     }
 
-    /// Get the config lock (for RPC handlers to serialize config access).
+    /// Get the config lock used to serialize cron config access.
     pub fn config_lock(&self) -> &tokio::sync::Mutex<()> {
         &self.config_lock
     }

@@ -925,7 +925,7 @@ fn merge_aborted_carries_origin_field() {
 // Phase K — StashPop lifecycle (continue / abort)
 //
 // After a stash-pop conflict, `handle_post_stash_pop` populates
-// `pending_merges` with `origin = StashPop`. The normal conflict RPCs
+// `pending_merges` with `origin = StashPop`. The normal conflict capability calls
 // (`listConflicts` / `resolveConflict` / `continueMerge` / `abortMerge`)
 // then drive it to completion. These tests lock down:
 //  - `continueMerge(StashPop)` drops the stash and emits

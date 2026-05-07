@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::rpc::events_wire as rpc_events;
+use crate::server::services::events_wire as rpc_events;
 
 pub(super) async fn handle(
     method: &str,
@@ -9,11 +9,11 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "events.getHistory" => events_get_history_value(Some(payload), deps).await,
-        "events.getSince" => events_get_since_value(Some(payload), deps).await,
-        "events.append" => events_append_value(Some(payload), invocation, deps).await,
-        "events.subscribe" => events_subscribe_value(Some(payload), invocation, deps).await,
-        "events.unsubscribe" => events_unsubscribe_value(Some(payload), deps).await,
+        "events::get_history" => events_get_history_value(Some(payload), deps).await,
+        "events::get_since" => events_get_since_value(Some(payload), deps).await,
+        "events::append" => events_append_value(Some(payload), invocation, deps).await,
+        "events::subscribe" => events_subscribe_value(Some(payload), invocation, deps).await,
+        "events::unsubscribe" => events_unsubscribe_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("events method {method} is not engine-owned"),
         }),
@@ -37,7 +37,7 @@ async fn events_subscribe_value(
             invocation.causal_context.workspace_id.clone(),
         )
         .await
-        .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     Ok(json!({ "subscribed": true }))
 }
 
@@ -51,7 +51,7 @@ async fn events_unsubscribe_value(
         .engine_host
         .unsubscribe_stream(&subscription_id)
         .await
-        .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     Ok(json!({ "unsubscribed": true }))
 }
 
@@ -103,7 +103,7 @@ async fn events_get_history_value(
     let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
     let oldest_event_id = events.first().map(|e| e.id.clone());
     let mut wire_events: Vec<Value> = events.iter().map(rpc_events::event_row_to_wire).collect();
-    crate::server::rpc::interactive_tool_enrichment::enrich_interactive_tool_statuses(
+    crate::server::services::interactive_tool_enrichment::enrich_interactive_tool_statuses(
         &mut wire_events,
     );
 
@@ -141,7 +141,7 @@ async fn events_get_since_value(
         events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
     }
     let mut wire_events: Vec<Value> = events.iter().map(rpc_events::event_row_to_wire).collect();
-    crate::server::rpc::interactive_tool_enrichment::enrich_interactive_tool_statuses(
+    crate::server::services::interactive_tool_enrichment::enrich_interactive_tool_statuses(
         &mut wire_events,
     );
     let next_cursor = events.last().map(|r| r.id.clone());

@@ -1,6 +1,6 @@
 //! Agent-facing capability client.
 //!
-//! The client is a thin, typed adapter over [`EngineHostHandle`] for agents and
+//! The client is a thin, typed domain over [`EngineHostHandle`] for agents and
 //! tools. It deliberately speaks canonical engine ids, not JSON-RPC method ids.
 
 use serde_json::Value;
@@ -77,7 +77,7 @@ impl AgentCapabilityClient {
 
     /// Inspect one canonical function.
     pub async fn inspect(&self, function_id: &FunctionId) -> Result<FunctionDefinition> {
-        reject_rpc_compat(function_id)?;
+        reject_noncanonical_namespace(function_id)?;
         self.handle
             .inspect_function(function_id, Some(&self.actor_context()))
             .await
@@ -96,7 +96,7 @@ impl AgentCapabilityClient {
         idempotency_key: Option<String>,
         parent_invocation_id: Option<InvocationId>,
     ) -> InvocationResult {
-        if let Err(error) = reject_rpc_compat(&function_id) {
+        if let Err(error) = reject_noncanonical_namespace(&function_id) {
             return InvocationResult::error(
                 &Invocation::new_sync(function_id, payload, self.causal_context(idempotency_key)),
                 super::ids::WorkerId::new("agent").expect("valid static worker id"),
@@ -143,8 +143,8 @@ impl AgentCapabilityClient {
                 function.owner_worker,
                 function.revision,
                 super::types::CatalogRevision(0),
-                EngineError::AdapterFailure {
-                    adapter: "approval".to_owned(),
+                EngineError::DomainFailure {
+                    domain: "approval".to_owned(),
                     code: "APPROVAL_REQUIRED".to_owned(),
                     message: format!(
                         "approval required before agent invocation of {}",
@@ -219,11 +219,10 @@ impl AgentCapabilityClient {
     }
 }
 
-fn reject_rpc_compat(function_id: &FunctionId) -> Result<()> {
+fn reject_noncanonical_namespace(function_id: &FunctionId) -> Result<()> {
     if function_id.namespace() == "rpc" {
         return Err(EngineError::PolicyViolation(
-            "agents must invoke canonical domain function ids, not rpc compatibility ids"
-                .to_owned(),
+            "agents must invoke canonical domain function ids".to_owned(),
         ));
     }
     Ok(())

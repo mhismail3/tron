@@ -18,7 +18,7 @@
 //!
 //! Skills are server-owned, session-scoped, and event-sourced. They persist
 //! across turns (re-injected into the system prompt every turn) until explicit
-//! deactivation or compaction. Managed via `skill.activate` / `skill.deactivate` RPCs.
+//! deactivation or compaction. Managed via `skill.activate` / `skill.deactivate` capability calls.
 //!
 //! ## Module Overview
 //!

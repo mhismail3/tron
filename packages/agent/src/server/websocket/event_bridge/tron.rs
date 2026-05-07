@@ -10,7 +10,9 @@ use super::tool;
 use super::turn;
 
 #[cfg(test)]
-pub(super) fn tron_event_to_rpc(event: &TronEvent) -> crate::server::rpc::types::RpcEvent {
+pub(super) fn tron_event_to_rpc(
+    event: &TronEvent,
+) -> crate::server::transport::json_rpc::types::JsonRpcEvent {
     tron_event_to_bridged(event).rpc_event
 }
 

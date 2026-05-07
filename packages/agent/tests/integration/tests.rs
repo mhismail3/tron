@@ -20,7 +20,7 @@ async fn e2e_connect_and_ping() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await; // skip system.connected
 
-    let resp = rpc_call(&mut ws, 1, "system.ping", None).await;
+    let resp = rpc_call(&mut ws, 1, "system::ping", None).await;
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["pong"], true);
 
@@ -37,7 +37,7 @@ async fn e2e_session_lifecycle() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir(), "title": "Test"})),
     )
     .await;
@@ -46,7 +46,7 @@ async fn e2e_session_lifecycle() {
     assert!(!sid.is_empty());
 
     // List
-    let resp = rpc_call(&mut ws, 2, "session.list", None).await;
+    let resp = rpc_call(&mut ws, 2, "session::list", None).await;
     assert_eq!(resp["success"], true);
     let sessions = resp["result"]["sessions"].as_array().unwrap();
     assert!(sessions.iter().any(|s| s["sessionId"] == sid));
@@ -55,7 +55,7 @@ async fn e2e_session_lifecycle() {
     let resp = rpc_call(
         &mut ws,
         3,
-        "session.getState",
+        "session::get_state",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -66,7 +66,7 @@ async fn e2e_session_lifecycle() {
     let resp = rpc_call(
         &mut ws,
         4,
-        "session.delete",
+        "session::delete",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -85,7 +85,7 @@ async fn e2e_events_round_trip() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -95,7 +95,7 @@ async fn e2e_events_round_trip() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid,
             "type": "message.user",
@@ -110,7 +110,7 @@ async fn e2e_events_round_trip() {
     let resp = rpc_call(
         &mut ws,
         3,
-        "events.getHistory",
+        "events::get_history",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -127,7 +127,7 @@ async fn e2e_settings_get() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
-    let resp = rpc_call(&mut ws, 1, "settings.get", None).await;
+    let resp = rpc_call(&mut ws, 1, "settings::get", None).await;
     assert_eq!(resp["success"], true);
     assert!(resp["result"].is_object());
 
@@ -140,7 +140,7 @@ async fn e2e_model_list() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
-    let resp = rpc_call(&mut ws, 1, "model.list", None).await;
+    let resp = rpc_call(&mut ws, 1, "model::list", None).await;
     assert_eq!(resp["success"], true);
     let models = resp["result"]["models"].as_array().unwrap();
     assert!(!models.is_empty());
@@ -163,7 +163,7 @@ async fn e2e_agent_prompt_acknowledged() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -172,7 +172,7 @@ async fn e2e_agent_prompt_acknowledged() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "Hello"})),
     )
     .await;
@@ -194,7 +194,7 @@ async fn e2e_agent_abort() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -203,12 +203,12 @@ async fn e2e_agent_abort() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "Hello"})),
     )
     .await;
 
-    let resp = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    let resp = rpc_call(&mut ws, 3, "agent::abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["aborted"], true);
 
@@ -250,9 +250,9 @@ async fn e2e_missing_params() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
-    let resp = rpc_call(&mut ws, 1, "session.getState", Some(json!({}))).await;
+    let resp = rpc_call(&mut ws, 1, "session::get_state", Some(json!({}))).await;
     assert_eq!(resp["success"], false);
-    assert_eq!(resp["error"]["code"], "INVALID_PARAMS");
+    assert_eq!(resp["error"]["code"], "schema_violation");
 
     server.shutdown().shutdown();
 }
@@ -266,7 +266,7 @@ async fn e2e_session_not_found() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.getState",
+        "session::get_state",
         Some(json!({"sessionId": "nonexistent-id"})),
     )
     .await;
@@ -285,7 +285,7 @@ async fn e2e_skill_list() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "skill.list",
+        "skills::list",
         Some(json!({"workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -306,10 +306,10 @@ async fn e2e_two_clients() {
     let _ = read_json(&mut ws2).await;
 
     // Both can ping
-    let resp1 = rpc_call(&mut ws1, 1, "system.ping", None).await;
-    let resp2 = rpc_call(&mut ws2, 1, "system.ping", None).await;
-    assert_eq!(resp1["success"], true);
-    assert_eq!(resp2["success"], true);
+    let resp1 = rpc_call(&mut ws1, 1, "system::ping", None).await;
+    let resp2 = rpc_call(&mut ws2, 1, "system::ping", None).await;
+    assert_eq!(resp1["success"], true, "resp1: {resp1}");
+    assert_eq!(resp2["success"], true, "resp2: {resp2}");
 
     server.shutdown().shutdown();
 }
@@ -322,10 +322,15 @@ async fn e2e_rapid_fire_requests() {
 
     // Send 50 rapid pings
     for i in 1..=50u64 {
+        let payload = ping_params();
         let req = json!({
             "id": format!("rapid_{i}"),
-            "method": "system.ping",
-            "params": ping_params(),
+            "method": "engine.invoke",
+            "params": {
+                "functionId": "system::ping",
+                "payload": payload,
+                "idempotencyKey": integration_idempotency_key(i, "system::ping", &payload),
+            },
         });
         ws.send(Message::text(req.to_string())).await.unwrap();
     }
@@ -362,7 +367,7 @@ async fn e2e_context_snapshot() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -371,7 +376,7 @@ async fn e2e_context_snapshot() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "context.getSnapshot",
+        "context::get_snapshot",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -389,7 +394,7 @@ async fn e2e_concurrent_sessions() {
     let resp1 = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": "/tmp/1"})),
     )
     .await;
@@ -398,7 +403,7 @@ async fn e2e_concurrent_sessions() {
     let resp2 = rpc_call(
         &mut ws,
         2,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": "/tmp/2"})),
     )
     .await;
@@ -406,7 +411,7 @@ async fn e2e_concurrent_sessions() {
 
     assert_ne!(sid1, sid2);
 
-    let resp = rpc_call(&mut ws, 3, "session.list", None).await;
+    let resp = rpc_call(&mut ws, 3, "session::list", None).await;
     let sessions = resp["result"]["sessions"].as_array().unwrap();
     assert!(sessions.len() >= 2);
 
@@ -419,7 +424,7 @@ async fn e2e_system_get_info() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
-    let resp = rpc_call(&mut ws, 1, "system.getInfo", None).await;
+    let resp = rpc_call(&mut ws, 1, "system::get_info", None).await;
     assert_eq!(resp["success"], true);
     assert!(resp["result"]["version"].is_string());
 
@@ -435,7 +440,7 @@ async fn e2e_tree_visualization() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -444,7 +449,7 @@ async fn e2e_tree_visualization() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "tree.getVisualization",
+        "tree::get_visualization",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -463,7 +468,7 @@ async fn e2e_agent_get_state() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -473,7 +478,7 @@ async fn e2e_agent_get_state() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "session.reconstruct",
+        "session::reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -484,7 +489,7 @@ async fn e2e_agent_get_state() {
     let _ = rpc_call(
         &mut ws,
         3,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "test"})),
     )
     .await;
@@ -493,14 +498,14 @@ async fn e2e_agent_get_state() {
     let resp = rpc_call(
         &mut ws,
         4,
-        "session.reconstruct",
+        "session::reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["isRunning"], true);
 
-    let abort = rpc_call(&mut ws, 5, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    let abort = rpc_call(&mut ws, 5, "agent::abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(abort["result"]["aborted"], true);
     wait_until_run_cleared(&server, &sid).await;
 
@@ -516,7 +521,7 @@ async fn e2e_session_archive_unarchive() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -526,7 +531,7 @@ async fn e2e_session_archive_unarchive() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "session.archive",
+        "session::archive",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -537,7 +542,7 @@ async fn e2e_session_archive_unarchive() {
     let resp = rpc_call(
         &mut ws,
         3,
-        "session.unarchive",
+        "session::unarchive",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -556,7 +561,7 @@ async fn e2e_session_create_enriched_response() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp/test"})),
     )
     .await;
@@ -586,12 +591,12 @@ async fn e2e_session_list_enriched_fields() {
     let _ = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir(), "title": "Test Session"})),
     )
     .await;
 
-    let resp = rpc_call(&mut ws, 2, "session.list", None).await;
+    let resp = rpc_call(&mut ws, 2, "session::list", None).await;
     assert_eq!(resp["success"], true);
     let sessions = resp["result"]["sessions"].as_array().unwrap();
     assert!(!sessions.is_empty());
@@ -614,7 +619,7 @@ async fn e2e_graceful_shutdown() {
     let _ = read_json(&mut ws).await;
 
     // Verify the server is working before shutdown
-    let resp = rpc_call(&mut ws, 1, "system.ping", None).await;
+    let resp = rpc_call(&mut ws, 1, "system::ping", None).await;
     assert_eq!(resp["success"], true);
 
     server.shutdown().shutdown();
@@ -654,7 +659,7 @@ async fn create_and_bind_session(ws: &mut WsStream, id: u64) -> String {
     let resp = rpc_call(
         ws,
         id,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -699,7 +704,7 @@ async fn wait_for_detailed_snapshot_rules(
         let resp = rpc_call(
             ws,
             request_id,
-            "context.getDetailedSnapshot",
+            "context::get_detailed_snapshot",
             Some(json!({"sessionId": session_id})),
         )
         .await;
@@ -729,21 +734,14 @@ async fn e2e_bridge_delivers_to_bound_client() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await; // skip connected
 
-    // session.create auto-binds the connection to the session
+    // session::create through engine.invoke auto-binds the connection.
     let sid = create_and_bind_session(&mut ws, 1).await;
 
-    // Emit an event via orchestrator broadcast
-    let _ = server
-        .rpc_context()
-        .orchestrator
-        .broadcast()
-        .emit(TronEvent::AgentStart {
-            base: BaseEvent::now(&sid),
-        });
+    publish_engine_session_event(&server, &sid, "agent.turn_start", json!({})).await;
 
     // Should receive the event
-    let evt = read_until_event_type(&mut ws, "agent.start").await;
-    assert!(evt.is_some(), "should receive agent.start event");
+    let evt = read_until_event_type(&mut ws, "agent.turn_start").await;
+    assert!(evt.is_some(), "should receive agent.turn_start event");
 
     server.shutdown().shutdown();
 }
@@ -757,26 +755,25 @@ async fn e2e_bridge_multiple_clients() {
     let mut ws2 = connect(&url).await;
     let _ = read_json(&mut ws2).await;
 
-    // ws1 creates session (auto-binds ws1)
+    // ws1 creates a session through engine.invoke, which auto-binds ws1.
     let sid = create_and_bind_session(&mut ws1, 1).await;
 
-    // ws2 resumes the same session (auto-binds ws2)
+    // ws2 resumes the same session through engine.invoke, which auto-binds ws2.
     let _ = rpc_call(
         &mut ws2,
         1,
-        "session.resume",
+        "session::resume",
         Some(json!({"sessionId": sid})),
     )
     .await;
 
-    let _ = server
-        .rpc_context()
-        .orchestrator
-        .broadcast()
-        .emit(TronEvent::MessageUpdate {
-            base: BaseEvent::now(&sid),
-            content: "hello both".into(),
-        });
+    publish_engine_session_event(
+        &server,
+        &sid,
+        "agent.text_delta",
+        json!({"content": "hello both"}),
+    )
+    .await;
 
     let evt1 = read_until_event_type(&mut ws1, "agent.text_delta").await;
     let evt2 = read_until_event_type(&mut ws2, "agent.text_delta").await;
@@ -799,25 +796,20 @@ async fn e2e_bridge_session_isolation() {
     let _sid1 = create_and_bind_session(&mut ws1, 1).await;
     let sid2 = create_and_bind_session(&mut ws2, 1).await;
 
-    // Drain any session lifecycle events that may have been broadcast
-    // (session.created events race with binding)
+    // Drain any session lifecycle events that may have been broadcast; the
+    // canonical session-created event can race with binding.
     let _ = try_read_json(&mut ws1, Duration::from_millis(50)).await;
     let _ = try_read_json(&mut ws2, Duration::from_millis(50)).await;
 
-    // Emit event for sid2 only
-    let _ = server
-        .rpc_context()
-        .orchestrator
-        .broadcast()
-        .emit(TronEvent::AgentStart {
-            base: BaseEvent::now(&sid2),
-        });
+    publish_engine_session_event(&server, &sid2, "agent.turn_start", json!({})).await;
 
-    // ws1 (bound to sid1) should NOT receive sid2's agent.start event.
+    // ws1 (bound to sid1) should NOT receive sid2's agent.turn_start event.
     let evt1 = tokio::time::timeout(Duration::from_millis(200), async {
         loop {
             match try_read_json(&mut ws1, Duration::from_millis(25)).await {
-                Some(msg) if msg.get("type").and_then(|v| v.as_str()) == Some("agent.start") => {
+                Some(msg)
+                    if msg.get("type").and_then(|v| v.as_str()) == Some("agent.turn_start") =>
+                {
                     break Some(msg);
                 }
                 Some(_) => {}
@@ -829,11 +821,11 @@ async fn e2e_bridge_session_isolation() {
     .unwrap_or(None);
     assert!(
         evt1.is_none(),
-        "ws1 should not receive sid2 agent.start events"
+        "ws1 should not receive sid2 agent.turn_start events"
     );
 
     // ws2 (bound to sid2) SHOULD receive it
-    let evt2 = read_until_event_type(&mut ws2, "agent.start").await;
+    let evt2 = read_until_event_type(&mut ws2, "agent.turn_start").await;
     assert!(evt2.is_some(), "ws2 should receive sid2 events");
     if let Some(evt) = evt2 {
         assert_eq!(evt["sessionId"], sid2);
@@ -865,7 +857,11 @@ async fn e2e_events_have_type_field() {
     ];
 
     for evt in events {
-        let _ = server.rpc_context().orchestrator.broadcast().emit(evt);
+        let _ = server
+            .capability_context()
+            .orchestrator
+            .broadcast()
+            .emit(evt);
     }
 
     // Read all 3 events
@@ -889,15 +885,9 @@ async fn e2e_events_have_timestamp() {
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
-    let _ = server
-        .rpc_context()
-        .orchestrator
-        .broadcast()
-        .emit(TronEvent::AgentStart {
-            base: BaseEvent::now(&sid),
-        });
+    publish_engine_session_event(&server, &sid, "agent.turn_start", json!({})).await;
 
-    let evt = read_until_event_type(&mut ws, "agent.start").await;
+    let evt = read_until_event_type(&mut ws, "agent.turn_start").await;
     assert!(evt.is_some());
     assert!(evt.unwrap()["timestamp"].is_string());
 
@@ -912,15 +902,9 @@ async fn e2e_events_have_session_id() {
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
-    let _ = server
-        .rpc_context()
-        .orchestrator
-        .broadcast()
-        .emit(TronEvent::AgentStart {
-            base: BaseEvent::now(&sid),
-        });
+    publish_engine_session_event(&server, &sid, "agent.turn_start", json!({})).await;
 
-    let evt = read_until_event_type(&mut ws, "agent.start").await;
+    let evt = read_until_event_type(&mut ws, "agent.turn_start").await;
     assert!(evt.is_some());
     assert_eq!(evt.unwrap()["sessionId"], sid);
 
@@ -937,14 +921,15 @@ async fn e2e_event_ordering_preserved() {
 
     // Emit 20 sequential events
     for i in 0..20 {
-        let _ = server
-            .rpc_context()
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::MessageUpdate {
-                base: BaseEvent::now(&sid),
-                content: format!("msg_{i}"),
-            });
+        let _ =
+            server
+                .capability_context()
+                .orchestrator
+                .broadcast()
+                .emit(TronEvent::MessageUpdate {
+                    base: BaseEvent::now(&sid),
+                    content: format!("msg_{i}"),
+                });
     }
 
     // Collect events and verify order
@@ -989,7 +974,7 @@ async fn e2e_state_persists_after_disconnect() {
     let resp = rpc_call(
         &mut ws2,
         1,
-        "session.getState",
+        "session::get_state",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1011,7 +996,7 @@ async fn e2e_events_survive_reconnect() {
     let _ = rpc_call(
         &mut ws1,
         2,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid,
             "type": "message.user",
@@ -1031,7 +1016,7 @@ async fn e2e_events_survive_reconnect() {
     let resp = rpc_call(
         &mut ws2,
         1,
-        "events.getHistory",
+        "events::get_history",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1054,7 +1039,7 @@ async fn e2e_reconstruct_messages() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid,
             "type": "message.user",
@@ -1066,7 +1051,7 @@ async fn e2e_reconstruct_messages() {
     let _ = rpc_call(
         &mut ws,
         3,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid,
             "type": "message.assistant",
@@ -1078,7 +1063,7 @@ async fn e2e_reconstruct_messages() {
     let resp = rpc_call(
         &mut ws,
         4,
-        "context.getSnapshot",
+        "context::get_snapshot",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1099,7 +1084,7 @@ async fn e2e_reconstruct_preserves_tokens() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid,
             "type": "turn.end",
@@ -1115,7 +1100,7 @@ async fn e2e_reconstruct_preserves_tokens() {
     let resp = rpc_call(
         &mut ws,
         3,
-        "events.getHistory",
+        "events::get_history",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1139,7 +1124,7 @@ async fn e2e_multiple_events_in_sequence() {
         let _ = rpc_call(
             &mut ws,
             (i + 2) as u64,
-            "events.append",
+            "events::append",
             Some(json!({
                 "sessionId": sid,
                 "type": "message.user",
@@ -1152,7 +1137,7 @@ async fn e2e_multiple_events_in_sequence() {
     let resp = rpc_call(
         &mut ws,
         10,
-        "events.getHistory",
+        "events::get_history",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1174,7 +1159,7 @@ async fn e2e_context_history() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "context.getSnapshot",
+        "context::get_snapshot",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1202,7 +1187,7 @@ async fn e2e_concurrent_isolated() {
     let resp1 = rpc_call(
         &mut ws,
         3,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid1,
             "type": "message.user",
@@ -1215,7 +1200,7 @@ async fn e2e_concurrent_isolated() {
     let resp2 = rpc_call(
         &mut ws,
         4,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid2,
             "type": "message.user",
@@ -1229,14 +1214,14 @@ async fn e2e_concurrent_isolated() {
     let h1 = rpc_call(
         &mut ws,
         5,
-        "events.getHistory",
+        "events::get_history",
         Some(json!({"sessionId": sid1})),
     )
     .await;
     let h2 = rpc_call(
         &mut ws,
         6,
-        "events.getHistory",
+        "events::get_history",
         Some(json!({"sessionId": sid2})),
     )
     .await;
@@ -1266,7 +1251,7 @@ async fn e2e_many_sessions_stress() {
         let resp = rpc_call(
             &mut ws,
             (i + 1) as u64,
-            "session.create",
+            "session::create",
             Some(json!({"model": "m", "workingDirectory": format!("{}/{i}", integration_prompt_workdir())})),
         )
         .await;
@@ -1275,7 +1260,7 @@ async fn e2e_many_sessions_stress() {
     }
 
     // Verify all sessions exist
-    let resp = rpc_call(&mut ws, 100, "session.list", None).await;
+    let resp = rpc_call(&mut ws, 100, "session::list", None).await;
     let sessions = resp["result"]["sessions"].as_array().unwrap();
     assert!(sessions.len() >= 10);
 
@@ -1284,7 +1269,7 @@ async fn e2e_many_sessions_stress() {
         let resp = rpc_call(
             &mut ws,
             (200 + i) as u64,
-            "session.delete",
+            "session::delete",
             Some(json!({"sessionId": sid})),
         )
         .await;
@@ -1307,19 +1292,19 @@ async fn e2e_concurrent_prompts_different_sessions() {
     let resp1 = rpc_call(
         &mut ws,
         3,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid1, "prompt": "test 1"})),
     )
     .await;
     let resp2 = rpc_call(
         &mut ws,
         4,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid2, "prompt": "test 2"})),
     )
     .await;
-    assert_eq!(resp1["success"], true);
-    assert_eq!(resp2["success"], true);
+    assert_eq!(resp1["success"], true, "resp1: {resp1}");
+    assert_eq!(resp2["success"], true, "resp2: {resp2}");
 
     wait_until_run_cleared(&server, &sid1).await;
     wait_until_run_cleared(&server, &sid2).await;
@@ -1339,7 +1324,7 @@ async fn e2e_cleanup_after_delete() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "events.append",
+        "events::append",
         Some(json!({
             "sessionId": sid,
             "type": "message.user",
@@ -1352,7 +1337,7 @@ async fn e2e_cleanup_after_delete() {
     let resp = rpc_call(
         &mut ws,
         3,
-        "session.delete",
+        "session::delete",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1362,7 +1347,7 @@ async fn e2e_cleanup_after_delete() {
     let resp = rpc_call(
         &mut ws,
         4,
-        "session.getState",
+        "session::get_state",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1413,7 +1398,7 @@ async fn e2e_error_prompt_nonexistent_session() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": "nonexistent-session", "prompt": "hello"})),
     )
     .await;
@@ -1435,7 +1420,7 @@ async fn e2e_error_delete_active_session() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "running"})),
     )
     .await;
@@ -1444,7 +1429,7 @@ async fn e2e_error_delete_active_session() {
     let resp = rpc_call(
         &mut ws,
         3,
-        "session.delete",
+        "session::delete",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1464,7 +1449,7 @@ async fn e2e_error_get_events_no_session() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "events.getHistory",
+        "events::get_history",
         Some(json!({"sessionId": "nonexistent"})),
     )
     .await;
@@ -1484,7 +1469,7 @@ async fn e2e_error_append_invalid() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "events.append",
+        "events::append",
         Some(json!({"type": "message.user", "payload": {"text": "hello"}})),
     )
     .await;
@@ -1500,7 +1485,7 @@ async fn e2e_error_settings_update_invalid() {
     let _ = read_json(&mut ws).await;
 
     // Update with empty params
-    let resp = rpc_call(&mut ws, 1, "settings.update", Some(json!({}))).await;
+    let resp = rpc_call(&mut ws, 1, "settings::update", Some(json!({}))).await;
     // Should gracefully handle (either succeed with no-op or fail with message)
     assert!(resp.get("success").is_some());
 
@@ -1519,7 +1504,7 @@ async fn e2e_reject_concurrent_same_session() {
     let resp1 = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "first"})),
     )
     .await;
@@ -1529,7 +1514,7 @@ async fn e2e_reject_concurrent_same_session() {
     let resp2 = rpc_call(
         &mut ws,
         3,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "second"})),
     )
     .await;
@@ -1553,14 +1538,14 @@ async fn e2e_sequential_prompts_after_abort() {
     let resp1 = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "first"})),
     )
     .await;
     assert_eq!(resp1["success"], true);
 
     // Abort
-    let _ = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    let _ = rpc_call(&mut ws, 3, "agent::abort", Some(json!({"sessionId": sid}))).await;
 
     wait_until_run_cleared(&server, &sid).await;
 
@@ -1568,7 +1553,7 @@ async fn e2e_sequential_prompts_after_abort() {
     let resp2 = rpc_call(
         &mut ws,
         4,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "second"})),
     )
     .await;
@@ -1624,7 +1609,7 @@ async fn wait_until_not_busy(ws: &mut WsStream, sid: &str, id_start: u64) {
             let resp = rpc_call(
                 ws,
                 id_start + i,
-                "session.reconstruct",
+                "session::reconstruct",
                 Some(json!({"sessionId": sid})),
             )
             .await;
@@ -1641,7 +1626,7 @@ async fn wait_until_not_busy(ws: &mut WsStream, sid: &str, id_start: u64) {
 async fn wait_until_active_run(server: &Arc<TronServer>, sid: &str) {
     tokio::time::timeout(PROMPT_STATE_TIMEOUT, async {
         loop {
-            if server.rpc_context().orchestrator.has_active_run(sid) {
+            if server.capability_context().orchestrator.has_active_run(sid) {
                 break;
             }
             tokio::time::sleep(PROMPT_STATE_POLL).await;
@@ -1663,7 +1648,7 @@ async fn wait_until_reconstruct_running(
         let resp = rpc_call(
             ws,
             id_start + i,
-            "session.reconstruct",
+            "session::reconstruct",
             Some(json!({"sessionId": sid})),
         )
         .await;
@@ -1689,8 +1674,11 @@ async fn wait_until_run_cleared(server: &Arc<TronServer>, sid: &str) {
     // success is fast while giving heavily loaded CI enough scheduler headroom.
     tokio::time::timeout(PROMPT_STATE_TIMEOUT, async {
         loop {
-            if !server.rpc_context().orchestrator.has_active_run(sid)
-                && !server.rpc_context().orchestrator.is_session_busy(sid)
+            if !server.capability_context().orchestrator.has_active_run(sid)
+                && !server
+                    .capability_context()
+                    .orchestrator
+                    .is_session_busy(sid)
             {
                 break;
             }
@@ -1713,7 +1701,7 @@ async fn e2e_prompt_text_response() {
     let (resp, mut interleaved) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "Say hello"})),
     )
     .await;
@@ -1744,7 +1732,7 @@ async fn e2e_prompt_panic_cleans_up_and_server_recovers() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "panic once"})),
     )
     .await;
@@ -1756,14 +1744,14 @@ async fn e2e_prompt_panic_cleans_up_and_server_recovers() {
     let state = rpc_call(
         &mut ws,
         3,
-        "session.reconstruct",
+        "session::reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
     assert_eq!(state["success"], true);
     assert_eq!(state["result"]["isRunning"], false);
 
-    let sessions = rpc_call(&mut ws, 4, "session.list", None).await;
+    let sessions = rpc_call(&mut ws, 4, "session::list", None).await;
     assert_eq!(sessions["success"], true);
     assert!(
         sessions["result"]["sessions"]
@@ -1777,7 +1765,7 @@ async fn e2e_prompt_panic_cleans_up_and_server_recovers() {
     let retry = rpc_call(
         &mut ws,
         5,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "recover"})),
     )
     .await;
@@ -1803,7 +1791,7 @@ async fn e2e_prompt_event_ordering() {
     let (_, mut events) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "test"})),
     )
     .await;
@@ -1848,7 +1836,7 @@ async fn e2e_prompt_error_from_provider() {
     let (_, mut interleaved) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "this will fail"})),
     )
     .await;
@@ -1880,7 +1868,7 @@ async fn e2e_prompt_cleans_up_on_complete() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "work"})),
     )
     .await;
@@ -1895,7 +1883,7 @@ async fn e2e_prompt_cleans_up_on_complete() {
     let resp = rpc_call(
         &mut ws,
         10,
-        "session.reconstruct",
+        "session::reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -1917,7 +1905,7 @@ async fn e2e_prompt_sequential() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "first"})),
     )
     .await;
@@ -1930,7 +1918,7 @@ async fn e2e_prompt_sequential() {
     let resp = rpc_call(
         &mut ws,
         3,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "second"})),
     )
     .await;
@@ -1957,7 +1945,7 @@ async fn e2e_prompt_reject_concurrent() {
     let resp1 = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "slow"})),
     )
     .await;
@@ -1968,14 +1956,14 @@ async fn e2e_prompt_reject_concurrent() {
     let resp2 = rpc_call(
         &mut ws,
         3,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "rejected"})),
     )
     .await;
     assert_eq!(resp2["success"], false);
     assert_eq!(resp2["error"]["code"], "SESSION_BUSY");
 
-    let abort = rpc_call(&mut ws, 4, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    let abort = rpc_call(&mut ws, 4, "agent::abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(abort["result"]["aborted"], true);
     wait_until_run_cleared(&server, &sid).await;
 
@@ -1994,7 +1982,7 @@ async fn e2e_graceful_shutdown_cleans_up_active_prompt_run() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "slow"})),
     )
     .await;
@@ -2008,8 +1996,18 @@ async fn e2e_graceful_shutdown_cleans_up_active_prompt_run() {
         .await;
 
     assert!(server.shutdown().is_shutting_down());
-    assert!(!server.rpc_context().orchestrator.has_active_run(&sid));
-    assert!(!server.rpc_context().orchestrator.is_session_busy(&sid));
+    assert!(
+        !server
+            .capability_context()
+            .orchestrator
+            .has_active_run(&sid)
+    );
+    assert!(
+        !server
+            .capability_context()
+            .orchestrator
+            .is_session_busy(&sid)
+    );
     assert_eq!(server.shutdown().tracked_task_count(), 0);
 
     let close_result = timeout(Duration::from_secs(2), async {
@@ -2035,7 +2033,7 @@ async fn e2e_prompt_abort_mid_stream() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "slow task"})),
     )
     .await;
@@ -2043,7 +2041,7 @@ async fn e2e_prompt_abort_mid_stream() {
     wait_until_active_run(&server, &sid).await;
 
     // Abort
-    let resp = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    let resp = rpc_call(&mut ws, 3, "agent::abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(resp["result"]["aborted"], true);
 
     // Wait for the run to be cleaned up (agent_runner calls complete_run)
@@ -2064,7 +2062,7 @@ async fn e2e_prompt_without_deps_returns_not_available() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "no deps"})),
     )
     .await;
@@ -2088,14 +2086,14 @@ async fn e2e_prompt_multiple_sessions() {
     let resp1 = rpc_call(
         &mut ws,
         3,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid1, "prompt": "session 1"})),
     )
     .await;
     let resp2 = rpc_call(
         &mut ws,
         4,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid2, "prompt": "session 2"})),
     )
     .await;
@@ -2122,7 +2120,7 @@ async fn e2e_prompt_run_id_matches() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "test"})),
     )
     .await;
@@ -2135,7 +2133,13 @@ async fn e2e_prompt_run_id_matches() {
     assert_eq!(resp["result"]["isRunning"], true);
     assert_eq!(resp["result"]["runId"], run_id);
 
-    let abort = rpc_call(&mut ws, 100, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    let abort = rpc_call(
+        &mut ws,
+        100,
+        "agent::abort",
+        Some(json!({"sessionId": sid})),
+    )
+    .await;
     assert_eq!(abort["result"]["aborted"], true);
     wait_until_run_cleared(&server, &sid).await;
 
@@ -2154,7 +2158,7 @@ async fn e2e_prompt_text_content_arrives() {
     let (_, mut events) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "test"})),
     )
     .await;
@@ -2199,7 +2203,7 @@ async fn e2e_prompt_events_scoped_to_session() {
     let _ = rpc_call(
         &mut ws,
         2,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "test"})),
     )
     .await;
@@ -2237,7 +2241,7 @@ async fn e2e_prompt_state_transitions() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "session.reconstruct",
+        "session::reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2247,7 +2251,7 @@ async fn e2e_prompt_state_transitions() {
     let _ = rpc_call(
         &mut ws,
         3,
-        "agent.prompt",
+        "agent::prompt",
         Some(json!({"sessionId": sid, "prompt": "work"})),
     )
     .await;
@@ -2260,7 +2264,7 @@ async fn e2e_prompt_state_transitions() {
     let resp = rpc_call(
         &mut ws,
         10,
-        "session.reconstruct",
+        "session::reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2273,16 +2277,16 @@ async fn e2e_prompt_state_transitions() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Phase 15: iOS compatibility integration tests
+// Phase 15: engine transport payload integration tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn e2e_system_get_info_ios_compat() {
+async fn e2e_system_get_info_engine_transport_payload() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
-    let resp = rpc_call(&mut ws, 1, "system.getInfo", None).await;
+    let resp = rpc_call(&mut ws, 1, "system::get_info", None).await;
     let result = &resp["result"];
     assert!(result["version"].is_string());
     assert!(result["uptime"].is_number());
@@ -2295,7 +2299,7 @@ async fn e2e_system_get_info_ios_compat() {
 }
 
 #[tokio::test]
-async fn e2e_agent_get_state_ios_compat() {
+async fn e2e_agent_get_state_engine_transport_payload() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
@@ -2305,7 +2309,7 @@ async fn e2e_agent_get_state_ios_compat() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "session.reconstruct",
+        "session::reconstruct",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2330,7 +2334,7 @@ async fn e2e_session_get_history_exists() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "session.getHistory",
+        "session::get_history",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2342,7 +2346,7 @@ async fn e2e_session_get_history_exists() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Phase 16: iOS wire format compatibility tests
+// Phase 16: engine transport wire format tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
@@ -2366,12 +2370,12 @@ async fn e2e_session_list_has_cache_tokens() {
     let _ = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
 
-    let resp = rpc_call(&mut ws, 2, "session.list", None).await;
+    let resp = rpc_call(&mut ws, 2, "session::list", None).await;
     assert_eq!(resp["success"], true);
     let sessions = resp["result"]["sessions"].as_array().unwrap();
     let s = &sessions[0];
@@ -2388,7 +2392,7 @@ async fn e2e_model_list_ios_cost_fields() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
-    let resp = rpc_call(&mut ws, 1, "model.list", None).await;
+    let resp = rpc_call(&mut ws, 1, "model::list", None).await;
     let models = resp["result"]["models"].as_array().unwrap();
     for model in models {
         assert!(
@@ -2401,7 +2405,7 @@ async fn e2e_model_list_ios_cost_fields() {
         );
         assert!(
             model.get("inputCostPer1M").is_none(),
-            "legacy inputCostPer1M should not exist"
+            "removed inputCostPer1M field should not exist"
         );
     }
 
@@ -2420,7 +2424,7 @@ async fn e2e_context_snapshot_has_real_tokens() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -2430,7 +2434,7 @@ async fn e2e_context_snapshot_has_real_tokens() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "context.getSnapshot",
+        "context::get_snapshot",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2460,7 +2464,7 @@ async fn e2e_detailed_snapshot_has_system_prompt() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -2469,7 +2473,7 @@ async fn e2e_detailed_snapshot_has_system_prompt() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "context.getDetailedSnapshot",
+        "context::get_detailed_snapshot",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2504,7 +2508,7 @@ async fn e2e_detailed_snapshot_has_rules_when_present() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "claude-opus-4-6", "workingDirectory": tmp.path().to_str().unwrap()})),
     )
     .await;
@@ -2533,7 +2537,7 @@ async fn e2e_should_compact_reflects_usage() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -2543,7 +2547,7 @@ async fn e2e_should_compact_reflects_usage() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "context.shouldCompact",
+        "context::should_compact",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2561,7 +2565,7 @@ async fn e2e_can_accept_turn_empty_session() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "session.create",
+        "session::create",
         Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
@@ -2570,7 +2574,7 @@ async fn e2e_can_accept_turn_empty_session() {
     let resp = rpc_call(
         &mut ws,
         2,
-        "context.canAcceptTurn",
+        "context::can_accept_turn",
         Some(json!({"sessionId": sid})),
     )
     .await;
@@ -2588,7 +2592,7 @@ async fn e2e_context_snapshot_session_not_found() {
     let resp = rpc_call(
         &mut ws,
         1,
-        "context.getSnapshot",
+        "context::get_snapshot",
         Some(json!({"sessionId": "nonexistent_session"})),
     )
     .await;

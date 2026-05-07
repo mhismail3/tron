@@ -29,16 +29,16 @@ use std::path::{Path, PathBuf};
 /// The test asserts the file contains both the literal string
 /// `"INVARIANT"` and the required substring (lowercased comparison).
 const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
-    // C1 — filesystem handlers accept arbitrary paths
-    ("src/server/rpc/filesystem_service.rs", "trusted-local"),
+    // C1 — filesystem services accept arbitrary paths
+    ("src/server/services/filesystem_service.rs", "trusted-local"),
     // C2 — server binds 0.0.0.0 by default
     ("src/main.rs", "trusted-local"),
     // M1 — NotFound messages echo caller-supplied IDs
-    ("src/server/rpc/errors.rs", "trusted-local"),
+    ("src/server/transport/json_rpc/errors.rs", "trusted-local"),
     // M4 — BroadcastManager trusts client-claimed session_id
     ("src/server/websocket/broadcast.rs", "trusted-local"),
-    // L7 — no per-client RPC rate limiting
-    ("src/server/rpc/mod.rs", "trusted-local"),
+    // L7 — no per-client JSON-RPC rate limiting
+    ("src/server/transport/json_rpc/mod.rs", "trusted-local"),
     // L8 — client-supplied bundleId trusted at register time
     ("src/server/capabilities/device.rs", "trusted-local"),
     // L14 — `is_path_within` is lexical, no symlink resolution
@@ -186,12 +186,12 @@ fn readme_does_not_advertise_removed_or_fictional_contracts() {
 }
 
 #[test]
-fn rpc_blocking_work_uses_the_supervisor_entrypoint() {
+fn server_blocking_work_uses_the_supervisor_entrypoint() {
     let crate_root = crate_root();
-    let rpc_root = crate_root.join("src/server/rpc");
-    for path in rust_files_under(&rpc_root) {
+    let services_root = crate_root.join("src/server/services");
+    for path in rust_files_under(&services_root) {
         let rel = path.strip_prefix(&crate_root).unwrap();
-        if rel == Path::new("src/server/rpc/context.rs") {
+        if rel == Path::new("src/server/services/context.rs") {
             continue;
         }
         let content = std::fs::read_to_string(&path)
@@ -199,7 +199,7 @@ fn rpc_blocking_work_uses_the_supervisor_entrypoint() {
         assert!(
             !content.contains("tokio::task::spawn_blocking")
                 && !content.contains("spawn_blocking("),
-            "{} must route blocking work through RpcContext::run_blocking or run_blocking_task",
+            "{} must route blocking work through ServerCapabilityContext::run_blocking or run_blocking_task",
             rel.display()
         );
     }
@@ -210,8 +210,11 @@ fn removed_server_owned_settings_store_stays_deleted() {
     let crate_root = crate_root();
     let file_name = ["settings", "_service.rs"].concat();
     assert!(
-        !crate_root.join("src/server/rpc").join(file_name).exists(),
-        "settings persistence belongs to settings::SettingsStore, not server::rpc"
+        !crate_root
+            .join("src/server/services")
+            .join(file_name)
+            .exists(),
+        "settings persistence belongs to settings::SettingsStore, not server::transport::json_rpc"
     );
 }
 

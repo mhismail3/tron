@@ -3,8 +3,8 @@
 //! In-process live capability fabric for the Tron agent.
 //!
 //! This module is the foundation for the engine redesign documented in
-//! `packages/agent/docs/engine-redesign/`. Production JSON-RPC is increasingly
-//! just a trigger transport into canonical domain functions, and agents now get
+//! `packages/agent/docs/engine-redesign/`. Production JSON-RPC is only a thin
+//! transport for reserved `engine.*` meta-capabilities, and agents get
 //! first-party tools over this same live catalog. The core invariants are:
 //!
 //! - the catalog is live, revisioned, and discoverable;
@@ -21,9 +21,9 @@
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
 //! - agents use `AgentCapabilityClient` and engine tools to discover, inspect,
 //!   watch, and invoke live canonical capabilities without frozen snapshots;
-//! - the RPC bridge keeps legacy method names as trigger metadata while
-//!   migrated methods execute as canonical domain functions such as
-//!   `events::append`, `filesystem::create_dir`, and `skills::activate`;
+//! - canonical domain functions such as `events::append`,
+//!   `filesystem::create_dir`, and `skills::activate` are the only executable
+//!   domain surface;
 //! - stream, state, and queue workers are registered as first-class primitive
 //!   workers with in-memory and SQLite-backed stores scoped outside the
 //!   production event-store migration;
@@ -43,9 +43,9 @@
 //! # INVARIANT: one production execution shape
 //!
 //! Production behavior must enter the fabric as a canonical engine function.
-//! JSON-RPC names are transport aliases, not executable `rpc::*` functions, and
-//! production engine modules must not call old RPC `MethodHandler` adapters.
-//! Legacy handler code may exist only as `#[cfg(test)]` wire fixtures.
+//! JSON-RPC transport exposes only `engine.discover`, `engine.inspect`,
+//! `engine.watch`, `engine.invoke`, and `engine.promote`. Production engine
+//! modules must not call handler-shaped adapters or hidden transport shims.
 //!
 //! ## Module Position
 //!

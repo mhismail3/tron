@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::server::rpc::types::RpcEvent;
+use crate::server::transport::json_rpc::types::JsonRpcEvent;
 use metrics::{counter, histogram};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -68,7 +68,7 @@ impl BroadcastManager {
     }
 
     /// Broadcast an event to all connections bound to the given session.
-    pub async fn broadcast_to_session(&self, session_id: &str, event: &RpcEvent) {
+    pub async fn broadcast_to_session(&self, session_id: &str, event: &JsonRpcEvent) {
         self.broadcast_to(
             |c| c.session_id().as_deref() == Some(session_id),
             event,
@@ -78,7 +78,7 @@ impl BroadcastManager {
     }
 
     /// Broadcast an event to all connections.
-    pub async fn broadcast_all(&self, event: &RpcEvent) {
+    pub async fn broadcast_all(&self, event: &JsonRpcEvent) {
         self.broadcast_to(|_| true, event, "all").await;
     }
 
@@ -86,7 +86,7 @@ impl BroadcastManager {
     async fn broadcast_to(
         &self,
         filter: impl Fn(&ClientConnection) -> bool,
-        event: &RpcEvent,
+        event: &JsonRpcEvent,
         label: &str,
     ) {
         let json = match serde_json::to_string(event) {
@@ -196,8 +196,8 @@ mod tests {
         (Arc::new(conn), rx)
     }
 
-    fn make_event(event_type: &str, session_id: Option<&str>) -> RpcEvent {
-        RpcEvent {
+    fn make_event(event_type: &str, session_id: Option<&str>) -> JsonRpcEvent {
+        JsonRpcEvent {
             event_type: event_type.into(),
             session_id: session_id.map(Into::into),
             timestamp: "2026-01-01T00:00:00.000Z".into(),
@@ -332,7 +332,7 @@ mod tests {
         let (conn, mut rx) = make_connection_with_rx("c1", Some("sess_a"));
         bm.add(conn.clone()).await;
 
-        let event = RpcEvent {
+        let event = JsonRpcEvent {
             event_type: "agent.text_delta".into(),
             session_id: Some("sess_a".into()),
             timestamp: "2026-02-13T15:30:00.000Z".into(),

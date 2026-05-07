@@ -7,15 +7,15 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "settings.get" => {
+        "settings::get" => {
             serde_json::to_value(&deps.profile_runtime.current().settings).map_err(|error| {
                 RpcError::Internal {
                     message: error.to_string(),
                 }
             })
         }
-        "settings.update" => settings_update_value(Some(payload), invocation, deps).await,
-        "settings.resetToDefaults" => settings_reset_to_defaults_value(deps).await,
+        "settings::update" => settings_update_value(Some(payload), invocation, deps).await,
+        "settings::reset_to_defaults" => settings_reset_to_defaults_value(deps).await,
         _ => Err(RpcError::Internal {
             message: format!("settings method {method} is not engine-owned"),
         }),
@@ -50,7 +50,7 @@ async fn settings_update_value(
             .server
             .codex_app_server
             .clone();
-        run_blocking_task("settings.update", move || {
+        run_blocking_task("settings::update", move || {
             crate::settings::SettingsStore::new(settings_path)
                 .update(updates)
                 .map_err(settings_error)
@@ -61,7 +61,7 @@ async fn settings_update_value(
             rollback_sparse_settings(deps, previous_sparse, "settings.rollbackMcpUpdate").await?;
             return Err(RpcError::Internal { message });
         }
-        if let Err(error) = deps.profile_runtime.reload_now("settings.update") {
+        if let Err(error) = deps.profile_runtime.reload_now("settings::update") {
             rollback_sparse_settings(
                 deps,
                 previous_sparse,
@@ -101,13 +101,13 @@ async fn settings_update_value(
         .server
         .codex_app_server
         .clone();
-    run_blocking_task("settings.update", move || {
+    run_blocking_task("settings::update", move || {
         crate::settings::SettingsStore::new(settings_path)
             .update(updates)
             .map_err(settings_error)
     })
     .await?;
-    reload_profile_runtime_or_rollback(deps, previous_sparse.clone(), "settings.update").await?;
+    reload_profile_runtime_or_rollback(deps, previous_sparse.clone(), "settings::update").await?;
 
     if has_codex_changes {
         refresh_codex_app_server_if_needed(
@@ -133,14 +133,18 @@ async fn settings_reset_to_defaults_value(deps: &EngineCapabilityDeps) -> Result
         .codex_app_server
         .clone();
     let settings_path = deps.settings_path.clone();
-    let result = run_blocking_task("settings.resetToDefaults", move || {
+    let result = run_blocking_task("settings::reset_to_defaults", move || {
         crate::settings::SettingsStore::new(settings_path)
             .reset()
             .map_err(settings_error)
     })
     .await?;
-    reload_profile_runtime_or_rollback(deps, previous_sparse.clone(), "settings.resetToDefaults")
-        .await?;
+    reload_profile_runtime_or_rollback(
+        deps,
+        previous_sparse.clone(),
+        "settings::reset_to_defaults",
+    )
+    .await?;
 
     refresh_codex_app_server_if_needed(
         deps,
@@ -261,10 +265,10 @@ async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &EngineCapa
 
     let router = router_arc.read().await;
     let status = router.status();
-    let event = RpcEvent::new(
+    let event = JsonRpcEvent::new(
         "mcp.status_changed",
         None,
         Some(serde_json::to_value(status).unwrap_or_default()),
     );
-    super::publish_rpc_event_or_broadcast(deps, "mcp", "settings", event, Some(invocation)).await;
+    super::publish_engine_stream_event(deps, "mcp", "settings", event, Some(invocation)).await;
 }

@@ -1,12 +1,10 @@
 //! Event bridge — converts `TronEvent`s from the Orchestrator broadcast into
-//! `RpcEvent`s and routes them through WebSocket-compatible delivery.
+//! `JsonRpcEvent`s and routes them through WebSocket-compatible delivery.
 //!
-//! Migrated runtime event classes publish first to the engine stream primitive
-//! (`events.session`) when an [`EngineHostHandle`] is attached. The stream pump
-//! then rebroadcasts the wrapped `RpcEvent` shape. This keeps WebSocket as
-//! delivery while making engine streams the live/resumable source for agent
-//! runtime updates. Tests and unmigrated contexts may still construct a bridge
-//! without engine streams and use direct broadcast.
+//! Migrated runtime event classes publish to the engine stream primitive
+//! (`events.session`). The stream pump then rebroadcasts the wrapped
+//! `JsonRpcEvent` shape, keeping WebSocket as delivery while engine streams
+//! remain the live/resumable source for runtime updates.
 
 use std::sync::Arc;
 
@@ -39,10 +37,10 @@ mod tron;
 mod turn;
 
 #[cfg(test)]
-use crate::server::rpc::types::RpcEvent;
+use crate::server::transport::json_rpc::types::JsonRpcEvent;
 
 #[cfg(test)]
-fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
+fn tron_event_to_rpc(event: &TronEvent) -> JsonRpcEvent {
     tron::tron_event_to_rpc(event)
 }
 
@@ -76,8 +74,7 @@ impl EventBridge {
     ///
     /// WebSocket remains the delivery transport: migrated event classes are
     /// published to `events.session`, and the server stream pump rebroadcasts
-    /// the wrapped [`RpcEvent`] shape. If publication fails, the bridge falls
-    /// back to direct broadcast so existing clients do not lose live updates.
+    /// the wrapped [`JsonRpcEvent`] shape.
     #[must_use]
     pub fn with_engine_streams(mut self, host: EngineHostHandle) -> Self {
         self.engine_streams = Some(host);
@@ -132,14 +129,20 @@ impl EventBridge {
         tracing::debug!(event_type, "bridging event to client");
         let bridged = tron_event_to_bridged(event);
 
-        if should_publish_stream_first(event)
-            && let Some(host) = self.engine_streams.as_ref()
-        {
-            let published = host
+        if should_publish_stream_first(event) {
+            let Some(host) = self.engine_streams.as_ref() else {
+                tracing::warn!(
+                    event_type,
+                    "engine stream host missing; dropping stream-owned event"
+                );
+                return;
+            };
+            match host
                 .publish_stream_event(PublishStreamEvent {
                     topic: "events.session".to_owned(),
                     payload: json!({
                         "__rpcEvent": bridged.rpc_event.clone(),
+                        "__broadcastScope": broadcast_scope_payload(&bridged.scope),
                         "sourceEventType": event.event_type(),
                         "sourceSequence": event.sequence(),
                     }),
@@ -150,15 +153,16 @@ impl EventBridge {
                     trace_id: None,
                     parent_invocation_id: None,
                 })
-                .await;
-            match published {
+                .await
+            {
                 Ok(_) => return,
                 Err(error) => {
                     tracing::warn!(
                         event_type,
                         error = %error,
-                        "engine stream publish failed; falling back to direct WebSocket broadcast"
+                        "engine stream publish failed; dropping stream-owned event"
                     );
+                    return;
                 }
             }
         }
@@ -201,6 +205,15 @@ fn should_publish_stream_first(event: &TronEvent) -> bool {
             | TronEvent::SessionUpdated { .. }
             | TronEvent::JobBackgrounded { .. }
     )
+}
+
+fn broadcast_scope_payload(scope: &BroadcastScope) -> serde_json::Value {
+    match scope {
+        BroadcastScope::All => json!({ "kind": "all" }),
+        BroadcastScope::Session(session_id) => {
+            json!({ "kind": "session", "sessionId": session_id })
+        }
+    }
 }
 
 #[cfg(test)]

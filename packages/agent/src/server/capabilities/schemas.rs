@@ -87,7 +87,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "idempotencyKey": {"type": "string"}
             }
         }),
-        "system.ping" => json!({
+        "system::ping" => json!({
             "type": "object",
             "required": ["protocolVersion"],
             "additionalProperties": false,
@@ -98,7 +98,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "logs.recent" => json!({
+        "logs::recent" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -107,7 +107,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "logs.ingest" => json!({
+        "logs::ingest" => json!({
             "type": "object",
             "required": ["entries"],
             "additionalProperties": false,
@@ -131,13 +131,13 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "system.getDiagnostics"
-        | "system.getUpdateStatus"
-        | "system.checkForUpdates"
-        | "system.shutdown"
-        | "codexApp.status"
-        | "cron.status"
-        | "transcribe.downloadModel" => {
+        "system::get_diagnostics"
+        | "system::get_update_status"
+        | "system::check_for_updates"
+        | "system::shutdown"
+        | "codex_app::status"
+        | "cron::status"
+        | "transcription::download_model" => {
             json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -147,7 +147,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 }
             })
         }
-        "auth.get" => json!({
+        "auth::get" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -155,7 +155,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "auth.update" => json!({
+        "auth::update" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -171,7 +171,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "auth.clear" => json!({
+        "auth::clear" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -181,7 +181,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "auth.oauthBegin" => json!({
+        "auth::oauth_begin" => json!({
             "type": "object",
             "required": ["provider"],
             "additionalProperties": false,
@@ -191,7 +191,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "auth.oauthComplete" => json!({
+        "auth::oauth_complete" => json!({
             "type": "object",
             "required": ["flowId", "code", "label"],
             "additionalProperties": false,
@@ -203,7 +203,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "auth.renameAccount" => json!({
+        "auth::rename_account" => json!({
             "type": "object",
             "required": ["provider", "oldLabel", "newLabel"],
             "additionalProperties": false,
@@ -215,7 +215,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "auth.setActive" => json!({
+        "auth::set_active" => json!({
             "type": "object",
             "required": ["provider", "credential"],
             "additionalProperties": false,
@@ -226,7 +226,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "auth.removeAccount" | "auth.removeApiKey" => json!({
+        "auth::remove_account" | "auth::remove_api_key" => json!({
             "type": "object",
             "required": ["provider", "label"],
             "additionalProperties": false,
@@ -237,7 +237,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "browser.startStream" | "browser.stopStream" => json!({
+        "browser::start_stream" | "browser::stop_stream" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -245,7 +245,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "display.stopStream" => json!({
+        "display::stop_stream" => json!({
             "type": "object",
             "required": ["streamId"],
             "additionalProperties": false,
@@ -255,7 +255,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "device.register" => json!({
+        "device::register" => json!({
             "type": "object",
             "required": ["deviceToken", "bundleId"],
             "additionalProperties": false,
@@ -267,7 +267,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "device.unregister" => json!({
+        "device::unregister" => json!({
             "type": "object",
             "required": ["deviceToken"],
             "additionalProperties": false,
@@ -277,7 +277,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "device.respond" => json!({
+        "device::respond" => json!({
             "type": "object",
             "required": ["requestId"],
             "additionalProperties": false,
@@ -288,7 +288,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "transcribe.audio" => json!({
+        "transcription::audio" => json!({
             "type": "object",
             "required": ["audioBase64"],
             "additionalProperties": false,
@@ -299,7 +299,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "voiceNotes.save" => json!({
+        "voice_notes::save" => json!({
             "type": "object",
             "required": ["audioBase64"],
             "additionalProperties": false,
@@ -310,7 +310,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "voiceNotes.delete" => json!({
+        "voice_notes::delete" => json!({
             "type": "object",
             "required": ["filename"],
             "additionalProperties": false,
@@ -320,10 +320,10 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "sandbox.startContainer"
-        | "sandbox.stopContainer"
-        | "sandbox.killContainer"
-        | "sandbox.removeContainer" => json!({
+        "sandbox::start_container"
+        | "sandbox::stop_container"
+        | "sandbox::kill_container"
+        | "sandbox::remove_container" => json!({
             "type": "object",
             "required": ["name"],
             "additionalProperties": false,
@@ -333,7 +333,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "blob.get" => json!({
+        "blob::get" => json!({
             "type": "object",
             "required": ["blobId"],
             "additionalProperties": false,
@@ -343,7 +343,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "tool.result" => json!({
+        "tool::result" => json!({
             "type": "object",
             "required": ["sessionId", "toolUseId", "result"],
             "additionalProperties": false,
@@ -354,7 +354,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "message.delete" => json!({
+        "message::delete" => json!({
             "type": "object",
             "required": ["sessionId", "targetEventId"],
             "additionalProperties": false,
@@ -365,7 +365,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "cron.list" => json!({
+        "cron::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -375,7 +375,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "sessionId": {"type": "string"}
             }
         }),
-        "cron.get" | "cron.delete" | "cron.run" => json!({
+        "cron::get" | "cron::delete" | "cron::run" => json!({
             "type": "object",
             "required": ["jobId"],
             "additionalProperties": false,
@@ -385,7 +385,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "cron.getRuns" => json!({
+        "cron::get_runs" => json!({
             "type": "object",
             "required": ["jobId"],
             "additionalProperties": false,
@@ -398,7 +398,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "cron.create" => json!({
+        "cron::create" => json!({
             "type": "object",
             "required": ["job"],
             "additionalProperties": false,
@@ -408,7 +408,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "cron.update" => json!({
+        "cron::update" => json!({
             "type": "object",
             "required": ["jobId"],
             "additionalProperties": false,
@@ -431,7 +431,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": ["string", "null"]}
             }
         }),
-        "skill.list" => json!({
+        "skills::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -440,7 +440,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "skill.get" => json!({
+        "skills::get" => json!({
             "type": "object",
             "required": ["name"],
             "additionalProperties": false,
@@ -451,7 +451,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "skill.refresh" => json!({
+        "skills::refresh" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -460,7 +460,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "skill.activate" | "skill.deactivate" => json!({
+        "skills::activate" | "skills::deactivate" => json!({
             "type": "object",
             "required": ["sessionId", "skillName"],
             "additionalProperties": false,
@@ -470,7 +470,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "skill.active" => json!({
+        "skills::active" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -479,7 +479,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "events.getHistory" => json!({
+        "events::get_history" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -491,7 +491,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "events.getSince" => json!({
+        "events::get_since" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -503,7 +503,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "events.append" => json!({
+        "events::append" => json!({
             "type": "object",
             "required": ["sessionId", "type", "payload"],
             "additionalProperties": false,
@@ -515,7 +515,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "events.subscribe" | "events.unsubscribe" => json!({
+        "events::subscribe" | "events::unsubscribe" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -524,7 +524,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "filesystem.listDir" => json!({
+        "filesystem::list_dir" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -534,7 +534,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "file.read" => json!({
+        "filesystem::read_file" => json!({
             "type": "object",
             "required": ["path"],
             "additionalProperties": false,
@@ -544,7 +544,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "filesystem.getHome" | "promptSnippet.list" => json!({
+        "filesystem::get_home" | "prompt_library::snippet_list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -552,7 +552,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "filesystem.createDir" => json!({
+        "filesystem::create_dir" => json!({
             "type": "object",
             "required": ["path"],
             "additionalProperties": false,
@@ -562,7 +562,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "tree.getVisualization" | "tree.getBranches" => json!({
+        "tree::get_visualization" | "tree::get_branches" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -571,7 +571,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "tree.getSubtree" | "tree.getAncestors" => json!({
+        "tree::get_subtree" | "tree::get_ancestors" => json!({
             "type": "object",
             "required": ["eventId"],
             "additionalProperties": false,
@@ -581,7 +581,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "tree.compareBranches" => json!({
+        "tree::compare_branches" => json!({
             "type": "object",
             "required": ["branchA", "branchB"],
             "additionalProperties": false,
@@ -592,7 +592,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "repo.listSessions" | "repo.getDivergence" => json!({
+        "repo::list_sessions" | "repo::get_divergence" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -601,10 +601,10 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "import.listSources"
-        | "browser.getStatus"
-        | "transcribe.listModels"
-        | "sandbox.listContainers" => json!({
+        "import::list_sources"
+        | "browser::get_status"
+        | "transcription::list_models"
+        | "sandbox::list_containers" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -612,7 +612,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "import.listSessions" => json!({
+        "import::list_sessions" => json!({
             "type": "object",
             "required": ["encodedDir"],
             "additionalProperties": false,
@@ -622,7 +622,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "import.previewSession" => json!({
+        "import::preview_session" => json!({
             "type": "object",
             "required": ["sessionPath"],
             "additionalProperties": false,
@@ -632,7 +632,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "import.execute" => json!({
+        "import::execute" => json!({
             "type": "object",
             "required": ["sessionPath"],
             "additionalProperties": false,
@@ -644,7 +644,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "voiceNotes.list" => json!({
+        "voice_notes::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -654,7 +654,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.list" => json!({
+        "session::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -664,7 +664,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.create" => json!({
+        "session::create" => json!({
             "type": "object",
             "required": ["workingDirectory"],
             "additionalProperties": false,
@@ -686,8 +686,8 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.resume" | "session.delete" | "session.archive" | "session.unarchive"
-        | "session.export" => json!({
+        "session::resume" | "session::delete" | "session::archive" | "session::unarchive"
+        | "session::export" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -696,7 +696,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.fork" => json!({
+        "session::fork" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -707,7 +707,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.archiveOlderThan" => json!({
+        "session::archive_older_than" => json!({
             "type": "object",
             "required": ["days"],
             "additionalProperties": false,
@@ -717,7 +717,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.getHead" | "session.getState" => json!({
+        "session::get_head" | "session::get_state" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -726,7 +726,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.reconstruct" => json!({
+        "session::reconstruct" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -737,7 +737,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.getHistory" => json!({
+        "session::get_history" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -748,11 +748,11 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "context.getSnapshot"
-        | "context.getDetailedSnapshot"
-        | "context.shouldCompact"
-        | "context.previewCompaction"
-        | "context.canAcceptTurn" => json!({
+        "context::get_snapshot"
+        | "context::get_detailed_snapshot"
+        | "context::should_compact"
+        | "context::preview_compaction"
+        | "context::can_accept_turn" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -761,7 +761,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "context.getAuditTrace" => json!({
+        "context::get_audit_trace" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -771,7 +771,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "context.confirmCompaction" => json!({
+        "context::confirm_compaction" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -781,7 +781,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "context.clear" | "context.compact" => json!({
+        "context::clear" | "context::compact" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -790,7 +790,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.prompt" => json!({
+        "agent::prompt" => json!({
             "type": "object",
             "required": ["sessionId", "prompt"],
             "additionalProperties": false,
@@ -810,7 +810,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.queuePrompt" => json!({
+        "agent::queue_prompt" => json!({
             "type": "object",
             "required": ["sessionId", "prompt"],
             "additionalProperties": false,
@@ -820,7 +820,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.dequeuePrompt" => json!({
+        "agent::dequeue_prompt" => json!({
             "type": "object",
             "required": ["sessionId", "queueId"],
             "additionalProperties": false,
@@ -830,7 +830,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.clearQueue" => json!({
+        "agent::clear_queue" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -839,7 +839,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.status" | "agent.abort" => json!({
+        "agent::status" | "agent::abort" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -848,7 +848,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.abortTool" => json!({
+        "agent::abort_tool" => json!({
             "type": "object",
             "required": ["sessionId", "toolCallId"],
             "additionalProperties": false,
@@ -858,7 +858,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.deliverSubagentResults" => json!({
+        "agent::deliver_subagent_results" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -867,7 +867,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.submitConfirmation" => json!({
+        "agent::submit_confirmation" => json!({
             "type": "object",
             "required": ["sessionId", "action", "decision"],
             "additionalProperties": false,
@@ -879,7 +879,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "agent.submitAnswers" => json!({
+        "agent::submit_answers" => json!({
             "type": "object",
             "required": ["sessionId", "questions"],
             "additionalProperties": false,
@@ -901,7 +901,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "mcp.status" | "mcp.reload" => json!({
+        "mcp::status" | "mcp::reload" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -909,7 +909,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "mcp.listTools" => json!({
+        "mcp::list_tools" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -918,7 +918,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "mcp.addServer" => json!({
+        "mcp::add_server" => json!({
             "type": "object",
             "required": ["name"],
             "additionalProperties": false,
@@ -933,7 +933,10 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "mcp.removeServer" | "mcp.enableServer" | "mcp.disableServer" | "mcp.restartServer" => {
+        "mcp::remove_server"
+        | "mcp::enable_server"
+        | "mcp::disable_server"
+        | "mcp::restart_server" => {
             json!({
                 "type": "object",
                 "required": ["name"],
@@ -945,7 +948,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 }
             })
         }
-        "job.list" => json!({
+        "job::list" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -954,7 +957,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "job.background" | "job.cancel" => json!({
+        "job::background" | "job::cancel" => json!({
             "type": "object",
             "required": ["jobId", "sessionId"],
             "additionalProperties": false,
@@ -964,7 +967,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "job.subscribe" => json!({
+        "job::subscribe" => json!({
             "type": "object",
             "required": ["jobId", "sessionId"],
             "additionalProperties": false,
@@ -974,7 +977,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "job.unsubscribe" => json!({
+        "job::unsubscribe" => json!({
             "type": "object",
             "required": ["jobId"],
             "additionalProperties": false,
@@ -984,7 +987,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "notifications.list" => json!({
+        "notifications::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -993,7 +996,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "notifications.markRead" => json!({
+        "notifications::mark_read" => json!({
             "type": "object",
             "required": ["eventId"],
             "additionalProperties": false,
@@ -1003,7 +1006,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "notifications.markAllRead" => json!({
+        "notifications::mark_all_read" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1011,7 +1014,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "plan.enter" | "plan.exit" | "plan.getState" => json!({
+        "plan::enter" | "plan::exit" | "plan::get_state" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1020,12 +1023,12 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "settings.get" => json!({
+        "settings::get" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {}
         }),
-        "settings.update" => json!({
+        "settings::update" => json!({
             "type": "object",
             "required": ["settings"],
             "additionalProperties": false,
@@ -1035,11 +1038,11 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "settings.resetToDefaults" => json!({
+        "settings::reset_to_defaults" => json!({
             "type": "object",
             "additionalProperties": true
         }),
-        "approval.get" => json!({
+        "approval::get" => json!({
             "type": "object",
             "required": ["approvalId"],
             "additionalProperties": false,
@@ -1049,7 +1052,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "approval.list" => json!({
+        "approval::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1059,7 +1062,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "approval.resolve" => json!({
+        "approval::resolve" => json!({
             "type": "object",
             "required": ["approvalId", "decision"],
             "additionalProperties": false,
@@ -1070,7 +1073,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "model.list" => json!({
+        "model::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1085,7 +1088,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "model.switch" => json!({
+        "model::switch" => json!({
             "type": "object",
             "required": ["sessionId", "model"],
             "additionalProperties": false,
@@ -1095,7 +1098,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "config.setReasoningLevel" => json!({
+        "config::set_reasoning_level" => json!({
             "type": "object",
             "required": ["sessionId", "level"],
             "additionalProperties": false,
@@ -1105,7 +1108,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "memory.retain" => json!({
+        "memory::retain" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1114,7 +1117,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "promptHistory.list" => json!({
+        "prompt_library::history_list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1125,7 +1128,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "promptHistory.delete" => json!({
+        "prompt_library::history_delete" => json!({
             "type": "object",
             "required": ["id"],
             "additionalProperties": false,
@@ -1135,7 +1138,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "promptHistory.clear" => json!({
+        "prompt_library::history_clear" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1143,7 +1146,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "promptSnippet.get" => json!({
+        "prompt_library::snippet_get" => json!({
             "type": "object",
             "required": ["id"],
             "additionalProperties": false,
@@ -1153,7 +1156,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "promptSnippet.create" => json!({
+        "prompt_library::snippet_create" => json!({
             "type": "object",
             "required": ["name", "text"],
             "additionalProperties": false,
@@ -1164,7 +1167,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "promptSnippet.update" => json!({
+        "prompt_library::snippet_update" => json!({
             "type": "object",
             "required": ["id"],
             "additionalProperties": false,
@@ -1176,7 +1179,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "promptSnippet.delete" => json!({
+        "prompt_library::snippet_delete" => json!({
             "type": "object",
             "required": ["id"],
             "additionalProperties": false,
@@ -1186,7 +1189,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "system.getInfo" => json!({
+        "system::get_info" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1201,7 +1204,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "git.clone" => json!({
+        "git::clone" => json!({
             "type": "object",
             "required": ["url", "targetPath"],
             "additionalProperties": false,
@@ -1212,7 +1215,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "git.syncMain" => json!({
+        "git::sync_main" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1226,7 +1229,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "git.push" => json!({
+        "git::push" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1242,8 +1245,8 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "git.listLocalBranches" => session_scoped_schema(),
-        "git.listRemoteBranches" => json!({
+        "git::list_local_branches" => session_scoped_schema(),
+        "git::list_remote_branches" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1253,15 +1256,15 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.getStatus"
-        | "worktree.listSessionBranches"
-        | "worktree.getCommittedDiff"
-        | "worktree.acquire"
-        | "worktree.release"
-        | "worktree.pruneBranches"
-        | "worktree.listConflicts"
-        | "worktree.continueMerge" => session_scoped_schema(),
-        "worktree.isGitRepo" => json!({
+        "worktree::get_status"
+        | "worktree::list_session_branches"
+        | "worktree::get_committed_diff"
+        | "worktree::acquire"
+        | "worktree::release"
+        | "worktree::prune_branches"
+        | "worktree::list_conflicts"
+        | "worktree::continue_merge" => session_scoped_schema(),
+        "worktree::is_git_repo" => json!({
             "type": "object",
             "required": ["path"],
             "additionalProperties": false,
@@ -1271,7 +1274,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.list" => json!({
+        "worktree::list" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1279,7 +1282,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.getDiff" => json!({
+        "worktree::get_diff" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1289,7 +1292,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.commit" => json!({
+        "worktree::commit" => json!({
             "type": "object",
             "required": ["sessionId", "message", "stageAll"],
             "additionalProperties": false,
@@ -1302,7 +1305,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.merge" => json!({
+        "worktree::merge" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1313,7 +1316,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.finalizeSession" => json!({
+        "worktree::finalize_session" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1328,7 +1331,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.deleteBranch" => json!({
+        "worktree::delete_branch" => json!({
             "type": "object",
             "required": ["sessionId", "branch"],
             "additionalProperties": false,
@@ -1338,7 +1341,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.stageFiles" | "worktree.unstageFiles" | "worktree.discardFiles" => json!({
+        "worktree::stage_files" | "worktree::unstage_files" | "worktree::discard_files" => json!({
             "type": "object",
             "required": ["sessionId", "paths"],
             "additionalProperties": false,
@@ -1348,7 +1351,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.rebaseOnMain" => json!({
+        "worktree::rebase_on_main" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1359,7 +1362,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.startMerge" => json!({
+        "worktree::start_merge" => json!({
             "type": "object",
             "required": ["sessionId", "sourceBranch", "targetBranch"],
             "additionalProperties": false,
@@ -1371,7 +1374,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.resolveConflict" => json!({
+        "worktree::resolve_conflict" => json!({
             "type": "object",
             "required": ["sessionId", "path", "resolution"],
             "additionalProperties": false,
@@ -1382,7 +1385,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.abortMerge" => json!({
+        "worktree::abort_merge" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1392,7 +1395,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "worktree.resolveConflictsWithSubagent" => json!({
+        "worktree::resolve_conflicts_with_subagent" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1455,7 +1458,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "visibility": {"type": "string"}
             }
         }),
-        "system.ping" => json!({
+        "system::ping" => json!({
             "type": "object",
             "required": [
                 "pong",
@@ -1475,7 +1478,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "compatible": {"type": "boolean"}
             }
         }),
-        "system.getInfo" => json!({
+        "system::get_info" => json!({
             "type": "object",
             "required": [
                 "version",
@@ -1501,11 +1504,11 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "paired": {"type": "boolean"}
             }
         }),
-        "settings.get" => json!({
+        "settings::get" => json!({
             "type": "object",
             "additionalProperties": true
         }),
-        "settings.update" => json!({
+        "settings::update" => json!({
             "type": "object",
             "required": ["success"],
             "additionalProperties": false,
@@ -1513,23 +1516,23 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "success": {"type": "boolean"}
             }
         }),
-        "settings.resetToDefaults" => json!({
+        "settings::reset_to_defaults" => json!({
             "type": "object",
             "additionalProperties": true
         }),
-        "approval.get" => json!({
+        "approval::get" => json!({
             "type": "object",
             "required": ["approval"],
             "additionalProperties": false,
             "properties": {"approval": {}}
         }),
-        "approval.list" => json!({
+        "approval::list" => json!({
             "type": "object",
             "required": ["approvals"],
             "additionalProperties": false,
             "properties": {"approvals": {"type": "array"}}
         }),
-        "approval.resolve" => json!({
+        "approval::resolve" => json!({
             "type": "object",
             "required": ["approval", "child"],
             "additionalProperties": false,
@@ -1538,7 +1541,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "child": {}
             }
         }),
-        "model.list" => json!({
+        "model::list" => json!({
             "type": "object",
             "required": ["models"],
             "additionalProperties": false,
@@ -1549,7 +1552,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 }
             }
         }),
-        "model.switch" => json!({
+        "model::switch" => json!({
             "type": "object",
             "required": ["previousModel", "newModel"],
             "additionalProperties": false,
@@ -1558,7 +1561,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "newModel": {"type": "string"}
             }
         }),
-        "config.setReasoningLevel" => json!({
+        "config::set_reasoning_level" => json!({
             "type": "object",
             "required": ["previousLevel", "newLevel", "changed"],
             "additionalProperties": false,
@@ -1568,7 +1571,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "changed": {"type": "boolean"}
             }
         }),
-        "memory.retain" => json!({
+        "memory::retain" => json!({
             "type": "object",
             "required": ["retained"],
             "additionalProperties": false,
@@ -1578,7 +1581,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "reason": {"type": "string"}
             }
         }),
-        "import.execute" => json!({
+        "import::execute" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -1594,7 +1597,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "existingSessionId": {"type": "string"}
             }
         }),
-        "skill.list" => json!({
+        "skills::list" => json!({
             "type": "object",
             "required": ["skills"],
             "additionalProperties": false,
@@ -1605,7 +1608,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 }
             }
         }),
-        "skill.get" => json!({
+        "skills::get" => json!({
             "type": "object",
             "required": ["skill", "found"],
             "additionalProperties": false,
@@ -1614,7 +1617,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "found": {"type": "boolean"}
             }
         }),
-        "skill.refresh" => json!({
+        "skills::refresh" => json!({
             "type": "object",
             "required": ["success", "skillCount"],
             "additionalProperties": false,
@@ -1623,7 +1626,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "skillCount": {"type": "integer"}
             }
         }),
-        "skill.activate" => json!({
+        "skills::activate" => json!({
             "type": "object",
             "required": ["success", "skill"],
             "additionalProperties": false,
@@ -1633,7 +1636,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "skill": {"type": "object", "additionalProperties": true}
             }
         }),
-        "skill.deactivate" => json!({
+        "skills::deactivate" => json!({
             "type": "object",
             "required": ["success", "wasActive", "deactivatedSkill"],
             "additionalProperties": false,
@@ -1643,7 +1646,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "deactivatedSkill": {"type": "string"}
             }
         }),
-        "skill.active" => json!({
+        "skills::active" => json!({
             "type": "object",
             "required": ["skills"],
             "additionalProperties": false,
@@ -1651,7 +1654,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "skills": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
             }
         }),
-        "logs.recent" => json!({
+        "logs::recent" => json!({
             "type": "object",
             "required": ["entries", "count"],
             "additionalProperties": false,
@@ -1663,7 +1666,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "count": {"type": "integer"}
             }
         }),
-        "logs.ingest" => json!({
+        "logs::ingest" => json!({
             "type": "object",
             "required": ["success", "inserted"],
             "additionalProperties": false,
@@ -1672,20 +1675,20 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "inserted": {"type": "integer"}
             }
         }),
-        "system.getDiagnostics"
-        | "system.getUpdateStatus"
-        | "system.checkForUpdates"
-        | "codexApp.status"
-        | "cron.list"
-        | "cron.get"
-        | "cron.create"
-        | "cron.update"
-        | "cron.status"
-        | "cron.getRuns" => json!({
+        "system::get_diagnostics"
+        | "system::get_update_status"
+        | "system::check_for_updates"
+        | "codex_app::status"
+        | "cron::list"
+        | "cron::get"
+        | "cron::create"
+        | "cron::update"
+        | "cron::status"
+        | "cron::get_runs" => json!({
             "type": "object",
             "additionalProperties": true
         }),
-        "system.shutdown" => json!({
+        "system::shutdown" => json!({
             "type": "object",
             "required": ["acknowledged"],
             "additionalProperties": false,
@@ -1693,8 +1696,14 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "acknowledged": {"type": "boolean"}
             }
         }),
-        "auth.get" | "auth.update" | "auth.clear" | "auth.oauthComplete" | "auth.renameAccount"
-        | "auth.setActive" | "auth.removeAccount" | "auth.removeApiKey" => json!({
+        "auth::get"
+        | "auth::update"
+        | "auth::clear"
+        | "auth::oauth_complete"
+        | "auth::rename_account"
+        | "auth::set_active"
+        | "auth::remove_account"
+        | "auth::remove_api_key" => json!({
             "type": "object",
             "required": ["providers", "services"],
             "additionalProperties": false,
@@ -1703,7 +1712,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "services": {"type": "object", "additionalProperties": true}
             }
         }),
-        "auth.oauthBegin" => json!({
+        "auth::oauth_begin" => json!({
             "type": "object",
             "required": ["flowId", "authUrl"],
             "additionalProperties": false,
@@ -1712,7 +1721,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "authUrl": {"type": "string"}
             }
         }),
-        "blob.get" => json!({
+        "blob::get" => json!({
             "type": "object",
             "required": ["blobId", "mimeType", "data", "sizeBytes"],
             "additionalProperties": false,
@@ -1723,7 +1732,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "sizeBytes": {"type": "integer"}
             }
         }),
-        "tool.result" => json!({
+        "tool::result" => json!({
             "type": "object",
             "required": ["success", "toolCallId"],
             "additionalProperties": false,
@@ -1732,7 +1741,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "toolCallId": {"type": "string"}
             }
         }),
-        "message.delete" => json!({
+        "message::delete" => json!({
             "type": "object",
             "required": ["success", "deletionEventId", "targetType"],
             "additionalProperties": false,
@@ -1742,13 +1751,13 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "targetType": {"type": "string"}
             }
         }),
-        "cron.delete" => json!({
+        "cron::delete" => json!({
             "type": "object",
             "required": ["deleted"],
             "additionalProperties": false,
             "properties": {"deleted": {"type": "boolean"}}
         }),
-        "cron.run" => json!({
+        "cron::run" => json!({
             "type": "object",
             "required": ["triggered", "jobId"],
             "additionalProperties": false,
@@ -1757,7 +1766,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "jobId": {"type": "string"}
             }
         }),
-        "events.getHistory" => json!({
+        "events::get_history" => json!({
             "type": "object",
             "required": ["sessionId", "events", "hasMore", "oldestEventId"],
             "additionalProperties": false,
@@ -1768,7 +1777,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "oldestEventId": {"type": ["string", "null"]}
             }
         }),
-        "events.getSince" => json!({
+        "events::get_since" => json!({
             "type": "object",
             "required": ["events", "hasMore", "nextCursor"],
             "additionalProperties": false,
@@ -1778,7 +1787,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "nextCursor": {"type": ["string", "null"]}
             }
         }),
-        "events.append" => json!({
+        "events::append" => json!({
             "type": "object",
             "required": ["event", "newHeadEventId"],
             "additionalProperties": false,
@@ -1787,19 +1796,19 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "newHeadEventId": {"type": ["string", "null"]}
             }
         }),
-        "events.subscribe" => json!({
+        "events::subscribe" => json!({
             "type": "object",
             "required": ["subscribed"],
             "additionalProperties": false,
             "properties": {"subscribed": {"type": "boolean"}}
         }),
-        "events.unsubscribe" => json!({
+        "events::unsubscribe" => json!({
             "type": "object",
             "required": ["unsubscribed"],
             "additionalProperties": false,
             "properties": {"unsubscribed": {"type": "boolean"}}
         }),
-        "filesystem.listDir" => json!({
+        "filesystem::list_dir" => json!({
             "type": "object",
             "required": ["path", "parent", "entries"],
             "additionalProperties": false,
@@ -1809,7 +1818,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "entries": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
             }
         }),
-        "filesystem.getHome" => json!({
+        "filesystem::get_home" => json!({
             "type": "object",
             "required": ["homePath", "suggestedPaths"],
             "additionalProperties": false,
@@ -1830,7 +1839,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 }
             }
         }),
-        "file.read" => json!({
+        "filesystem::read_file" => json!({
             "type": "object",
             "required": ["content", "path"],
             "additionalProperties": false,
@@ -1839,7 +1848,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "path": {"type": "string"}
             }
         }),
-        "filesystem.createDir" => json!({
+        "filesystem::create_dir" => json!({
             "type": "object",
             "required": ["created", "path"],
             "additionalProperties": false,
@@ -1848,45 +1857,45 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "path": {"type": "string"}
             }
         }),
-        "session.list"
-        | "session.create"
-        | "session.resume"
-        | "session.delete"
-        | "session.fork"
-        | "session.getHead"
-        | "session.getState"
-        | "session.getHistory"
-        | "session.reconstruct"
-        | "session.archive"
-        | "session.unarchive"
-        | "session.archiveOlderThan"
-        | "session.export"
-        | "context.getSnapshot"
-        | "context.getDetailedSnapshot"
-        | "context.getAuditTrace"
-        | "context.shouldCompact"
-        | "context.previewCompaction"
-        | "context.canAcceptTurn"
-        | "context.confirmCompaction"
-        | "context.clear"
-        | "context.compact"
-        | "tree.getVisualization"
-        | "tree.getBranches"
-        | "tree.getSubtree"
-        | "tree.getAncestors"
-        | "tree.compareBranches"
-        | "repo.listSessions"
-        | "repo.getDivergence"
-        | "import.listSources"
-        | "import.listSessions"
-        | "import.previewSession"
-        | "voiceNotes.list"
-        | "transcribe.listModels"
-        | "sandbox.listContainers" => json!({
+        "session::list"
+        | "session::create"
+        | "session::resume"
+        | "session::delete"
+        | "session::fork"
+        | "session::get_head"
+        | "session::get_state"
+        | "session::get_history"
+        | "session::reconstruct"
+        | "session::archive"
+        | "session::unarchive"
+        | "session::archive_older_than"
+        | "session::export"
+        | "context::get_snapshot"
+        | "context::get_detailed_snapshot"
+        | "context::get_audit_trace"
+        | "context::should_compact"
+        | "context::preview_compaction"
+        | "context::can_accept_turn"
+        | "context::confirm_compaction"
+        | "context::clear"
+        | "context::compact"
+        | "tree::get_visualization"
+        | "tree::get_branches"
+        | "tree::get_subtree"
+        | "tree::get_ancestors"
+        | "tree::compare_branches"
+        | "repo::list_sessions"
+        | "repo::get_divergence"
+        | "import::list_sources"
+        | "import::list_sessions"
+        | "import::preview_session"
+        | "voice_notes::list"
+        | "transcription::list_models"
+        | "sandbox::list_containers" => json!({
             "type": "object",
             "additionalProperties": true
         }),
-        "browser.getStatus" => json!({
+        "browser::get_status" => json!({
             "type": "object",
             "required": ["hasBrowser", "isStreaming"],
             "additionalProperties": false,
@@ -1895,17 +1904,17 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "isStreaming": {"type": "boolean"}
             }
         }),
-        "browser.startStream" => json!({
+        "browser::start_stream" => json!({
             "type": "object",
             "additionalProperties": true
         }),
-        "browser.stopStream" => json!({
+        "browser::stop_stream" => json!({
             "type": "object",
             "required": ["success"],
             "additionalProperties": false,
             "properties": {"success": {"type": "boolean"}}
         }),
-        "display.stopStream" => json!({
+        "display::stop_stream" => json!({
             "type": "object",
             "required": ["streamId", "stopped"],
             "additionalProperties": false,
@@ -1914,7 +1923,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "stopped": {"type": "boolean"}
             }
         }),
-        "device.register" => json!({
+        "device::register" => json!({
             "type": "object",
             "required": ["id", "created"],
             "additionalProperties": false,
@@ -1923,19 +1932,19 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "created": {"type": "boolean"}
             }
         }),
-        "device.unregister" => json!({
+        "device::unregister" => json!({
             "type": "object",
             "required": ["success"],
             "additionalProperties": false,
             "properties": {"success": {"type": "boolean"}}
         }),
-        "device.respond" => json!({
+        "device::respond" => json!({
             "type": "object",
             "required": ["resolved"],
             "additionalProperties": false,
             "properties": {"resolved": {"type": "boolean"}}
         }),
-        "transcribe.audio" => json!({
+        "transcription::audio" => json!({
             "type": "object",
             "required": [
                 "text",
@@ -1961,7 +1970,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "cleanupMode": {"type": "string"}
             }
         }),
-        "transcribe.downloadModel" => json!({
+        "transcription::download_model" => json!({
             "type": "object",
             "required": ["started", "reason"],
             "additionalProperties": false,
@@ -1971,7 +1980,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "message": {"type": "string"}
             }
         }),
-        "voiceNotes.save" => json!({
+        "voice_notes::save" => json!({
             "type": "object",
             "required": ["success", "filename", "filepath", "transcription"],
             "additionalProperties": false,
@@ -1982,7 +1991,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "transcription": {"type": "object", "additionalProperties": true}
             }
         }),
-        "voiceNotes.delete" => json!({
+        "voice_notes::delete" => json!({
             "type": "object",
             "required": ["success", "filename"],
             "additionalProperties": false,
@@ -1991,16 +2000,16 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "filename": {"type": "string"}
             }
         }),
-        "sandbox.startContainer"
-        | "sandbox.stopContainer"
-        | "sandbox.killContainer"
-        | "sandbox.removeContainer" => json!({
+        "sandbox::start_container"
+        | "sandbox::stop_container"
+        | "sandbox::kill_container"
+        | "sandbox::remove_container" => json!({
             "type": "object",
             "required": ["success"],
             "additionalProperties": false,
             "properties": {"success": {"type": "boolean"}}
         }),
-        "agent.prompt" => json!({
+        "agent::prompt" => json!({
             "type": "object",
             "required": ["acknowledged", "runId"],
             "additionalProperties": false,
@@ -2009,27 +2018,27 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "runId": {"type": "string"}
             }
         }),
-        "agent.status"
-        | "agent.abort"
-        | "agent.abortTool"
-        | "agent.queuePrompt"
-        | "agent.dequeuePrompt"
-        | "agent.clearQueue"
-        | "agent.deliverSubagentResults"
-        | "agent.submitConfirmation"
-        | "agent.submitAnswers" => json!({
+        "agent::status"
+        | "agent::abort"
+        | "agent::abort_tool"
+        | "agent::queue_prompt"
+        | "agent::dequeue_prompt"
+        | "agent::clear_queue"
+        | "agent::deliver_subagent_results"
+        | "agent::submit_confirmation"
+        | "agent::submit_answers" => json!({
             "type": "object",
             "additionalProperties": true
         }),
-        "mcp.status" => json!({
+        "mcp::status" => json!({
             "type": "array",
             "items": {"type": "object", "additionalProperties": true}
         }),
-        "mcp.listTools" => json!({
+        "mcp::list_tools" => json!({
             "type": "array",
             "items": {"type": "object", "additionalProperties": true}
         }),
-        "mcp.addServer" | "mcp.restartServer" => json!({
+        "mcp::add_server" | "mcp::restart_server" => json!({
             "type": "object",
             "required": ["success", "toolCount"],
             "additionalProperties": false,
@@ -2038,7 +2047,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "toolCount": {"type": "integer"}
             }
         }),
-        "mcp.removeServer" | "mcp.enableServer" | "mcp.disableServer" => json!({
+        "mcp::remove_server" | "mcp::enable_server" | "mcp::disable_server" => json!({
             "type": "object",
             "required": ["success"],
             "additionalProperties": false,
@@ -2046,7 +2055,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "success": {"type": "boolean"}
             }
         }),
-        "mcp.reload" => json!({
+        "mcp::reload" => json!({
             "type": "object",
             "required": ["success", "serverCount"],
             "additionalProperties": false,
@@ -2055,7 +2064,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "serverCount": {"type": "integer"}
             }
         }),
-        "job.background" => json!({
+        "job::background" => json!({
             "type": "object",
             "required": ["jobId", "backgrounded"],
             "additionalProperties": false,
@@ -2064,7 +2073,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "backgrounded": {"type": "boolean"}
             }
         }),
-        "job.cancel" => json!({
+        "job::cancel" => json!({
             "type": "object",
             "required": ["jobId", "cancelled"],
             "additionalProperties": false,
@@ -2073,13 +2082,13 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "cancelled": {"type": "boolean"}
             }
         }),
-        "job.list" => json!({
+        "job::list" => json!({
             "type": "object",
             "required": ["jobs"],
             "additionalProperties": false,
             "properties": {"jobs": {"type": "array"}}
         }),
-        "job.subscribe" => json!({
+        "job::subscribe" => json!({
             "type": "object",
             "required": ["subscribed", "jobId"],
             "additionalProperties": false,
@@ -2088,7 +2097,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "jobId": {"type": "string"}
             }
         }),
-        "job.unsubscribe" => json!({
+        "job::unsubscribe" => json!({
             "type": "object",
             "required": ["jobId", "unsubscribed"],
             "additionalProperties": false,
@@ -2097,7 +2106,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "unsubscribed": {"type": "boolean"}
             }
         }),
-        "notifications.list" => json!({
+        "notifications::list" => json!({
             "type": "object",
             "required": ["notifications", "unreadCount"],
             "additionalProperties": false,
@@ -2106,7 +2115,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "unreadCount": {"type": "integer"}
             }
         }),
-        "notifications.markRead" => json!({
+        "notifications::mark_read" => json!({
             "type": "object",
             "required": ["success"],
             "additionalProperties": false,
@@ -2114,7 +2123,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "success": {"type": "boolean"}
             }
         }),
-        "notifications.markAllRead" => json!({
+        "notifications::mark_all_read" => json!({
             "type": "object",
             "required": ["marked"],
             "additionalProperties": false,
@@ -2122,7 +2131,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "marked": {"type": "integer"}
             }
         }),
-        "plan.enter" | "plan.exit" | "plan.getState" => json!({
+        "plan::enter" | "plan::exit" | "plan::get_state" => json!({
             "type": "object",
             "required": ["planMode"],
             "additionalProperties": false,
@@ -2130,7 +2139,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "planMode": {"type": "boolean"}
             }
         }),
-        "promptHistory.list" => json!({
+        "prompt_library::history_list" => json!({
             "type": "object",
             "required": ["items", "nextCursor"],
             "additionalProperties": false,
@@ -2139,7 +2148,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "nextCursor": {"type": ["string", "null"]}
             }
         }),
-        "promptHistory.delete" => json!({
+        "prompt_library::history_delete" => json!({
             "type": "object",
             "required": ["deleted"],
             "additionalProperties": false,
@@ -2147,7 +2156,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "deleted": {"type": "boolean"}
             }
         }),
-        "promptHistory.clear" => json!({
+        "prompt_library::history_clear" => json!({
             "type": "object",
             "required": ["deletedCount"],
             "additionalProperties": false,
@@ -2155,7 +2164,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "deletedCount": {"type": "integer"}
             }
         }),
-        "promptSnippet.list" => json!({
+        "prompt_library::snippet_list" => json!({
             "type": "object",
             "required": ["items"],
             "additionalProperties": false,
@@ -2163,7 +2172,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "items": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
             }
         }),
-        "promptSnippet.get" => json!({
+        "prompt_library::snippet_get" => json!({
             "type": "object",
             "required": ["snippet"],
             "additionalProperties": false,
@@ -2171,7 +2180,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "snippet": {"type": "object", "additionalProperties": true}
             }
         }),
-        "promptSnippet.create" | "promptSnippet.update" => json!({
+        "prompt_library::snippet_create" | "prompt_library::snippet_update" => json!({
             "type": "object",
             "required": ["snippet"],
             "additionalProperties": false,
@@ -2179,7 +2188,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "snippet": {"type": "object", "additionalProperties": true}
             }
         }),
-        "promptSnippet.delete" => json!({
+        "prompt_library::snippet_delete" => json!({
             "type": "object",
             "required": ["deleted"],
             "additionalProperties": false,
@@ -2187,7 +2196,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "deleted": {"type": "boolean"}
             }
         }),
-        method if method.starts_with("git.") || method.starts_with("worktree.") => {
+        method if method.starts_with("git::") || method.starts_with("worktree::") => {
             json!({
                 "type": "object",
                 "additionalProperties": true

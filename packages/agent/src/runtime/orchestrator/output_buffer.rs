@@ -147,11 +147,11 @@ impl Default for SharedOutputBuffer {
 /// Registry mapping job IDs to their output buffers.
 ///
 /// The bash tool registers a buffer after spawning a managed process.
-/// RPC handlers look up buffers to subscribe to output streaming.
+/// Job capabilities look up buffers to subscribe to output streaming.
 /// Registry mapping job IDs to their output buffers.
 ///
 /// The bash tool registers a buffer after spawning a managed process.
-/// RPC handlers look up buffers to subscribe to output streaming.
+/// Job capabilities look up buffers to subscribe to output streaming.
 pub struct OutputBufferRegistry {
     /// Maps job_id → (buffer, tool_call_id).
     buffers: DashMap<String, (Arc<SharedOutputBuffer>, String)>,

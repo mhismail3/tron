@@ -20,7 +20,7 @@
 //! ## Module Position
 //!
 //! Depends on: core, events, runtime::orchestrator, worktree.
-//! Depended on by: server::rpc::handlers.
+//! Depended on by: canonical worktree capabilities.
 
 #![deny(unsafe_code)]
 

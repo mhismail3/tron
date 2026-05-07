@@ -1,212 +1,49 @@
-# Tron capability matrix
+# Tron Capability Matrix
 
-This inventory maps the current server to the live capability fabric. It is
-based on source inspection on 2026-04-30.
+The current server capability inventory is canonical-first. Each row below is a
+worker namespace that owns `namespace::function` capabilities in the live engine
+catalog. JSON-RPC does not expose these domains directly; clients invoke them
+through `engine.invoke` after discovery/inspection.
 
-## Current server shape
+| Worker | Default Visibility | Primary Effect Classes | Idempotency | Authority / Risk Notes |
+|--------|--------------------|------------------------|-------------|------------------------|
+| `engine` | System | Pure read, delegated invocation, idempotent promotion | Explicit for promotion | Reserved namespace; normal workers cannot override meta-capabilities. |
+| `agent` | System, hidden apply internals | Reads, idempotent writes, external side effects | Session scoped writes | Prompt, abort, queue, confirmation, answers, subagent result delivery. High-risk autonomous prompt/abort paths require approval. |
+| `approval` | System | Idempotent writes, reads | System scoped writes | User/system-authorized resolution only; agent self-resolution is rejected. |
+| `auth` | System | Reads, reversible side effects | System scoped writes | Auth-file leases; secrets never logged or embedded in docs/tests. |
+| `browser` / `display` | System | Reads, reversible stream controls | System scoped writes | Stream lifecycle records and local authority. |
+| `config` / `model` / `settings` | System | Reads, reversible side effects | Session/system scoped writes | Resource leases protect session model/reasoning and settings profile writes. |
+| `context` / `memory` | System | Reads, reversible/external side effects | Session scoped writes | Event-store truth remains authoritative; retain/compact flows are high risk. |
+| `cron` | System plus hidden apply | Reads, high-risk side effects, scheduled triggers | System scoped writes/runs | `cron_schedule` triggers dispatch through the engine runtime. |
+| `device` / `notifications` | System | Reads, idempotent writes, append-only events | System/session scoped writes | APNs/device broker semantics stay behind canonical functions. |
+| `events` | System | Reads, append-only events, stream subscription controls | Session scoped writes | Event store remains durable session truth; streams are live delivery. |
+| `filesystem` / `blob` | System | Pure reads, idempotent create | Explicit for create | Path normalization and root checks are enforced before side effects. |
+| `git` / `worktree` / `repo` | System | Reads, idempotent writes, high-risk side effects | Resource-scoped writes | Leases and compensation metadata protect repo/worktree mutations. |
+| `import` | System | Reads, append-only execution | System scoped execute | Import execution is high risk and resource-locked by canonical session path. |
+| `job` / `queue` | System and hidden apply | Reads, idempotent writes, queued execution | System scoped writes | Queue receipt and attempt metadata preserve causality. |
+| `logs` | System | Reads, append-only events | System scoped ingestion | Engine idempotency sits above row-level log deduplication. |
+| `mcp` / discovered `mcp::*` tools | System/session as discovered | Conservative read/side-effect classification | Explicit for mutating tools | Unknown MCP tools default to approval-required side effects. |
+| `plan` | Session/workspace | Reads, idempotent writes | Session/workspace scoped | Plan state is local execution state, not durable session truth. |
+| `prompt_library` | System | Reads, idempotent writes, irreversible deletes | System scoped writes | Prompt history/snippets are local global state. |
+| `sandbox` | System | Reads, high-risk lifecycle side effects | Container scoped writes | Local-only authority; no remote sandbox execution in this branch. |
+| `session` | System | Reads, idempotent/reversible lifecycle writes | Session/system scoped writes | Session truth is event-sourced; mutations are causally recorded. |
+| `skills` | System/session | Reads, idempotent session writes | Session scoped writes | Activation state is reconstructed from events. |
+| `state` / `stream` | Scoped primitive workers | Projection writes, stream append/poll | Scoped writes | Primitives support catalog watch, subscriptions, approvals, jobs, and runtime delivery. |
+| `tool` | System/session as visible | Tool-specific effects | Explicit for mutating tools | Model-visible schemas are projected from the live catalog every model call. |
+| `transcription` / `voice_notes` | System | Reads, high-risk media writes | File/model scoped writes | Audio/model-cache/file leases guard side effects. |
+| `system` / `codex_app` | System | Reads, critical lifecycle writes | Explicit writes | Shutdown/update/check/status are canonical functions with strict authority. |
 
-The Rust agent is a single crate with these top-level modules:
+## Required Contract Columns
 
-| Layer | Modules | Current role |
-|-------|---------|--------------|
-| Foundation | `core`, `settings`, `skills`, `transcription` | IDs, settings schema, skill registry, transcription sidecar. |
-| Services | `cron`, `events`, `import`, `llm`, `mcp`, `prompt_library`, `tools`, `worktree` | Durable data, LLM providers, external tools, automation, git/worktree, imports. |
-| Orchestration | `runtime` | Agent loop, context, hooks, memory, subagents, session orchestration. |
-| Interface | `server` | Axum HTTP/WS, bearer auth, RPC dispatch, event broadcasting, APNS. |
+Every canonical function definition must declare:
 
-`main.rs` wires all core service instances up front: event store, session
-manager, orchestrator, skill registry, memory registry, provider factory,
-process manager, tool config, subagent manager, job manager, tool factory,
-transcription sidecar, cron scheduler, worktree services, RPC context, method
-registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
-
-## RPC surface
-
-The current source-of-truth registry in `server/capabilities/catalog.rs` registers
-175 methods. Five `engine.*` methods are the canonical public capability
-transport for discovery, inspection, watch cursors, delegated invocation, and
-promotion. The older 170 domain method names remain wire-compatible aliases.
-The exploration branch registers a `rpc` transport compatibility worker,
-domain-owned in-process workers, canonical domain functions for every public
-legacy method, non-executable `rpc::<method>` transport metadata, and
-`json_rpc` trigger bindings from the legacy method names into canonical
-functions. `engine.invoke` rejects `rpc::*` ids so agents and newer clients use
-the canonical `namespace::function` surface instead of compatibility metadata.
-
-Fully collapsed groups now include prompt library, settings, logs, MCP, skills,
-notifications, plan, events, approval get/list/resolve, job controls, all
-current agent controls including `agent.prompt`, basic filesystem, tree reads,
-repo divergence reads, import, browser/display stream controls, voice notes,
-transcription, sandbox lifecycle, cron, auth, device, session resume, update
-checks, shutdown, and runtime-tail status/blob/message/tool methods.
-Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
-context compaction/clear commands are also generic-triggered canonical
-functions. Migrated groups delete their method-specific production business
-handlers as they move behind canonical functions; the single-shape cleanup
-deleted the old handler namespace and moved parity coverage beside canonical
-capability modules or the JSON-RPC transport binding tests.
-
-The table is intentionally not just a method inventory. Each row maps current
-behavior to first-principles engine concerns: visibility, effect, idempotency,
-authority, and causality. A subsystem is not ready to migrate until those
-answers are explicit enough to test.
-
-| Prefix | Count | Future mapping | Default visibility | Effect/idempotency | Authority and causality |
-|--------|------:|----------------|--------------------|--------------------|-------------------------|
-| `engine` | 5 | Canonical public transport over reserved `engine::*` meta-capabilities: discover, inspect, watch, invoke, promote. | Client/agent/user/admin according to target visibility and authority. | Discovery/watch/inspect are reads; invoke is delegated and inherits target idempotency; promote is an audited idempotent visibility mutation. | Rejects `rpc::*`, records parent/child invocation causality, promotion authority, catalog revision, expected function revision, explicit idempotency, and catalog-change stream records. |
-| `system` | 6 | Fully generic-triggered `system::*` functions, including shutdown and active update checks. | Client/admin/system. | Status/update reads are pure; shutdown is a critical idempotent lifecycle side effect with approval metadata. | Trace client/system actor, update fetcher outcomes, shutdown acknowledgement, resource leases, and lifecycle stream effects. |
-| `codexApp` | 1 | `codex_app::status` is a generic-triggered status function. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
-| `blob` | 1 | `blob::get` is a generic-triggered read. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
-| `session` | 13 | Fully generic-triggered `session` domain worker, including resume. | Client/session/workspace. | Reads plus idempotent mutations; create/archiveOlderThan use system idempotency, session-specific commands use session idempotency. | Reads preserve event-store reconstruction; mutations call the existing command service behind canonical functions and preserve broadcasts/worktree cleanup; resume preserves WebSocket binding response shape. |
-| `agent` | 10 | `agent::*` functions and queue triggers; prompt, status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered. | Session by default. | Prompt and other writes are session-scoped idempotent commands; high-risk prompt/abort carry approval metadata for autonomous agent visibility. | Prompt acceptance records trigger/idempotency causality, enqueues hidden `agent::prompt_apply`, completion enqueues hidden `agent::prompt_queue_drain`, and event-store turn truth remains authoritative. |
-| `model` / `config` | 3 | `model.list`, `model.switch`, and `config.setReasoningLevel` are generic-triggered canonical `model::*` / `config::*` functions. | Client/agent where safe. | List is read; switch/reasoning changes are high-risk reversible session-idempotent writes. | Changes record session scope, actor, trigger/idempotency metadata, and a session resource lease before event writes/cache invalidation. |
-| `context` | 9 | `context` domain worker; safe reads and compaction/clear commands are generic-triggered. | Session. | Reads plus high-risk reversible/irreversible context mutations with idempotency and approval metadata where destructive. | Compaction ordering, event writes, cache invalidation, and broadcasts remain deterministic behind canonical functions. |
-| `events` | 5 | Fully generic-triggered `events` domain worker functions, including stream-backed subscribe/unsubscribe. | Session/workspace/admin. | Reads plus append-only `events.append` and idempotent subscribe/unsubscribe. | Event append and stream subscription records carry trigger/invocation metadata. |
-| `settings` | 3 | Fully generic-triggered `settings::*` state functions. | Admin/client. | Read plus high-risk reversible system writes with engine-ledger idempotency. | Must preserve iOS settings parity, strict validation, rollback, MCP reload, and Codex App Server reconfiguration causality. |
-| `approval` | 3 | Public `approval.get/list/resolve` JSON-RPC triggers over the engine approval primitive; `approval.request` remains agent/tool-only. | Client/user/admin; resolution requires user/system/admin actor kind. | Reads plus system-idempotent resolve. | Pending/approved/denied/executed records preserve original actor, trace, parent, trigger, scopes, payload fingerprint, and idempotency key. |
-| `auth` | 9 | Fully generic-triggered privileged `auth::*` functions. | Admin only. | Reads plus high-risk system-idempotent credential/account mutations. | Uses auth-file leases, preserves secure file permissions/OAuth flow state/account semantics, never logs or returns secrets, and requires approval metadata for agent visibility. |
-| `tool` | 1 | `tool::result` is a generic-triggered runtime write. | Session. | Append/update tool result; session-scoped idempotency by request/tool call id. | Link to parent tool invocation and turn. |
-| `message` | 1 | `message::delete` is a generic-triggered message command. | Session/client. | Session-scoped irreversible side effect with idempotency and approval metadata for agent visibility. | Event-sourced deletion marker plus trigger/invocation ledger metadata. |
-| `logs` | 2 | Fully generic-triggered `observability::logs::*` compatibility functions. | Admin/client filtered. | Ingest append-only with system idempotency; recent read. | Trace/log correlation mandatory; duplicate transport ingests replay before DB insertion. |
-| `memory` | 1 | `memory::retain` is a generic-triggered manual retain function. | Session/workspace with policy. | High-risk external side effect with session idempotency and approval metadata for autonomous agents. | Acquires a session memory-retain lease before handing off to the existing retain guard/background summarizer; user memory files remain governed and no hardcoded personal data is allowed. |
-| `mcp` | 8 | Fully generic-triggered `mcp` domain worker functions plus live discovered MCP tool functions. | Agent/client/admin filtered; discovered tools are system-visible until a safer server/tool policy is available. | Lifecycle writes use system idempotency; status/list are reads; discovered MCP tools default to approval-required external side effects. | Server lifecycle changes refresh the live catalog, unregister absent tools, publish catalog/status stream records, and MCP tool calls inherit caller authority and trace. |
-| `skill` | 6 | Fully generic-triggered `skills` domain worker functions over registry and session state. | Session/workspace. | Activate/deactivate are session-scoped idempotent writes; refresh is system-scoped. | Skill provenance and denied/allowed tools affect capability views; activation events are causally linked. |
-| `filesystem` / `file` | 4 | `filesystem` domain worker; home/list/read/createDir are generic-triggered compatibility functions. | Session/workspace by path policy. | Reads plus idempotent createDir; broader file writes later. | Path guards, workspace scope, and file effect metadata required before broader writes migrate. |
-| `tree` | 5 | Fully generic-triggered `tree::*` read functions. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
-| `import` | 4 | Fully generic-triggered `import::*` functions, including `import::execute`. | Admin/workspace. | Browse/preview reads plus high-risk append-only, system-idempotent execute by import source. | Execute records source provenance, acquires an import-source lease, preserves already-imported dedupe behavior, and keeps full rollback deferred. |
-| `browser` / `display` | 4 | Fully generic-triggered stream-control/status functions. | Session/client. | Status is pure read; stream lifecycle commands are idempotent by stream id. | Link stream writes to session and actor, use stream resource leases, and preserve existing registry/unavailable error shapes. |
-| `job` | 5 | Fully generic-triggered `job` domain worker for background/cancel/list/subscribe/unsubscribe plus queue functions. | Session/client/agent filtered. | Job controls are idempotent by request/job id; cancel is high-risk approval-metadata-bearing. | Background/cancel enqueue hidden apply functions, synchronously drain compatibility receipts, preserve existing job/process manager behavior, persist user-action events, and publish job/queue stream records. |
-| `worktree` | 23 | Fully generic-triggered canonical `worktree::*` functions for status/diff/branch/conflict reads, acquire/release, stage/unstage/discard, commit/merge/rebase/finalize/delete/prune, and conflict subagent automation. | Workspace/session. | Reads are pure; safe writes require idempotency and host-enforced leases; destructive/merge/publishing workflows are high risk with approval metadata and compensation records. | Branch/worktree state machine, path guardrails, trigger id, lease id, idempotency key, sanitized error shape, and compensation status are auditable. |
-| `transcribe` | 3 | Fully generic-triggered `transcription::*` functions. | Client/session. | Model listing is pure read; audio/download commands are system-idempotent side effects protected by audio/model-cache leases. | Sidecar lifecycle, validation, model download state, and progress behavior trace to request. |
-| `device` | 3 | Fully generic-triggered `device::*` functions and approval response triggers. | Client/session/admin. | Register/unregister/respond idempotent by token/request id. | APNS/device broker behavior and approval responses link to pending invocation and stream lifecycle records. |
-| `plan` | 3 | Fully generic-triggered `plan` domain worker functions. | Session. | Idempotent session-scoped state writes. | Plan transitions record actor, session, trigger id, and idempotency context. |
-| `voiceNotes` | 3 | Fully generic-triggered `voice_notes::*` functions. | Client/session. | List is pure read; save/delete are system-idempotent file/audio side effects, with delete approval metadata. | Link audio/transcription/provenance, path guards, voice-note inbox leases, and retained wire error shapes. |
-| `git` / `repo` | 7 | `repo.listSessions/getDivergence` plus all public `git.*` methods are generic-triggered canonical functions. | Workspace/admin. | Branch-list reads are pure; clone/sync/push are high-risk idempotent side effects with host-enforced leases, approval metadata for autonomous agents, and compensation notes. | Remote side effects record trigger/trace/lease/compensation metadata and preserve existing git error mapping. |
-| `sandbox` | 5 | Fully generic-triggered `sandbox::*` lifecycle/read functions. | Session by default. | List is pure read; lifecycle commands are system-idempotent high-risk local side effects. | Container-id leases, local-only authority, manual/external compensation notes, and approval metadata gate autonomous lifecycle effects. |
-| `notifications` | 3 | Fully generic-triggered `notifications` domain worker functions. | Client/session. | Mark read/all-read are system-scoped idempotent writes; list is read. | Notification effects link to source invocation/event and trigger metadata. |
-| `promptHistory` / `promptSnippet` | 8 | `prompt_library::*`; all methods are generic-triggered in the RPC bridge. | Workspace/client. | Prompt-library writes use engine-ledger idempotency; delete/clear effects carry irreversible-risk metadata. | Prompt provenance and retention policy recorded. |
-| `cron` | 8 | Fully generic-triggered `cron::*` functions plus live `cron_schedule` trigger definitions. | Admin/workspace. | Reads are pure; create/update/delete/run are high-risk system-idempotent writes; scheduled fires use trigger-derived idempotency. | Trigger fires dispatch through hidden `cron::scheduled_fire` and record schedule time, trigger id, actor, authority, function/catalog revision, overlap/misfire policy, and run outcome. |
-
-## Runtime and agent loop
-
-Current runtime path:
-
-1. Client sends WebSocket RPC.
-2. JSON-RPC transport binding dispatches a `json_rpc` trigger into a canonical
-   engine function.
-3. Runtime builds context, calls the LLM provider, processes stream events,
-   executes tools, records events, and loops.
-4. Orchestrator broadcasts events back to clients.
-
-Live fabric mapping:
-
-| Current concept | Future primitive | Agent-native requirement |
-|-----------------|------------------|--------------------------|
-| `agent.prompt` | Generic `json_rpc` trigger into canonical `agent::prompt`; it enqueues hidden `agent::prompt_apply` and queue-drain work. | Record actor, session, catalog/function revision, trigger id, queue receipt, idempotency key, child apply invocation, and prompt causality. |
-| Turn runner | `agent::run_turn` function. | Uses stable meta-capabilities over live catalog. |
-| Tool executor | Engine invocation over canonical `tool::*` functions. | Local-model policy, guardrails, and hooks still run before execution; actual tool execution runs under engine idempotency/ledger records with the original runtime `ToolContext` preserved. |
-| Context manager | `context::*` functions. | Context can include live discovery instructions, not static full catalog dumps. |
-| Hooks | Trigger conditions or post-invocation triggers. | Loop/depth and idempotency policy prevents runaway cascades. |
-| Subagents | Agent worker invocations with delegated authority. | Child agents inherit narrowed grants, not full parent authority. |
-| Memory registry | `memory::*` functions backed by workspace files. | Memory writes are governed and idempotent; no personal literals in code/docs. |
-| Stream processor | `stream::*` producer for tokens, thinking, tool calls, lifecycle. | Stream records carry trace and parent invocation ids. |
-
-The agent loop should be redesigned around a small stable meta-tool surface:
-search/inspect/invoke/watch/spawn/promote. The live catalog provides the actual
-capabilities.
-
-## Tools and MCP
-
-The base tool factory currently registers filesystem, shell, search/find, UI,
-notification, web, display, computer-use, engine capability tools, and MCP
-meta-tools. The runtime tool factory adds subagent spawning, job management,
-waiting, and an LLM-backed `WebFetch` override. Provider-facing tool schemas
-now come from the live engine catalog on every model call; `ToolRegistry`
-remains only the temporary implementation backing for built-ins.
-
-Live fabric mapping:
-
-| Current tool area | Function namespace | Effect and policy |
-|-------------------|--------------------|-------------------|
-| Read/search/find | `filesystem::*`, `workspace::*`. | Pure reads with path scope policy. |
-| Write/edit | `filesystem::*`. | Idempotent/reversible writes with file revision and diff provenance. |
-| Bash/process | `process::*`, `job::*`, later `sandbox::*`. | High risk; queue-backed, audited, and approval-gated by policy. |
-| UI confirmation/questions | `approval::*`, `device::*`. | Approval trigger resolves pending invocation. |
-| Notify/display/computer-use | `client::*`, `display::*`, `computer::*`. | Client/device effects with explicit visibility and risk. |
-| Web fetch/search | `tool::*` now, later `web::*`. | External network reads default to conservative approval-required tool invocation metadata until first-class web worker policy lands. |
-| Engine discover/inspect/watch/invoke | `engine::*` plus canonical domain functions. | Stable agent meta-tools over the live catalog; mutating invokes require explicit idempotency and approval-gated functions fail closed. |
-| SpawnSubagent | `agent::spawn`, `agent::run_turn`. | Delegated authority and session-scoped visibility. |
-| ManageJob/Wait | `job::*`. | Queue/job idempotency and causal status streams. |
-| MCP meta-tools and discovered tools | `mcp::*`. | Preserve compressed catalog for large MCP tool sets while registering discovered tools as live capabilities with classifier reason/confidence; obvious reads become low-risk pure reads and unknown/mutating tools require approval. |
-
-MCP already resembles a live capability bridge. Tron keeps the searchable
-meta-tool pattern for large catalogs and now projects discovered tools into the
-live catalog immediately. Classification stays intentionally conservative:
-unsafe false positives require approval rather than autonomous execution.
-
-## Event store, state, streams, and queues
-
-Current durable database tables:
-
-`sessions`, `events`, `blobs`, `branches`, `logs`, `device_tokens`,
-`notification_read_state`, `cron_jobs`, `cron_runs`, `prompt_history`,
-`prompt_snippets`, `workspaces`, and `schema_version`.
-
-| Persistence area | Future primitive | Rule |
-|------------------|------------------|------|
-| `events` table | `event` worker and causal ledger. | Session truth remains append-only and reconstructable. |
-| WebSocket broadcasts | `stream` worker. | Transport-independent streams with cursors and trace metadata. |
-| `logs` table | `observability` worker. | Client log ingestion is append-only and engine-idempotent; logs correlate to trace/invocation ids. |
-| `cron_jobs` / `cron_runs` | `cron` trigger worker. | Definitions become triggers; run history remains durable. |
-| Prompt snippets/history | `prompt_library` functions. | Idempotent by id/hash with provenance. |
-| Device/read state | `device` and `notification` functions. | Approval responses link to pending invocations. |
-| Blobs | `blob` functions. | Blob ids and provenance flow through causality. |
-| Branches/workspaces | `worktree` and `repo` functions. | Worktree lifecycle remains auditable. |
-
-State is useful for shared mutable values, but it must not replace the event
-store. Queues are at-least-once by default, so queue-backed mutating functions
-must have idempotency contracts.
-
-## Settings and auth
-
-Settings remain a typed `TronSettings` tree loaded from the active profile plus
-the sparse `~/.tron/profiles/user/profile.toml` `[settings]` overlay, with
-defaults, strict validation, and iOS parity requirements.
-
-Engine mapping:
-
-- `settings::get`, `settings::update`, and `settings::reset` become privileged
-  settings functions.
-- New engine settings still need iOS settings parity.
-- Client bearer auth remains separate from worker auth.
-- Future worker tokens are authority grants with namespace, visibility,
-  invocation, trigger, and delegation rights.
-- Auth provider operations are high-risk admin functions, never broadly
-  agent-visible.
-
-## Client-facing surfaces
-
-Current clients depend on:
-
-- WebSocket RPC framing at `/ws`;
-- event broadcasts over the same connection;
-- `/health`, `/health/deep`, and `/metrics`;
-- pairing/onboarding bearer-token behavior;
-- device request/response events for approvals;
-- APNS and notification read state.
-
-During migration, a compatibility worker keeps these paths working while live
-catalog and stream APIs are introduced. The final client API can break once
-into the engine-native surface.
-
-## Migration readiness checklist
-
-Before migrating any row above, define:
-
-- actor kinds allowed to discover and invoke it;
-- default visibility and promotion path;
+- function id and owning worker;
+- request and response schema;
 - effect class and risk level;
-- idempotency key source and dedupe scope;
-- causal records written on success, failure, retry, and cancellation;
-- behavior when the owner worker disconnects or the function revision changes;
-- tests proving the current RPC path and engine path agree during migration.
+- visibility and health;
+- authority requirement;
+- idempotency contract when mutating;
+- approval metadata when autonomous execution is high risk;
+- lease metadata when shared resources are touched;
+- compensation notes for high-risk or irreversible effects;
+- provenance and catalog revision.

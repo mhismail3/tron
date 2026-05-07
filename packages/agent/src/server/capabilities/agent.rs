@@ -5,16 +5,16 @@ use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::queue::publish_queue_lifecycle_event;
 use crate::engine::{EngineQueueDrainer, EnqueueInvocation, FunctionId};
 use crate::events::EventType;
-use crate::server::rpc::agent_commands::AgentCommandService;
-use crate::server::rpc::agent_runtime::runtime::{
+use crate::server::services::agent_commands::AgentCommandService;
+use crate::server::services::agent_runtime::runtime::{
     format_subagent_results, get_pending_subagent_results,
 };
-use crate::server::rpc::agent_runtime::service::{
+use crate::server::services::agent_runtime::service::{
     PromptEngineCausality, PromptRequest, drain_prompt_queue, spawn_prompt_run,
 };
-use crate::server::rpc::errors;
-use crate::server::rpc::prompt_queue::PromptQueueService;
-use crate::server::rpc::validation;
+use crate::server::services::prompt_queue::PromptQueueService;
+use crate::server::transport::json_rpc::errors;
+use crate::server::transport::json_rpc::validation;
 use serde::Deserialize;
 
 pub(super) async fn handle(
@@ -24,21 +24,23 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "agent.prompt" => prompt_value(invocation, deps).await,
-        "agent.prompt.apply" => prompt_apply_value(Some(payload), invocation, deps).await,
-        "agent.run_turn" => run_turn_value(Some(payload), invocation, deps).await,
-        "agent.prompt.queue_drain" => {
+        "agent::prompt" => prompt_value(invocation, deps).await,
+        "agent::prompt_apply" => prompt_apply_value(Some(payload), invocation, deps).await,
+        "agent::run_turn" => run_turn_value(Some(payload), invocation, deps).await,
+        "agent::prompt_queue_drain" => {
             prompt_queue_drain_value(Some(payload), invocation, deps).await
         }
-        "agent.status" => status_value(Some(payload), deps).await,
-        "agent.abort" => abort_value(Some(payload), deps).await,
-        "agent.abortTool" => abort_tool_value(Some(payload), deps).await,
-        "agent.queuePrompt" => queue_prompt_value(Some(payload), invocation, deps).await,
-        "agent.dequeuePrompt" => dequeue_prompt_value(Some(payload), invocation, deps).await,
-        "agent.clearQueue" => clear_queue_value(Some(payload), invocation, deps).await,
-        "agent.deliverSubagentResults" => deliver_subagent_results_value(Some(payload), deps).await,
-        "agent.submitConfirmation" => submit_confirmation_value(Some(payload), deps).await,
-        "agent.submitAnswers" => submit_answers_value(Some(payload), deps).await,
+        "agent::status" => status_value(Some(payload), deps).await,
+        "agent::abort" => abort_value(Some(payload), deps).await,
+        "agent::abort_tool" => abort_tool_value(Some(payload), deps).await,
+        "agent::queue_prompt" => queue_prompt_value(Some(payload), invocation, deps).await,
+        "agent::dequeue_prompt" => dequeue_prompt_value(Some(payload), invocation, deps).await,
+        "agent::clear_queue" => clear_queue_value(Some(payload), invocation, deps).await,
+        "agent::deliver_subagent_results" => {
+            deliver_subagent_results_value(Some(payload), deps).await
+        }
+        "agent::submit_confirmation" => submit_confirmation_value(Some(payload), deps).await,
+        "agent::submit_answers" => submit_answers_value(Some(payload), deps).await,
         _ => Err(RpcError::Internal {
             message: format!("agent method {method} is not engine-owned"),
         }),
@@ -80,7 +82,7 @@ async fn prompt_value(
         deps,
         &submission.session_id,
         "agent::prompt_apply",
-        "agent.prompt.apply",
+        "agent::prompt_apply",
         apply_payload,
     )
     .await
@@ -107,7 +109,7 @@ async fn prompt_apply_value(
         deps,
         &submission.session_id,
         "agent::run_turn",
-        "agent.run_turn",
+        "agent::run_turn",
         params.cloned().unwrap_or_else(|| json!({})),
     )
     .await
@@ -145,7 +147,7 @@ async fn run_turn_value(
     )
     .await;
     spawn_prompt_run(
-        &deps.rpc_context,
+        &deps.capability_context,
         &agent_deps,
         &session,
         started_run,
@@ -173,7 +175,8 @@ async fn prompt_queue_drain_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    let session = AgentCommandService::load_prompt_session(&deps.rpc_context, &session_id).await?;
+    let session =
+        AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
     let agent_deps = deps
         .agent_deps
         .as_ref()
@@ -191,22 +194,22 @@ async fn prompt_queue_drain_value(
         agent_deps.provider_factory.clone(),
         agent_deps.tool_factory.clone(),
         agent_deps.guardrails.clone(),
-        deps.rpc_context.health_tracker.clone(),
-        deps.rpc_context.context_artifacts.clone(),
+        deps.capability_context.health_tracker.clone(),
+        deps.capability_context.context_artifacts.clone(),
         deps.skill_registry.clone(),
-        deps.rpc_context.memory_registry.clone(),
+        deps.capability_context.memory_registry.clone(),
         deps.profile_runtime.clone(),
-        deps.rpc_context.subagent_manager.clone(),
-        deps.rpc_context
+        deps.capability_context.subagent_manager.clone(),
+        deps.capability_context
             .shutdown_coordinator
             .as_ref()
             .map(|coord| coord.token()),
-        deps.rpc_context.worktree_coordinator.clone(),
+        deps.capability_context.worktree_coordinator.clone(),
         deps.process_manager.clone(),
         deps.job_manager.clone(),
         deps.output_buffer_registry.clone(),
-        deps.rpc_context.hook_abort_tracker.clone(),
-        deps.rpc_context.origin.clone(),
+        deps.capability_context.hook_abort_tracker.clone(),
+        deps.capability_context.origin.clone(),
         deps.engine_host.clone(),
         Some(PromptEngineCausality::from_invocation(invocation)),
     )?;
@@ -230,7 +233,7 @@ async fn validate_prompt_submission(
     (
         PromptSubmission,
         crate::events::sqlite::row_types::SessionRow,
-        crate::server::rpc::context::AgentDeps,
+        crate::server::services::context::AgentDeps,
     ),
     RpcError,
 > {
@@ -249,7 +252,8 @@ async fn validate_prompt_submission(
         });
     }
 
-    let session = AgentCommandService::load_prompt_session(&deps.rpc_context, &session_id).await?;
+    let session =
+        AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
     let agent_deps = deps
         .agent_deps
         .as_ref()
@@ -329,7 +333,7 @@ async fn enqueue_and_sync_drain_agent_function(
             idempotency_key: Some(format!("{idempotency_prefix}:{}", invocation.id)),
         })
         .await
-        .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     publish_queue_lifecycle_event(&deps.engine_host, "enqueue", &item, None).await;
     publish_prompt_stream(
         invocation,
@@ -355,7 +359,7 @@ async fn enqueue_and_sync_drain_agent_function(
             item.receipt_id
         ),
     })?
-    .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+    .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     let Some(result) = drained else {
         return Err(RpcError::Internal {
             message: format!(
@@ -377,7 +381,7 @@ async fn enqueue_and_sync_drain_agent_function(
         )
         .await;
     }
-    crate::server::rpc::engine_bridge::result_to_rpc(result)
+    crate::server::transport::json_rpc::engine_transport::result_to_rpc(result)
 }
 
 fn record_prompt_history(deps: &EngineCapabilityDeps, prompt: &str, source: Option<&str>) {
@@ -397,7 +401,7 @@ fn record_prompt_history(deps: &EngineCapabilityDeps, prompt: &str, source: Opti
     let max_age_days = auto_prune
         .then_some(prompt_library_settings.history_max_age_days)
         .filter(|n| *n > 0);
-    deps.rpc_context
+    deps.capability_context
         .spawn_blocking_detached("agent.prompt.history", move || {
             match crate::prompt_library::store::record_prompt_and_prune(
                 &pool,
@@ -455,7 +459,7 @@ async fn status_value(
         event_store
             .get_session(&sid_for_check)
             .map(|opt| opt.is_some())
-            .map_err(crate::server::rpc::error_mapping::map_event_store_error)
+            .map_err(crate::server::transport::json_rpc::error_mapping::map_event_store_error)
     })
     .await?;
     if !session_exists {
@@ -484,7 +488,7 @@ async fn status_value(
         })?;
         crate::events::sqlite::repositories::event::EventRepo::get_latest(&conn, &sid_for_latest)
             .map(|opt| opt.map(|row| row.timestamp))
-            .map_err(crate::server::rpc::error_mapping::map_event_store_error)
+            .map_err(crate::server::transport::json_rpc::error_mapping::map_event_store_error)
     })
     .await?;
     let time_since_last_event_ms = latest_timestamp
@@ -519,7 +523,7 @@ async fn abort_value(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
-    AgentCommandService::abort(&deps.rpc_context, &session_id)
+    AgentCommandService::abort(&deps.capability_context, &session_id)
 }
 
 async fn abort_tool_value(
@@ -528,7 +532,7 @@ async fn abort_tool_value(
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(params, "sessionId")?;
     let tool_call_id = require_string_param(params, "toolCallId")?;
-    AgentCommandService::abort_tool(&deps.rpc_context, &session_id, &tool_call_id)
+    AgentCommandService::abort_tool(&deps.capability_context, &session_id, &tool_call_id)
 }
 
 async fn queue_prompt_value(
@@ -543,7 +547,7 @@ async fn queue_prompt_value(
     let event_store = deps.event_store.clone();
     let sid = session_id.clone();
     let prompt_for_queue = prompt.clone();
-    let item = run_blocking_task("agent.queuePrompt", move || {
+    let item = run_blocking_task("agent::queue_prompt", move || {
         PromptQueueService::enqueue(&event_store, &sid, &prompt_for_queue)
     })
     .await?;
@@ -575,7 +579,7 @@ async fn dequeue_prompt_value(
     let event_store = deps.event_store.clone();
     let sid = session_id.clone();
     let qid = queue_id.clone();
-    run_blocking_task("agent.dequeuePrompt", move || {
+    run_blocking_task("agent::dequeue_prompt", move || {
         PromptQueueService::dequeue(&event_store, &sid, &qid, "cancelled")
     })
     .await?;
@@ -616,7 +620,7 @@ async fn clear_queue_value(
     })
     .await?;
 
-    let cleared = run_blocking_task("agent.clearQueue", move || {
+    let cleared = run_blocking_task("agent::clear_queue", move || {
         PromptQueueService::clear_queue(&event_store, &sid)
     })
     .await?;
@@ -807,7 +811,8 @@ async fn start_or_queue_prompt(
     queue_task: &'static str,
     require_agent_deps: bool,
 ) -> Result<Value, RpcError> {
-    let session = AgentCommandService::load_prompt_session(&deps.rpc_context, &session_id).await?;
+    let session =
+        AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
     start_or_queue_prompt_with_loaded_session(
         deps,
         session,
@@ -835,7 +840,7 @@ async fn start_or_queue_prompt_with_loaded_session(
     if let Some(agent_deps) = deps.agent_deps.as_ref() {
         if let Ok(started_run) = deps.orchestrator.begin_run(&session_id, &run_id) {
             spawn_prompt_run(
-                &deps.rpc_context,
+                &deps.capability_context,
                 agent_deps,
                 &session,
                 started_run,

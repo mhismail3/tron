@@ -29,7 +29,9 @@
 
 #![deny(unsafe_code)]
 
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use axum::http::{HeaderMap, StatusCode, header};
@@ -118,8 +120,8 @@ impl BearerTokenStore {
         }
     }
 
-    /// Path the store is reading from (test/diagnostics use only).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Path the store is reading from (test only).
+    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
     }

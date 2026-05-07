@@ -7,7 +7,7 @@ use crate::engine::Result as EngineResult;
 fn scheduler(
     deps: &EngineCapabilityDeps,
 ) -> Result<&std::sync::Arc<crate::cron::CronScheduler>, RpcError> {
-    deps.rpc_context
+    deps.capability_context
         .cron_scheduler
         .as_ref()
         .ok_or(RpcError::NotAvailable {
@@ -19,7 +19,7 @@ pub(crate) fn project_all_cron_triggers_for_setup(
     handle: &crate::engine::EngineHostHandle,
     deps: &EngineCapabilityDeps,
 ) -> EngineResult<()> {
-    let Some(scheduler) = deps.rpc_context.cron_scheduler.as_ref() else {
+    let Some(scheduler) = deps.capability_context.cron_scheduler.as_ref() else {
         return Ok(());
     };
     for job in scheduler.jobs().values() {
@@ -50,15 +50,15 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "cron.list" => cron_list_value(&invocation.payload, deps).await,
-        "cron.get" => cron_get_value(&invocation.payload, deps).await,
-        "cron.create" => cron_create_value(&invocation.payload, invocation, deps).await,
-        "cron.update" => cron_update_value(&invocation.payload, invocation, deps).await,
-        "cron.delete" => cron_delete_value(&invocation.payload, invocation, deps).await,
-        "cron.run" => cron_run_value(&invocation.payload, invocation, deps).await,
-        "cron.status" => cron_status_value(deps).await,
-        "cron.getRuns" => cron_get_runs_value(&invocation.payload, deps).await,
-        "cron.scheduled_fire" => {
+        "cron::list" => cron_list_value(&invocation.payload, deps).await,
+        "cron::get" => cron_get_value(&invocation.payload, deps).await,
+        "cron::create" => cron_create_value(&invocation.payload, invocation, deps).await,
+        "cron::update" => cron_update_value(&invocation.payload, invocation, deps).await,
+        "cron::delete" => cron_delete_value(&invocation.payload, invocation, deps).await,
+        "cron::run" => cron_run_value(&invocation.payload, invocation, deps).await,
+        "cron::status" => cron_status_value(deps).await,
+        "cron::get_runs" => cron_get_runs_value(&invocation.payload, deps).await,
+        "cron::scheduled_fire" => {
             cron_scheduled_fire_value(&invocation.payload, invocation, deps).await
         }
         _ => Err(RpcError::Internal {
@@ -279,7 +279,7 @@ async fn cron_create_value(
     sched.reschedule_notify().notify_one();
     project_cron_trigger(&deps.engine_host, &job)
         .await
-        .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     publish_cron_stream(invocation, deps, "created", &job.id, None).await;
     Ok(json!({ "job": to_json_value(&job)? }))
 }
@@ -399,7 +399,7 @@ async fn cron_update_value(
     sched.reschedule_notify().notify_one();
     project_cron_trigger(&deps.engine_host, &updated_job)
         .await
-        .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     publish_cron_stream(invocation, deps, "updated", &updated_job.id, None).await;
     Ok(json!({ "job": to_json_value(&updated_job)? }))
 }

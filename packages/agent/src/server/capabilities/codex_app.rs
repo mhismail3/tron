@@ -6,7 +6,7 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "codexApp.status" => codex_app_status_value(deps).await,
+        "codex_app::status" => codex_app_status_value(deps).await,
         _ => Err(RpcError::Internal {
             message: format!("codex app method {method} is not engine-owned"),
         }),

@@ -133,7 +133,7 @@ pub struct Orchestrator {
     session_manager: Arc<SessionManager>,
     broadcast: Arc<EventEmitter>,
     run_registry: Arc<RunRegistry>,
-    /// Tool call tracker shared with RPC handlers.
+    /// Tool call tracker shared with tool-result capabilities.
     tool_tracker: Mutex<ToolCallTracker>,
     /// Accumulates in-progress turn content for session resume catch-up.
     turn_accumulators: Arc<TurnAccumulatorMap>,

@@ -2,7 +2,7 @@
 //!
 //! Implements a request/response pattern over the existing WebSocket event
 //! channel. Server broadcasts a `device.request` event, iOS handles it locally,
-//! and sends the result back via a `device.respond` RPC call.
+//! and sends the result back via the `device::respond` capability.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::server::rpc::types::RpcEvent;
+use crate::server::transport::json_rpc::types::JsonRpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
 
 /// Broker for device request/response round-trips.
@@ -26,8 +26,8 @@ use crate::server::websocket::broadcast::BroadcastManager;
 /// 2. Broker generates a `requestId`, stores a oneshot sender, and broadcasts
 ///    a `device.request` event via `BroadcastManager`.
 /// 3. iOS receives the event, dispatches to a local handler, and sends the
-///    result back via the `device.respond` RPC call.
-/// 4. The `device.respond` handler calls `broker.resolve(requestId, result)`,
+///    result back via the `device::respond` capability.
+/// 4. `device::respond` calls `broker.resolve(requestId, result)`,
 ///    which completes the oneshot and unblocks the tool.
 pub struct DeviceRequestBroker {
     pending: Mutex<HashMap<String, PendingRequest>>,
@@ -76,7 +76,7 @@ impl DeviceRequestBroker {
         gauge!("device_requests_pending").set(pending_count as f64);
         counter!("device_requests_started_total").increment(1);
 
-        let event = RpcEvent {
+        let event = JsonRpcEvent {
             event_type: "device.request".into(),
             session_id: Some(session_id.to_string()),
             timestamp: chrono::Utc::now().to_rfc3339(),

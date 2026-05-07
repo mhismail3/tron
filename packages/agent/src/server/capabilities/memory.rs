@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::rpc::memory_retain as rpc_memory;
+use crate::server::services::memory_retain as rpc_memory;
 
 pub(super) async fn handle(
     method: &str,
@@ -8,7 +8,7 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "memory.retain" => retain_value(&invocation.payload, deps).await,
+        "memory::retain" => retain_value(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("memory method {method} is not engine-owned"),
         }),
@@ -16,5 +16,5 @@ pub(super) async fn handle(
 }
 
 async fn retain_value(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
-    rpc_memory::trigger_manual_retain(Some(payload), &deps.rpc_context).await
+    rpc_memory::trigger_manual_retain(Some(payload), &deps.capability_context).await
 }

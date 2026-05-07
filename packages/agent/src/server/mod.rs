@@ -23,19 +23,20 @@
 //! | `disk`        | Disk-space probes for health diagnostics                                           |
 //! | `engine_runtime` | Queue drainers and stream pump for engine primitives                           |
 //! | `external_workers` | Loopback-only engine worker WebSocket endpoint                              |
-//! | `health`      | `/health` JSON producer (DB ok, RPC count, version)                                |
+//! | `health`      | `/health` JSON producer (DB ok, transport count, version)                          |
 //! | `metrics`     | Prometheus recorder install + `/metrics` exporter                                  |
 //! | `onboarding`  | Per-server bearer-token lifecycle + first-run sentinel                             |
 //! | `platform`    | OS-specific surfaces (APNs, launchd, codesign helpers)                             |
-//! | `rpc`         | JSON-RPC method registry, handler tree, request/response types                     |
 //! | `server`      | `TronServer::new` wiring (registry + context + bind)                               |
+//! | `services`    | Server-local services used by canonical engine capabilities                        |
 //! | `shutdown`    | Phased graceful shutdown coordinator (MCP → tasks → IO)                            |
+//! | `transport`   | Thin client transports over canonical engine capabilities                          |
 //! | `updater`     | User-mode GitHub Releases checks/downloads — channel + action + state           |
 //! | `websocket`   | WS upgrade, framing, heartbeat, mandatory bearer-auth middleware                   |
 
 #![deny(unsafe_code)]
 
-/// Canonical server-owned engine capability modules and JSON-RPC alias catalog.
+/// Canonical server-owned engine capability modules and public engine transport catalog.
 pub mod capabilities;
 pub mod codex_app;
 #[path = "app/config.rs"]
@@ -52,11 +53,12 @@ pub mod health;
 pub mod metrics;
 pub mod onboarding;
 pub mod platform;
-pub mod rpc;
 #[path = "app/server.rs"]
 #[allow(clippy::module_inception)]
 pub mod server;
+pub mod services;
 #[path = "app/shutdown.rs"]
 pub mod shutdown;
+pub mod transport;
 pub mod updater;
 pub mod websocket;

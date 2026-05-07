@@ -155,16 +155,16 @@ pub enum EngineError {
         reason: String,
     },
 
-    /// A transport or subsystem adapter preserved its native error envelope.
-    #[error("adapter {adapter} failed with {code}: {message}")]
-    AdapterFailure {
-        /// Adapter namespace, such as `rpc`.
-        adapter: String,
-        /// Stable adapter error code.
+    /// A domain capability preserved its native error envelope.
+    #[error("domain {domain} failed with {code}: {message}")]
+    DomainFailure {
+        /// Domain namespace.
+        domain: String,
+        /// Stable domain error code.
         code: String,
-        /// Adapter error message.
+        /// Domain error message.
         message: String,
-        /// Adapter-specific structured details.
+        /// Domain-specific structured details.
         details: Option<serde_json::Value>,
     },
 

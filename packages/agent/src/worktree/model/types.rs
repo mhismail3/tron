@@ -124,7 +124,7 @@ pub enum MergeStrategy {
 impl MergeStrategy {
     /// Canonical wire label (`"merge" | "rebase" | "squash"`).
     ///
-    /// Used by RPC handlers and event payload builders — lives here so
+    /// Used by worktree capabilities and event payload builders — lives here so
     /// every call site agrees on the casing.
     pub const fn as_str(&self) -> &'static str {
         match self {

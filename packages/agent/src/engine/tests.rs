@@ -3680,8 +3680,8 @@ async fn agent_high_risk_invocation_creates_pending_approval_and_stream_event() 
             None,
         )
         .await;
-    let Some(EngineError::AdapterFailure { code, details, .. }) = result.error else {
-        panic!("expected approval adapter failure, got {:?}", result.error);
+    let Some(EngineError::DomainFailure { code, details, .. }) = result.error else {
+        panic!("expected approval domain failure, got {:?}", result.error);
     };
     assert_eq!(code, "APPROVAL_REQUIRED");
     let approval_id = details.unwrap()["approvalId"].as_str().unwrap().to_owned();
@@ -3851,7 +3851,7 @@ async fn approval_resolution_resumes_original_invocation_with_original_causality
         )
         .await;
     let approval_id = match pending.error.unwrap() {
-        EngineError::AdapterFailure { details, .. } => {
+        EngineError::DomainFailure { details, .. } => {
             details.unwrap()["approvalId"].as_str().unwrap().to_owned()
         }
         other => panic!("unexpected error {other:?}"),

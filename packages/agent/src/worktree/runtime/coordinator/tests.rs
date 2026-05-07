@@ -1788,7 +1788,7 @@ async fn delete_branch_with_stale_worktree_ref() {
 //
 // These cover the "session running directly on main" case: maybe_acquire
 // returns Passthrough, nothing is inserted into active_by_session, but
-// git-workflow RPCs (status, list_local_branches, list_remote_branches,
+// git-workflow capability calls (status, list_local_branches, list_remote_branches,
 // sync_main, push_branch) must still work against the session's
 // original working directory.
 

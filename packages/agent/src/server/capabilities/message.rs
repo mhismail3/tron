@@ -6,7 +6,7 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "message.delete" => message_delete_value(&invocation.payload, deps).await,
+        "message::delete" => message_delete_value(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("message method {method} is not engine-owned"),
         }),

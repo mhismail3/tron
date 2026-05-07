@@ -49,7 +49,7 @@ pub enum TronError {
     #[error("{0}")]
     Tool(#[from] ToolError),
 
-    /// RPC handler error.
+    /// canonical capability function error.
     #[error("{0}")]
     Rpc(#[from] RpcHandlerError),
 
@@ -522,7 +522,7 @@ impl ToolError {
 // RpcHandlerError
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// RPC handler error for converting response errors to typed errors.
+/// canonical capability function error for converting response errors to typed errors.
 #[derive(Debug, Error)]
 #[error("[{code}] {message}")]
 pub struct RpcHandlerError {
@@ -536,7 +536,7 @@ pub struct RpcHandlerError {
 }
 
 impl RpcHandlerError {
-    /// Create a new RPC handler error.
+    /// Create a new canonical capability function error.
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
         Self {

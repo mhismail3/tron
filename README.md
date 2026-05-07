@@ -64,13 +64,13 @@ This README is the single, canonical reference for the project and is expected t
 
 +-----------------------------------------------------------------------------+
 | Optional Codex mode                                                         |
-| iOS discovers endpoint via Tron RPC -> Codex App Server WS -> managed child |
+| engine.invoke(codex_app::status) -> Codex App Server WS -> managed child    |
 +-----------------------------------------------------------------------------+
 
 Optional Codex mode connects the iOS app directly to a `codex app-server`
 process on the active paired machine, but Tron Server owns that child process,
-its bearer token file, and its lifecycle. iOS discovers the live endpoint via
-authenticated `codexApp.status`, then uses a dedicated Codex JSON-RPC transport
+its bearer token file, and its lifecycle. Clients discover the live endpoint via
+authenticated `engine.invoke(codex_app::status)`, then use a dedicated Codex JSON-RPC transport
 that does not route turns through the Tron agent.
 ```
 
@@ -80,8 +80,8 @@ that does not route turns through the Tron agent.
 2. The `server` module validates the method and dispatches a catalog-derived transport binding
 3. The binding invokes a canonical `namespace::function` engine capability through a `json_rpc` trigger
 4. Canonical functions call runtime, orchestrator, event store, or domain services as needed
-5. Domain output is serialized at the RPC/WebSocket boundary when clients need wire-compatible shapes
-6. Events and responses broadcast back through WebSocket channels
+5. Domain output is serialized at the JSON-RPC/WebSocket boundary when clients need wire-compatible shapes
+6. Runtime events publish to engine streams and WebSocket pumps stream records
 
 ---
 
@@ -142,7 +142,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |
   +-- runtime          Agent loop, context, hooks, orchestrator, tasks
   |
-  +-- server           Axum HTTP/WS, RPC transport bindings, event bridge, APNS
+  +-- server           Axum HTTP/WS, engine transport, services, event bridge, APNS
   |                    +-- onboarding      Bearer token + `.onboarded` sentinel lifecycle
   |                    +-- codex_app       Managed `codex app-server` child lifecycle
   |                    +-- websocket       WS upgrade handler + mandatory bearer-auth middleware
@@ -167,7 +167,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
-| `server` | HTTP/WS + RPC dispatch | `TronServer`, `MethodRegistry`, `RpcContext`, `EventBridge` |
+| `server` | HTTP/WS + engine transport | `TronServer`, `JsonRpcTransportRegistry`, `ServerCapabilityContext`, `EventBridge` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
 | `server::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
 | `server::websocket` | WS upgrade + bearer-auth middleware | `BearerTokenStore`, `verify_bearer_header()` |
@@ -327,9 +327,13 @@ Source-control operations are now canonical engine capabilities as well as iOS S
 
 ## RPC API
 
-Tron RPC over WebSocket. Public methods are generated from the canonical capability catalog in `packages/agent/src/server/capabilities/catalog.rs`, with `packages/agent/src/server/rpc/bindings.rs` projecting those aliases into the transport registry. The current registration totals **175 methods** across three groups.
+Tron exposes a deliberately small JSON-RPC transport over WebSocket. The public registry contains exactly **5 methods**, all in the `engine` group:
 
-The five `engine.*` methods are the canonical public capability transport. Existing domain method names such as `agent.prompt` and `settings.update` remain wire-compatible compatibility aliases; under the hood every public method is a `json_rpc` trigger into a canonical `namespace::function` engine capability.
+| Group | Count | Methods |
+|-------|------:|---------|
+| `engine` | 5 | `engine.discover`, `engine.inspect`, `engine.watch`, `engine.invoke`, `engine.promote` |
+
+Domain behavior is addressed only by live canonical `namespace::function` capabilities invoked through `engine.invoke`. Dotted domain method names are not registered and return `METHOD_NOT_FOUND`.
 
 ### Connection
 
@@ -343,76 +347,13 @@ Metrics:   GET  http://<host>:<port>/metrics
 Messages use the server's WebSocket RPC framing. Request IDs are strings and are echoed on responses:
 
 ```json
-{"id":"ping-1","method":"system.ping","params":{"protocolVersion":1,"clientVersion":"ios"}}
-{"id":"ping-1","success":true,"result":{"pong":true,"timestamp":"…","serverVersion":"0.1.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}
+{"id":"discover-1","method":"engine.discover","params":{"text":"session"}}
+{"id":"discover-1","success":true,"result":{"functions":[{"id":"session::create"}]}}
 ```
 
-`system.ping` requires `{"protocolVersion": <u32>}` params and accepts optional `clientVersion` as a string. Clients that omit `protocolVersion` or send a non-numeric value receive `INVALID_PARAMS`; clients below `minClientProtocolVersion` receive `CLIENT_VERSION_UNSUPPORTED` with details naming both versions.
+`engine.invoke` accepts only canonical function ids such as `system::ping`, `agent::prompt`, or `settings::get`. Mutating calls must include an explicit idempotency key in the payload. JSON-RPC request ids are correlation ids only.
 
-`system.getInfo` returns the running daemon's `version`, `uptime` (seconds), `activeSessions` count, `platform` / `arch`, plus three additive fields used by the iOS pairing flow:
-
-- `port` — WebSocket listening port (mirrors the `--port` CLI flag).
-- `tailscaleIp` — cached `server.tailscaleIp` from `profiles/user/profile.toml` `[settings]`, or `null` if unset. The Mac pairing wizard resolves Tailscale live on fresh installs, then writes this cache for later wrapper/menu-bar reads and future server settings reloads.
-- `paired` — `true` once `~/.tron/internal/run/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
-
-These fields are additive; older clients that ignore them continue to work unchanged.
-
-`system.checkForUpdates` / `system.getUpdateStatus` drive user-mode GitHub Releases checks (see "Deployment → User-mode update checks"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
-
-- `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
-- `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/internal/run/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
-
-### Core (73)
-
-| Group | Count | Methods |
-|-------|------:|---------|
-| `engine` | 5 | `engine.discover`, `engine.inspect`, `engine.watch`, `engine.invoke`, `engine.promote` |
-| `system` | 6 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.checkForUpdates`, `system.getUpdateStatus` |
-| `codexApp` | 1 | `codexApp.status` |
-| `blob` | 1 | `blob.get` |
-| `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.archiveOlderThan`, `session.export` |
-| `agent` | 10 | `agent.prompt`, `agent.abort`, `agent.abortTool`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
-| `model` / `config` | 3 | `model.list`, `model.switch`, `config.setReasoningLevel` |
-| `context` | 9 | `context.getSnapshot`, `context.getDetailedSnapshot`, `context.getAuditTrace`, `context.shouldCompact`, `context.previewCompaction`, `context.confirmCompaction`, `context.canAcceptTurn`, `context.clear`, `context.compact` |
-| `events` | 5 | `events.getHistory`, `events.getSince`, `events.subscribe`, `events.unsubscribe`, `events.append` |
-| `settings` | 3 | `settings.get`, `settings.update`, `settings.resetToDefaults` |
-| `approval` | 3 | `approval.get`, `approval.list`, `approval.resolve` |
-| `auth` | 9 | `auth.get`, `auth.update`, `auth.clear`, `auth.oauthBegin`, `auth.oauthComplete`, `auth.renameAccount`, `auth.setActive`, `auth.removeAccount`, `auth.removeApiKey` |
-| `tool` | 1 | `tool.result` |
-| `message` | 1 | `message.delete` |
-| `logs` | 2 | `logs.ingest`, `logs.recent` |
-| `memory` | 1 | `memory.retain` |
-
-### Capabilities (27)
-
-| Group | Count | Methods |
-|-------|------:|---------|
-| `mcp` | 8 | `mcp.status`, `mcp.addServer`, `mcp.removeServer`, `mcp.enableServer`, `mcp.disableServer`, `mcp.restartServer`, `mcp.reload`, `mcp.listTools` |
-| `skill` (registry) | 3 | `skill.list`, `skill.get`, `skill.refresh` |
-| `skill` (session) | 3 | `skill.activate`, `skill.deactivate`, `skill.active` |
-| `filesystem` | 4 | `filesystem.listDir`, `filesystem.getHome`, `filesystem.createDir`, `file.read` |
-| `import` | 4 | `import.listSources`, `import.listSessions`, `import.previewSession`, `import.execute` |
-| `tree` | 5 | `tree.getVisualization`, `tree.getBranches`, `tree.getSubtree`, `tree.getAncestors`, `tree.compareBranches` |
-
-### Platform (75)
-
-| Group | Count | Methods |
-|-------|------:|---------|
-| `browser` | 3 | `browser.startStream`, `browser.stopStream`, `browser.getStatus` |
-| `display` | 1 | `display.stopStream` |
-| `job` | 5 | `job.background`, `job.cancel`, `job.list`, `job.subscribe`, `job.unsubscribe` |
-| `worktree` | 23 | `worktree.getStatus`, `worktree.isGitRepo`, `worktree.commit`, `worktree.merge`, `worktree.list`, `worktree.getDiff`, `worktree.acquire`, `worktree.release`, `worktree.listSessionBranches`, `worktree.getCommittedDiff`, `worktree.deleteBranch`, `worktree.pruneBranches`, `worktree.stageFiles`, `worktree.unstageFiles`, `worktree.discardFiles`, `worktree.finalizeSession`, `worktree.rebaseOnMain`, `worktree.startMerge`, `worktree.listConflicts`, `worktree.resolveConflict`, `worktree.continueMerge`, `worktree.abortMerge`, `worktree.resolveConflictsWithSubagent` |
-| `transcribe` | 3 | `transcribe.audio`, `transcribe.listModels`, `transcribe.downloadModel` |
-| `device` | 3 | `device.register`, `device.unregister`, `device.respond` |
-| `plan` | 3 | `plan.enter`, `plan.exit`, `plan.getState` |
-| `voiceNotes` | 3 | `voiceNotes.save`, `voiceNotes.list`, `voiceNotes.delete` |
-| `git` | 5 | `git.clone`, `git.syncMain`, `git.push`, `git.listLocalBranches`, `git.listRemoteBranches` |
-| `repo` | 2 | `repo.listSessions`, `repo.getDivergence` |
-| `sandbox` | 5 | `sandbox.listContainers`, `sandbox.startContainer`, `sandbox.stopContainer`, `sandbox.killContainer`, `sandbox.removeContainer` |
-| `notifications` | 3 | `notifications.list`, `notifications.markRead`, `notifications.markAllRead` |
-| `promptHistory` | 3 | `promptHistory.list`, `promptHistory.delete`, `promptHistory.clear` |
-| `promptSnippet` | 5 | `promptSnippet.list`, `promptSnippet.get`, `promptSnippet.create`, `promptSnippet.update`, `promptSnippet.delete` |
-| `cron` | 8 | `cron.list`, `cron.get`, `cron.create`, `cron.update`, `cron.delete`, `cron.run`, `cron.status`, `cron.getRuns` |
+Hidden apply functions remain in the engine catalog for queue/cron/runtime execution, but normal discovery excludes them and the public transport cannot invoke them directly.
 
 ---
 
@@ -476,7 +417,7 @@ Settings are loaded from three layers (highest priority last):
 2. **User overlay** (`~/.tron/profiles/user/profile.toml` `[settings]`, deep-merged over the active profile)
 3. **Environment variables** (`TRON_*` overrides)
 
-Settings are server-authoritative. The iOS app reads the current valid `ProfileRuntime` snapshot via `settings.get` and writes sparse user overrides via `settings.update` / `settings.resetToDefaults`. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an RPC error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>` and `ProfileRuntime`. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active.
+Settings are server-authoritative. Engine-native clients read the current valid `ProfileRuntime` snapshot by invoking `settings::get` and write sparse user overrides through `settings::update` / `settings::reset_to_defaults` with explicit idempotency keys. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an engine/transport error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>` and `ProfileRuntime`. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active.
 
 The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If the managed default is missing or corrupt, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
 
@@ -604,7 +545,7 @@ tron login --label work
 tron login --label personal
 ```
 
-`auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app or via `auth.*` RPC methods. When an API key is saved without a custom label, Tron stores it as `Default`.
+`auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app, CLI, or canonical `auth::*` capabilities through `engine.invoke`. When an API key is saved without a custom label, Tron stores it as `Default`.
 
 OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth credentials route to `chatgpt.com/backend-api/codex` and use Codex catalog limits such as `gpt-5.5` and `gpt-5.3-codex` at 272K context. OpenAI API keys route to `api.openai.com/v1/responses` and use Platform limits such as `gpt-5.5` at 1.05M context and `gpt-5.3-codex` at 400K context. `model.list` is auth-path-aware: OAuth shows the live Codex catalog plus documented Codex previews, while API keys show all streaming text/image-in-to-text-out Responses models Tron can serve without a separate image, audio, video, embedding, moderation, realtime, or background provider path. Dated snapshots like `gpt-5.5-2026-04-23` are accepted as hidden aliases and preserve the exact request model ID. Deprecated OpenAI models remain listed with `isDeprecated` and `replacementModel` metadata, but `model.switch` rejects them so they cannot be newly selected; non-streaming models such as `gpt-5.5-pro`, `o3-pro`, and `o1-pro` stay hidden and are rejected by the streaming provider.
 
@@ -632,7 +573,7 @@ tron auth rotate
 
 Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
 
-The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported to iOS via the `paired` field of `system.getInfo` (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
+The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported via the `paired` field of the canonical `system::get_info` capability (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
 See [`packages/agent/src/server/onboarding/mod.rs`](packages/agent/src/server/onboarding/mod.rs) for the full token + sentinel lifecycle.
 
@@ -653,7 +594,7 @@ When context approaches the token budget (default `compactionThreshold: 0.85` of
 3. **Trim**: Messages before the boundary are replaced with the summary on reconstruction.
 4. **Preserve recent**: The most recent `preserveRecentCount` messages always survive the cut.
 
-Compaction is observable via `context.shouldCompact`, `context.previewCompaction`, and `context.confirmCompaction` RPC methods. Programmatic compaction is exposed via `context.compact`.
+Compaction is observable via the canonical `context::should_compact`, `context::preview_compaction`, and `context::confirm_compaction` capabilities. Programmatic compaction is exposed via `context::compact`.
 
 ### Context Assembly Order
 
@@ -673,7 +614,7 @@ Reusable context packages stored as `SKILL.md` files with optional YAML frontmat
 - `~/.tron/skills/`, `~/.claude/skills/` — Global (all projects). First-party skills under `packages/agent/skills/` are bundled into the Mac app at `Contents/Resources/Skills/` and synced into `~/.tron/skills/` by the Mac installer/menu-bar start path, `tron dev`, and `tron install`. The Mac wrapper serializes its managed-skill sync and skips already-current directories so idle menu-bar launches do not rewrite this tree. Managed skills carry a `.managed` sentinel file; user-owned same-name directories are preserved. `~/.claude/skills/` is read-only to Tron (Claude Code owns that tree) but its contents are detected automatically.
 - `.tron/skills/` or `.claude/skills/` under the working directory (any depth) — Project-local (higher precedence than globals). `.tron/skills/` wins over `.claude/skills/` on same-name collision within a single scope.
 
-**Usage:** Reference with `@skill-name` in prompts. The injector extracts references, resolves them from the registry, and prepends the skill content as `<skills>` XML context. Session-scoped activation is also exposed via `skill.activate` / `skill.deactivate` RPC methods.
+**Usage:** Reference with `@skill-name` in prompts. The injector extracts references, resolves them from the registry, and prepends the skill content as `<skills>` XML context. Session-scoped activation is also exposed via the canonical `skills::activate` / `skills::deactivate` capabilities.
 
 ### Hooks
 
@@ -755,10 +696,10 @@ packages/ios-app/Sources/
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; iOS discovers the live endpoint through authenticated `codexApp.status` and does not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
-- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages are not available until a pairing probe, `settings.get`, and setup hydration succeed.
+- **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; engine-native clients discover the live endpoint by invoking `codex_app::status` and do not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
+- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
-- **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings.get` response and best-effort `auth.get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
+- **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet fallback. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
 
@@ -767,7 +708,7 @@ packages/ios-app/Sources/
 ```
 Live:    WebSocket -> RPCClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
-Codex:   RPCClient.codexAppServer.status -> Codex App Server WS -> CodexJSONRPCTransport -> CodexAppClient -> CodexAppViewModel -> Codex mode UI
+Codex:   engine.invoke(codex_app::status) -> Codex App Server WS -> CodexJSONRPCTransport -> CodexAppClient -> CodexAppViewModel -> Codex mode UI
 ```
 
 ### Build Configurations
@@ -794,7 +735,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `engine.invoke`.
 
 ```
 packages/mac-app/Sources/
@@ -806,7 +747,7 @@ packages/mac-app/Sources/
 |   +-- Steps/                 Welcome, Tailscale, Install, Permissions, Transcription, iOS Beta, Pairing, Done
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
 +-- Services/
-|   +-- Server/                Bearer-token reader, `system.ping` client, status poller
+|   +-- Server/                Bearer-token reader, engine transport client, status poller
 |   +-- Onboarding/            SMAppService install planner, permission/Tailscale probes, existing-install detection
 |   +-- Pairing/               Tailscale live probe + auth.json bearer-token reader; QR + tron:// URL generation
 |   +-- Feedback/              GitHub issue composer with redacted log context
@@ -825,7 +766,7 @@ packages/mac-app/Sources/
 
 1. **Welcome** — introduces Tron.
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
-3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system.ping` answers. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system.ping` while ignoring initial `connection.established` frames.
+3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `engine.invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system::ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
 5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/internal/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/internal/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
 6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open fallbacks. TestFlight then owns beta availability and update selection.
@@ -841,7 +782,7 @@ packages/mac-app/Sources/
 | Restart / Pause / Resume server | `SMAppService.register` repair/load before restart or resume, then `launchctl kickstart` when the label was already loaded; shows busy state and posts success/failure notifications |
 | Update finalization | On the first menu-bar launch for a new app build, syncs managed skills, refreshes stale SMAppService metadata, and restarts the bundled server once; `tron dev` takeover defers this until the production server is active again |
 | Stop dev server | Appears with the server controls whenever `Tron-Dev.app` owns port 9847; stops the dev process and resumes the installed Login Item. Pause, restart, and uninstall are disabled while dev takeover is active. |
-| Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |
+| Show logs | Opens the native logs window backed by the read-only `logs::recent` capability |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
 | Check for updates | Opens the latest GitHub Release |
 | Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `internal/run/` runtime state; optional checkboxes remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. The database and workspace are always preserved. |
@@ -970,7 +911,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
     |   +-- codex-app-server-token Managed Codex App Server capability token (mode 600)
     |   +-- deploy.lock            Manual deploy concurrency lock
     |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
-    |   +-- .onboarded             First-run sentinel; presence drives `system.getInfo.paired`
+    |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
     |   +-- updater-state.json     Update-check scheduler state
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
@@ -1082,7 +1023,7 @@ style/pedantic suggestions stay advisory so the signal is not buried.
 
 These constraints are enforced in code with `// INVARIANT:` markers at the enforcement site.
 
-1. **Canonical engine execution**: Production behavior is owned by canonical engine functions. JSON-RPC method names are transport aliases, and client-specific wire compatibility belongs at the RPC/WebSocket boundary.
+1. **Canonical engine execution**: Production behavior is owned by canonical engine functions. The public JSON-RPC surface contains only `engine.*` transport methods; domain behavior is discovered and invoked by canonical `namespace::function` ids.
 
 2. **Fail-fast on unknown models**: Unknown model or provider returns a typed `UnsupportedModel` error immediately. No silent fallback or default provider substitution.
 

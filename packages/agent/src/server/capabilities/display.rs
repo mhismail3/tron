@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::rpc::params::require_string_param;
+use crate::server::transport::json_rpc::params::require_string_param;
 
 pub(super) async fn handle(
     method: &str,
@@ -8,7 +8,7 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "display.stopStream" => stop_stream(&invocation.payload, deps).await,
+        "display::stop_stream" => stop_stream(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("display method {method} is not engine-owned"),
         }),

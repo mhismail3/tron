@@ -1,5 +1,5 @@
 use crate::core::events::TronEvent;
-use crate::server::rpc::types::RpcEvent;
+use crate::server::transport::json_rpc::types::JsonRpcEvent;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -11,7 +11,7 @@ pub(super) enum BroadcastScope {
 
 #[derive(Debug, Clone)]
 pub(super) struct BridgedEvent {
-    pub(super) rpc_event: RpcEvent,
+    pub(super) rpc_event: JsonRpcEvent,
     pub(super) scope: BroadcastScope,
 }
 
@@ -22,9 +22,9 @@ pub(super) fn set_opt<T: Serialize>(data: &mut Value, key: &str, val: &Option<T>
     }
 }
 
-pub(super) fn make_rpc(event: &TronEvent, wire_type: &str, data: Option<Value>) -> RpcEvent {
+pub(super) fn make_rpc(event: &TronEvent, wire_type: &str, data: Option<Value>) -> JsonRpcEvent {
     let session_id = event.session_id();
-    RpcEvent {
+    JsonRpcEvent {
         event_type: wire_type.to_string(),
         session_id: if session_id.is_empty() {
             None

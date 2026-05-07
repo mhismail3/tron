@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::server::rpc::error_mapping::map_import_error;
+use crate::server::transport::json_rpc::error_mapping::map_import_error;
 
 pub(super) async fn handle(
     method: &str,
@@ -11,10 +11,10 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "import.listSources" => list_sources(deps).await,
-        "import.listSessions" => list_sessions(&invocation.payload, deps).await,
-        "import.previewSession" => preview_session(&invocation.payload, deps).await,
-        "import.execute" => execute_import(&invocation.payload, deps).await,
+        "import::list_sources" => list_sources(deps).await,
+        "import::list_sessions" => list_sessions(&invocation.payload, deps).await,
+        "import::preview_session" => preview_session(&invocation.payload, deps).await,
+        "import::execute" => execute_import(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("import method {method} is not engine-owned"),
         }),
@@ -22,8 +22,8 @@ pub(super) async fn handle(
 }
 
 async fn list_sources(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
-    deps.rpc_context
-        .run_blocking("import.listSources", move || {
+    deps.capability_context
+        .run_blocking("import::list_sources", move || {
             let claude_projects =
                 PathBuf::from(crate::core::paths::home_dir()).join(".claude").join("projects");
             let Ok(projects) = crate::import::discover_projects(&claude_projects) else {
@@ -48,8 +48,8 @@ async fn list_sources(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
 async fn list_sessions(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
     let encoded_dir = require_string_param(Some(payload), "encodedDir")?;
     let event_store = deps.event_store.clone();
-    deps.rpc_context
-        .run_blocking("import.listSessions", move || {
+    deps.capability_context
+        .run_blocking("import::list_sessions", move || {
             let claude_projects = PathBuf::from(crate::core::paths::home_dir())
                 .join(".claude")
                 .join("projects");
@@ -84,8 +84,8 @@ async fn list_sessions(payload: &Value, deps: &EngineCapabilityDeps) -> Result<V
 
 async fn preview_session(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
     let session_path = require_string_param(Some(payload), "sessionPath")?;
-    deps.rpc_context
-        .run_blocking("import.previewSession", move || {
+    deps.capability_context
+        .run_blocking("import::preview_session", move || {
             let path = PathBuf::from(&session_path);
             let records = crate::import::parser::parse_session(&path).map_err(map_import_error)?;
             let linear = crate::import::tree::linearize(records);
@@ -177,11 +177,11 @@ async fn execute_import(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
         .unwrap_or_default();
     let working_directory = opt_string(Some(payload), "workingDirectory").unwrap_or_default();
     let event_store = deps.event_store.clone();
-    let origin = deps.rpc_context.origin.clone();
+    let origin = deps.capability_context.origin.clone();
     let session_path = session_path.to_owned();
 
-    deps.rpc_context
-        .run_blocking("import.execute", move || {
+    deps.capability_context
+        .run_blocking("import::execute", move || {
             let path = PathBuf::from(&session_path);
             let wd = if working_directory.is_empty() {
                 path.parent()

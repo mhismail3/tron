@@ -1,17 +1,20 @@
 //! Canonical worktree engine functions.
 //!
 //! JSON-RPC now reaches these operations through `json_rpc` triggers targeting
-//! canonical `worktree::*` function ids. The operation helpers below are private domain services for the engine-owned function module, not registry-owned
-//! RPC handlers or registry-trait adapters.
+//! canonical `worktree::*` function ids. The operation helpers below are private
+//! domain services for the engine-owned function module, not transport-owned
+//! dispatch branches.
 
 use crate::worktree::{count_diff_stats, split_diff_by_file};
 use serde_json::Value;
 use tracing::instrument;
 
-use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::error_mapping::map_worktree_error;
-use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::params::{opt_bool, opt_string, require_bool, require_string_param};
+use crate::server::services::context::ServerCapabilityContext;
+use crate::server::transport::json_rpc::error_mapping::map_worktree_error;
+use crate::server::transport::json_rpc::errors::RpcError;
+use crate::server::transport::json_rpc::params::{
+    opt_bool, opt_string, require_bool, require_string_param,
+};
 use crate::worktree::types::CommitOptions;
 
 use super::EngineCapabilityDeps;
@@ -23,25 +26,25 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     let params = Some(invocation.payload.clone());
-    let ctx = deps.rpc_context.as_ref();
+    let ctx = deps.capability_context.as_ref();
     match method {
-        "worktree.getStatus" => GetStatusOperation.run(params, ctx).await,
-        "worktree.isGitRepo" => IsGitRepoOperation.run(params, ctx).await,
-        "worktree.commit" => CommitOperation.run(params, ctx).await,
-        "worktree.merge" => MergeOperation.run(params, ctx).await,
-        "worktree.list" => ListOperation.run(params, ctx).await,
-        "worktree.getDiff" => GetDiffOperation.run(params, ctx).await,
-        "worktree.acquire" => AcquireOperation.run(params, ctx).await,
-        "worktree.release" => ReleaseOperation.run(params, ctx).await,
-        "worktree.listSessionBranches" => ListSessionBranchesOperation.run(params, ctx).await,
-        "worktree.getCommittedDiff" => GetCommittedDiffOperation.run(params, ctx).await,
-        "worktree.deleteBranch" => DeleteBranchOperation.run(params, ctx).await,
-        "worktree.pruneBranches" => PruneBranchesOperation.run(params, ctx).await,
-        "worktree.stageFiles" => StageFilesOperation.run(params, ctx).await,
-        "worktree.unstageFiles" => UnstageFilesOperation.run(params, ctx).await,
-        "worktree.discardFiles" => DiscardFilesOperation.run(params, ctx).await,
+        "worktree::get_status" => GetStatusOperation.run(params, ctx).await,
+        "worktree::is_git_repo" => IsGitRepoOperation.run(params, ctx).await,
+        "worktree::commit" => CommitOperation.run(params, ctx).await,
+        "worktree::merge" => MergeOperation.run(params, ctx).await,
+        "worktree::list" => ListOperation.run(params, ctx).await,
+        "worktree::get_diff" => GetDiffOperation.run(params, ctx).await,
+        "worktree::acquire" => AcquireOperation.run(params, ctx).await,
+        "worktree::release" => ReleaseOperation.run(params, ctx).await,
+        "worktree::list_session_branches" => ListSessionBranchesOperation.run(params, ctx).await,
+        "worktree::get_committed_diff" => GetCommittedDiffOperation.run(params, ctx).await,
+        "worktree::delete_branch" => DeleteBranchOperation.run(params, ctx).await,
+        "worktree::prune_branches" => PruneBranchesOperation.run(params, ctx).await,
+        "worktree::stage_files" => StageFilesOperation.run(params, ctx).await,
+        "worktree::unstage_files" => UnstageFilesOperation.run(params, ctx).await,
+        "worktree::discard_files" => DiscardFilesOperation.run(params, ctx).await,
         _ => Err(RpcError::Internal {
-            message: format!("RPC method {method} is not worktree-owned"),
+            message: format!("operation {method} is not worktree-owned"),
         }),
     }
 }
@@ -49,7 +52,7 @@ pub(super) async fn handle(
 // ── Helpers ─────────────────────────────────────────────────────────
 
 fn require_coordinator(
-    ctx: &RpcContext,
+    ctx: &ServerCapabilityContext,
 ) -> Result<&crate::worktree::WorktreeCoordinator, RpcError> {
     ctx.worktree_coordinator
         .as_deref()
@@ -58,7 +61,10 @@ fn require_coordinator(
         })
 }
 
-fn require_session_working_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
+fn require_session_working_dir(
+    ctx: &ServerCapabilityContext,
+    session_id: &str,
+) -> Result<String, RpcError> {
     let session = ctx
         .session_manager
         .get_session(session_id)
@@ -77,7 +83,7 @@ fn require_session_working_dir(ctx: &RpcContext, session_id: &str) -> Result<Str
 /// Prefers the coordinator's worktree path (if active), otherwise uses the
 /// session's original working directory. This is intentionally lenient — getDiff
 /// should work for any session, not only those with worktrees.
-fn resolve_diff_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
+fn resolve_diff_dir(ctx: &ServerCapabilityContext, session_id: &str) -> Result<String, RpcError> {
     // Check coordinator for active worktree
     if let Some(ref coord) = ctx.worktree_coordinator
         && let Some(dir) = coord.effective_working_dir(session_id)
@@ -96,10 +102,13 @@ fn resolve_diff_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcErr
 /// and `commitCount` fields that the iOS client expects.
 pub struct GetStatusOperation;
 
-#[allow(dead_code)]
 impl GetStatusOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.getStatus"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::get_status"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -158,10 +167,13 @@ impl GetStatusOperation {
 /// per-session worktree-isolation toggle.
 pub struct IsGitRepoOperation;
 
-#[allow(dead_code)]
 impl IsGitRepoOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.isGitRepo"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::is_git_repo"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let path = require_string_param(params.as_ref(), "path")?;
         let coord = require_coordinator(ctx)?;
         let is_git = coord.is_git_repo(std::path::Path::new(&path)).await;
@@ -174,17 +186,20 @@ impl IsGitRepoOperation {
 /// Commit worktree changes.
 pub struct CommitOperation;
 
-#[allow(dead_code)]
 impl CommitOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.commit"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::commit"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = require_string_param(params.as_ref(), "message")?;
         let coord = require_coordinator(ctx)?;
 
         if coord.get_info(&session_id).is_none() {
             return Err(RpcError::NotFound {
-                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
+                code: crate::server::transport::json_rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             });
         }
@@ -205,7 +220,7 @@ impl CommitOperation {
             Ok(Some(result)) => {
                 // Record worktree.commit event for compaction progress signal detection.
                 if let Some(handler) = ctx.orchestrator.get_compaction_handler(&session_id) {
-                    handler.record_event_type("worktree.commit");
+                    handler.record_event_type("worktree::commit");
                 }
                 Ok(serde_json::json!({
                     "commitHash": result.commit_hash,
@@ -229,10 +244,13 @@ impl CommitOperation {
 /// Merge worktree.
 pub struct MergeOperation;
 
-#[allow(dead_code)]
 impl MergeOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.merge"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::merge"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target_branch = opt_string(params.as_ref(), "targetBranch");
         let target_branch = target_branch.as_deref().unwrap_or("main");
@@ -241,7 +259,7 @@ impl MergeOperation {
 
         if coord.get_info(&session_id).is_none() {
             return Err(RpcError::NotFound {
-                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
+                code: crate::server::transport::json_rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             });
         }
@@ -275,10 +293,13 @@ impl MergeOperation {
 /// List worktrees across all sessions.
 pub struct ListOperation;
 
-#[allow(dead_code)]
 impl ListOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.list"))]
-    async fn run(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::list"))]
+    async fn run(
+        &self,
+        _params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let coord = require_coordinator(ctx)?;
 
         let active = coord.list_active();
@@ -304,10 +325,13 @@ impl ListOperation {
 /// Explicitly acquire a worktree for a session.
 pub struct AcquireOperation;
 
-#[allow(dead_code)]
 impl AcquireOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.acquire"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::acquire"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -341,10 +365,13 @@ impl AcquireOperation {
 /// Explicitly release a session's worktree.
 pub struct ReleaseOperation;
 
-#[allow(dead_code)]
 impl ReleaseOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.release"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::release"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -365,10 +392,13 @@ impl ReleaseOperation {
 /// List all session branches (active and preserved) for the repo.
 pub struct ListSessionBranchesOperation;
 
-#[allow(dead_code)]
 impl ListSessionBranchesOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.listSessionBranches"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::list_session_branches"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -391,10 +421,13 @@ impl ListSessionBranchesOperation {
 /// Get committed diff for a session (base..HEAD).
 pub struct GetCommittedDiffOperation;
 
-#[allow(dead_code)]
 impl GetCommittedDiffOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.getCommittedDiff"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::get_committed_diff"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -422,10 +455,13 @@ impl GetCommittedDiffOperation {
 /// Delete a single session branch.
 pub struct DeleteBranchOperation;
 
-#[allow(dead_code)]
 impl DeleteBranchOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.deleteBranch"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::delete_branch"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let branch = require_string_param(params.as_ref(), "branch")?;
         let coord = require_coordinator(ctx)?;
@@ -452,10 +488,13 @@ impl DeleteBranchOperation {
 /// Prune all inactive session branches.
 pub struct PruneBranchesOperation;
 
-#[allow(dead_code)]
 impl PruneBranchesOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.pruneBranches"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::prune_branches"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -486,10 +525,13 @@ const MAX_DIFF_BYTES: usize = 1_024 * 1_024; // 1 MB
 /// the session's original working directory. Does not require a coordinator.
 pub struct GetDiffOperation;
 
-#[allow(dead_code)]
 impl GetDiffOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.getDiff"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::get_diff"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -895,10 +937,13 @@ fn validate_relative_worktree_path(path: &str) -> Result<(), RpcError> {
 /// Stage files: `git add -- <paths>`
 pub struct StageFilesOperation;
 
-#[allow(dead_code)]
 impl StageFilesOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.stageFiles"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::stage_files"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -927,10 +972,13 @@ impl StageFilesOperation {
 /// Unstage files: `git restore --staged -- <paths>` (or `git rm --cached` for repos with no commits)
 pub struct UnstageFilesOperation;
 
-#[allow(dead_code)]
 impl UnstageFilesOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.unstageFiles"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::unstage_files"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -989,10 +1037,13 @@ impl UnstageFilesOperation {
 /// Discard file changes: restores tracked files from HEAD, deletes untracked files.
 pub struct DiscardFilesOperation;
 
-#[allow(dead_code)]
 impl DiscardFilesOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree.discardFiles"))]
-    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "worktree::discard_files"))]
+    async fn run(
+        &self,
+        params: Option<Value>,
+        ctx: &ServerCapabilityContext,
+    ) -> Result<Value, RpcError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
         let repo_root = std::path::Path::new(&dir);

@@ -7,23 +7,23 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "context.getSnapshot" => {
+        "context::get_snapshot" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
-            crate::server::rpc::context_queries::ContextQueryService::get_snapshot(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_queries::ContextQueryService::get_snapshot(
+                &session::capability_context_view(deps),
                 session_id,
             )
             .await
         }
-        "context.getDetailedSnapshot" => {
+        "context::get_detailed_snapshot" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
-            crate::server::rpc::context_queries::ContextQueryService::get_detailed_snapshot(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_queries::ContextQueryService::get_detailed_snapshot(
+                &session::capability_context_view(deps),
                 session_id,
             )
             .await
         }
-        "context.getAuditTrace" => {
+        "context::get_audit_trace" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             let turn = payload
                 .get("turn")
@@ -33,59 +33,59 @@ pub(super) async fn handle(
                 .map_err(|_| RpcError::InvalidParams {
                     message: "turn must fit in u32".into(),
                 })?;
-            crate::server::rpc::context_queries::ContextQueryService::get_audit_trace(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_queries::ContextQueryService::get_audit_trace(
+                &session::capability_context_view(deps),
                 session_id,
                 turn,
             )
             .await
         }
-        "context.shouldCompact" => {
+        "context::should_compact" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
-            crate::server::rpc::context_queries::ContextQueryService::should_compact(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_queries::ContextQueryService::should_compact(
+                &session::capability_context_view(deps),
                 session_id,
             )
             .await
         }
-        "context.previewCompaction" => {
+        "context::preview_compaction" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
-            crate::server::rpc::context_queries::ContextQueryService::preview_compaction(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_queries::ContextQueryService::preview_compaction(
+                &session::capability_context_view(deps),
                 session_id,
             )
             .await
         }
-        "context.canAcceptTurn" => {
+        "context::can_accept_turn" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
-            crate::server::rpc::context_queries::ContextQueryService::can_accept_turn(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_queries::ContextQueryService::can_accept_turn(
+                &session::capability_context_view(deps),
                 session_id,
             )
             .await
         }
-        "context.confirmCompaction" => {
+        "context::confirm_compaction" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             let edited_summary = opt_string(Some(payload), "editedSummary");
-            crate::server::rpc::context_commands::ContextCommandService::confirm_compaction(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_commands::ContextCommandService::confirm_compaction(
+                &session::capability_context_view(deps),
                 session_id,
                 edited_summary,
             )
             .await
         }
-        "context.clear" => {
+        "context::clear" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
-            crate::server::rpc::context_commands::ContextCommandService::clear(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_commands::ContextCommandService::clear(
+                &session::capability_context_view(deps),
                 session_id,
             )
             .await
         }
-        "context.compact" => {
+        "context::compact" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
-            crate::server::rpc::context_commands::ContextCommandService::compact(
-                &session::rpc_context_view(deps),
+            crate::server::services::context_commands::ContextCommandService::compact(
+                &session::capability_context_view(deps),
                 session_id,
             )
             .await

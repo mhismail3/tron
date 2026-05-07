@@ -1,20 +1,23 @@
 use super::*;
 
-use crate::server::rpc::model_catalog as rpc_model;
+use crate::server::services::model_catalog as rpc_model;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-    allow_rpc_context: bool,
+    allow_capability_context: bool,
 ) -> Result<Value, RpcError> {
     match method {
-        "model.list" => model_list_value(&invocation.payload, deps, allow_rpc_context).await,
-        "model.switch" => {
-            rpc_model::switch_model(Some(&invocation.payload), &deps.rpc_context).await
+        "model::list" => {
+            model_list_value(&invocation.payload, deps, allow_capability_context).await
         }
-        "config.setReasoningLevel" => {
-            rpc_model::set_reasoning_level(Some(&invocation.payload), &deps.rpc_context).await
+        "model::switch" => {
+            rpc_model::switch_model(Some(&invocation.payload), &deps.capability_context).await
+        }
+        "config::set_reasoning_level" => {
+            rpc_model::set_reasoning_level(Some(&invocation.payload), &deps.capability_context)
+                .await
         }
         _ => Err(RpcError::Internal {
             message: format!("model method {method} is not engine-owned"),
@@ -25,9 +28,9 @@ pub(super) async fn handle(
 async fn model_list_value(
     payload: &Value,
     deps: &EngineCapabilityDeps,
-    allow_rpc_context: bool,
+    allow_capability_context: bool,
 ) -> Result<Value, RpcError> {
-    let auth_json_path = allow_rpc_context
+    let auth_json_path = allow_capability_context
         .then(|| {
             payload
                 .pointer("/__rpcContext/authPath")

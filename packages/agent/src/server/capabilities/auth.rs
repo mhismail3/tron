@@ -10,8 +10,8 @@ use crate::llm::auth::storage::{
 use crate::llm::auth::types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, OAuthTokens, ProviderAuth, ServiceAuth,
 };
-use crate::server::rpc::error_mapping::map_auth_error;
-use crate::server::rpc::params::{opt_string, require_string_param};
+use crate::server::transport::json_rpc::error_mapping::map_auth_error;
+use crate::server::transport::json_rpc::params::{opt_string, require_string_param};
 
 const DEFAULT_API_KEY_LABEL: &str = "Default";
 const KNOWN_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "google", "minimax", "kimi"];
@@ -25,15 +25,15 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "auth.get" => auth_get(deps).await,
-        "auth.update" => auth_update(invocation, deps).await,
-        "auth.clear" => auth_clear(invocation, deps).await,
-        "auth.oauthBegin" => auth_oauth_begin(&invocation.payload, deps).await,
-        "auth.oauthComplete" => auth_oauth_complete(invocation, deps).await,
-        "auth.renameAccount" => auth_rename_account(invocation, deps).await,
-        "auth.setActive" => auth_set_active(invocation, deps).await,
-        "auth.removeAccount" => auth_remove_account(invocation, deps).await,
-        "auth.removeApiKey" => auth_remove_api_key(invocation, deps).await,
+        "auth::get" => auth_get(deps).await,
+        "auth::update" => auth_update(invocation, deps).await,
+        "auth::clear" => auth_clear(invocation, deps).await,
+        "auth::oauth_begin" => auth_oauth_begin(&invocation.payload, deps).await,
+        "auth::oauth_complete" => auth_oauth_complete(invocation, deps).await,
+        "auth::rename_account" => auth_rename_account(invocation, deps).await,
+        "auth::set_active" => auth_set_active(invocation, deps).await,
+        "auth::remove_account" => auth_remove_account(invocation, deps).await,
+        "auth::remove_api_key" => auth_remove_api_key(invocation, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("auth method {method} is not engine-owned"),
         }),
@@ -42,8 +42,8 @@ pub(super) async fn handle(
 
 async fn auth_get(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
     let auth_path = deps.auth_path.clone();
-    deps.rpc_context
-        .run_blocking("auth.get", move || {
+    deps.capability_context
+        .run_blocking("auth::get", move || {
             build_masked_state(&auth_path).map_err(map_auth_error)
         })
         .await
@@ -66,8 +66,8 @@ async fn auth_update(
     let auth_path = deps.auth_path.clone();
     let payload = payload.clone();
     let masked_state = deps
-        .rpc_context
-        .run_blocking("auth.update", move || {
+        .capability_context
+        .run_blocking("auth::update", move || {
             let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
                 message: format!("Failed to acquire auth lock: {error}"),
             })?;
@@ -111,8 +111,8 @@ async fn auth_clear(
 
     let auth_path = deps.auth_path.clone();
     let masked_state = deps
-        .rpc_context
-        .run_blocking("auth.clear", move || {
+        .capability_context
+        .run_blocking("auth::clear", move || {
             let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
                 message: format!("Failed to acquire auth lock: {error}"),
             })?;
@@ -191,13 +191,13 @@ async fn auth_oauth_begin(payload: &Value, deps: &EngineCapabilityDeps) -> Resul
     };
 
     let flow_id = uuid::Uuid::now_v7().to_string();
-    let mut flows = deps.rpc_context.oauth_flows.lock().await;
+    let mut flows = deps.capability_context.oauth_flows.lock().await;
     flows.retain(|_, flow| {
         flow.created_at.elapsed() < std::time::Duration::from_secs(OAUTH_FLOW_TTL_SECS)
     });
     let _ = flows.insert(
         flow_id.clone(),
-        crate::server::rpc::auth_flows::PendingOAuthFlow {
+        crate::server::services::auth_flows::PendingOAuthFlow {
             verifier: verifier_or_state,
             provider,
             created_at: std::time::Instant::now(),
@@ -220,7 +220,7 @@ async fn auth_oauth_complete(
     let label = require_string_param(Some(payload), "label")?;
 
     let flow = {
-        let mut flows = deps.rpc_context.oauth_flows.lock().await;
+        let mut flows = deps.capability_context.oauth_flows.lock().await;
         flows.remove(&flow_id)
     }
     .ok_or_else(|| RpcError::InvalidParams {
@@ -283,8 +283,8 @@ async fn auth_oauth_complete(
     let auth_path = deps.auth_path.clone();
     let provider_key = flow.provider;
     let masked_state = deps
-        .rpc_context
-        .run_blocking("auth.oauthComplete", move || {
+        .capability_context
+        .run_blocking("auth::oauth_complete", move || {
             let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
                 message: format!("Failed to acquire auth lock: {error}"),
             })?;
@@ -314,7 +314,7 @@ async fn auth_rename_account(
     let old_label = require_string_param(Some(payload), "oldLabel")?;
     let new_label = require_string_param(Some(payload), "newLabel")?;
 
-    write_auth_and_broadcast(deps, invocation, "auth.renameAccount", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth::rename_account", move |auth_path| {
         crate::llm::auth::storage::rename_account(auth_path, &provider, &old_label, &new_label)
             .map_err(map_auth_error)
     })
@@ -337,7 +337,7 @@ async fn auth_set_active(
             message: format!("Invalid credential: {error}"),
         })?;
 
-    write_auth_and_broadcast(deps, invocation, "auth.setActive", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth::set_active", move |auth_path| {
         crate::llm::auth::storage::set_active_credential(auth_path, &provider, &credential).map_err(
             |error| RpcError::InvalidParams {
                 message: format!("Failed to set active credential: {error}"),
@@ -354,7 +354,7 @@ async fn auth_remove_account(
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;
-    write_auth_and_broadcast(deps, invocation, "auth.removeAccount", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth::remove_account", move |auth_path| {
         crate::llm::auth::storage::remove_account(auth_path, &provider, &label)
             .map_err(map_auth_error)
     })
@@ -368,7 +368,7 @@ async fn auth_remove_api_key(
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;
-    write_auth_and_broadcast(deps, invocation, "auth.removeApiKey", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth::remove_api_key", move |auth_path| {
         crate::llm::auth::storage::remove_named_api_key(auth_path, &provider, &label)
             .map_err(map_auth_error)
     })
@@ -386,7 +386,7 @@ where
 {
     let auth_path = deps.auth_path.clone();
     let masked_state = deps
-        .rpc_context
+        .capability_context
         .run_blocking(task_name, move || {
             let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
                 message: format!("Failed to acquire auth lock: {error}"),
@@ -738,6 +738,6 @@ async fn broadcast_auth_updated(
     invocation: &Invocation,
     masked_state: &Value,
 ) {
-    let event = RpcEvent::new("auth.updated", None, Some(masked_state.clone()));
-    super::publish_rpc_event_or_broadcast(deps, "auth", "auth", event, Some(invocation)).await;
+    let event = JsonRpcEvent::new("auth.updated", None, Some(masked_state.clone()));
+    super::publish_engine_stream_event(deps, "auth", "auth", event, Some(invocation)).await;
 }

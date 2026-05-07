@@ -218,7 +218,7 @@ pub async fn perform_tick(deps: &SchedulerDeps) -> TickReport {
                         "channel": update_cfg.channel.as_str(),
                         "timestamp": now,
                     });
-                    let event = crate::server::rpc::types::RpcEvent {
+                    let event = crate::server::transport::json_rpc::types::JsonRpcEvent {
                         event_type: "server.update_available".to_owned(),
                         session_id: None,
                         timestamp: now.clone(),
@@ -319,7 +319,7 @@ pub fn spawn(
         }
 
         // `Manual` parks on the shutdown token — ticks only come via
-        // `system.checkForUpdates` RPC. We still keep the task alive
+        // `system::check_for_updates`. We still keep the task alive
         // because settings can flip to a recurring cadence at any
         // time; on every "settings changed" we just wake and re-read.
         //

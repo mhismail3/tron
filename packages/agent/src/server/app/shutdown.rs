@@ -46,7 +46,7 @@ const PER_HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 /// - [`Tools`](ShutdownPhase::Tools) then cancels anything still running
 ///   (e.g. long bash commands that ignored turn cancel).
 /// - [`Mcp`](ShutdownPhase::Mcp) disconnects external MCP servers BEFORE
-///   we stop accepting RPCs that would call them.
+///   we stop accepting capability calls that would call them.
 /// - [`Cron`](ShutdownPhase::Cron) stops scheduling new runs.
 /// - [`Transcription`](ShutdownPhase::Transcription) reaps sidecar
 ///   processes last, after any tool that might produce audio has drained.

@@ -7,9 +7,11 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "notifications.list" => notifications_list_value(Some(payload), deps).await,
-        "notifications.markRead" => notifications_mark_read_value(Some(payload), deps).await,
-        "notifications.markAllRead" => notifications_mark_all_read_value(Some(payload), deps).await,
+        "notifications::list" => notifications_list_value(Some(payload), deps).await,
+        "notifications::mark_read" => notifications_mark_read_value(Some(payload), deps).await,
+        "notifications::mark_all_read" => {
+            notifications_mark_all_read_value(Some(payload), deps).await
+        }
         _ => Err(RpcError::Internal {
             message: format!("notifications method {method} is not engine-owned"),
         }),
@@ -22,7 +24,7 @@ async fn notifications_list_value(
 ) -> Result<Value, RpcError> {
     let limit = opt_u64(params, "limit", 50).min(100);
     let pool = deps.event_store.pool().clone();
-    let result = run_blocking_task("notifications.list", move || {
+    let result = run_blocking_task("notifications::list", move || {
         let conn = pool.get().map_err(|error| RpcError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;

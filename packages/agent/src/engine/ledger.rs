@@ -184,16 +184,16 @@ impl StoredEngineError {
                     "reason": reason,
                 }),
             },
-            EngineError::AdapterFailure {
-                adapter,
+            EngineError::DomainFailure {
+                domain,
                 code,
                 message,
                 details,
             } => Self {
-                kind: "adapter_failure".to_owned(),
+                kind: "domain_failure".to_owned(),
                 message: error.to_string(),
                 details: serde_json::json!({
-                    "adapter": adapter,
+                    "domain": domain,
                     "code": code,
                     "message": message,
                     "details": details,
@@ -245,10 +245,10 @@ impl StoredEngineError {
                     .to_owned(),
             );
         }
-        if self.kind == "adapter_failure" {
-            let adapter = self
+        if self.kind == "domain_failure" {
+            let domain = self
                 .details
-                .get("adapter")
+                .get("domain")
                 .and_then(Value::as_str)
                 .unwrap_or("stored")
                 .to_owned();
@@ -269,8 +269,8 @@ impl StoredEngineError {
                 .get("details")
                 .cloned()
                 .filter(|value| !value.is_null());
-            return EngineError::AdapterFailure {
-                adapter,
+            return EngineError::DomainFailure {
+                domain,
                 code,
                 message,
                 details,

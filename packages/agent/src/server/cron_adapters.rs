@@ -10,7 +10,7 @@ use async_trait::async_trait;
 
 use crate::cron::errors::CronError;
 use crate::cron::types::{CronJob, CronRun};
-use crate::server::rpc::types::RpcEvent;
+use crate::server::transport::json_rpc::types::JsonRpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
 
 #[cfg(feature = "apns")]
@@ -115,7 +115,7 @@ impl CronEventBroadcaster {
 #[async_trait]
 impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
     async fn broadcast_cron_result(&self, job: &CronJob, run: &CronRun) {
-        let event = RpcEvent {
+        let event = JsonRpcEvent {
             event_type: "cron.runComplete".to_owned(),
             session_id: None,
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -134,7 +134,7 @@ impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
     }
 
     async fn broadcast_cron_event(&self, event_type: &str, payload: serde_json::Value) {
-        let event = RpcEvent {
+        let event = JsonRpcEvent {
             event_type: event_type.to_owned(),
             session_id: None,
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),

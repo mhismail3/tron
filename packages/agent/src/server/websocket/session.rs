@@ -4,8 +4,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::registry::MethodRegistry;
+use crate::server::services::context::ServerCapabilityContext;
+use crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
@@ -32,8 +32,8 @@ const OUTBOUND_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 pub async fn run_ws_session(
     ws: WebSocket,
     client_id: String,
-    registry: Arc<MethodRegistry>,
-    ctx: Arc<RpcContext>,
+    registry: Arc<JsonRpcTransportRegistry>,
+    ctx: Arc<ServerCapabilityContext>,
     broadcast: Arc<BroadcastManager>,
     ping_interval: Duration,
     pong_timeout: Duration,
@@ -54,8 +54,8 @@ pub async fn run_ws_session(
 pub(crate) async fn run_ws_session_with_limits(
     ws: WebSocket,
     client_id: String,
-    registry: Arc<MethodRegistry>,
-    ctx: Arc<RpcContext>,
+    registry: Arc<JsonRpcTransportRegistry>,
+    ctx: Arc<ServerCapabilityContext>,
     broadcast: Arc<BroadcastManager>,
     ping_interval: Duration,
     pong_timeout: Duration,
@@ -199,16 +199,8 @@ pub(crate) async fn run_ws_session_with_limits(
 
         let result = handle_message_with_transport(text, &registry, &ctx, Some(&client_id)).await;
 
-        // Bind session on create/resume
-        if (result.method == "session.create" || result.method == "session.resume")
-            && result.response.success
-            && let Some(sid) = result
-                .response
-                .result
-                .as_ref()
-                .and_then(|r| r.get("sessionId"))
-                .and_then(|v| v.as_str())
-        {
+        // Bind the socket when an engine invocation creates or resumes a session.
+        if let Some(sid) = session_binding_from_engine_response(&result) {
             connection.bind_session(sid);
             debug!(client_id, session_id = sid, "session bound to client");
         }
@@ -257,6 +249,22 @@ pub(crate) async fn run_ws_session_with_limits(
     }
 }
 
+fn session_binding_from_engine_response(result: &super::handler::HandleResult) -> Option<&str> {
+    if result.method != "engine.invoke" || !result.response.success {
+        return None;
+    }
+    let response = result.response.result.as_ref()?;
+    let function_id = response
+        .pointer("/child/functionId")
+        .and_then(|v| v.as_str())?;
+    if !matches!(function_id, "session::create" | "session::resume") {
+        return None;
+    }
+    response
+        .pointer("/child/value/sessionId")
+        .and_then(|v| v.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -271,15 +279,15 @@ mod tests {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
 
-    use crate::server::rpc::bindings;
-    use crate::server::rpc::registry::MethodRegistry;
-    use crate::server::rpc::test_support::make_test_context;
+    use crate::server::services::test_support::make_test_context;
+    use crate::server::transport::json_rpc::bindings;
+    use crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
     use crate::server::websocket::broadcast::BroadcastManager;
 
     async fn boot_session_server_with_limits(
         limits: ConnectionLimits,
     ) -> (String, Arc<BroadcastManager>, tokio::task::JoinHandle<()>) {
-        let mut registry = MethodRegistry::new();
+        let mut registry = JsonRpcTransportRegistry::new();
         bindings::register_all(&mut registry);
         let registry = Arc::new(registry);
         let ctx = Arc::new(make_test_context());
@@ -392,7 +400,7 @@ mod tests {
         assert_eq!(broadcast.connection_count(), 1);
 
         ws.send(Message::Text(
-            serde_json::json!({"id": "r1", "method": "system.ping"})
+            serde_json::json!({"id": "r1", "method": "engine.discover"})
                 .to_string()
                 .into(),
         ))

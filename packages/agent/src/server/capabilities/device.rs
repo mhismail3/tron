@@ -1,7 +1,7 @@
 use super::*;
 
-use crate::server::rpc::error_mapping::map_event_store_error;
-use crate::server::rpc::params::{opt_string, require_string_param};
+use crate::server::transport::json_rpc::error_mapping::map_event_store_error;
+use crate::server::transport::json_rpc::params::{opt_string, require_string_param};
 
 // INVARIANT: device.register accepts a client-supplied bundleId only under the
 // trusted-local model: paired clients are the user's own devices on the local
@@ -16,9 +16,9 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "device.register" => register_token(&invocation.payload, deps).await,
-        "device.unregister" => unregister_token(&invocation.payload, deps).await,
-        "device.respond" => respond(&invocation.payload, deps).await,
+        "device::register" => register_token(&invocation.payload, deps).await,
+        "device::unregister" => unregister_token(&invocation.payload, deps).await,
+        "device::respond" => respond(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("device method {method} is not engine-owned"),
         }),
@@ -47,8 +47,8 @@ async fn register_token(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
     }
 
     let event_store = Arc::clone(&deps.event_store);
-    deps.rpc_context
-        .run_blocking("device.register", move || {
+    deps.capability_context
+        .run_blocking("device::register", move || {
             let result = event_store
                 .register_device_token(
                     &device_token,
@@ -69,8 +69,8 @@ async fn register_token(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
 async fn unregister_token(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
     let device_token = require_string_param(Some(payload), "deviceToken")?;
     let event_store = Arc::clone(&deps.event_store);
-    deps.rpc_context
-        .run_blocking("device.unregister", move || {
+    deps.capability_context
+        .run_blocking("device::unregister", move || {
             let success = event_store
                 .unregister_device_token(&device_token)
                 .map_err(map_event_store_error)?;
@@ -82,7 +82,7 @@ async fn unregister_token(payload: &Value, deps: &EngineCapabilityDeps) -> Resul
 async fn respond(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
     let request_id = require_string_param(Some(payload), "requestId")?;
     let result = payload.get("result").cloned().unwrap_or(Value::Null);
-    if let Some(ref broker) = deps.rpc_context.device_request_broker {
+    if let Some(ref broker) = deps.capability_context.device_request_broker {
         let resolved = broker.resolve(&request_id, result);
         Ok(json!({ "resolved": resolved }))
     } else {

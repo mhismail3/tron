@@ -16,16 +16,16 @@
 //! tron::skills        SKILL.md parser, registry, context injection
 //! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
 //! tron::runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
-//! tron::server        Axum HTTP/WS, RPC handlers, event bridge, APNS
+//! tron::server        Axum HTTP/WS, engine transport, stream pump, APNS
 //! ```
 //!
 //! ## Data Path
 //!
-//! 1. Client sends JSON-RPC over WebSocket
-//! 2. `server` dispatches to RPC handlers
-//! 3. Handlers call runtime/orchestrator/event store
-//! 4. Client compatibility is serialized at the RPC/WebSocket boundary
-//! 5. Events broadcast back through WebSocket channels
+//! 1. Client sends one of the five public `engine.*` JSON-RPC methods
+//! 2. `server` dispatches through the `json_rpc` engine trigger
+//! 3. Canonical `namespace::function` capabilities call domain services
+//! 4. Domain output is serialized at the JSON-RPC/WebSocket boundary
+//! 5. Engine streams publish live events; WebSocket pumps stream records
 //!
 //! ## Core Invariants
 //!
@@ -55,9 +55,11 @@ use tron::runtime::orchestrator::orchestrator::Orchestrator;
 use tron::runtime::orchestrator::session_manager::SessionManager;
 use tron::runtime::orchestrator::subagent_manager::SubagentManager;
 use tron::server::config::ServerConfig;
-use tron::server::rpc::context::{AgentDeps, RpcContext, register_blocking_supervisor_shutdown};
-use tron::server::rpc::registry::MethodRegistry;
 use tron::server::server::TronServer;
+use tron::server::services::context::{
+    AgentDeps, ServerCapabilityContext, register_blocking_supervisor_shutdown,
+};
+use tron::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
 use tron::server::websocket::event_bridge::EventBridge;
 use tron::settings::db_path_policy::resolve_production_db_path;
 use tron::skills::registry::SkillRegistry;
@@ -207,7 +209,7 @@ fn format_listening_log(
         ""
     };
     format!(
-        "Tron agent listening on http://{addr} ({method_count} RPC methods registered){trust_note}"
+        "Tron agent listening on http://{addr} ({method_count} JSON-RPC transport methods registered){trust_note}"
     )
 }
 
@@ -819,8 +821,8 @@ async fn init_worktree(
     Some(coord)
 }
 
-/// Build the RPC context that holds all shared state for RPC handlers.
-fn build_rpc_context(
+/// Build the capability context that holds shared state for domain functions.
+fn build_capability_context(
     services: ServiceState,
     engine_host: tron::engine::EngineHostHandle,
     settings_path: PathBuf,
@@ -829,8 +831,8 @@ fn build_rpc_context(
     cron: &CronState,
     worktree_coordinator: Option<Arc<tron::worktree::WorktreeCoordinator>>,
     mcp_router: Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>,
-) -> RpcContext {
-    RpcContext {
+) -> ServerCapabilityContext {
+    ServerCapabilityContext {
         orchestrator: services.orchestrator.clone(),
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
@@ -851,7 +853,7 @@ fn build_rpc_context(
         worktree_coordinator,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::rpc::session_context::ContextArtifactsService::new(),
+            tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: auth_path(),
         broadcast_manager: None,
@@ -869,7 +871,7 @@ fn build_rpc_context(
         onboarded_marker_path: tron::server::onboarding::onboarded_marker_path(),
         // User-mode updater wiring (Plan §H.2). Production uses the live
         // GitHub Releases fetcher; `main_tests.rs` and `tests/integration.rs`
-        // construct their own `RpcContext` directly and leave this `None`,
+        // construct their own `ServerCapabilityContext` directly and leave this `None`,
         // which short-circuits `system.checkForUpdates` + skips the
         // scheduler arm below. The state path is stable regardless so the
         // `system.getUpdateStatus` handler can still render defaults.
@@ -998,14 +1000,14 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    // Phase 4: Cron, worktree, RPC context
+    // Phase 4: Cron, worktree, capability context
     let cron = init_cron(&services, &origin, profile_runtime.clone());
     let worktree_coordinator = init_worktree(&services, &settings).await;
     let session_manager_for_startup = services.session_manager.clone();
     let orchestrator_for_bridge = services.orchestrator.clone();
     let process_manager_for_shutdown = services.process_manager.clone();
     let profile_runtime_for_watcher = profile_runtime.clone();
-    let rpc_context = build_rpc_context(
+    let capability_context = build_capability_context(
         services,
         engine_host,
         settings_path,
@@ -1017,22 +1019,22 @@ async fn main() -> Result<()> {
     );
 
     // Phase 5: Build and start server
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::bindings::register_all(&mut registry);
+    let mut registry = JsonRpcTransportRegistry::new();
+    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
     let method_count = registry.methods().len();
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = tron::server::metrics::install_recorder();
-    let server = TronServer::new(config, registry, rpc_context, metrics_handle);
-    tron::server::rpc::engine_bridge::register_rpc_worker_for_context(
-        server.rpc_context(),
+    let server = TronServer::new(config, registry, capability_context, metrics_handle);
+    tron::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(
+        server.capability_context(),
         server.registry(),
     )
-    .context("Failed to register RPC engine bridge")?;
+    .context("Failed to register JSON-RPC engine transport")?;
     cron.scheduler
-        .set_engine_host(server.rpc_context().engine_host.clone());
+        .set_engine_host(server.capability_context().engine_host.clone());
     register_blocking_supervisor_shutdown(server.shutdown());
-    if let Some(codex_app_server) = server.rpc_context().codex_app_server.clone() {
+    if let Some(codex_app_server) = server.capability_context().codex_app_server.clone() {
         if let Err(error) = codex_app_server.start().await {
             tracing::warn!(
                 error = %error,
@@ -1050,7 +1052,7 @@ async fn main() -> Result<()> {
     register_transcription_sidecar(
         settings.server.transcription.enabled,
         server.shutdown(),
-        server.rpc_context().transcription_engine.clone(),
+        server.capability_context().transcription_engine.clone(),
     );
 
     // Register MCP shutdown as an ordered phase hook. Replaces the earlier
@@ -1071,7 +1073,7 @@ async fn main() -> Result<()> {
         server.shutdown().token(),
         orchestrator_for_bridge.turn_accumulators().clone(),
     )
-    .with_engine_streams(server.rpc_context().engine_host.clone());
+    .with_engine_streams(server.capability_context().engine_host.clone());
     let bridge_handle = tokio::spawn(bridge.run());
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
@@ -1102,22 +1104,26 @@ async fn main() -> Result<()> {
     // the fetcher is `None` (embedded / test paths) the scheduler
     // silently no-ops because `perform_tick` bails on `enabled = false`
     // and tests never set enabled.
-    let updater_scheduler_handle =
-        if let Some(fetcher) = server.rpc_context().release_fetcher.as_ref().cloned() {
-            let deps = tron::server::updater::SchedulerDeps {
-                fetcher,
-                broadcast: server.broadcast().clone(),
-                state_path: server.rpc_context().updater_state_path.clone(),
-                pause_path: tron::server::updater::pause_sentinel_path(),
-                current_version: env!("CARGO_PKG_VERSION").to_string(),
-            };
-            Some(tron::server::updater::scheduler::spawn(
-                deps,
-                server.shutdown().token(),
-            ))
-        } else {
-            None
+    let updater_scheduler_handle = if let Some(fetcher) = server
+        .capability_context()
+        .release_fetcher
+        .as_ref()
+        .cloned()
+    {
+        let deps = tron::server::updater::SchedulerDeps {
+            fetcher,
+            broadcast: server.broadcast().clone(),
+            state_path: server.capability_context().updater_state_path.clone(),
+            pause_path: tron::server::updater::pause_sentinel_path(),
+            current_version: env!("CARGO_PKG_VERSION").to_string(),
         };
+        Some(tron::server::updater::scheduler::spawn(
+            deps,
+            server.shutdown().token(),
+        ))
+    } else {
+        None
+    };
 
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
     tracing::info!(

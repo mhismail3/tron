@@ -112,7 +112,7 @@ pub fn init_settings(settings: TronSettings) {
 /// and atomically swaps the global cache. All subsequent [`get_settings`]
 /// calls return the new values.
 ///
-/// Called by settings RPC handlers after writing sparse profile settings.
+/// Called by settings canonical capability functions after writing sparse profile settings.
 pub fn reload_settings_from_path(path: &Path) -> Result<()> {
     let new = Arc::new(load_settings_from_path(path)?);
     settings_slot().store(Some(new));
@@ -135,7 +135,7 @@ pub(crate) fn reset_settings() {
 /// Any test that mutates the global must hold this mutex for its whole
 /// body to prevent races with other parallel tests. Since settings live
 /// in a process-global, any parallel test that writes to it (directly
-/// via `init_settings` or indirectly via RPC handlers like
+/// via `init_settings` or indirectly via canonical capability functions like
 /// `update_settings`) can corrupt a concurrent test's state unless they
 /// all synchronize through a single lock.
 ///

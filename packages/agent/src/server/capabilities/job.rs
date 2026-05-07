@@ -15,29 +15,31 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "job.background" => {
+        "job::background" => {
             enqueue_and_sync_drain_job_apply(
                 "job::background_apply",
-                "job.background.apply",
+                "job::background_apply",
                 invocation,
                 deps,
             )
             .await
         }
-        "job.cancel" => {
+        "job::cancel" => {
             enqueue_and_sync_drain_job_apply(
                 "job::cancel_apply",
-                "job.cancel.apply",
+                "job::cancel_apply",
                 invocation,
                 deps,
             )
             .await
         }
-        "job.background.apply" => job_background_apply_value(Some(payload), invocation, deps).await,
-        "job.cancel.apply" => job_cancel_apply_value(Some(payload), invocation, deps).await,
-        "job.list" => job_list_value(Some(payload), deps),
-        "job.subscribe" => job_subscribe_value(Some(payload), deps).await,
-        "job.unsubscribe" => job_unsubscribe_value(Some(payload)),
+        "job::background_apply" => {
+            job_background_apply_value(Some(payload), invocation, deps).await
+        }
+        "job::cancel_apply" => job_cancel_apply_value(Some(payload), invocation, deps).await,
+        "job::list" => job_list_value(Some(payload), deps),
+        "job::subscribe" => job_subscribe_value(Some(payload), deps).await,
+        "job::unsubscribe" => job_unsubscribe_value(Some(payload)),
         _ => Err(RpcError::Internal {
             message: format!("job method {method} is not engine-owned"),
         }),
@@ -79,7 +81,7 @@ async fn enqueue_and_sync_drain_job_apply(
             idempotency_key: Some(format!("{idempotency_prefix}:{}", invocation.id)),
         })
         .await
-        .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     publish_queue_lifecycle_event(&deps.engine_host, "enqueue", &item, None).await;
 
     let drained = tokio::time::timeout(
@@ -93,7 +95,7 @@ async fn enqueue_and_sync_drain_job_apply(
             item.receipt_id
         ),
     })?
-    .map_err(crate::server::rpc::engine_bridge::engine_error_to_rpc)?;
+    .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
     let Some(result) = drained else {
         return Err(RpcError::Internal {
             message: format!(
@@ -102,7 +104,7 @@ async fn enqueue_and_sync_drain_job_apply(
             ),
         });
     };
-    crate::server::rpc::engine_bridge::result_to_rpc(result)
+    crate::server::transport::json_rpc::engine_transport::result_to_rpc(result)
 }
 
 async fn job_background_apply_value(

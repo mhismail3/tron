@@ -1,6 +1,8 @@
 //! End-to-end integration tests using a real WebSocket client.
 
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -27,9 +29,10 @@ use tron::llm::provider::{
 use tron::runtime::orchestrator::orchestrator::Orchestrator;
 use tron::runtime::orchestrator::session_manager::SessionManager;
 use tron::server::config::ServerConfig;
-use tron::server::rpc::context::{AgentDeps, RpcContext};
-use tron::server::rpc::registry::MethodRegistry;
 use tron::server::server::TronServer;
+use tron::server::services::context::{AgentDeps, ServerCapabilityContext};
+use tron::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
+use tron::server::transport::json_rpc::types::JsonRpcEvent;
 use tron::server::websocket::event_bridge::EventBridge;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
@@ -67,6 +70,17 @@ fn unique_runtime_path(name: &str, extension: &str) -> PathBuf {
     path
 }
 
+fn unique_event_store() -> Arc<EventStore> {
+    let db_path = unique_runtime_path("events", "db");
+    let pool = tron::events::new_file(&db_path.to_string_lossy(), &ConnectionConfig::default())
+        .unwrap_or_else(|error| panic!("failed to open {}: {error}", db_path.display()));
+    {
+        let conn = pool.get().unwrap();
+        let _ = tron::events::run_migrations(&conn).unwrap();
+    }
+    Arc::new(EventStore::new(pool))
+}
+
 fn profile_runtime_for_settings_path(path: &std::path::Path) -> Arc<tron::runtime::ProfileRuntime> {
     let home = path
         .ancestors()
@@ -77,12 +91,7 @@ fn profile_runtime_for_settings_path(path: &std::path::Path) -> Arc<tron::runtim
 
 /// Boot a test server and return the WS URL + shutdown handle.
 async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
-    let pool = tron::events::new_in_memory(&ConnectionConfig::default()).unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = tron::events::run_migrations(&conn).unwrap();
-    }
-    let event_store = Arc::new(EventStore::new(pool));
+    let event_store = unique_event_store();
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
@@ -90,7 +99,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let settings_path = unique_settings_path();
     tron::settings::reload_settings_from_path(&settings_path).unwrap();
 
-    let rpc_context = RpcContext {
+    let capability_context = ServerCapabilityContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
@@ -113,7 +122,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::rpc::session_context::ContextArtifactsService::new(),
+            tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
         broadcast_manager: None,
@@ -130,8 +139,8 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         updater_state_path: unique_runtime_path("updater-state", "json"),
     };
 
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::bindings::register_all(&mut registry);
+    let mut registry = JsonRpcTransportRegistry::new();
+    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
 
     let config = ServerConfig::default(); // port 0 = auto-assign
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -140,26 +149,28 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let server = Arc::new(TronServer::new(
         config,
         registry,
-        rpc_context,
+        capability_context,
         metrics_handle,
     ));
-    tron::server::rpc::engine_bridge::register_rpc_worker_for_context(
-        server.rpc_context(),
+    tron::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(
+        server.capability_context(),
         server.registry(),
     )
     .expect("integration RPC engine bridge should register");
+    tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
     let bridge = EventBridge::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
-    );
+    )
+    .with_engine_streams(server.capability_context().engine_host.clone());
     let _bridge_handle = tokio::spawn(bridge.run());
 
     let (addr, _handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
-    register_server_auth_path(&ws_url, &server.rpc_context().auth_path);
+    register_server_auth_path(&ws_url, &server.capability_context().auth_path);
 
     (ws_url, server)
 }
@@ -377,12 +388,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
 async fn boot_server_with_provider_and_handles(
     provider: Arc<dyn Provider>,
 ) -> (String, Arc<TronServer>, Vec<JoinHandle<()>>) {
-    let pool = tron::events::new_in_memory(&ConnectionConfig::default()).unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = tron::events::run_migrations(&conn).unwrap();
-    }
-    let event_store = Arc::new(EventStore::new(pool));
+    let event_store = unique_event_store();
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
@@ -390,7 +396,7 @@ async fn boot_server_with_provider_and_handles(
     let settings_path = unique_settings_path();
     tron::settings::reload_settings_from_path(&settings_path).unwrap();
 
-    let rpc_context = RpcContext {
+    let capability_context = ServerCapabilityContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
@@ -417,7 +423,7 @@ async fn boot_server_with_provider_and_handles(
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::rpc::session_context::ContextArtifactsService::new(),
+            tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
         broadcast_manager: None,
@@ -434,8 +440,8 @@ async fn boot_server_with_provider_and_handles(
         updater_state_path: unique_runtime_path("updater-state", "json"),
     };
 
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::bindings::register_all(&mut registry);
+    let mut registry = JsonRpcTransportRegistry::new();
+    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
 
     let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -444,26 +450,28 @@ async fn boot_server_with_provider_and_handles(
     let server = Arc::new(TronServer::new(
         config,
         registry,
-        rpc_context,
+        capability_context,
         metrics_handle,
     ));
-    tron::server::rpc::engine_bridge::register_rpc_worker_for_context(
-        server.rpc_context(),
+    tron::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(
+        server.capability_context(),
         server.registry(),
     )
     .expect("integration RPC engine bridge should register");
+    tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
     let bridge = EventBridge::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
-    );
+    )
+    .with_engine_streams(server.capability_context().engine_host.clone());
     let bridge_handle = tokio::spawn(bridge.run());
 
     let (addr, server_handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
-    register_server_auth_path(&ws_url, &server.rpc_context().auth_path);
+    register_server_auth_path(&ws_url, &server.capability_context().auth_path);
 
     (ws_url, server, vec![bridge_handle, server_handle])
 }
@@ -519,10 +527,22 @@ async fn rpc_call_with_interleaved_events(
     method: &str,
     params: Option<Value>,
 ) -> (Value, Vec<Value>) {
+    if method.contains("::") {
+        return engine_invoke_call_with_interleaved_events(ws, id, method, params).await;
+    }
+    raw_rpc_call_with_interleaved_events(ws, id, method, params).await
+}
+
+async fn raw_rpc_call_with_interleaved_events(
+    ws: &mut WsStream,
+    id: u64,
+    method: &str,
+    params: Option<Value>,
+) -> (Value, Vec<Value>) {
     let id_str = format!("r{id}");
     let mut req = json!({"id": id_str, "method": method});
-    if method == "system.ping" {
-        req["params"] = params.unwrap_or_else(ping_params);
+    if method == "engine.invoke" {
+        req["params"] = params.unwrap_or_else(|| json!({}));
     } else if let Some(p) = params {
         req["params"] = p;
     }
@@ -537,6 +557,131 @@ async fn rpc_call_with_interleaved_events(
         }
         interleaved.push(parsed);
     }
+}
+
+async fn engine_invoke_call_with_interleaved_events(
+    ws: &mut WsStream,
+    id: u64,
+    function_id: &str,
+    params: Option<Value>,
+) -> (Value, Vec<Value>) {
+    let payload = if function_id == "system::ping" {
+        params.unwrap_or_else(ping_params)
+    } else {
+        params.unwrap_or_else(|| json!({}))
+    };
+    let idempotency_key = integration_idempotency_key(id, function_id, &payload);
+    let mut invoke_params = json!({
+        "functionId": function_id,
+        "payload": payload,
+        "idempotencyKey": idempotency_key,
+    });
+    if let Some(session_id) = invoke_params
+        .pointer("/payload/sessionId")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        && let Some(object) = invoke_params.as_object_mut()
+    {
+        object.insert("sessionId".to_owned(), json!(session_id));
+    }
+    if let Some(workspace_id) = invoke_params
+        .pointer("/payload/workspaceId")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        && let Some(object) = invoke_params.as_object_mut()
+    {
+        object.insert("workspaceId".to_owned(), json!(workspace_id));
+    }
+    let (response, events) =
+        raw_rpc_call_with_interleaved_events(ws, id, "engine.invoke", Some(invoke_params)).await;
+    (unwrap_engine_invoke_response(response), events)
+}
+
+async fn publish_engine_session_event(
+    server: &Arc<TronServer>,
+    session_id: &str,
+    event_type: &str,
+    data: Value,
+) {
+    let event = JsonRpcEvent::new(event_type, Some(session_id.to_owned()), Some(data));
+    server
+        .capability_context()
+        .engine_host
+        .publish_stream_event(tron::engine::PublishStreamEvent {
+            topic: "events.session".to_owned(),
+            payload: json!({
+                "__rpcEvent": event,
+                "sourceEventType": event_type,
+            }),
+            visibility: tron::engine::VisibilityScope::Session,
+            session_id: Some(session_id.to_owned()),
+            workspace_id: None,
+            producer: "integration-test".to_owned(),
+            trace_id: None,
+            parent_invocation_id: None,
+        })
+        .await
+        .expect("publish integration stream event");
+}
+
+fn unwrap_engine_invoke_response(response: Value) -> Value {
+    if response.get("success") != Some(&Value::Bool(true)) {
+        return response;
+    }
+    let Some(child) = response.pointer("/result/child") else {
+        return response;
+    };
+    if !child.get("error").is_none_or(Value::is_null) {
+        let error = child.get("error").unwrap_or(&Value::Null);
+        let kind = error
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("ENGINE_ERROR");
+        let domain_code = error
+            .pointer("/details/code")
+            .and_then(Value::as_str)
+            .filter(|_| kind == "domain_failure");
+        let domain_message = error
+            .pointer("/details/message")
+            .filter(|_| kind == "domain_failure")
+            .cloned();
+        let domain_details = error
+            .pointer("/details/details")
+            .filter(|_| kind == "domain_failure")
+            .cloned();
+        return json!({
+            "id": response.get("id").cloned().unwrap_or(Value::Null),
+            "success": false,
+            "error": {
+                "code": domain_code.map_or_else(|| json!(kind), |code| json!(code)),
+                "message": domain_message
+                    .or_else(|| error.get("message").cloned())
+                    .unwrap_or_else(|| json!("engine invocation failed")),
+                "details": domain_details
+                    .or_else(|| error.get("details").cloned())
+                    .unwrap_or(Value::Null),
+            }
+        });
+    }
+    json!({
+        "id": response.get("id").cloned().unwrap_or(Value::Null),
+        "success": true,
+        "result": child.get("value").cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn integration_idempotency_key(id: u64, function_id: &str, payload: &Value) -> String {
+    let mut hasher = DefaultHasher::new();
+    id.hash(&mut hasher);
+    function_id.hash(&mut hasher);
+    serde_json::to_string(payload)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    format!(
+        "integration:{id}:{}:{:x}",
+        function_id.replace("::", "-"),
+        hasher.finish()
+    )
 }
 
 fn ping_params() -> Value {

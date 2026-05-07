@@ -8,8 +8,8 @@ pub(super) async fn handle(
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, RpcError> {
     match method {
-        "repo.listSessions" => list_sessions(&invocation.payload, deps).await,
-        "repo.getDivergence" => get_divergence(&invocation.payload, deps).await,
+        "repo::list_sessions" => list_sessions(&invocation.payload, deps).await,
+        "repo::get_divergence" => get_divergence(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("repo method {method} is not engine-owned"),
         }),
@@ -19,7 +19,7 @@ pub(super) async fn handle(
 fn require_coordinator(
     deps: &EngineCapabilityDeps,
 ) -> Result<&crate::worktree::WorktreeCoordinator, RpcError> {
-    deps.rpc_context
+    deps.capability_context
         .worktree_coordinator
         .as_deref()
         .ok_or_else(|| RpcError::Internal {
