@@ -7,19 +7,29 @@
 //! sandboxing yet.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
+use async_trait::async_trait;
 use serde_json::Value;
 
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::host::EngineHostHandle;
 use super::ids::{ActorId, InvocationId, WorkerId};
+use super::invocation::{InProcessFunctionHandler, Invocation};
 use super::protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION,
     WorkerCatalogChange, WorkerDisconnect, WorkerHeartbeat, WorkerHello, WorkerInvocationResult,
-    WorkerProtocolMessage,
+    WorkerInvoke, WorkerProtocolMessage,
 };
 use super::types::VisibilityScope;
+
+/// Transport adapter used to invoke a connected local external worker.
+#[async_trait]
+pub trait ExternalWorkerInvoker: Send + Sync {
+    /// Send one invocation to the worker and wait for its result.
+    async fn invoke(&self, invoke: WorkerInvoke) -> Result<WorkerInvocationResult>;
+}
 
 /// Runtime state for one connected local external worker.
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +52,7 @@ pub struct ExternalWorkerConnection {
 pub struct EngineExternalWorkerRuntime {
     host: EngineHostHandle,
     connections: BTreeMap<WorkerId, ExternalWorkerConnection>,
+    invokers: BTreeMap<WorkerId, Arc<dyn ExternalWorkerInvoker>>,
 }
 
 impl EngineExternalWorkerRuntime {
@@ -51,7 +62,24 @@ impl EngineExternalWorkerRuntime {
         Self {
             host,
             connections: BTreeMap::new(),
+            invokers: BTreeMap::new(),
         }
+    }
+
+    /// Attach an executable transport proxy for a connected worker.
+    pub fn attach_invoker(
+        &mut self,
+        worker_id: WorkerId,
+        invoker: Arc<dyn ExternalWorkerInvoker>,
+    ) -> Result<()> {
+        if !self.connections.contains_key(&worker_id) {
+            return Err(EngineError::NotFound {
+                kind: "external worker connection",
+                id: worker_id.to_string(),
+            });
+        }
+        self.invokers.insert(worker_id, invoker);
+        Ok(())
     }
 
     /// Accept a worker hello and return a catalog snapshot visible to the
@@ -140,8 +168,13 @@ impl EngineExternalWorkerRuntime {
             ));
         }
         let id = message.definition.id.to_string();
+        let handler = self.invokers.get(&worker_id).map(|invoker| {
+            Arc::new(ExternalFunctionProxyHandler {
+                invoker: invoker.clone(),
+            }) as Arc<dyn InProcessFunctionHandler>
+        });
         self.host
-            .register_function(message.definition, None, true)
+            .register_function(message.definition, handler, true)
             .await?;
         self.connection_mut(&worker_id)?
             .functions
@@ -193,6 +226,7 @@ impl EngineExternalWorkerRuntime {
         let Some(connection) = self.connections.remove(&disconnect.worker_id) else {
             return Ok(());
         };
+        self.invokers.remove(&disconnect.worker_id);
         self.host
             .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())
             .await?;
@@ -246,5 +280,30 @@ impl EngineExternalWorkerRuntime {
                 kind: "external worker connection",
                 id: worker_id.to_string(),
             })
+    }
+}
+
+struct ExternalFunctionProxyHandler {
+    invoker: Arc<dyn ExternalWorkerInvoker>,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for ExternalFunctionProxyHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
+        let result = self
+            .invoker
+            .invoke(WorkerInvoke {
+                invocation_id: invocation.id.clone(),
+                function_id: invocation.function_id.clone(),
+                payload: invocation.payload.clone(),
+                actor_kind: invocation.causal_context.actor_kind.clone(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                trigger_id: invocation.causal_context.trigger_id.clone(),
+            })
+            .await?;
+        if let Some(error) = result.error {
+            return Err(EngineError::HandlerFailed(error.to_string()));
+        }
+        Ok(result.result.unwrap_or(Value::Null))
     }
 }

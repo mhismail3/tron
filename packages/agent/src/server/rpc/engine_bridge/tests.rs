@@ -8,8 +8,8 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::engine::{
-    ActorContext, ActorKind, DeliveryMode, EffectClass, EngineError, FunctionQuery, Invocation,
-    RiskLevel, VisibilityScope,
+    ActorContext, ActorKind, CausalContext, DeliveryMode, EffectClass, EngineError, FunctionId,
+    FunctionQuery, Invocation, RiskLevel, TraceId, VisibilityScope,
 };
 use crate::server::codex_app::{
     CodexAppServerChild, CodexAppServerExit, CodexAppServerLaunchSpec, CodexAppServerManager,
@@ -19,6 +19,11 @@ use crate::server::rpc::handlers;
 use crate::server::rpc::handlers::test_helpers::make_test_context;
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 use crate::server::rpc::types::RpcRequest;
+use crate::tools::errors::ToolError;
+use crate::tools::traits::{
+    ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult, ProcessInfo, ProcessKind,
+    ProcessManagerOps,
+};
 
 const GENERIC_READ_METHODS: &[&str] = &[
     "system.ping",
@@ -43,6 +48,9 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "context.shouldCompact",
     "context.previewCompaction",
     "context.canAcceptTurn",
+    "agent.status",
+    "approval.get",
+    "approval.list",
     "filesystem.listDir",
     "filesystem.getHome",
     "file.read",
@@ -65,14 +73,20 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "session.archive",
     "session.unarchive",
     "session.archiveOlderThan",
+    "agent.abort",
+    "agent.abortTool",
     "agent.queuePrompt",
     "agent.dequeuePrompt",
     "agent.clearQueue",
+    "agent.deliverSubagentResults",
+    "agent.submitConfirmation",
+    "agent.submitAnswers",
     "context.confirmCompaction",
     "context.clear",
     "context.compact",
     "job.background",
     "job.cancel",
+    "approval.resolve",
     "settings.update",
     "settings.resetToDefaults",
     "skill.refresh",
@@ -238,6 +252,75 @@ impl CodexAppServerChild for SettingsFakeChild {
     }
 }
 
+#[derive(Default)]
+struct QueueJobFakeProcessManager {
+    promoted: Mutex<Vec<String>>,
+    cancelled: Mutex<Vec<(String, bool)>>,
+    processes: Mutex<Vec<ProcessInfo>>,
+}
+
+#[async_trait]
+impl ProcessManagerOps for QueueJobFakeProcessManager {
+    async fn spawn_managed(
+        &self,
+        _session_id: &str,
+        _tool_call_id: &str,
+        _config: ManagedProcessConfig,
+        _task: std::pin::Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
+    ) -> Result<ManagedProcessHandle, ToolError> {
+        Ok(ManagedProcessHandle {
+            process_id: "unused".to_owned(),
+            result: None,
+            backgrounded: None,
+        })
+    }
+
+    fn promote_to_background(&self, process_id: &str) -> Result<(), ToolError> {
+        self.promoted.lock().unwrap().push(process_id.to_owned());
+        Ok(())
+    }
+
+    fn cancel_process(&self, process_id: &str, user_initiated: bool) -> Result<(), ToolError> {
+        self.cancelled
+            .lock()
+            .unwrap()
+            .push((process_id.to_owned(), user_initiated));
+        Ok(())
+    }
+
+    fn list_processes(&self, session_id: &str) -> Vec<ProcessInfo> {
+        self.processes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|process| process.session_id == session_id)
+            .cloned()
+            .collect()
+    }
+
+    fn get_result(&self, _process_id: &str) -> Option<ManagedProcessResult> {
+        None
+    }
+
+    fn find_by_label(&self, _session_id: &str, _label_prefix: &str) -> Option<String> {
+        None
+    }
+
+    fn cancel_session_processes(&self, _session_id: &str) {}
+
+    fn cancel_all(&self) {}
+
+    async fn wait_for_process(
+        &self,
+        process_id: &str,
+        _timeout_ms: u64,
+    ) -> Result<ManagedProcessResult, ToolError> {
+        Err(ToolError::Validation {
+            message: format!("process {process_id} was not started by this test"),
+        })
+    }
+}
+
 fn attach_codex_manager(
     ctx: &mut crate::server::rpc::context::RpcContext,
     token_dir: &tempfile::TempDir,
@@ -341,7 +424,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
-    assert_eq!(registry.methods().len(), 167);
+    assert_eq!(registry.methods().len(), 170);
     assert_eq!(specs.len(), registry.methods().len());
 
     let spec_methods = specs
@@ -350,7 +433,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
         .collect::<BTreeSet<_>>();
     let registry_methods = registry.methods().into_iter().collect::<BTreeSet<_>>();
     assert_eq!(spec_methods, registry_methods);
-    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 66);
+    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 75);
 }
 
 #[test]
@@ -395,9 +478,14 @@ fn bridge_specs_classify_generic_writes_as_generic_triggers() {
         assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert_eq!(spec.visibility, VisibilityScope::System);
         assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
-        assert!(
+        let expected_write_scope = if *method == "approval.resolve" {
+            Some("approval.resolve")
+        } else {
             spec.authority_scope
-                .is_some_and(|scope| scope.ends_with(".write")),
+                .filter(|scope| scope.ends_with(".write"))
+        };
+        assert!(
+            expected_write_scope.is_some(),
             "{method} must require a domain write scope"
         );
         assert_eq!(
@@ -1042,6 +1130,132 @@ async fn generic_trigger_strict_request_schemas_reject_unknown_fields() {
     let error = response.error.unwrap();
     assert_eq!(error.code, errors::INVALID_PARAMS);
     assert!(error.message.contains("additional property"));
+}
+
+#[tokio::test]
+async fn approval_rpc_methods_route_to_engine_approval_primitive() {
+    let ctx = make_test_context();
+    let request = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("approval::request").unwrap(),
+            json!({
+                "functionId": "system::ping",
+                "payload": {"protocolVersion": 1}
+            }),
+            CausalContext::new(
+                specs::actor_id("agent:test").unwrap(),
+                ActorKind::Agent,
+                specs::grant_id("agent-test").unwrap(),
+                TraceId::generate(),
+            )
+            .with_scope("approval.request")
+            .with_session_id("approval-session")
+            .with_idempotency_key("approval-rpc-test"),
+        ))
+        .await;
+    assert!(request.error.is_none(), "{:?}", request.error);
+    let approval_id = request.value.as_ref().unwrap()["approval"]["approvalId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let get = rpc_dispatch_value(&ctx, "approval.get", json!({"approvalId": approval_id})).await;
+    assert_eq!(get["approval"]["status"], "pending");
+    let list = rpc_dispatch_value(&ctx, "approval.list", json!({"status": "pending"})).await;
+    assert!(
+        list["approvals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|record| record["approvalId"] == approval_id)
+    );
+    let resolved = rpc_dispatch_value(
+        &ctx,
+        "approval.resolve",
+        json!({"approvalId": approval_id, "decision": "deny"}),
+    )
+    .await;
+    assert_eq!(resolved["approval"]["status"], "denied");
+    assert!(resolved["child"].is_null());
+}
+
+#[tokio::test]
+async fn job_background_queues_hidden_apply_and_replays_transport_retry() {
+    let mut ctx = make_test_context();
+    let session_id = ctx
+        .session_manager
+        .create_session("model", "/tmp", Some("jobs"), None)
+        .unwrap();
+    let process_manager = Arc::new(QueueJobFakeProcessManager::default());
+    process_manager.processes.lock().unwrap().push(ProcessInfo {
+        process_id: "job-1".to_owned(),
+        label: "demo".to_owned(),
+        kind: ProcessKind::ToolOperation,
+        state: "foreground".to_owned(),
+        elapsed_ms: 0,
+        session_id: session_id.clone(),
+        tool_call_id: "tool-1".to_owned(),
+    });
+    ctx.process_manager = Some(process_manager.clone());
+    let registry = migration_parity_registry();
+    register_rpc_worker_for_context(&ctx, &registry).unwrap();
+
+    let request = RpcRequest {
+        id: "job-background-retry".to_owned(),
+        method: "job.background".to_owned(),
+        params: Some(json!({"sessionId": session_id, "jobId": "job-1"})),
+    };
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(first.result.as_ref().unwrap()["backgrounded"], true);
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+    assert_eq!(
+        process_manager.promoted.lock().unwrap().as_slice(),
+        ["job-1"],
+        "duplicate transport retry must replay without re-promoting"
+    );
+}
+
+#[tokio::test]
+async fn job_cancel_queues_hidden_apply_and_replays_transport_retry() {
+    let mut ctx = make_test_context();
+    let session_id = ctx
+        .session_manager
+        .create_session("model", "/tmp", Some("jobs"), None)
+        .unwrap();
+    let process_manager = Arc::new(QueueJobFakeProcessManager::default());
+    process_manager.processes.lock().unwrap().push(ProcessInfo {
+        process_id: "job-2".to_owned(),
+        label: "demo".to_owned(),
+        kind: ProcessKind::ToolOperation,
+        state: "foreground".to_owned(),
+        elapsed_ms: 0,
+        session_id: session_id.clone(),
+        tool_call_id: "tool-2".to_owned(),
+    });
+    ctx.process_manager = Some(process_manager.clone());
+    let registry = migration_parity_registry();
+    register_rpc_worker_for_context(&ctx, &registry).unwrap();
+
+    let request = RpcRequest {
+        id: "job-cancel-retry".to_owned(),
+        method: "job.cancel".to_owned(),
+        params: Some(json!({"sessionId": session_id, "jobId": "job-2"})),
+    };
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(first.result.as_ref().unwrap()["cancelled"], true);
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+    assert_eq!(
+        process_manager.cancelled.lock().unwrap().as_slice(),
+        [("job-2".to_owned(), true)],
+        "duplicate transport retry must replay without re-cancelling"
+    );
 }
 
 #[tokio::test]

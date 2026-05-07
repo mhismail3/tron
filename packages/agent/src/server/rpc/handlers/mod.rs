@@ -5,9 +5,10 @@
 //! ## `register_core` — Session and agent lifecycle
 //!
 //! `system` (ping, info, shutdown), `session` (CRUD, fork, archive, export
-//! generic except resume), `agent` (prompt/abort direct; queue controls
-//! generic), `model` (list, switch), `context` (snapshot and compaction
-//! generic), `events`, `settings`, `tool` (result), `message`, `memory`, `logs`
+//! generic except resume), `agent` (prompt direct; status/abort/tool/submission
+//! controls generic), `model` (list, switch), `context` (snapshot and
+//! compaction generic), `events`, `settings`, `approval`, `tool` (result),
+//! `message`, `memory`, `logs`
 //!
 //! ## `register_capabilities` — Domain features
 //!
@@ -20,13 +21,15 @@
 //!
 //! ## `register_platform` — Platform-specific
 //!
-//! `browser` (stream), `worktree` (git), `job` (fully generic),
+//! `browser` (stream), `worktree` (git), `job` (fully generic and queue-backed),
 //! `transcription`, `device` (push tokens), `notifications` and `plan`
 //! (fully generic), `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
+#[cfg(test)]
 pub mod agent_confirmation;
 pub mod agent_queue;
+#[cfg(test)]
 pub mod agent_subagent;
 pub mod auth;
 pub mod blob;
@@ -146,9 +149,15 @@ fn register_core(registry: &mut MethodRegistry) {
     );
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
-    registry.register("agent.abort", agent::AbortHandler);
-    registry.register("agent.abortTool", agent::AbortToolHandler);
-    registry.register("agent.status", agent::StatusHandler);
+    registry.register("agent.abort", RpcGenericTriggerHandler::new("agent.abort"));
+    registry.register(
+        "agent.abortTool",
+        RpcGenericTriggerHandler::new("agent.abortTool"),
+    );
+    registry.register(
+        "agent.status",
+        RpcGenericTriggerHandler::new("agent.status"),
+    );
     registry.register(
         "agent.queuePrompt",
         RpcGenericTriggerHandler::new("agent.queuePrompt"),
@@ -163,15 +172,15 @@ fn register_core(registry: &mut MethodRegistry) {
     );
     registry.register(
         "agent.deliverSubagentResults",
-        agent_subagent::DeliverSubagentResultsHandler,
+        RpcGenericTriggerHandler::new("agent.deliverSubagentResults"),
     );
     registry.register(
         "agent.submitConfirmation",
-        agent_confirmation::SubmitConfirmationHandler,
+        RpcGenericTriggerHandler::new("agent.submitConfirmation"),
     );
     registry.register(
         "agent.submitAnswers",
-        agent_confirmation::SubmitAnswersHandler,
+        RpcGenericTriggerHandler::new("agent.submitAnswers"),
     );
 
     // Model
@@ -251,6 +260,20 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register(
         "settings.resetToDefaults",
         RpcGenericTriggerHandler::new("settings.resetToDefaults"),
+    );
+
+    // Approval
+    registry.register(
+        "approval.get",
+        RpcGenericTriggerHandler::new("approval.get"),
+    );
+    registry.register(
+        "approval.list",
+        RpcGenericTriggerHandler::new("approval.list"),
+    );
+    registry.register(
+        "approval.resolve",
+        RpcGenericTriggerHandler::new("approval.resolve"),
     );
 
     // Auth
@@ -560,8 +583,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            167,
-            "expected 167 methods, got {}",
+            170,
+            "expected 170 methods, got {}",
             reg.methods().len()
         );
     }

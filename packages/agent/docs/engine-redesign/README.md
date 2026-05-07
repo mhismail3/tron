@@ -149,7 +149,8 @@ in-process expression of the live capability fabric:
 - owner-tracked workers, functions, trigger types, and triggers;
 - function metadata for effect class, risk, visibility, idempotency, health,
   provenance, and revision;
-- async sync-call invocation only, with queue/void/external workers deferred;
+- async sync-call invocation first, with queues, streams, approval, and local
+  external workers added once the host/ledger invariants were stable;
 - no broad tool, runtime, or client rewrite yet; RPC migration begins only
   with classified compatibility functions and low-risk read adapters that keep
   existing wire payloads stable.
@@ -225,8 +226,10 @@ first-class workers.
 - `protocol.rs` and `external.rs` define the loopback-only external worker
   contract/runtime for hello, catalog snapshot, session-default
   function/trigger registration, invoke/result, catalog change, heartbeat, and
-  disconnect cleanup. No sandbox or arbitrary remote worker execution has
-  landed.
+  disconnect cleanup. The server now exposes the local `/engine/workers`
+  WebSocket endpoint for authenticated loopback workers, and registered
+  functions receive executable proxy handlers over that socket; sandbox and
+  remote worker hosting remain deferred.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
 - `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
@@ -236,10 +239,11 @@ first-class workers.
   handler-only inventory, the `json_rpc` and `manual` trigger types, and
   `json_rpc` trigger bindings from legacy method names into canonical targets.
   Handler-only methods remain internal/non-routable until their behavior moves.
-  Prompt library, settings, logs, skills, notifications, plan, events, basic
-  filesystem, safe session reads, safe context reads, and job list/subscription
-  controls are generic-triggered. Migrated writes use `rpc.write`, strict
-  schemas, domain write scopes, and scoped engine-ledger idempotency;
+  Prompt library, settings, logs, skills, notifications, plan, approval
+  get/list/resolve, events, basic filesystem, safe session reads, safe context
+  reads, job controls, and agent status/abort/submission controls are
+  generic-triggered. Migrated writes use `rpc.write`, strict schemas, domain
+  write scopes, and scoped engine-ledger idempotency;
   superseded method-specific business handlers are deleted as each group
   migrates.
 - `tools/engine` adds first-party agent tools: `engine_discover`,
@@ -345,16 +349,29 @@ Implemented:
   previewCompaction/canAcceptTurn/confirmCompaction/clear/compact` are now
   canonical `context::*` functions with approval metadata on high-risk effects;
 - job collapse: `job.background/cancel/list/subscribe/unsubscribe` are
-  canonical `job::*` functions that preserve current job/process-manager
-  behavior, publish job stream events, and use engine-ledger idempotency;
-- agent queue collapse: `agent.queuePrompt/dequeuePrompt/clearQueue` are
-  canonical `agent::*` functions with session-scoped idempotency and stream
-  publication while prompt execution/abort remain deferred;
+  canonical `job::*` functions; background/cancel enqueue hidden internal
+  apply functions, synchronously drain their own receipt for current JSON-RPC
+  compatibility, publish job/queue stream events, and use engine-ledger
+  idempotency;
+- agent command collapse: `agent.status/abort/abortTool/queuePrompt/
+  dequeuePrompt/clearQueue/deliverSubagentResults/submitConfirmation/
+  submitAnswers` are canonical `agent::*` functions with strict schemas,
+  session-scoped idempotency for writes, approval metadata where high risk, and
+  stream publication for queue state; `agent.prompt` remains handler-owned
+  until the full turn runtime is collapsed;
 - approval runtime: `approval::request/resolve/get/list` records high-risk
   agent-visible pauses in the engine ledger, publishes scoped approval stream
   events, and resumes approved invocations with their original trace/authority/
   parent/idempotency context; agents can request approvals but resolution is
   reserved for system/admin or user-authorized actors;
+- approval RPC transport: `approval.get`, `approval.list`, and
+  `approval.resolve` are additive JSON-RPC trigger bindings over the existing
+  `approval::*` primitive functions; `approval.request` intentionally remains
+  agent/tool-only;
+- server runtime services: `EngineRuntimeServices` starts queue drainers for
+  `default` and `jobs` plus a stream pump for approvals, jobs, agent queue,
+  session events, and catalog topics so engine primitives drive runtime
+  behavior instead of staying test-only stores;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -367,12 +384,15 @@ Still deferred:
 - RPC migrations and generic-trigger conversion for the remaining handler-only
   method groups beyond prompt library, settings, logs, skills, notifications,
   plan, events, basic filesystem, session commands/reads except resume, context
-  commands/reads, job controls, and agent queue controls;
+  commands/reads, job controls, and current agent command controls except
+  prompt;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
-- void delivery execution and production queue-backed agent/background jobs;
-- sandbox workers, remote worker sockets, and durable reconnect semantics for
-  external workers beyond the local loopback runtime;
+- full engine-owned `agent.prompt` turn execution and queue-backed prompt
+  draining;
+- sandbox workers, remote worker hosting, durable reconnect semantics, and
+  stronger executable-worker supervision beyond the authenticated local
+  loopback endpoint;
 - trigger firing/runtime loop detection;
 - reconstruction of live catalog definitions from durable ledger state.
 

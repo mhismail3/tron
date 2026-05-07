@@ -3671,3 +3671,73 @@ async fn local_external_worker_runtime_registers_session_functions_and_disconnec
         Err(EngineError::NotFound { .. })
     ));
 }
+
+struct EchoExternalInvoker;
+
+#[async_trait]
+impl super::external::ExternalWorkerInvoker for EchoExternalInvoker {
+    async fn invoke(&self, invoke: super::WorkerInvoke) -> Result<super::WorkerInvocationResult> {
+        Ok(super::WorkerInvocationResult {
+            invocation_id: invoke.invocation_id,
+            result: Some(json!({
+                "functionId": invoke.function_id,
+                "payload": invoke.payload,
+                "traceId": invoke.trace_id,
+            })),
+            error: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn local_external_worker_runtime_registers_executable_proxy_handler() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("local-exec-worker");
+    runtime
+        .hello(super::WorkerHello {
+            protocol_version: super::WORKER_PROTOCOL_VERSION,
+            worker: WorkerDefinition::new(
+                worker_id.clone(),
+                WorkerKind::External,
+                actor("owner"),
+                grant("external-grant"),
+            )
+            .with_namespace_claim("local_exec"),
+            loopback_only: true,
+        })
+        .await
+        .unwrap();
+    runtime
+        .attach_invoker(worker_id.clone(), Arc::new(EchoExternalInvoker))
+        .unwrap();
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: FunctionDefinition::new(
+                fid("local_exec::echo"),
+                worker_id,
+                "executable external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )
+            .with_provenance(Provenance::system().with_session_id("session-a")),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+
+    let result = handle
+        .invoke(Invocation::new_sync(
+            fid("local_exec::echo"),
+            json!({"hello": "worker"}),
+            causal()
+                .with_scope("local_exec.read")
+                .with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+    assert_eq!(
+        result.value.as_ref().unwrap()["payload"],
+        json!({"hello": "worker"})
+    );
+}

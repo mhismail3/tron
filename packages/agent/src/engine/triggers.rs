@@ -11,7 +11,7 @@ use super::errors::EngineError;
 use super::host::EngineHostHandle;
 use super::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
 use super::invocation::{CausalContext, Invocation, InvocationResult};
-use super::queue::EnqueueInvocation;
+use super::queue::{EnqueueInvocation, publish_queue_lifecycle_event};
 use super::types::{DeliveryMode, FunctionRevision, TriggerDefinition};
 
 struct PreparedTriggerInvocation {
@@ -107,7 +107,10 @@ impl EngineTriggerRuntime {
                     idempotency_key: invocation.causal_context.idempotency_key.clone(),
                 };
                 match handle.enqueue_invocation(enqueue).await {
-                    Ok(item) => handle.record_enqueued_invocation(invocation, &item).await,
+                    Ok(item) => {
+                        publish_queue_lifecycle_event(handle, "enqueue", &item, None).await;
+                        handle.record_enqueued_invocation(invocation, &item).await
+                    }
                     Err(error) => {
                         handle
                             .record_trigger_prepare_failure(

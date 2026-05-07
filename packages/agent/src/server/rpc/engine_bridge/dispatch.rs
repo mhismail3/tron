@@ -63,8 +63,9 @@ impl RpcEngineInvocation {
                 spec.method
             ),
         })?;
-        let mut causal_context = rpc_causal_context_for_scope(transport_authority_scope)
-            .with_scope(domain_authority_scope);
+        let mut causal_context =
+            rpc_causal_context_for_method(spec.method, transport_authority_scope)
+                .with_scope(domain_authority_scope);
         if let Some(session_id) = extract_string(&params_payload, "sessionId") {
             causal_context = causal_context.with_session_id(session_id);
         }
@@ -207,10 +208,25 @@ pub(super) fn rpc_causal_context() -> CausalContext {
     rpc_causal_context_for_scope(super::RPC_READ_AUTHORITY)
 }
 
+#[cfg(test)]
 pub(super) fn rpc_causal_context_for_scope(scope: &str) -> CausalContext {
+    rpc_causal_context_for_method("rpc.transport", scope)
+}
+
+fn rpc_causal_context_for_method(method: &str, scope: &str) -> CausalContext {
+    let actor_kind = if method.starts_with("approval.") {
+        ActorKind::User
+    } else {
+        ActorKind::Client
+    };
+    let actor_id = if method.starts_with("approval.") {
+        "rpc-user"
+    } else {
+        "rpc-client"
+    };
     CausalContext::new(
-        specs::actor_id("rpc-client").expect("valid static rpc actor id"),
-        ActorKind::Client,
+        specs::actor_id(actor_id).expect("valid static rpc actor id"),
+        actor_kind,
         specs::grant_id(RPC_AUTHORITY_GRANT).expect("valid static rpc grant id"),
         TraceId::generate(),
     )

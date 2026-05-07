@@ -240,6 +240,18 @@ impl QueueStoreBackend {
         }
     }
 
+    fn claim_by_receipt(
+        &mut self,
+        receipt_id: &str,
+        lease_owner: &str,
+        lease_ms: i64,
+    ) -> Result<Option<EngineQueueItem>> {
+        match self {
+            Self::InMemory(store) => store.claim_by_receipt(receipt_id, lease_owner, lease_ms),
+            Self::Sqlite(store) => store.claim_by_receipt(receipt_id, lease_owner, lease_ms),
+        }
+    }
+
     fn complete(&mut self, receipt_id: &str) -> Result<bool> {
         match self {
             Self::InMemory(store) => store.complete(receipt_id),
@@ -853,6 +865,20 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
             .claim(queue, lease_owner, lease_ms)
+    }
+
+    /// Claim a queue item by receipt.
+    pub async fn claim_queue_item_by_receipt(
+        &self,
+        receipt_id: &str,
+        lease_owner: &str,
+        lease_ms: i64,
+    ) -> Result<Option<EngineQueueItem>> {
+        let store = self.inner.lock().await.primitives.queue.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+            .claim_by_receipt(receipt_id, lease_owner, lease_ms)
     }
 
     /// Complete a queue item.
@@ -2212,54 +2238,66 @@ fn primitive_function_definitions(
             approval_handler.clone(),
         ),
         (
-            primitive_function(
-                APPROVAL_RESOLVE_FUNCTION,
-                APPROVAL_WORKER_ID,
-                "resolve and optionally resume an approval",
-                EffectClass::IdempotentWrite,
-                "approval.resolve",
-            )
-            .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .with_risk(RiskLevel::High)
-            .with_request_schema(approval_resolve_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["approval", "child"],
-                "additionalProperties": false,
-                "properties": {
-                    "approval": {"type": "object"},
-                    "child": {}
-                }
-            })),
+            {
+                let mut definition = primitive_function(
+                    APPROVAL_RESOLVE_FUNCTION,
+                    APPROVAL_WORKER_ID,
+                    "resolve and optionally resume an approval",
+                    EffectClass::IdempotentWrite,
+                    "approval.resolve",
+                )
+                .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+                .with_risk(RiskLevel::High)
+                .with_request_schema(approval_resolve_schema())
+                .with_response_schema(json!({
+                    "type": "object",
+                    "required": ["approval", "child"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "approval": {"type": "object"},
+                        "child": {}
+                    }
+                }));
+                definition.visibility = VisibilityScope::System;
+                definition
+            },
             approval_handler.clone(),
         ),
         (
-            primitive_function(
-                APPROVAL_GET_FUNCTION,
-                APPROVAL_WORKER_ID,
-                "get one approval record",
-                EffectClass::PureRead,
-                "approval.read",
-            )
-            .with_request_schema(approval_get_schema())
-            .with_response_schema(approval_nullable_response_schema()),
+            {
+                let mut definition = primitive_function(
+                    APPROVAL_GET_FUNCTION,
+                    APPROVAL_WORKER_ID,
+                    "get one approval record",
+                    EffectClass::PureRead,
+                    "approval.read",
+                )
+                .with_request_schema(approval_get_schema())
+                .with_response_schema(approval_nullable_response_schema());
+                definition.visibility = VisibilityScope::System;
+                definition
+            },
             approval_handler.clone(),
         ),
         (
-            primitive_function(
-                APPROVAL_LIST_FUNCTION,
-                APPROVAL_WORKER_ID,
-                "list approval records",
-                EffectClass::PureRead,
-                "approval.read",
-            )
-            .with_request_schema(approval_list_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["approvals"],
-                "additionalProperties": false,
-                "properties": {"approvals": {"type": "array"}}
-            })),
+            {
+                let mut definition = primitive_function(
+                    APPROVAL_LIST_FUNCTION,
+                    APPROVAL_WORKER_ID,
+                    "list approval records",
+                    EffectClass::PureRead,
+                    "approval.read",
+                )
+                .with_request_schema(approval_list_schema())
+                .with_response_schema(json!({
+                    "type": "object",
+                    "required": ["approvals"],
+                    "additionalProperties": false,
+                    "properties": {"approvals": {"type": "array"}}
+                }));
+                definition.visibility = VisibilityScope::System;
+                definition
+            },
             approval_handler,
         ),
     ])
@@ -2874,7 +2912,9 @@ fn approval_resolve_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "approvalId": {"type": "string"},
-            "decision": {"type": "string", "enum": ["approve", "deny"]}
+            "decision": {"type": "string", "enum": ["approve", "deny"]},
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"}
         }
     })
 }
@@ -2884,7 +2924,11 @@ fn approval_get_schema() -> Value {
         "type": "object",
         "required": ["approvalId"],
         "additionalProperties": false,
-        "properties": {"approvalId": {"type": "string"}}
+        "properties": {
+            "approvalId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
     })
 }
 
@@ -2895,7 +2939,8 @@ fn approval_list_schema() -> Value {
         "properties": {
             "status": {"type": "string"},
             "sessionId": {"type": "string"},
-            "limit": {"type": "integer"}
+            "limit": {"type": "integer"},
+            "workspaceId": {"type": "string"}
         }
     })
 }

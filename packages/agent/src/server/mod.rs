@@ -20,6 +20,8 @@
 //! | `cron_adapters` | Server transport adapters for cron WebSocket/APNS callbacks                      |
 //! | `device`      | iOS push-device registry; APNs token storage                                       |
 //! | `disk`        | Disk-space probes for health diagnostics                                           |
+//! | `engine_runtime` | Queue drainers and stream pump for engine primitives                           |
+//! | `external_workers` | Loopback-only engine worker WebSocket endpoint                              |
 //! | `health`      | `/health` JSON producer (DB ok, RPC count, version)                                |
 //! | `metrics`     | Prometheus recorder install + `/metrics` exporter                                  |
 //! | `onboarding`  | Per-server bearer-token lifecycle + first-run sentinel                             |
@@ -39,6 +41,8 @@ pub mod cron_adapters;
 pub mod device;
 #[path = "ops/disk.rs"]
 pub mod disk;
+pub mod engine_runtime;
+pub mod external_workers;
 #[path = "ops/health.rs"]
 pub mod health;
 #[path = "app/metrics.rs"]

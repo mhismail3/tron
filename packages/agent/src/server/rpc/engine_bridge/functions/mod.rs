@@ -47,9 +47,11 @@ mod system;
 
 #[derive(Clone)]
 pub(super) struct RpcEngineDeps {
+    rpc_context: Arc<RpcContext>,
     orchestrator: Arc<Orchestrator>,
     session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
+    agent_deps: Option<crate::server::rpc::context::AgentDeps>,
     skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
     profile_runtime: Arc<ProfileRuntime>,
     server_start_time: Instant,
@@ -70,9 +72,11 @@ pub(super) struct RpcEngineDeps {
 impl RpcEngineDeps {
     pub(super) fn from_context(ctx: &RpcContext) -> Self {
         Self {
+            rpc_context: Arc::new(ctx.clone()),
             orchestrator: Arc::clone(&ctx.orchestrator),
             session_manager: Arc::clone(&ctx.session_manager),
             event_store: Arc::clone(&ctx.event_store),
+            agent_deps: ctx.agent_deps.clone(),
             skill_registry: Arc::clone(&ctx.skill_registry),
             profile_runtime: Arc::clone(&ctx.profile_runtime),
             server_start_time: ctx.server_start_time,
@@ -121,9 +125,15 @@ async fn rpc_function_value(
         "model.list" => model::handle(method, invocation, deps, allow_rpc_context).await,
         "skill.list" | "skill.get" | "skill.refresh" | "skill.activate" | "skill.deactivate"
         | "skill.active" => skills::handle(method, invocation, deps).await,
-        "agent.queuePrompt" | "agent.dequeuePrompt" | "agent.clearQueue" => {
-            agent::handle(method, invocation, deps).await
-        }
+        "agent.status"
+        | "agent.abort"
+        | "agent.abortTool"
+        | "agent.queuePrompt"
+        | "agent.dequeuePrompt"
+        | "agent.clearQueue"
+        | "agent.deliverSubagentResults"
+        | "agent.submitConfirmation"
+        | "agent.submitAnswers" => agent::handle(method, invocation, deps).await,
         "logs.ingest" | "logs.recent" => logs::handle(method, invocation, deps).await,
         "events.getHistory" | "events.getSince" | "events.append" => {
             events::handle(method, invocation, deps).await
@@ -154,9 +164,13 @@ async fn rpc_function_value(
         | "context.confirmCompaction"
         | "context.clear"
         | "context.compact" => context::handle(method, invocation, deps).await,
-        "job.background" | "job.cancel" | "job.list" | "job.subscribe" | "job.unsubscribe" => {
-            job::handle(method, invocation, deps).await
-        }
+        "job.background"
+        | "job.cancel"
+        | "job.background.apply"
+        | "job.cancel.apply"
+        | "job.list"
+        | "job.subscribe"
+        | "job.unsubscribe" => job::handle(method, invocation, deps).await,
         "notifications.list" | "notifications.markRead" | "notifications.markAllRead" => {
             notifications::handle(method, invocation, deps).await
         }

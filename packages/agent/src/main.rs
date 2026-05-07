@@ -1018,13 +1018,16 @@ async fn main() -> Result<()> {
     // Phase 5: Build and start server
     let mut registry = MethodRegistry::new();
     tron::server::rpc::handlers::register_all(&mut registry);
-    tron::server::rpc::engine_bridge::register_rpc_worker_for_context(&rpc_context, &registry)
-        .context("Failed to register RPC engine bridge")?;
     let method_count = registry.methods().len();
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = tron::server::metrics::install_recorder();
     let server = TronServer::new(config, registry, rpc_context, metrics_handle);
+    tron::server::rpc::engine_bridge::register_rpc_worker_for_context(
+        server.rpc_context(),
+        server.registry(),
+    )
+    .context("Failed to register RPC engine bridge")?;
     register_blocking_supervisor_shutdown(server.shutdown());
     if let Some(codex_app_server) = server.rpc_context().codex_app_server.clone() {
         if let Err(error) = codex_app_server.start().await {
@@ -1066,6 +1069,7 @@ async fn main() -> Result<()> {
         orchestrator_for_bridge.turn_accumulators().clone(),
     );
     let bridge_handle = tokio::spawn(bridge.run());
+    tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
     // Wire cron broadcaster and shutdown forwarding
     cron.scheduler.set_broadcaster(Arc::new(

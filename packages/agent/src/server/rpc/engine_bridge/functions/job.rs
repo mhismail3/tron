@@ -1,5 +1,8 @@
 use super::*;
 
+use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::queue::publish_queue_lifecycle_event;
+use crate::engine::{EngineQueueDrainer, EnqueueInvocation, FunctionId};
 use tokio_util::sync::CancellationToken;
 
 static ACTIVE_SUBSCRIPTIONS: std::sync::LazyLock<dashmap::DashMap<String, CancellationToken>> =
@@ -12,8 +15,26 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
-        "job.background" => job_background_value(Some(payload), invocation, deps).await,
-        "job.cancel" => job_cancel_value(Some(payload), invocation, deps).await,
+        "job.background" => {
+            enqueue_and_sync_drain_job_apply(
+                "job::background_apply",
+                "job.background.apply",
+                invocation,
+                deps,
+            )
+            .await
+        }
+        "job.cancel" => {
+            enqueue_and_sync_drain_job_apply(
+                "job::cancel_apply",
+                "job.cancel.apply",
+                invocation,
+                deps,
+            )
+            .await
+        }
+        "job.background.apply" => job_background_apply_value(Some(payload), invocation, deps).await,
+        "job.cancel.apply" => job_cancel_apply_value(Some(payload), invocation, deps).await,
         "job.list" => job_list_value(Some(payload), deps),
         "job.subscribe" => job_subscribe_value(Some(payload), deps).await,
         "job.unsubscribe" => job_unsubscribe_value(Some(payload)),
@@ -23,7 +44,68 @@ pub(super) async fn handle(
     }
 }
 
-async fn job_background_value(
+async fn enqueue_and_sync_drain_job_apply(
+    function_id: &str,
+    idempotency_prefix: &str,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let function_id = FunctionId::new(function_id).map_err(|e| RpcError::Internal {
+        message: e.to_string(),
+    })?;
+    let mut authority_scopes = invocation.causal_context.authority_scopes.clone();
+    if !authority_scopes
+        .iter()
+        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
+    {
+        authority_scopes.push(ENGINE_INTERNAL_INVOKE_SCOPE.to_owned());
+    }
+    let item = deps
+        .engine_host
+        .enqueue_invocation(EnqueueInvocation {
+            queue: "jobs".to_owned(),
+            function_id,
+            target_revision: None,
+            payload: invocation.payload.clone(),
+            actor_id: invocation.causal_context.actor_id.clone(),
+            actor_kind: invocation.causal_context.actor_kind.clone(),
+            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+            authority_scopes,
+            trace_id: invocation.causal_context.trace_id.clone(),
+            parent_invocation_id: Some(invocation.id.clone()),
+            trigger_id: invocation.causal_context.trigger_id.clone(),
+            session_id: invocation.causal_context.session_id.clone(),
+            workspace_id: invocation.causal_context.workspace_id.clone(),
+            idempotency_key: Some(format!("{idempotency_prefix}:{}", invocation.id)),
+        })
+        .await
+        .map_err(super::super::engine_error_to_rpc)?;
+    publish_queue_lifecycle_event(&deps.engine_host, "enqueue", &item, None).await;
+
+    let drained = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        EngineQueueDrainer::drain_receipt(&deps.engine_host, &item.receipt_id, "rpc-job-sync"),
+    )
+    .await
+    .map_err(|_| RpcError::Internal {
+        message: format!(
+            "Timed out waiting for queued job command receipt {}",
+            item.receipt_id
+        ),
+    })?
+    .map_err(super::super::engine_error_to_rpc)?;
+    let Some(result) = drained else {
+        return Err(RpcError::Internal {
+            message: format!(
+                "Queued job command receipt {} was not claimable",
+                item.receipt_id
+            ),
+        });
+    };
+    super::super::result_to_rpc(result)
+}
+
+async fn job_background_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &RpcEngineDeps,
@@ -60,7 +142,7 @@ async fn job_background_value(
     }))
 }
 
-async fn job_cancel_value(
+async fn job_cancel_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &RpcEngineDeps,

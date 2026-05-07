@@ -326,12 +326,13 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **167 methods** across three groups.
+Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **170 methods** across three groups.
 
 ### Connection
 
 ```
 WebSocket: ws://<host>:<port>/ws    Default port: 9847 (set via --port CLI flag)
+Workers:   ws://<host>:<port>/engine/workers    Loopback-only local engine workers
 Health:    GET  http://<host>:<port>/health
 Metrics:   GET  http://<host>:<port>/metrics
 ```
@@ -358,7 +359,7 @@ These fields are additive; older clients that ignore them continue to work uncha
 - `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
 - `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/internal/run/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
 
-### Core (65)
+### Core (68)
 
 | Group | Count | Methods |
 |-------|------:|---------|
@@ -371,6 +372,7 @@ These fields are additive; older clients that ignore them continue to work uncha
 | `context` | 9 | `context.getSnapshot`, `context.getDetailedSnapshot`, `context.getAuditTrace`, `context.shouldCompact`, `context.previewCompaction`, `context.confirmCompaction`, `context.canAcceptTurn`, `context.clear`, `context.compact` |
 | `events` | 5 | `events.getHistory`, `events.getSince`, `events.subscribe`, `events.unsubscribe`, `events.append` |
 | `settings` | 3 | `settings.get`, `settings.update`, `settings.resetToDefaults` |
+| `approval` | 3 | `approval.get`, `approval.list`, `approval.resolve` |
 | `auth` | 9 | `auth.get`, `auth.update`, `auth.clear`, `auth.oauthBegin`, `auth.oauthComplete`, `auth.renameAccount`, `auth.setActive`, `auth.removeAccount`, `auth.removeApiKey` |
 | `tool` | 1 | `tool.result` |
 | `message` | 1 | `message.delete` |

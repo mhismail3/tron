@@ -179,8 +179,10 @@ impl MethodHandler for PromptHandler {
 }
 
 /// Abort a running agent in a session.
+#[cfg(test)]
 pub struct AbortHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for AbortHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.abort", session_id))]
@@ -197,8 +199,10 @@ impl MethodHandler for AbortHandler {
 /// keeps running other tools and streaming text. If the tool has already
 /// finished (or was never registered) the response is
 /// `{ "aborted": false }` — callers treat that as "nothing to do".
+#[cfg(test)]
 pub struct AbortToolHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for AbortToolHandler {
     #[instrument(
@@ -234,8 +238,10 @@ impl MethodHandler for AbortToolHandler {
 /// `currentTool` reflects the most recent tool in the turn accumulator
 /// whose status is `running`; `null` means no tool is actively
 /// executing (the agent is streaming text, thinking, or between turns).
+#[cfg(test)]
 pub struct StatusHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for StatusHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.status", session_id))]

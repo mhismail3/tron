@@ -173,6 +173,7 @@ pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>
 }
 
 /// Dependencies needed to create and run agents.
+#[derive(Clone)]
 pub struct AgentDeps {
     /// Factory that creates a fresh LLM provider per request (reads current model + auth).
     pub provider_factory: Arc<dyn ProviderFactory>,
@@ -183,6 +184,7 @@ pub struct AgentDeps {
 }
 
 /// Shared context passed to every RPC handler.
+#[derive(Clone)]
 pub struct RpcContext {
     /// Multi-session orchestrator.
     pub orchestrator: Arc<Orchestrator>,

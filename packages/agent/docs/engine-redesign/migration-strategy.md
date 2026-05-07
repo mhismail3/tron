@@ -216,7 +216,7 @@ Acceptance:
   host handle.
 - Success, handler error, panic, missing-function, schema, policy, and
   idempotency replay paths all produce invocation records.
-- All 167 current JSON-RPC methods have bridge specs.
+- All 170 current JSON-RPC methods have bridge specs.
 - The bridge is explicitly temporary: `HandlerOnly` may use `EngineOwned` or
   `ThinAdapter` as short parity checkpoints, but completed groups end at
   `GenericTrigger` with old handlers removed. Low-risk groups should skip
@@ -599,6 +599,40 @@ Acceptance:
 - approval, job, agent queue, and event paths publish scoped stream events that
   future WebSocket pumps can consume without making WebSocket the source of
   truth.
+
+### WP32-WP37 runtime service and approval transport step
+
+Implemented runtime integration now moves the engine from a catalog/adapter
+surface into long-running server behavior:
+
+- `EngineRuntimeServices` starts queue drainer loops for `default` and `jobs`
+  and a stream pump for approval, job, agent queue, session-event, and catalog
+  topics;
+- `approval.get`, `approval.list`, and `approval.resolve` are additive public
+  JSON-RPC methods, increasing the method count from 167 to 170 while keeping
+  `approval.request` available only through agent/tool invocation;
+- `job.background` and `job.cancel` enqueue hidden internal
+  `job::*_apply` functions, then synchronously drain their own queue receipt to
+  preserve existing JSON-RPC response timing;
+- `agent.status`, `agent.abort`, `agent.abortTool`,
+  `agent.deliverSubagentResults`, `agent.submitConfirmation`, and
+  `agent.submitAnswers` are now canonical generic-trigger functions; only
+  `agent.prompt` remains handler-owned in the current agent group;
+- `/engine/workers` is an authenticated loopback WebSocket endpoint backed by
+  the local external-worker runtime. Registered external functions receive
+  executable proxy handlers over the worker socket. External workers remain
+  session-scoped and volatile by default; sandboxing, remote hosting, durable
+  reconnect, and stronger worker supervision remain future work.
+
+Acceptance:
+
+- public JSON-RPC count is 170 and every method has exactly one bridge spec;
+- generic-trigger count rises from 66 to 75;
+- approval resolution is user/system/admin-gated and preserves original
+  approval causality;
+- queue lifecycle events are published from enqueue/claim/complete/fail paths;
+- WebSocket delivery is a pump over engine stream state, not the source of
+  truth for migrated stream topics.
 
 ## Phase 4: stream push, event unification, and job output
 

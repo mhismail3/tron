@@ -12,11 +12,11 @@
 //! `GetConfirmationDetector`, `AskUserQuestionDetector`, and `AnswerParser`
 //! on iOS (~270 lines total).
 //!
-//! Since the server generates those text prefixes in
-//! `handlers/agent_confirmation.rs`, the server is the authoritative source
-//! for the parse. Enrichment runs here, injects structured fields into the
-//! `tool.call` wire payload, and iOS just reads them — no scanning, no
-//! fragile string matching on the client.
+//! Since the server generates those text prefixes in the canonical
+//! `agent::submit_confirmation` / `agent::submit_answers` engine functions,
+//! the server is the authoritative source for the parse. Enrichment runs
+//! here, injects structured fields into the `tool.call` wire payload, and iOS
+//! just reads them — no scanning, no fragile string matching on the client.
 //!
 //! ## Wire format (what iOS reads)
 //!
@@ -42,7 +42,7 @@
 //! ## INVARIANT
 //!
 //! The text formats parsed here must match exactly what
-//! `server/rpc/handlers/agent_confirmation.rs` generates. If that file
+//! `server/rpc/engine_bridge/functions/agent.rs` generates. If that file
 //! changes the confirmation/answer prefix format, update this module in
 //! lockstep. Tests below pin the exact formats.
 

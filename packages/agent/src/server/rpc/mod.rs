@@ -4,11 +4,12 @@
 //!
 //! Implements the full RPC surface that clients connect to:
 //! - Session: create, resume, list, delete, fork, getHead, getState, reconstruct
-//! - Agent: prompt, abort, queuePrompt, dequeuePrompt, clearQueue
+//! - Agent: prompt plus generic-triggered status/abort/tool/queue/confirmation controls
 //! - Model: list, switch
 //! - Context: getSnapshot, compact, clear, canAcceptTurn, shouldCompact
 //! - Events: getHistory, getSince, subscribe, append
 //! - Settings: get, update, resetToDefaults
+//! - Approval: get, list, resolve
 //! - Skills: list, get, refresh, activate, deactivate, active
 //! - Plus: browser, device, task, transcription, worktree, tree
 //!
@@ -30,11 +31,13 @@
 //! `rpc.read` plus the domain read scope; migrated write triggers carry
 //! `rpc.write` plus the domain write scope and engine-ledger idempotency.
 //! Prompt library, settings, logs, skills, notifications, plan, events,
-//! read-safe session/context queries, job list/subscription controls, and basic
-//! filesystem reads/create-dir are now generic-triggered with marker-only
-//! JSON-RPC registrations. RPC remains a compatibility transport; the
-//! canonical capability surface is the domain function catalog agents discover
-//! through the engine tools.
+//! approval resolution, read-safe session/context queries, job commands, agent
+//! status/abort/submission controls, and basic filesystem reads/create-dir are
+//! now generic-triggered with marker-only JSON-RPC registrations. Job
+//! background/cancel commands enqueue hidden apply functions and synchronously
+//! drain their own receipt for current wire compatibility. RPC remains a
+//! compatibility transport; the canonical capability surface is the domain
+//! function catalog agents discover through the engine tools.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

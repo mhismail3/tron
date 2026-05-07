@@ -8,6 +8,10 @@ use super::types::{
     DeliveryMode, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
 };
 
+/// Delegation-only authority scope used by engine internals to execute hidden
+/// apply functions while preserving the original actor in the causal ledger.
+pub const ENGINE_INTERNAL_INVOKE_SCOPE: &str = "engine.internal.invoke";
+
 /// Validate a function definition before registration.
 pub fn validate_function_registration(function: &FunctionDefinition) -> Result<()> {
     if function.effect_class.requires_idempotency() && function.idempotency.is_none() {
@@ -139,7 +143,15 @@ pub fn validate_invocation(function: &FunctionDefinition, invocation: &Invocatio
 #[must_use]
 pub fn is_visible_to_actor(function: &FunctionDefinition, actor: Option<&ActorContext>) -> bool {
     match function.visibility {
-        VisibilityScope::Internal => false,
+        VisibilityScope::Internal => actor
+            .map(|ctx| {
+                ctx.actor_kind.is_admin_like()
+                    || ctx
+                        .authority_scopes
+                        .iter()
+                        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
+            })
+            .unwrap_or(false),
         VisibilityScope::Session => actor
             .map(|ctx| {
                 ctx.actor_kind.is_admin_like()

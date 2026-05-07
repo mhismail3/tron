@@ -23,20 +23,21 @@ registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
 ## RPC surface
 
 The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
-167 methods. The exploration branch now registers a `rpc` transport
+170 methods. The exploration branch now registers a `rpc` transport
 compatibility worker, domain-owned in-process workers for migrated groups,
 canonical domain functions for generic-triggered methods, non-routable
 `rpc::<method>` metadata for handler-only inventory, and `json_rpc` trigger
 bindings from the legacy method names into the canonical functions.
 
 Fully collapsed groups now include prompt library, settings, logs, skills,
-notifications, plan, events, job controls, agent queue controls, and basic
-filesystem. Session create/delete/fork/archive/unarchive/archiveOlderThan/
-export and context compaction/clear commands are also generic-triggered
-canonical functions. Migrated groups delete their method-specific business
-handlers as they move behind canonical functions; a few remaining handler
-structs are test-only wire fixtures while older regression suites are moved to
-direct engine parity tests.
+notifications, plan, events, approval get/list/resolve, job controls, the
+current agent command controls except `agent.prompt`, and basic filesystem.
+Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
+context compaction/clear commands are also generic-triggered canonical
+functions. Migrated groups delete their method-specific business handlers as
+they move behind canonical functions; a few remaining handler structs are
+test-only wire fixtures while older regression suites are moved to direct
+engine parity tests.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,
@@ -49,11 +50,12 @@ answers are explicit enough to test.
 | `codexApp` | 1 | `codex_app::*` lifecycle/status functions. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
 | `blob` | 1 | `blob::get`. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
 | `session` | 13 | `session` domain worker; all create/delete/fork/archive/export plus safe reads are generic-triggered except resume. | Client/session/workspace. | Reads plus idempotent mutations; create/archiveOlderThan use system idempotency, session-specific commands use session idempotency. | Reads preserve event-store reconstruction; mutations call the existing command service behind canonical functions and preserve broadcasts/worktree cleanup. |
-| `agent` | 10 | `agent::*` functions and queue triggers; queue controls are generic-triggered. | Session by default. | Prompt/run/abort remain deferred; queuePrompt/dequeuePrompt/clearQueue are session-scoped idempotent writes. | Turn id, parent invocation, catalog revision, authority grant, stream event, and queue/event-store causality are mandatory. |
+| `agent` | 10 | `agent::*` functions and queue triggers; status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered. | Session by default. | `agent.prompt` remains deferred; migrated writes are session-scoped idempotent commands, with approval metadata on high-risk abort. | Turn id, parent invocation, catalog revision, authority grant, stream event, and queue/event-store causality are mandatory. |
 | `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
 | `context` | 9 | `context` domain worker; safe reads and compaction/clear commands are generic-triggered. | Session. | Reads plus high-risk reversible/irreversible context mutations with idempotency and approval metadata where destructive. | Compaction ordering, event writes, cache invalidation, and broadcasts remain deterministic behind canonical functions. |
 | `events` | 5 | Fully generic-triggered `events` domain worker functions, including stream-backed subscribe/unsubscribe. | Session/workspace/admin. | Reads plus append-only `events.append` and idempotent subscribe/unsubscribe. | Event append and stream subscription records carry trigger/invocation metadata. |
 | `settings` | 3 | Fully generic-triggered `settings::*` state functions. | Admin/client. | Read plus high-risk reversible system writes with engine-ledger idempotency. | Must preserve iOS settings parity, strict validation, rollback, MCP reload, and Codex App Server reconfiguration causality. |
+| `approval` | 3 | Public `approval.get/list/resolve` JSON-RPC triggers over the engine approval primitive; `approval.request` remains agent/tool-only. | Client/user/admin; resolution requires user/system/admin actor kind. | Reads plus system-idempotent resolve. | Pending/approved/denied/executed records preserve original actor, trace, parent, trigger, scopes, payload fingerprint, and idempotency key. |
 | `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
 | `tool` | 1 | Tool-result compatibility function. | Session. | Append/update tool result; idempotent by tool call id. | Link to parent tool invocation and turn. |
 | `message` | 1 | `message::delete`. | Session/client. | Idempotent write. | Event-sourced deletion marker. |
@@ -65,7 +67,7 @@ answers are explicit enough to test.
 | `tree` | 5 | `event_graph::*`. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
 | `import` | 4 | `import::*`. | Admin/workspace. | Preview/list reads; execute append-only/idempotent by import source. | Import provenance and dedupe tags mandatory. |
 | `browser` / `display` | 4 | `browser::*`, `display::*`, stream functions. | Session/client. | Stream lifecycle idempotent by stream id. | Link stream writes to session and actor. |
-| `job` | 5 | Fully generic-triggered `job` domain worker for background/cancel/list/subscribe/unsubscribe plus queue functions. | Session/client/agent filtered. | Job controls are idempotent by request/job id; cancel is high-risk approval-metadata-bearing. | Background/cancel preserve existing job/process manager behavior, user-action event persistence, and publish job stream records. |
+| `job` | 5 | Fully generic-triggered `job` domain worker for background/cancel/list/subscribe/unsubscribe plus queue functions. | Session/client/agent filtered. | Job controls are idempotent by request/job id; cancel is high-risk approval-metadata-bearing. | Background/cancel enqueue hidden apply functions, synchronously drain compatibility receipts, preserve existing job/process manager behavior, persist user-action events, and publish job/queue stream records. |
 | `worktree` | 23 | `worktree::*` functions and triggers. | Workspace/session. | Git mutations require idempotency, locks, and compensation where possible. | Branch/worktree state machine must stay auditable. |
 | `transcribe` | 3 | `transcription::*`. | Client/session. | Audio processing idempotent by input hash/request id. | Sidecar lifecycle and stream progress trace to request. |
 | `device` | 3 | `device::*` and approval triggers. | Client/session/admin. | Register/unregister/respond idempotent by token/request id. | Approval responses must link to pending invocation. |

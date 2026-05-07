@@ -251,12 +251,16 @@ idempotency keys.
 
 ## Local external workers
 
-External workers begin loopback-only. A local worker can say hello, receive a
-catalog snapshot, register session-visible volatile functions/triggers, send
-heartbeats, and disconnect. Disconnect unregisters only that worker's volatile
-catalog entries and emits normal availability changes. Workspace/system
-visibility still requires explicit promotion, so agent-created local workers
-do not silently become global capabilities.
+External workers begin loopback-only. The server exposes an authenticated
+`/engine/workers` WebSocket endpoint for local worker protocol messages. A
+local worker can say hello, receive a catalog snapshot, register
+session-visible volatile functions/triggers, receive executable `invoke`
+requests for registered functions, return invocation results, send heartbeats,
+and disconnect. Disconnect unregisters only that worker's volatile catalog
+entries and emits normal availability changes. Workspace/system visibility
+still requires explicit promotion, so agent-created local workers do not
+silently become global capabilities. Stronger executable-worker supervision and
+sandbox execution remain separate phases.
 
 Agents choose catalog-change subscriptions by task/session:
 
@@ -436,11 +440,11 @@ isolation does.
 | `events` | Session/event-store append, read, reconstruct, subscribe/unsubscribe. All current `events.*` RPC methods are generic-triggered; subscribe/unsubscribe create stream subscription records while preserving current acknowledgements. |
 | `session` | Session create/delete/fork/archive/unarchive/archiveOlderThan/export plus safe reads are generic-triggered canonical functions; `session.resume` remains handler-owned because it is still coupled to transport/session lifecycle. |
 | `context` | Snapshot/audit/compaction/clear/canAcceptTurn methods are generic-triggered canonical functions with approval metadata on destructive commands. |
-| `agent` | Queue controls are generic-triggered canonical functions; prompt execution, abort, subagent delivery, and confirmation/answer submission remain deferred until turn execution and approval streams are fully engine-owned. |
-| `job` | Background/cancel/list/subscribe/unsubscribe are generic-triggered canonical functions; current background/cancel behavior is preserved while queue-backed job execution becomes the next hardening step. |
+| `agent` | Status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered canonical functions; `agent.prompt` remains handler-owned until turn execution and prompt queue draining collapse into engine runtime. |
+| `job` | Background/cancel/list/subscribe/unsubscribe are generic-triggered canonical functions; background/cancel enqueue hidden internal apply functions and synchronously drain their own receipts for current JSON-RPC compatibility. |
 | `notifications` | Notification inbox read-state functions; currently fully generic-triggered for RPC compatibility. |
 | `plan` | Session plan-mode state; currently fully generic-triggered for RPC compatibility. |
-| `approval` | Pending/approved/denied/executed approval records for high-risk agent-visible invocations, with scoped approval lifecycle stream events. |
+| `approval` | Pending/approved/denied/executed approval records for high-risk agent-visible invocations, with scoped approval lifecycle stream events and additive `approval.get/list/resolve` JSON-RPC transport triggers. |
 | `stream` | Durable subscriptions for catalog, session events, approvals, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |
 | `queue` | Durable named queues, receipts, retries, cancellation, DLQ/redrive. |

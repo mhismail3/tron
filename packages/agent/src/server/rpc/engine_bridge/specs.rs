@@ -197,15 +197,15 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("session.archiveOlderThan"),
     generic_trigger!("session.export"),
     handler_only!("agent.prompt"),
-    handler_only!("agent.abort"),
-    handler_only!("agent.abortTool"),
-    handler_only!("agent.status"),
+    generic_trigger!("agent.abort"),
+    generic_trigger!("agent.abortTool"),
+    generic_trigger!("agent.status"),
     generic_trigger!("agent.queuePrompt"),
     generic_trigger!("agent.dequeuePrompt"),
     generic_trigger!("agent.clearQueue"),
-    handler_only!("agent.deliverSubagentResults"),
-    handler_only!("agent.submitConfirmation"),
-    handler_only!("agent.submitAnswers"),
+    generic_trigger!("agent.deliverSubagentResults"),
+    generic_trigger!("agent.submitConfirmation"),
+    generic_trigger!("agent.submitAnswers"),
     generic_trigger!("model.list"),
     handler_only!("model.switch"),
     handler_only!("config.setReasoningLevel"),
@@ -226,6 +226,9 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("settings.get"),
     generic_trigger!("settings.update"),
     generic_trigger!("settings.resetToDefaults"),
+    generic_trigger!("approval.get"),
+    generic_trigger!("approval.list"),
+    generic_trigger!("approval.resolve"),
     handler_only!("auth.get"),
     handler_only!("auth.update"),
     handler_only!("auth.clear"),
@@ -460,6 +463,13 @@ pub(super) fn is_engine_routable(spec: &RpcCapabilitySpec) -> bool {
     )
 }
 
+pub(super) fn uses_existing_engine_primitive(spec: &RpcCapabilitySpec) -> bool {
+    matches!(
+        spec.function_id.as_str(),
+        "approval::get" | "approval::list" | "approval::resolve"
+    )
+}
+
 fn validate_seed_uniqueness() -> EngineResult<()> {
     let mut seen = BTreeSet::new();
     for seed in RPC_CAPABILITY_SEEDS {
@@ -541,6 +551,8 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
             | "settings.resetToDefaults"
             | "context.confirmCompaction"
             | "context.compact"
+            | "agent.abort"
+            | "agent.abortTool"
     ) {
         return EffectClass::ReversibleSideEffect;
     }
@@ -590,6 +602,8 @@ fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
             | "session.delete"
             | "session.archiveOlderThan"
             | "job.cancel"
+            | "approval.resolve"
+            | "agent.abort"
     ) {
         RiskLevel::High
     } else if matches!(effect, EffectClass::IrreversibleSideEffect) {
@@ -662,6 +676,7 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
         || method == "job.cancel"
         || method == "session.create"
         || method == "session.archiveOlderThan"
+        || method == "approval.resolve"
         || method.starts_with("notifications.")
         || method.starts_with("promptHistory.")
         || method.starts_with("promptSnippet.")
@@ -683,6 +698,7 @@ fn settings_write_requires_approval(method: &str) -> bool {
             | "context.compact"
             | "session.archiveOlderThan"
             | "job.cancel"
+            | "agent.abort"
     )
 }
 
@@ -811,6 +827,7 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("context.") => "context",
         method if method.starts_with("job.") => "job",
         method if method.starts_with("agent.") => "agent",
+        method if method.starts_with("approval.") => "approval",
         method if method.starts_with("notifications.") => "notifications",
         method if method.starts_with("plan.") => "plan",
         method if method.starts_with("system.") => "system",
@@ -861,9 +878,15 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "session.unarchive" => ("session", "unarchive".to_owned()),
         "session.archiveOlderThan" => ("session", "archive_older_than".to_owned()),
         "session.export" => ("session", "export".to_owned()),
+        "agent.status" => ("agent", "status".to_owned()),
+        "agent.abort" => ("agent", "abort".to_owned()),
+        "agent.abortTool" => ("agent", "abort_tool".to_owned()),
         "agent.queuePrompt" => ("agent", "queue_prompt".to_owned()),
         "agent.dequeuePrompt" => ("agent", "dequeue_prompt".to_owned()),
         "agent.clearQueue" => ("agent", "clear_queue".to_owned()),
+        "agent.deliverSubagentResults" => ("agent", "deliver_subagent_results".to_owned()),
+        "agent.submitConfirmation" => ("agent", "submit_confirmation".to_owned()),
+        "agent.submitAnswers" => ("agent", "submit_answers".to_owned()),
         "context.getSnapshot" => ("context", "get_snapshot".to_owned()),
         "context.getDetailedSnapshot" => ("context", "get_detailed_snapshot".to_owned()),
         "context.getAuditTrace" => ("context", "get_audit_trace".to_owned()),
@@ -878,6 +901,9 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "job.list" => ("job", "list".to_owned()),
         "job.subscribe" => ("job", "subscribe".to_owned()),
         "job.unsubscribe" => ("job", "unsubscribe".to_owned()),
+        "approval.get" => ("approval", "get".to_owned()),
+        "approval.list" => ("approval", "list".to_owned()),
+        "approval.resolve" => ("approval", "resolve".to_owned()),
         "notifications.list" => ("notifications", "list".to_owned()),
         "notifications.markRead" => ("notifications", "mark_read".to_owned()),
         "notifications.markAllRead" => ("notifications", "mark_all_read".to_owned()),
@@ -909,6 +935,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "context" => "context",
                     "job" => "job",
                     "agent" => "agent",
+                    "approval" => "approval",
                     "logs" => "logs",
                     "model" => "model",
                     "notifications" => "notifications",
@@ -961,6 +988,8 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("job"), "write") => "job.write",
         (Some("agent"), "read") => "agent.read",
         (Some("agent"), "write") => "agent.write",
+        (Some("approval"), "read") => "approval.read",
+        (Some("approval"), "write") => "approval.resolve",
         (Some("notifications"), "read") => "notifications.read",
         (Some("notifications"), "write") => "notifications.write",
         (Some("plan"), "read") => "plan.read",

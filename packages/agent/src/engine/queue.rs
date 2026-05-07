@@ -10,7 +10,7 @@ use std::path::Path;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::discovery::ActorKind;
 use super::errors::{EngineError, Result};
@@ -211,6 +211,41 @@ impl InMemoryEngineQueueStore {
         Ok(Some(item.clone()))
     }
 
+    /// Claim a specific ready or expired-leased item by receipt.
+    pub fn claim_by_receipt(
+        &mut self,
+        receipt_id: &str,
+        lease_owner: &str,
+        lease_ms: i64,
+    ) -> Result<Option<EngineQueueItem>> {
+        if lease_owner.trim().is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "queue lease owner must not be empty".to_owned(),
+            ));
+        }
+        let now = Utc::now();
+        let Some(item) = self.items.get_mut(receipt_id) else {
+            return Ok(None);
+        };
+        if !matches!(
+            item.status,
+            QueueItemStatus::Ready | QueueItemStatus::Leased
+        ) || item.not_before > now
+            || (item.status == QueueItemStatus::Leased
+                && item
+                    .lease_expires_at
+                    .map(|expiry| expiry > now)
+                    .unwrap_or(false))
+        {
+            return Ok(None);
+        }
+        item.status = QueueItemStatus::Leased;
+        item.lease_owner = Some(lease_owner.to_owned());
+        item.lease_expires_at = Some(now + Duration::milliseconds(lease_ms.max(1)));
+        item.updated_at = now;
+        Ok(Some(item.clone()))
+    }
+
     /// Complete one queue item.
     pub fn complete(&mut self, receipt_id: &str) -> Result<bool> {
         let Some(item) = self.items.get_mut(receipt_id) else {
@@ -294,6 +329,32 @@ impl EngineQueueRuntime {
         let Some(item) = handle.claim_queue_item(queue, lease_owner, 30_000).await? else {
             return Ok(None);
         };
+        publish_queue_lifecycle_event(handle, "claim", &item, None).await;
+        Self::execute_claimed_item(handle, item).await.map(Some)
+    }
+
+    /// Claim and execute a specific receipt. Used by compatibility surfaces
+    /// that must synchronously preserve an existing wire contract without
+    /// racing unrelated queued work.
+    pub async fn drain_receipt(
+        handle: &EngineHostHandle,
+        receipt_id: &str,
+        lease_owner: &str,
+    ) -> Result<Option<InvocationResult>> {
+        let Some(item) = handle
+            .claim_queue_item_by_receipt(receipt_id, lease_owner, 30_000)
+            .await?
+        else {
+            return Ok(None);
+        };
+        publish_queue_lifecycle_event(handle, "claim", &item, None).await;
+        Self::execute_claimed_item(handle, item).await.map(Some)
+    }
+
+    async fn execute_claimed_item(
+        handle: &EngineHostHandle,
+        item: EngineQueueItem,
+    ) -> Result<InvocationResult> {
         let mut context = CausalContext::new(
             item.actor_id.clone(),
             item.actor_kind.clone(),
@@ -325,10 +386,12 @@ impl EngineQueueRuntime {
         let result = handle.invoke(invocation).await;
         if result.error.is_some() {
             handle.fail_queue_item(&item.receipt_id, 3, 1_000).await?;
+            publish_queue_lifecycle_event(handle, "fail", &item, Some(&result)).await;
         } else {
             handle.complete_queue_item(&item.receipt_id).await?;
+            publish_queue_lifecycle_event(handle, "complete", &item, Some(&result)).await;
         }
-        Ok(Some(result))
+        Ok(result)
     }
 }
 
@@ -344,6 +407,15 @@ impl EngineQueueDrainer {
         lease_owner: &str,
     ) -> Result<Option<InvocationResult>> {
         EngineQueueRuntime::drain_once(handle, queue, lease_owner).await
+    }
+
+    /// Claim and execute a specific queue receipt.
+    pub async fn drain_receipt(
+        handle: &EngineHostHandle,
+        receipt_id: &str,
+        lease_owner: &str,
+    ) -> Result<Option<InvocationResult>> {
+        EngineQueueRuntime::drain_receipt(handle, receipt_id, lease_owner).await
     }
 }
 
@@ -454,6 +526,42 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
         let Some(mut item) = item else {
             return Ok(None);
         };
+        item.status = QueueItemStatus::Leased;
+        item.lease_owner = Some(lease_owner.to_owned());
+        item.lease_expires_at = Some(now + Duration::milliseconds(lease_ms.max(1)));
+        item.updated_at = now;
+        self.update_item(&item)?;
+        Ok(Some(item))
+    }
+
+    /// Claim a specific ready or expired-leased item by receipt.
+    pub fn claim_by_receipt(
+        &mut self,
+        receipt_id: &str,
+        lease_owner: &str,
+        lease_ms: i64,
+    ) -> Result<Option<EngineQueueItem>> {
+        if lease_owner.trim().is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "queue lease owner must not be empty".to_owned(),
+            ));
+        }
+        let now = Utc::now();
+        let Some(mut item) = self.get(receipt_id)? else {
+            return Ok(None);
+        };
+        if !matches!(
+            item.status,
+            QueueItemStatus::Ready | QueueItemStatus::Leased
+        ) || item.not_before > now
+            || (item.status == QueueItemStatus::Leased
+                && item
+                    .lease_expires_at
+                    .map(|expiry| expiry > now)
+                    .unwrap_or(false))
+        {
+            return Ok(None);
+        }
         item.status = QueueItemStatus::Leased;
         item.lease_owner = Some(lease_owner.to_owned());
         item.lease_expires_at = Some(now + Duration::milliseconds(lease_ms.max(1)));
@@ -715,4 +823,43 @@ fn sqlite_err(operation: &'static str, message: impl Into<String>) -> EngineErro
         operation,
         message: message.into(),
     }
+}
+
+/// Publish a queue lifecycle event to the engine stream primitive.
+pub async fn publish_queue_lifecycle_event(
+    handle: &EngineHostHandle,
+    event_type: &str,
+    item: &EngineQueueItem,
+    result: Option<&InvocationResult>,
+) {
+    let status = match event_type {
+        "enqueue" => "ready",
+        "claim" => "leased",
+        "complete" => "completed",
+        "fail" => "ready_or_dead_lettered",
+        "cancel" => "cancelled",
+        "dead_letter" => "dead_lettered",
+        _ => item.status.as_str(),
+    };
+    let _ = handle
+        .publish_stream_event(super::streams::PublishStreamEvent {
+            topic: "queue.lifecycle".to_owned(),
+            payload: json!({
+                "type": format!("queue.{event_type}"),
+                "receiptId": &item.receipt_id,
+                "queue": &item.queue,
+                "functionId": &item.function_id,
+                "status": status,
+                "attempts": item.attempts,
+                "resultInvocationId": result.map(|value| value.invocation_id.to_string()),
+                "error": result.and_then(|value| value.error.as_ref()).map(ToString::to_string),
+            }),
+            visibility: super::types::VisibilityScope::Session,
+            session_id: item.session_id.clone(),
+            workspace_id: item.workspace_id.clone(),
+            producer: "queue".to_owned(),
+            trace_id: Some(item.trace_id.clone()),
+            parent_invocation_id: item.parent_invocation_id.clone(),
+        })
+        .await;
 }

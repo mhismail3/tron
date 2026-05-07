@@ -41,7 +41,11 @@ mod tests;
 
 use serde_json::Value;
 
-use crate::engine::{EngineError, EngineHostHandle, InvocationResult, Result as EngineResult};
+use crate::engine::{
+    AuthorityRequirement, EffectClass, EngineError, EngineHostHandle, FunctionDefinition,
+    FunctionId, IdempotencyContract, InvocationResult, Provenance, Result as EngineResult,
+    RiskLevel, VisibilityScope,
+};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::registry::MethodRegistry;
@@ -83,6 +87,9 @@ fn register_rpc_worker(
     handle.register_trigger_type_for_setup(specs::json_rpc_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(specs::manual_trigger_type()?, false)?;
     for spec in &specs {
+        if specs::uses_existing_engine_primitive(spec) {
+            continue;
+        }
         let handler = specs::is_engine_routable(&spec).then(|| {
             std::sync::Arc::new(functions::RpcFunctionHandler {
                 method: spec.method,
@@ -95,10 +102,63 @@ fn register_rpc_worker(
             false,
         )?;
     }
+    register_hidden_job_apply_functions(handle, &deps)?;
     for spec in &specs {
         if let Some(trigger) = specs::json_rpc_trigger_for_spec(spec)? {
             handle.register_trigger_for_setup(trigger, false)?;
         }
+    }
+    Ok(())
+}
+
+fn register_hidden_job_apply_functions(
+    handle: &EngineHostHandle,
+    deps: &functions::RpcEngineDeps,
+) -> EngineResult<()> {
+    for (id, method, public_method, description) in [
+        (
+            "job::background_apply",
+            "job.background.apply",
+            "job.background",
+            "apply a queued background-job command",
+        ),
+        (
+            "job::cancel_apply",
+            "job.cancel.apply",
+            "job.cancel",
+            "apply a queued job-cancel command",
+        ),
+    ] {
+        let mut definition = FunctionDefinition::new(
+            FunctionId::new(id)?,
+            specs::worker_id("job")?,
+            description,
+            VisibilityScope::Internal,
+            EffectClass::ReversibleSideEffect,
+        )
+        .with_risk(RiskLevel::High)
+        .with_required_authority(AuthorityRequirement::scope("job.write"))
+        .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .with_provenance(Provenance::system());
+        if let Some(schema) = schemas::request_schema_for_method(public_method) {
+            definition = definition.with_request_schema(schema);
+        }
+        if let Some(schema) = schemas::response_schema_for_method(public_method) {
+            definition = definition.with_response_schema(schema);
+        }
+        definition.metadata = serde_json::json!({
+            "internal": true,
+            "canonicalCapability": id,
+            "hiddenApplyFunction": true,
+        });
+        handle.register_function_for_setup(
+            definition,
+            Some(std::sync::Arc::new(functions::RpcFunctionHandler {
+                method,
+                deps: deps.clone(),
+            })),
+            false,
+        )?;
     }
     Ok(())
 }

@@ -341,6 +341,68 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "agent.status" | "agent.abort" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "agent.abortTool" => json!({
+            "type": "object",
+            "required": ["sessionId", "toolCallId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "toolCallId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "agent.deliverSubagentResults" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "agent.submitConfirmation" => json!({
+            "type": "object",
+            "required": ["sessionId", "action", "decision"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "action": {"type": "string"},
+                "decision": {"type": "string"},
+                "note": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "agent.submitAnswers" => json!({
+            "type": "object",
+            "required": ["sessionId", "questions"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["question"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "question": {"type": "string"},
+                            "selectedValues": {"type": "array", "items": {"type": "string"}},
+                            "otherValue": {"type": "string"}
+                        }
+                    }
+                },
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "job.list" => json!({
             "type": "object",
             "required": ["sessionId"],
@@ -434,6 +496,37 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
         "settings.resetToDefaults" => json!({
             "type": "object",
             "additionalProperties": true
+        }),
+        "approval.get" => json!({
+            "type": "object",
+            "required": ["approvalId"],
+            "additionalProperties": false,
+            "properties": {
+                "approvalId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "approval.list" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "status": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "limit": {"type": "integer"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "approval.resolve" => json!({
+            "type": "object",
+            "required": ["approvalId", "decision"],
+            "additionalProperties": false,
+            "properties": {
+                "approvalId": {"type": "string"},
+                "decision": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
         }),
         "model.list" => json!({
             "type": "object",
@@ -604,6 +697,27 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         "settings.resetToDefaults" => json!({
             "type": "object",
             "additionalProperties": true
+        }),
+        "approval.get" => json!({
+            "type": "object",
+            "required": ["approval"],
+            "additionalProperties": false,
+            "properties": {"approval": {}}
+        }),
+        "approval.list" => json!({
+            "type": "object",
+            "required": ["approvals"],
+            "additionalProperties": false,
+            "properties": {"approvals": {"type": "array"}}
+        }),
+        "approval.resolve" => json!({
+            "type": "object",
+            "required": ["approval", "child"],
+            "additionalProperties": false,
+            "properties": {
+                "approval": {"type": "object"},
+                "child": {}
+            }
         }),
         "model.list" => json!({
             "type": "object",
@@ -806,9 +920,15 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         | "context.confirmCompaction"
         | "context.clear"
         | "context.compact"
+        | "agent.status"
+        | "agent.abort"
+        | "agent.abortTool"
         | "agent.queuePrompt"
         | "agent.dequeuePrompt"
-        | "agent.clearQueue" => json!({
+        | "agent.clearQueue"
+        | "agent.deliverSubagentResults"
+        | "agent.submitConfirmation"
+        | "agent.submitAnswers" => json!({
             "type": "object",
             "additionalProperties": true
         }),

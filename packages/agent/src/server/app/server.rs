@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::registry::MethodRegistry;
 use axum::Router;
+use axum::extract::ConnectInfo;
 use axum::extract::Request as AxumRequest;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
@@ -28,6 +29,7 @@ use tracing::{info, instrument};
 use metrics_exporter_prometheus::PrometheusHandle;
 
 use crate::server::config::ServerConfig;
+use crate::server::external_workers::{SharedExternalWorkerRuntime, run_external_worker_socket};
 use crate::server::health::{self, HealthResponse};
 use crate::server::shutdown::ShutdownCoordinator;
 use crate::server::websocket::auth::{BearerTokenStore, verify_bearer_header};
@@ -66,6 +68,8 @@ pub struct AppState {
     pub metrics_handle: Arc<PrometheusHandle>,
     /// Bearer-token verifier for `/ws` upgrades.
     pub auth_store: Arc<BearerTokenStore>,
+    /// Shared local external-worker runtime.
+    pub external_workers: SharedExternalWorkerRuntime,
 }
 
 /// The main Tron server.
@@ -77,6 +81,7 @@ pub struct TronServer {
     rpc_context: Arc<RpcContext>,
     metrics_handle: Arc<PrometheusHandle>,
     auth_store: Arc<BearerTokenStore>,
+    external_workers: SharedExternalWorkerRuntime,
     start_time: Instant,
 }
 
@@ -100,6 +105,9 @@ impl TronServer {
         ));
         rpc_context.set_ws_port(config.port);
         let auth_store = Arc::new(BearerTokenStore::new(rpc_context.auth_path.clone()));
+        let external_workers = Arc::new(tokio::sync::Mutex::new(
+            crate::engine::EngineExternalWorkerRuntime::new(rpc_context.engine_host.clone()),
+        ));
         Self {
             config,
             registry: Arc::new(registry),
@@ -108,6 +116,7 @@ impl TronServer {
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
             auth_store,
+            external_workers,
             start_time: Instant::now(),
         }
     }
@@ -123,6 +132,7 @@ impl TronServer {
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
             auth_store: self.auth_store.clone(),
+            external_workers: self.external_workers.clone(),
         };
 
         Router::new()
@@ -131,6 +141,11 @@ impl TronServer {
             .route(
                 "/ws",
                 get(ws_upgrade_handler)
+                    .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
+            )
+            .route(
+                "/engine/workers",
+                get(engine_worker_upgrade_handler)
                     .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
             )
             .route("/health/deep", get(deep_health_handler))
@@ -165,12 +180,15 @@ impl TronServer {
         let shutdown_token = self.shutdown.token();
 
         let handle = tokio::spawn(async move {
-            let _ = axum::serve(listener, router)
-                .with_graceful_shutdown(async move {
-                    shutdown_token.cancelled().await;
-                    info!("server shutdown initiated");
-                })
-                .await;
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                shutdown_token.cancelled().await;
+                info!("server shutdown initiated");
+            })
+            .await;
             info!("server shutdown complete");
         });
 
@@ -201,6 +219,22 @@ impl TronServer {
     pub fn rpc_context(&self) -> &Arc<RpcContext> {
         &self.rpc_context
     }
+}
+
+/// GET /engine/workers — local engine worker WebSocket upgrade handler.
+async fn engine_worker_upgrade_handler(
+    ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if !addr.ip().is_loopback() {
+        tracing::warn!(%addr, "rejected non-loopback engine worker connection");
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let runtime = state.external_workers;
+    Ok(ws.on_upgrade(move |socket| async move {
+        run_external_worker_socket(socket, runtime).await;
+    }))
 }
 
 /// GET /health
