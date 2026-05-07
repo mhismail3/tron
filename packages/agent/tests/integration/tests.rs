@@ -729,7 +729,7 @@ async fn wait_for_detailed_snapshot_rules(
 }
 
 #[tokio::test]
-async fn e2e_bridge_delivers_to_bound_client() {
+async fn e2e_stream_pump_delivers_to_bound_client() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await; // skip connected
@@ -747,7 +747,7 @@ async fn e2e_bridge_delivers_to_bound_client() {
 }
 
 #[tokio::test]
-async fn e2e_bridge_multiple_clients() {
+async fn e2e_stream_pump_multiple_clients() {
     let (url, server) = boot_server().await;
 
     let mut ws1 = connect(&url).await;
@@ -784,7 +784,7 @@ async fn e2e_bridge_multiple_clients() {
 }
 
 #[tokio::test]
-async fn e2e_bridge_session_isolation() {
+async fn e2e_stream_pump_session_isolation() {
     let (url, server) = boot_server().await;
 
     // Two connections, each bound to a different session
@@ -2281,7 +2281,7 @@ async fn e2e_prompt_state_transitions() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn e2e_system_get_info_engine_transport_payload() {
+async fn e2e_system_get_info_engine_json_rpc_payload() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
@@ -2299,7 +2299,7 @@ async fn e2e_system_get_info_engine_transport_payload() {
 }
 
 #[tokio::test]
-async fn e2e_agent_get_state_engine_transport_payload() {
+async fn e2e_agent_get_state_engine_json_rpc_payload() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;

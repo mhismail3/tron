@@ -20,11 +20,11 @@ use crate::transcription::MlxEngine;
 use metrics::{counter, histogram};
 use parking_lot::{Mutex, RwLock};
 
+use crate::server::capabilities::errors::CapabilityError;
 use crate::server::codex_app::CodexAppServerManager;
 use crate::server::device::DeviceRequestBroker;
 use crate::server::services::session_context::ContextArtifactsService;
 use crate::server::shutdown::{ShutdownCoordinator, ShutdownPhase};
-use crate::server::transport::json_rpc::errors::RpcError;
 use crate::server::websocket::broadcast::BroadcastManager;
 
 const DEFAULT_BLOCKING_CONCURRENCY: usize = 16;
@@ -65,24 +65,19 @@ impl BlockingTaskSupervisor {
     }
 
     /// Run one blocking closure after acquiring a supervisor permit.
-    pub async fn run<T, F>(&self, task_name: &'static str, f: F) -> Result<T, RpcError>
+    pub async fn run<T, F>(&self, task_name: &'static str, f: F) -> Result<T, CapabilityError>
     where
         T: Send + 'static,
-        F: FnOnce() -> Result<T, RpcError> + Send + 'static,
+        F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
     {
         let start = Instant::now();
         counter!("rpc_blocking_tasks_started_total", "task" => task_name.to_owned()).increment(1);
 
-        let permit =
-            self.semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|_| RpcError::Internal {
-                    message: format!(
-                        "Blocking task supervisor closed before '{task_name}' started"
-                    ),
-                })?;
+        let permit = self.semaphore.clone().acquire_owned().await.map_err(|_| {
+            CapabilityError::Internal {
+                message: format!("Blocking task supervisor closed before '{task_name}' started"),
+            }
+        })?;
 
         let active = Arc::clone(&self.active);
         let drained = Arc::clone(&self.drained);
@@ -111,7 +106,7 @@ impl BlockingTaskSupervisor {
                 counter!("rpc_blocking_failures_total", "task" => task_name.to_owned())
                     .increment(1);
                 record_blocking_outcome(task_name, start.elapsed(), "panic");
-                Err(RpcError::Internal {
+                Err(CapabilityError::Internal {
                     message: format!("Blocking task '{task_name}' failed: {error}"),
                 })
             }
@@ -289,10 +284,14 @@ pub struct ServerCapabilityContext {
 
 impl ServerCapabilityContext {
     /// Run blocking work on the dedicated blocking pool used by async capabilities.
-    pub async fn run_blocking<T, F>(&self, task_name: &'static str, f: F) -> Result<T, RpcError>
+    pub async fn run_blocking<T, F>(
+        &self,
+        task_name: &'static str,
+        f: F,
+    ) -> Result<T, CapabilityError>
     where
         T: Send + 'static,
-        F: FnOnce() -> Result<T, RpcError> + Send + 'static,
+        F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
     {
         run_blocking_task(task_name, f).await
     }
@@ -301,7 +300,7 @@ impl ServerCapabilityContext {
     /// response, while still registering the async owner with shutdown.
     pub fn spawn_blocking_detached<F>(&self, task_name: &'static str, f: F)
     where
-        F: FnOnce() -> Result<(), RpcError> + Send + 'static,
+        F: FnOnce() -> Result<(), CapabilityError> + Send + 'static,
     {
         let handle = tokio::spawn(async move {
             if let Err(error) = run_blocking_task(task_name, f).await {
@@ -327,10 +326,13 @@ impl ServerCapabilityContext {
     }
 }
 
-pub(crate) async fn run_blocking_task<T, F>(task_name: &'static str, f: F) -> Result<T, RpcError>
+pub(crate) async fn run_blocking_task<T, F>(
+    task_name: &'static str,
+    f: F,
+) -> Result<T, CapabilityError>
 where
     T: Send + 'static,
-    F: FnOnce() -> Result<T, RpcError> + Send + 'static,
+    F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
 {
     global_blocking_supervisor().run(task_name, f).await
 }
@@ -470,7 +472,7 @@ mod tests {
     async fn run_blocking_executes_closure() {
         let ctx = make_test_context();
         let value = ctx
-            .run_blocking("test.run_blocking", || Ok::<_, RpcError>(41))
+            .run_blocking("test.run_blocking", || Ok::<_, CapabilityError>(41))
             .await;
         assert_eq!(value.unwrap(), 41);
     }
@@ -480,7 +482,7 @@ mod tests {
         let ctx = make_test_context();
         let err = ctx
             .run_blocking("test.run_blocking_error", || {
-                Err::<(), _>(RpcError::InvalidParams {
+                Err::<(), _>(CapabilityError::InvalidParams {
                     message: "bad input".into(),
                 })
             })
@@ -494,9 +496,12 @@ mod tests {
     async fn run_blocking_maps_panics_to_internal_error() {
         let ctx = make_test_context();
         let err = ctx
-            .run_blocking("test.run_blocking_panic", || -> Result<(), RpcError> {
-                panic!("boom");
-            })
+            .run_blocking(
+                "test.run_blocking_panic",
+                || -> Result<(), CapabilityError> {
+                    panic!("boom");
+                },
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INTERNAL_ERROR");
@@ -526,7 +531,7 @@ mod tests {
                         max_seen.fetch_max(now, Ordering::SeqCst);
                         std::thread::sleep(Duration::from_millis(30));
                         active.fetch_sub(1, Ordering::SeqCst);
-                        Ok::<_, RpcError>(())
+                        Ok::<_, CapabilityError>(())
                     })
                     .await
                     .unwrap();
@@ -548,7 +553,7 @@ mod tests {
             running
                 .run("test.blocking_drain", || {
                     std::thread::sleep(Duration::from_millis(30));
-                    Ok::<_, RpcError>(())
+                    Ok::<_, CapabilityError>(())
                 })
                 .await
                 .unwrap();
@@ -569,7 +574,7 @@ mod tests {
             running
                 .run("test.blocking_drain_timeout", || {
                     std::thread::sleep(Duration::from_millis(120));
-                    Ok::<_, RpcError>(())
+                    Ok::<_, CapabilityError>(())
                 })
                 .await
                 .unwrap();

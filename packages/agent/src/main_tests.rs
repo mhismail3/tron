@@ -492,13 +492,13 @@ async fn server_boots_and_responds() {
         .handle();
     let server = TronServer::new(config, registry, capability_context, metrics_handle);
 
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
-    let _bridge = tokio::spawn(bridge.run());
+    let _stream_pump = tokio::spawn(pump.run());
 
     let (addr, handle) = server.listen().await.unwrap();
 
@@ -680,7 +680,7 @@ async fn init_mcp_registers_meta_tools_without_servers() {
 }
 
 #[test]
-fn server_registers_public_engine_transport_methods_only() {
+fn server_registers_public_engine_json_rpc_methods_only() {
     let mut registry = JsonRpcTransportRegistry::new();
     tron::server::transport::json_rpc::bindings::register_all(&mut registry);
     let mut methods = registry.methods();

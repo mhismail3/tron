@@ -4,7 +4,7 @@ use crate::core::logging::LogLevel;
 use crate::events::PooledConnection;
 use serde::{Deserialize, Serialize};
 
-use crate::server::transport::json_rpc::errors::RpcError;
+use crate::server::capabilities::errors::CapabilityError;
 
 const MAX_INGEST_ENTRIES: usize = 10_000;
 
@@ -44,9 +44,9 @@ impl ClientLogsService {
     pub(crate) fn ingest(
         conn: &mut PooledConnection,
         entries: &[ClientLogEntry],
-    ) -> Result<ClientLogIngestResult, RpcError> {
+    ) -> Result<ClientLogIngestResult, CapabilityError> {
         if entries.len() > MAX_INGEST_ENTRIES {
-            return Err(RpcError::InvalidParams {
+            return Err(CapabilityError::InvalidParams {
                 message: format!("Too many entries: {} (max 10000)", entries.len()),
             });
         }
@@ -88,14 +88,14 @@ fn truncate_message(message: &str) -> std::borrow::Cow<'_, str> {
 fn insert_client_logs(
     conn: &mut PooledConnection,
     entries: &[ClientLogEntry],
-) -> Result<usize, RpcError> {
+) -> Result<usize, CapabilityError> {
     if entries.is_empty() {
         return Ok(0);
     }
 
     let tx = conn
         .unchecked_transaction()
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: format!("Failed to begin transaction: {e}"),
         })?;
 
@@ -105,7 +105,7 @@ fn insert_client_logs(
                 "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message, origin) \
                  VALUES (?1, ?2, ?3, ?4, ?5, 'ios-client')",
             )
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to prepare statement: {e}"),
             })?;
 
@@ -125,14 +125,14 @@ fn insert_client_logs(
                     component.as_str(),
                     message.as_ref(),
                 ])
-                .map_err(|e| RpcError::Internal {
+                .map_err(|e| CapabilityError::Internal {
                     message: format!("Failed to insert log entry: {e}"),
                 })?;
         }
         count
     };
 
-    tx.commit().map_err(|e| RpcError::Internal {
+    tx.commit().map_err(|e| CapabilityError::Internal {
         message: format!("Failed to commit transaction: {e}"),
     })?;
 

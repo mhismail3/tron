@@ -26,9 +26,9 @@ use crate::llm::openai::types::{
     OpenAIAuthPath, all_openai_models_api_json_for_auth_path, get_openai_model,
     get_openai_model_profile,
 };
+use crate::server::capabilities::errors::{self, CapabilityError};
+use crate::server::capabilities::params::require_string_param;
 use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::errors::{self, RpcError};
-use crate::server::transport::json_rpc::params::require_string_param;
 
 /// All known models, derived from provider registries (single source of truth).
 ///
@@ -78,19 +78,19 @@ pub(crate) fn active_openai_auth_path(ctx: &ServerCapabilityContext) -> OpenAIAu
 pub(crate) async fn switch_model(
     params: Option<&Value>,
     ctx: &ServerCapabilityContext,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let requested_model = require_string_param(params, "model")?;
     let model = strip_provider_prefix(&requested_model).to_string();
 
     if !is_model_supported(&model) {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!("Unknown model: {requested_model}"),
         });
     }
 
     if is_model_deprecated(&model) {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!("Model '{model}' is deprecated and cannot be selected"),
         });
     }
@@ -98,7 +98,7 @@ pub(crate) async fn switch_model(
     if get_openai_model(&model).is_some() {
         let auth_path = active_openai_auth_path(ctx);
         if !openai_model_available_for_auth_path(&model, auth_path) {
-            return Err(RpcError::InvalidParams {
+            return Err(CapabilityError::InvalidParams {
                 message: format!(
                     "OpenAI model '{model}' is not available for the active auth path ({})",
                     auth_path.as_str()
@@ -110,10 +110,10 @@ pub(crate) async fn switch_model(
     let session = ctx
         .event_store
         .get_session(&session_id)
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::SESSION_NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -121,7 +121,7 @@ pub(crate) async fn switch_model(
     let previous_model = session.latest_model.clone();
 
     if ctx.orchestrator.has_active_run(&session_id) {
-        return Err(RpcError::Custom {
+        return Err(CapabilityError::Custom {
             code: "SESSION_BUSY".into(),
             message: "Cannot switch model while session is running".into(),
             details: None,
@@ -131,7 +131,7 @@ pub(crate) async fn switch_model(
     let _ = ctx
         .event_store
         .update_latest_model(&session_id, &model)
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?;
 
@@ -201,17 +201,17 @@ pub(crate) fn default_reasoning_level(
 pub(crate) async fn set_reasoning_level(
     params: Option<&Value>,
     ctx: &ServerCapabilityContext,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let new_level = require_string_param(params, "level")?;
 
     let _ = ctx
         .event_store
         .get_session(&session_id)
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::SESSION_NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -219,7 +219,7 @@ pub(crate) async fn set_reasoning_level(
     let state = ctx
         .event_store
         .get_state_at_head(&session_id)
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: format!("failed to resolve session state: {e}"),
         })?;
     let previous_level = state

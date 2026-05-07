@@ -10,9 +10,9 @@ use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::skills::registry::SkillRegistry;
 use parking_lot::RwLock;
 
+use crate::server::capabilities::errors::{self, CapabilityError};
 use crate::server::services::context::ServerCapabilityContext;
 use crate::server::services::session_context::SessionContextArtifacts;
-use crate::server::transport::json_rpc::errors::{self, RpcError};
 
 pub(crate) struct PreparedSessionContext {
     pub(crate) session: crate::events::sqlite::row_types::SessionRow,
@@ -27,13 +27,13 @@ pub(crate) fn build_context_manager_for_session(
     context_artifacts: &crate::server::services::session_context::ContextArtifactsService,
     profile_runtime: &crate::runtime::ProfileRuntime,
     tool_definitions: Vec<Tool>,
-) -> Result<PreparedSessionContext, RpcError> {
+) -> Result<PreparedSessionContext, CapabilityError> {
     let session = session_manager
         .get_session(session_id)
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: error.to_string(),
         })?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::SESSION_NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -55,7 +55,7 @@ pub(crate) fn build_context_manager_for_session(
             source: session.source.clone(),
             entrypoint: None,
         })
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: format!("invalid session profile `{profile_name}`: {error}"),
         })?;
     let settings = session_plan.settings.clone();
@@ -120,8 +120,8 @@ pub(crate) fn build_context_manager_for_session(
 
 pub(crate) fn retry_context_read<T>(
     operation_name: &'static str,
-    mut operation: impl FnMut() -> Result<T, RpcError>,
-) -> Result<T, RpcError> {
+    mut operation: impl FnMut() -> Result<T, CapabilityError>,
+) -> Result<T, CapabilityError> {
     let policy = BusyRetryPolicy {
         deadline: Duration::from_millis(750),
         backoff_step: Duration::from_millis(10),
@@ -132,7 +132,7 @@ pub(crate) fn retry_context_read<T>(
     match contention::retry_on_busy(operation_name, policy, &mut operation, is_busy_rpc_error) {
         Ok(value) => Ok(value),
         Err(contention::RetryError::Inner(error)) => Err(error),
-        Err(contention::RetryError::BusyTimeout(timeout)) => Err(RpcError::Internal {
+        Err(contention::RetryError::BusyTimeout(timeout)) => Err(CapabilityError::Internal {
             message: format!(
                 "database busy during {operation_name} after {} attempts: {}",
                 timeout.attempts, timeout.last_error
@@ -141,8 +141,8 @@ pub(crate) fn retry_context_read<T>(
     }
 }
 
-fn is_busy_rpc_error(error: &RpcError) -> bool {
-    let RpcError::Internal { message } = error else {
+fn is_busy_rpc_error(error: &CapabilityError) -> bool {
+    let CapabilityError::Internal { message } = error else {
         return false;
     };
 

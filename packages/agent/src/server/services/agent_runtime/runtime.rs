@@ -13,11 +13,11 @@ use crate::skills::types::SkillMetadata;
 use parking_lot::RwLock;
 use serde_json::Value;
 
+use crate::server::capabilities::errors::CapabilityError;
 use crate::server::services::context::run_blocking_task;
 use crate::server::services::session_context::{
     ContextArtifactsService, collect_dynamic_rule_paths,
 };
-use crate::server::transport::json_rpc::errors::RpcError;
 
 /// Build the JSON payload for a `message.user` event.
 ///
@@ -605,11 +605,11 @@ pub fn format_user_job_actions(actions: &[(String, Value)]) -> String {
 pub async fn resume_prompt_session(
     session_manager: Arc<SessionManager>,
     session_id: String,
-) -> Result<ResumedPromptSession, RpcError> {
+) -> Result<ResumedPromptSession, CapabilityError> {
     run_blocking_task("agent.prompt.resume", move || {
         let active = session_manager
             .resume_session(&session_id)
-            .map_err(|error| RpcError::Internal {
+            .map_err(|error| CapabilityError::Internal {
                 message: error.to_string(),
             })?;
         Ok(ResumedPromptSession {
@@ -636,7 +636,7 @@ pub async fn load_prompt_bootstrap_minimal(
     settings: crate::settings::TronSettings,
     is_resumed: bool,
     source: Option<String>,
-) -> Result<PromptBootstrapData, RpcError> {
+) -> Result<PromptBootstrapData, CapabilityError> {
     run_blocking_task("agent.prompt.bootstrap.minimal", move || {
         let artifacts = load_prompt_context_artifacts(
             context_artifacts.as_ref(),
@@ -665,7 +665,7 @@ pub async fn load_prompt_bootstrap(
     settings: crate::settings::TronSettings,
     is_resumed: bool,
     source: Option<String>,
-) -> Result<PromptBootstrapData, RpcError> {
+) -> Result<PromptBootstrapData, CapabilityError> {
     run_blocking_task("agent.prompt.bootstrap", move || {
         let artifacts = load_prompt_context_artifacts(
             context_artifacts.as_ref(),
@@ -754,7 +754,7 @@ pub async fn persist_user_message_event(
     event_store: Arc<EventStore>,
     session_id: String,
     payload: Value,
-) -> Result<(), RpcError> {
+) -> Result<(), CapabilityError> {
     run_blocking_task("agent.prompt.persist_user", move || {
         let _ = event_store.append(&crate::events::AppendOptions {
             session_id: &session_id,
@@ -790,7 +790,7 @@ pub async fn prepare_skill_context_from_session(
     skill_registry: Arc<RwLock<SkillRegistry>>,
     event_store: Arc<EventStore>,
     session_id: String,
-) -> Result<SkillContextResult, RpcError> {
+) -> Result<SkillContextResult, CapabilityError> {
     run_blocking_task("agent.prompt.skills", move || {
         let policy = {
             let settings = crate::settings::get_settings();
@@ -942,7 +942,7 @@ pub async fn load_session_update_data(
     _session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
     session_id: String,
-) -> Result<Option<SessionUpdateData>, RpcError> {
+) -> Result<Option<SessionUpdateData>, CapabilityError> {
     run_blocking_task("agent.prompt.session_update", move || {
         let mut last_busy_error = None;
 
@@ -957,14 +957,14 @@ pub async fn load_session_update_data(
                     std::thread::sleep(SESSION_UPDATE_LOAD_RETRY_DELAY);
                 }
                 Err(error) => {
-                    return Err(RpcError::Internal {
+                    return Err(CapabilityError::Internal {
                         message: error.to_string(),
                     });
                 }
             }
         }
 
-        Err(RpcError::Internal {
+        Err(CapabilityError::Internal {
             message: last_busy_error
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "session update data unavailable".to_string()),

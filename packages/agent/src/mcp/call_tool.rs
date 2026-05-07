@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::core::tools::{Tool, ToolCategory, TronToolResult, error_result};
 use crate::mcp::router::McpRouter;
-use crate::mcp::tool_bridge::mcp_result_to_tron_result;
+use crate::mcp::tool_projection::mcp_result_to_tron_result;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;

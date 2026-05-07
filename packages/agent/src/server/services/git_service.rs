@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::server::transport::json_rpc::errors::{self, RpcError};
+use crate::server::capabilities::errors::{self, CapabilityError};
 
 static GIT_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -25,15 +25,15 @@ pub(crate) fn has_path_traversal(path: &str) -> bool {
     path.contains("..") || path.contains('\0')
 }
 
-pub(crate) fn prepare_clone(url: &str, target_path: &str) -> Result<CloneRequest, RpcError> {
+pub(crate) fn prepare_clone(url: &str, target_path: &str) -> Result<CloneRequest, CapabilityError> {
     if !is_valid_git_url(url) {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!("Invalid git URL: {url}"),
         });
     }
 
     if has_path_traversal(target_path) {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "Target directory contains path traversal".into(),
         });
     }
@@ -47,7 +47,7 @@ pub(crate) fn prepare_clone(url: &str, target_path: &str) -> Result<CloneRequest
     let target_dir = PathBuf::from(target_path);
 
     if target_dir.exists() {
-        return Err(RpcError::Custom {
+        return Err(CapabilityError::Custom {
             code: errors::ALREADY_EXISTS.into(),
             message: format!("Target directory already exists: {}", target_dir.display()),
             details: None,
@@ -55,7 +55,7 @@ pub(crate) fn prepare_clone(url: &str, target_path: &str) -> Result<CloneRequest
     }
 
     if let Some(parent) = target_dir.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| RpcError::Internal {
+        std::fs::create_dir_all(parent).map_err(|error| CapabilityError::Internal {
             message: format!("Failed to create parent directory: {error}"),
         })?;
     }

@@ -4,7 +4,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "session::create" => session_create_value(Some(payload), deps).await,
@@ -22,7 +22,7 @@ pub(super) async fn handle(
             session_archive_older_than_value(Some(payload), deps).await
         }
         "session::export" => session_export_value(Some(payload), deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("session method {method} is not engine-owned"),
         }),
     }
@@ -31,7 +31,7 @@ pub(super) async fn handle(
 async fn session_resume_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::services::session_queries::SessionQueryService::resume(
         &capability_context_view(deps),
@@ -43,7 +43,7 @@ async fn session_resume_value(
 async fn session_create_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let working_directory = require_string_param(params, "workingDirectory")?;
     let model =
         opt_string(params, "model").unwrap_or_else(|| "claude-sonnet-4-20250514".to_owned());
@@ -68,7 +68,7 @@ async fn session_create_value(
 async fn session_list_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let include_archived = opt_bool(params, "includeArchived").unwrap_or(false);
     let limit = params
         .and_then(|p| p.get("limit"))
@@ -85,7 +85,7 @@ async fn session_list_value(
 async fn session_get_head_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::services::session_queries::SessionQueryService::get_head(
         &capability_context_view(deps),
@@ -97,7 +97,7 @@ async fn session_get_head_value(
 async fn session_delete_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::services::session_commands::SessionCommandService::delete(
         &capability_context_view(deps),
@@ -109,7 +109,7 @@ async fn session_delete_value(
 async fn session_fork_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let from_event_id = opt_string(params, "fromEventId");
     let title = opt_string(params, "title");
@@ -125,7 +125,7 @@ async fn session_fork_value(
 async fn session_get_state_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::services::session_queries::SessionQueryService::get_state(
         &capability_context_view(deps),
@@ -137,7 +137,7 @@ async fn session_get_state_value(
 async fn session_get_history_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let limit = params
         .and_then(|p| p.get("limit"))
@@ -156,7 +156,7 @@ async fn session_get_history_value(
 async fn session_reconstruct_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let limit = params
         .and_then(|p| p.get("limit"))
@@ -177,7 +177,7 @@ async fn session_reconstruct_value(
 async fn session_archive_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::services::session_commands::SessionCommandService::archive(
         &capability_context_view(deps),
@@ -189,7 +189,7 @@ async fn session_archive_value(
 async fn session_unarchive_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::services::session_commands::SessionCommandService::unarchive(
         &capability_context_view(deps),
@@ -201,11 +201,11 @@ async fn session_unarchive_value(
 async fn session_archive_older_than_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let days_raw = params
         .and_then(|p| p.get("days"))
         .and_then(Value::as_u64)
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "missing required parameter 'days' (non-negative integer)".into(),
         })?;
     let days = u32::try_from(days_raw).unwrap_or(u32::MAX);
@@ -219,7 +219,7 @@ async fn session_archive_older_than_value(
 async fn session_export_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::services::session_queries::SessionQueryService::export(
         &capability_context_view(deps),

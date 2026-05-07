@@ -1,20 +1,20 @@
 //! Parameter extraction helpers shared by transport and capability code.
 //!
 //! Each helper turns a `Option<&Value>` (the raw `params` payload from a
-//! JSON-RPC request) into a typed value, returning `RpcError::InvalidParams`
+//! JSON-RPC request) into a typed value, returning `CapabilityError::InvalidParams`
 //! for missing or wrong-typed required fields. Optional helpers return
 //! `Option<T>` plus an explicit defaulted variant for `u64`.
 
-use crate::server::transport::json_rpc::errors::RpcError;
+use crate::server::capabilities::errors::CapabilityError;
 
 /// Extract a required parameter from the params object.
 pub(crate) fn require_param<'a>(
     params: Option<&'a serde_json::Value>,
     key: &str,
-) -> Result<&'a serde_json::Value, RpcError> {
+) -> Result<&'a serde_json::Value, CapabilityError> {
     params
         .and_then(|p| p.get(key))
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: format!("Missing required parameter: {key}"),
         })
 }
@@ -23,11 +23,11 @@ pub(crate) fn require_param<'a>(
 pub(crate) fn require_string_param(
     params: Option<&serde_json::Value>,
     key: &str,
-) -> Result<String, RpcError> {
+) -> Result<String, CapabilityError> {
     require_param(params, key)?
         .as_str()
         .map(ToOwned::to_owned)
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: format!("Parameter '{key}' must be a string"),
         })
 }
@@ -56,16 +56,16 @@ pub(crate) fn opt_bool(params: Option<&serde_json::Value>, key: &str) -> Option<
 }
 
 /// Extract a required bool parameter. Missing or wrong-typed returns
-/// `RpcError::InvalidParams` — use this when the client is contractually
+/// `CapabilityError::InvalidParams` — use this when the client is contractually
 /// required to send the flag and there is no sane server-side default
 /// (see I7: `stageAll` on `worktree.commit`).
 pub(crate) fn require_bool(
     params: Option<&serde_json::Value>,
     key: &str,
-) -> Result<bool, RpcError> {
+) -> Result<bool, CapabilityError> {
     require_param(params, key)?
         .as_bool()
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: format!("Parameter '{key}' must be a boolean"),
         })
 }

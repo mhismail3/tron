@@ -5,7 +5,7 @@ use serde_json::Value;
 use tokio::time::{Duration, timeout};
 use tracing::{debug, warn};
 
-use crate::server::transport::json_rpc::errors::RpcError;
+use crate::server::capabilities::errors::CapabilityError;
 
 const CONTAINER_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 const CONTAINER_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -14,13 +14,13 @@ pub(crate) fn containers_json_path() -> PathBuf {
     crate::core::paths::containers_path()
 }
 
-pub(crate) fn load_containers(path: &Path) -> Result<Vec<Value>, RpcError> {
+pub(crate) fn load_containers(path: &Path) -> Result<Vec<Value>, CapabilityError> {
     if !path.exists() {
         debug!("containers.json not found, returning empty list");
         return Ok(vec![]);
     }
 
-    let content = std::fs::read_to_string(path).map_err(|error| RpcError::Internal {
+    let content = std::fs::read_to_string(path).map_err(|error| CapabilityError::Internal {
         message: format!("Failed to read containers.json: {error}"),
     })?;
     Ok(parse_containers(&content))
@@ -41,12 +41,12 @@ pub(crate) fn parse_containers(content: &str) -> Vec<Value> {
     }
 }
 
-pub(crate) fn remove_container_metadata_at(path: &Path, name: &str) -> Result<(), RpcError> {
+pub(crate) fn remove_container_metadata_at(path: &Path, name: &str) -> Result<(), CapabilityError> {
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => {
-            return Err(RpcError::Internal {
+            return Err(CapabilityError::Internal {
                 message: format!("Failed to read containers.json: {error}"),
             });
         }
@@ -78,11 +78,12 @@ pub(crate) fn remove_container_metadata_at(path: &Path, name: &str) -> Result<()
         Value::Array(filtered)
     };
 
-    let serialized = serde_json::to_string_pretty(&output).map_err(|error| RpcError::Internal {
-        message: format!("Failed to serialize containers.json: {error}"),
-    })?;
+    let serialized =
+        serde_json::to_string_pretty(&output).map_err(|error| CapabilityError::Internal {
+            message: format!("Failed to serialize containers.json: {error}"),
+        })?;
 
-    std::fs::write(path, serialized).map_err(|error| RpcError::Internal {
+    std::fs::write(path, serialized).map_err(|error| CapabilityError::Internal {
         message: format!("Failed to write containers.json: {error}"),
     })
 }
@@ -127,7 +128,10 @@ pub(crate) async fn query_container_statuses() -> HashMap<String, String> {
         .collect()
 }
 
-pub(crate) async fn run_container_command(action: &str, name: &str) -> Result<Value, RpcError> {
+pub(crate) async fn run_container_command(
+    action: &str,
+    name: &str,
+) -> Result<Value, CapabilityError> {
     let output = timeout(
         CONTAINER_COMMAND_TIMEOUT,
         tokio::process::Command::new("container")
@@ -140,21 +144,21 @@ pub(crate) async fn run_container_command(action: &str, name: &str) -> Result<Va
         Ok(Ok(result)) if result.status.success() => Ok(serde_json::json!({ "success": true })),
         Ok(Ok(result)) => {
             let stderr = String::from_utf8_lossy(&result.stderr);
-            Err(RpcError::Internal {
+            Err(CapabilityError::Internal {
                 message: format!("container {action} failed: {stderr}"),
             })
         }
         Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(RpcError::NotAvailable {
+            Err(CapabilityError::NotAvailable {
                 message:
                     "Container CLI not found. Install container runtime to use sandbox features."
                         .into(),
             })
         }
-        Ok(Err(error)) => Err(RpcError::Internal {
+        Ok(Err(error)) => Err(CapabilityError::Internal {
             message: format!("Failed to execute container command: {error}"),
         }),
-        Err(_) => Err(RpcError::Internal {
+        Err(_) => Err(CapabilityError::Internal {
             message: format!("container {action} timed out"),
         }),
     }

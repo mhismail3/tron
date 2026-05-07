@@ -1,95 +1,169 @@
-//! Domain-error → RPC-error mapping.
+//! Domain-error and engine-error mapping for canonical capabilities.
 //!
 //! Each helper here turns a typed domain error into the most specific
-//! `RpcError` variant available, so iOS clients see actionable codes
+//! `CapabilityError` variant available, so iOS clients see actionable codes
 //! (`PROTECTED_BRANCH`, `NON_FAST_FORWARD`, …) instead of a blanket
 //! `INTERNAL_ERROR`. New error mappers (event-store, cron, sandbox, …)
 //! belong in this file alongside `map_worktree_error`.
 
 use crate::cron::errors::CronError;
+use crate::engine::{EngineError, InvocationResult};
 use crate::events::errors::EventStoreError;
 use crate::import::errors::ImportError;
 use crate::llm::auth::errors::AuthError;
-use crate::server::transport::json_rpc::errors::{self as codes, RpcError};
+use crate::server::capabilities::errors::{self as codes, CapabilityError};
 use crate::worktree::WorktreeError;
+use serde_json::Value;
 
-/// Map a `WorktreeError` to the most specific `RpcError` variant available.
+pub(crate) fn capability_error_to_engine(error: CapabilityError) -> EngineError {
+    EngineError::DomainFailure {
+        domain: "server_capability".to_owned(),
+        code: error.code().to_owned(),
+        message: error.to_string(),
+        details: error.details(),
+    }
+}
+
+pub(crate) fn result_to_capability_value(
+    result: InvocationResult,
+) -> Result<Value, CapabilityError> {
+    if let Some(error) = result.error {
+        return Err(engine_error_to_capability_error(error));
+    }
+    Ok(result.value.unwrap_or(Value::Null))
+}
+
+pub(crate) fn engine_error_to_capability_error(error: EngineError) -> CapabilityError {
+    match error {
+        EngineError::DomainFailure {
+            domain: _,
+            code,
+            message,
+            details,
+        } => capability_error_from_parts(&code, message, details),
+        EngineError::SchemaViolation { message, .. } => CapabilityError::InvalidParams { message },
+        EngineError::PolicyViolation(message) => CapabilityError::InvalidParams { message },
+        EngineError::IdempotencyConflict {
+            function_id,
+            key,
+            reason,
+        } => CapabilityError::Custom {
+            code: codes::IDEMPOTENCY_CONFLICT.to_owned(),
+            message: format!("Idempotency conflict for {function_id}: {reason}"),
+            details: Some(serde_json::json!({
+                "functionId": function_id,
+                "key": key,
+                "reason": reason,
+            })),
+        },
+        EngineError::NotFound { id, .. } => CapabilityError::NotFound {
+            code: codes::NOT_FOUND.to_owned(),
+            message: format!("Engine function '{id}' not found"),
+        },
+        other => CapabilityError::Internal {
+            message: other.to_string(),
+        },
+    }
+}
+
+fn capability_error_from_parts(
+    code: &str,
+    message: String,
+    details: Option<Value>,
+) -> CapabilityError {
+    match code {
+        codes::INVALID_PARAMS => CapabilityError::InvalidParams { message },
+        codes::INTERNAL_ERROR => CapabilityError::Internal { message },
+        codes::NOT_AVAILABLE => CapabilityError::NotAvailable { message },
+        codes::NOT_FOUND => CapabilityError::NotFound {
+            code: codes::NOT_FOUND.to_owned(),
+            message,
+        },
+        _ => CapabilityError::Custom {
+            code: code.to_owned(),
+            message,
+            details,
+        },
+    }
+}
+
+/// Map a `WorktreeError` to the most specific `CapabilityError` variant available.
 /// Every git workflow handler routes its coordinator errors through this
 /// one function.
 ///
 /// INVARIANT: the `match` is exhaustive over `WorktreeError` — adding a
 /// new variant forces a compile error here. Do NOT add a `_` arm; every
 /// variant must be classified by hand.
-pub(crate) fn map_worktree_error(e: WorktreeError) -> RpcError {
+pub(crate) fn map_worktree_error(e: WorktreeError) -> CapabilityError {
     use WorktreeError as W;
     match e {
-        W::NotFound { session_id } => RpcError::NotFound {
+        W::NotFound { session_id } => CapabilityError::NotFound {
             code: codes::WORKTREE_NOT_FOUND.into(),
             message: format!("No worktree or working directory for session '{session_id}'"),
         },
-        W::NotGitRepo(p) => RpcError::Custom {
+        W::NotGitRepo(p) => CapabilityError::Custom {
             code: codes::NOT_GIT_REPO.into(),
             message: format!("Not a git repository: {p}"),
             details: None,
         },
-        W::ProtectedBranch(m) => RpcError::Custom {
+        W::ProtectedBranch(m) => CapabilityError::Custom {
             code: codes::PROTECTED_BRANCH.into(),
             message: m,
             details: None,
         },
-        W::NoRemoteConfigured(m) => RpcError::Custom {
+        W::NoRemoteConfigured(m) => CapabilityError::Custom {
             code: codes::NO_REMOTE.into(),
             message: m,
             details: None,
         },
-        W::NonFastForward(m) => RpcError::Custom {
+        W::NonFastForward(m) => CapabilityError::Custom {
             code: codes::NON_FAST_FORWARD.into(),
             message: m,
             details: None,
         },
-        W::AuthFailure(m) => RpcError::Custom {
+        W::AuthFailure(m) => CapabilityError::Custom {
             code: codes::GIT_AUTH_FAILED.into(),
             message: m,
             details: None,
         },
-        W::NetworkTimeout(m) => RpcError::Custom {
+        W::NetworkTimeout(m) => CapabilityError::Custom {
             code: codes::GIT_NETWORK_ERROR.into(),
             message: m,
             details: None,
         },
-        W::DirtyWorkingTree(m) => RpcError::Custom {
+        W::DirtyWorkingTree(m) => CapabilityError::Custom {
             code: codes::DIRTY_WORKING_TREE.into(),
             message: m,
             details: None,
         },
-        W::PendingMergeExists => RpcError::InvalidParams {
+        W::PendingMergeExists => CapabilityError::InvalidParams {
             message: "session already has a pending merge; resolve or abort it first".into(),
         },
-        W::NoPendingMerge => RpcError::InvalidParams {
+        W::NoPendingMerge => CapabilityError::InvalidParams {
             message: "session has no pending merge".into(),
         },
-        W::MissingBaseBranch => RpcError::Custom {
+        W::MissingBaseBranch => CapabilityError::Custom {
             code: codes::MISSING_BASE_BRANCH.into(),
             message: "session has no base branch; pass `mainBranch` explicitly".into(),
             details: None,
         },
-        W::RefNotFound(r) => RpcError::Custom {
+        W::RefNotFound(r) => CapabilityError::Custom {
             code: codes::REF_NOT_FOUND.into(),
             message: format!("ref not found: {r}"),
             details: None,
         },
-        W::BranchExists(b) => RpcError::Custom {
+        W::BranchExists(b) => CapabilityError::Custom {
             code: codes::BRANCH_EXISTS.into(),
             message: format!("branch already exists: {b}"),
             details: None,
         },
-        W::BranchActive(b) => RpcError::Custom {
+        W::BranchActive(b) => CapabilityError::Custom {
             code: codes::BRANCH_ACTIVE.into(),
             message: format!("branch is active: {b}"),
             details: None,
         },
-        W::InvalidSessionState(m) => RpcError::InvalidParams { message: m },
-        W::Git(m) => RpcError::Custom {
+        W::InvalidSessionState(m) => CapabilityError::InvalidParams { message: m },
+        W::Git(m) => CapabilityError::Custom {
             code: codes::GIT_ERROR.into(),
             message: m,
             details: None,
@@ -97,48 +171,48 @@ pub(crate) fn map_worktree_error(e: WorktreeError) -> RpcError {
         // MergeConflicts is special-cased by individual handlers
         // (they return Ok({"conflicts": true, …}) rather than erroring)
         // — reaching this boundary indicates a handler bug.
-        W::MergeConflicts(n) => RpcError::Internal {
+        W::MergeConflicts(n) => CapabilityError::Internal {
             message: format!("unexpected MergeConflicts({n}) at error boundary"),
         },
         // Genuinely internal — not user-actionable. The Display
         // impl preserves the underlying detail for logs.
-        W::Timeout(_) | W::Io(_) | W::EventStore(_) => RpcError::Internal {
+        W::Timeout(_) | W::Io(_) | W::EventStore(_) => CapabilityError::Internal {
             message: e.to_string(),
         },
     }
 }
 
-/// Map an `EventStoreError` to a typed `RpcError`. Most events / session
+/// Map an `EventStoreError` to a typed `CapabilityError`. Most events / session
 /// / memory / blob handlers should route their event-store calls through
-/// this instead of wrapping into `RpcError::Internal { e.to_string() }`,
+/// this instead of wrapping into `CapabilityError::Internal { e.to_string() }`,
 /// so iOS clients see actionable codes (`SESSION_NOT_FOUND`,
 /// `WORKSPACE_NOT_FOUND`, `BLOB_NOT_FOUND`) instead of `INTERNAL_ERROR`.
 ///
 /// INVARIANT: the `match` is exhaustive over `EventStoreError`. Adding
 /// a variant forces a compile error here. Do NOT add a `_` arm.
-pub(crate) fn map_event_store_error(e: EventStoreError) -> RpcError {
+pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
     use EventStoreError as E;
     match e {
-        E::SessionNotFound(id) => RpcError::NotFound {
+        E::SessionNotFound(id) => CapabilityError::NotFound {
             code: codes::SESSION_NOT_FOUND.into(),
             message: format!("Session not found: {id}"),
         },
-        E::EventNotFound(id) => RpcError::NotFound {
+        E::EventNotFound(id) => CapabilityError::NotFound {
             code: codes::EVENT_NOT_FOUND.into(),
             message: format!("Event not found: {id}"),
         },
-        E::WorkspaceNotFound(id) => RpcError::NotFound {
+        E::WorkspaceNotFound(id) => CapabilityError::NotFound {
             code: codes::WORKSPACE_NOT_FOUND.into(),
             message: format!("Workspace not found: {id}"),
         },
-        E::BlobNotFound(id) => RpcError::NotFound {
+        E::BlobNotFound(id) => CapabilityError::NotFound {
             code: codes::BLOB_NOT_FOUND.into(),
             message: format!("Blob not found: {id}"),
         },
-        E::InvalidOperation(m) => RpcError::InvalidParams { message: m },
+        E::InvalidOperation(m) => CapabilityError::InvalidParams { message: m },
         E::DuplicateImport {
             existing_session_id,
-        } => RpcError::Custom {
+        } => CapabilityError::Custom {
             code: codes::IMPORT_ALREADY_IMPORTED.into(),
             message: format!(
                 "This source has already been imported into session '{existing_session_id}'."
@@ -154,87 +228,87 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> RpcError {
         | E::Serde(_)
         | E::Migration { .. }
         | E::Busy { .. }
-        | E::Internal(_) => RpcError::Internal {
+        | E::Internal(_) => CapabilityError::Internal {
             message: e.to_string(),
         },
     }
 }
 
-/// Map a `CronError` to a typed `RpcError`. The cron handler should
+/// Map a `CronError` to a typed `CapabilityError`. The cron handler should
 /// route its `crate::cron::*` calls through this instead of wrapping
-/// into `RpcError::Internal { e.to_string() }`, so iOS clients see
+/// into `CapabilityError::Internal { e.to_string() }`, so iOS clients see
 /// actionable codes (`CRON_NOT_FOUND`, `CRON_DUPLICATE_NAME`,
 /// `CRON_INVALID_EXPRESSION`, …) instead of `INTERNAL_ERROR`.
 ///
 /// INVARIANT: the `match` is exhaustive over `CronError`. Adding a
 /// variant forces a compile error here. Do NOT add a `_` arm.
-pub(crate) fn map_cron_error(e: CronError) -> RpcError {
+pub(crate) fn map_cron_error(e: CronError) -> CapabilityError {
     use CronError as C;
     match e {
-        C::NotFound(id) => RpcError::NotFound {
+        C::NotFound(id) => CapabilityError::NotFound {
             code: codes::CRON_NOT_FOUND.into(),
             message: format!("Cron job not found: {id}"),
         },
-        C::DuplicateName(name) => RpcError::Custom {
+        C::DuplicateName(name) => CapabilityError::Custom {
             code: codes::CRON_DUPLICATE_NAME.into(),
             message: format!("A cron job named '{name}' already exists"),
             details: None,
         },
-        C::InvalidExpression(m) => RpcError::Custom {
+        C::InvalidExpression(m) => CapabilityError::Custom {
             code: codes::CRON_INVALID_EXPRESSION.into(),
             message: format!("Invalid cron expression: {m}"),
             details: None,
         },
-        C::InvalidTimezone(m) => RpcError::Custom {
+        C::InvalidTimezone(m) => CapabilityError::Custom {
             code: codes::CRON_INVALID_TIMEZONE.into(),
             message: format!("Invalid timezone: {m}"),
             details: None,
         },
-        C::Validation(m) => RpcError::InvalidParams { message: m },
-        C::TimedOut => RpcError::Custom {
+        C::Validation(m) => CapabilityError::InvalidParams { message: m },
+        C::TimedOut => CapabilityError::Custom {
             code: codes::CRON_TIMED_OUT.into(),
             message: "Cron job execution timed out".into(),
             details: None,
         },
-        C::Cancelled(m) => RpcError::Custom {
+        C::Cancelled(m) => CapabilityError::Custom {
             code: codes::CRON_CANCELLED.into(),
             message: format!("Cron job cancelled: {m}"),
             details: None,
         },
         // Genuinely internal — config / DB / execution / IO errors.
-        C::Config(_) | C::Database(_) | C::Execution(_) | C::Io(_) => RpcError::Internal {
+        C::Config(_) | C::Database(_) | C::Execution(_) | C::Io(_) => CapabilityError::Internal {
             message: e.to_string(),
         },
     }
 }
 
-/// Map an `ImportError` to a typed `RpcError`. The import handler
+/// Map an `ImportError` to a typed `CapabilityError`. The import handler
 /// routes its `crate::import::*` calls through this so iOS clients can
 /// distinguish "file missing" from "already imported" from "empty
 /// session" from a real internal error.
 ///
 /// INVARIANT: the `match` is exhaustive over `ImportError`. Adding a
 /// variant forces a compile error here. Do NOT add a `_` arm.
-pub(crate) fn map_import_error(e: ImportError) -> RpcError {
+pub(crate) fn map_import_error(e: ImportError) -> CapabilityError {
     use ImportError as I;
     match e {
-        I::SessionNotFound { path } => RpcError::NotFound {
+        I::SessionNotFound { path } => CapabilityError::NotFound {
             code: codes::IMPORT_SESSION_NOT_FOUND.into(),
             message: format!("Session file not found: {}", path.display()),
         },
-        I::AlreadyImported { tron_session_id } => RpcError::Custom {
+        I::AlreadyImported { tron_session_id } => CapabilityError::Custom {
             code: codes::IMPORT_ALREADY_IMPORTED.into(),
             message: format!("Session already imported as Tron session {tron_session_id}"),
             details: Some(serde_json::json!({
                 "existingSessionId": tron_session_id,
             })),
         },
-        I::EmptySession => RpcError::Custom {
+        I::EmptySession => CapabilityError::Custom {
             code: codes::IMPORT_EMPTY_SESSION.into(),
             message: "Empty session: no importable records after parsing".into(),
             details: None,
         },
-        I::NoClaudeDirectory { path } => RpcError::NotFound {
+        I::NoClaudeDirectory { path } => CapabilityError::NotFound {
             code: codes::IMPORT_NO_CLAUDE_DIRECTORY.into(),
             message: format!("No Claude Code directory found at {}", path.display()),
         },
@@ -243,32 +317,32 @@ pub(crate) fn map_import_error(e: ImportError) -> RpcError {
         // failures during the import write phase.
         I::Database(es) => map_event_store_error(es),
         // I/O is genuinely internal — disk full, perm denied, etc.
-        I::Io { .. } => RpcError::Internal {
+        I::Io { .. } => CapabilityError::Internal {
             message: e.to_string(),
         },
     }
 }
 
-/// Map an `AuthError` to a typed `RpcError`. The `auth/*` handlers
+/// Map an `AuthError` to a typed `CapabilityError`. The `auth/*` handlers
 /// route their `crate::llm::auth::*` calls through this so iOS clients
 /// can disambiguate "user not signed in" from "OAuth failed" from
 /// "transient network glitch".
 ///
 /// INVARIANT: the `match` is exhaustive over `AuthError`. Adding a
 /// variant forces a compile error here. Do NOT add a `_` arm.
-pub(crate) fn map_auth_error(e: AuthError) -> RpcError {
+pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
     use AuthError as A;
     match e {
-        A::NotConfigured(provider) => RpcError::NotFound {
+        A::NotConfigured(provider) => CapabilityError::NotFound {
             code: codes::AUTH_NOT_CONFIGURED.into(),
             message: format!("No auth configured for provider: {provider}"),
         },
-        A::TokenExpired(m) => RpcError::Custom {
+        A::TokenExpired(m) => CapabilityError::Custom {
             code: codes::AUTH_TOKEN_EXPIRED.into(),
             message: format!("Token expired and refresh failed: {m}"),
             details: None,
         },
-        A::OAuth { status, message } => RpcError::Custom {
+        A::OAuth { status, message } => CapabilityError::Custom {
             code: codes::AUTH_OAUTH_ERROR.into(),
             message: format!("OAuth error ({status}): {message}"),
             details: None,
@@ -277,7 +351,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> RpcError {
         // configuration gap, but the user has to act (re-authenticate).
         // Mapped to NotFound so the iOS settings page nudges them to the
         // sign-in screen rather than showing an opaque internal error.
-        A::MalformedProviderAuth { provider, details } => RpcError::NotFound {
+        A::MalformedProviderAuth { provider, details } => CapabilityError::NotFound {
             code: codes::AUTH_NOT_CONFIGURED.into(),
             message: format!(
                 "Malformed auth for {provider}: {details}. Re-authenticate via `tron auth {provider}`."
@@ -288,14 +362,14 @@ pub(crate) fn map_auth_error(e: AuthError) -> RpcError {
         // version bump. Surface the actionable detail so the iOS settings
         // page renders it verbatim instead of masking every provider as
         // "not configured" — which was the previous (silent-swallow) bug.
-        A::MalformedAuthFile { path, details } => RpcError::Internal {
+        A::MalformedAuthFile { path, details } => CapabilityError::Internal {
             message: format!(
                 "Malformed auth file at '{path}': {details}. Fix the file or run `tron auth reset` to wipe and re-authenticate."
             ),
         },
         // Genuinely internal — IO / JSON / HTTP transport failures.
         // The Display impl preserves the underlying detail for logs.
-        A::Http(_) | A::Json(_) | A::Io(_) => RpcError::Internal {
+        A::Http(_) | A::Json(_) | A::Io(_) => CapabilityError::Internal {
             message: e.to_string(),
         },
     }
@@ -304,7 +378,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> RpcError {
 #[cfg(test)]
 mod tests {
     //! Per-variant coverage for the typed-error mappers. Each test pins
-    //! one variant to its expected `RpcError` code — adding a new
+    //! one variant to its expected `CapabilityError` code — adding a new
     //! variant MUST come with a new test here, in addition to the
     //! compile-error the exhaustive match raises.
 
@@ -685,8 +759,7 @@ mod tests {
         assert_eq!(rpc.code(), "IMPORT_ALREADY_IMPORTED");
         assert!(rpc.to_string().contains("sess_42"));
         // Details payload carries the session id for clients to follow.
-        let body = rpc.to_error_body();
-        assert_eq!(body.details.unwrap()["existingSessionId"], "sess_42");
+        assert_eq!(rpc.details().unwrap()["existingSessionId"], "sess_42");
     }
 
     #[test]

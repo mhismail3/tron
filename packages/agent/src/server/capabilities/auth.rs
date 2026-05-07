@@ -10,8 +10,8 @@ use crate::llm::auth::storage::{
 use crate::llm::auth::types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, OAuthTokens, ProviderAuth, ServiceAuth,
 };
-use crate::server::transport::json_rpc::error_mapping::map_auth_error;
-use crate::server::transport::json_rpc::params::{opt_string, require_string_param};
+use crate::server::capabilities::error_mapping::map_auth_error;
+use crate::server::capabilities::params::{opt_string, require_string_param};
 
 const DEFAULT_API_KEY_LABEL: &str = "Default";
 const KNOWN_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "google", "minimax", "kimi"];
@@ -23,7 +23,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "auth::get" => auth_get(deps).await,
         "auth::update" => auth_update(invocation, deps).await,
@@ -34,13 +34,13 @@ pub(super) async fn handle(
         "auth::set_active" => auth_set_active(invocation, deps).await,
         "auth::remove_account" => auth_remove_account(invocation, deps).await,
         "auth::remove_api_key" => auth_remove_api_key(invocation, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("auth method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn auth_get(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn auth_get(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let auth_path = deps.auth_path.clone();
     deps.capability_context
         .run_blocking("auth::get", move || {
@@ -52,13 +52,13 @@ async fn auth_get(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
 async fn auth_update(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
     let service = opt_string(Some(payload), "service");
 
     if provider.is_none() && service.is_none() {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "Missing required parameter: provider or service".into(),
         });
     }
@@ -68,13 +68,14 @@ async fn auth_update(
     let masked_state = deps
         .capability_context
         .run_blocking("auth::update", move || {
-            let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
-                message: format!("Failed to acquire auth lock: {error}"),
-            })?;
+            let _lock =
+                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                    message: format!("Failed to acquire auth lock: {error}"),
+                })?;
 
             if let Some(ref provider) = provider {
                 if !KNOWN_PROVIDERS.contains(&provider.as_str()) {
-                    return Err(RpcError::InvalidParams {
+                    return Err(CapabilityError::InvalidParams {
                         message: format!("Unknown provider: {provider}"),
                     });
                 }
@@ -98,13 +99,13 @@ async fn auth_update(
 async fn auth_clear(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
     let service = opt_string(Some(payload), "service");
 
     if provider.is_none() && service.is_none() {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "Missing required parameter: provider or service".into(),
         });
     }
@@ -113,9 +114,10 @@ async fn auth_clear(
     let masked_state = deps
         .capability_context
         .run_blocking("auth::clear", move || {
-            let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
-                message: format!("Failed to acquire auth lock: {error}"),
-            })?;
+            let _lock =
+                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                    message: format!("Failed to acquire auth lock: {error}"),
+                })?;
 
             if let Some(ref provider) = provider {
                 clear_provider_auth(&auth_path, provider).map_err(map_auth_error)?;
@@ -131,7 +133,10 @@ async fn auth_clear(
     Ok(masked_state)
 }
 
-async fn auth_oauth_begin(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn auth_oauth_begin(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let provider = require_string_param(Some(payload), "provider")?;
 
     let (auth_url, verifier_or_state) = match provider.as_str() {
@@ -161,7 +166,7 @@ async fn auth_oauth_begin(payload: &Value, deps: &EngineCapabilityDeps) -> Resul
             let client_id =
                 gpa.as_ref()
                     .and_then(|google| google.client_id.clone())
-                    .ok_or_else(|| RpcError::InvalidParams {
+                    .ok_or_else(|| CapabilityError::InvalidParams {
                         message: "Google OAuth requires a client_id - configure it in Settings > Providers > Google".into(),
                     })?;
             let client_secret = gpa.and_then(|google| google.client_secret);
@@ -181,7 +186,7 @@ async fn auth_oauth_begin(payload: &Value, deps: &EngineCapabilityDeps) -> Resul
             (url, pair.verifier)
         }
         _ => {
-            return Err(RpcError::InvalidParams {
+            return Err(CapabilityError::InvalidParams {
                 message: format!(
                     "OAuth login supported for: {}. Got: {provider}",
                     OAUTH_PROVIDERS.join(", "),
@@ -213,7 +218,7 @@ async fn auth_oauth_begin(payload: &Value, deps: &EngineCapabilityDeps) -> Resul
 async fn auth_oauth_complete(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let flow_id = require_string_param(Some(payload), "flowId")?;
     let code = require_string_param(Some(payload), "code")?;
@@ -223,12 +228,12 @@ async fn auth_oauth_complete(
         let mut flows = deps.capability_context.oauth_flows.lock().await;
         flows.remove(&flow_id)
     }
-    .ok_or_else(|| RpcError::InvalidParams {
+    .ok_or_else(|| CapabilityError::InvalidParams {
         message: "OAuth flow not found or expired".into(),
     })?;
 
     if flow.created_at.elapsed() > std::time::Duration::from_secs(OAUTH_FLOW_TTL_SECS) {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "OAuth flow expired".into(),
         });
     }
@@ -254,7 +259,7 @@ async fn auth_oauth_complete(
             let client_id = gpa
                 .as_ref()
                 .and_then(|google| google.client_id.clone())
-                .ok_or_else(|| RpcError::Internal {
+                .ok_or_else(|| CapabilityError::Internal {
                     message: "Google client_id is no longer configured - cannot complete OAuth"
                         .into(),
                 })?;
@@ -273,7 +278,7 @@ async fn auth_oauth_complete(
             crate::llm::auth::google::exchange_code_for_tokens(&config, &code, &flow.verifier).await
         }
         _ => {
-            return Err(RpcError::InvalidParams {
+            return Err(CapabilityError::InvalidParams {
                 message: format!("Unsupported OAuth provider: {}", flow.provider),
             });
         }
@@ -285,9 +290,10 @@ async fn auth_oauth_complete(
     let masked_state = deps
         .capability_context
         .run_blocking("auth::oauth_complete", move || {
-            let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
-                message: format!("Failed to acquire auth lock: {error}"),
-            })?;
+            let _lock =
+                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                    message: format!("Failed to acquire auth lock: {error}"),
+                })?;
 
             crate::llm::auth::storage::save_account_oauth_tokens(
                 &auth_path,
@@ -308,7 +314,7 @@ async fn auth_oauth_complete(
 async fn auth_rename_account(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let old_label = require_string_param(Some(payload), "oldLabel")?;
@@ -324,22 +330,24 @@ async fn auth_rename_account(
 async fn auth_set_active(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let cred_val = payload
         .get("credential")
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "Missing required parameter: credential".into(),
         })?;
     let credential: ActiveCredential =
-        serde_json::from_value(cred_val.clone()).map_err(|error| RpcError::InvalidParams {
-            message: format!("Invalid credential: {error}"),
+        serde_json::from_value(cred_val.clone()).map_err(|error| {
+            CapabilityError::InvalidParams {
+                message: format!("Invalid credential: {error}"),
+            }
         })?;
 
     write_auth_and_broadcast(deps, invocation, "auth::set_active", move |auth_path| {
         crate::llm::auth::storage::set_active_credential(auth_path, &provider, &credential).map_err(
-            |error| RpcError::InvalidParams {
+            |error| CapabilityError::InvalidParams {
                 message: format!("Failed to set active credential: {error}"),
             },
         )
@@ -350,7 +358,7 @@ async fn auth_set_active(
 async fn auth_remove_account(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;
@@ -364,7 +372,7 @@ async fn auth_remove_account(
 async fn auth_remove_api_key(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;
@@ -380,17 +388,18 @@ async fn write_auth_and_broadcast<F>(
     invocation: &Invocation,
     task_name: &'static str,
     mutate: F,
-) -> Result<Value, RpcError>
+) -> Result<Value, CapabilityError>
 where
-    F: FnOnce(&Path) -> Result<(), RpcError> + Send + 'static,
+    F: FnOnce(&Path) -> Result<(), CapabilityError> + Send + 'static,
 {
     let auth_path = deps.auth_path.clone();
     let masked_state = deps
         .capability_context
         .run_blocking(task_name, move || {
-            let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| RpcError::Internal {
-                message: format!("Failed to acquire auth lock: {error}"),
-            })?;
+            let _lock =
+                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                    message: format!("Failed to acquire auth lock: {error}"),
+                })?;
             mutate(&auth_path)?;
             build_masked_state(&auth_path).map_err(map_auth_error)
         })
@@ -403,8 +412,8 @@ fn update_standard_provider(
     auth_path: &Path,
     provider: &str,
     params: Option<&Value>,
-) -> Result<(), RpcError> {
-    let params = params.ok_or_else(|| RpcError::InvalidParams {
+) -> Result<(), CapabilityError> {
+    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -451,8 +460,8 @@ fn update_standard_provider(
     Ok(())
 }
 
-fn update_google_provider(auth_path: &Path, params: Option<&Value>) -> Result<(), RpcError> {
-    let params = params.ok_or_else(|| RpcError::InvalidParams {
+fn update_google_provider(auth_path: &Path, params: Option<&Value>) -> Result<(), CapabilityError> {
+    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -494,8 +503,12 @@ fn update_google_provider(auth_path: &Path, params: Option<&Value>) -> Result<()
     save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)
 }
 
-fn update_service(auth_path: &Path, service: &str, params: Option<&Value>) -> Result<(), RpcError> {
-    let params = params.ok_or_else(|| RpcError::InvalidParams {
+fn update_service(
+    auth_path: &Path,
+    service: &str,
+    params: Option<&Value>,
+) -> Result<(), CapabilityError> {
+    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -528,25 +541,25 @@ fn clear_service_auth(
     save_auth_storage(auth_path, &mut storage)
 }
 
-fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, RpcError> {
+fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, CapabilityError> {
     let access_token = oauth
         .get("accessToken")
         .and_then(Value::as_str)
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "oauth.accessToken is required".into(),
         })?
         .to_owned();
     let refresh_token = oauth
         .get("refreshToken")
         .and_then(Value::as_str)
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "oauth.refreshToken is required".into(),
         })?
         .to_owned();
     let expires_at = oauth
         .get("expiresAt")
         .and_then(Value::as_i64)
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "oauth.expiresAt is required (milliseconds)".into(),
         })?;
 
@@ -738,6 +751,6 @@ async fn broadcast_auth_updated(
     invocation: &Invocation,
     masked_state: &Value,
 ) {
-    let event = JsonRpcEvent::new("auth.updated", None, Some(masked_state.clone()));
+    let event = ServerEventPayload::new("auth.updated", None, Some(masked_state.clone()));
     super::publish_engine_stream_event(deps, "auth", "auth", event, Some(invocation)).await;
 }

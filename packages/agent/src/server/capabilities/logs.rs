@@ -4,12 +4,12 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "logs::ingest" => ingest_logs_value(Some(payload), deps).await,
         "logs::recent" => recent_logs_value(Some(payload.clone()), deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("logs method {method} is not engine-owned"),
         }),
     }
@@ -52,20 +52,22 @@ struct RecentLogEntry {
 async fn ingest_logs_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let entries_value = params
         .and_then(|value| value.get("entries"))
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "Missing required parameter: entries".to_owned(),
         })?;
     let entries: Vec<ClientLogEntry> =
-        serde_json::from_value(entries_value.clone()).map_err(|error| RpcError::InvalidParams {
-            message: format!("Invalid entries: {error}"),
+        serde_json::from_value(entries_value.clone()).map_err(|error| {
+            CapabilityError::InvalidParams {
+                message: format!("Invalid entries: {error}"),
+            }
         })?;
 
     let pool = deps.event_store.pool().clone();
     let result = run_blocking_task("logs::ingest", move || {
-        let mut conn = pool.get().map_err(|error| RpcError::Internal {
+        let mut conn = pool.get().map_err(|error| CapabilityError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;
         ClientLogsService::ingest(&mut conn, &entries)
@@ -78,18 +80,20 @@ async fn ingest_logs_value(
 async fn recent_logs_value(
     params: Option<Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let params: RecentLogsParams = match params {
-        Some(value) => serde_json::from_value(value).map_err(|error| RpcError::InvalidParams {
-            message: format!("Invalid params: {error}"),
-        })?,
+        Some(value) => {
+            serde_json::from_value(value).map_err(|error| CapabilityError::InvalidParams {
+                message: format!("Invalid params: {error}"),
+            })?
+        }
         None => RecentLogsParams {
             limit: DEFAULT_RECENT_LIMIT,
         },
     };
 
     if params.limit > MAX_RECENT_LIMIT {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!("limit must be <= {MAX_RECENT_LIMIT}"),
         });
     }
@@ -97,7 +101,7 @@ async fn recent_logs_value(
     let limit = i64::from(params.limit);
     let pool = deps.event_store.pool().clone();
     let result = run_blocking_task("logs::recent", move || {
-        let conn = pool.get().map_err(|error| RpcError::Internal {
+        let conn = pool.get().map_err(|error| CapabilityError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;
         let mut stmt = conn
@@ -105,7 +109,7 @@ async fn recent_logs_value(
                 "SELECT id, timestamp, level, component, message, origin, session_id, error_message \
                  FROM logs ORDER BY id DESC LIMIT ?1",
             )
-            .map_err(|error| RpcError::Internal {
+            .map_err(|error| CapabilityError::Internal {
                 message: format!("Failed to prepare logs query: {error}"),
             })?;
         let rows = stmt
@@ -121,13 +125,13 @@ async fn recent_logs_value(
                     error_message: row.get(7)?,
                 })
             })
-            .map_err(|error| RpcError::Internal {
+            .map_err(|error| CapabilityError::Internal {
                 message: format!("Failed to read logs: {error}"),
             })?;
 
         let mut entries = rows
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| RpcError::Internal {
+            .map_err(|error| CapabilityError::Internal {
                 message: format!("Failed to decode logs: {error}"),
             })?;
         entries.reverse();
@@ -137,7 +141,7 @@ async fn recent_logs_value(
         })
     })
     .await?;
-    serde_json::to_value(result).map_err(|error| RpcError::Internal {
+    serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
     })
 }

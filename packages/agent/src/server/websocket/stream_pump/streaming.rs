@@ -1,9 +1,9 @@
 use crate::core::events::TronEvent;
 use serde_json::json;
 
-use super::routed::{BridgedEvent, session_scoped};
+use super::routed::{ProjectedEvent, session_scoped};
 
-pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
+pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
         TronEvent::ThinkingStart { .. } => Some(session_scoped(
             event,
@@ -104,7 +104,7 @@ mod tests {
     use crate::core::events::BaseEvent;
 
     #[test]
-    fn display_frame_bridge_produces_correct_wire_type() {
+    fn display_frame_projection_produces_correct_wire_type() {
         let event = TronEvent::DisplayFrame {
             base: BaseEvent::now("sess-1"),
             stream_id: "stream-1".into(),
@@ -114,12 +114,12 @@ mod tests {
             width: 1280,
             height: 720,
         };
-        let bridged = convert(&event).expect("should convert");
-        assert_eq!(bridged.rpc_event.event_type, "display.frame");
+        let projected = convert(&event).expect("should convert");
+        assert_eq!(projected.rpc_event.event_type, "display.frame");
     }
 
     #[test]
-    fn display_frame_bridge_includes_all_fields() {
+    fn display_frame_projection_includes_all_fields() {
         let event = TronEvent::DisplayFrame {
             base: BaseEvent::now("sess-1"),
             stream_id: "stream-1".into(),
@@ -129,8 +129,8 @@ mod tests {
             width: 1280,
             height: 720,
         };
-        let bridged = convert(&event).expect("should convert");
-        let data = bridged.rpc_event.data.as_ref().expect("should have data");
+        let projected = convert(&event).expect("should convert");
+        let data = projected.rpc_event.data.as_ref().expect("should have data");
         assert_eq!(data["streamId"], "stream-1");
         assert_eq!(data["toolCallId"], "call-1");
         assert_eq!(data["data"], "b64data");
@@ -150,8 +150,8 @@ mod tests {
             width: 640,
             height: 480,
         };
-        let bridged = convert(&event).expect("should convert");
-        assert_eq!(bridged.rpc_event.session_id.as_deref(), Some("sess-42"));
+        let projected = convert(&event).expect("should convert");
+        assert_eq!(projected.rpc_event.session_id.as_deref(), Some("sess-42"));
     }
 
     #[test]
@@ -162,10 +162,10 @@ mod tests {
         assert!(convert(&event).is_none());
     }
 
-    // ── Process event bridge tests ──
+    // ── Process stream pump tests ──
 
     #[test]
-    fn process_spawned_bridge_wire_type() {
+    fn process_spawned_projection_wire_type() {
         let event = TronEvent::ProcessSpawned {
             base: BaseEvent::now("sess-1"),
             process_id: "proc-1".into(),
@@ -174,12 +174,12 @@ mod tests {
             background: true,
             tool_call_id: "tc-1".into(),
         };
-        let bridged = convert(&event).expect("should convert");
-        assert_eq!(bridged.rpc_event.event_type, "process.spawned");
+        let projected = convert(&event).expect("should convert");
+        assert_eq!(projected.rpc_event.event_type, "process.spawned");
     }
 
     #[test]
-    fn process_spawned_bridge_fields() {
+    fn process_spawned_projection_fields() {
         let event = TronEvent::ProcessSpawned {
             base: BaseEvent::now("sess-1"),
             process_id: "proc-abc".into(),
@@ -188,8 +188,8 @@ mod tests {
             background: false,
             tool_call_id: "tc-42".into(),
         };
-        let bridged = convert(&event).expect("should convert");
-        let data = bridged.rpc_event.data.as_ref().unwrap();
+        let projected = convert(&event).expect("should convert");
+        let data = projected.rpc_event.data.as_ref().unwrap();
         assert_eq!(data["processId"], "proc-abc");
         assert_eq!(data["label"], "npm test");
         assert_eq!(data["kind"], "shell");
@@ -207,26 +207,26 @@ mod tests {
             background: true,
             tool_call_id: "t".into(),
         };
-        let bridged = convert(&event).expect("should convert");
-        assert_eq!(bridged.rpc_event.session_id.as_deref(), Some("sess-99"));
+        let projected = convert(&event).expect("should convert");
+        assert_eq!(projected.rpc_event.session_id.as_deref(), Some("sess-99"));
     }
 
     #[test]
-    fn process_status_update_bridge_wire_type() {
+    fn process_status_update_projection_wire_type() {
         let event = TronEvent::ProcessStatusUpdate {
             base: BaseEvent::now("s1"),
             process_id: "proc-1".into(),
             status: "background".into(),
         };
-        let bridged = convert(&event).expect("should convert");
-        assert_eq!(bridged.rpc_event.event_type, "process.status_update");
-        let data = bridged.rpc_event.data.as_ref().unwrap();
+        let projected = convert(&event).expect("should convert");
+        assert_eq!(projected.rpc_event.event_type, "process.status_update");
+        let data = projected.rpc_event.data.as_ref().unwrap();
         assert_eq!(data["processId"], "proc-1");
         assert_eq!(data["status"], "background");
     }
 
     #[test]
-    fn process_completed_bridge_wire_type() {
+    fn process_completed_projection_wire_type() {
         let event = TronEvent::ProcessCompleted {
             base: BaseEvent::now("sess-1"),
             parent_session_id: "sess-1".into(),
@@ -239,12 +239,12 @@ mod tests {
             blob_id: None,
             completed_at: "2026-03-29T12:00:00Z".into(),
         };
-        let bridged = convert(&event).expect("should convert");
-        assert_eq!(bridged.rpc_event.event_type, "process.completed");
+        let projected = convert(&event).expect("should convert");
+        assert_eq!(projected.rpc_event.event_type, "process.completed");
     }
 
     #[test]
-    fn process_completed_bridge_all_fields() {
+    fn process_completed_projection_all_fields() {
         let event = TronEvent::ProcessCompleted {
             base: BaseEvent::now("sess-1"),
             parent_session_id: "sess-1".into(),
@@ -257,8 +257,8 @@ mod tests {
             blob_id: Some("blob-xyz".into()),
             completed_at: "2026-03-29T15:00:00Z".into(),
         };
-        let bridged = convert(&event).expect("should convert");
-        let data = bridged.rpc_event.data.as_ref().unwrap();
+        let projected = convert(&event).expect("should convert");
+        let data = projected.rpc_event.data.as_ref().unwrap();
         assert_eq!(data["parentSessionId"], "sess-1");
         assert_eq!(data["processId"], "proc-abc");
         assert_eq!(data["label"], "npm test");
@@ -284,8 +284,8 @@ mod tests {
             blob_id: None,
             completed_at: "2026-01-01T00:00:00Z".into(),
         };
-        let bridged = convert(&event).expect("should convert");
-        let data = bridged.rpc_event.data.as_ref().unwrap();
+        let projected = convert(&event).expect("should convert");
+        let data = projected.rpc_event.data.as_ref().unwrap();
         assert!(data["exitCode"].is_null());
         assert!(data["blobId"].is_null());
     }

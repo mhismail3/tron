@@ -44,7 +44,7 @@ components can share the same primitives:
 
 | iii primitive | Reference behavior | Tron interpretation |
 |---------------|--------------------|---------------------|
-| Worker | Any process that connects to the engine and registers functions/triggers. | Any live actor: daemon module, agent, sandbox, browser, client, MCP bridge, cron scheduler, queue, stream, or temporary worker created by another agent. |
+| Worker | Any process that connects to the engine and registers functions/triggers. | Any live actor: daemon module, agent, sandbox, browser, client, MCP worker, cron scheduler, queue, stream, or temporary worker created by another agent. |
 | Function | Stable callable unit with optional schema metadata. | Capability contract with schema, revision, authority, effect class, idempotency, risk, health, provenance, and visibility. |
 | Trigger | Declarative entrypoint that causes a function to run. | Causal rule with delivery policy, authority, trace context, loop controls, and idempotency controls. |
 

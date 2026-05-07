@@ -7,16 +7,16 @@ use crate::runtime::agent::event_emitter::EventEmitter;
 use metrics::{counter, histogram};
 use serde_json::{Value, json};
 
+use crate::server::capabilities::errors::{self, CapabilityError};
 use crate::server::services::context::{ServerCapabilityContext, run_blocking_task};
 use crate::server::services::session_context::{ContextArtifactsService, RuleFileLevel};
-use crate::server::transport::json_rpc::errors::{self, RpcError};
 
 fn resolve_session_profile(
     ctx: &ServerCapabilityContext,
     requested: Option<&str>,
     model: &str,
     source: Option<&str>,
-) -> Result<String, RpcError> {
+) -> Result<String, CapabilityError> {
     ctx.profile_runtime
         .plan_session(crate::runtime::SessionPlanRequest {
             requested_profile: requested.map(str::to_string),
@@ -25,7 +25,7 @@ fn resolve_session_profile(
             entrypoint: None,
         })
         .map(|plan| plan.profile_name)
-        .map_err(|error| RpcError::InvalidParams {
+        .map_err(|error| CapabilityError::InvalidParams {
             message: format!("invalid session profile: {error}"),
         })
 }
@@ -65,7 +65,7 @@ impl SessionCommandService {
     pub(crate) async fn create(
         ctx: &ServerCapabilityContext,
         request: CreateSessionRequest,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let working_directory = request.working_directory.clone();
         let model = request.model.clone();
@@ -90,7 +90,7 @@ impl SessionCommandService {
                         Some(profile_for_create.as_str()),
                         use_worktree,
                     )
-                    .map_err(|error| RpcError::Internal {
+                    .map_err(|error| CapabilityError::Internal {
                         message: error.to_string(),
                     })
             })
@@ -135,7 +135,7 @@ impl SessionCommandService {
     pub(crate) async fn delete(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         release_worktree_if_active(ctx, &session_id).await;
 
         let session_manager = ctx.session_manager.clone();
@@ -143,7 +143,7 @@ impl SessionCommandService {
         ctx.run_blocking("session.delete", move || {
             session_manager
                 .delete_session(&session_id_for_delete)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?;
             Ok(())
@@ -168,7 +168,7 @@ impl SessionCommandService {
         session_id: String,
         from_event_id: Option<String>,
         title: Option<String>,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let session_id_for_fork = session_id.clone();
         let title_for_fork = title.clone();
@@ -181,7 +181,7 @@ impl SessionCommandService {
                         None,
                         title_for_fork.as_deref(),
                     )
-                    .map_err(|error| RpcError::NotFound {
+                    .map_err(|error| CapabilityError::NotFound {
                         code: errors::SESSION_NOT_FOUND.into(),
                         message: error.to_string(),
                     })?;
@@ -211,7 +211,7 @@ impl SessionCommandService {
     pub(crate) async fn archive(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         release_worktree_if_active(ctx, &session_id).await;
 
         let session_manager = ctx.session_manager.clone();
@@ -219,7 +219,7 @@ impl SessionCommandService {
         ctx.run_blocking("session.archive", move || {
             session_manager
                 .archive_session(&session_id_for_archive)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?;
             Ok(())
@@ -242,13 +242,13 @@ impl SessionCommandService {
     pub(crate) async fn unarchive(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let session_id_for_unarchive = session_id.clone();
         ctx.run_blocking("session.unarchive", move || {
             session_manager
                 .unarchive_session(&session_id_for_unarchive)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?;
             Ok(())
@@ -289,7 +289,7 @@ impl SessionCommandService {
     pub(crate) async fn archive_older_than(
         ctx: &ServerCapabilityContext,
         days: u32,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(days));
         let cutoff_rfc = cutoff.to_rfc3339();
 
@@ -306,12 +306,11 @@ impl SessionCommandService {
                     user_only: true,
                     ..Default::default()
                 };
-                let sessions =
-                    session_manager
-                        .list_sessions(&filter)
-                        .map_err(|error| RpcError::Internal {
-                            message: error.to_string(),
-                        })?;
+                let sessions = session_manager.list_sessions(&filter).map_err(|error| {
+                    CapabilityError::Internal {
+                        message: error.to_string(),
+                    }
+                })?;
                 // RFC3339 strings are lexicographically sortable, so a
                 // string comparison correctly implements "older than cutoff".
                 let ids: Vec<String> = sessions
@@ -331,7 +330,7 @@ impl SessionCommandService {
                 Ok(_) => archived.push(session_id),
                 Err(err) => skipped.push(json!({
                     "sessionId": session_id,
-                    "error": err.to_error_body().message,
+                    "error": err.to_string(),
                 })),
             }
         }
@@ -369,7 +368,7 @@ fn spawn_optimistic_context_preload(
                 &session_id_for_task,
                 &working_dir_for_task,
             );
-            Ok::<_, RpcError>(summary)
+            Ok::<_, CapabilityError>(summary)
         })
         .await;
         match result {

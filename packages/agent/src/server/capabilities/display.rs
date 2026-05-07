@@ -1,21 +1,24 @@
 use super::*;
 
-use crate::server::transport::json_rpc::params::require_string_param;
+use crate::server::capabilities::params::require_string_param;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "display::stop_stream" => stop_stream(&invocation.payload, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("display method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn stop_stream(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn stop_stream(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let stream_id = require_string_param(Some(payload), "streamId")?;
     let session_id = payload
         .get("sessionId")

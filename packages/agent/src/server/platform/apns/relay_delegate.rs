@@ -71,8 +71,8 @@ impl NotifyDelegate for RelayNotifyDelegate {
             let owned: Vec<String> = group.tokens.iter().map(|t| t.to_string()).collect();
             // INVARIANT: `device_tokens.bundle_id` is NOT NULL (v001 schema),
             // so every group carries a concrete APNs topic. The relay worker
-            // no longer has an `env.APNS_BUNDLE_ID` fallback path for this
-            // request — the per-token value is the one source of truth.
+            // no longer has an `env.APNS_BUNDLE_ID` alternate-topic path
+            // for this request — the per-token value is the one source of truth.
             debug!(
                 environment = group.environment,
                 bundle_id = group.bundle_id,
@@ -174,7 +174,7 @@ mod tests {
     async fn every_sender_call_carries_a_non_empty_bundle_id() {
         // INVARIANT: the transport never sees an empty `bundle_id`. The
         // v001 schema enforces NOT NULL, and the relay worker no longer
-        // has a fallback APNS_BUNDLE_ID path — a missing topic would
+        // has an APNS_BUNDLE_ID alternate-topic path — a missing topic would
         // produce a server-side error, so we guard against regressions
         // that might bypass the NOT NULL constraint through future
         // direct SQL inserts.

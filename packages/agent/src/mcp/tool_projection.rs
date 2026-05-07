@@ -1,4 +1,4 @@
-//! Bridge from MCP tools to [`TronTool`] — adapts MCP-discovered tools
+//! Projection from MCP tools to [`TronTool`] — projects MCP-discovered tools
 //! so they appear as native Tron tools to the LLM.
 
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use crate::tools::traits::{ToolContext, TronTool};
 ///
 /// The tool name is prefixed with the server name to prevent collisions:
 /// e.g., `sqlite.query`, `github.create_issue`.
-pub struct McpToolBridge {
+pub struct McpToolProjection {
     /// Prefixed tool name (e.g., "sqlite.query").
     prefixed_name: String,
     /// Original MCP tool name (e.g., "query").
@@ -31,8 +31,8 @@ pub struct McpToolBridge {
     client: Arc<McpClient>,
 }
 
-impl McpToolBridge {
-    /// Create a bridge tool from an MCP tool definition and client.
+impl McpToolProjection {
+    /// Create a projected tool from an MCP tool definition and client.
     pub fn new(server_name: &str, tool_def: &McpToolDef, client: Arc<McpClient>) -> Self {
         Self {
             prefixed_name: format!("{}.{}", server_name, tool_def.name),
@@ -56,7 +56,7 @@ impl McpToolBridge {
 }
 
 #[async_trait]
-impl TronTool for McpToolBridge {
+impl TronTool for McpToolProjection {
     fn name(&self) -> &str {
         &self.prefixed_name
     }
@@ -168,9 +168,9 @@ pub fn mcp_result_to_tron_result(
     }
 }
 
-/// Create bridge tools for all tools discovered from an MCP client.
+/// Create projected tools for all tools discovered from an MCP client.
 #[cfg(test)]
-pub(crate) fn create_bridge_tools(
+pub(crate) fn create_mcp_tools(
     server_name: &str,
     tool_defs: &[McpToolDef],
     client: &Arc<McpClient>,
@@ -178,7 +178,7 @@ pub(crate) fn create_bridge_tools(
     tool_defs
         .iter()
         .map(|def| {
-            Arc::new(McpToolBridge::new(server_name, def, client.clone())) as Arc<dyn TronTool>
+            Arc::new(McpToolProjection::new(server_name, def, client.clone())) as Arc<dyn TronTool>
         })
         .collect()
 }
@@ -202,14 +202,14 @@ mod tests {
     }
 
     #[test]
-    fn bridge_tool_name_prefixed() {
+    fn projected_tool_name_prefixed() {
         let def = sample_tool_def();
         let prefixed = format!("{}.{}", "sqlite", def.name);
         assert_eq!(prefixed, "sqlite.query");
     }
 
     #[test]
-    fn bridge_description_includes_server_name() {
+    fn projected_description_includes_server_name() {
         let desc = format!("[MCP: {}] {}", "sqlite", "Run a SQL query");
         assert!(desc.contains("MCP: sqlite"));
         assert!(desc.contains("Run a SQL query"));

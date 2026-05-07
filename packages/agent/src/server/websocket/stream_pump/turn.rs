@@ -1,9 +1,9 @@
 use crate::core::events::TronEvent;
 use serde_json::{Value, json};
 
-use super::routed::{BridgedEvent, global, session_scoped, set_opt};
+use super::routed::{ProjectedEvent, global, session_scoped, set_opt};
 
-pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
+pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
         TronEvent::TurnStart { turn, .. } => Some(global(
             event,

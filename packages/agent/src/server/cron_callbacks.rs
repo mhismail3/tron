@@ -1,8 +1,8 @@
-//! Server-owned cron adapters.
+//! Server-owned cron callbacks.
 //!
-//! The cron scheduler owns automation semantics. This module owns transport
-//! adaptation from cron domain callbacks to server surfaces such as WebSocket
-//! RPC events and APNS pushes, keeping `cron` independent of `server`.
+//! The cron scheduler owns automation semantics. This module projects cron
+//! domain callbacks onto server surfaces such as WebSocket events and APNS
+//! pushes, keeping `cron` independent of `server`.
 
 use std::sync::Arc;
 

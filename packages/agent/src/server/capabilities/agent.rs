@@ -5,6 +5,8 @@ use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::queue::publish_queue_lifecycle_event;
 use crate::engine::{EngineQueueDrainer, EnqueueInvocation, FunctionId};
 use crate::events::EventType;
+use crate::server::capabilities::errors;
+use crate::server::capabilities::validation;
 use crate::server::services::agent_commands::AgentCommandService;
 use crate::server::services::agent_runtime::runtime::{
     format_subagent_results, get_pending_subagent_results,
@@ -13,15 +15,13 @@ use crate::server::services::agent_runtime::service::{
     PromptEngineCausality, PromptRequest, drain_prompt_queue, spawn_prompt_run,
 };
 use crate::server::services::prompt_queue::PromptQueueService;
-use crate::server::transport::json_rpc::errors;
-use crate::server::transport::json_rpc::validation;
 use serde::Deserialize;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "agent::prompt" => prompt_value(invocation, deps).await,
@@ -41,7 +41,7 @@ pub(super) async fn handle(
         }
         "agent::submit_confirmation" => submit_confirmation_value(Some(payload), deps).await,
         "agent::submit_answers" => submit_answers_value(Some(payload), deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("agent method {method} is not engine-owned"),
         }),
     }
@@ -59,12 +59,12 @@ struct PromptSubmission {
 async fn prompt_value(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let (submission, _, _) = validate_prompt_submission(Some(&invocation.payload), deps).await?;
     let run_id = uuid::Uuid::now_v7().to_string();
     let mut apply_payload = invocation.payload.clone();
     let Some(object) = apply_payload.as_object_mut() else {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "agent.prompt params must be an object".into(),
         });
     };
@@ -92,7 +92,7 @@ async fn prompt_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, _session, _agent_deps) = validate_prompt_submission(params, deps).await?;
 
@@ -119,14 +119,14 @@ async fn run_turn_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, session, agent_deps) = validate_prompt_submission(params, deps).await?;
 
     let started_run = deps
         .orchestrator
         .begin_run(&submission.session_id, &run_id)
-        .map_err(|e| RpcError::Custom {
+        .map_err(|e| CapabilityError::Custom {
             code: e.category().to_uppercase(),
             message: e.to_string(),
             details: None,
@@ -173,14 +173,14 @@ async fn prompt_queue_drain_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let session =
         AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
     let agent_deps = deps
         .agent_deps
         .as_ref()
-        .ok_or_else(|| RpcError::NotAvailable {
+        .ok_or_else(|| CapabilityError::NotAvailable {
             message: "Agent execution dependencies are not configured".into(),
         })?;
     let outcome = drain_prompt_queue(
@@ -221,7 +221,7 @@ async fn prompt_queue_drain_value(
         serde_json::to_value(&outcome).unwrap_or_else(|_| json!({})),
     )
     .await;
-    serde_json::to_value(outcome).map_err(|e| RpcError::Internal {
+    serde_json::to_value(outcome).map_err(|e| CapabilityError::Internal {
         message: format!("Failed to serialize prompt queue drain outcome: {e}"),
     })
 }
@@ -235,7 +235,7 @@ async fn validate_prompt_submission(
         crate::events::sqlite::row_types::SessionRow,
         crate::server::services::context::AgentDeps,
     ),
-    RpcError,
+    CapabilityError,
 > {
     let session_id = require_string_param(params, "sessionId")?;
     let prompt = require_string_param(params, "prompt")?;
@@ -245,7 +245,7 @@ async fn validate_prompt_submission(
     validate_attachment_arrays(images.as_deref(), attachments.as_deref())?;
 
     if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
-        return Err(RpcError::Custom {
+        return Err(CapabilityError::Custom {
             code: errors::SESSION_BUSY.into(),
             message: format!("Session '{session_id}' is already processing run '{active_run_id}'"),
             details: Some(json!({ "runId": active_run_id })),
@@ -254,13 +254,13 @@ async fn validate_prompt_submission(
 
     let session =
         AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
-    let agent_deps = deps
-        .agent_deps
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| RpcError::NotAvailable {
-            message: "Agent execution dependencies are not configured".into(),
-        })?;
+    let agent_deps =
+        deps.agent_deps
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| CapabilityError::NotAvailable {
+                message: "Agent execution dependencies are not configured".into(),
+            })?;
     Ok((
         PromptSubmission {
             session_id,
@@ -278,7 +278,7 @@ async fn validate_prompt_submission(
 fn validate_attachment_arrays(
     images: Option<&[Value]>,
     attachments: Option<&[Value]>,
-) -> Result<(), RpcError> {
+) -> Result<(), CapabilityError> {
     if let Some(images) = images {
         for image in images {
             if let Some(data) = image.get("data").and_then(Value::as_str) {
@@ -303,8 +303,8 @@ async fn enqueue_and_sync_drain_agent_function(
     function_id: &str,
     idempotency_prefix: &str,
     payload: Value,
-) -> Result<Value, RpcError> {
-    let function_id = FunctionId::new(function_id).map_err(|e| RpcError::Internal {
+) -> Result<Value, CapabilityError> {
+    let function_id = FunctionId::new(function_id).map_err(|e| CapabilityError::Internal {
         message: e.to_string(),
     })?;
     let mut authority_scopes = invocation.causal_context.authority_scopes.clone();
@@ -333,7 +333,7 @@ async fn enqueue_and_sync_drain_agent_function(
             idempotency_key: Some(format!("{idempotency_prefix}:{}", invocation.id)),
         })
         .await
-        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+        .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     publish_queue_lifecycle_event(&deps.engine_host, "enqueue", &item, None).await;
     publish_prompt_stream(
         invocation,
@@ -353,15 +353,15 @@ async fn enqueue_and_sync_drain_agent_function(
         EngineQueueDrainer::drain_receipt(&deps.engine_host, &item.receipt_id, "rpc-agent-sync"),
     )
     .await
-    .map_err(|_| RpcError::Internal {
+    .map_err(|_| CapabilityError::Internal {
         message: format!(
             "Timed out waiting for queued prompt command receipt {}",
             item.receipt_id
         ),
     })?
-    .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+    .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     let Some(result) = drained else {
-        return Err(RpcError::Internal {
+        return Err(CapabilityError::Internal {
             message: format!(
                 "Queued prompt command receipt {} was not claimable",
                 item.receipt_id
@@ -381,7 +381,7 @@ async fn enqueue_and_sync_drain_agent_function(
         )
         .await;
     }
-    crate::server::transport::json_rpc::engine_transport::result_to_rpc(result)
+    crate::server::capabilities::error_mapping::result_to_capability_value(result)
 }
 
 fn record_prompt_history(deps: &EngineCapabilityDeps, prompt: &str, source: Option<&str>) {
@@ -451,7 +451,7 @@ async fn publish_prompt_stream(
 async fn status_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_store = deps.event_store.clone();
     let sid_for_check = session_id.clone();
@@ -459,11 +459,11 @@ async fn status_value(
         event_store
             .get_session(&sid_for_check)
             .map(|opt| opt.is_some())
-            .map_err(crate::server::transport::json_rpc::error_mapping::map_event_store_error)
+            .map_err(crate::server::capabilities::error_mapping::map_event_store_error)
     })
     .await?;
     if !session_exists {
-        return Err(RpcError::NotFound {
+        return Err(CapabilityError::NotFound {
             code: "SESSION_NOT_FOUND".into(),
             message: format!("Session '{session_id}' not found"),
         });
@@ -483,12 +483,12 @@ async fn status_value(
     let sid_for_latest = session_id.clone();
     let latest_timestamp = run_blocking_task("agent.status.latest_event", move || {
         let pool = event_store.pool().clone();
-        let conn = pool.get().map_err(|e| RpcError::Internal {
+        let conn = pool.get().map_err(|e| CapabilityError::Internal {
             message: format!("DB connection failed: {e}"),
         })?;
         crate::events::sqlite::repositories::event::EventRepo::get_latest(&conn, &sid_for_latest)
             .map(|opt| opt.map(|row| row.timestamp))
-            .map_err(crate::server::transport::json_rpc::error_mapping::map_event_store_error)
+            .map_err(crate::server::capabilities::error_mapping::map_event_store_error)
     })
     .await?;
     let time_since_last_event_ms = latest_timestamp
@@ -521,7 +521,7 @@ async fn status_value(
 async fn abort_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     AgentCommandService::abort(&deps.capability_context, &session_id)
 }
@@ -529,7 +529,7 @@ async fn abort_value(
 async fn abort_tool_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let tool_call_id = require_string_param(params, "toolCallId")?;
     AgentCommandService::abort_tool(&deps.capability_context, &session_id, &tool_call_id)
@@ -539,7 +539,7 @@ async fn queue_prompt_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let prompt = require_string_param(params, "prompt")?;
     validation::validate_string_param(&prompt, "prompt", validation::MAX_PROMPT_LENGTH)?;
@@ -563,7 +563,7 @@ async fn queue_prompt_value(
         });
     publish_agent_queue_stream(invocation, deps, &session_id, "queued", json!(&item)).await;
 
-    serde_json::to_value(&item).map_err(|e| RpcError::Internal {
+    serde_json::to_value(&item).map_err(|e| CapabilityError::Internal {
         message: format!("Failed to serialize queue item: {e}"),
     })
 }
@@ -572,7 +572,7 @@ async fn dequeue_prompt_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let queue_id = require_string_param(params, "queueId")?;
 
@@ -608,7 +608,7 @@ async fn clear_queue_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_store = deps.event_store.clone();
     let sid = session_id.clone();
@@ -650,7 +650,7 @@ async fn clear_queue_value(
 async fn submit_confirmation_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let action = require_string_param(params, "action")?;
     let decision = require_string_param(params, "decision")?;
@@ -702,20 +702,22 @@ struct AnswerSubmission {
 async fn submit_answers_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let questions_value =
         params
             .and_then(|p| p.get("questions"))
-            .ok_or_else(|| RpcError::InvalidParams {
+            .ok_or_else(|| CapabilityError::InvalidParams {
                 message: "Missing required param: questions".into(),
             })?;
     let answers: Vec<AnswerSubmission> =
-        serde_json::from_value(questions_value.clone()).map_err(|e| RpcError::InvalidParams {
-            message: format!("Invalid questions format: {e}"),
+        serde_json::from_value(questions_value.clone()).map_err(|e| {
+            CapabilityError::InvalidParams {
+                message: format!("Invalid questions format: {e}"),
+            }
         })?;
     if answers.is_empty() {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "questions array must not be empty".into(),
         });
     }
@@ -754,7 +756,7 @@ async fn submit_answers_value(
 async fn deliver_subagent_results_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let session =
         load_prompt_session(deps, &session_id, "agent.deliverSubagentResults.verify").await?;
@@ -763,16 +765,17 @@ async fn deliver_subagent_results_value(
     let (prompt, count) = run_blocking_task("agent.deliverSubagentResults.format", move || {
         let pending = get_pending_subagent_results(&event_store, &sid);
         if pending.is_empty() {
-            return Err(RpcError::NotFound {
+            return Err(CapabilityError::NotFound {
                 code: "NO_PENDING_RESULTS".into(),
                 message: "No unconsumed subagent results found".into(),
             });
         }
         let count = pending.len();
         let event_ids: Vec<String> = pending.iter().map(|(id, _)| id.clone()).collect();
-        let formatted = format_subagent_results(&pending).ok_or_else(|| RpcError::Internal {
-            message: "Failed to format subagent results".into(),
-        })?;
+        let formatted =
+            format_subagent_results(&pending).ok_or_else(|| CapabilityError::Internal {
+                message: "Failed to format subagent results".into(),
+            })?;
         let _ = event_store.append(&crate::events::AppendOptions {
             session_id: &sid,
             event_type: EventType::SubagentResultsConsumed,
@@ -810,7 +813,7 @@ async fn start_or_queue_prompt(
     message_metadata: Option<Value>,
     queue_task: &'static str,
     require_agent_deps: bool,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session =
         AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
     start_or_queue_prompt_with_loaded_session(
@@ -835,7 +838,7 @@ async fn start_or_queue_prompt_with_loaded_session(
     queue_task: &'static str,
     require_agent_deps: bool,
     extra_success_fields: Option<Value>,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let run_id = uuid::Uuid::now_v7().to_string();
     if let Some(agent_deps) = deps.agent_deps.as_ref() {
         if let Ok(started_run) = deps.orchestrator.begin_run(&session_id, &run_id) {
@@ -864,7 +867,7 @@ async fn start_or_queue_prompt_with_loaded_session(
             return Ok(result);
         }
     } else if require_agent_deps {
-        return Err(RpcError::NotAvailable {
+        return Err(CapabilityError::NotAvailable {
             message: "Agent execution dependencies are not configured".into(),
         });
     }
@@ -874,7 +877,7 @@ async fn start_or_queue_prompt_with_loaded_session(
     let queued_metadata = message_metadata.clone();
     let _ = run_blocking_task(queue_task, move || {
         PromptQueueService::enqueue_with_metadata(&event_store, &sid, &prompt, queued_metadata)
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: e.to_string(),
             })
     })
@@ -902,16 +905,16 @@ async fn load_prompt_session(
     deps: &EngineCapabilityDeps,
     session_id: &str,
     task: &'static str,
-) -> Result<crate::events::sqlite::row_types::SessionRow, RpcError> {
+) -> Result<crate::events::sqlite::row_types::SessionRow, CapabilityError> {
     let session_manager = deps.session_manager.clone();
     let sid_check = session_id.to_owned();
     run_blocking_task(task, move || {
         session_manager
             .get_session(&sid_check)
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: e.to_string(),
             })?
-            .ok_or_else(|| RpcError::NotFound {
+            .ok_or_else(|| CapabilityError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: format!("Session '{sid_check}' not found"),
             })

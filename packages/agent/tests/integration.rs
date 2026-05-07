@@ -33,7 +33,7 @@ use tron::server::server::TronServer;
 use tron::server::services::context::{AgentDeps, ServerCapabilityContext};
 use tron::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
 use tron::server::transport::json_rpc::types::JsonRpcEvent;
-use tron::server::websocket::event_bridge::EventBridge;
+use tron::server::websocket::stream_pump::EngineStreamEventPump;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
 
@@ -152,21 +152,21 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         capability_context,
         metrics_handle,
     ));
-    tron::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(
+    tron::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
         server.capability_context(),
         server.registry(),
     )
-    .expect("integration RPC engine bridge should register");
+    .expect("integration RPC engine pump should register");
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     )
     .with_engine_streams(server.capability_context().engine_host.clone());
-    let _bridge_handle = tokio::spawn(bridge.run());
+    let _stream_pump_handle = tokio::spawn(pump.run());
 
     let (addr, _handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
@@ -453,27 +453,27 @@ async fn boot_server_with_provider_and_handles(
         capability_context,
         metrics_handle,
     ));
-    tron::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(
+    tron::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
         server.capability_context(),
         server.registry(),
     )
-    .expect("integration RPC engine bridge should register");
+    .expect("integration RPC engine pump should register");
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
         server.broadcast().clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     )
     .with_engine_streams(server.capability_context().engine_host.clone());
-    let bridge_handle = tokio::spawn(bridge.run());
+    let stream_pump_handle = tokio::spawn(pump.run());
 
     let (addr, server_handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
     register_server_auth_path(&ws_url, &server.capability_context().auth_path);
 
-    (ws_url, server, vec![bridge_handle, server_handle])
+    (ws_url, server, vec![stream_pump_handle, server_handle])
 }
 
 /// Connect and skip the initial system.connected message.

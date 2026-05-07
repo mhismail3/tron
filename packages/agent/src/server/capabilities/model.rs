@@ -7,7 +7,7 @@ pub(super) async fn handle(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
     allow_capability_context: bool,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "model::list" => {
             model_list_value(&invocation.payload, deps, allow_capability_context).await
@@ -19,7 +19,7 @@ pub(super) async fn handle(
             rpc_model::set_reasoning_level(Some(&invocation.payload), &deps.capability_context)
                 .await
         }
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("model method {method} is not engine-owned"),
         }),
     }
@@ -29,7 +29,7 @@ async fn model_list_value(
     payload: &Value,
     deps: &EngineCapabilityDeps,
     allow_capability_context: bool,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let auth_json_path = allow_capability_context
         .then(|| {
             payload

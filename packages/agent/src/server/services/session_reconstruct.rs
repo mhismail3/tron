@@ -31,10 +31,10 @@
 use serde_json::{Value, json};
 use tracing::{debug, instrument};
 
+use crate::server::capabilities::errors::{self, CapabilityError};
 use crate::server::services::context::ServerCapabilityContext;
 use crate::server::services::events_wire::event_row_to_wire;
 use crate::server::services::prompt_queue::PromptQueueService;
-use crate::server::transport::json_rpc::errors::{self, RpcError};
 
 /// Hard ceiling on the number of events returned by a single
 /// `session.reconstruct` call, regardless of what the client asks for.
@@ -57,7 +57,7 @@ impl SessionReconstructService {
         session_id: String,
         limit: Option<i64>,
         before_sequence: Option<i64>,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         // INVARIANT: client-supplied `limit` is always clamped to
         // [0, MAX_RECONSTRUCT_EVENTS]. `None` means "give me the default
         // window" — the default IS the cap, not "unbounded". A negative
@@ -78,10 +78,10 @@ impl SessionReconstructService {
                 // Verify session exists
                 let session = session_manager
                     .get_session(&sid)
-                    .map_err(|e| RpcError::Internal {
+                    .map_err(|e| CapabilityError::Internal {
                         message: e.to_string(),
                     })?
-                    .ok_or_else(|| RpcError::NotFound {
+                    .ok_or_else(|| CapabilityError::NotFound {
                         code: errors::SESSION_NOT_FOUND.into(),
                         message: format!("Session '{sid}' not found"),
                     })?;
@@ -92,7 +92,7 @@ impl SessionReconstructService {
                 } else {
                     event_store.get_latest_events(&sid, limit)
                 }
-                .map_err(|e| RpcError::Internal {
+                .map_err(|e| CapabilityError::Internal {
                     message: format!("Failed to load events: {e}"),
                 })?;
 

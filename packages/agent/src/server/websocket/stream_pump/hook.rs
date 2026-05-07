@@ -1,9 +1,9 @@
 use crate::core::events::TronEvent;
 use serde_json::json;
 
-use super::routed::{BridgedEvent, session_scoped, set_opt};
+use super::routed::{ProjectedEvent, session_scoped, set_opt};
 
-pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
+pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
         TronEvent::HookTriggered {
             hook_names,

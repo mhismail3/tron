@@ -12,7 +12,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "job::background" => {
@@ -40,7 +40,7 @@ pub(super) async fn handle(
         "job::list" => job_list_value(Some(payload), deps),
         "job::subscribe" => job_subscribe_value(Some(payload), deps).await,
         "job::unsubscribe" => job_unsubscribe_value(Some(payload)),
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("job method {method} is not engine-owned"),
         }),
     }
@@ -51,8 +51,8 @@ async fn enqueue_and_sync_drain_job_apply(
     idempotency_prefix: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
-    let function_id = FunctionId::new(function_id).map_err(|e| RpcError::Internal {
+) -> Result<Value, CapabilityError> {
+    let function_id = FunctionId::new(function_id).map_err(|e| CapabilityError::Internal {
         message: e.to_string(),
     })?;
     let mut authority_scopes = invocation.causal_context.authority_scopes.clone();
@@ -81,7 +81,7 @@ async fn enqueue_and_sync_drain_job_apply(
             idempotency_key: Some(format!("{idempotency_prefix}:{}", invocation.id)),
         })
         .await
-        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+        .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     publish_queue_lifecycle_event(&deps.engine_host, "enqueue", &item, None).await;
 
     let drained = tokio::time::timeout(
@@ -89,39 +89,39 @@ async fn enqueue_and_sync_drain_job_apply(
         EngineQueueDrainer::drain_receipt(&deps.engine_host, &item.receipt_id, "rpc-job-sync"),
     )
     .await
-    .map_err(|_| RpcError::Internal {
+    .map_err(|_| CapabilityError::Internal {
         message: format!(
             "Timed out waiting for queued job command receipt {}",
             item.receipt_id
         ),
     })?
-    .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+    .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     let Some(result) = drained else {
-        return Err(RpcError::Internal {
+        return Err(CapabilityError::Internal {
             message: format!(
                 "Queued job command receipt {} was not claimable",
                 item.receipt_id
             ),
         });
     };
-    crate::server::transport::json_rpc::engine_transport::result_to_rpc(result)
+    crate::server::capabilities::error_mapping::result_to_capability_value(result)
 }
 
 async fn job_background_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let job_id = require_string_param(params, "jobId")?;
     let session_id = require_string_param(params, "sessionId")?;
     let pm = deps
         .process_manager
         .as_ref()
-        .ok_or_else(|| RpcError::Internal {
+        .ok_or_else(|| CapabilityError::Internal {
             message: "Process manager not available".into(),
         })?;
     pm.promote_to_background(&job_id)
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: format!("Failed to background: {e}"),
         })?;
     let label = pm
@@ -148,21 +148,21 @@ async fn job_cancel_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let job_id = require_string_param(params, "jobId")?;
     let session_id = require_string_param(params, "sessionId")?;
     if let Some(ref jm) = deps.job_manager {
         jm.cancel_job(&job_id, true)
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to cancel: {e}"),
             })?;
     } else if let Some(ref pm) = deps.process_manager {
         pm.cancel_process(&job_id, true)
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to cancel: {e}"),
             })?;
     } else {
-        return Err(RpcError::Internal {
+        return Err(CapabilityError::Internal {
             message: "No job manager available".into(),
         });
     }
@@ -185,7 +185,10 @@ async fn job_cancel_apply_value(
     }))
 }
 
-fn job_list_value(params: Option<&Value>, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+fn job_list_value(
+    params: Option<&Value>,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     if let Some(ref jm) = deps.job_manager {
         Ok(json!({ "jobs": jm.list_jobs(&session_id) }))
@@ -260,20 +263,21 @@ async fn publish_job_stream(
 async fn job_subscribe_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let job_id = require_string_param(params, "jobId")?;
     let session_id = require_string_param(params, "sessionId")?;
-    let registry = deps
-        .output_buffer_registry
-        .as_ref()
-        .ok_or_else(|| RpcError::Internal {
-            message: "Output buffer registry not available".into(),
-        })?;
-    let (buffer, tool_call_id) = registry
-        .get(&job_id)
-        .ok_or_else(|| RpcError::InvalidParams {
-            message: format!("No output buffer for job: {job_id}"),
-        })?;
+    let registry =
+        deps.output_buffer_registry
+            .as_ref()
+            .ok_or_else(|| CapabilityError::Internal {
+                message: "Output buffer registry not available".into(),
+            })?;
+    let (buffer, tool_call_id) =
+        registry
+            .get(&job_id)
+            .ok_or_else(|| CapabilityError::InvalidParams {
+                message: format!("No output buffer for job: {job_id}"),
+            })?;
 
     if let Some((_, old_cancel)) = ACTIVE_SUBSCRIPTIONS.remove(&job_id) {
         old_cancel.cancel();
@@ -293,7 +297,7 @@ async fn job_subscribe_value(
     }))
 }
 
-fn job_unsubscribe_value(params: Option<&Value>) -> Result<Value, RpcError> {
+fn job_unsubscribe_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
     let job_id = require_string_param(params, "jobId")?;
     let cancelled = if let Some((_, cancel)) = ACTIVE_SUBSCRIPTIONS.remove(&job_id) {
         cancel.cancel();

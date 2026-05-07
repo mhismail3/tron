@@ -3,7 +3,7 @@ use super::*;
 use base64::Engine;
 use tracing::{debug, warn};
 
-use crate::server::transport::json_rpc::params::opt_string;
+use crate::server::capabilities::params::opt_string;
 use crate::transcription::TranscriptionResult;
 
 const MAX_AUDIO_SIZE: usize = 150 * 1024 * 1024;
@@ -26,11 +26,11 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "transcription::audio" => transcribe_audio_value(&invocation.payload, deps).await,
         "transcription::download_model" => download_model_value(deps),
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("transcription method {method} is not engine-owned"),
         }),
     }
@@ -39,20 +39,20 @@ pub(super) async fn handle(
 async fn transcribe_audio_value(
     payload: &Value,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let audio_base64 =
-        opt_string(Some(payload), "audioBase64").ok_or_else(|| RpcError::InvalidParams {
+        opt_string(Some(payload), "audioBase64").ok_or_else(|| CapabilityError::InvalidParams {
             message: "Missing required parameter: audioBase64".into(),
         })?;
     let audio_base64 = normalize_base64(&audio_base64);
     let audio_bytes = base64::engine::general_purpose::STANDARD
         .decode(audio_base64)
-        .map_err(|error| RpcError::InvalidParams {
+        .map_err(|error| CapabilityError::InvalidParams {
             message: format!("Invalid base64 audio data: {error}"),
         })?;
 
     if audio_bytes.len() > MAX_AUDIO_SIZE {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!(
                 "Audio data too large: {} bytes (max {})",
                 audio_bytes.len(),
@@ -69,12 +69,12 @@ async fn transcribe_audio_value(
     );
 
     let response = transcribe_audio_full(&deps.capability_context, &audio_bytes, mime_type).await?;
-    serde_json::to_value(&response).map_err(|error| RpcError::Internal {
+    serde_json::to_value(&response).map_err(|error| CapabilityError::Internal {
         message: format!("serialize response: {error}"),
     })
 }
 
-fn download_model_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+fn download_model_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let engine_loaded = deps.capability_context.transcription_engine.get().is_some();
     let enabled = crate::settings::get_settings().server.transcription.enabled;
 
@@ -133,11 +133,11 @@ async fn transcribe_audio_full(
     ctx: &crate::server::services::context::ServerCapabilityContext,
     audio_bytes: &[u8],
     mime_type: &str,
-) -> Result<TranscribeResponse, RpcError> {
+) -> Result<TranscribeResponse, CapabilityError> {
     let start = std::time::Instant::now();
 
     if !crate::settings::get_settings().server.transcription.enabled {
-        return Err(RpcError::NotAvailable {
+        return Err(CapabilityError::NotAvailable {
             message: "Transcription disabled".into(),
         });
     }
@@ -145,7 +145,7 @@ async fn transcribe_audio_full(
     let engine = ctx
         .transcription_engine
         .get()
-        .ok_or(RpcError::NotAvailable {
+        .ok_or(CapabilityError::NotAvailable {
             message: "Transcription engine not loaded".into(),
         })?;
 
@@ -168,7 +168,7 @@ async fn transcribe_audio_full(
         }
         Err(error) => {
             warn!(error = %error, "transcription failed");
-            Err(RpcError::NotAvailable {
+            Err(CapabilityError::NotAvailable {
                 message: "Transcription not available (engine failed)".into(),
             })
         }

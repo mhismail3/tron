@@ -4,16 +4,16 @@ pub(super) async fn handle(
     method: &str,
     _invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "codex_app::status" => codex_app_status_value(deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("codex app method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn codex_app_status_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn codex_app_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let Some(manager) = &deps.codex_app_server else {
         return Ok(json!({
             "enabled": false,
@@ -30,7 +30,7 @@ async fn codex_app_status_value(deps: &EngineCapabilityDeps) -> Result<Value, Rp
             "lastError": "Codex App Server lifecycle manager is unavailable"
         }));
     };
-    serde_json::to_value(manager.status().await).map_err(|error| RpcError::Internal {
+    serde_json::to_value(manager.status().await).map_err(|error| CapabilityError::Internal {
         message: format!("Failed to encode Codex App Server status: {error}"),
     })
 }

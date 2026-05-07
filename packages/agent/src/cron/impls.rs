@@ -4,7 +4,7 @@
 //! - [`CronAgentTurnExecutor`] — Isolated agent session execution
 //! - [`CronSystemEventInjector`] — Session event injection
 //!
-//! Server transport adapters for cron live in `server::cron_adapters`.
+//! Server transport callbacks for cron live in `server::cron_callbacks`.
 
 use std::sync::Arc;
 

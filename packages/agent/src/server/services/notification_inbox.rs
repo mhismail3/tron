@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tracing::warn;
 
-use crate::server::transport::json_rpc::errors::RpcError;
+use crate::server::capabilities::errors::CapabilityError;
 
 /// A single notification returned to the client inbox.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -74,7 +74,7 @@ impl NotificationInboxService {
     pub(crate) fn list(
         conn: &PooledConnection,
         limit: u64,
-    ) -> Result<NotificationListResult, RpcError> {
+    ) -> Result<NotificationListResult, CapabilityError> {
         let mut stmt = conn
             .prepare(
                 "SELECT
@@ -95,7 +95,7 @@ impl NotificationInboxService {
                  ORDER BY e.timestamp DESC
                  LIMIT ?1",
             )
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to prepare notification query: {e}"),
             })?;
 
@@ -113,7 +113,7 @@ impl NotificationInboxService {
                     read_at: row.get(8)?,
                 })
             })
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to query notifications: {e}"),
             })?;
 
@@ -121,7 +121,7 @@ impl NotificationInboxService {
         let mut unread_count = 0u64;
 
         for row in rows {
-            let row = row.map_err(|e| RpcError::Internal {
+            let row = row.map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to read notification row: {e}"),
             })?;
 
@@ -155,13 +155,16 @@ impl NotificationInboxService {
         })
     }
 
-    pub(crate) fn mark_read(conn: &Connection, event_id: &str) -> Result<MarkReadResult, RpcError> {
+    pub(crate) fn mark_read(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<MarkReadResult, CapabilityError> {
         let _ = conn
             .execute(
                 "INSERT OR IGNORE INTO notification_read_state (event_id, read_at) VALUES (?1, datetime('now'))",
                 [event_id],
             )
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to mark notification as read: {e}"),
             })?;
 
@@ -175,7 +178,7 @@ impl NotificationInboxService {
     pub(crate) fn mark_all_read(
         conn: &Connection,
         session_id: Option<&str>,
-    ) -> Result<MarkAllReadResult, RpcError> {
+    ) -> Result<MarkAllReadResult, CapabilityError> {
         let marked = if let Some(sid) = session_id {
             conn.execute(
                 "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
@@ -198,7 +201,7 @@ impl NotificationInboxService {
                 params![],
             )
         }
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: format!("Failed to mark all notifications as read: {e}"),
         })?;
 

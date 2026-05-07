@@ -40,7 +40,7 @@ pub(crate) struct DeviceToken {
     pub environment: String,
     /// APNs bundle ID (`apns-topic`). NOT NULL on the row — every active
     /// registration carries its bundle identifier so the send path can
-    /// attach the correct `apns-topic` without a fallback.
+    /// attach the correct `apns-topic` without an alternate topic.
     pub bundle_id: String,
 }
 

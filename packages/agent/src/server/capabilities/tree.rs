@@ -6,14 +6,14 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "tree::get_visualization" => get_visualization(&invocation.payload, deps).await,
         "tree::get_branches" => get_branches(&invocation.payload, deps).await,
         "tree::get_subtree" => get_subtree(&invocation.payload, deps).await,
         "tree::get_ancestors" => get_ancestors(&invocation.payload, deps).await,
         "tree::compare_branches" => compare_branches(&invocation.payload).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("tree method {method} is not engine-owned"),
         }),
     }
@@ -22,13 +22,13 @@ pub(super) async fn handle(
 async fn get_visualization(
     payload: &Value,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let session = deps
         .event_store
         .get_session(&session_id)
         .map_err(map_event_store_error)?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::SESSION_NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -61,7 +61,10 @@ async fn get_visualization(
     }))
 }
 
-async fn get_branches(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn get_branches(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let branches = deps
         .event_store
@@ -89,7 +92,10 @@ async fn get_branches(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Va
     }))
 }
 
-async fn get_subtree(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn get_subtree(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let event_id = require_string_param(Some(payload), "eventId")?;
     let descendants = deps
         .event_store
@@ -112,7 +118,10 @@ async fn get_subtree(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Val
     }))
 }
 
-async fn get_ancestors(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn get_ancestors(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let event_id = require_string_param(Some(payload), "eventId")?;
     let ancestors = deps
         .event_store
@@ -132,7 +141,7 @@ async fn get_ancestors(payload: &Value, deps: &EngineCapabilityDeps) -> Result<V
     Ok(json!({ "ancestors": nodes }))
 }
 
-async fn compare_branches(payload: &Value) -> Result<Value, RpcError> {
+async fn compare_branches(payload: &Value) -> Result<Value, CapabilityError> {
     let _branch_a = require_string_param(Some(payload), "branchA")?;
     let _branch_b = require_string_param(Some(payload), "branchB")?;
     Ok(json!({

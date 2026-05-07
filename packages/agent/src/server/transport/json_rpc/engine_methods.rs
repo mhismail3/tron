@@ -39,11 +39,10 @@ use serde_json::{Value, json};
 use crate::engine::{
     AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, EngineError,
     EngineHostHandle, FunctionDefinition, FunctionId, IdempotencyContract,
-    InProcessFunctionHandler, Invocation, InvocationResult, Provenance, Result as EngineResult,
-    RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
+    InProcessFunctionHandler, Invocation, Provenance, Result as EngineResult, RiskLevel,
+    VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::errors::{self, RpcError};
 use crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
 use crate::tools::capability_runtime;
 use crate::tools::traits::{ToolContext, TronTool};
@@ -53,16 +52,16 @@ use crate::server::capabilities::catalog;
 pub use crate::server::capabilities::catalog::{
     CanonicalCapabilitySpec, CapabilitySpec, TransportIdempotencyMode, public_json_rpc_specs,
 };
-pub use dispatch::{JsonRpcEngineInvocation, dispatch_json_rpc_transport};
+pub use dispatch::dispatch_engine_json_rpc_method;
 
 pub(crate) use crate::server::capabilities::catalog::{SYSTEM_AUTHORITY_GRANT, SYSTEM_OWNER_ACTOR};
 
 /// Register in-process engine capabilities and public JSON-RPC engine triggers.
-pub fn register_engine_transport_for_context(
+pub fn register_engine_json_rpc_for_context(
     ctx: &ServerCapabilityContext,
     registry: &JsonRpcTransportRegistry,
 ) -> EngineResult<()> {
-    register_engine_transport(
+    register_engine_json_rpc(
         &ctx.engine_host,
         registry,
         crate::server::capabilities::EngineCapabilityDeps::from_context(ctx),
@@ -71,13 +70,14 @@ pub fn register_engine_transport_for_context(
     Ok(())
 }
 
-fn register_engine_transport(
+fn register_engine_json_rpc(
     handle: &EngineHostHandle,
     registry: &JsonRpcTransportRegistry,
     deps: crate::server::capabilities::EngineCapabilityDeps,
 ) -> EngineResult<()> {
     let canonical_specs = catalog::canonical_capability_specs()?;
-    let public_transport_specs = catalog::public_json_rpc_specs(registry)?;
+    let registered_methods = registry.methods();
+    let public_transport_specs = catalog::public_json_rpc_specs(&registered_methods)?;
     for worker in catalog::domain_workers()? {
         handle.register_worker_for_setup(worker, false)?;
     }
@@ -630,71 +630,4 @@ fn register_hidden_cron_schedule_function(
         false,
     )?;
     Ok(())
-}
-
-pub(crate) fn capability_error_to_engine(error: RpcError) -> EngineError {
-    let body = error.to_error_body();
-    EngineError::DomainFailure {
-        domain: "server_capability".to_owned(),
-        code: body.code,
-        message: body.message,
-        details: body.details,
-    }
-}
-
-pub(crate) fn result_to_rpc(result: InvocationResult) -> Result<Value, RpcError> {
-    if let Some(error) = result.error {
-        return Err(engine_error_to_rpc(error));
-    }
-    Ok(result.value.unwrap_or(Value::Null))
-}
-
-pub(crate) fn engine_error_to_rpc(error: EngineError) -> RpcError {
-    match error {
-        EngineError::DomainFailure {
-            domain: _,
-            code,
-            message,
-            details,
-        } => rpc_error_from_parts(&code, message, details),
-        EngineError::SchemaViolation { message, .. } => RpcError::InvalidParams { message },
-        EngineError::PolicyViolation(message) => RpcError::InvalidParams { message },
-        EngineError::IdempotencyConflict {
-            function_id,
-            key,
-            reason,
-        } => RpcError::Custom {
-            code: errors::IDEMPOTENCY_CONFLICT.to_owned(),
-            message: format!("Idempotency conflict for {function_id}: {reason}"),
-            details: Some(serde_json::json!({
-                "functionId": function_id,
-                "key": key,
-                "reason": reason,
-            })),
-        },
-        EngineError::NotFound { id, .. } => RpcError::NotFound {
-            code: errors::NOT_FOUND.to_owned(),
-            message: format!("Engine function '{id}' not found"),
-        },
-        other => RpcError::Internal {
-            message: other.to_string(),
-        },
-    }
-}
-
-fn rpc_error_from_parts(code: &str, message: String, details: Option<Value>) -> RpcError {
-    match code {
-        errors::INVALID_PARAMS => RpcError::InvalidParams { message },
-        errors::INTERNAL_ERROR => RpcError::Internal { message },
-        errors::NOT_AVAILABLE => RpcError::NotAvailable { message },
-        errors::NOT_FOUND => RpcError::NotFound {
-            code: errors::NOT_FOUND.to_owned(),
-            message,
-        },
-        _ => RpcError::Custom {
-            code: code.to_owned(),
-            message,
-            details,
-        },
-    }
 }

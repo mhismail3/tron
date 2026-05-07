@@ -22,6 +22,13 @@ meta-capabilities:
 Dotted domain calls are not registered public methods on this branch. Clients
 and agents discover canonical ids and invoke them through `engine.invoke`.
 
+Inside the server, JSON-RPC is translated into a protocol-neutral
+`EngineTransportRequest` before trigger dispatch. That envelope carries the
+target function, trigger, actor, authority, trace, scope, payload, expected
+revision, and explicit idempotency key. A future custom engine WebSocket
+protocol should build the same envelope rather than introducing a second
+domain path.
+
 ## First Principles
 
 - The catalog is always live. A model call should see the current capabilities
@@ -69,6 +76,8 @@ The code layout follows the same boundary:
   capabilities.
 - `packages/agent/src/server/transport/json_rpc/`: JSON-RPC framing, registry,
   validation, and the five `engine.*` transport methods.
+- `packages/agent/src/server/transport/engine.rs`: protocol-neutral transport
+  envelope used by JSON-RPC and intended for future engine-native protocols.
 - `packages/agent/src/server/websocket/`: WebSocket delivery over engine stream
   records.
 
@@ -78,7 +87,7 @@ The code layout follows the same boundary:
 - No executable or discoverable noncanonical transport namespace exists.
 - Domain dotted names are internal operation keys only, not public transport.
 - Production code does not implement method-specific canonical capability functions.
-- Production engine functions do not call handler-shaped adapters.
+- Production engine functions do not call handler-shaped transport shims.
 - The live catalog is the source for agents, model tool schemas, triggers, and
   transport invocation.
 - Missing engine, stream, queue, approval, idempotency, or lease services fail

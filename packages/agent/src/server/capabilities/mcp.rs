@@ -8,15 +8,15 @@ use crate::engine::{
     FunctionDefinition, FunctionId, FunctionQuery, IdempotencyContract, InProcessFunctionHandler,
     Provenance, RiskLevel, VisibilityScope, WorkerId,
 };
-use crate::mcp::tool_bridge::mcp_result_to_tron_result;
 use crate::mcp::tool_index::ParamSummary;
+use crate::mcp::tool_projection::mcp_result_to_tron_result;
 use crate::mcp::types::McpServerConfig;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "mcp::status" => mcp_status_value(deps).await,
@@ -27,7 +27,7 @@ pub(super) async fn handle(
         "mcp::restart_server" => mcp_restart_server_value(Some(payload), invocation, deps).await,
         "mcp::reload" => mcp_reload_value(invocation, deps).await,
         "mcp::list_tools" => mcp_list_tools_value(Some(payload), deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("mcp method {method} is not engine-owned"),
         }),
     }
@@ -35,17 +35,17 @@ pub(super) async fn handle(
 
 fn require_router(
     deps: &EngineCapabilityDeps,
-) -> Result<&Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>, RpcError> {
-    deps.mcp_router.as_ref().ok_or(RpcError::Internal {
+) -> Result<&Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>, CapabilityError> {
+    deps.mcp_router.as_ref().ok_or(CapabilityError::Internal {
         message: "MCP is not configured on this server".into(),
     })
 }
 
-async fn mcp_status_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn mcp_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?;
     let guard = router.read().await;
     let status = guard.status();
-    serde_json::to_value(status).map_err(|e| RpcError::Internal {
+    serde_json::to_value(status).map_err(|e| CapabilityError::Internal {
         message: e.to_string(),
     })
 }
@@ -54,7 +54,7 @@ async fn mcp_add_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
     let command = opt_string(params, "command");
@@ -96,7 +96,7 @@ async fn mcp_add_server_value(
     let tool_count = guard
         .add_server(config)
         .await
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?;
     drop(guard);
@@ -114,7 +114,7 @@ async fn mcp_remove_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
 
@@ -122,7 +122,7 @@ async fn mcp_remove_server_value(
     guard
         .remove_server(&name)
         .await
-        .map_err(|message| RpcError::Internal { message })?;
+        .map_err(|message| CapabilityError::Internal { message })?;
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
@@ -135,7 +135,7 @@ async fn mcp_enable_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
 
@@ -143,7 +143,7 @@ async fn mcp_enable_server_value(
     guard
         .enable_server(&name)
         .await
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?;
     drop(guard);
@@ -158,7 +158,7 @@ async fn mcp_disable_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
 
@@ -166,7 +166,7 @@ async fn mcp_disable_server_value(
     guard
         .disable_server(&name)
         .await
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?;
     drop(guard);
@@ -181,7 +181,7 @@ async fn mcp_restart_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
 
@@ -189,7 +189,7 @@ async fn mcp_restart_server_value(
     let tool_count = guard
         .restart_server(&name)
         .await
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?;
     drop(guard);
@@ -206,14 +206,14 @@ async fn mcp_restart_server_value(
 async fn mcp_reload_value(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
 
     let mut guard = router.write().await;
     let server_count = guard
         .reload_from_settings()
         .await
-        .map_err(|e| RpcError::Internal { message: e })?;
+        .map_err(|e| CapabilityError::Internal { message: e })?;
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
@@ -228,7 +228,7 @@ async fn mcp_reload_value(
 async fn mcp_list_tools_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?;
     let server_filter = opt_string(params, "server");
 
@@ -237,7 +237,7 @@ async fn mcp_list_tools_value(
     drop(guard);
     refresh_mcp_tool_catalog(deps).await;
 
-    serde_json::to_value(matches).map_err(|e| RpcError::Internal {
+    serde_json::to_value(matches).map_err(|e| CapabilityError::Internal {
         message: e.to_string(),
     })
 }
@@ -246,7 +246,7 @@ async fn publish_mcp_status_changed(invocation: &Invocation, deps: &EngineCapabi
     let Ok(status) = mcp_status_value(deps).await else {
         return;
     };
-    let event = JsonRpcEvent::new("mcp.status_changed", None, Some(status));
+    let event = ServerEventPayload::new("mcp.status_changed", None, Some(status));
     super::publish_engine_stream_event(deps, "mcp", "mcp", event, Some(invocation)).await;
 }
 

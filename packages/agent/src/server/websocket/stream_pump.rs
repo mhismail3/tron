@@ -1,4 +1,4 @@
-//! Event bridge — converts `TronEvent`s from the Orchestrator broadcast into
+//! Engine stream event pump — converts `TronEvent`s from the Orchestrator broadcast into
 //! `JsonRpcEvent`s and routes them through WebSocket-compatible delivery.
 //!
 //! Migrated runtime event classes publish to the engine stream primitive
@@ -17,23 +17,23 @@ use tokio_util::sync::CancellationToken;
 
 use super::broadcast::BroadcastManager;
 use routed::BroadcastScope;
-use tron::tron_event_to_bridged;
+use tron::tron_event_to_projected;
 
-#[path = "event_bridge/hook.rs"]
+#[path = "stream_pump/hook.rs"]
 mod hook;
-#[path = "event_bridge/message.rs"]
+#[path = "stream_pump/message.rs"]
 mod message;
-#[path = "event_bridge/routed.rs"]
+#[path = "stream_pump/routed.rs"]
 mod routed;
-#[path = "event_bridge/session.rs"]
+#[path = "stream_pump/session.rs"]
 mod session;
-#[path = "event_bridge/streaming.rs"]
+#[path = "stream_pump/streaming.rs"]
 mod streaming;
-#[path = "event_bridge/tool.rs"]
+#[path = "stream_pump/tool.rs"]
 mod tool;
-#[path = "event_bridge/tron.rs"]
+#[path = "stream_pump/tron.rs"]
 mod tron;
-#[path = "event_bridge/turn.rs"]
+#[path = "stream_pump/turn.rs"]
 mod turn;
 
 #[cfg(test)]
@@ -44,8 +44,8 @@ fn tron_event_to_rpc(event: &TronEvent) -> JsonRpcEvent {
     tron::tron_event_to_rpc(event)
 }
 
-/// Bridges orchestrator events to WebSocket clients.
-pub struct EventBridge {
+/// Projects orchestrator events into engine streams and WebSocket delivery.
+pub struct EngineStreamEventPump {
     rx: broadcast::Receiver<TronEvent>,
     broadcast: Arc<BroadcastManager>,
     cancel: CancellationToken,
@@ -53,8 +53,8 @@ pub struct EventBridge {
     engine_streams: Option<EngineHostHandle>,
 }
 
-impl EventBridge {
-    /// Create a new event bridge.
+impl EngineStreamEventPump {
+    /// Create a new stream event pump.
     pub fn new(
         rx: broadcast::Receiver<TronEvent>,
         broadcast: Arc<BroadcastManager>,
@@ -81,13 +81,13 @@ impl EventBridge {
         self
     }
 
-    /// Run the bridge loop. Exits on shutdown signal or when the broadcast sender is dropped.
-    #[tracing::instrument(skip_all, name = "event_bridge")]
+    /// Run the stream pump loop. Exits on shutdown signal or when the broadcast sender is dropped.
+    #[tracing::instrument(skip_all, name = "stream_pump")]
     pub async fn run(mut self) {
         loop {
             tokio::select! {
                 () = self.cancel.cancelled() => {
-                    tracing::debug!("event bridge: shutdown signal received");
+                    tracing::debug!("stream pump: shutdown signal received");
                     break;
                 }
                 result = self.rx.recv() => {
@@ -106,28 +106,28 @@ impl EventBridge {
     ) -> bool {
         match result {
             Ok(event) => {
-                self.bridge_tron_event(&event).await;
+                self.project_tron_event(&event).await;
                 true
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                tracing::debug!(lagged = n, "event bridge lagged");
-                metrics::counter!("broadcast_lagged_events_total", "source" => "event_bridge")
+                tracing::debug!(lagged = n, "stream pump lagged");
+                metrics::counter!("broadcast_lagged_events_total", "source" => "stream_pump")
                     .increment(n);
                 true
             }
             Err(broadcast::error::RecvError::Closed) => {
-                tracing::debug!("event bridge: sender closed, exiting");
+                tracing::debug!("stream pump: sender closed, exiting");
                 false
             }
         }
     }
 
-    async fn bridge_tron_event(&self, event: &TronEvent) {
+    async fn project_tron_event(&self, event: &TronEvent) {
         self.accumulators.update_from_event(event);
 
         let event_type = event.event_type();
-        tracing::debug!(event_type, "bridging event to client");
-        let bridged = tron_event_to_bridged(event);
+        tracing::debug!(event_type, "projecting event to client delivery");
+        let projected = tron_event_to_projected(event);
 
         if should_publish_stream_first(event) {
             let Some(host) = self.engine_streams.as_ref() else {
@@ -141,8 +141,8 @@ impl EventBridge {
                 .publish_stream_event(PublishStreamEvent {
                     topic: "events.session".to_owned(),
                     payload: json!({
-                        "__rpcEvent": bridged.rpc_event.clone(),
-                        "__broadcastScope": broadcast_scope_payload(&bridged.scope),
+                        "__rpcEvent": projected.rpc_event.clone(),
+                        "__broadcastScope": broadcast_scope_payload(&projected.scope),
                         "sourceEventType": event.event_type(),
                         "sourceSequence": event.sequence(),
                     }),
@@ -167,11 +167,11 @@ impl EventBridge {
             }
         }
 
-        match bridged.scope {
-            BroadcastScope::All => self.broadcast.broadcast_all(&bridged.rpc_event).await,
+        match projected.scope {
+            BroadcastScope::All => self.broadcast.broadcast_all(&projected.rpc_event).await,
             BroadcastScope::Session(session_id) => {
                 self.broadcast
-                    .broadcast_to_session(&session_id, &bridged.rpc_event)
+                    .broadcast_to_session(&session_id, &projected.rpc_event)
                     .await;
             }
         }
@@ -217,5 +217,5 @@ fn broadcast_scope_payload(scope: &BroadcastScope) -> serde_json::Value {
 }
 
 #[cfg(test)]
-#[path = "event_bridge/tests.rs"]
+#[path = "stream_pump/tests.rs"]
 mod tests;

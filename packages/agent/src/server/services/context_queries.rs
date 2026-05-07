@@ -8,13 +8,13 @@ use parking_lot::RwLock;
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
+use crate::server::capabilities::errors::CapabilityError;
 use crate::server::services::context::ServerCapabilityContext;
 use crate::server::services::context_service::{
     PreparedSessionContext, build_active_skill_context, build_context_manager_for_session,
     build_summarizer, retry_context_read, tool_definitions,
 };
 use crate::server::services::session_context::{RuleFileLevel, collect_dynamic_rule_paths};
-use crate::server::transport::json_rpc::errors::RpcError;
 
 pub(crate) struct ContextQueryService;
 
@@ -22,7 +22,7 @@ impl ContextQueryService {
     pub(crate) async fn get_snapshot(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
@@ -85,7 +85,7 @@ impl ContextQueryService {
     pub(crate) async fn get_detailed_snapshot(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
@@ -120,18 +120,18 @@ impl ContextQueryService {
         ctx: &ServerCapabilityContext,
         session_id: String,
         turn: Option<u32>,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let event_store = ctx.event_store.clone();
         let session_id_for_query = session_id.clone();
         ctx.run_blocking("context.get_audit_trace", move || {
             let conn = event_store
                 .pool()
                 .get()
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: format!("database connection error: {error}"),
                 })?;
             let trace = load_audit_trace(&conn, &session_id_for_query, turn)?;
-            trace.ok_or_else(|| RpcError::NotFound {
+            trace.ok_or_else(|| CapabilityError::NotFound {
                 code: "CONTEXT_AUDIT_NOT_FOUND".into(),
                 message: format!(
                     "No context audit trace found for session `{}`{}",
@@ -146,7 +146,7 @@ impl ContextQueryService {
     pub(crate) async fn should_compact(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
@@ -174,7 +174,7 @@ impl ContextQueryService {
     pub(crate) async fn preview_compaction(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let prepared =
             prepare_session_context(ctx, "context.preview_compaction.prepare", &session_id).await?;
         let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
@@ -182,7 +182,7 @@ impl ContextQueryService {
             .context_manager
             .preview_compaction(summarizer.as_ref())
             .await
-            .map_err(|error| RpcError::Internal {
+            .map_err(|error| CapabilityError::Internal {
                 message: format!("Compaction preview failed: {error}"),
             })?;
 
@@ -200,7 +200,7 @@ impl ContextQueryService {
     pub(crate) async fn can_accept_turn(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
@@ -230,7 +230,7 @@ pub(crate) async fn prepare_session_context(
     ctx: &ServerCapabilityContext,
     task_name: &'static str,
     session_id: &str,
-) -> Result<PreparedSessionContext, RpcError> {
+) -> Result<PreparedSessionContext, CapabilityError> {
     let session_manager = ctx.session_manager.clone();
     let event_store = ctx.event_store.clone();
     let context_artifacts = ctx.context_artifacts.clone();
@@ -299,7 +299,7 @@ fn build_detailed_snapshot_response(
     prepared: PreparedSessionContext,
     skill_registry: &Arc<RwLock<SkillRegistry>>,
     memory_registry: &Arc<parking_lot::Mutex<crate::runtime::memory::MemoryRegistry>>,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let PreparedSessionContext {
         session,
         artifacts,
@@ -438,7 +438,7 @@ fn build_added_skills(
     event_store: &crate::events::EventStore,
     session_id: &str,
     skill_registry: &Arc<RwLock<SkillRegistry>>,
-) -> Result<Vec<Value>, RpcError> {
+) -> Result<Vec<Value>, CapabilityError> {
     let policy = {
         let settings = crate::settings::get_settings();
         settings.skills.compaction_policy.clone()
@@ -456,7 +456,7 @@ fn build_added_skills(
             ],
             None,
         )
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: error.to_string(),
         })?;
 
@@ -551,7 +551,7 @@ fn load_audit_trace(
     conn: &rusqlite::Connection,
     session_id: &str,
     turn: Option<u32>,
-) -> Result<Option<Value>, RpcError> {
+) -> Result<Option<Value>, CapabilityError> {
     let context = load_context_resolution(conn, session_id, turn)?;
     let Some(context) = context else {
         return Ok(None);
@@ -577,7 +577,7 @@ fn load_context_resolution(
     conn: &rusqlite::Connection,
     session_id: &str,
     turn: Option<u32>,
-) -> Result<Option<AuditResolution>, RpcError> {
+) -> Result<Option<AuditResolution>, CapabilityError> {
     let sql = if turn.is_some() {
         "SELECT id, occurred_at, turn, profile, provider, model, effective_hash, payload_blob_id, metadata_json
          FROM constitution_resolution_audit
@@ -611,7 +611,7 @@ fn load_provider_payload_resolution(
     session_id: &str,
     context: &AuditResolution,
     turn: Option<u32>,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let by_context: Option<AuditResolution> = conn
         .query_row(
             "SELECT id, occurred_at, turn, profile, provider, model, effective_hash, payload_blob_id, metadata_json
@@ -665,7 +665,7 @@ fn load_provider_payload_resolution(
 fn load_context_blocks(
     conn: &rusqlite::Connection,
     resolution_id: &str,
-) -> Result<Vec<Value>, RpcError> {
+) -> Result<Vec<Value>, CapabilityError> {
     let mut stmt = conn
         .prepare(
             "SELECT block_id, name, source_home, source_path, source_blob_id, content_hash,
@@ -736,9 +736,9 @@ fn resolution_json(row: &AuditResolution) -> Value {
 fn load_payload_preview(
     conn: &rusqlite::Connection,
     blob_id: &str,
-) -> Result<Option<Value>, RpcError> {
+) -> Result<Option<Value>, CapabilityError> {
     let content = crate::events::sqlite::repositories::blob::BlobRepo::get_content(conn, blob_id)
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
         message: format!("audit payload blob lookup error: {error}"),
     })?;
     let Some(content) = content else {
@@ -797,8 +797,8 @@ fn parse_json_value(content: &str) -> Value {
     serde_json::from_str(content).unwrap_or_else(|_| json!({ "unparsed": content }))
 }
 
-fn sql_error(error: rusqlite::Error) -> RpcError {
-    RpcError::Internal {
+fn sql_error(error: rusqlite::Error) -> CapabilityError {
+    CapabilityError::Internal {
         message: format!("context audit query failed: {error}"),
     }
 }

@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::json;
 
+use super::schemas::{request_schema_for_method, response_schema_for_method};
 use crate::engine::{
     ActorId, AuthorityGrantId, AuthorityRequirement, CompensationContract, CompensationKind,
     DeliveryMode, EffectClass, EngineError, FunctionDefinition, FunctionId, IdempotencyContract,
@@ -9,11 +10,6 @@ use crate::engine::{
     TriggerDefinition, TriggerId, TriggerTypeDefinition, TriggerTypeId, VisibilityScope,
     WorkerDefinition, WorkerId, WorkerKind,
 };
-use crate::server::transport::json_rpc::registry::{
-    JsonRpcTransportRegistry, TransportExecutionPolicy,
-};
-
-use super::schemas::{request_schema_for_method, response_schema_for_method};
 
 /// System actor used for server-owned capability registration.
 pub(crate) const SYSTEM_OWNER_ACTOR: &str = "system";
@@ -291,8 +287,7 @@ pub fn canonical_capability_specs() -> EngineResult<Vec<CanonicalCapabilitySpec>
     CAPABILITY_SEEDS
         .iter()
         .map(|seed| {
-            let policy = JsonRpcTransportRegistry::policy_for_method(seed.method);
-            let spec = spec_from_seed(*seed, policy)?;
+            let spec = spec_from_seed(*seed)?;
             Ok(CanonicalCapabilitySpec {
                 function_id: spec.function_id,
                 owner_worker: spec.owner_worker,
@@ -307,10 +302,8 @@ pub fn canonical_capability_specs() -> EngineResult<Vec<CanonicalCapabilitySpec>
 }
 
 /// Build and validate the public JSON-RPC engine transport method set.
-pub fn public_json_rpc_specs(
-    registry: &JsonRpcTransportRegistry,
-) -> EngineResult<Vec<CapabilitySpec>> {
-    let registered = registry.methods().into_iter().collect::<BTreeSet<_>>();
+pub fn public_json_rpc_specs(registered_methods: &[String]) -> EngineResult<Vec<CapabilitySpec>> {
+    let registered = registered_methods.iter().cloned().collect::<BTreeSet<_>>();
     let seeded = PUBLIC_JSON_RPC_METHODS
         .iter()
         .map(|method| (*method).to_owned())
@@ -330,13 +323,7 @@ pub fn public_json_rpc_specs(
     let mut specs = Vec::with_capacity(PUBLIC_JSON_RPC_METHODS.len());
     for method in PUBLIC_JSON_RPC_METHODS {
         let seed = CapabilitySeed { method: *method };
-        let policy = registry.method_policy(seed.method).ok_or_else(|| {
-            EngineError::PolicyViolation(format!(
-                "public engine transport method {} has no registry policy",
-                seed.method
-            ))
-        })?;
-        let spec = spec_from_seed(seed, policy)?;
+        let spec = spec_from_seed(seed)?;
         if spec.visibility.is_agent_visible()
             && spec.effect_class.is_mutating()
             && spec.idempotency_mode == TransportIdempotencyMode::NotRequired
@@ -401,7 +388,6 @@ pub fn public_json_rpc_specs(
 }
 
 pub(crate) fn public_json_rpc_spec_for_method(
-    registry: &JsonRpcTransportRegistry,
     method: &str,
 ) -> EngineResult<Option<CapabilitySpec>> {
     let Some(seed) = PUBLIC_JSON_RPC_METHODS
@@ -411,10 +397,7 @@ pub(crate) fn public_json_rpc_spec_for_method(
     else {
         return Ok(None);
     };
-    let Some(policy) = registry.method_policy(method) else {
-        return Ok(None);
-    };
-    spec_from_seed(seed, policy).map(Some)
+    spec_from_seed(seed).map(Some)
 }
 
 pub(crate) fn capability_spec_for_method(method: &str) -> EngineResult<CapabilitySpec> {
@@ -426,7 +409,7 @@ pub(crate) fn capability_spec_for_method(method: &str) -> EngineResult<Capabilit
             "canonical capability operation {method} is not registered"
         )));
     };
-    spec_from_seed(*seed, JsonRpcTransportRegistry::policy_for_method(method))
+    spec_from_seed(*seed)
 }
 
 fn validate_seed_uniqueness() -> EngineResult<()> {
@@ -442,11 +425,8 @@ fn validate_seed_uniqueness() -> EngineResult<()> {
     Ok(())
 }
 
-fn spec_from_seed(
-    seed: CapabilitySeed,
-    policy: TransportExecutionPolicy,
-) -> EngineResult<CapabilitySpec> {
-    let effect_class = effect_class_for_method(seed.method, policy);
+fn spec_from_seed(seed: CapabilitySeed) -> EngineResult<CapabilitySpec> {
+    let effect_class = effect_class_for_method(seed.method);
     let visibility = VisibilityScope::System;
     let owner_worker = domain_worker_for_method(seed.method)?;
     Ok(CapabilitySpec {
@@ -475,14 +455,92 @@ fn idempotency_mode_for_method(
     }
 }
 
-fn effect_class_for_method(method: &str, policy: TransportExecutionPolicy) -> EffectClass {
+fn is_pure_read_method(method: &str) -> bool {
+    matches!(
+        method,
+        "engine.discover"
+            | "engine.inspect"
+            | "engine.watch"
+            | "system::ping"
+            | "system::get_info"
+            | "system::get_diagnostics"
+            | "system::get_update_status"
+            | "codex_app::status"
+            | "agent::status"
+            | "browser::get_status"
+            | "blob::get"
+            | "cron::status"
+            | "cron::list"
+            | "cron::get"
+            | "cron::get_runs"
+            | "context::get_snapshot"
+            | "context::get_detailed_snapshot"
+            | "context::get_audit_trace"
+            | "context::preview_compaction"
+            | "context::should_compact"
+            | "context::can_accept_turn"
+            | "events::get_history"
+            | "events::get_since"
+            | "filesystem::get_home"
+            | "filesystem::list_dir"
+            | "filesystem::read_file"
+            | "git::list_local_branches"
+            | "git::list_remote_branches"
+            | "import::list_sources"
+            | "import::list_sessions"
+            | "import::preview_session"
+            | "job::list"
+            | "logs::recent"
+            | "mcp::status"
+            | "mcp::list_tools"
+            | "model::list"
+            | "notifications::list"
+            | "plan::get_state"
+            | "prompt_library::history_list"
+            | "prompt_library::snippet_list"
+            | "prompt_library::snippet_get"
+            | "repo::list_sessions"
+            | "repo::get_divergence"
+            | "sandbox::list_containers"
+            | "session::list"
+            | "session::get_head"
+            | "session::get_state"
+            | "session::get_history"
+            | "session::reconstruct"
+            | "session::export"
+            | "settings::get"
+            | "skills::list"
+            | "skills::get"
+            | "skills::active"
+            | "system::check_for_updates"
+            | "transcription::list_models"
+            | "tree::get_visualization"
+            | "tree::get_branches"
+            | "tree::get_subtree"
+            | "tree::get_ancestors"
+            | "tree::compare_branches"
+            | "voice_notes::list"
+            | "worktree::get_status"
+            | "worktree::is_git_repo"
+            | "worktree::list"
+            | "worktree::get_diff"
+            | "worktree::get_committed_diff"
+            | "worktree::list_session_branches"
+            | "worktree::list_conflicts"
+            | "approval::get"
+            | "approval::list"
+            | "auth::get"
+    )
+}
+
+fn effect_class_for_method(method: &str) -> EffectClass {
     if method == "engine.invoke" {
         return EffectClass::DelegatedInvocation;
     }
     if method == "engine.promote" {
         return EffectClass::IdempotentWrite;
     }
-    if policy != TransportExecutionPolicy::Mutating {
+    if is_pure_read_method(method) {
         return EffectClass::PureRead;
     }
     if matches!(

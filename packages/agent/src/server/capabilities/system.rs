@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 
-use crate::server::transport::json_rpc::protocol as json_rpc_protocol;
-use crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
+use crate::server::transport::protocol as engine_transport_protocol;
 use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
 
 pub(super) async fn handle(
@@ -11,7 +10,7 @@ pub(super) async fn handle(
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
     allow_capability_context: bool,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "system::ping" => ping_value(Some(payload)),
@@ -20,23 +19,25 @@ pub(super) async fn handle(
         "system::get_update_status" => system_update_status_value(deps).await,
         "system::check_for_updates" => system_check_for_updates_value(deps).await,
         "system::shutdown" => system_shutdown_value(deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("system method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn system_shutdown_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn system_shutdown_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     deps.orchestrator
         .shutdown()
         .await
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: error.to_string(),
         })?;
     Ok(json!({ "acknowledged": true }))
 }
 
-async fn system_check_for_updates_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn system_check_for_updates_value(
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let settings = deps.profile_runtime.current().settings.clone();
     let update_cfg = &settings.server.update;
 
@@ -69,7 +70,7 @@ async fn system_check_for_updates_value(deps: &EngineCapabilityDeps) -> Result<V
         fetcher.as_ref(),
     )
     .await
-    .map_err(|error| RpcError::Internal {
+    .map_err(|error| CapabilityError::Internal {
         message: format!("release check failed: {error}"),
     })?;
 
@@ -86,13 +87,13 @@ async fn system_check_for_updates_value(deps: &EngineCapabilityDeps) -> Result<V
     }))
 }
 
-fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let uptime = deps.server_start_time.elapsed().as_secs();
     let active_sessions = deps.orchestrator.active_session_count();
     let active_runs = deps.orchestrator.active_run_count();
-    let mut registry = JsonRpcTransportRegistry::new();
-    crate::server::transport::json_rpc::bindings::register_all(&mut registry);
-    let transport_methods = registry.methods();
+    let transport_methods = super::catalog::public_json_rpc_methods()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
     let total_methods = transport_methods.len();
     let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
     for method in &transport_methods {
@@ -108,8 +109,8 @@ fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcErr
     Ok(json!({
         "server": {
             "version": env!("CARGO_PKG_VERSION"),
-            "protocolVersion": json_rpc_protocol::CURRENT_PROTOCOL_VERSION,
-            "minClientProtocolVersion": json_rpc_protocol::MIN_CLIENT_PROTOCOL_VERSION,
+            "protocolVersion": engine_transport_protocol::CURRENT_PROTOCOL_VERSION,
+            "minClientProtocolVersion": engine_transport_protocol::MIN_CLIENT_PROTOCOL_VERSION,
             "platform": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
             "pid": std::process::id(),
@@ -133,13 +134,13 @@ fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcErr
     }))
 }
 
-async fn system_update_status_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn system_update_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let settings = deps.profile_runtime.current().settings.clone();
     let state_path = deps.updater_state_path.clone();
     let state = deps
         .capability_context
         .run_blocking("system.getUpdateStatus.read_state", move || {
-            read_update_state(&state_path).map_err(|error| RpcError::Internal {
+            read_update_state(&state_path).map_err(|error| CapabilityError::Internal {
                 message: format!("read updater state: {error}"),
             })
         })
@@ -169,15 +170,15 @@ fn build_status_value(
     })
 }
 
-fn ping_value(params: Option<&Value>) -> Result<Value, RpcError> {
+fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
     let client_protocol_raw = params
         .and_then(|p| p.get("protocolVersion"))
         .and_then(Value::as_u64)
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "system::ping requires numeric protocolVersion".into(),
         })?;
     let client_protocol =
-        u32::try_from(client_protocol_raw).map_err(|_| RpcError::InvalidParams {
+        u32::try_from(client_protocol_raw).map_err(|_| CapabilityError::InvalidParams {
             message: "system::ping protocolVersion is too large".into(),
         })?;
     let client_version = params
@@ -185,18 +186,18 @@ fn ping_value(params: Option<&Value>) -> Result<Value, RpcError> {
         .and_then(Value::as_str)
         .map(String::from);
 
-    if client_protocol < json_rpc_protocol::MIN_CLIENT_PROTOCOL_VERSION {
-        return Err(RpcError::Custom {
+    if client_protocol < engine_transport_protocol::MIN_CLIENT_PROTOCOL_VERSION {
+        return Err(CapabilityError::Custom {
             code: CLIENT_VERSION_UNSUPPORTED.to_string(),
             message: format!(
                 "Client protocol version {client_protocol} is below the minimum supported version \
                  {}. Please upgrade the Tron client.",
-                json_rpc_protocol::MIN_CLIENT_PROTOCOL_VERSION
+                engine_transport_protocol::MIN_CLIENT_PROTOCOL_VERSION
             ),
             details: Some(json!({
                 "clientProtocolVersion": client_protocol,
-                "minClientProtocolVersion": json_rpc_protocol::MIN_CLIENT_PROTOCOL_VERSION,
-                "serverProtocolVersion": json_rpc_protocol::CURRENT_PROTOCOL_VERSION,
+                "minClientProtocolVersion": engine_transport_protocol::MIN_CLIENT_PROTOCOL_VERSION,
+                "serverProtocolVersion": engine_transport_protocol::CURRENT_PROTOCOL_VERSION,
                 "serverVersion": env!("CARGO_PKG_VERSION"),
                 "clientVersion": client_version,
             })),
@@ -207,8 +208,8 @@ fn ping_value(params: Option<&Value>) -> Result<Value, RpcError> {
         "pong": true,
         "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         "serverVersion": env!("CARGO_PKG_VERSION"),
-        "serverProtocolVersion": json_rpc_protocol::CURRENT_PROTOCOL_VERSION,
-        "minClientProtocolVersion": json_rpc_protocol::MIN_CLIENT_PROTOCOL_VERSION,
+        "serverProtocolVersion": engine_transport_protocol::CURRENT_PROTOCOL_VERSION,
+        "minClientProtocolVersion": engine_transport_protocol::MIN_CLIENT_PROTOCOL_VERSION,
         "compatible": true,
     }))
 }

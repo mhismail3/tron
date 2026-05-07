@@ -4,7 +4,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "context::get_snapshot" => {
@@ -30,7 +30,7 @@ pub(super) async fn handle(
                 .and_then(Value::as_u64)
                 .map(u32::try_from)
                 .transpose()
-                .map_err(|_| RpcError::InvalidParams {
+                .map_err(|_| CapabilityError::InvalidParams {
                     message: "turn must fit in u32".into(),
                 })?;
             crate::server::services::context_queries::ContextQueryService::get_audit_trace(
@@ -90,7 +90,7 @@ pub(super) async fn handle(
             )
             .await
         }
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("context method {method} is not engine-owned"),
         }),
     }

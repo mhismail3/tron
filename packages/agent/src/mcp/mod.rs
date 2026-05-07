@@ -20,7 +20,7 @@
 //!
 //! - [`types`] — MCP protocol types (JSON-RPC, tool schemas, server config)
 //! - [`client`] — Transport and protocol implementation
-//! - [`tool_bridge`] — Engine/tool result conversion helper
+//! - [`tool_projection`] — Engine/tool result conversion helper
 //! - [`server_manager`] — Lifecycle management for MCP servers
 //! - [`tool_index`] — Searchable in-memory tool index
 //! - [`schemas`] — Pure drift-detection between two tool-definition sets
@@ -42,8 +42,8 @@ pub mod router;
 pub mod schemas;
 pub mod search_tool;
 pub mod server_manager;
-pub mod tool_bridge;
 pub mod tool_index;
+pub mod tool_projection;
 pub mod types;
 
 #[cfg(test)]

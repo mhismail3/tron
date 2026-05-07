@@ -9,12 +9,12 @@ use crate::worktree::{count_diff_stats, split_diff_by_file};
 use serde_json::Value;
 use tracing::instrument;
 
-use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::error_mapping::map_worktree_error;
-use crate::server::transport::json_rpc::errors::RpcError;
-use crate::server::transport::json_rpc::params::{
+use crate::server::capabilities::error_mapping::map_worktree_error;
+use crate::server::capabilities::errors::CapabilityError;
+use crate::server::capabilities::params::{
     opt_bool, opt_string, require_bool, require_string_param,
 };
+use crate::server::services::context::ServerCapabilityContext;
 use crate::worktree::types::CommitOptions;
 
 use super::EngineCapabilityDeps;
@@ -24,7 +24,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let params = Some(invocation.payload.clone());
     let ctx = deps.capability_context.as_ref();
     match method {
@@ -43,7 +43,7 @@ pub(super) async fn handle(
         "worktree::stage_files" => StageFilesOperation.run(params, ctx).await,
         "worktree::unstage_files" => UnstageFilesOperation.run(params, ctx).await,
         "worktree::discard_files" => DiscardFilesOperation.run(params, ctx).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("operation {method} is not worktree-owned"),
         }),
     }
@@ -53,10 +53,10 @@ pub(super) async fn handle(
 
 fn require_coordinator(
     ctx: &ServerCapabilityContext,
-) -> Result<&crate::worktree::WorktreeCoordinator, RpcError> {
+) -> Result<&crate::worktree::WorktreeCoordinator, CapabilityError> {
     ctx.worktree_coordinator
         .as_deref()
-        .ok_or_else(|| RpcError::Internal {
+        .ok_or_else(|| CapabilityError::Internal {
             message: "Worktree isolation is not enabled".into(),
         })
 }
@@ -64,14 +64,14 @@ fn require_coordinator(
 fn require_session_working_dir(
     ctx: &ServerCapabilityContext,
     session_id: &str,
-) -> Result<String, RpcError> {
+) -> Result<String, CapabilityError> {
     let session = ctx
         .session_manager
         .get_session(session_id)
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: format!("Session lookup failed: {e}"),
         })?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: "SESSION_NOT_FOUND".into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -83,7 +83,10 @@ fn require_session_working_dir(
 /// Prefers the coordinator's worktree path (if active), otherwise uses the
 /// session's original working directory. This is intentionally lenient — getDiff
 /// should work for any session, not only those with worktrees.
-fn resolve_diff_dir(ctx: &ServerCapabilityContext, session_id: &str) -> Result<String, RpcError> {
+fn resolve_diff_dir(
+    ctx: &ServerCapabilityContext,
+    session_id: &str,
+) -> Result<String, CapabilityError> {
     // Check coordinator for active worktree
     if let Some(ref coord) = ctx.worktree_coordinator
         && let Some(dir) = coord.effective_working_dir(session_id)
@@ -108,7 +111,7 @@ impl GetStatusOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -173,7 +176,7 @@ impl IsGitRepoOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let path = require_string_param(params.as_ref(), "path")?;
         let coord = require_coordinator(ctx)?;
         let is_git = coord.is_git_repo(std::path::Path::new(&path)).await;
@@ -192,14 +195,14 @@ impl CommitOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = require_string_param(params.as_ref(), "message")?;
         let coord = require_coordinator(ctx)?;
 
         if coord.get_info(&session_id).is_none() {
-            return Err(RpcError::NotFound {
-                code: crate::server::transport::json_rpc::errors::WORKTREE_NOT_FOUND.into(),
+            return Err(CapabilityError::NotFound {
+                code: crate::server::capabilities::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             });
         }
@@ -250,7 +253,7 @@ impl MergeOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target_branch = opt_string(params.as_ref(), "targetBranch");
         let target_branch = target_branch.as_deref().unwrap_or("main");
@@ -258,8 +261,8 @@ impl MergeOperation {
         let coord = require_coordinator(ctx)?;
 
         if coord.get_info(&session_id).is_none() {
-            return Err(RpcError::NotFound {
-                code: crate::server::transport::json_rpc::errors::WORKTREE_NOT_FOUND.into(),
+            return Err(CapabilityError::NotFound {
+                code: crate::server::capabilities::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             });
         }
@@ -299,7 +302,7 @@ impl ListOperation {
         &self,
         _params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let coord = require_coordinator(ctx)?;
 
         let active = coord.list_active();
@@ -331,7 +334,7 @@ impl AcquireOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -371,7 +374,7 @@ impl ReleaseOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -398,7 +401,7 @@ impl ListSessionBranchesOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -427,14 +430,16 @@ impl GetCommittedDiffOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
         match coord.get_committed_diff(&session_id).await {
-            Ok(Some(result)) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
-                message: format!("Serialization failed: {e}"),
-            }),
+            Ok(Some(result)) => {
+                serde_json::to_value(&result).map_err(|e| CapabilityError::Internal {
+                    message: format!("Serialization failed: {e}"),
+                })
+            }
             Ok(None) => Ok(serde_json::json!({
                 "commits": [],
                 "files": [],
@@ -461,7 +466,7 @@ impl DeleteBranchOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let branch = require_string_param(params.as_ref(), "branch")?;
         let coord = require_coordinator(ctx)?;
@@ -475,7 +480,7 @@ impl DeleteBranchOperation {
         let repo_root = std::path::Path::new(&repo_root_str);
 
         match coord.delete_session_branch(repo_root, &branch).await {
-            Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
+            Ok(result) => serde_json::to_value(&result).map_err(|e| CapabilityError::Internal {
                 message: format!("Serialization failed: {e}"),
             }),
             Err(e) => Err(map_worktree_error(e)),
@@ -494,7 +499,7 @@ impl PruneBranchesOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -507,7 +512,7 @@ impl PruneBranchesOperation {
         let repo_root = std::path::Path::new(&repo_root_str);
 
         match coord.prune_session_branches(repo_root).await {
-            Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
+            Ok(result) => serde_json::to_value(&result).map_err(|e| CapabilityError::Internal {
                 message: format!("Serialization failed: {e}"),
             }),
             Err(e) => Err(map_worktree_error(e)),
@@ -531,7 +536,7 @@ impl GetDiffOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -548,7 +553,7 @@ impl GetDiffOperation {
             .args(["-C", &dir, "rev-parse", "--is-inside-work-tree"])
             .output()
             .await
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to run git: {e}"),
             })?;
 
@@ -582,19 +587,19 @@ impl GetDiffOperation {
         });
 
         let status_str = status_out
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("git status failed: {e}"),
             })
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())?;
 
         let staged_diff_str = staged_diff_out
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("git diff --cached failed: {e}"),
             })
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())?;
 
         let unstaged_diff_str = unstaged_diff_out
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("git diff failed: {e}"),
             })
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())?;
@@ -887,7 +892,9 @@ fn is_binary_diff(chunk: &str) -> bool {
 // ── Stage / Unstage / Discard handlers ──────────────────────────────
 
 /// Extract `sessionId` and `paths` (non-empty string array) from params.
-fn require_session_and_paths(params: Option<&Value>) -> Result<(String, Vec<String>), RpcError> {
+fn require_session_and_paths(
+    params: Option<&Value>,
+) -> Result<(String, Vec<String>), CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let paths = params
         .and_then(|p| p.get("paths"))
@@ -900,7 +907,7 @@ fn require_session_and_paths(params: Option<&Value>) -> Result<(String, Vec<Stri
         .unwrap_or_default();
 
     if paths.is_empty() {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "Missing or empty required parameter: paths".into(),
         });
     }
@@ -910,9 +917,9 @@ fn require_session_and_paths(params: Option<&Value>) -> Result<(String, Vec<Stri
     Ok((session_id, paths))
 }
 
-fn validate_relative_worktree_path(path: &str) -> Result<(), RpcError> {
+fn validate_relative_worktree_path(path: &str) -> Result<(), CapabilityError> {
     if path.is_empty() || path.contains('\0') {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "Path must be a non-empty relative path".into(),
         });
     }
@@ -927,7 +934,7 @@ fn validate_relative_worktree_path(path: &str) -> Result<(), RpcError> {
             )
         })
     {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!("Path escapes repository root: {path}"),
         });
     }
@@ -943,7 +950,7 @@ impl StageFilesOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -954,13 +961,13 @@ impl StageFilesOperation {
             .args(&args)
             .output()
             .await
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to run git add: {e}"),
             })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(RpcError::Internal {
+            return Err(CapabilityError::Internal {
                 message: format!("git add failed: {stderr}"),
             });
         }
@@ -978,7 +985,7 @@ impl UnstageFilesOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -1019,13 +1026,13 @@ impl UnstageFilesOperation {
                 .await
         };
 
-        let output = output.map_err(|e| RpcError::Internal {
+        let output = output.map_err(|e| CapabilityError::Internal {
             message: format!("Failed to run git unstage: {e}"),
         })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(RpcError::Internal {
+            return Err(CapabilityError::Internal {
                 message: format!("git unstage failed: {stderr}"),
             });
         }
@@ -1043,7 +1050,7 @@ impl DiscardFilesOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
         let repo_root = std::path::Path::new(&dir);
@@ -1057,13 +1064,13 @@ impl DiscardFilesOperation {
         for path in &paths {
             // Reject absolute paths
             if path.starts_with('/') {
-                return Err(RpcError::InvalidParams {
+                return Err(CapabilityError::InvalidParams {
                     message: format!("Path must be relative: {path}"),
                 });
             }
             // Reject path traversal components
             if path.contains("..") {
-                return Err(RpcError::InvalidParams {
+                return Err(CapabilityError::InvalidParams {
                     message: format!("Path escapes repository root: {path}"),
                 });
             }
@@ -1071,7 +1078,7 @@ impl DiscardFilesOperation {
             let resolved = canonical_root.join(path);
             let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
             if !canonical.starts_with(&canonical_root) {
-                return Err(RpcError::InvalidParams {
+                return Err(CapabilityError::InvalidParams {
                     message: format!("Path escapes repository root: {path}"),
                 });
             }
@@ -1092,12 +1099,12 @@ impl DiscardFilesOperation {
                     .args(["-C", &dir, "checkout", "--", path])
                     .output()
                     .await
-                    .map_err(|e| RpcError::Internal {
+                    .map_err(|e| CapabilityError::Internal {
                         message: format!("Failed to run git checkout: {e}"),
                     })?;
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(RpcError::Internal {
+                    return Err(CapabilityError::Internal {
                         message: format!("git checkout failed for {path}: {stderr}"),
                     });
                 }
@@ -1105,13 +1112,13 @@ impl DiscardFilesOperation {
                 // Untracked: delete from filesystem
                 let full_path = canonical_root.join(path);
                 if full_path.exists() {
-                    tokio::fs::remove_file(&full_path)
-                        .await
-                        .map_err(|e| RpcError::Internal {
+                    tokio::fs::remove_file(&full_path).await.map_err(|e| {
+                        CapabilityError::Internal {
                             message: format!("Failed to delete {path}: {e}"),
-                        })?;
+                        }
+                    })?;
                 } else {
-                    return Err(RpcError::Internal {
+                    return Err(CapabilityError::Internal {
                         message: format!("File not found: {path}"),
                     });
                 }

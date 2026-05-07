@@ -4,7 +4,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "skills::list" => Ok(skill_list_value(Some(payload), deps)),
@@ -13,7 +13,7 @@ pub(super) async fn handle(
         "skills::activate" => skill_activate_value(Some(payload), deps),
         "skills::deactivate" => skill_deactivate_value(Some(payload), deps),
         "skills::active" => skill_active_value(Some(payload), deps),
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("skills method {method} is not engine-owned"),
         }),
     }
@@ -27,17 +27,22 @@ fn skill_list_value(params: Option<&Value>, deps: &EngineCapabilityDeps) -> Valu
     json!({ "skills": skills })
 }
 
-fn skill_get_value(params: Option<&Value>, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+fn skill_get_value(
+    params: Option<&Value>,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let name = require_string_param(params, "name")?;
     let working_dir = resolve_skill_working_dir(params, deps);
 
     let mut registry = deps.skill_registry.write();
     let _ = registry.refresh_if_stale(&working_dir);
 
-    let skill = registry.get(&name).ok_or_else(|| RpcError::NotFound {
-        code: errors::NOT_FOUND.into(),
-        message: format!("Skill '{name}' not found"),
-    })?;
+    let skill = registry
+        .get(&name)
+        .ok_or_else(|| CapabilityError::NotFound {
+            code: errors::NOT_FOUND.into(),
+            message: format!("Skill '{name}' not found"),
+        })?;
 
     Ok(json!({
         "skill": skill_to_wire(skill),
@@ -48,7 +53,7 @@ fn skill_get_value(params: Option<&Value>, deps: &EngineCapabilityDeps) -> Resul
 async fn skill_refresh_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let working_dir = resolve_skill_working_dir(params, deps);
     let skill_registry = Arc::clone(&deps.skill_registry);
     let count = run_blocking_task("skills::refresh", move || {
@@ -63,16 +68,16 @@ async fn skill_refresh_value(
 fn skill_activate_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let skill_name = require_string_param(params, "skillName")?;
 
     deps.session_manager
         .get_session(&session_id)
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: error.to_string(),
         })?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -81,7 +86,7 @@ fn skill_activate_value(
         let registry = deps.skill_registry.read();
         let skill = registry
             .get(&skill_name)
-            .ok_or_else(|| RpcError::NotFound {
+            .ok_or_else(|| CapabilityError::NotFound {
                 code: errors::NOT_FOUND.into(),
                 message: format!("Skill '{skill_name}' not found"),
             })?;
@@ -138,16 +143,16 @@ fn skill_activate_value(
 fn skill_deactivate_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let skill_name = require_string_param(params, "skillName")?;
 
     deps.session_manager
         .get_session(&session_id)
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: error.to_string(),
         })?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -186,14 +191,14 @@ fn skill_deactivate_value(
 fn skill_active_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     deps.session_manager
         .get_session(&session_id)
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: error.to_string(),
         })?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;

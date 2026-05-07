@@ -1,3 +1,26 @@
+//! Canonical Tron capability surface.
+//!
+//! This module owns the server-specific `namespace::function` implementations
+//! that the engine catalog exposes to agents, tools, triggers, and public
+//! transports. Capability handlers return transport-neutral
+//! [`CapabilityError`] values and plain JSON results; JSON-RPC mapping is kept
+//! in `server::transport::json_rpc`.
+//!
+//! ## Submodules
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | `catalog` | Canonical specs, worker ownership, trigger definitions, and guardrails |
+//! | `errors` / `error_mapping` | Transport-neutral capability errors and domain/engine mappers |
+//! | `params` / `validation` | Payload extraction and strict schema/depth validation |
+//! | domain modules | Engine-owned behavior for agent, settings, tools, MCP, git/worktree, session, cron, and the rest of Tron |
+//!
+//! # INVARIANT: no transport-owned behavior
+//!
+//! Domain methods here are canonical operation keys only. Public JSON-RPC
+//! methods are limited to `engine.*`; they translate into the transport-neutral
+//! engine envelope before reaching these handlers.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
@@ -16,24 +39,24 @@ use crate::prompt_library::store;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::profile_runtime::ProfileRuntime;
+use crate::server::capabilities::error_mapping::{map_cron_error, map_event_store_error};
+use crate::server::capabilities::errors::{
+    CLIENT_VERSION_UNSUPPORTED, CapabilityError, to_json_value,
+};
+use crate::server::capabilities::params::{
+    opt_array, opt_bool, opt_string, opt_u64, require_param, require_string_param,
+};
+use crate::server::capabilities::validation::validate_string_param;
 use crate::server::codex_app::CodexAppServerManager;
 use crate::server::services::client_logs::{ClientLogEntry, ClientLogsService};
 use crate::server::services::context::{ServerCapabilityContext, run_blocking_task};
+use crate::server::services::events_wire::ServerEventPayload;
 use crate::server::services::filesystem_service;
 use crate::server::services::notification_inbox::NotificationInboxService;
-use crate::server::transport::json_rpc::error_mapping::{map_cron_error, map_event_store_error};
-use crate::server::transport::json_rpc::errors::{
-    self, CLIENT_VERSION_UNSUPPORTED, RpcError, to_json_value,
-};
-use crate::server::transport::json_rpc::params::{
-    opt_array, opt_bool, opt_string, opt_u64, require_param, require_string_param,
-};
-use crate::server::transport::json_rpc::types::JsonRpcEvent;
-use crate::server::transport::json_rpc::validation::validate_string_param;
 use crate::server::websocket::broadcast::BroadcastManager;
 use crate::skills::registry::SkillRegistry;
 
-use crate::server::transport::json_rpc::engine_transport::capability_error_to_engine;
+use crate::server::capabilities::error_mapping::capability_error_to_engine;
 
 mod agent;
 mod auth;
@@ -45,6 +68,8 @@ mod context;
 pub(crate) mod cron;
 mod device;
 mod display;
+pub(crate) mod error_mapping;
+pub(crate) mod errors;
 mod events;
 mod filesystem;
 mod git;
@@ -57,6 +82,7 @@ mod memory;
 mod message;
 mod model;
 mod notifications;
+pub(crate) mod params;
 mod plan;
 mod prompt_library;
 mod repo;
@@ -70,6 +96,7 @@ mod system;
 mod tool;
 mod transcription;
 mod tree;
+pub(crate) mod validation;
 mod voice_notes;
 mod worktree;
 
@@ -143,7 +170,7 @@ async fn publish_engine_stream_event(
     deps: &EngineCapabilityDeps,
     topic: &str,
     producer: &str,
-    event: JsonRpcEvent,
+    event: ServerEventPayload,
     invocation: Option<&Invocation>,
 ) {
     if let Err(error) = deps
@@ -179,7 +206,7 @@ async fn capability_function_value(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let allow_capability_context =
         matches!(invocation.causal_context.actor_kind, ActorKind::Client);
     match method {
@@ -361,21 +388,21 @@ async fn capability_function_value(
         | "voice_notes::list"
         | "transcription::list_models"
         | "sandbox::list_containers" => safe_reads::handle(method, invocation, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("operation {method} is not engine-owned"),
         }),
     }
 }
 
-fn map_store_err(e: crate::events::EventStoreError) -> RpcError {
+fn map_store_err(e: crate::events::EventStoreError) -> CapabilityError {
     match e {
         crate::events::EventStoreError::InvalidOperation(message) => {
-            RpcError::InvalidParams { message }
+            CapabilityError::InvalidParams { message }
         }
-        crate::events::EventStoreError::Sqlite(err) => RpcError::Internal {
+        crate::events::EventStoreError::Sqlite(err) => CapabilityError::Internal {
             message: format!("Database error: {err}"),
         },
-        crate::events::EventStoreError::Internal(msg) => RpcError::Internal { message: msg },
+        crate::events::EventStoreError::Internal(msg) => CapabilityError::Internal { message: msg },
         other => map_event_store_error(other),
     }
 }

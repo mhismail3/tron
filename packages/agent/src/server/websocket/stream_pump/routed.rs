@@ -10,7 +10,7 @@ pub(super) enum BroadcastScope {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct BridgedEvent {
+pub(super) struct ProjectedEvent {
     pub(super) rpc_event: JsonRpcEvent,
     pub(super) scope: BroadcastScope,
 }
@@ -51,8 +51,8 @@ pub(super) fn with_scope(
     wire_type: &str,
     data: Option<Value>,
     scope: BroadcastScope,
-) -> BridgedEvent {
-    BridgedEvent {
+) -> ProjectedEvent {
+    ProjectedEvent {
         rpc_event: make_rpc(event, wire_type, data),
         scope,
     }
@@ -62,10 +62,10 @@ pub(super) fn session_scoped(
     event: &TronEvent,
     wire_type: &str,
     data: Option<Value>,
-) -> BridgedEvent {
+) -> ProjectedEvent {
     with_scope(event, wire_type, data, session_scope(event.session_id()))
 }
 
-pub(super) fn global(event: &TronEvent, wire_type: &str, data: Option<Value>) -> BridgedEvent {
+pub(super) fn global(event: &TronEvent, wire_type: &str, data: Option<Value>) -> ProjectedEvent {
     with_scope(event, wire_type, data, BroadcastScope::All)
 }

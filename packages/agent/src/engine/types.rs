@@ -53,10 +53,8 @@ pub enum WorkerKind {
     Cron,
     /// State worker.
     State,
-    /// MCP bridge worker.
-    McpBridge,
-    /// Migration adapter.
-    Compatibility,
+    /// MCP capability worker.
+    Mcp,
 }
 
 /// Worker lifecycle state.

@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::server::transport::json_rpc::errors::RpcError;
+use crate::server::capabilities::errors::CapabilityError;
 
 pub(crate) fn notes_dir() -> String {
     crate::core::paths::voice_notes_dir()
@@ -10,14 +10,14 @@ pub(crate) fn notes_dir() -> String {
         .into_owned()
 }
 
-pub(crate) fn ensure_notes_dir(dir: &str) -> Result<(), RpcError> {
-    std::fs::create_dir_all(dir).map_err(|error| RpcError::Internal {
+pub(crate) fn ensure_notes_dir(dir: &str) -> Result<(), CapabilityError> {
+    std::fs::create_dir_all(dir).map_err(|error| CapabilityError::Internal {
         message: format!("Failed to create voice notes directory: {error}"),
     })
 }
 
-pub(crate) fn write_note(filepath: &str, content: &str) -> Result<(), RpcError> {
-    std::fs::write(filepath, content).map_err(|error| RpcError::Internal {
+pub(crate) fn write_note(filepath: &str, content: &str) -> Result<(), CapabilityError> {
+    std::fs::write(filepath, content).map_err(|error| CapabilityError::Internal {
         message: format!("Failed to write voice note: {error}"),
     })
 }

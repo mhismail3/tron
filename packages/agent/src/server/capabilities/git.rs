@@ -9,10 +9,10 @@ use serde_json::Value;
 use tokio::time::{Duration, timeout};
 use tracing::instrument;
 
+use crate::server::capabilities::errors::{self, CapabilityError};
+use crate::server::capabilities::params::require_string_param;
 use crate::server::services::context::ServerCapabilityContext;
 use crate::server::services::git_service;
-use crate::server::transport::json_rpc::errors::{self, RpcError};
-use crate::server::transport::json_rpc::params::require_string_param;
 
 use super::EngineCapabilityDeps;
 use crate::engine::Invocation;
@@ -23,7 +23,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "git::clone" => {
             CloneOperation
@@ -33,7 +33,7 @@ pub(super) async fn handle(
                 )
                 .await
         }
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("operation {method} is not git-owned"),
         }),
     }
@@ -48,7 +48,7 @@ impl CloneOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let url = require_string_param(params.as_ref(), "url")?;
         let target_path = require_string_param(params.as_ref(), "targetPath")?;
         let url_for_clone = url.clone();
@@ -72,12 +72,12 @@ impl CloneOperation {
                 .output(),
         )
         .await
-        .map_err(|_| RpcError::Custom {
+        .map_err(|_| CapabilityError::Custom {
             code: errors::GIT_ERROR.into(),
             message: "Clone timed out. Try again or use a smaller repository.".into(),
             details: None,
         })?
-        .map_err(|e| RpcError::Internal {
+        .map_err(|e| CapabilityError::Internal {
             message: format!("Failed to execute git clone: {e}"),
         })?;
 
@@ -92,7 +92,7 @@ impl CloneOperation {
             } else {
                 format!("git clone failed: {stderr}")
             };
-            return Err(RpcError::Custom {
+            return Err(CapabilityError::Custom {
                 code: errors::GIT_ERROR.into(),
                 message,
                 details: None,

@@ -3,24 +3,24 @@ use super::*;
 use base64::Engine;
 use uuid::Uuid;
 
+use crate::server::capabilities::params::{opt_string, require_string_param};
 use crate::server::services::voice_notes_service;
-use crate::server::transport::json_rpc::params::{opt_string, require_string_param};
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "voice_notes::save" => save(&invocation.payload, deps).await,
         "voice_notes::delete" => delete(&invocation.payload, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("voice notes method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn save(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn save(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let audio_base64 = require_string_param(Some(payload), "audioBase64")?;
     let mime_type_owned = opt_string(Some(payload), "mimeType");
     let mime_type = mime_type_owned.as_deref().unwrap_or("audio/wav");
@@ -38,7 +38,7 @@ async fn save(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, Rpc
     let audio_base64 = super::transcription::normalize_base64(&audio_base64);
     let audio_bytes = base64::engine::general_purpose::STANDARD
         .decode(audio_base64)
-        .map_err(|error| RpcError::InvalidParams {
+        .map_err(|error| CapabilityError::InvalidParams {
             message: format!("Invalid base64 audio data: {error}"),
         })?;
     let result =
@@ -71,7 +71,7 @@ async fn save(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, Rpc
     }))
 }
 
-async fn delete(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn delete(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let filename = require_string_param(Some(payload), "filename")?;
     let filepath = format!("{}/{filename}", voice_notes_service::notes_dir());
     let filename_for_response = filename.clone();

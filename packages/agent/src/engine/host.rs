@@ -1,6 +1,6 @@
 //! Agent-facing engine host and privileged meta-capabilities.
 //!
-//! `EngineHost` is the boundary future server/runtime adapters should use when
+//! `EngineHost` is the boundary future server/runtime services should use when
 //! they need the live capability fabric. It keeps `engine::*` capabilities
 //! visible as normal catalog functions while executing them through privileged
 //! host code that cannot be replaced by ordinary workers.
@@ -482,7 +482,7 @@ pub struct EngineHostHandle {
 }
 
 impl EngineHostHandle {
-    /// Create an in-memory engine host for tests and isolated adapters.
+    /// Create an in-memory engine host for tests and isolated runtime services.
     pub fn new_in_memory() -> Result<Self> {
         Ok(Self::from_host(EngineHost::new()?))
     }

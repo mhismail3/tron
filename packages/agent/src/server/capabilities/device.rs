@@ -1,7 +1,7 @@
 use super::*;
 
-use crate::server::transport::json_rpc::error_mapping::map_event_store_error;
-use crate::server::transport::json_rpc::params::{opt_string, require_string_param};
+use crate::server::capabilities::error_mapping::map_event_store_error;
+use crate::server::capabilities::params::{opt_string, require_string_param};
 
 // INVARIANT: device.register accepts a client-supplied bundleId only under the
 // trusted-local model: paired clients are the user's own devices on the local
@@ -14,21 +14,24 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "device::register" => register_token(&invocation.payload, deps).await,
         "device::unregister" => unregister_token(&invocation.payload, deps).await,
         "device::respond" => respond(&invocation.payload, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("device method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn register_token(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn register_token(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let device_token = require_string_param(Some(payload), "deviceToken")?;
     if device_token.len() != 64 || !device_token.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!(
                 "Invalid device token: expected 64 hex chars, got {} chars",
                 device_token.len()
@@ -41,7 +44,7 @@ async fn register_token(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
     let environment = opt_string(Some(payload), "environment");
     let bundle_id = require_string_param(Some(payload), "bundleId")?;
     if bundle_id.is_empty() {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: "bundleId must not be empty".into(),
         });
     }
@@ -66,7 +69,10 @@ async fn register_token(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
         .await
 }
 
-async fn unregister_token(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn unregister_token(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let device_token = require_string_param(Some(payload), "deviceToken")?;
     let event_store = Arc::clone(&deps.event_store);
     deps.capability_context
@@ -79,14 +85,14 @@ async fn unregister_token(payload: &Value, deps: &EngineCapabilityDeps) -> Resul
         .await
 }
 
-async fn respond(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn respond(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let request_id = require_string_param(Some(payload), "requestId")?;
     let result = payload.get("result").cloned().unwrap_or(Value::Null);
     if let Some(ref broker) = deps.capability_context.device_request_broker {
         let resolved = broker.resolve(&request_id, result);
         Ok(json!({ "resolved": resolved }))
     } else {
-        Err(RpcError::Internal {
+        Err(CapabilityError::Internal {
             message: "Device request broker not available".into(),
         })
     }

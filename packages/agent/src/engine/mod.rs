@@ -16,7 +16,7 @@
 //! - session capabilities can be explicitly promoted to workspace/system scope;
 //! - `EngineHost` exposes privileged `engine::*` meta-capabilities for live
 //!   discovery, inspection, cursor watch, delegated invocation, and promotion;
-//! - `EngineHostHandle` gives server startup and adapters an intent-shaped
+//! - `EngineHostHandle` gives server startup and runtime services an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
 //! - agents use `AgentCapabilityClient` and engine tools to discover, inspect,
@@ -45,14 +45,14 @@
 //! Production behavior must enter the fabric as a canonical engine function.
 //! JSON-RPC transport exposes only `engine.discover`, `engine.inspect`,
 //! `engine.watch`, `engine.invoke`, and `engine.promote`. Production engine
-//! modules must not call handler-shaped adapters or hidden transport shims.
+//! modules must not call handler-shaped transport shims.
 //!
 //! ## Module Position
 //!
 //! Depends on: `serde`, `serde_json`, `async_trait`, `thiserror`, `chrono`,
-//! `sha2`, `hex`, and `rusqlite` for the isolated durable ledger adapter.
+//! `sha2`, `hex`, and `rusqlite` for the isolated durable ledger store.
 //! Does not depend on runtime, server, events, tools, or settings. Server-side
-//! adapters register those subsystems as in-process workers at startup without
+//! runtime services register those subsystems as in-process workers at startup without
 //! making the engine core depend on them.
 
 #![deny(unsafe_code)]

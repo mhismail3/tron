@@ -1,14 +1,15 @@
-//! Input validation helpers for RPC parameters.
+//! Input validation helpers for capability payloads and transport envelopes.
 
-use super::errors::RpcError;
+use super::errors::CapabilityError;
 
 /// Maximum prompt length (1 MB).
 pub const MAX_PROMPT_LENGTH: usize = 1_048_576;
 
 /// Maximum general string parameter length (8 KB).
+#[cfg(test)]
 pub const MAX_PARAM_LENGTH: usize = 8_192;
 
-/// Maximum JSON nesting depth for incoming RPC payloads.
+/// Maximum JSON nesting depth for incoming transport payloads.
 ///
 /// **Why this exists (defense-in-depth rationale):**
 /// `serde_json` already enforces a 128-deep recursion limit during parse,
@@ -17,9 +18,9 @@ pub const MAX_PARAM_LENGTH: usize = 8_192;
 /// parser error. We re-apply the cap at the RPC boundary so that:
 ///
 /// 1. **Stable error surface.** Depth-rejected requests produce a
-///    structured [`RpcError::InvalidParams`] with a clear message, not a
+///    structured [`CapabilityError::InvalidParams`] with a clear message, not a
 ///    raw serde parse error that happens to mention "recursion limit".
-///    The iOS client renders this as a user-actionable error.
+///    Clients can render this as a user-actionable error.
 /// 2. **Protect post-parse traversal.** Several handlers walk the JSON
 ///    tree recursively (argument coercion, default filling). Running the
 ///    cap here means those walks can trust the bound: stack frame ceiling
@@ -40,9 +41,13 @@ pub const MAX_JSON_DEPTH: usize = 128;
 pub const MAX_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
 
 /// Validate that a string parameter does not exceed `max_len` bytes.
-pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<(), RpcError> {
+pub fn validate_string_param(
+    value: &str,
+    name: &str,
+    max_len: usize,
+) -> Result<(), CapabilityError> {
     if value.len() > max_len {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!(
                 "Parameter '{name}' exceeds maximum length ({} > {max_len})",
                 value.len()
@@ -57,10 +62,13 @@ pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<
 /// See [`MAX_JSON_DEPTH`] for why this exists on top of `serde_json`'s
 /// built-in recursion limit. The short version: we translate the parser's
 /// opaque recursion failure into a structured
-/// [`RpcError::InvalidParams`] so the client can render an actionable
+/// [`CapabilityError::InvalidParams`] so the client can render an actionable
 /// message, and we guarantee a bounded stack for any handler that walks
 /// the parsed tree.
-pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Result<(), RpcError> {
+pub fn validate_json_depth(
+    value: &serde_json::Value,
+    max_depth: usize,
+) -> Result<(), CapabilityError> {
     fn measure_depth(v: &serde_json::Value, current: usize, max: usize) -> Result<(), ()> {
         if current > max {
             return Err(());
@@ -81,17 +89,17 @@ pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Resul
         Ok(())
     }
 
-    measure_depth(value, 0, max_depth).map_err(|()| RpcError::InvalidParams {
+    measure_depth(value, 0, max_depth).map_err(|()| CapabilityError::InvalidParams {
         message: format!("JSON nesting depth exceeds maximum of {max_depth}"),
     })
 }
 
 /// Validate that a base64-encoded attachment does not exceed [`MAX_ATTACHMENT_BYTES`] decoded.
-pub fn validate_attachment_size(base64_data: &str) -> Result<(), RpcError> {
+pub fn validate_attachment_size(base64_data: &str) -> Result<(), CapabilityError> {
     // base64 encodes 3 bytes into 4 chars; approximate decoded size.
     let decoded_size = base64_data.len() * 3 / 4;
     if decoded_size > MAX_ATTACHMENT_BYTES {
-        return Err(RpcError::InvalidParams {
+        return Err(CapabilityError::InvalidParams {
             message: format!(
                 "Attachment exceeds maximum size of {}MB (got ~{}MB)",
                 MAX_ATTACHMENT_BYTES / (1024 * 1024),
@@ -106,13 +114,13 @@ pub fn validate_attachment_size(base64_data: &str) -> Result<(), RpcError> {
 ///
 /// Preserves user-facing messages (invalid params, not found) but strips
 /// internal details (file paths, stack traces) from internal errors.
-pub fn sanitize_error_message(err: &RpcError) -> String {
+pub fn sanitize_error_message(err: &CapabilityError) -> String {
     match err {
-        RpcError::InvalidParams { message }
-        | RpcError::NotFound { message, .. }
-        | RpcError::NotAvailable { message }
-        | RpcError::Custom { message, .. } => message.clone(),
-        RpcError::Internal { .. } => "Internal error".to_string(),
+        CapabilityError::InvalidParams { message }
+        | CapabilityError::NotFound { message, .. }
+        | CapabilityError::NotAvailable { message }
+        | CapabilityError::Custom { message, .. } => message.clone(),
+        CapabilityError::Internal { .. } => "Internal error".to_string(),
     }
 }
 
@@ -156,7 +164,7 @@ mod tests {
 
     #[test]
     fn sanitize_internal_error_strips_details() {
-        let err = RpcError::Internal {
+        let err = CapabilityError::Internal {
             message: "failed at /Users/user/.tron/internal/database/events.db: disk full".into(),
         };
         let sanitized = sanitize_error_message(&err);
@@ -166,7 +174,7 @@ mod tests {
 
     #[test]
     fn sanitize_invalid_params_preserves_message() {
-        let err = RpcError::InvalidParams {
+        let err = CapabilityError::InvalidParams {
             message: "Missing required parameter 'sessionId'".into(),
         };
         let sanitized = sanitize_error_message(&err);
@@ -175,7 +183,7 @@ mod tests {
 
     #[test]
     fn sanitize_not_found_preserves_message() {
-        let err = RpcError::NotFound {
+        let err = CapabilityError::NotFound {
             code: "SESSION_NOT_FOUND".into(),
             message: "Session 'abc' not found".into(),
         };

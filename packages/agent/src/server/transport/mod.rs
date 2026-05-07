@@ -7,4 +7,6 @@
 //! behavior. Executable behavior lives in `server::capabilities` and engine
 //! primitives.
 
+pub mod engine;
 pub mod json_rpc;
+pub mod protocol;

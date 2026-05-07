@@ -195,7 +195,7 @@ pub fn make_test_context() -> ServerCapabilityContext {
     let mut registry =
         crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry::new();
     crate::server::transport::json_rpc::bindings::register_all(&mut registry);
-    crate::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(
+    crate::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
         &ctx, &registry,
     )
     .unwrap();

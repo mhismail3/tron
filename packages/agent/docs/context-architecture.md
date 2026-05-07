@@ -13,14 +13,14 @@ Tron builds model context through a layered runtime path:
    `ProfileRuntime`, initializes settings from that compiled spec, then starts
    the database, provider factory, tool factory, skill registry, memory
    registry, and orchestrator.
-2. `agent.prompt` reconstructs session state, loads rules/memory/job results,
+2. `agent::prompt` reconstructs session state, loads rules/memory/job results,
    refreshes skills, applies hook-injected context, and creates a per-run
    `TronAgent`.
 3. `TronAgent::run` adds the current user message, enters the turn loop, and
    delegates each turn to `turn_runner`.
 4. `turn_runner` asks `ContextManager` for the stable context, attaches
    per-turn volatile context from `RunContext`, records Constitution audit rows,
-   asks the provider adapter for its request payload, streams the response, and
+   asks the provider transport for its request payload, streams the response, and
    executes requested tools.
 5. Tool results and assistant messages are appended back into `ContextManager`
    and persisted to the event store, so the next turn sees the updated history.
@@ -39,8 +39,8 @@ flowchart TD
     Home --> ProfileRuntime["ProfileRuntime: compile active AgentExecutionSpec"]
     ProfileRuntime --> Settings["settings snapshot from resolved profile + user overlay + env overrides"]
     Settings --> Services["EventStore, Orchestrator, ProviderFactory, ToolFactory, SkillRegistry, MemoryRegistry"]
-    Services --> RPC["agent.prompt RPC handler"]
-    RPC --> Reconstruct["Session reconstruction from events"]
+    Services --> PromptCap["agent::prompt engine capability"]
+    PromptCap --> Reconstruct["Session reconstruction from events"]
     Reconstruct --> Bootstrap["Prompt bootstrap: rules, rules index, pending jobs, process/subagent/user-job results"]
     Bootstrap --> Memory["MemoryRegistry: MEMORY.md + rules/*.md listing"]
     Memory --> AgentFactory["AgentFactory::create_agent"]
@@ -49,7 +49,7 @@ flowchart TD
     UserMessage --> Turn["turn_runner::execute_turn"]
     Turn --> Compose["build_turn_context + compose_context_blocks"]
     Compose --> Audit["Constitution context + provider payload audit"]
-    Audit --> Provider["Provider adapter request"]
+    Audit --> Provider["Provider transport request"]
     Provider --> Stream["Stream processor + streaming journal"]
     Stream --> Tools["Tool execution waves"]
     Tools --> Events["Persist assistant/tool/rules/events"]
@@ -80,16 +80,16 @@ steps are:
 - `build_tool_factory()` creates a fresh `ToolRegistry` for each agent run. It
   adds built-in tools, subagent/job tools, MCP tools, and an LLM-backed
   `web_fetch` variant.
-- The RPC context holds shared services: `SessionManager`, `EventStore`,
+- The ServerCapabilityContext holds shared services: `SessionManager`, `EventStore`,
   `Orchestrator`, `ProviderFactory`, `SkillRegistry`, `MemoryRegistry`,
   process/job managers, output buffers, and settings.
 
-### Prompt RPC to Agent Construction
+### Prompt Capability to Agent Construction
 
 The prompt path is centered on
-`packages/agent/src/server/rpc/handlers/agent_prompt_service.rs`.
+`packages/agent/src/server/services/agent_runtime`.
 
-- `agent.prompt` validates params, loads the session, records prompt history,
+- `agent::prompt` validates params, loads the session, records prompt history,
   starts a run, and spawns `execute_prompt_run`.
 - `execute_prompt_run` reconstructs session messages from events. Chat sessions
   skip project artifacts and use the `chat` entrypoint prompt; normal sessions
@@ -140,14 +140,14 @@ gravity.
 - `build_turn_context` starts from `ContextManager::build_base_context`, attaches
   message history, tool schemas, server origin, skill contexts, job results, and
   dynamic rules from `RunContext`.
-- Local providers use `runtime/context/local_policy.rs` as a thin adapter over
+- Local providers use `runtime/context/local_policy.rs` as a thin projection over
   the active AgentExecutionSpec: reduced tool schemas including
   `AskUserQuestion`, no memory, no skill index, no job results, truncated rules,
   but explicit skill activation/active/removal context is retained.
 - `compose_context_audit_blocks` compiles the provider-independent audit view.
   It includes prompt blocks plus audit-only hook context, tool schemas, and
   conversation messages.
-- The provider adapter also builds an exact or near-exact provider payload via
+- The provider transport also builds an exact or near-exact provider payload via
   `Provider::audit_payload`. Audit write failures currently fail the turn before
   the model call.
 - The provider stream is processed into assistant deltas, thinking deltas, tool
@@ -166,22 +166,22 @@ gravity.
 | Seeded profile system prompts | `~/.tron/profiles/default/prompts/*.md` plus `normal`/`chat`/`local` entrypoint overrides; loaded by `runtime/context/instruction_prompts` and `ContextManager` | Always, unless project/global override provides the normal core prompt; chat maps main to `chat`; local maps main to `local` | Foundation/session | Provider instructions | Foundation | `systemPrompt` bucket | Edit child profile refs/prompts; project `.tron/SYSTEM.md` |
 | Project system prompt override | `.tron/SYSTEM.md` in working directory | Normal non-chat sessions when present | Session | Provider instructions | Foundation | `systemPrompt` bucket | File contents |
 | Global user profile prompt | `~/.tron/profiles/user/prompts/core.md` | Normal non-chat sessions when project override absent | Session | Provider instructions | Foundation | `systemPrompt` bucket | File contents |
-| Project/global rules | `server/rpc/session_context.rs`, `runtime/context/loader.rs`, `rules_discovery.rs` | Normal sessions; path-scoped rules can be pre-activated or dynamically activated | Session and turn | Provider instructions | Session/turn | `rules` and dynamic-rules buckets | `settings.context.rules.*`, rules files, touched paths |
-| Memory root | `runtime/memory/registry.rs`; `~/.tron/memory/MEMORY.md` | Non-local model turns | Session | Provider instructions | Session | `memory` bucket | Memory RPC handlers and file contents |
+| Project/global rules | `runtime/context/loader.rs`, `runtime/context/loader.rs`, `rules_discovery.rs` | Normal sessions; path-scoped rules can be pre-activated or dynamically activated | Session and turn | Provider instructions | Session/turn | `rules` and dynamic-rules buckets | `settings.context.rules.*`, rules files, touched paths |
+| Memory root | `runtime/memory/registry.rs`; `~/.tron/memory/MEMORY.md` | Non-local model turns | Session | Provider instructions | Session | `memory` bucket | memory capabilities and file contents |
 | Memory detail listing | `~/.tron/memory/rules/*.md` listing only | Non-local model turns, as part of memory content | Session | Provider instructions | Session | `memory` bucket | File presence/frontmatter |
 | Worktree isolation note | `agent_prompt_service.rs` plus `git-workflow` prompt | Sessions with acquired worktree | Session | Provider instructions through memory | Session | `memory` bucket | Worktree/session isolation settings |
 | Skill index | `skills/injector.rs`; `settings.skills.showIndex` | Cloud models according to show-index policy | Session | Provider instructions | Session | `skillIndex` bucket | Skill registry and `showIndex` |
-| Skill activation directive | `prompt_runtime` skill context reconstruction | Active or newly invoked skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | `@skill`, skill RPC events |
-| Active skill XML | `SKILL.md` resolved by `SkillRegistry` and injector | Explicitly active skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | Skill files, `@skill`, skill RPC events |
+| Skill activation directive | `prompt_runtime` skill context reconstruction | Active or newly invoked skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | `@skill`, skill events |
+| Active skill XML | `SKILL.md` resolved by `SkillRegistry` and injector | Explicitly active skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | Skill files, `@skill`, skill events |
 | Skill removal notice | Skill tracker/event reconstruction | One turn after deactivation/removal state requires notice | Turn | Provider instructions | Turn | `skillRemoval` volatile estimate | Skill deactivation/compaction policy |
 | Pending job/process/subagent results | Prompt bootstrap from event store managers | Cloud-model normal turns with unconsumed results | Turn | Provider instructions | Turn | `jobResults` volatile estimate | Job/process/subagent events |
-| Server origin | RPC context -> `RunContext`/`ContextManager` | Turn context when origin known | Session | Provider instructions | Session | `environment` bucket | Server startup/origin |
+| Server origin | ServerCapabilityContext -> `RunContext`/`ContextManager` | Turn context when origin known | Session | Provider instructions | Session | `environment` bucket | Server startup/origin |
 | Working directory | `AgentConfig`/`ContextManager` | Every turn | Session | Provider instructions | Session | `environment` bucket | Session working directory/worktree |
 | Message history | `ContextManager` `MessageStore`, reconstructed from events | Every turn | Turn/session history | Provider messages | Turn | `messages` bucket | Session events, compaction |
-| Current user prompt | `TronAgent::run`; optional multimodal override | Current turn | Turn | Provider message | Turn | `messages` bucket | RPC prompt payload, hook AddContext |
+| Current user prompt | `TronAgent::run`; optional multimodal override | Current turn | Turn | Provider message | Turn | `messages` bucket | engine prompt payload, hook AddContext |
 | Tool schemas | `ToolRegistry` definitions | Every turn; reduced for local models | Session | Provider tools | Session | `tools` bucket | Tool factory, denied tools, local policy |
 | Tool results | Tool executor -> `ContextManager` messages | After tool execution, next provider request | Turn/history | Provider messages | Turn | `messages` bucket | Tool behavior and compaction |
-| Compaction summaries | `compaction_engine`/event reconstruction | After compaction boundaries | Session/history | Provider messages | Session | `messages` bucket | Context compactor settings/RPC |
+| Compaction summaries | `compaction_engine`/event reconstruction | After compaction boundaries | Session/history | Provider messages | Session | `messages` bucket | Context compactor settings/capabilities |
 | Hook AddContext | Hook engine `UserPromptSubmit` action | Hook returns non-empty context under budget | Turn | User message content | Turn | `messages` bucket | Hook files/settings |
 
 ### Canonical Context Block Order
@@ -210,7 +210,7 @@ The audit-only view adds:
 | 120 | `tools.schemas` | `profiles` | Tool | Session |
 | 130 | `conversation.messages` | `workspace` | Message | Turn |
 
-This ordering is provider-independent. Provider adapters can flatten it, split
+This ordering is provider-independent. Provider transports can flatten it, split
 it into cacheable chunks, or translate it into native provider fields.
 
 ## Provider Adaptation
@@ -261,7 +261,7 @@ The implementation adds:
 provider-payload audit record. If either write fails, the turn fails before the
 model call so replay integrity is not silently lost.
 
-### Snapshot and Control RPC
+### Snapshot and Control Capabilities
 
 The current public observability layer includes context snapshot and compaction
 methods such as `context.getSnapshot`, `context.getDetailedSnapshot`,
@@ -285,7 +285,7 @@ profile-first home model:
   override layer.
 - Canonical path helpers in `core/foundation/paths.rs` describe the five
   top-level homes: `profiles`, `skills`, `memory`, `workspace`, and `internal`.
-- Provider adapters gained `audit_payload` support so the pre-adapter context
+- Provider transports gained `audit_payload` support so the pre-transport context
   and adapted provider request can both be recorded.
 - Runtime context composition now emits typed Constitution context blocks with
   lifecycle/cache/surface metadata.
@@ -320,8 +320,8 @@ knowledge from runtime call sites:
   starts.
 - Contributor shell paths are centralized in `scripts/tron-lib.sh`; the Mac
   wrapper resolves its data-root paths through `TronPaths.swift`; iOS settings
-  remain RPC-backed instead of duplicating filesystem layout.
-- README RPC drift is guarded by a registry-count test, and the Mac bundle copy
+  remain engine-backed instead of duplicating filesystem layout.
+- README transport drift is guarded by a registry-count test, and the Mac bundle copy
   phase validates the profile-default shape rather than old instructions/settings
   roots.
 
@@ -333,15 +333,15 @@ These findings were the original audit gaps that drove the profile-first pass.
 | --- | --- | --- |
 | Seeded `context-blocks.toml` was incomplete | The default policy now names all emitted prompt blocks plus the audit-only tool/message blocks. | `packages/agent/defaults/profiles/default/context/context-blocks.toml`; `llm/shared/context_composition.rs` |
 | Google system prompt appeared duplicated | Google now uses only `compose_context_parts`, so `system.prompt` is included once. | `packages/agent/src/llm/google/provider.rs` |
-| Global rules path migration was uneven | Global rules route through `~/.tron/memory/rules`; global behavior routes through `~/.tron/profiles`. | `runtime/context/loader.rs`; `server/rpc/session_context.rs`; `core/foundation/paths.rs`; `runtime/memory/registry.rs` |
+| Global rules path migration was uneven | Global rules route through `~/.tron/memory/rules`; global behavior routes through `~/.tron/profiles`. | `runtime/context/loader.rs`; `runtime/context/loader.rs`; `core/foundation/paths.rs`; `runtime/memory/registry.rs` |
 | `self-inspect` docs showed old home layout | Managed self-inspect docs now describe the five-root profile-first home. | `packages/agent/skills/self-inspect/SKILL.md`; `reference/schema.md` |
 | Audit persistence is load-bearing | If Constitution context or provider-payload audit writes fail, the turn fails before the model call. This improves replay integrity but makes audit storage availability part of the critical path. | `runtime/agent/turn_runner.rs` |
-| No user-facing audit query surface existed | `context.getAuditTrace` exposes profile refs, context blocks, blob/hash refs, cache policy, and redacted provider payload previews. | `server/rpc/handlers/context.rs`; `server/rpc/context_queries.rs`; Constitution audit repo |
+| No user-facing audit query surface existed | `context.getAuditTrace` exposes profile refs, context blocks, blob/hash refs, cache policy, and redacted provider payload previews. | `server/capabilities/context.rs`; `server/services/context_queries.rs`; Constitution audit repo |
 | Existing users needed managed default recovery | Managed `default` files are restored from compiled defaults if missing or corrupt; user profiles fail validation and are not overwritten. | `core/foundation/constitution.rs`; `core/foundation/profile.rs` |
 
 ## Migration Retirement Status
 
-The old-layout and profile-v1 compatibility layer has been removed. Startup no
+The old-layout and profile-v1 migration layer has been removed. Startup no
 longer moves pre-profile-first homes, rewrites profile documents, or records a
 profile-migration ledger. Normal runtime supports only the five-root
 profile-first home and current `AgentExecutionSpec` schema.
@@ -365,14 +365,14 @@ Current behavior:
 | --- | --- | --- |
 | Startup and service wiring | `packages/agent/src/main.rs` | `init_directories`, DB/settings init, `build_tool_factory`, `init_cron` |
 | Runtime module map | `packages/agent/src/runtime/mod.rs` | Module docs and exported runtime types |
-| Prompt orchestration | `server/rpc/handlers/agent_prompt_service.rs` | `execute_prompt_run`, prompt bootstrap, skill/hook setup |
+| Prompt orchestration | `server/services/agent_runtime` | `execute_prompt_run`, prompt bootstrap, skill/hook setup |
 | Agent construction | `runtime/agent/factory.rs`, `runtime/agent/tron_agent.rs` | `AgentConfig`, tool filtering, `TronAgent::run` |
 | Single-turn execution | `runtime/agent/turn_runner.rs` | `execute_turn`, `build_turn_context`, audit writes, stream/tool phases |
 | Context state | `runtime/context/context_manager.rs` | base context, snapshots, compaction triggers, volatile token generation |
 | Context composition | `llm/shared/context_composition.rs` | canonical block order and audit-only blocks |
 | Provider payloads | `llm/{anthropic,openai,google,kimi,minimax,ollama}` | provider-specific prompt/request adaptation and `audit_payload` |
-| Rules | `runtime/context/loader.rs`, `rules_discovery.rs`, `rules_tracker.rs`, `server/rpc/session_context.rs` | discovery, merge order, activation, scoped rules |
-| Memory | `runtime/memory/registry.rs`, `server/rpc/handlers/memory.rs` | root memory, rules listing, auto-retain |
+| Rules | `runtime/context/loader.rs`, `rules_discovery.rs`, `rules_tracker.rs`, `runtime/context/loader.rs` | discovery, merge order, activation, scoped rules |
+| Memory | `runtime/memory/registry.rs`, `server/capabilities/memory.rs` | root memory, rules listing, auto-retain |
 | Skills | `skills/registry.rs`, `skills/injector.rs`, prompt runtime helpers | index, active XML injection, event-sourced activation |
 | Settings and paths | `settings/storage/loader.rs`, `settings/types`, `core/foundation/paths.rs`, `core/foundation/constitution.rs` | defaults merge, env overrides, home contracts |
 | Persistence and audit | `events/sqlite/repositories/constitution.rs`, `events/store/event_store/constitution.rs`, migrations | audit schema, blob storage, write APIs |
@@ -382,16 +382,16 @@ Current behavior:
 
 ### What can be inspected today
 
-- Context token snapshots through context RPC methods.
+- Context token snapshots through context capabilities.
 - Session history, tool calls/results, compaction events, skill events, rules
   events, and errors through the event log.
 - Raw database state through read-only `sqlite3` against
   `~/.tron/internal/database/log.db`.
 - Settings through `[settings]` in `~/.tron/profiles/default/profile.toml`,
-  sparse overrides in `~/.tron/profiles/user/profile.toml`, settings RPCs, and
+  sparse overrides in `~/.tron/profiles/user/profile.toml`, settings capabilities, and
   environment overrides.
 - Memory through `~/.tron/memory/MEMORY.md`, `~/.tron/memory/rules/*.md`, and
-  memory RPC handlers.
+  memory capabilities.
 - Prompt and provider defaults through `~/.tron/profiles/**` and
   `packages/agent/defaults/profiles/**`.
 
@@ -402,8 +402,8 @@ Current behavior:
 - Project/user system prompt overrides.
 - Project and scoped rules files.
 - Memory root and memory detail files.
-- Skill activation/deactivation via prompt references or RPC.
-- Context compaction through context RPCs.
+- Skill activation/deactivation via prompt references or engine capability.
+- Context compaction through context capabilities.
 - Hooks that can inject prompt context, subject to hook budget.
 
 ### Remaining hardening areas
@@ -413,7 +413,7 @@ Current behavior:
   exact assembly semantics and is guarded by coverage/parity tests.
 - Provider payload previews are redacted by key name; exact payload bytes remain
   available by blob id through the database/blob path for trusted diagnostics.
-- Provider adapters still contain provider-specific edge behavior; profile
+- Provider transports still contain provider-specific edge behavior; profile
   provider policy is the place to move shared behavior when it becomes stable.
 - Local/cloud/chat/subagent differences now select a stored session profile and
   read entrypoint/process policies from the resolved spec; remaining work is to

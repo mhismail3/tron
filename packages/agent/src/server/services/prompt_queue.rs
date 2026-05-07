@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::events::{AppendOptions, EventStore, EventType};
-use crate::server::transport::json_rpc::errors::RpcError;
+use crate::server::capabilities::errors::CapabilityError;
 
 /// Maximum number of messages that can be queued per session.
 pub const MAX_QUEUE_CAPACITY: usize = 3;
@@ -40,10 +40,10 @@ impl PromptQueueService {
     pub fn get_pending_queue(
         event_store: &EventStore,
         session_id: &str,
-    ) -> Result<Vec<PendingQueueItem>, RpcError> {
+    ) -> Result<Vec<PendingQueueItem>, CapabilityError> {
         let events = event_store
             .get_events_by_type(session_id, &["message.queued", "message.dequeued"], None)
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to query queue events: {e}"),
             })?;
 
@@ -118,7 +118,7 @@ impl PromptQueueService {
         event_store: &EventStore,
         session_id: &str,
         text: &str,
-    ) -> Result<PendingQueueItem, RpcError> {
+    ) -> Result<PendingQueueItem, CapabilityError> {
         Self::enqueue_with_metadata(event_store, session_id, text, None)
     }
 
@@ -129,11 +129,11 @@ impl PromptQueueService {
         session_id: &str,
         text: &str,
         metadata: Option<Value>,
-    ) -> Result<PendingQueueItem, RpcError> {
+    ) -> Result<PendingQueueItem, CapabilityError> {
         let pending = Self::get_pending_queue(event_store, session_id)?;
 
         if pending.len() >= MAX_QUEUE_CAPACITY {
-            return Err(RpcError::Custom {
+            return Err(CapabilityError::Custom {
                 code: "QUEUE_FULL".into(),
                 message: format!("Message queue is full ({MAX_QUEUE_CAPACITY} items max)"),
                 details: None,
@@ -160,7 +160,7 @@ impl PromptQueueService {
                 parent_id: None,
                 sequence: None,
             })
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to persist message.queued event: {e}"),
             })?;
 
@@ -179,7 +179,7 @@ impl PromptQueueService {
         session_id: &str,
         queue_id: &str,
         reason: &str,
-    ) -> Result<(), RpcError> {
+    ) -> Result<(), CapabilityError> {
         let payload = json!({
             "queueId": queue_id,
             "reason": reason,
@@ -193,7 +193,7 @@ impl PromptQueueService {
                 parent_id: None,
                 sequence: None,
             })
-            .map_err(|e| RpcError::Internal {
+            .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to persist message.dequeued event: {e}"),
             })?;
 
@@ -201,7 +201,7 @@ impl PromptQueueService {
     }
 
     /// Clear all pending queued messages (emits `message.dequeued` for each).
-    pub fn clear_queue(event_store: &EventStore, session_id: &str) -> Result<u32, RpcError> {
+    pub fn clear_queue(event_store: &EventStore, session_id: &str) -> Result<u32, CapabilityError> {
         let pending = Self::get_pending_queue(event_store, session_id)?;
         let count = pending.len() as u32;
 
@@ -219,7 +219,7 @@ impl PromptQueueService {
     pub fn peek_next(
         event_store: &EventStore,
         session_id: &str,
-    ) -> Result<Option<PendingQueueItem>, RpcError> {
+    ) -> Result<Option<PendingQueueItem>, CapabilityError> {
         let pending = Self::get_pending_queue(event_store, session_id)?;
         Ok(pending.into_iter().next())
     }
@@ -228,7 +228,7 @@ impl PromptQueueService {
     pub fn drain_next(
         event_store: &std::sync::Arc<EventStore>,
         session_id: &str,
-    ) -> Result<Option<String>, RpcError> {
+    ) -> Result<Option<String>, CapabilityError> {
         let first = match Self::peek_next(event_store, session_id)? {
             Some(item) => item,
             None => return Ok(None),

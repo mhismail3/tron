@@ -27,7 +27,7 @@
 //! per-method, or per-connection. Under the trusted-local threat
 //! model that is intentional — the only callers are the user's own
 //! devices, and the 1 MB body cap + JSON depth check
-//! ([`validation`]) plus connection-level backpressure
+//! ([`crate::server::capabilities::validation`]) plus connection-level backpressure
 //! ([`crate::server::websocket::broadcast`] drop detection) are
 //! sufficient for accidental-runaway protection.
 //!
@@ -37,11 +37,7 @@
 //! with per-method quotas loaded from settings.
 
 pub mod bindings;
-pub mod engine_transport;
-pub(crate) mod error_mapping;
+pub mod engine_methods;
 pub mod errors;
-pub(crate) mod params;
-pub(crate) mod protocol;
 pub mod registry;
 pub mod types;
-pub mod validation;

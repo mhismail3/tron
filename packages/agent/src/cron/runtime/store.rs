@@ -101,7 +101,7 @@ pub fn list_job_ids(pool: &ConnectionPool) -> Result<Vec<String>, CronError> {
     Ok(ids)
 }
 
-/// List all jobs from the database (for `SQLite` fallback when config is corrupt).
+/// List all jobs from the database for config-file corruption recovery.
 pub fn list_all_jobs(pool: &ConnectionPool) -> Result<Vec<CronJob>, CronError> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
@@ -116,7 +116,7 @@ pub fn list_all_jobs(pool: &ConnectionPool) -> Result<Vec<CronJob>, CronError> {
         .filter_map(|r| match r {
             Ok(job) => Some(job),
             Err(e) => {
-                tracing::error!(error = %e, "skipping corrupt job in SQLite fallback");
+                tracing::error!(error = %e, "skipping corrupt job in SQLite recovery source");
                 None
             }
         })

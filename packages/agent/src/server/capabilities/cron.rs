@@ -6,11 +6,11 @@ use crate::engine::Result as EngineResult;
 
 fn scheduler(
     deps: &EngineCapabilityDeps,
-) -> Result<&std::sync::Arc<crate::cron::CronScheduler>, RpcError> {
+) -> Result<&std::sync::Arc<crate::cron::CronScheduler>, CapabilityError> {
     deps.capability_context
         .cron_scheduler
         .as_ref()
-        .ok_or(RpcError::NotAvailable {
+        .ok_or(CapabilityError::NotAvailable {
             message: "Cron scheduler not available".into(),
         })
 }
@@ -48,7 +48,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "cron::list" => cron_list_value(&invocation.payload, deps).await,
         "cron::get" => cron_get_value(&invocation.payload, deps).await,
@@ -61,13 +61,16 @@ pub(super) async fn handle(
         "cron::scheduled_fire" => {
             cron_scheduled_fire_value(&invocation.payload, invocation, deps).await
         }
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("cron method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn cron_list_value(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn cron_list_value(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let enabled_filter = opt_bool(Some(payload), "enabled");
     let tag_filter = opt_array(Some(payload), "tags").map(|arr| {
@@ -121,13 +124,18 @@ async fn cron_list_value(payload: &Value, deps: &EngineCapabilityDeps) -> Result
     }))
 }
 
-async fn cron_get_value(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn cron_get_value(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
-    let job = sched.get_job(&job_id).ok_or_else(|| RpcError::NotFound {
-        code: "NOT_FOUND".into(),
-        message: format!("Job not found: {job_id}"),
-    })?;
+    let job = sched
+        .get_job(&job_id)
+        .ok_or_else(|| CapabilityError::NotFound {
+            code: "NOT_FOUND".into(),
+            message: format!("Job not found: {job_id}"),
+        })?;
     let runtime_state = sched.get_runtime_state(&job_id);
     let (recent_runs, _total) =
         crate::cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0)
@@ -149,36 +157,37 @@ async fn cron_create_value(
     payload: &Value,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_param = require_param(Some(payload), "job")?;
-    let name = job_param
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or(RpcError::InvalidParams {
-            message: "Missing required field: name".into(),
-        })?;
+    let name =
+        job_param
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or(CapabilityError::InvalidParams {
+                message: "Missing required field: name".into(),
+            })?;
     let schedule = serde_json::from_value(job_param.get("schedule").cloned().ok_or(
-        RpcError::InvalidParams {
+        CapabilityError::InvalidParams {
             message: "Missing required field: schedule".into(),
         },
     )?)
-    .map_err(|error| RpcError::InvalidParams {
+    .map_err(|error| CapabilityError::InvalidParams {
         message: format!("Invalid schedule: {error}"),
     })?;
     let payload_value = serde_json::from_value(job_param.get("payload").cloned().ok_or(
-        RpcError::InvalidParams {
+        CapabilityError::InvalidParams {
             message: "Missing required field: payload".into(),
         },
     )?)
-    .map_err(|error| RpcError::InvalidParams {
+    .map_err(|error| CapabilityError::InvalidParams {
         message: format!("Invalid payload: {error}"),
     })?;
     let delivery = job_param
         .get("delivery")
         .map(|value| serde_json::from_value(value.clone()))
         .transpose()
-        .map_err(|error| RpcError::InvalidParams {
+        .map_err(|error| CapabilityError::InvalidParams {
             message: format!("Invalid delivery: {error}"),
         })?
         .unwrap_or_default();
@@ -201,7 +210,7 @@ async fn cron_create_value(
             .get("overlapPolicy")
             .map(|value| serde_json::from_value(value.clone()))
             .transpose()
-            .map_err(|error| RpcError::InvalidParams {
+            .map_err(|error| CapabilityError::InvalidParams {
                 message: format!("Invalid overlapPolicy: {error}"),
             })?
             .unwrap_or_default(),
@@ -209,7 +218,7 @@ async fn cron_create_value(
             .get("misfirePolicy")
             .map(|value| serde_json::from_value(value.clone()))
             .transpose()
-            .map_err(|error| RpcError::InvalidParams {
+            .map_err(|error| CapabilityError::InvalidParams {
                 message: format!("Invalid misfirePolicy: {error}"),
             })?
             .unwrap_or_default(),
@@ -238,7 +247,7 @@ async fn cron_create_value(
             .get("toolRestrictions")
             .map(|value| serde_json::from_value(value.clone()))
             .transpose()
-            .map_err(|error| RpcError::InvalidParams {
+            .map_err(|error| CapabilityError::InvalidParams {
                 message: format!("Invalid toolRestrictions: {error}"),
             })?,
         workspace_id: job_param
@@ -248,12 +257,12 @@ async fn cron_create_value(
         created_at: now,
         updated_at: now,
     };
-    crate::cron::config::validate_job(&job).map_err(|error| RpcError::InvalidParams {
+    crate::cron::config::validate_job(&job).map_err(|error| CapabilityError::InvalidParams {
         message: error.to_string(),
     })?;
     let _guard = sched.config_lock().lock().await;
     if crate::cron::store::name_exists(sched.pool(), &job.name, None).map_err(map_cron_error)? {
-        return Err(RpcError::Custom {
+        return Err(CapabilityError::Custom {
             code: "ALREADY_EXISTS".into(),
             message: format!("Job with name '{}' already exists", job.name),
             details: None,
@@ -279,7 +288,7 @@ async fn cron_create_value(
     sched.reschedule_notify().notify_one();
     project_cron_trigger(&deps.engine_host, &job)
         .await
-        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+        .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     publish_cron_stream(invocation, deps, "created", &job.id, None).await;
     Ok(json!({ "job": to_json_value(&job)? }))
 }
@@ -288,7 +297,7 @@ async fn cron_update_value(
     payload: &Value,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let _guard = sched.config_lock().lock().await;
@@ -298,7 +307,7 @@ async fn cron_update_value(
         .jobs
         .iter_mut()
         .find(|job| job.id == job_id)
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: "NOT_FOUND".into(),
             message: format!("Job not found: {job_id}"),
         })?;
@@ -306,7 +315,7 @@ async fn cron_update_value(
         if crate::cron::store::name_exists(sched.pool(), name, Some(&job_id))
             .map_err(map_cron_error)?
         {
-            return Err(RpcError::Custom {
+            return Err(CapabilityError::Custom {
                 code: "ALREADY_EXISTS".into(),
                 message: format!("Job with name '{name}' already exists"),
                 details: None,
@@ -321,34 +330,39 @@ async fn cron_update_value(
         job.enabled = enabled;
     }
     if let Some(value) = payload.get("schedule") {
-        job.schedule =
-            serde_json::from_value(value.clone()).map_err(|error| RpcError::InvalidParams {
+        job.schedule = serde_json::from_value(value.clone()).map_err(|error| {
+            CapabilityError::InvalidParams {
                 message: format!("Invalid schedule: {error}"),
-            })?;
+            }
+        })?;
     }
     if let Some(value) = payload.get("payload") {
-        job.payload =
-            serde_json::from_value(value.clone()).map_err(|error| RpcError::InvalidParams {
+        job.payload = serde_json::from_value(value.clone()).map_err(|error| {
+            CapabilityError::InvalidParams {
                 message: format!("Invalid payload: {error}"),
-            })?;
+            }
+        })?;
     }
     if let Some(value) = payload.get("delivery") {
-        job.delivery =
-            serde_json::from_value(value.clone()).map_err(|error| RpcError::InvalidParams {
+        job.delivery = serde_json::from_value(value.clone()).map_err(|error| {
+            CapabilityError::InvalidParams {
                 message: format!("Invalid delivery: {error}"),
-            })?;
+            }
+        })?;
     }
     if let Some(value) = payload.get("overlapPolicy") {
-        job.overlap_policy =
-            serde_json::from_value(value.clone()).map_err(|error| RpcError::InvalidParams {
+        job.overlap_policy = serde_json::from_value(value.clone()).map_err(|error| {
+            CapabilityError::InvalidParams {
                 message: format!("Invalid overlapPolicy: {error}"),
-            })?;
+            }
+        })?;
     }
     if let Some(value) = payload.get("misfirePolicy") {
-        job.misfire_policy =
-            serde_json::from_value(value.clone()).map_err(|error| RpcError::InvalidParams {
+        job.misfire_policy = serde_json::from_value(value.clone()).map_err(|error| {
+            CapabilityError::InvalidParams {
                 message: format!("Invalid misfirePolicy: {error}"),
-            })?;
+            }
+        })?;
     }
     if let Some(value) = payload.get("maxRetries").and_then(Value::as_u64) {
         job.max_retries = value as u32;
@@ -373,14 +387,14 @@ async fn cron_update_value(
             None
         } else {
             Some(serde_json::from_value(value.clone()).map_err(|error| {
-                RpcError::InvalidParams {
+                CapabilityError::InvalidParams {
                     message: format!("Invalid toolRestrictions: {error}"),
                 }
             })?)
         };
     }
     job.updated_at = Utc::now();
-    crate::cron::config::validate_job(job).map_err(|error| RpcError::InvalidParams {
+    crate::cron::config::validate_job(job).map_err(|error| CapabilityError::InvalidParams {
         message: error.to_string(),
     })?;
     let updated_job = job.clone();
@@ -399,7 +413,7 @@ async fn cron_update_value(
     sched.reschedule_notify().notify_one();
     project_cron_trigger(&deps.engine_host, &updated_job)
         .await
-        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+        .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     publish_cron_stream(invocation, deps, "updated", &updated_job.id, None).await;
     Ok(json!({ "job": to_json_value(&updated_job)? }))
 }
@@ -408,7 +422,7 @@ async fn cron_delete_value(
     payload: &Value,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let _guard = sched.config_lock().lock().await;
@@ -417,7 +431,7 @@ async fn cron_delete_value(
     let before_len = config.jobs.len();
     config.jobs.retain(|job| job.id != job_id);
     if config.jobs.len() == before_len {
-        return Err(RpcError::NotFound {
+        return Err(CapabilityError::NotFound {
             code: "NOT_FOUND".into(),
             message: format!("Job not found: {job_id}"),
         });
@@ -436,13 +450,15 @@ async fn cron_run_value(
     payload: &Value,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
-    let _job = sched.get_job(&job_id).ok_or_else(|| RpcError::NotFound {
-        code: "NOT_FOUND".into(),
-        message: format!("Job not found: {job_id}"),
-    })?;
+    let _job = sched
+        .get_job(&job_id)
+        .ok_or_else(|| CapabilityError::NotFound {
+            code: "NOT_FOUND".into(),
+            message: format!("Job not found: {job_id}"),
+        })?;
     let now = Utc::now();
     let _ = crate::cron::store::update_next_run_at(sched.pool(), &job_id, Some(now));
     if let Some(mut runtime) = sched.get_runtime_state(&job_id) {
@@ -468,7 +484,7 @@ async fn cron_scheduled_fire_value(
     payload: &Value,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let scheduled_at = payload
@@ -477,7 +493,7 @@ async fn cron_scheduled_fire_value(
         .map(|value| {
             chrono::DateTime::parse_from_rfc3339(value)
                 .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|error| RpcError::InvalidParams {
+                .map_err(|error| CapabilityError::InvalidParams {
                     message: format!("Invalid scheduledAt: {error}"),
                 })
         })
@@ -489,10 +505,12 @@ async fn cron_scheduled_fire_value(
                 .and_then(chrono::DateTime::<Utc>::from_timestamp_millis)
         })
         .unwrap_or_else(Utc::now);
-    let job = sched.get_job(&job_id).ok_or_else(|| RpcError::NotFound {
-        code: "NOT_FOUND".into(),
-        message: format!("Job not found: {job_id}"),
-    })?;
+    let job = sched
+        .get_job(&job_id)
+        .ok_or_else(|| CapabilityError::NotFound {
+            code: "NOT_FOUND".into(),
+            message: format!("Job not found: {job_id}"),
+        })?;
     let outcome = sched
         .start_due_job(job, scheduled_at)
         .await
@@ -530,7 +548,7 @@ async fn cron_scheduled_fire_value(
     }
 }
 
-async fn cron_status_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn cron_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     Ok(json!({
         "running": true,
@@ -544,7 +562,7 @@ async fn cron_status_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcErro
 async fn cron_get_runs_value(
     payload: &Value,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let limit = opt_u64(Some(payload), "limit", 20) as u32;

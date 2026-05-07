@@ -4,7 +4,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "notifications::list" => notifications_list_value(Some(payload), deps).await,
@@ -12,7 +12,7 @@ pub(super) async fn handle(
         "notifications::mark_all_read" => {
             notifications_mark_all_read_value(Some(payload), deps).await
         }
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("notifications method {method} is not engine-owned"),
         }),
     }
@@ -21,11 +21,11 @@ pub(super) async fn handle(
 async fn notifications_list_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let limit = opt_u64(params, "limit", 50).min(100);
     let pool = deps.event_store.pool().clone();
     let result = run_blocking_task("notifications::list", move || {
-        let conn = pool.get().map_err(|error| RpcError::Internal {
+        let conn = pool.get().map_err(|error| CapabilityError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;
         NotificationInboxService::list(&conn, limit)
@@ -37,11 +37,11 @@ async fn notifications_list_value(
 async fn notifications_mark_read_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let event_id = require_string_param(params, "eventId")?;
     let pool = deps.event_store.pool().clone();
     let result = run_blocking_task("notifications.mark_read", move || {
-        let conn = pool.get().map_err(|error| RpcError::Internal {
+        let conn = pool.get().map_err(|error| CapabilityError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;
         NotificationInboxService::mark_read(&conn, &event_id)
@@ -53,11 +53,11 @@ async fn notifications_mark_read_value(
 async fn notifications_mark_all_read_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = opt_string(params, "sessionId");
     let pool = deps.event_store.pool().clone();
     let result = run_blocking_task("notifications.mark_all_read", move || {
-        let conn = pool.get().map_err(|error| RpcError::Internal {
+        let conn = pool.get().map_err(|error| CapabilityError::Internal {
             message: format!("Failed to get DB connection: {error}"),
         })?;
         NotificationInboxService::mark_all_read(&conn, session_id.as_deref())

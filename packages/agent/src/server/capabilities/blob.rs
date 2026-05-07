@@ -6,35 +6,38 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "blob::get" => blob_get_value(&invocation.payload, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("blob method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn blob_get_value(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn blob_get_value(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let blob_id = payload
         .get("blobId")
         .and_then(Value::as_str)
-        .ok_or_else(|| RpcError::InvalidParams {
+        .ok_or_else(|| CapabilityError::InvalidParams {
             message: "missing 'blobId' parameter".into(),
         })?
         .to_owned();
     let pool = deps.event_store.pool().clone();
     deps.capability_context
         .run_blocking("blob::get", move || {
-            let conn = pool.get().map_err(|error| RpcError::Internal {
+            let conn = pool.get().map_err(|error| CapabilityError::Internal {
                 message: format!("database connection error: {error}"),
             })?;
             let blob =
                 crate::events::sqlite::repositories::blob::BlobRepo::get_by_id(&conn, &blob_id)
-                    .map_err(|error| RpcError::Internal {
+                    .map_err(|error| CapabilityError::Internal {
                         message: format!("blob lookup error: {error}"),
                     })?
-                    .ok_or_else(|| RpcError::NotFound {
+                    .ok_or_else(|| CapabilityError::NotFound {
                         code: "BLOB_NOT_FOUND".into(),
                         message: format!("blob not found: {blob_id}"),
                     })?;

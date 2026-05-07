@@ -1,12 +1,12 @@
 use super::*;
 
-pub(super) async fn handle(method: &str) -> Result<Value, RpcError> {
+pub(super) async fn handle(method: &str) -> Result<Value, CapabilityError> {
     match method {
-        "browser::start_stream" => Err(RpcError::NotAvailable {
+        "browser::start_stream" => Err(CapabilityError::NotAvailable {
             message: "Browser streaming has been removed".into(),
         }),
         "browser::stop_stream" => Ok(json!({ "success": true })),
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("browser method {method} is not engine-owned"),
         }),
     }

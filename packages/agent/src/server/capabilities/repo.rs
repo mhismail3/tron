@@ -6,11 +6,11 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "repo::list_sessions" => list_sessions(&invocation.payload, deps).await,
         "repo::get_divergence" => get_divergence(&invocation.payload, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("repo method {method} is not engine-owned"),
         }),
     }
@@ -18,21 +18,24 @@ pub(super) async fn handle(
 
 fn require_coordinator(
     deps: &EngineCapabilityDeps,
-) -> Result<&crate::worktree::WorktreeCoordinator, RpcError> {
+) -> Result<&crate::worktree::WorktreeCoordinator, CapabilityError> {
     deps.capability_context
         .worktree_coordinator
         .as_deref()
-        .ok_or_else(|| RpcError::Internal {
+        .ok_or_else(|| CapabilityError::Internal {
             message: "Worktree isolation is not enabled".into(),
         })
 }
 
-async fn list_sessions(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn list_sessions(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let coord = require_coordinator(deps)?;
     let caller_info = coord
         .get_info(&session_id)
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::WORKTREE_NOT_FOUND.into(),
             message: format!("No worktree found for session '{session_id}'"),
         })?;
@@ -70,12 +73,15 @@ async fn list_sessions(payload: &Value, deps: &EngineCapabilityDeps) -> Result<V
     Ok(json!({ "sessions": futures::future::join_all(futs).await }))
 }
 
-async fn get_divergence(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn get_divergence(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let coord = require_coordinator(deps)?;
     let info = coord
         .get_info(&session_id)
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::WORKTREE_NOT_FOUND.into(),
             message: format!("No worktree found for session '{session_id}'"),
         })?;

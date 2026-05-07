@@ -71,6 +71,13 @@ mutations, and approval-required autonomous writes before handler execution.
 JSON-RPC request ids are correlation ids. They do not become command ids or
 idempotency keys.
 
+The server translates each public `engine.*` JSON-RPC call into an internal
+`EngineTransportRequest` before dispatch. The envelope is protocol-neutral:
+it contains the target function, trigger, actor, authority grant/scopes, trace,
+parent invocation, session/workspace scope, payload, expected revision, and
+explicit idempotency key. Later custom engine WebSocket transport work should
+build this same envelope and call the same dispatch path.
+
 ## Agent Semantics
 
 Agents use stable meta-capabilities to interact with a live catalog:

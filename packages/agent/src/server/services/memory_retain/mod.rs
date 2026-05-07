@@ -1,7 +1,7 @@
 //! Memory retain runtime: manual + auto.
 //!
-//! The retain system is the bridge between ephemeral conversations and
-//! persistent memory. It runs as an async background task and acts as a smart
+//! The retain system connects ephemeral conversations to persistent memory.
+//! It runs as an async background task and acts as a smart
 //! router:
 //!
 //! - **Always** writes a journal entry to `~/.tron/memory/sessions/`
@@ -46,10 +46,10 @@ use crate::events::{
 };
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
+use crate::server::capabilities::error_mapping::map_event_store_error;
+use crate::server::capabilities::errors::CapabilityError;
+use crate::server::capabilities::params::require_string_param;
 use crate::server::services::context::{ServerCapabilityContext, run_blocking_task};
-use crate::server::transport::json_rpc::error_mapping::map_event_store_error;
-use crate::server::transport::json_rpc::errors::RpcError;
-use crate::server::transport::json_rpc::params::require_string_param;
 
 use std::collections::HashSet;
 use std::fs;
@@ -113,7 +113,7 @@ impl RetainDeps {
 pub(crate) async fn trigger_manual_retain(
     params: Option<&Value>,
     ctx: &ServerCapabilityContext,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let deps = RetainDeps::from_rpc(ctx);
     trigger_retain(&deps, session_id, RetainSource::Manual).await
@@ -135,7 +135,7 @@ pub(crate) async fn trigger_retain(
     deps: &RetainDeps,
     session_id: String,
     source: RetainSource,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     // Acquire the retain slot. If another retain is already running for this
     // session, return the sentinel response and emit nothing — no events, no
     // writes, no LLM calls.
@@ -275,7 +275,7 @@ pub(crate) async fn trigger_retain(
 ///
 /// Errors persisting or broadcasting are logged but never surfaced — the
 /// retain background task must proceed regardless (it will still write a
-/// fallback summary and emit `MemoryUpdated` to clear the spinner).
+/// recovery summary and emit `MemoryUpdated` to clear the spinner).
 async fn emit_auto_retain_failed(
     event_store: &Arc<EventStore>,
     broadcast: &Arc<EventEmitter>,
@@ -308,7 +308,7 @@ async fn emit_auto_retain_failed(
                 "failed to persist memory.auto_retain_failed event"
             );
         }
-        Ok::<(), RpcError>(())
+        Ok::<(), CapabilityError>(())
     })
     .await;
 
@@ -347,7 +347,7 @@ async fn emit_auto_retain_triggered(deps: &RetainDeps, session_id: &str, interva
                 "failed to persist memory.auto_retain_triggered event"
             );
         }
-        Ok::<(), RpcError>(())
+        Ok::<(), CapabilityError>(())
     })
     .await;
 
@@ -378,9 +378,9 @@ async fn retain_background_task(
     let outcome = match subagent_manager {
         Some(manager) => run_summarizer(manager, &session_id, &working_directory, transcript).await,
         None => {
-            warn!(session_id = %session_id, "no subagent manager for memory retain, using keyword fallback");
+            warn!(session_id = %session_id, "no subagent manager for memory retain, using keyword recovery");
             SummarizerOutcome::Err {
-                fallback: keyword_summary(&session_id),
+                recovery: keyword_summary(&session_id),
                 reason: "no subagent manager configured".to_string(),
             }
         }
@@ -388,12 +388,12 @@ async fn retain_background_task(
 
     let (raw_output, summarizer_failure) = match outcome {
         SummarizerOutcome::Ok(text) => (text, None),
-        SummarizerOutcome::Err { fallback, reason } => (fallback, Some(reason)),
+        SummarizerOutcome::Err { recovery, reason } => (recovery, Some(reason)),
     };
 
     // When an auto-retain pipeline started (we persisted the
     // `triggered` event) and the summarizer subagent failed, persist +
-    // broadcast `auto_retain_failed` BEFORE writing the fallback
+    // broadcast `auto_retain_failed` BEFORE writing the recovery
     // summary. iOS uses the pair (triggered → failed) to exit the
     // retain pill's spinner with an error label instead of a perpetual
     // "retaining…".
@@ -551,7 +551,7 @@ fn parse_retain_output(raw: &str) -> RetainOutput {
         result.argument = parse_argument(&content);
     }
 
-    // Fallback: if no journal tag found, use the entire raw output
+    // Recovery: if no journal tag found, use the entire raw output
     if result.journal.is_none() {
         result.journal = Some(raw.to_owned());
     }
@@ -670,7 +670,7 @@ fn slugify(title: &str) -> String {
 /// 1. Latest `memory.retained` event (previous Retain boundary)
 /// 2. Latest `compact.boundary` event (compaction boundary)
 /// 3. 0 (beginning of session)
-fn find_boundary_sequence(store: &EventStore, session_id: &str) -> Result<i64, RpcError> {
+fn find_boundary_sequence(store: &EventStore, session_id: &str) -> Result<i64, CapabilityError> {
     // Try memory.retained first
     if let Ok(Some(row)) = store.get_latest_event_by_type(session_id, "memory.retained") {
         return Ok(row.sequence);
@@ -699,7 +699,7 @@ fn get_retain_slice(
     store: &EventStore,
     session_id: &str,
     after_sequence: i64,
-) -> Result<Option<RetainSlice>, RpcError> {
+) -> Result<Option<RetainSlice>, CapabilityError> {
     let rows = store
         .get_events_since(session_id, after_sequence)
         .map_err(map_event_store_error)?;
@@ -924,16 +924,16 @@ fn truncate_str(s: &str, max: usize) -> &str {
 
 /// Outcome of an attempt to run the LLM summarizer subsession.
 ///
-/// Distinguishes a real summarizer output from a graceful fallback so the
+/// Distinguishes a real summarizer output from a graceful recovery so the
 /// background task can decide whether to fire `MemoryAutoRetainFailed`
-/// (auto-retain lifecycle exit event). A fallback summary is still written
+/// (auto-retain lifecycle exit event). A recovery summary is still written
 /// to disk — it's better than nothing — but iOS sees the failure signal.
 enum SummarizerOutcome {
     /// Real output from the summarizer subagent.
     Ok(String),
     /// Subagent failed or returned an error. The returned string is the
-    /// graceful keyword fallback; `reason` names what went wrong.
-    Err { fallback: String, reason: String },
+    /// graceful keyword recovery; `reason` names what went wrong.
+    Err { recovery: String, reason: String },
 }
 
 /// Run the LLM summarizer subsession and return its text output.
@@ -948,9 +948,9 @@ async fn run_summarizer(
         Ok(plan) => plan,
         Err(error) => {
             let reason = error.to_string();
-            warn!(session_id = %parent_session_id, error = %reason, "memory retain process planning failed, using keyword fallback");
+            warn!(session_id = %parent_session_id, error = %reason, "memory retain process planning failed, using keyword recovery");
             return SummarizerOutcome::Err {
-                fallback: keyword_summary(parent_session_id),
+                recovery: keyword_summary(parent_session_id),
                 reason,
             };
         }
@@ -989,16 +989,16 @@ async fn run_summarizer(
         Ok(result) => SummarizerOutcome::Ok(result.output),
         Err(e) => {
             let reason = e.to_string();
-            warn!(session_id = %parent_session_id, error = %reason, "memory summarizer subagent failed, using keyword fallback");
+            warn!(session_id = %parent_session_id, error = %reason, "memory summarizer subagent failed, using keyword recovery");
             SummarizerOutcome::Err {
-                fallback: keyword_summary(parent_session_id),
+                recovery: keyword_summary(parent_session_id),
                 reason,
             }
         }
     }
 }
 
-/// Minimal keyword-based fallback when no subagent manager is available.
+/// Minimal keyword-based recovery when no subagent manager is available.
 fn keyword_summary(session_id: &str) -> String {
     format!("Session {session_id}")
 }
@@ -1341,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn split_title_and_body_empty_input_uses_fallback_title() {
+    fn split_title_and_body_empty_input_uses_recovery_title() {
         let (title, body) = split_title_and_body("");
         assert_eq!(title, "Session summary");
         assert_eq!(body, "");
@@ -1381,7 +1381,7 @@ mod tests {
     fn parse_retain_output_handles_malformed_gracefully() {
         let output = "Just a plain text summary without tags";
         let parsed = parse_retain_output(output);
-        // Fallback: treat entire output as journal
+        // Recovery: treat entire output as journal
         assert!(parsed.journal.is_some());
         assert_eq!(parsed.journal.unwrap(), output);
         assert!(parsed.core_memory.is_none());

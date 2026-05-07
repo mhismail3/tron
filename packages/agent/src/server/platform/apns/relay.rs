@@ -376,8 +376,8 @@ mod tests {
     fn request_serialization_always_includes_bundle_id() {
         // Post-R5 invariant: `device_tokens.bundle_id` is NOT NULL, so the
         // wire ALWAYS carries a concrete `bundle_id`. The relay worker
-        // uses it verbatim as `apns-topic` and no longer has a fallback
-        // path for a missing value.
+        // uses it verbatim as `apns-topic`; a missing value is a schema
+        // error rather than an alternate-topic path.
         let tokens = vec!["aa".to_string()];
         let notification = ApnsNotification {
             title: "T".into(),

@@ -4,26 +4,26 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "settings::get" => {
             serde_json::to_value(&deps.profile_runtime.current().settings).map_err(|error| {
-                RpcError::Internal {
+                CapabilityError::Internal {
                     message: error.to_string(),
                 }
             })
         }
         "settings::update" => settings_update_value(Some(payload), invocation, deps).await,
         "settings::reset_to_defaults" => settings_reset_to_defaults_value(deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("settings method {method} is not engine-owned"),
         }),
     }
 }
 
-fn settings_error(error: crate::settings::SettingsError) -> RpcError {
-    RpcError::Internal {
+fn settings_error(error: crate::settings::SettingsError) -> CapabilityError {
+    CapabilityError::Internal {
         message: error.to_string(),
     }
 }
@@ -32,7 +32,7 @@ async fn settings_update_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let updates = require_param(params, "settings")?.clone();
     let codex_updates = updates.clone();
     let has_codex_changes = updates.pointer("/server/codexAppServer").is_some();
@@ -59,7 +59,7 @@ async fn settings_update_value(
 
         if let Err(message) = router_guard.reload_from_settings().await {
             rollback_sparse_settings(deps, previous_sparse, "settings.rollbackMcpUpdate").await?;
-            return Err(RpcError::Internal { message });
+            return Err(CapabilityError::Internal { message });
         }
         if let Err(error) = deps.profile_runtime.reload_now("settings::update") {
             rollback_sparse_settings(
@@ -74,7 +74,7 @@ async fn settings_update_value(
                     "MCP router failed to reload after profile-runtime rollback"
                 );
             }
-            return Err(RpcError::Internal {
+            return Err(CapabilityError::Internal {
                 message: format!(
                     "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
                 ),
@@ -122,7 +122,9 @@ async fn settings_update_value(
     Ok(json!({ "success": true }))
 }
 
-async fn settings_reset_to_defaults_value(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn settings_reset_to_defaults_value(
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
     let previous_sparse = read_sparse_settings_snapshot(deps).await?;
     let previous_codex_app_server = deps
@@ -157,7 +159,9 @@ async fn settings_reset_to_defaults_value(deps: &EngineCapabilityDeps) -> Result
     Ok(result)
 }
 
-async fn read_sparse_settings_snapshot(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn read_sparse_settings_snapshot(
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let path = deps.settings_path.clone();
     run_blocking_task("settings.readSparseSnapshot", move || {
         crate::settings::SettingsStore::new(path)
@@ -171,7 +175,7 @@ async fn restore_sparse_settings_file(
     deps: &EngineCapabilityDeps,
     previous_sparse: Value,
     reason: &str,
-) -> Result<(), RpcError> {
+) -> Result<(), CapabilityError> {
     let path = deps.settings_path.clone();
     run_blocking_task("settings.rollbackSparseSettings", move || {
         crate::settings::SettingsStore::new(path)
@@ -187,7 +191,7 @@ async fn rollback_sparse_settings(
     deps: &EngineCapabilityDeps,
     previous_sparse: Value,
     reason: &str,
-) -> Result<(), RpcError> {
+) -> Result<(), CapabilityError> {
     restore_sparse_settings_file(deps, previous_sparse, reason).await?;
     crate::settings::init_settings(deps.profile_runtime.current().settings.clone());
     Ok(())
@@ -197,12 +201,12 @@ async fn reload_profile_runtime_or_rollback(
     deps: &EngineCapabilityDeps,
     previous_sparse: Value,
     reason: &'static str,
-) -> Result<(), RpcError> {
+) -> Result<(), CapabilityError> {
     match deps.profile_runtime.reload_now(reason) {
         Ok(_) => Ok(()),
         Err(error) => {
             rollback_sparse_settings(deps, previous_sparse, reason).await?;
-            Err(RpcError::Internal {
+            Err(CapabilityError::Internal {
                 message: format!(
                     "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
                 ),
@@ -216,7 +220,7 @@ async fn refresh_codex_app_server_if_needed(
     updates: &Value,
     previous_sparse: Value,
     previous_settings: crate::settings::CodexAppServerSettings,
-) -> Result<(), RpcError> {
+) -> Result<(), CapabilityError> {
     if updates.pointer("/server/codexAppServer").is_none() {
         return Ok(());
     }
@@ -238,7 +242,7 @@ async fn refresh_codex_app_server_if_needed(
         .await?;
         deps.profile_runtime
             .reload_now("settings.rollbackCodexAppServerUpdate")
-            .map_err(|rollback_error| RpcError::Internal {
+            .map_err(|rollback_error| CapabilityError::Internal {
                 message: format!(
                     "Codex App Server reconfiguration failed ({error}); sparse settings were restored, but profile runtime reload failed during rollback: {rollback_error}"
                 ),
@@ -249,7 +253,7 @@ async fn refresh_codex_app_server_if_needed(
                 "Codex App Server failed to reconfigure back to previous settings after rollback"
             );
         }
-        return Err(RpcError::Internal {
+        return Err(CapabilityError::Internal {
             message: format!(
                 "Codex App Server reconfiguration failed; sparse settings were rolled back: {error}"
             ),
@@ -265,7 +269,7 @@ async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &EngineCapa
 
     let router = router_arc.read().await;
     let status = router.status();
-    let event = JsonRpcEvent::new(
+    let event = ServerEventPayload::new(
         "mcp.status_changed",
         None,
         Some(serde_json::to_value(status).unwrap_or_default()),

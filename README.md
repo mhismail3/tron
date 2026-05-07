@@ -133,7 +133,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |     +-- minimax/     MiniMax (API key only)
   |     +-- kimi/        Kimi/Moonshot (API key only)
   |     +-- ollama/      Gemma 4 local inference (no auth, native /api/chat)
-  +-- mcp              Model Context Protocol client/server bridge
+  +-- mcp              Model Context Protocol client/server pump
   +-- tools            Tool trait, registry, tool implementations
   +-- engine           Live capability catalog (workers, functions, triggers)
   +-- cron             Scheduled job runner (automations)
@@ -142,7 +142,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |
   +-- runtime          Agent loop, context, hooks, orchestrator, tasks
   |
-  +-- server           Axum HTTP/WS, engine transport, services, event bridge, APNS
+  +-- server           Axum HTTP/WS, engine transport, services, stream pump, APNS
   |                    +-- onboarding      Bearer token + `.onboarded` sentinel lifecycle
   |                    +-- codex_app       Managed `codex app-server` child lifecycle
   |                    +-- websocket       WS upgrade handler + mandatory bearer-auth middleware
@@ -167,7 +167,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
-| `server` | HTTP/WS + engine transport | `TronServer`, `JsonRpcTransportRegistry`, `ServerCapabilityContext`, `EventBridge` |
+| `server` | HTTP/WS + engine transport | `TronServer`, `JsonRpcTransportRegistry`, `ServerCapabilityContext`, `EngineStreamEventPump` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
 | `server::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
 | `server::websocket` | WS upgrade + bearer-auth middleware | `BearerTokenStore`, `verify_bearer_header()` |
@@ -355,6 +355,12 @@ Messages use the server's WebSocket RPC framing. Request IDs are strings and are
 
 Hidden apply functions remain in the engine catalog for queue/cron/runtime execution, but normal discovery excludes them and the public transport cannot invoke them directly.
 
+The transport boundary is intentionally protocol-neutral inside the server:
+JSON-RPC requests are translated into an internal engine transport envelope with
+actor, authority, trace, scope, payload, expected revision, and explicit
+idempotency. A future custom engine WebSocket protocol can reuse that envelope
+without changing canonical domain capabilities.
+
 ---
 
 ## Event System
@@ -397,13 +403,13 @@ Events flow from the agent through a broadcast channel to all connected WebSocke
 ```
 TronAgent (run loop)  ->  EventEmitter  ->  Orchestrator broadcast
                                                     |
-EventBridge  <------------------------------------------+
+EngineStreamEventPump  <------------------------------------------+
     |
     v
 BroadcastManager  ->  Per-connection WebSocket writers
 ```
 
-The `EventBridge` also routes browser CDP frames and `Display` tool frames when iOS clients are subscribed.
+The `EngineStreamEventPump` also routes browser CDP frames and `Display` tool frames when iOS clients are subscribed.
 
 ---
 
@@ -701,7 +707,7 @@ packages/ios-app/Sources/
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
-- **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet fallback. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
+- **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
 
 ### Data Flow
 
@@ -769,7 +775,7 @@ packages/mac-app/Sources/
 3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `engine.invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system::ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
 5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/internal/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/internal/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
-6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open fallbacks. TestFlight then owns beta availability and update selection.
+6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open alternatives. TestFlight then owns beta availability and update selection.
 7. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it in `profiles/user/profile.toml`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
 8. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
@@ -952,7 +958,7 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
 12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
 13. Keep dSYMs in the Xcode archive/release artifacts for Apple crash diagnostics.
-14. `scripts/tron-release-notes` writes a bounded draft changelog body from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta1-to-beta2 bridge recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
+14. `scripts/tron-release-notes` writes a bounded draft changelog body from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta1-to-beta2 pump recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
 15. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates a draft GitHub pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog; maintainers publish after installing and verifying the DMG.
 
 A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
@@ -1025,7 +1031,7 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 1. **Canonical engine execution**: Production behavior is owned by canonical engine functions. The public JSON-RPC surface contains only `engine.*` transport methods; domain behavior is discovered and invoked by canonical `namespace::function` ids.
 
-2. **Fail-fast on unknown models**: Unknown model or provider returns a typed `UnsupportedModel` error immediately. No silent fallback or default provider substitution.
+2. **Fail-fast on unknown models**: Unknown model or provider returns a typed `UnsupportedModel` error immediately. No silent substitution or default provider substitution.
 
 3. **Deterministic event reconstruction**: Session state is always reconstructable from the immutable event log. No mutable session state stored outside events.
 

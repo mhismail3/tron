@@ -28,7 +28,7 @@ use super::protocol::{
 };
 use super::types::VisibilityScope;
 
-/// Transport adapter used to invoke a connected local external worker.
+/// Transport client used to invoke a connected local external worker.
 #[async_trait]
 pub trait ExternalWorkerInvoker: Send + Sync {
     /// Send one invocation to the worker and wait for its result.

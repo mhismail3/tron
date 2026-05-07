@@ -6,7 +6,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "events::get_history" => events_get_history_value(Some(payload), deps).await,
@@ -14,7 +14,7 @@ pub(super) async fn handle(
         "events::append" => events_append_value(Some(payload), invocation, deps).await,
         "events::subscribe" => events_subscribe_value(Some(payload), invocation, deps).await,
         "events::unsubscribe" => events_unsubscribe_value(Some(payload), deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("events method {method} is not engine-owned"),
         }),
     }
@@ -24,7 +24,7 @@ async fn events_subscribe_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let subscription_id = format!("events.session:{session_id}");
     deps.engine_host
@@ -37,33 +37,33 @@ async fn events_subscribe_value(
             invocation.causal_context.workspace_id.clone(),
         )
         .await
-        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+        .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     Ok(json!({ "subscribed": true }))
 }
 
 async fn events_unsubscribe_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let subscription_id = format!("events.session:{session_id}");
     let _ = deps
         .engine_host
         .unsubscribe_stream(&subscription_id)
         .await
-        .map_err(crate::server::transport::json_rpc::engine_transport::engine_error_to_rpc)?;
+        .map_err(crate::server::capabilities::error_mapping::engine_error_to_capability_error)?;
     Ok(json!({ "unsubscribed": true }))
 }
 
 async fn events_get_history_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     deps.event_store
         .get_session(&session_id)
         .map_err(map_event_store_error)?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: errors::SESSION_NOT_FOUND.into(),
             message: format!("Session '{session_id}' not found"),
         })?;
@@ -118,7 +118,7 @@ async fn events_get_history_value(
 async fn events_get_since_value(
     params: Option<&Value>,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let after_sequence = if let Some(event_id) = opt_string(params, "afterEventId") {
         deps.event_store
@@ -156,14 +156,14 @@ async fn events_append_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_type_str = require_string_param(params, "type")?;
     let payload = require_param(params, "payload")?;
     let event_type: crate::events::EventType =
         event_type_str
             .parse()
-            .map_err(|_| RpcError::InvalidParams {
+            .map_err(|_| CapabilityError::InvalidParams {
                 message: format!("Unknown event type: {event_type_str}"),
             })?;
     let parent_id = opt_string(params, "parentId");

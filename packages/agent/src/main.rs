@@ -30,7 +30,7 @@
 //! ## Core Invariants
 //!
 //! 1. Canonical internal model per concept; iOS adaptation is boundary-only
-//! 2. Unknown model/provider → fail-fast typed error (no fallback)
+//! 2. Unknown model/provider → fail-fast typed error (no implicit substitution)
 //! 3. Event reconstruction is deterministic from persisted events
 //! 4. Session writes are serialized per-session via in-process locks
 //! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
@@ -60,7 +60,7 @@ use tron::server::services::context::{
     AgentDeps, ServerCapabilityContext, register_blocking_supervisor_shutdown,
 };
 use tron::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
-use tron::server::websocket::event_bridge::EventBridge;
+use tron::server::websocket::stream_pump::EngineStreamEventPump;
 use tron::settings::db_path_policy::resolve_production_db_path;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
@@ -756,7 +756,7 @@ fn init_cron(
             #[cfg(feature = "apns")]
             {
                 services.tool_config.push_service.as_ref().map(|ps| {
-                    Arc::new(tron::server::cron_adapters::CronPushNotifier::new(
+                    Arc::new(tron::server::cron_callbacks::CronPushNotifier::new(
                         ps.as_sender(),
                         services.event_store.pool().clone(),
                     )) as _
@@ -1004,7 +1004,7 @@ async fn main() -> Result<()> {
     let cron = init_cron(&services, &origin, profile_runtime.clone());
     let worktree_coordinator = init_worktree(&services, &settings).await;
     let session_manager_for_startup = services.session_manager.clone();
-    let orchestrator_for_bridge = services.orchestrator.clone();
+    let orchestrator_for_stream_pump = services.orchestrator.clone();
     let process_manager_for_shutdown = services.process_manager.clone();
     let profile_runtime_for_watcher = profile_runtime.clone();
     let capability_context = build_capability_context(
@@ -1026,7 +1026,7 @@ async fn main() -> Result<()> {
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = tron::server::metrics::install_recorder();
     let server = TronServer::new(config, registry, capability_context, metrics_handle);
-    tron::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(
+    tron::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
         server.capability_context(),
         server.registry(),
     )
@@ -1066,20 +1066,20 @@ async fn main() -> Result<()> {
         },
     );
 
-    // Event bridge: orchestrator events -> WebSocket clients
-    let bridge = EventBridge::new(
-        orchestrator_for_bridge.subscribe(),
+    // Stream pump: orchestrator events -> WebSocket clients
+    let pump = EngineStreamEventPump::new(
+        orchestrator_for_stream_pump.subscribe(),
         server.broadcast().clone(),
         server.shutdown().token(),
-        orchestrator_for_bridge.turn_accumulators().clone(),
+        orchestrator_for_stream_pump.turn_accumulators().clone(),
     )
     .with_engine_streams(server.capability_context().engine_host.clone());
-    let bridge_handle = tokio::spawn(bridge.run());
+    let stream_pump_handle = tokio::spawn(pump.run());
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
     // Wire cron broadcaster and shutdown forwarding
     cron.scheduler.set_broadcaster(Arc::new(
-        tron::server::cron_adapters::CronEventBroadcaster::new(server.broadcast().clone()),
+        tron::server::cron_callbacks::CronEventBroadcaster::new(server.broadcast().clone()),
     ));
     {
         let cron_cancel = cron.cancel.clone();
@@ -1141,7 +1141,7 @@ async fn main() -> Result<()> {
     tracing::info!(signal = shutdown_signal, "Shutting down...");
     let mut shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![
         server_handle,
-        bridge_handle,
+        stream_pump_handle,
         cron_sched_handle,
         cron_watcher_handle,
     ];

@@ -17,8 +17,8 @@ use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineQueueDrainer, EnqueueInvocation,
     FunctionId, Invocation, InvocationId, PublishStreamEvent, TraceId, VisibilityScope,
 };
+use crate::server::capabilities::errors::CapabilityError;
 use crate::server::services::context::{AgentDeps, ServerCapabilityContext};
-use crate::server::transport::json_rpc::errors::RpcError;
 
 use super::runtime::{
     PromptBootstrapData, PromptContextArtifacts, build_user_content_override,
@@ -1106,7 +1106,7 @@ pub(crate) fn drain_prompt_queue(
     server_origin: String,
     engine_host: crate::engine::EngineHostHandle,
     engine_causality: Option<PromptEngineCausality>,
-) -> Result<PromptDrainOutcome, RpcError> {
+) -> Result<PromptDrainOutcome, CapabilityError> {
     use crate::server::services::prompt_queue::PromptQueueService;
     use crate::settings::types::QueueDrainMode;
 

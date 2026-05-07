@@ -6,7 +6,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "browser::get_status" => Ok(json!({
             "hasBrowser": false,
@@ -15,13 +15,16 @@ pub(super) async fn handle(
         "voice_notes::list" => voice_notes_list(&invocation.payload, deps).await,
         "transcription::list_models" => transcribe_list_models(deps).await,
         "sandbox::list_containers" => sandbox_list_containers(deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("safe read method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn voice_notes_list(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn voice_notes_list(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let limit = usize::try_from(opt_u64(Some(payload), "limit", 50)).unwrap_or(usize::MAX);
     let offset = usize::try_from(opt_u64(Some(payload), "offset", 0)).unwrap_or(0);
     let dir = crate::server::services::voice_notes_service::notes_dir();
@@ -34,7 +37,7 @@ async fn voice_notes_list(payload: &Value, deps: &EngineCapabilityDeps) -> Resul
         .await
 }
 
-async fn transcribe_list_models(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn transcribe_list_models(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let engine_loaded = deps.capability_context.transcription_engine.get().is_some();
     let enabled = crate::settings::get_settings().server.transcription.enabled;
     Ok(json!({
@@ -53,7 +56,7 @@ async fn transcribe_list_models(deps: &EngineCapabilityDeps) -> Result<Value, Rp
     }))
 }
 
-async fn sandbox_list_containers(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn sandbox_list_containers(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     let path = crate::server::services::sandbox_service::containers_json_path();
     let mut containers = deps
         .capability_context

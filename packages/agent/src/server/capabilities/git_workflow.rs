@@ -12,21 +12,19 @@
 //! JSON-RPC transport, subagent).
 //!
 //! Error mapping: every coordinator error is routed through
-//! `crate::server::transport::json_rpc::error_mapping::map_worktree_error`, which classifies `WorktreeError`
+//! `crate::server::capabilities::error_mapping::map_worktree_error`, which classifies `WorktreeError`
 //! variants into typed JSON-RPC error codes (`PROTECTED_BRANCH`,
 //! `NON_FAST_FORWARD`, `NO_REMOTE`, `GIT_AUTH_FAILED`, …). Domain functions
-//! should not produce `RpcError::Internal` for a predictable git failure; use
+//! should not produce `CapabilityError::Internal` for a predictable git failure; use
 //! the helper instead.
 
 use serde_json::{Value, json};
 use tracing::instrument;
 
+use crate::server::capabilities::error_mapping::map_worktree_error;
+use crate::server::capabilities::errors::CapabilityError;
+use crate::server::capabilities::params::{opt_bool, opt_string, opt_u64, require_string_param};
 use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::error_mapping::map_worktree_error;
-use crate::server::transport::json_rpc::errors::RpcError;
-use crate::server::transport::json_rpc::params::{
-    opt_bool, opt_string, opt_u64, require_string_param,
-};
 use crate::worktree::types::{
     ConflictResolution, MergeStrategy, RebaseOnMainResult, SyncBlockReason, SyncOutcome,
 };
@@ -40,7 +38,7 @@ pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     let params = Some(invocation.payload.clone());
     let ctx = deps.capability_context.as_ref();
     match method {
@@ -58,7 +56,7 @@ pub(super) async fn handle(
         "worktree::resolve_conflicts_with_subagent" => {
             ResolveConflictsWithSubagentOperation.run(params, ctx).await
         }
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("operation {method} is not git workflow-owned"),
         }),
     }
@@ -66,10 +64,12 @@ pub(super) async fn handle(
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-fn require_coordinator(ctx: &ServerCapabilityContext) -> Result<&WorktreeCoordinator, RpcError> {
+fn require_coordinator(
+    ctx: &ServerCapabilityContext,
+) -> Result<&WorktreeCoordinator, CapabilityError> {
     ctx.worktree_coordinator
         .as_deref()
-        .ok_or_else(|| RpcError::Internal {
+        .ok_or_else(|| CapabilityError::Internal {
             message: "Worktree isolation is not enabled".into(),
         })
 }
@@ -99,25 +99,25 @@ fn parse_strategy(s: Option<&str>) -> MergeStrategy {
 /// (default) or `"merge"`. `"squash"` and unknown values error with
 /// `INVALID_PARAMS` so callers find out at the transport boundary rather than
 /// deep in the coordinator.
-fn parse_rebase_strategy(s: Option<&str>) -> Result<MergeStrategy, RpcError> {
+fn parse_rebase_strategy(s: Option<&str>) -> Result<MergeStrategy, CapabilityError> {
     match s {
         None | Some("rebase") => Ok(MergeStrategy::Rebase),
         Some("merge") => Ok(MergeStrategy::Merge),
-        Some("squash") => Err(RpcError::InvalidParams {
+        Some("squash") => Err(CapabilityError::InvalidParams {
             message: "rebaseOnMain does not accept 'squash'".into(),
         }),
-        Some(other) => Err(RpcError::InvalidParams {
+        Some(other) => Err(CapabilityError::InvalidParams {
             message: format!("strategy must be 'rebase' or 'merge'; got '{other}'"),
         }),
     }
 }
 
-fn parse_resolution(s: &str) -> Result<ConflictResolution, RpcError> {
+fn parse_resolution(s: &str) -> Result<ConflictResolution, CapabilityError> {
     match s {
         "ours" => Ok(ConflictResolution::Ours),
         "theirs" => Ok(ConflictResolution::Theirs),
         "markResolved" | "mark_resolved" | "manual" => Ok(ConflictResolution::MarkResolved),
-        other => Err(RpcError::InvalidParams {
+        other => Err(CapabilityError::InvalidParams {
             message: format!(
                 "resolution must be one of 'ours' | 'theirs' | 'markResolved'; got '{other}'"
             ),
@@ -216,7 +216,7 @@ impl SyncMainOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target = opt_string(params.as_ref(), "targetBranch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
@@ -225,7 +225,7 @@ impl SyncMainOperation {
         let dry_run = opt_bool(params.as_ref(), "dryRun").unwrap_or(false);
         let coord = require_coordinator(ctx)?;
 
-        let fallback = session_working_dir(ctx, &session_id);
+        let session_dir_hint = session_working_dir(ctx, &session_id);
         let outcome = coord
             .sync_main(
                 &session_id,
@@ -234,7 +234,7 @@ impl SyncMainOperation {
                 timeout_ms,
                 prune,
                 dry_run,
-                fallback.as_deref(),
+                session_dir_hint.as_deref(),
             )
             .await
             .map_err(|e| map_worktree_error(e))?;
@@ -253,7 +253,7 @@ impl PushOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let branch = opt_string(params.as_ref(), "branch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
@@ -274,7 +274,7 @@ impl PushOperation {
             .unwrap_or_else(|| vec!["main".into(), "master".into(), "develop".into()]);
 
         let coord = require_coordinator(ctx)?;
-        let fallback = session_working_dir(ctx, &session_id);
+        let session_dir_hint = session_working_dir(ctx, &session_id);
         let out = coord
             .push_branch(
                 &session_id,
@@ -285,7 +285,7 @@ impl PushOperation {
                 dry_run,
                 &protected,
                 override_protected,
-                fallback.as_deref(),
+                session_dir_hint.as_deref(),
             )
             .await
             .map_err(|e| map_worktree_error(e))?;
@@ -314,12 +314,12 @@ impl ListLocalBranchesOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
-        let fallback = session_working_dir(ctx, &session_id);
+        let session_dir_hint = session_working_dir(ctx, &session_id);
         let branches = coord
-            .list_local_branches(&session_id, fallback.as_deref())
+            .list_local_branches(&session_id, session_dir_hint.as_deref())
             .await
             .map_err(|e| map_worktree_error(e))?;
         // `current` is best-effort: isolated sessions read it from the
@@ -327,7 +327,7 @@ impl ListLocalBranchesOperation {
         // git HEAD of the session's working dir.
         let current = if let Some(info) = coord.get_info(&session_id) {
             Some(info.branch)
-        } else if let Some(ref dir) = fallback {
+        } else if let Some(ref dir) = session_dir_hint {
             coord
                 .passthrough_status(dir)
                 .await
@@ -357,13 +357,13 @@ impl ListRemoteBranchesOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let remote = opt_string(params.as_ref(), "remote");
         let coord = require_coordinator(ctx)?;
-        let fallback = session_working_dir(ctx, &session_id);
+        let session_dir_hint = session_working_dir(ctx, &session_id);
         let branches = coord
-            .list_remote_branches(&session_id, remote.as_deref(), fallback.as_deref())
+            .list_remote_branches(&session_id, remote.as_deref(), session_dir_hint.as_deref())
             .await
             .map_err(|e| map_worktree_error(e))?;
         Ok(json!({
@@ -384,15 +384,15 @@ impl FinalizeSessionOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
         // Source branch defaults to the session's current branch.
         let info = coord
             .get_info(&session_id)
-            .ok_or_else(|| RpcError::NotFound {
-                code: crate::server::transport::json_rpc::errors::WORKTREE_NOT_FOUND.into(),
+            .ok_or_else(|| CapabilityError::NotFound {
+                code: crate::server::capabilities::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             })?;
         let source_branch =
@@ -456,7 +456,7 @@ impl RebaseOnMainOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Parse strategy BEFORE touching the coordinator so "squash" is
         // rejected at the RPC boundary (plan requirement).
@@ -508,7 +508,7 @@ impl StartMergeOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let source = require_string_param(params.as_ref(), "sourceBranch")?;
         let target = require_string_param(params.as_ref(), "targetBranch")?;
@@ -547,7 +547,7 @@ impl ListConflictsOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
         let conflicts = coord
@@ -571,7 +571,7 @@ impl ResolveConflictOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let path = require_string_param(params.as_ref(), "path")?;
         let resolution_str = require_string_param(params.as_ref(), "resolution")?;
@@ -605,7 +605,7 @@ impl ContinueMergeOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = opt_string(params.as_ref(), "message");
         let coord = require_coordinator(ctx)?;
@@ -628,7 +628,7 @@ impl AbortMergeOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let reason = opt_string(params.as_ref(), "reason").unwrap_or_else(|| "user".into());
         let coord = require_coordinator(ctx)?;
@@ -660,12 +660,15 @@ impl ResolveConflictsWithSubagentOperation {
         &self,
         params: Option<Value>,
         ctx: &ServerCapabilityContext,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Must have a live coordinator to resolve worktree + merge state.
-        let coord = ctx.worktree_coordinator.clone().ok_or(RpcError::Internal {
-            message: "Worktree isolation is not enabled".into(),
-        })?;
+        let coord = ctx
+            .worktree_coordinator
+            .clone()
+            .ok_or(CapabilityError::Internal {
+                message: "Worktree isolation is not enabled".into(),
+            })?;
 
         // Subagent manager is optional server-wide. Without it we cannot
         // spawn — return a graceful stub so iOS falls back to manual.

@@ -1,9 +1,9 @@
 use serde_json::{Value, json};
 
+use crate::server::capabilities::errors::CapabilityError;
 use crate::server::services::context::ServerCapabilityContext;
 use crate::server::services::context_queries::prepare_session_context;
 use crate::server::services::context_service::build_summarizer;
-use crate::server::transport::json_rpc::errors::RpcError;
 
 // NOTE: Event appends in this module use `let _ =` because they are supplementary
 // audit-trail emissions. The RPC response has already been determined; a failed
@@ -15,7 +15,7 @@ impl ContextCommandService {
         ctx: &ServerCapabilityContext,
         session_id: String,
         edited_summary: Option<String>,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let result = execute_compaction(ctx, session_id, edited_summary).await?;
         Ok(json!({
             "confirmed": true,
@@ -30,7 +30,7 @@ impl ContextCommandService {
     pub(crate) async fn clear(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let tokens_before =
             match prepare_session_context(ctx, "context.clear.snapshot", &session_id).await {
                 Ok(prepared) => prepared.context_manager.get_snapshot().current_tokens,
@@ -77,7 +77,7 @@ impl ContextCommandService {
     pub(crate) async fn compact(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let result = execute_compaction(ctx, session_id, None).await?;
         Ok(json!({
             "success": result.success,
@@ -93,12 +93,12 @@ async fn execute_compaction(
     ctx: &ServerCapabilityContext,
     session_id: String,
     edited_summary: Option<String>,
-) -> Result<crate::runtime::context::types::CompactionResult, RpcError> {
+) -> Result<crate::runtime::context::types::CompactionResult, CapabilityError> {
     // If an agent is actively running, check concurrency guard to prevent
     // racing with auto-compaction.
     if let Some(handler) = ctx.orchestrator.get_compaction_handler(&session_id) {
         if handler.is_compacting() {
-            return Err(RpcError::Internal {
+            return Err(CapabilityError::Internal {
                 message: "Compaction already in progress".to_string(),
             });
         }
@@ -121,7 +121,7 @@ async fn execute_compaction(
     let result = context_manager
         .execute_compaction(summarizer.as_ref(), edited_summary.as_deref())
         .await
-        .map_err(|error| RpcError::Internal {
+        .map_err(|error| CapabilityError::Internal {
             message: format!("Compaction failed: {error}"),
         })?;
 

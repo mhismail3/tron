@@ -12,8 +12,9 @@ use std::time::Duration;
 use metrics::{counter, histogram};
 use tracing::warn;
 
+use crate::server::capabilities::errors::{INTERNAL_ERROR, METHOD_NOT_FOUND};
 use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::errors;
+use crate::server::transport::json_rpc::errors::to_error_body;
 use crate::server::transport::json_rpc::types::{JsonRpcRequest, JsonRpcResponse};
 
 /// Execution contract for a JSON-RPC transport binding.
@@ -97,18 +98,18 @@ impl JsonRpcTransportRegistry {
             counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "method_not_found").increment(1);
             return JsonRpcResponse::error(
                 &request.id,
-                errors::METHOD_NOT_FOUND,
+                METHOD_NOT_FOUND,
                 format!("Method '{method}' not found"),
             );
         };
 
         if let Some(ref params) = request.params {
-            if let Err(err) = crate::server::transport::json_rpc::validation::validate_json_depth(
+            if let Err(err) = crate::server::capabilities::validation::validate_json_depth(
                 params,
-                crate::server::transport::json_rpc::validation::MAX_JSON_DEPTH,
+                crate::server::capabilities::validation::MAX_JSON_DEPTH,
             ) {
                 counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "json_depth").increment(1);
-                let body = err.to_error_body();
+                let body = to_error_body(&err);
                 return JsonRpcResponse {
                     id: request.id,
                     success: false,
@@ -123,7 +124,7 @@ impl JsonRpcTransportRegistry {
             Some(timeout) => {
                 match tokio::time::timeout(
                     timeout,
-                    crate::server::transport::json_rpc::engine_transport::dispatch_json_rpc_transport(
+                    crate::server::transport::json_rpc::engine_methods::dispatch_engine_json_rpc_method(
                         self, ctx, &request,
                     ),
                 )
@@ -141,14 +142,14 @@ impl JsonRpcTransportRegistry {
                         record_dispatch_duration(&method, start);
                         return JsonRpcResponse::error(
                             &request.id,
-                            errors::INTERNAL_ERROR,
+                            INTERNAL_ERROR,
                             format!("JSON-RPC transport for '{method}' timed out"),
                         );
                     }
                 }
             }
             None => {
-                crate::server::transport::json_rpc::engine_transport::dispatch_json_rpc_transport(
+                crate::server::transport::json_rpc::engine_methods::dispatch_engine_json_rpc_method(
                     self, ctx, &request,
                 )
                 .await
@@ -187,68 +188,10 @@ impl JsonRpcTransportRegistry {
 
     pub(crate) fn policy_for_method(method: &str) -> TransportExecutionPolicy {
         match method {
-            "engine.discover"
-            | "engine.inspect"
-            | "engine.watch"
-            | "system::ping"
-            | "system::get_info"
-            | "system::get_diagnostics"
-            | "agent::status"
-            | "browser::get_status"
-            | "codex_app::status"
-            | "cron::status"
-            | "context::should_compact"
-            | "context::can_accept_turn"
-            | "mcp::status" => TransportExecutionPolicy::Quick,
-            "engine.invoke" | "engine.promote" => TransportExecutionPolicy::Mutating,
-            method
-                if method.starts_with("settings::get")
-                    || method.starts_with("session::list")
-                    || method.starts_with("session::get_")
-                    || method.starts_with("session::reconstruct")
-                    || method.starts_with("session::resume")
-                    || method.starts_with("session::export")
-                    || method.starts_with("events::get_")
-                    || method.starts_with("model::list")
-                    || method.starts_with("blob::get")
-                    || method.starts_with("context::get_")
-                    || method.starts_with("context::preview")
-                    || method.starts_with("logs::recent")
-                    || method.starts_with("mcp::list")
-                    || method.starts_with("skills::list")
-                    || method.starts_with("skills::get")
-                    || method.starts_with("skills::active")
-                    || method.starts_with("filesystem::list")
-                    || method.starts_with("filesystem::get")
-                    || method.starts_with("filesystem::read_file")
-                    || method.starts_with("tree::")
-                    || method.starts_with("import::list")
-                    || method.starts_with("import::preview")
-                    || method.starts_with("git::list")
-                    || method.starts_with("worktree::get")
-                    || method.starts_with("worktree::is")
-                    || method.starts_with("worktree::list")
-                    || method.starts_with("repo::list")
-                    || method.starts_with("repo::get")
-                    || method.starts_with("sandbox::list")
-                    || method.starts_with("transcription::list")
-                    || method.starts_with("plan::get")
-                    || method.starts_with("voice_notes::list")
-                    || method.starts_with("notifications::list")
-                    || method.starts_with("prompt_library::history_list")
-                    || method.starts_with("prompt_library::snippet_list")
-                    || method.starts_with("prompt_library::snippet_get")
-                    || method.starts_with("cron::list")
-                    || method.starts_with("cron::get")
-                    || method.starts_with("job::list")
-                    || method.starts_with("auth::get")
-                    || method.starts_with("approval::get")
-                    || method.starts_with("approval::list")
-                    || method.starts_with("system::check_for_updates")
-                    || method.starts_with("system::get_update_status") =>
-            {
-                TransportExecutionPolicy::BlockingRead
+            "engine.discover" | "engine.inspect" | "engine.watch" => {
+                TransportExecutionPolicy::Quick
             }
+            "engine.invoke" | "engine.promote" => TransportExecutionPolicy::Mutating,
             _ => TransportExecutionPolicy::Mutating,
         }
     }
@@ -332,7 +275,7 @@ mod tests {
         reg.register("engine.discover");
 
         let mut value = json!({});
-        for _ in 0..(crate::server::transport::json_rpc::validation::MAX_JSON_DEPTH + 1) {
+        for _ in 0..(crate::server::capabilities::validation::MAX_JSON_DEPTH + 1) {
             value = json!({ "nested": value });
         }
         let resp = reg
@@ -390,7 +333,10 @@ mod tests {
         let ctx = make_test_context();
         let mut reg = JsonRpcTransportRegistry::new();
         bindings::register_all(&mut reg);
-        crate::server::transport::json_rpc::engine_transport::register_engine_transport_for_context(&ctx, &reg).unwrap();
+        crate::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
+            &ctx, &reg,
+        )
+        .unwrap();
 
         let resp = reg
             .dispatch(make_request("r1", "engine.discover", Some(json!({}))), &ctx)

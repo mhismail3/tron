@@ -3,25 +3,25 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::server::transport::json_rpc::error_mapping::map_import_error;
+use crate::server::capabilities::error_mapping::map_import_error;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
     deps: &EngineCapabilityDeps,
-) -> Result<Value, RpcError> {
+) -> Result<Value, CapabilityError> {
     match method {
         "import::list_sources" => list_sources(deps).await,
         "import::list_sessions" => list_sessions(&invocation.payload, deps).await,
         "import::preview_session" => preview_session(&invocation.payload, deps).await,
         "import::execute" => execute_import(&invocation.payload, deps).await,
-        _ => Err(RpcError::Internal {
+        _ => Err(CapabilityError::Internal {
             message: format!("import method {method} is not engine-owned"),
         }),
     }
 }
 
-async fn list_sources(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn list_sources(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
     deps.capability_context
         .run_blocking("import::list_sources", move || {
             let claude_projects =
@@ -45,7 +45,10 @@ async fn list_sources(deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
         .await
 }
 
-async fn list_sessions(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn list_sessions(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let encoded_dir = require_string_param(Some(payload), "encodedDir")?;
     let event_store = deps.event_store.clone();
     deps.capability_context
@@ -76,13 +79,16 @@ async fn list_sessions(payload: &Value, deps: &EngineCapabilityDeps) -> Result<V
                         "existingTronSessionId": existing_id,
                     }))
                 })
-                .collect::<Result<Vec<_>, RpcError>>()?;
+                .collect::<Result<Vec<_>, CapabilityError>>()?;
             Ok(json!({ "sessions": result }))
         })
         .await
 }
 
-async fn preview_session(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn preview_session(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let session_path = require_string_param(Some(payload), "sessionPath")?;
     deps.capability_context
         .run_blocking("import::preview_session", move || {
@@ -164,7 +170,10 @@ async fn preview_session(payload: &Value, deps: &EngineCapabilityDeps) -> Result
         .await
 }
 
-async fn execute_import(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, RpcError> {
+async fn execute_import(
+    payload: &Value,
+    deps: &EngineCapabilityDeps,
+) -> Result<Value, CapabilityError> {
     let session_path = require_string_param(Some(payload), "sessionPath")?;
     let tags: Vec<String> = payload
         .get("tags")
@@ -188,7 +197,7 @@ async fn execute_import(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
                     .and_then(|p| p.file_name())
                     .and_then(|n| n.to_str())
                     .map(crate::import::parser::decode_project_dir)
-                    .ok_or_else(|| RpcError::InvalidParams {
+                    .ok_or_else(|| CapabilityError::InvalidParams {
                         message: "Could not derive working directory from session path; pass `workingDirectory` explicitly".to_string(),
                     })?
             } else {
@@ -229,7 +238,7 @@ async fn execute_import(payload: &Value, deps: &EngineCapabilityDeps) -> Result<
 fn check_already_imported(
     event_store: &EventStore,
     session_uuid: &str,
-) -> Result<(bool, Option<String>), RpcError> {
+) -> Result<(bool, Option<String>), CapabilityError> {
     let tag = format!("claude_code_import:{session_uuid}");
     let result = event_store
         .find_session_id_with_metadata_tag(&tag)

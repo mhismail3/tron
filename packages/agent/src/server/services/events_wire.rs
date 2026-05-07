@@ -6,6 +6,9 @@
 use crate::events::sqlite::row_types::EventRow;
 use serde_json::Value;
 
+/// WebSocket-compatible event payload used by server capability streams.
+pub(crate) type ServerEventPayload = crate::server::transport::json_rpc::types::JsonRpcEvent;
+
 /// Convert an `EventRow` to wire format (camelCase).
 pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
     let mut obj = serde_json::json!({

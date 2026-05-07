@@ -29,7 +29,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::server::transport::json_rpc::errors::{self, RpcError};
+use crate::server::capabilities::errors::{self, CapabilityError};
 
 /// Debug-build-only signal that a filesystem capability received a path
 /// outside the user's home directory. Emits nothing in release.
@@ -58,16 +58,16 @@ fn trace_out_of_home(path: &str, op: &'static str) {
 #[inline(always)]
 fn trace_out_of_home(_path: &str, _op: &'static str) {}
 
-pub(crate) fn list_dir(path: &str, show_hidden: bool) -> Result<Value, RpcError> {
+pub(crate) fn list_dir(path: &str, show_hidden: bool) -> Result<Value, CapabilityError> {
     trace_out_of_home(path, "list_dir");
     let entries = std::fs::read_dir(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            RpcError::NotFound {
+            CapabilityError::NotFound {
                 code: errors::FILE_NOT_FOUND.into(),
                 message: format!("Directory not found: {path}"),
             }
         } else {
-            RpcError::Custom {
+            CapabilityError::Custom {
                 code: errors::FILESYSTEM_ERROR.into(),
                 message: error.to_string(),
                 details: None,
@@ -158,9 +158,9 @@ pub(crate) fn get_home(home: &str) -> Value {
     })
 }
 
-pub(crate) fn create_dir(path: &str) -> Result<Value, RpcError> {
+pub(crate) fn create_dir(path: &str) -> Result<Value, CapabilityError> {
     trace_out_of_home(path, "create_dir");
-    std::fs::create_dir_all(path).map_err(|error| RpcError::Custom {
+    std::fs::create_dir_all(path).map_err(|error| CapabilityError::Custom {
         code: errors::FILESYSTEM_ERROR.into(),
         message: error.to_string(),
         details: None,
@@ -169,16 +169,16 @@ pub(crate) fn create_dir(path: &str) -> Result<Value, RpcError> {
     Ok(serde_json::json!({ "created": true, "path": path }))
 }
 
-pub(crate) fn read_file(path: &str) -> Result<Value, RpcError> {
+pub(crate) fn read_file(path: &str) -> Result<Value, CapabilityError> {
     trace_out_of_home(path, "read_file");
     let content = std::fs::read_to_string(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            RpcError::NotFound {
+            CapabilityError::NotFound {
                 code: errors::FILE_NOT_FOUND.into(),
                 message: format!("File not found: {path}"),
             }
         } else {
-            RpcError::Custom {
+            CapabilityError::Custom {
                 code: errors::FILE_ERROR.into(),
                 message: error.to_string(),
                 details: None,

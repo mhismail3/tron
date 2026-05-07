@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 
+use crate::server::capabilities::errors::{self, CapabilityError};
 use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::errors::{self, RpcError};
 
 pub(crate) struct SessionQueryService;
 
@@ -11,13 +11,13 @@ impl SessionQueryService {
     pub(crate) async fn resume(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let session_id_for_resume = session_id.clone();
         ctx.run_blocking("session.resume", move || {
             let active = session_manager
                 .resume_session(&session_id_for_resume)
-                .map_err(|error| RpcError::NotFound {
+                .map_err(|error| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: error.to_string(),
                 })?;
@@ -36,7 +36,7 @@ impl SessionQueryService {
         ctx: &ServerCapabilityContext,
         include_archived: bool,
         limit: Option<usize>,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let filter = crate::runtime::SessionFilter {
             include_archived,
             exclude_subagents: true,
@@ -51,7 +51,7 @@ impl SessionQueryService {
             let sessions =
                 session_manager
                     .list_sessions(&filter)
-                    .map_err(|error| RpcError::Internal {
+                    .map_err(|error| CapabilityError::Internal {
                         message: error.to_string(),
                     })?;
 
@@ -108,16 +108,16 @@ impl SessionQueryService {
     pub(crate) async fn get_head(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let session_id_for_head = session_id.clone();
         ctx.run_blocking("session.get_head", move || {
             let session = session_manager
                 .get_session(&session_id_for_head)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?
-                .ok_or_else(|| RpcError::NotFound {
+                .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_head}' not found"),
                 })?;
@@ -133,24 +133,24 @@ impl SessionQueryService {
     pub(crate) async fn get_state(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let session_id_for_state = session_id.clone();
         ctx.run_blocking("session.get_state", move || {
             let session = session_manager
                 .get_session(&session_id_for_state)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?
-                .ok_or_else(|| RpcError::NotFound {
+                .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_state}' not found"),
                 })?;
 
             let active = session_manager
                 .resume_session(&session_id_for_state)
-                .map_err(|error| RpcError::NotFound {
+                .map_err(|error| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: error.to_string(),
                 })?;
@@ -193,17 +193,17 @@ impl SessionQueryService {
     pub(crate) async fn export(
         ctx: &ServerCapabilityContext,
         session_id: String,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let session_id_for_export = session_id.clone();
         ctx.run_blocking("session.export", move || {
             let session = session_manager
                 .get_session(&session_id_for_export)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?
-                .ok_or_else(|| RpcError::NotFound {
+                .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_export}' not found"),
                 })?;
@@ -211,15 +211,15 @@ impl SessionQueryService {
             let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
             let events = event_store
                 .get_events_by_session(&session_id_for_export, &opts)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?;
 
             let event_count = events.len();
-            let session_value = serde_json::to_value(&session).map_err(|error| RpcError::Internal {
+            let session_value = serde_json::to_value(&session).map_err(|error| CapabilityError::Internal {
                 message: format!("session serialization failed: {error}"),
             })?;
-            let events_value = serde_json::to_value(&events).map_err(|error| RpcError::Internal {
+            let events_value = serde_json::to_value(&events).map_err(|error| CapabilityError::Internal {
                 message: format!("events serialization failed: {error}"),
             })?;
 
@@ -239,17 +239,17 @@ impl SessionQueryService {
         session_id: String,
         limit: Option<usize>,
         before_id: Option<String>,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, CapabilityError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let session_id_for_history = session_id.clone();
         ctx.run_blocking("session.get_history", move || {
             let _ = session_manager
                 .get_session(&session_id_for_history)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?
-                .ok_or_else(|| RpcError::NotFound {
+                .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_history}' not found"),
                 })?;
@@ -258,7 +258,7 @@ impl SessionQueryService {
             let type_strs: Vec<&str> = message_types.to_vec();
             let events = event_store
                 .get_events_by_type(&session_id_for_history, &type_strs, None)
-                .map_err(|error| RpcError::Internal {
+                .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?;
 

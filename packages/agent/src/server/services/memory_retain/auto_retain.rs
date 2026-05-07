@@ -14,9 +14,9 @@
 use tracing::{debug, warn};
 
 use crate::events::EventStore;
+use crate::server::capabilities::error_mapping::map_event_store_error;
+use crate::server::capabilities::errors::{CapabilityError, SESSION_NOT_FOUND};
 use crate::server::services::context::run_blocking_task;
-use crate::server::transport::json_rpc::error_mapping::map_event_store_error;
-use crate::server::transport::json_rpc::errors::{RpcError, SESSION_NOT_FOUND};
 
 use super::RetainDeps;
 
@@ -100,11 +100,11 @@ pub fn gather_state(
     event_store: &EventStore,
     session_id: &str,
     interval: u32,
-) -> Result<AutoRetainInput, RpcError> {
+) -> Result<AutoRetainInput, CapabilityError> {
     let session = event_store
         .get_session(session_id)
         .map_err(map_event_store_error)?
-        .ok_or_else(|| RpcError::NotFound {
+        .ok_or_else(|| CapabilityError::NotFound {
             code: SESSION_NOT_FOUND.into(),
             message: format!("session {session_id} not found"),
         })?;

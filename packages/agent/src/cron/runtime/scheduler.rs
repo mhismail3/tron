@@ -82,11 +82,11 @@ pub struct CronScheduler {
     delivery_semaphore: Arc<tokio::sync::Semaphore>,
     /// Executor dependencies.
     deps: Arc<ExecutorDeps>,
-    /// Live engine host used by production cron fires.
+    /// Live engine host used by scheduled cron fires.
     ///
     /// INVARIANT: when this is set, scheduled fires route through
-    /// `EngineTriggerRuntime`; direct execution is retained only for isolated
-    /// scheduler tests that do not bootstrap the engine.
+    /// `EngineTriggerRuntime`; if startup forgets to attach it, due fires fail
+    /// closed instead of bypassing engine policy and causal ledger recording.
     engine_host: OnceLock<EngineHostHandle>,
     /// Spawned cron execution tasks.
     active_tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
@@ -309,18 +309,21 @@ impl CronScheduler {
         }
         let _guard = self.config_lock.lock().await;
 
-        // Load config (with SQLite fallback if file is corrupt)
+        // Load config, recovering from SQLite-stored definitions if both
+        // config files are corrupt.
         let config = match config::load_config(&self.config_path, &self.backup_path) {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(
                     error = %e,
-                    "config file corrupt and backup recovery failed, falling back to SQLite definitions"
+                    "config file corrupt and backup recovery failed, recovering from SQLite definitions"
                 );
                 // Reconstruct config from SQLite-stored job definitions
                 let jobs = store::list_all_jobs(&self.pool)?;
                 if jobs.is_empty() {
-                    tracing::warn!("no jobs found in SQLite fallback, starting with empty config");
+                    tracing::warn!(
+                        "no jobs found in SQLite recovery source, starting with empty config"
+                    );
                 }
 
                 // Broadcast config error event if broadcaster is available
@@ -692,36 +695,45 @@ impl CronScheduler {
         job: &CronJob,
         scheduled_at: DateTime<Utc>,
     ) -> Result<(), CronError> {
-        if let Some(handle) = self.engine_host.get() {
-            let trigger_id = Self::schedule_trigger_id(&job.id)
-                .map_err(|error| CronError::Execution(error.to_string()))?;
-            let mut request = TriggerDispatchRequest::new(
-                trigger_id,
-                serde_json::json!({
-                    "jobId": job.id,
-                    "scheduledAt": scheduled_at,
-                }),
-                ActorId::new("cron-scheduler")
-                    .map_err(|error| CronError::Execution(error.to_string()))?,
-                ActorKind::System,
-            );
-            request.authority_scopes = vec!["cron.write".to_owned()];
-            request.idempotency_key = Some(format!(
-                "cron-schedule:v1:{}:{}",
-                job.id,
-                scheduled_at.timestamp_millis()
-            ));
-            request.delivery_mode = Some(DeliveryMode::Sync);
-            let result = EngineTriggerRuntime::dispatch(handle, request).await;
-            if let Some(error) = result.error {
-                return Err(CronError::Execution(error.to_string()));
+        let Some(handle) = self.engine_host.get() else {
+            #[cfg(test)]
+            {
+                // Unit tests exercise scheduler timing without bootstrapping
+                // the full engine catalog; production builds fail closed below.
+                return self
+                    .start_due_job(job.clone(), scheduled_at)
+                    .await
+                    .map(|_| ());
             }
-            Ok(())
-        } else {
-            self.start_due_job(job.clone(), scheduled_at)
-                .await
-                .map(|_| ())
+            #[cfg(not(test))]
+            return Err(CronError::Execution(
+                "engine host missing for cron scheduled trigger dispatch".into(),
+            ));
+        };
+        let trigger_id = Self::schedule_trigger_id(&job.id)
+            .map_err(|error| CronError::Execution(error.to_string()))?;
+        let mut request = TriggerDispatchRequest::new(
+            trigger_id,
+            serde_json::json!({
+                "jobId": job.id,
+                "scheduledAt": scheduled_at,
+            }),
+            ActorId::new("cron-scheduler")
+                .map_err(|error| CronError::Execution(error.to_string()))?,
+            ActorKind::System,
+        );
+        request.authority_scopes = vec!["cron.write".to_owned()];
+        request.idempotency_key = Some(format!(
+            "cron-schedule:v1:{}:{}",
+            job.id,
+            scheduled_at.timestamp_millis()
+        ));
+        request.delivery_mode = Some(DeliveryMode::Sync);
+        let result = EngineTriggerRuntime::dispatch(handle, request).await;
+        if let Some(error) = result.error {
+            return Err(CronError::Execution(error.to_string()));
         }
+        Ok(())
     }
 
     /// Start a due cron job after scheduler or engine-trigger validation.

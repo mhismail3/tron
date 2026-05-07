@@ -1,4 +1,4 @@
-//! Integration tests for MCP client, tool bridge, and server manager.
+//! Integration tests for MCP client, tool projection, and server manager.
 //!
 //! Uses a mock MCP server implemented as a child process that communicates
 //! via stdio JSON-RPC. The mock is a small Rust binary compiled inline via
@@ -13,7 +13,7 @@ mod integration {
 
     use crate::mcp::client::{McpClient, McpErrorKind};
     use crate::mcp::server_manager::McpServerManager;
-    use crate::mcp::tool_bridge::{McpToolBridge, create_bridge_tools};
+    use crate::mcp::tool_projection::{McpToolProjection, create_mcp_tools};
     use crate::mcp::types::*;
     use crate::tools::traits::TronTool;
 
@@ -290,20 +290,20 @@ while true; do read -r line 2>/dev/null || exit 0; done
     }
 
     // -----------------------------------------------------------------------
-    // Tool bridge tests
+    // Tool projection tests
     // -----------------------------------------------------------------------
 
     #[tokio::test]
-    async fn bridge_tool_definition_matches_schema() {
+    async fn projected_tool_definition_matches_schema() {
         let script =
             mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
-        let config = mock_config("bridge-def-test", &script);
+        let config = mock_config("projection-def-test", &script);
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
         let tools = client.list_tools().await.unwrap();
-        let bridge = McpToolBridge::new("sqlite", &tools[0], client.clone());
+        let projection = McpToolProjection::new("sqlite", &tools[0], client.clone());
 
-        let def = bridge.definition();
+        let def = projection.definition();
         assert_eq!(def.name, "sqlite.query");
         assert!(def.description.contains("[MCP: sqlite]"));
         assert!(def.description.contains("Run SQL query"));
@@ -318,37 +318,37 @@ while true; do read -r line 2>/dev/null || exit 0; done
     }
 
     #[tokio::test]
-    async fn bridge_tool_execute_forwards_params() {
+    async fn projected_tool_execute_forwards_params() {
         let script =
             mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
-        let config = mock_config("bridge-exec-test", &script);
+        let config = mock_config("projection-exec-test", &script);
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
         let tools = client.list_tools().await.unwrap();
-        let bridge_tools = create_bridge_tools("sqlite", &tools, &client);
+        let projected_tools = create_mcp_tools("sqlite", &tools, &client);
 
-        assert_eq!(bridge_tools.len(), 2);
-        assert_eq!(bridge_tools[0].name(), "sqlite.query");
-        assert_eq!(bridge_tools[1].name(), "sqlite.list_tables");
+        assert_eq!(projected_tools.len(), 2);
+        assert_eq!(projected_tools[0].name(), "sqlite.query");
+        assert_eq!(projected_tools[1].name(), "sqlite.list_tables");
 
         client.shutdown().await;
     }
 
     #[tokio::test]
-    async fn bridge_tool_name_prefixed_with_server() {
+    async fn projected_tool_name_prefixed_with_server() {
         let script =
             mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let config = mock_config("prefix-test", &script);
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
         let tools = client.list_tools().await.unwrap();
-        let bridges = create_bridge_tools("github", &tools, &client);
+        let projections = create_mcp_tools("github", &tools, &client);
 
-        for bridge in &bridges {
+        for projection in &projections {
             assert!(
-                bridge.name().starts_with("github."),
+                projection.name().starts_with("github."),
                 "Tool name should be prefixed: {}",
-                bridge.name()
+                projection.name()
             );
         }
 

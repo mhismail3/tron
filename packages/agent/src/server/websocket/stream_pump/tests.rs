@@ -136,8 +136,8 @@ fn message_updates_stay_session_scoped() {
         base: BaseEvent::now("s1"),
         content: "hello".into(),
     };
-    let bridged = tron_event_to_bridged(&event);
-    assert_eq!(bridged.scope, BroadcastScope::Session("s1".into()));
+    let projected = tron_event_to_projected(&event);
+    assert_eq!(projected.scope, BroadcastScope::Session("s1".into()));
 }
 
 #[test]
@@ -146,8 +146,8 @@ fn turn_start_remains_global() {
         base: BaseEvent::now("s1"),
         turn: 1,
     };
-    let bridged = tron_event_to_bridged(&event);
-    assert_eq!(bridged.scope, BroadcastScope::All);
+    let projected = tron_event_to_projected(&event);
+    assert_eq!(projected.scope, BroadcastScope::All);
 }
 
 #[test]
@@ -170,8 +170,8 @@ fn session_updated_remains_global() {
         parent_session_id: None,
         activity_lines: None,
     };
-    let bridged = tron_event_to_bridged(&event);
-    assert_eq!(bridged.scope, BroadcastScope::All);
+    let projected = tron_event_to_projected(&event);
+    assert_eq!(projected.scope, BroadcastScope::All);
 }
 
 #[test]
@@ -180,19 +180,19 @@ fn session_saved_stays_session_scoped() {
         base: BaseEvent::now("s1"),
         file_path: "/tmp/session.json".into(),
     };
-    let bridged = tron_event_to_bridged(&event);
-    assert_eq!(bridged.scope, BroadcastScope::Session("s1".into()));
+    let projected = tron_event_to_projected(&event);
+    assert_eq!(projected.scope, BroadcastScope::Session("s1".into()));
 }
 
 #[tokio::test]
-async fn bridge_publishes_session_events_to_engine_stream() {
+async fn stream_pump_publishes_session_events_to_engine_stream() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let host = EngineHostHandle::new_in_memory().unwrap();
-    subscribe_test_stream(&host, "event-bridge-session").await;
+    subscribe_test_stream(&host, "event-stream-pump-session").await;
 
     // Stream-owned events publish to the engine stream; WebSocket delivery is
-    // performed by the stream pump, not by this bridge.
+    // performed by the stream pump, not by this pump.
     let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
     conn1.bind_session("s1");
@@ -203,18 +203,18 @@ async fn bridge_publishes_session_events_to_engine_stream() {
     bm.add(Arc::new(conn2)).await;
 
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         rx,
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     )
     .with_engine_streams(host.clone());
-    let handle = tokio::spawn(bridge.run());
+    let handle = tokio::spawn(pump.run());
 
     let _ = tx.send(agent_start_event("s1")).unwrap();
 
-    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-session").await;
+    let (streamed, scope) = poll_test_stream_event(&host, "event-stream-pump-session").await;
     assert_eq!(streamed.event_type, "agent.start");
     assert_eq!(scope["kind"], "session");
     assert_eq!(scope["sessionId"], "s1");
@@ -226,7 +226,7 @@ async fn bridge_publishes_session_events_to_engine_stream() {
 }
 
 #[tokio::test]
-async fn bridge_broadcasts_session_lifecycle_to_all() {
+async fn stream_pump_broadcasts_session_lifecycle_to_all() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
 
@@ -241,13 +241,13 @@ async fn bridge_broadcasts_session_lifecycle_to_all() {
     bm.add(Arc::new(conn2)).await;
 
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         rx,
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
-    let handle = tokio::spawn(bridge.run());
+    let handle = tokio::spawn(pump.run());
 
     // SessionCreated for "s2" — both clients should receive it
     let _ = tx
@@ -277,11 +277,11 @@ async fn bridge_broadcasts_session_lifecycle_to_all() {
 }
 
 #[tokio::test]
-async fn bridge_publishes_global_turn_scope_to_engine_stream() {
+async fn stream_pump_publishes_global_turn_scope_to_engine_stream() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let host = EngineHostHandle::new_in_memory().unwrap();
-    subscribe_test_stream(&host, "event-bridge-turn-start").await;
+    subscribe_test_stream(&host, "event-stream-pump-turn-start").await;
 
     let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
@@ -293,14 +293,14 @@ async fn bridge_publishes_global_turn_scope_to_engine_stream() {
     bm.add(Arc::new(conn2)).await;
 
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         rx,
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     )
     .with_engine_streams(host.clone());
-    let handle = tokio::spawn(bridge.run());
+    let handle = tokio::spawn(pump.run());
 
     let _ = tx
         .send(TronEvent::TurnStart {
@@ -309,7 +309,7 @@ async fn bridge_publishes_global_turn_scope_to_engine_stream() {
         })
         .unwrap();
 
-    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-turn-start").await;
+    let (streamed, scope) = poll_test_stream_event(&host, "event-stream-pump-turn-start").await;
     assert_eq!(streamed.event_type, "agent.turn_start");
     assert_eq!(scope["kind"], "all");
     assert!(conn1_rx.try_recv().is_err());
@@ -320,11 +320,11 @@ async fn bridge_publishes_global_turn_scope_to_engine_stream() {
 }
 
 #[tokio::test]
-async fn bridge_publishes_content_events_with_session_scope() {
+async fn stream_pump_publishes_content_events_with_session_scope() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let host = EngineHostHandle::new_in_memory().unwrap();
-    subscribe_test_stream(&host, "event-bridge-content").await;
+    subscribe_test_stream(&host, "event-stream-pump-content").await;
 
     let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
@@ -336,14 +336,14 @@ async fn bridge_publishes_content_events_with_session_scope() {
     bm.add(Arc::new(conn2)).await;
 
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         rx,
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     )
     .with_engine_streams(host.clone());
-    let handle = tokio::spawn(bridge.run());
+    let handle = tokio::spawn(pump.run());
 
     let _ = tx
         .send(TronEvent::MessageUpdate {
@@ -352,7 +352,7 @@ async fn bridge_publishes_content_events_with_session_scope() {
         })
         .unwrap();
 
-    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-content").await;
+    let (streamed, scope) = poll_test_stream_event(&host, "event-stream-pump-content").await;
     assert_eq!(streamed.event_type, "agent.text_delta");
     assert_eq!(scope["kind"], "session");
     assert_eq!(scope["sessionId"], "s1");
@@ -364,25 +364,25 @@ async fn bridge_publishes_content_events_with_session_scope() {
 }
 
 #[tokio::test]
-async fn bridge_publishes_global_events_to_engine_stream() {
+async fn stream_pump_publishes_global_events_to_engine_stream() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let host = EngineHostHandle::new_in_memory().unwrap();
-    subscribe_test_stream(&host, "event-bridge-global").await;
+    subscribe_test_stream(&host, "event-stream-pump-global").await;
 
     let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel();
     let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
     bm.add(Arc::new(conn)).await;
 
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         rx,
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     )
     .with_engine_streams(host.clone());
-    let handle = tokio::spawn(bridge.run());
+    let handle = tokio::spawn(pump.run());
 
     let _ = tx
         .send(TronEvent::AgentReady {
@@ -390,7 +390,7 @@ async fn bridge_publishes_global_events_to_engine_stream() {
         })
         .unwrap();
 
-    let (streamed, scope) = poll_test_stream_event(&host, "event-bridge-global").await;
+    let (streamed, scope) = poll_test_stream_event(&host, "event-stream-pump-global").await;
     assert_eq!(streamed.event_type, "agent.ready");
     assert_eq!(scope["kind"], "all");
     assert!(conn_rx.try_recv().is_err());
@@ -683,8 +683,8 @@ fn session_processing_changed_is_global() {
         base: BaseEvent::now("s1"),
         is_processing: true,
     };
-    let bridged = tron_event_to_bridged(&event);
-    assert_eq!(bridged.scope, BroadcastScope::All);
+    let projected = tron_event_to_projected(&event);
+    assert_eq!(projected.scope, BroadcastScope::All);
 }
 
 #[test]
@@ -851,7 +851,7 @@ fn thinking_events_map_correctly() {
 }
 
 #[test]
-fn event_bridge_maps_session_created() {
+fn stream_pump_maps_session_created() {
     let event = TronEvent::SessionCreated {
         base: BaseEvent::now("s1"),
         model: "claude-opus-4-6".into(),
@@ -867,7 +867,7 @@ fn event_bridge_maps_session_created() {
 }
 
 #[test]
-fn event_bridge_maps_session_archived() {
+fn stream_pump_maps_session_archived() {
     let event = TronEvent::SessionArchived {
         base: BaseEvent::now("s1"),
     };
@@ -876,7 +876,7 @@ fn event_bridge_maps_session_archived() {
 }
 
 #[test]
-fn event_bridge_maps_session_forked() {
+fn stream_pump_maps_session_forked() {
     let event = TronEvent::SessionForked {
         base: BaseEvent::now("s1"),
         new_session_id: "s2".into(),
@@ -1350,8 +1350,8 @@ fn tool_progress_stays_session_scoped() {
         message: Some("tick".into()),
         percent: None,
     };
-    let bridged = tron_event_to_bridged(&event);
-    assert_eq!(bridged.scope, BroadcastScope::Session("s1".into()));
+    let projected = tron_event_to_projected(&event);
+    assert_eq!(projected.scope, BroadcastScope::Session("s1".into()));
 }
 
 // ── Compaction event chain verification ──
@@ -1426,7 +1426,7 @@ fn compaction_complete_minimal_fields() {
 }
 
 #[tokio::test]
-async fn compaction_events_route_through_bridge() {
+async fn compaction_events_route_through_stream_pump() {
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
 
@@ -1436,13 +1436,13 @@ async fn compaction_events_route_through_bridge() {
     bm.add(Arc::new(conn)).await;
 
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(
+    let pump = EngineStreamEventPump::new(
         rx,
         bm.clone(),
         CancellationToken::new(),
         Arc::new(TurnAccumulatorMap::new()),
     );
-    let handle = tokio::spawn(bridge.run());
+    let handle = tokio::spawn(pump.run());
 
     // Send CompactionStart
     let _ = tx
@@ -1607,7 +1607,7 @@ fn converts_subagent_result_available() {
 }
 
 #[test]
-fn subagent_result_available_bridges_notify_false() {
+fn subagent_result_available_projects_notify_false() {
     let event = TronEvent::SubagentResultAvailable {
         base: BaseEvent::now("s1"),
         parent_session_id: "parent-1".into(),
@@ -1630,13 +1630,13 @@ fn subagent_result_available_bridges_notify_false() {
 // ── Turn accumulator integration tests ──
 
 #[tokio::test]
-async fn bridge_feeds_events_to_accumulator() {
+async fn stream_pump_feeds_events_to_accumulator() {
     let map = Arc::new(TurnAccumulatorMap::new());
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(rx, bm.clone(), CancellationToken::new(), map.clone());
-    let handle = tokio::spawn(bridge.run());
+    let pump = EngineStreamEventPump::new(rx, bm.clone(), CancellationToken::new(), map.clone());
+    let handle = tokio::spawn(pump.run());
 
     let _ = tx.send(TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
@@ -1675,9 +1675,9 @@ async fn stream_first_runtime_events_publish_rpc_shape_to_engine_stream() {
     .unwrap();
 
     let rx = tx.subscribe();
-    let bridge =
-        EventBridge::new(rx, bm, CancellationToken::new(), map).with_engine_streams(host.clone());
-    let handle = tokio::spawn(bridge.run());
+    let pump = EngineStreamEventPump::new(rx, bm, CancellationToken::new(), map)
+        .with_engine_streams(host.clone());
+    let handle = tokio::spawn(pump.run());
 
     let _ = tx.send(TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
@@ -1705,13 +1705,13 @@ async fn stream_first_runtime_events_publish_rpc_shape_to_engine_stream() {
 }
 
 #[tokio::test]
-async fn bridge_accumulator_clears_on_agent_end() {
+async fn stream_pump_accumulator_clears_on_agent_end() {
     let map = Arc::new(TurnAccumulatorMap::new());
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
     let rx = tx.subscribe();
-    let bridge = EventBridge::new(rx, bm.clone(), CancellationToken::new(), map.clone());
-    let handle = tokio::spawn(bridge.run());
+    let pump = EngineStreamEventPump::new(rx, bm.clone(), CancellationToken::new(), map.clone());
+    let handle = tokio::spawn(pump.run());
 
     let _ = tx.send(TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
@@ -1824,7 +1824,7 @@ fn converts_worktree_renamed() {
 }
 
 #[test]
-fn bridged_event_includes_sequence() {
+fn projected_event_includes_sequence() {
     let mut event = TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
         content: "hello".into(),
@@ -1835,7 +1835,7 @@ fn bridged_event_includes_sequence() {
 }
 
 #[test]
-fn bridged_event_no_sequence_when_unset() {
+fn projected_event_no_sequence_when_unset() {
     let event = TronEvent::MessageUpdate {
         base: BaseEvent::now("s1"),
         content: "hello".into(),
