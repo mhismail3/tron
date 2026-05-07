@@ -34,6 +34,7 @@ mod agent;
 mod context;
 mod events;
 mod filesystem;
+mod import;
 mod job;
 mod logs;
 mod mcp;
@@ -41,10 +42,13 @@ mod model;
 mod notifications;
 mod plan;
 mod prompt_library;
+mod repo;
+mod safe_reads;
 mod session;
 mod settings;
 mod skills;
 mod system;
+mod tree;
 
 #[derive(Clone)]
 pub(super) struct RpcEngineDeps {
@@ -193,6 +197,19 @@ async fn rpc_function_value(
         | "promptSnippet.create"
         | "promptSnippet.update"
         | "promptSnippet.delete" => prompt_library::handle(method, invocation, deps).await,
+        "tree.getVisualization"
+        | "tree.getBranches"
+        | "tree.getSubtree"
+        | "tree.getAncestors"
+        | "tree.compareBranches" => tree::handle(method, invocation, deps).await,
+        "repo.listSessions" | "repo.getDivergence" => repo::handle(method, invocation, deps).await,
+        "import.listSources" | "import.listSessions" | "import.previewSession" => {
+            import::handle(method, invocation, deps).await
+        }
+        "browser.getStatus"
+        | "voiceNotes.list"
+        | "transcribe.listModels"
+        | "sandbox.listContainers" => safe_reads::handle(method, invocation, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("RPC method {method} is not engine-owned"),
         }),

@@ -7,10 +7,12 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::core::messages::Provider;
 use crate::core::tools::{Tool, ToolCategory, TronToolResult, text_result};
 use crate::engine::{
-    ActorContext, ActorKind, CausalContext, DeliveryMode, EffectClass, EngineError, FunctionId,
-    FunctionQuery, Invocation, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
+    ActorContext, ActorKind, CausalContext, DeliveryMode, EffectClass, EngineError,
+    FunctionDefinition, FunctionId, FunctionQuery, Invocation, RiskLevel, StreamActorScope,
+    StreamCursor, TraceId, VisibilityScope,
 };
 use crate::server::codex_app::{
     CodexAppServerChild, CodexAppServerExit, CodexAppServerLaunchSpec, CodexAppServerManager,
@@ -64,6 +66,20 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "promptHistory.list",
     "promptSnippet.list",
     "promptSnippet.get",
+    "tree.getVisualization",
+    "tree.getBranches",
+    "tree.getSubtree",
+    "tree.getAncestors",
+    "tree.compareBranches",
+    "repo.listSessions",
+    "repo.getDivergence",
+    "import.listSources",
+    "import.listSessions",
+    "import.previewSession",
+    "browser.getStatus",
+    "voiceNotes.list",
+    "transcribe.listModels",
+    "sandbox.listContainers",
 ];
 
 const GENERIC_WRITE_METHODS: &[&str] = &[
@@ -215,6 +231,23 @@ const PROMPT_LIBRARY_METHODS: &[&str] = &[
     "promptSnippet.delete",
 ];
 
+const SAFE_READ_COLLAPSE_METHODS: &[&str] = &[
+    "tree.getVisualization",
+    "tree.getBranches",
+    "tree.getSubtree",
+    "tree.getAncestors",
+    "tree.compareBranches",
+    "repo.listSessions",
+    "repo.getDivergence",
+    "import.listSources",
+    "import.listSessions",
+    "import.previewSession",
+    "browser.getStatus",
+    "voiceNotes.list",
+    "transcribe.listModels",
+    "sandbox.listContainers",
+];
+
 const MIGRATION_PARITY_TIMEOUT: Duration = Duration::from_secs(180);
 
 fn migration_parity_registry() -> MethodRegistry {
@@ -290,6 +323,7 @@ struct QueueJobFakeProcessManager {
 }
 
 struct EngineCatalogSearchTool;
+struct DynamicCatalogTool;
 
 #[async_trait]
 impl TronTool for EngineCatalogSearchTool {
@@ -324,6 +358,39 @@ impl TronTool for EngineCatalogSearchTool {
             format!("searched {}", params["query"].as_str().unwrap_or_default()),
             false,
         ))
+    }
+}
+
+#[async_trait]
+impl TronTool for DynamicCatalogTool {
+    fn name(&self) -> &str {
+        "Dynamic"
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Custom
+    }
+
+    fn definition(&self) -> Tool {
+        Tool {
+            name: "Dynamic".to_owned(),
+            description: "Dynamically registered catalog tool".to_owned(),
+            parameters: crate::core::tools::ToolParameterSchema {
+                schema_type: "object".to_owned(),
+                properties: None,
+                required: None,
+                description: None,
+                extra: serde_json::Map::new(),
+            },
+        }
+    }
+
+    async fn execute(
+        &self,
+        _params: Value,
+        _ctx: &ToolContext,
+    ) -> Result<TronToolResult, ToolError> {
+        Ok(text_result("dynamic", false))
     }
 }
 
@@ -504,7 +571,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
         .collect::<BTreeSet<_>>();
     let registry_methods = registry.methods().into_iter().collect::<BTreeSet<_>>();
     assert_eq!(spec_methods, registry_methods);
-    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 84);
+    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 98);
 }
 
 #[test]
@@ -834,6 +901,7 @@ fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
         .chain(JOB_METHODS)
         .chain(NOTIFICATION_METHODS)
         .chain(PLAN_METHODS)
+        .chain(SAFE_READ_COLLAPSE_METHODS)
         .chain(["events.append", "events.subscribe", "events.unsubscribe"].iter())
     {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
@@ -864,6 +932,13 @@ fn bridge_specs_assign_generic_methods_to_domain_workers() {
         ("events.append", "events"),
         ("notifications.markRead", "notifications"),
         ("plan.enter", "plan"),
+        ("tree.getVisualization", "tree"),
+        ("repo.getDivergence", "repo"),
+        ("import.previewSession", "import"),
+        ("browser.getStatus", "browser"),
+        ("voiceNotes.list", "voice_notes"),
+        ("transcribe.listModels", "transcription"),
+        ("sandbox.listContainers", "sandbox"),
     ] {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
         assert_eq!(spec.owner_worker, specs::worker_id(worker).unwrap());
@@ -908,7 +983,9 @@ async fn tool_worker_registers_builtin_tools_as_canonical_functions() {
         .expect("tool::search must be discoverable");
     assert_eq!(tool_function.owner_worker.as_str(), "tool");
     assert_eq!(tool_function.metadata["toolName"], "Search");
+    assert_eq!(tool_function.metadata["modelToolName"], "Search");
     assert_eq!(tool_function.effect_class, EffectClass::PureRead);
+    assert!(tool_function.request_schema.is_some());
 
     let result = ctx
         .engine_host
@@ -927,6 +1004,95 @@ async fn tool_worker_registers_builtin_tools_as_canonical_functions() {
     assert!(result.error.is_none(), "{:?}", result.error);
     let value = result.value.unwrap();
     assert_eq!(value["content"][0]["text"], "searched catalog");
+}
+
+#[tokio::test]
+async fn provider_tool_surface_is_resolved_from_live_catalog_each_call() {
+    let mut ctx = make_test_context();
+    let mut agent_deps = make_test_agent_deps();
+    agent_deps.tool_factory = Arc::new(|| {
+        let mut registry = crate::tools::registry::ToolRegistry::new();
+        registry.register(Arc::new(EngineCatalogSearchTool));
+        registry
+    });
+    ctx.agent_deps = Some(agent_deps);
+    let registry = migration_parity_registry();
+    super::register_rpc_worker_for_context(&ctx, &registry).unwrap();
+
+    let mut provider_registry = crate::tools::registry::ToolRegistry::new();
+    provider_registry.register(Arc::new(EngineCatalogSearchTool));
+    provider_registry.register(Arc::new(DynamicCatalogTool));
+    let spec = crate::core::profile::bundled_default_execution_spec();
+    let policy = crate::runtime::context::local_policy::ContextPolicy::from_entrypoint_with_spec(
+        Provider::Anthropic,
+        &spec,
+        "main",
+    );
+
+    let first = crate::tools::capability_surface::resolve_provider_tools(
+        &ctx.engine_host,
+        &provider_registry,
+        "surface-session",
+        None,
+        Provider::Anthropic,
+        &policy,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        first
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Search"]
+    );
+
+    let mut definition = FunctionDefinition::new(
+        FunctionId::new("tool::dynamic").unwrap(),
+        specs::worker_id("tool").unwrap(),
+        "Dynamically registered catalog tool",
+        VisibilityScope::System,
+        EffectClass::PureRead,
+    )
+    .with_required_authority(crate::engine::AuthorityRequirement::scope("tool.read"))
+    .with_provenance(crate::engine::Provenance::system())
+    .with_request_schema(json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+    }))
+    .with_response_schema(json!({
+        "type": "object",
+        "additionalProperties": true
+    }));
+    definition.metadata = json!({
+        "modelToolName": "Dynamic",
+        "toolOrder": 2,
+        "toolSchema": DynamicCatalogTool.definition(),
+        "localToolSchema": DynamicCatalogTool.definition(),
+    });
+    ctx.engine_host
+        .register_function(definition, None, true)
+        .await
+        .unwrap();
+
+    let second = crate::tools::capability_surface::resolve_provider_tools(
+        &ctx.engine_host,
+        &provider_registry,
+        "surface-session",
+        None,
+        Provider::Anthropic,
+        &policy,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        second
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Search", "Dynamic"]
+    );
 }
 
 #[test]
@@ -969,6 +1135,13 @@ async fn json_rpc_triggers_target_canonical_domain_functions() {
         ("notifications.markAllRead", "notifications::mark_all_read"),
         ("plan.getState", "plan::get_state"),
         ("promptSnippet.create", "prompt_library::snippet_create"),
+        ("tree.getBranches", "tree::get_branches"),
+        ("repo.getDivergence", "repo::get_divergence"),
+        ("import.listSources", "import::list_sources"),
+        ("browser.getStatus", "browser::get_status"),
+        ("voiceNotes.list", "voice_notes::list"),
+        ("transcribe.listModels", "transcription::list_models"),
+        ("sandbox.listContainers", "sandbox::list_containers"),
     ] {
         let trigger = ctx
             .engine_host
@@ -1494,6 +1667,14 @@ async fn generic_rpc_outputs_match_direct_engine_outputs() {
         ("skill.list", json!({})),
         ("logs.recent", json!({})),
         ("filesystem.getHome", json!({})),
+        ("browser.getStatus", json!({})),
+        ("transcribe.listModels", json!({})),
+        ("voiceNotes.list", json!({})),
+        ("import.listSources", json!({})),
+        (
+            "tree.compareBranches",
+            json!({"branchA": "a", "branchB": "b"}),
+        ),
         ("promptHistory.list", json!({})),
         ("promptSnippet.list", json!({})),
     ];
@@ -1528,6 +1709,8 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
         .unwrap();
     let snippet =
         crate::prompt_library::store::create_snippet(ctx.event_store.pool(), "n", "t").unwrap();
+    let session = ctx.event_store.get_session(&session_id).unwrap().unwrap();
+    let root_event_id = session.root_event_id.clone();
 
     let cases = [
         ("events.getHistory", json!({"sessionId": session_id})),
@@ -1554,6 +1737,10 @@ async fn generic_rpc_outputs_match_direct_engine_outputs_for_stateful_reads() {
         ),
         ("context.canAcceptTurn", json!({"sessionId": session_id})),
         ("job.list", json!({"sessionId": session_id})),
+        ("tree.getVisualization", json!({"sessionId": session_id})),
+        ("tree.getBranches", json!({"sessionId": session_id})),
+        ("tree.getSubtree", json!({"eventId": root_event_id})),
+        ("tree.getAncestors", json!({"eventId": root_event_id})),
         ("promptSnippet.get", json!({"id": snippet.id})),
     ];
 

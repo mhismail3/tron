@@ -17,6 +17,7 @@ use crate::runtime::context::context_manager::ContextManager;
 use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
+use crate::tools::capability_surface;
 use crate::tools::registry::ToolRegistry;
 
 use metrics::{counter, histogram};
@@ -174,13 +175,54 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     emit_turn_start(emitter, persister, session_id, turn, sequence_counter).await;
     debug!(session_id, turn, "turn started");
 
+    let resolved_profile = run_context
+        .resolved_profile
+        .as_deref()
+        .expect("RunContext.resolved_profile must be set from the session execution plan");
+    let context_policy = local_policy::ContextPolicy::from_entrypoint_with_spec(
+        provider.provider_type(),
+        &resolved_profile.spec,
+        "main",
+    );
+    let tool_surface = match resolve_provider_tool_surface(
+        engine_host,
+        registry,
+        session_id,
+        workspace_id,
+        provider.provider_type(),
+        &context_policy,
+    )
+    .await
+    {
+        Ok(tools) => tools,
+        Err(error) => {
+            let error_msg = format!("failed to resolve live engine tool surface: {error}");
+            error!(session_id, turn, error = %error_msg);
+            let _ = emitter.emit(TronEvent::TurnFailed {
+                base: BaseEvent::now(session_id),
+                turn,
+                error: error_msg.clone(),
+                code: Some("ENGINE_TOOL_SURFACE_FAILED".into()),
+                category: Some("engine".into()),
+                recoverable: true,
+                partial_content: None,
+            });
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
+
     // 3. Build context (base from CM, external fields from RunContext/params)
     let context = build_turn_context(
         context_manager,
-        registry,
         run_context,
         server_origin,
-        provider.provider_type(),
+        &context_policy,
+        tool_surface,
     );
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
@@ -724,20 +766,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
 fn build_turn_context(
     context_manager: &mut ContextManager,
-    registry: &ToolRegistry,
     run_context: &RunContext,
     server_origin: Option<&str>,
-    provider_type: crate::core::messages::Provider,
+    context_policy: &local_policy::ContextPolicy,
+    tool_surface: Vec<crate::core::tools::Tool>,
 ) -> Context {
-    let resolved_profile = run_context
-        .resolved_profile
-        .as_deref()
-        .expect("RunContext.resolved_profile must be set from the session execution plan");
-    let context_policy = local_policy::ContextPolicy::from_entrypoint_with_spec(
-        provider_type,
-        &resolved_profile.spec,
-        "main",
-    );
     let is_local = context_policy.is_local();
 
     // Set volatile token estimates for accurate snapshots.
@@ -758,11 +791,10 @@ fn build_turn_context(
     context.messages = context_manager.get_messages_arc();
     context.hook_context.clone_from(&run_context.hook_context);
 
-    // Tool schemas follow the active context/tool policy.
-    context.tools = match context_policy.tool_filter() {
-        Some(tool_names) => Some(registry.local_definitions_for_names(&tool_names)),
-        None => Some(registry.definitions()),
-    };
+    // Tool schemas are resolved from the live engine catalog at the provider
+    // request boundary. The context policy has already been applied by
+    // `resolve_provider_tool_surface`.
+    context.tools = Some(tool_surface);
 
     context
         .skill_activation_context
@@ -813,7 +845,7 @@ fn build_turn_context(
             .is_some_and(|r| r.ends_with(&truncation_suffix));
         debug!(
             provider = "ollama",
-            tool_count = context_policy.tool_filter().map_or(0, |tools| tools.len()),
+            tool_count = context.tools.as_ref().map_or(0, Vec::len),
             memory_stripped = context_policy.strip_memory(),
             skill_index_stripped = context_policy.strip_skill_index(),
             job_results_stripped = context_policy.strip_job_results(),
@@ -823,6 +855,47 @@ fn build_turn_context(
     }
 
     context
+}
+
+async fn resolve_provider_tool_surface(
+    engine_host: Option<&crate::engine::EngineHostHandle>,
+    registry: &ToolRegistry,
+    session_id: &str,
+    workspace_id: Option<&str>,
+    provider_type: crate::core::messages::Provider,
+    context_policy: &local_policy::ContextPolicy,
+) -> Result<Vec<crate::core::tools::Tool>, String> {
+    if let Some(host) = engine_host {
+        return capability_surface::resolve_provider_tools(
+            host,
+            registry,
+            session_id,
+            workspace_id,
+            provider_type,
+            context_policy,
+        )
+        .await;
+    }
+
+    #[cfg(test)]
+    {
+        return Ok(match context_policy.tool_filter() {
+            Some(tool_names) => registry.local_definitions_for_names(&tool_names),
+            None => registry.definitions(),
+        });
+    }
+
+    #[cfg(not(test))]
+    {
+        let _ = (
+            registry,
+            session_id,
+            workspace_id,
+            provider_type,
+            context_policy,
+        );
+        Err("engine host is required for provider tool schema resolution".to_owned())
+    }
 }
 
 fn resolved_turn_policy_ids(

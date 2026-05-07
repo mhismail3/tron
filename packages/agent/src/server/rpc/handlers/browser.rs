@@ -35,8 +35,10 @@ impl MethodHandler for StopStreamHandler {
 }
 
 /// Get browser streaming status.
+#[cfg(test)]
 pub struct GetStatusHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetStatusHandler {
     #[instrument(skip(self, _ctx), fields(method = "browser.getStatus"))]

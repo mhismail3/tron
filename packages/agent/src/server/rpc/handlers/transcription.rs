@@ -213,8 +213,10 @@ impl MethodHandler for TranscribeAudioHandler {
 }
 
 /// List available transcription models with sidecar status.
+#[cfg(test)]
 pub struct ListModelsHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ListModelsHandler {
     #[instrument(skip(self, ctx), fields(method = "transcribe.listModels"))]

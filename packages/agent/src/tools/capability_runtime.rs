@@ -1,11 +1,12 @@
 //! Short-lived runtime context handoff for engine-owned tool execution.
 //!
-//! Provider-facing schema generation still uses [`crate::tools::registry::ToolRegistry`],
-//! but prompt-time execution routes through canonical `tool::*` engine
-//! functions. Those engine functions need the exact [`ToolContext`] built by
-//! the turn runtime so progress output, cancellation, process managers, and
-//! event persistence remain intact. This module provides a process-local,
-//! one-shot handoff keyed by a deterministic runtime invocation id.
+//! Provider-facing schema generation now comes from the live engine catalog.
+//! `ToolRegistry` remains a temporary implementation store for built-ins, and
+//! prompt-time execution routes through canonical `tool::*` engine functions.
+//! Those engine functions need the exact [`ToolContext`] built by the turn
+//! runtime so progress output, cancellation, process managers, and event
+//! persistence remain intact. This module provides a process-local, one-shot
+//! handoff keyed by a deterministic runtime invocation id.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;

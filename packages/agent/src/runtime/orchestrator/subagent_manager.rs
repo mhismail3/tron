@@ -155,6 +155,9 @@ pub struct SubagentManager {
     hooks: Option<Arc<HookEngine>>,
     /// Worktree coordinator for subagent isolation (each subagent gets its own worktree).
     worktree_coordinator: std::sync::OnceLock<Arc<crate::worktree::WorktreeCoordinator>>,
+    /// Engine host used by child agents to resolve live provider tool schemas
+    /// and route tool execution through canonical capabilities.
+    engine_host: std::sync::OnceLock<crate::engine::EngineHostHandle>,
     /// Self-reference for passing to child agents (set after wrapping in Arc).
     self_ref: std::sync::OnceLock<std::sync::Weak<Self>>,
     /// Weak probe for querying parent-session run state without creating an
@@ -195,6 +198,7 @@ impl SubagentManager {
             guardrails,
             hooks,
             worktree_coordinator: std::sync::OnceLock::new(),
+            engine_host: std::sync::OnceLock::new(),
             self_ref: std::sync::OnceLock::new(),
             run_state_probe: std::sync::OnceLock::new(),
             subagents: DashMap::new(),
@@ -240,6 +244,11 @@ impl SubagentManager {
     /// Set the tool factory (breaks circular dependency with tool registry).
     pub fn set_tool_factory(&self, factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>) {
         let _ = self.tool_factory.set(factory);
+    }
+
+    /// Set the shared engine host for subagents.
+    pub fn set_engine_host(&self, host: crate::engine::EngineHostHandle) {
+        let _ = self.engine_host.set(host);
     }
 
     /// Wire the skill registry so that `SubagentConfig.skills` names can be
@@ -420,6 +429,7 @@ impl SubagentManager {
             tracker: tracker.clone(),
             cancel,
             tools,
+            engine_host: self.engine_host.get().cloned(),
         });
 
         if let Some(timeout) = config.blocking_timeout_ms {
@@ -623,6 +633,7 @@ impl SubagentSpawner for SubagentManager {
             denied_tools: merged_denied_tools,
             run_state_probe: self.probe_clone(),
             spawn_type: SpawnType::ToolAgent.as_str().to_owned(),
+            engine_host: self.engine_host.get().cloned(),
         });
 
         if let Some(timeout) = config.blocking_timeout_ms {

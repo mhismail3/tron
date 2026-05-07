@@ -630,8 +630,10 @@ impl MethodHandler for ResolveConflictsWithSubagentHandler {
 // ── repo.listSessions ────────────────────────────────────────────────
 
 /// Handler for `repo.listSessions` — sibling sessions sharing the repo.
+#[cfg(test)]
 pub struct ListRepoSessionsHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ListRepoSessionsHandler {
     #[instrument(skip(self, ctx), fields(method = "repo.listSessions"))]
@@ -692,8 +694,10 @@ impl MethodHandler for ListRepoSessionsHandler {
 // ── repo.getDivergence ───────────────────────────────────────────────
 
 /// Handler for `repo.getDivergence` — ahead/behind vs main and origin.
+#[cfg(test)]
 pub struct GetDivergenceHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetDivergenceHandler {
     #[instrument(skip(self, ctx), fields(method = "repo.getDivergence"))]

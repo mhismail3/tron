@@ -43,6 +43,7 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
     pub(super) tools: ToolRegistry,
+    pub(super) engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
 pub(super) struct ToolAgentTaskLaunch {
@@ -75,6 +76,7 @@ pub(super) struct ToolAgentTaskLaunch {
     pub(super) run_state_probe:
         Option<std::sync::Weak<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe>>,
     pub(super) spawn_type: String,
+    pub(super) engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
 pub(super) fn spawn_subsession_task(params: SubsessionTaskLaunch) {
@@ -167,7 +169,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
-            engine_host: None,
+            engine_host: params.engine_host.clone(),
         },
     );
 
@@ -339,7 +341,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
-            engine_host: None,
+            engine_host: params.engine_host.clone(),
         },
     );
 

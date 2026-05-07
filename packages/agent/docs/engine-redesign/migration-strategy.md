@@ -746,21 +746,32 @@ Delivered so far:
   turn, tool call id, tool name, working directory, workspace, and argument
   fingerprint. Direct engine/agent mutations still require explicit
   idempotency.
+- Provider-facing tool schema assembly now resolves from the live engine catalog
+  at each model-call boundary. `ToolRegistry` remains only the temporary
+  implementation/policy backing for built-in tools, so newly registered,
+  removed, or unhealthy engine/MCP capabilities affect the next provider call
+  without a server restart or frozen turn snapshot.
 - All public `mcp.*` methods are marker-only JSON-RPC triggers into canonical
   `mcp::*` functions, raising the generic-trigger count from 76 to 84 while
   preserving the public method count at 170.
 - Discovered MCP tools register/unregister as live `mcp::*` external-side-effect
   functions with server/tool provenance, conservative approval-required
   authority, system idempotency, and catalog availability changes.
+- MCP discovery now classifies tools conservatively at catalog refresh time:
+  obvious list/read/search/query/status tools become low-risk pure reads, while
+  mutation-like or unknown tools remain approval-required external side effects
+  with classifier reason/confidence metadata.
+- Safe read groups for tree, repo divergence, import browsing/preview, browser
+  status, voice-note listing, transcription model listing, and sandbox listing
+  are now canonical generic-trigger functions. The generic-trigger count rises
+  from 84 to 98 while the public JSON-RPC method count stays 170.
 
 Still to do:
 
-- Make provider-facing tool schema assembly read directly from the live engine
-  catalog instead of the legacy `ToolRegistry` compatibility surface.
 - Replace remaining direct compatibility broadcasts for tool/MCP/device flows
   with stream-owned delivery classes.
-- Add richer effect classification for known MCP tools instead of the current
-  conservative external-side-effect default.
+- Move the remaining handler-owned write and external-effect groups only after
+  their authority, approval, idempotency, and rollback contracts are explicit.
 
 ## Phase 8: agent worker and live self-modification
 

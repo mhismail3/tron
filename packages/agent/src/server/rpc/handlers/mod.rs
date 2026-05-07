@@ -371,16 +371,40 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("file.read", RpcGenericTriggerHandler::new("file.read"));
 
     // Tree
-    registry.register("tree.getVisualization", tree::GetVisualizationHandler);
-    registry.register("tree.getBranches", tree::GetBranchesHandler);
-    registry.register("tree.getSubtree", tree::GetSubtreeHandler);
-    registry.register("tree.getAncestors", tree::GetAncestorsHandler);
-    registry.register("tree.compareBranches", tree::CompareBranchesHandler);
+    registry.register(
+        "tree.getVisualization",
+        RpcGenericTriggerHandler::new("tree.getVisualization"),
+    );
+    registry.register(
+        "tree.getBranches",
+        RpcGenericTriggerHandler::new("tree.getBranches"),
+    );
+    registry.register(
+        "tree.getSubtree",
+        RpcGenericTriggerHandler::new("tree.getSubtree"),
+    );
+    registry.register(
+        "tree.getAncestors",
+        RpcGenericTriggerHandler::new("tree.getAncestors"),
+    );
+    registry.register(
+        "tree.compareBranches",
+        RpcGenericTriggerHandler::new("tree.compareBranches"),
+    );
 
     // Import
-    registry.register("import.listSources", import::ListSourcesHandler);
-    registry.register("import.listSessions", import::ListSessionsHandler);
-    registry.register("import.previewSession", import::PreviewSessionHandler);
+    registry.register(
+        "import.listSources",
+        RpcGenericTriggerHandler::new("import.listSources"),
+    );
+    registry.register(
+        "import.listSessions",
+        RpcGenericTriggerHandler::new("import.listSessions"),
+    );
+    registry.register(
+        "import.previewSession",
+        RpcGenericTriggerHandler::new("import.previewSession"),
+    );
     registry.register("import.execute", import::ExecuteImportHandler);
 }
 
@@ -388,7 +412,10 @@ fn register_platform(registry: &mut MethodRegistry) {
     // Browser
     registry.register("browser.startStream", browser::StartStreamHandler);
     registry.register("browser.stopStream", browser::StopStreamHandler);
-    registry.register("browser.getStatus", browser::GetStatusHandler);
+    registry.register(
+        "browser.getStatus",
+        RpcGenericTriggerHandler::new("browser.getStatus"),
+    );
 
     // Display
     registry.register("display.stopStream", display::StopStreamHandler);
@@ -434,7 +461,10 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Transcription
     registry.register("transcribe.audio", transcription::TranscribeAudioHandler);
-    registry.register("transcribe.listModels", transcription::ListModelsHandler);
+    registry.register(
+        "transcribe.listModels",
+        RpcGenericTriggerHandler::new("transcribe.listModels"),
+    );
     registry.register(
         "transcribe.downloadModel",
         transcription::DownloadModelHandler,
@@ -455,7 +485,10 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Voice Notes
     registry.register("voiceNotes.save", voice_notes::SaveHandler);
-    registry.register("voiceNotes.list", voice_notes::ListHandler);
+    registry.register(
+        "voiceNotes.list",
+        RpcGenericTriggerHandler::new("voiceNotes.list"),
+    );
     registry.register("voiceNotes.delete", voice_notes::DeleteHandler);
 
     // Git
@@ -489,11 +522,20 @@ fn register_platform(registry: &mut MethodRegistry) {
         "worktree.resolveConflictsWithSubagent",
         git_workflow::ResolveConflictsWithSubagentHandler,
     );
-    registry.register("repo.listSessions", git_workflow::ListRepoSessionsHandler);
-    registry.register("repo.getDivergence", git_workflow::GetDivergenceHandler);
+    registry.register(
+        "repo.listSessions",
+        RpcGenericTriggerHandler::new("repo.listSessions"),
+    );
+    registry.register(
+        "repo.getDivergence",
+        RpcGenericTriggerHandler::new("repo.getDivergence"),
+    );
 
     // Sandbox
-    registry.register("sandbox.listContainers", sandbox::ListContainersHandler);
+    registry.register(
+        "sandbox.listContainers",
+        RpcGenericTriggerHandler::new("sandbox.listContainers"),
+    );
     registry.register("sandbox.startContainer", sandbox::StartContainerHandler);
     registry.register("sandbox.stopContainer", sandbox::StopContainerHandler);
     registry.register("sandbox.killContainer", sandbox::KillContainerHandler);

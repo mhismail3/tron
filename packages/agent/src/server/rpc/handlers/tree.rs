@@ -1,17 +1,26 @@
 //! Tree handlers: getVisualization, getBranches, getSubtree, getAncestors, compareBranches.
 
+#[cfg(test)]
 use async_trait::async_trait;
+#[cfg(test)]
 use serde_json::Value;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
 use crate::server::rpc::errors::{self, RpcError};
+#[cfg(test)]
 use crate::server::rpc::handlers::{map_event_store_error, require_string_param};
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 
 /// Get tree visualization for a session.
+#[cfg(test)]
 pub struct GetVisualizationHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetVisualizationHandler {
     #[instrument(skip(self, ctx), fields(method = "tree.get"))]
@@ -60,8 +69,10 @@ impl MethodHandler for GetVisualizationHandler {
 }
 
 /// Get branches for a session.
+#[cfg(test)]
 pub struct GetBranchesHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetBranchesHandler {
     #[instrument(skip(self, ctx), fields(method = "tree.list"))]
@@ -96,8 +107,10 @@ impl MethodHandler for GetBranchesHandler {
 }
 
 /// Get a subtree rooted at a specific event.
+#[cfg(test)]
 pub struct GetSubtreeHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetSubtreeHandler {
     #[instrument(skip(self, ctx), fields(method = "tree.getSubtree"))]
@@ -129,8 +142,10 @@ impl MethodHandler for GetSubtreeHandler {
 }
 
 /// Get ancestor chain for an event.
+#[cfg(test)]
 pub struct GetAncestorsHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for GetAncestorsHandler {
     #[instrument(skip(self, ctx), fields(method = "tree.getAncestors"))]
@@ -159,8 +174,10 @@ impl MethodHandler for GetAncestorsHandler {
 }
 
 /// Compare two branches.
+#[cfg(test)]
 pub struct CompareBranchesHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for CompareBranchesHandler {
     #[instrument(skip(self, _ctx), fields(method = "tree.compareBranches"))]

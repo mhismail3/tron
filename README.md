@@ -291,7 +291,7 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 ## Tools
 
-Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registry`, with subagent and job tools added in the `tool_factory` closure in `main.rs`. To add or rename a tool, update both files.
+Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registry`, with subagent and job tools added in the `tool_factory` closure in `main.rs`. To add or rename a tool, update both files. At model-call time, provider-facing tool schemas are projected from the live engine catalog, so registered built-ins, engine meta-tools, and eligible live MCP capabilities are filtered by current visibility, health, authority, and schema metadata before being sent to the model.
 
 ### Always-on (22)
 

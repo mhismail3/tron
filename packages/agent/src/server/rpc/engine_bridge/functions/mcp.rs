@@ -8,6 +8,8 @@ use crate::engine::{
     FunctionDefinition, FunctionId, FunctionQuery, IdempotencyContract, InProcessFunctionHandler,
     Provenance, RiskLevel, VisibilityScope,
 };
+use crate::mcp::tool_bridge::mcp_result_to_tron_result;
+use crate::mcp::tool_index::ParamSummary;
 use crate::mcp::types::McpServerConfig;
 
 pub(super) async fn handle(
@@ -276,34 +278,48 @@ async fn refresh_mcp_tool_catalog(deps: &RpcEngineDeps) {
             continue;
         };
         let _ = live_ids.insert(function_id.as_str().to_owned());
+        let classification = classify_mcp_tool(&tool.tool, &tool.description);
+        let mut authority = AuthorityRequirement::scope(classification.authority_scope);
+        if classification.approval_required {
+            authority = authority.with_approval_required();
+        }
         let mut definition = FunctionDefinition::new(
             function_id,
             worker_id.clone(),
             format!("MCP tool {} on server {}", tool.tool, tool.server),
             VisibilityScope::System,
-            EffectClass::ExternalSideEffect,
+            classification.effect_class,
         )
-        .with_risk(RiskLevel::Medium)
-        .with_required_authority(AuthorityRequirement::scope("mcp.write").with_approval_required())
-        .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .with_risk(classification.risk_level)
+        .with_required_authority(authority)
         .with_provenance(Provenance::system())
-        .with_request_schema(json!({
-            "type": "object",
-            "additionalProperties": true
-        }))
+        .with_request_schema(schema_from_mcp_params(&tool.params))
         .with_response_schema(json!({
             "type": "object",
             "additionalProperties": true
         }));
+        if classification.effect_class.is_mutating() {
+            definition =
+                definition.with_idempotency(IdempotencyContract::caller_system_engine_ledger());
+        }
         definition.metadata = json!({
             "domainWorker": "mcp",
             "mcpTool": true,
+            "modelToolName": mcp_model_tool_name(&tool.server, &tool.tool),
+            "toolOrder": 10_000,
             "server": tool.server,
             "tool": tool.tool,
             "description": tool.description,
-            "params": tool.params,
+            "params": serde_json::to_value(&tool.params).unwrap_or_else(|_| json!([])),
             "canonicalCapability": definition.id.as_str(),
-            "effectDefault": "external_side_effect",
+            "classifier": {
+                "effectClass": effect_class_label(classification.effect_class),
+                "risk": risk_label(classification.risk_level),
+                "authorityScope": classification.authority_scope,
+                "approvalRequired": classification.approval_required,
+                "reason": classification.reason,
+                "confidence": classification.confidence,
+            },
         });
         let handler = McpToolFunctionHandler {
             server: definition.metadata["server"]
@@ -368,6 +384,123 @@ fn mcp_tool_function_id(server: &str, tool: &str) -> String {
     )
 }
 
+fn mcp_model_tool_name(server: &str, tool: &str) -> String {
+    format!(
+        "mcp_{}_{}",
+        sanitize_id_part(server),
+        sanitize_id_part(tool)
+    )
+}
+
+#[derive(Clone, Copy)]
+struct McpToolClassification {
+    effect_class: EffectClass,
+    risk_level: RiskLevel,
+    authority_scope: &'static str,
+    approval_required: bool,
+    reason: &'static str,
+    confidence: f64,
+}
+
+fn classify_mcp_tool(name: &str, description: &str) -> McpToolClassification {
+    let text = format!("{name} {description}").to_lowercase();
+    let read_markers = [
+        "get", "list", "read", "search", "find", "fetch", "query", "lookup", "inspect", "describe",
+        "status",
+    ];
+    let mutation_markers = [
+        "write", "create", "update", "delete", "remove", "send", "run", "execute", "exec", "start",
+        "stop", "restart", "kill", "apply", "patch", "edit", "commit", "push", "upload",
+        "download", "sync", "publish",
+    ];
+    if mutation_markers
+        .iter()
+        .any(|marker| token_like_match(&text, marker))
+    {
+        return McpToolClassification {
+            effect_class: EffectClass::ExternalSideEffect,
+            risk_level: RiskLevel::Medium,
+            authority_scope: "mcp.write",
+            approval_required: true,
+            reason: "name_or_description_implies_external_mutation",
+            confidence: 0.8,
+        };
+    }
+    if read_markers
+        .iter()
+        .any(|marker| token_like_match(&text, marker))
+    {
+        return McpToolClassification {
+            effect_class: EffectClass::PureRead,
+            risk_level: RiskLevel::Low,
+            authority_scope: "mcp.read",
+            approval_required: false,
+            reason: "name_or_description_looks_read_only",
+            confidence: 0.65,
+        };
+    }
+    McpToolClassification {
+        effect_class: EffectClass::ExternalSideEffect,
+        risk_level: RiskLevel::Medium,
+        authority_scope: "mcp.write",
+        approval_required: true,
+        reason: "unknown_mcp_tool_defaults_to_safe_external_side_effect",
+        confidence: 0.5,
+    }
+}
+
+fn token_like_match(text: &str, marker: &str) -> bool {
+    text.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|token| token == marker || token.starts_with(marker))
+}
+
+fn effect_class_label(effect: EffectClass) -> &'static str {
+    match effect {
+        EffectClass::PureRead => "pure_read",
+        EffectClass::DeterministicCompute => "deterministic_compute",
+        EffectClass::DelegatedInvocation => "delegated_invocation",
+        EffectClass::IdempotentWrite => "idempotent_write",
+        EffectClass::AppendOnlyEvent => "append_only_event",
+        EffectClass::ReversibleSideEffect => "reversible_side_effect",
+        EffectClass::ExternalSideEffect => "external_side_effect",
+        EffectClass::IrreversibleSideEffect => "irreversible_side_effect",
+    }
+}
+
+fn risk_label(risk: RiskLevel) -> &'static str {
+    match risk {
+        RiskLevel::Low => "low",
+        RiskLevel::Medium => "medium",
+        RiskLevel::High => "high",
+        RiskLevel::Critical => "critical",
+    }
+}
+
+fn schema_from_mcp_params(params: &[ParamSummary]) -> Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for param in params {
+        let mut schema = serde_json::Map::new();
+        let _ = schema.insert("type".to_owned(), Value::String(param.param_type.clone()));
+        if !param.description.is_empty() {
+            let _ = schema.insert(
+                "description".to_owned(),
+                Value::String(param.description.clone()),
+            );
+        }
+        if param.required {
+            required.push(Value::String(param.name.clone()));
+        }
+        let _ = properties.insert(param.name.clone(), Value::Object(schema));
+    }
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": true,
+    })
+}
+
 fn sanitize_id_part(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -412,10 +545,52 @@ impl InProcessFunctionHandler for McpToolFunctionHandler {
                     "tool": self.tool,
                 })),
             })?;
-        serde_json::to_value(result).map_err(|error| {
+        let tron_result = mcp_result_to_tron_result(&result, &self.server, &self.tool);
+        serde_json::to_value(tron_result).map_err(|error| {
             crate::engine::EngineError::HandlerFailed(format!(
                 "failed to serialize MCP tool result: {error}"
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifier_marks_obvious_reads_as_low_risk_pure_reads() {
+        let classification = classify_mcp_tool("list_projects", "List project metadata");
+        assert_eq!(classification.effect_class, EffectClass::PureRead);
+        assert_eq!(classification.risk_level, RiskLevel::Low);
+        assert_eq!(classification.authority_scope, "mcp.read");
+        assert!(!classification.approval_required);
+        assert!(classification.confidence >= 0.6);
+    }
+
+    #[test]
+    fn classifier_marks_mutation_words_as_approval_required_side_effects() {
+        let classification = classify_mcp_tool("send_email", "Send a message to a recipient");
+        assert_eq!(classification.effect_class, EffectClass::ExternalSideEffect);
+        assert_eq!(classification.risk_level, RiskLevel::Medium);
+        assert_eq!(classification.authority_scope, "mcp.write");
+        assert!(classification.approval_required);
+        assert_eq!(
+            classification.reason,
+            "name_or_description_implies_external_mutation"
+        );
+    }
+
+    #[test]
+    fn classifier_defaults_unknown_tools_to_conservative_side_effects() {
+        let classification = classify_mcp_tool("frobnicate", "Perform the server operation");
+        assert_eq!(classification.effect_class, EffectClass::ExternalSideEffect);
+        assert_eq!(classification.risk_level, RiskLevel::Medium);
+        assert_eq!(classification.authority_scope, "mcp.write");
+        assert!(classification.approval_required);
+        assert_eq!(
+            classification.reason,
+            "unknown_mcp_tool_defaults_to_safe_external_side_effect"
+        );
     }
 }

@@ -386,8 +386,17 @@ Implemented:
 - MCP collapse and live capabilities: all eight public `mcp.*` methods are now
   marker-only `json_rpc` triggers into canonical `mcp::*` functions, and
   discovered MCP tools are registered/unregistered as live `mcp::*`
-  external-side-effect capabilities with conservative approval/idempotency
-  metadata;
+  capabilities with conservative classifier reason/confidence metadata;
+- live catalog tool surface: provider-facing tool schemas now resolve from the
+  live catalog before every model request, so built-in `tool::*`, engine
+  meta-capabilities, and eligible `mcp::*` capabilities are visible according
+  to current health, authority, schemas, model tool names, ordering, and
+  provenance rather than a frozen `ToolRegistry` snapshot;
+- safe read collapse: tree reads, repo divergence reads, import browse/preview
+  reads, browser status, voice-note listing, transcription model listing, and
+  sandbox listing are now marker-only generic triggers into canonical domain
+  functions, raising generic-trigger coverage to 98 while the public JSON-RPC
+  method count stays 170;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -398,9 +407,7 @@ Implemented:
 Still deferred:
 
 - RPC migrations and generic-trigger conversion for the remaining handler-only
-  method groups beyond prompt library, settings, logs, skills, notifications,
-  plan, events, basic filesystem, session commands/reads except resume, context
-  commands/reads, job controls, and current agent controls;
+  method groups beyond the current collapsed set;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
 - replacement of the compatibility EventBridge fallback and provider-native

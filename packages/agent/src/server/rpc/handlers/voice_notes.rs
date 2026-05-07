@@ -8,8 +8,10 @@ use uuid::Uuid;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
+#[cfg(test)]
+use crate::server::rpc::handlers::opt_u64;
 use crate::server::rpc::handlers::transcription::{normalize_base64, transcribe_audio};
-use crate::server::rpc::handlers::{opt_string, opt_u64, require_string_param};
+use crate::server::rpc::handlers::{opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::voice_notes_service;
 
@@ -87,8 +89,10 @@ impl MethodHandler for SaveHandler {
 }
 
 /// List voice notes (reads from `~/.tron/workspace/inbox/voice-notes/`).
+#[cfg(test)]
 pub struct ListHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ListHandler {
     #[instrument(skip(self, ctx), fields(method = "voiceNotes.list"))]

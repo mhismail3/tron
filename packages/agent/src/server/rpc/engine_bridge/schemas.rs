@@ -177,6 +177,86 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "tree.getVisualization" | "tree.getBranches" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "tree.getSubtree" | "tree.getAncestors" => json!({
+            "type": "object",
+            "required": ["eventId"],
+            "additionalProperties": false,
+            "properties": {
+                "eventId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "tree.compareBranches" => json!({
+            "type": "object",
+            "required": ["branchA", "branchB"],
+            "additionalProperties": false,
+            "properties": {
+                "branchA": {"type": "string"},
+                "branchB": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "repo.listSessions" | "repo.getDivergence" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "import.listSources"
+        | "browser.getStatus"
+        | "transcribe.listModels"
+        | "sandbox.listContainers" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "import.listSessions" => json!({
+            "type": "object",
+            "required": ["encodedDir"],
+            "additionalProperties": false,
+            "properties": {
+                "encodedDir": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "import.previewSession" => json!({
+            "type": "object",
+            "required": ["sessionPath"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionPath": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "voiceNotes.list" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "session.list" => json!({
             "type": "object",
             "additionalProperties": false,
@@ -983,9 +1063,31 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         | "context.canAcceptTurn"
         | "context.confirmCompaction"
         | "context.clear"
-        | "context.compact" => json!({
+        | "context.compact"
+        | "tree.getVisualization"
+        | "tree.getBranches"
+        | "tree.getSubtree"
+        | "tree.getAncestors"
+        | "tree.compareBranches"
+        | "repo.listSessions"
+        | "repo.getDivergence"
+        | "import.listSources"
+        | "import.listSessions"
+        | "import.previewSession"
+        | "voiceNotes.list"
+        | "transcribe.listModels"
+        | "sandbox.listContainers" => json!({
             "type": "object",
             "additionalProperties": true
+        }),
+        "browser.getStatus" => json!({
+            "type": "object",
+            "required": ["hasBrowser", "isStreaming"],
+            "additionalProperties": false,
+            "properties": {
+                "hasBrowser": {"type": "boolean"},
+                "isStreaming": {"type": "boolean"}
+            }
         }),
         "agent.prompt" => json!({
             "type": "object",

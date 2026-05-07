@@ -31,7 +31,9 @@ bindings from the legacy method names into the canonical functions.
 
 Fully collapsed groups now include prompt library, settings, logs, MCP, skills,
 notifications, plan, events, approval get/list/resolve, job controls, all
-current agent controls including `agent.prompt`, and basic filesystem.
+current agent controls including `agent.prompt`, basic filesystem, tree reads,
+repo divergence reads, import browse/preview reads, browser status, voice-note
+listing, transcription model listing, and sandbox listing.
 Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
 context compaction/clear commands are also generic-triggered canonical
 functions. Migrated groups delete their method-specific business handlers as
@@ -64,17 +66,17 @@ answers are explicit enough to test.
 | `mcp` | 8 | Fully generic-triggered `mcp` domain worker functions plus live discovered MCP tool functions. | Agent/client/admin filtered; discovered tools are system-visible until a safer server/tool policy is available. | Lifecycle writes use system idempotency; status/list are reads; discovered MCP tools default to approval-required external side effects. | Server lifecycle changes refresh the live catalog, unregister absent tools, publish catalog/status stream records, and MCP tool calls inherit caller authority and trace. |
 | `skill` | 6 | Fully generic-triggered `skills` domain worker functions over registry and session state. | Session/workspace. | Activate/deactivate are session-scoped idempotent writes; refresh is system-scoped. | Skill provenance and denied/allowed tools affect capability views; activation events are causally linked. |
 | `filesystem` / `file` | 4 | `filesystem` domain worker; home/list/read/createDir are generic-triggered compatibility functions. | Session/workspace by path policy. | Reads plus idempotent createDir; broader file writes later. | Path guards, workspace scope, and file effect metadata required before broader writes migrate. |
-| `tree` | 5 | `event_graph::*`. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
-| `import` | 4 | `import::*`. | Admin/workspace. | Preview/list reads; execute append-only/idempotent by import source. | Import provenance and dedupe tags mandatory. |
-| `browser` / `display` | 4 | `browser::*`, `display::*`, stream functions. | Session/client. | Stream lifecycle idempotent by stream id. | Link stream writes to session and actor. |
+| `tree` | 5 | Fully generic-triggered `tree::*` read functions. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
+| `import` | 4 | `import.listSources/listSessions/previewSession` are generic-triggered `import::*` reads; execute remains deferred. | Admin/workspace. | Preview/list reads; execute append-only/idempotent by import source. | Import provenance and dedupe tags mandatory. |
+| `browser` / `display` | 4 | `browser::get_status` is generic-triggered; display/browser stream mutations remain deferred. | Session/client. | Status is pure read; stream lifecycle idempotent by stream id. | Link stream writes to session and actor. |
 | `job` | 5 | Fully generic-triggered `job` domain worker for background/cancel/list/subscribe/unsubscribe plus queue functions. | Session/client/agent filtered. | Job controls are idempotent by request/job id; cancel is high-risk approval-metadata-bearing. | Background/cancel enqueue hidden apply functions, synchronously drain compatibility receipts, preserve existing job/process manager behavior, persist user-action events, and publish job/queue stream records. |
 | `worktree` | 23 | `worktree::*` functions and triggers. | Workspace/session. | Git mutations require idempotency, locks, and compensation where possible. | Branch/worktree state machine must stay auditable. |
-| `transcribe` | 3 | `transcription::*`. | Client/session. | Audio processing idempotent by input hash/request id. | Sidecar lifecycle and stream progress trace to request. |
+| `transcribe` | 3 | `transcription::list_models` is generic-triggered; audio/download effects remain deferred. | Client/session. | Model listing is pure read; audio processing idempotent by input hash/request id. | Sidecar lifecycle and stream progress trace to request. |
 | `device` | 3 | `device::*` and approval triggers. | Client/session/admin. | Register/unregister/respond idempotent by token/request id. | Approval responses must link to pending invocation. |
 | `plan` | 3 | Fully generic-triggered `plan` domain worker functions. | Session. | Idempotent session-scoped state writes. | Plan transitions record actor, session, trigger id, and idempotency context. |
-| `voiceNotes` | 3 | `voice_note::*`. | Client/session. | Save/delete idempotent by note id. | Link audio/transcription/provenance. |
-| `git` / `repo` | 7 | `git::*`, `repo::*`. | Workspace/admin. | Mutations require idempotency and locks. | Remote side effects need risk and approval policy. |
-| `sandbox` | 5 | `sandbox::*` worker lifecycle. | Session by default. | Lifecycle idempotent by sandbox id; high-risk execution gated. | Created workers inherit narrowed delegated authority. |
+| `voiceNotes` | 3 | `voice_notes::list` is generic-triggered; save/delete remain deferred. | Client/session. | List is pure read; save/delete idempotent by note id. | Link audio/transcription/provenance. |
+| `git` / `repo` | 7 | `repo.listSessions/getDivergence` are generic-triggered reads; git/worktree mutations remain deferred. | Workspace/admin. | Mutations require idempotency and locks. | Remote side effects need risk and approval policy. |
+| `sandbox` | 5 | `sandbox::list_containers` is generic-triggered; lifecycle/execution remain deferred. | Session by default. | List is pure read; lifecycle idempotent by sandbox id; high-risk execution gated. | Created workers inherit narrowed delegated authority. |
 | `notifications` | 3 | Fully generic-triggered `notifications` domain worker functions. | Client/session. | Mark read/all-read are system-scoped idempotent writes; list is read. | Notification effects link to source invocation/event and trigger metadata. |
 | `promptHistory` / `promptSnippet` | 8 | `prompt_library::*`; all methods are generic-triggered in the RPC bridge. | Workspace/client. | Prompt-library writes use engine-ledger idempotency; delete/clear effects carry irreversible-risk metadata. | Prompt provenance and retention policy recorded. |
 | `cron` | 8 | `cron::*` trigger worker. | Admin/workspace. | Job definitions idempotent by job id; runs append-only. | Trigger fires record schedule, misfire/overlap policy, and target invocation. |
@@ -111,7 +113,9 @@ capabilities.
 The base tool factory currently registers filesystem, shell, search/find, UI,
 notification, web, display, computer-use, engine capability tools, and MCP
 meta-tools. The runtime tool factory adds subagent spawning, job management,
-waiting, and an LLM-backed `WebFetch` override.
+waiting, and an LLM-backed `WebFetch` override. Provider-facing tool schemas
+now come from the live engine catalog on every model call; `ToolRegistry`
+remains only the temporary implementation backing for built-ins.
 
 Live fabric mapping:
 
@@ -126,12 +130,12 @@ Live fabric mapping:
 | Engine discover/inspect/watch/invoke | `engine::*` plus canonical domain functions. | Stable agent meta-tools over the live catalog; mutating invokes require explicit idempotency and approval-gated functions fail closed. |
 | SpawnSubagent | `agent::spawn`, `agent::run_turn`. | Delegated authority and session-scoped visibility. |
 | ManageJob/Wait | `job::*`. | Queue/job idempotency and causal status streams. |
-| MCP meta-tools and discovered tools | `mcp::*`. | Preserve compressed catalog for large MCP tool sets while registering discovered tools as live external-side-effect capabilities; calls inherit authority, trace, server/tool provenance, and engine idempotency. |
+| MCP meta-tools and discovered tools | `mcp::*`. | Preserve compressed catalog for large MCP tool sets while registering discovered tools as live capabilities with classifier reason/confidence; obvious reads become low-risk pure reads and unknown/mutating tools require approval. |
 
 MCP already resembles a live capability bridge. Tron keeps the searchable
 meta-tool pattern for large catalogs and now projects discovered tools into the
-live catalog immediately, with conservative effect/risk defaults until a
-per-tool classifier can safely downgrade pure reads.
+live catalog immediately. Classification stays intentionally conservative:
+unsafe false positives require approval rather than autonomous execution.
 
 ## Event store, state, streams, and queues
 

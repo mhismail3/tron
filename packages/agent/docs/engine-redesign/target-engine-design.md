@@ -449,8 +449,15 @@ isolation does.
 | `state` | Scoped state for non-event-sourced data. |
 | `queue` | Durable named queues, receipts, retries, cancellation, DLQ/redrive. |
 | `cron` | Cron trigger type backed by current automations definitions and SQLite runtime state. |
-| `tool` | Built-in tools are registered as canonical `tool::*` capabilities with schema metadata, effect/risk/authority/provenance, and model tool-call idempotency. Prompt-time execution invokes those functions through the engine while handing off the exact runtime `ToolContext`, so progress output, cancellation, hooks, process/job managers, and event persistence survive the collapse. |
-| `mcp` | MCP server lifecycle, search/list, and discovered server tools. Public `mcp.*` RPC methods are marker triggers into canonical `mcp::*`; discovered MCP tools register/unregister live external-side-effect capabilities with conservative approval/idempotency defaults. |
+| `tool` | Built-in tools are registered as canonical `tool::*` capabilities with strict schema metadata, effect/risk/authority/provenance, model-facing names/order, and model tool-call idempotency. Provider requests resolve tool schemas from the live catalog on every model call; prompt-time execution invokes those functions through the engine while handing off the exact runtime `ToolContext`, so progress output, cancellation, hooks, process/job managers, and event persistence survive the collapse. |
+| `mcp` | MCP server lifecycle, search/list, and discovered server tools. Public `mcp.*` RPC methods are marker triggers into canonical `mcp::*`; discovered MCP tools register/unregister live capabilities with conservative classifier metadata, read-only downgrades only when obvious, and approval-required external-side-effect defaults otherwise. |
+| `tree` | Event tree visualization and branch/subtree/ancestor comparison reads are canonical generic-trigger functions. |
+| `repo` | Worktree/repository peer-session and divergence reads are canonical generic-trigger functions; git mutations remain deferred. |
+| `import` | Claude Code import source/session/preview reads are canonical generic-trigger functions; import execution remains deferred until append/idempotency contracts are hardened. |
+| `browser` | Browser status is a canonical read function; browser/display stream mutations remain deferred. |
+| `voice_notes` | Voice-note listing is a canonical read function; save/delete stay handler-owned until audio/transcription effects are modeled. |
+| `transcription` | Transcription model listing is a canonical read function; audio/download mutations stay deferred. |
+| `sandbox` | Sandbox listing is a canonical read function; lifecycle and execution effects remain approval-gated deferred work. |
 | `worktree` | Git/worktree capabilities and conflict workflows. |
 | `auth` | Provider auth, client auth, future worker tokens and grants. |
 | `observability` | Logs, metrics, traces, causal graph queries, diagnostics. |

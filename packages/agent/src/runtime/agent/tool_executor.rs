@@ -8,17 +8,16 @@ use crate::core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
 use crate::core::messages::Provider;
 use crate::core::messages::ToolCall;
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
-    TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation, TraceId,
 };
 use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::runtime::hooks::engine::HookEngine;
 use crate::runtime::hooks::types::{HookAction, HookContext};
 use crate::tools::capability_runtime::{
-    RuntimeToolExecution, canonical_tool_function_id, insert_runtime_tool_execution,
-    remove_runtime_tool_execution,
+    RuntimeToolExecution, insert_runtime_tool_execution, remove_runtime_tool_execution,
 };
+use crate::tools::capability_surface::{EngineToolTarget, resolve_model_tool_target};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::traits::ToolContext;
 use serde_json::{Value, json};
@@ -114,8 +113,41 @@ pub async fn execute_tool(
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
 
-    // 1. Look up tool
-    let Some(tool) = ctx.registry.get(&tool_name) else {
+    // 1. Resolve the model tool name through the live engine catalog. The
+    // registry remains a temporary implementation/policy backing for built-ins,
+    // but the executable capability and schema contract come from the catalog.
+    let registry_tool = ctx.registry.get(&tool_name);
+    let engine_target = if let Some(engine_host) = ctx.engine_host {
+        match resolve_model_tool_target(
+            engine_host,
+            ctx.registry,
+            session_id,
+            ctx.workspace_id,
+            &tool_name,
+        )
+        .await
+        {
+            Ok(target) => target,
+            Err(error) => {
+                error!(tool_name, error = %error, "failed to resolve engine tool target");
+                return ToolExecutionResult {
+                    tool_call_id,
+                    result: crate::core::tools::error_result(format!(
+                        "Tool catalog resolution failed for {tool_name}: {error}"
+                    )),
+                    duration_ms: duration_ceil_ms(start.elapsed()),
+                    blocked_by_hook: false,
+                    blocked_by_guardrail: false,
+                    stops_turn: false,
+                    is_interactive: false,
+                };
+            }
+        }
+    } else {
+        None
+    };
+
+    if registry_tool.is_none() && engine_target.is_none() {
         error!(tool_name, "tool not found");
         return ToolExecutionResult {
             tool_call_id,
@@ -126,10 +158,18 @@ pub async fn execute_tool(
             stops_turn: false,
             is_interactive: false,
         };
-    };
+    }
 
-    let stops_turn = tool.stops_turn();
-    let is_interactive = tool.is_interactive();
+    let stops_turn = registry_tool
+        .as_ref()
+        .map(|tool| tool.stops_turn())
+        .or_else(|| engine_target.as_ref().map(|target| target.stops_turn))
+        .unwrap_or(false);
+    let is_interactive = registry_tool
+        .as_ref()
+        .map(|tool| tool.is_interactive())
+        .or_else(|| engine_target.as_ref().map(|target| target.is_interactive))
+        .unwrap_or(false);
 
     // 1a. Provider-scoped allow-list. Local models only see a subset of tool
     // schemas; if the model hallucinates a call to a hidden tool, refuse
@@ -357,9 +397,10 @@ pub async fn execute_tool(
 
     let tool_result = if per_tool_cancel.is_cancelled() {
         crate::core::tools::error_result("Operation cancelled")
-    } else if let Some(engine_host) = ctx.engine_host {
+    } else if let (Some(engine_host), Some(target)) = (ctx.engine_host, engine_target.as_ref()) {
         execute_tool_via_engine(
             engine_host,
+            target,
             &tool_name,
             &tool_call_id,
             session_id,
@@ -372,16 +413,47 @@ pub async fn execute_tool(
         )
         .await
     } else {
-        tokio::select! {
-            biased;
-            () = per_tool_cancel.cancelled() => {
-                warn!(tool_name, "cancelled during execution");
-                crate::core::tools::error_result("Operation cancelled")
-            }
-            result = tool.execute(effective_args, &tool_ctx) => {
-                match result {
-                    Ok(r) => r,
-                    Err(e) => crate::core::tools::error_result(e.to_string()),
+        #[cfg(not(test))]
+        {
+            return ToolExecutionResult {
+                tool_call_id,
+                result: crate::core::tools::error_result(format!(
+                    "Engine host is required to execute tool '{tool_name}'"
+                )),
+                duration_ms: duration_ceil_ms(start.elapsed()),
+                blocked_by_hook: false,
+                blocked_by_guardrail: false,
+                stops_turn,
+                is_interactive,
+            };
+        }
+        #[cfg(test)]
+        let Some(tool) = registry_tool else {
+            return ToolExecutionResult {
+                tool_call_id,
+                result: crate::core::tools::error_result(format!(
+                    "Tool '{tool_name}' is not executable without an engine catalog target"
+                )),
+                duration_ms: duration_ceil_ms(start.elapsed()),
+                blocked_by_hook: false,
+                blocked_by_guardrail: false,
+                stops_turn,
+                is_interactive,
+            };
+        };
+        #[cfg(test)]
+        {
+            tokio::select! {
+                biased;
+                () = per_tool_cancel.cancelled() => {
+                    warn!(tool_name, "cancelled during execution");
+                    crate::core::tools::error_result("Operation cancelled")
+                }
+                result = tool.execute(effective_args, &tool_ctx) => {
+                    match result {
+                        Ok(r) => r,
+                        Err(e) => crate::core::tools::error_result(e.to_string()),
+                    }
                 }
             }
         }
@@ -510,6 +582,7 @@ pub async fn execute_tool(
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool_via_engine(
     engine_host: &EngineHostHandle,
+    target: &EngineToolTarget,
     tool_name: &str,
     tool_call_id: &str,
     session_id: &str,
@@ -531,12 +604,8 @@ async fn execute_tool_via_engine(
         &effective_args,
     );
     let fingerprint = sha256_hex(material.as_bytes());
-    let runtime_invocation_id = format!("tool-runtime:{fingerprint}");
     let idempotency_key = format!("model-tool-call:v1:{fingerprint}");
-    let function_id = match FunctionId::new(canonical_tool_function_id(tool_name)) {
-        Ok(id) => id,
-        Err(error) => return crate::core::tools::error_result(error.to_string()),
-    };
+    let function_id = target.function_id.clone();
     let actor_id = match ActorId::new(format!("agent:{session_id}")) {
         Ok(id) => id,
         Err(error) => return crate::core::tools::error_result(error.to_string()),
@@ -558,32 +627,24 @@ async fn execute_tool_via_engine(
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
     }
-    let payload = json!({
-        "__runtimeToolInvocationId": runtime_invocation_id.clone(),
-        "params": effective_args,
-        "sessionId": session_id,
-        "workingDirectory": working_directory,
-        "workspaceId": workspace_id,
-        "toolCallId": tool_call_id,
-        "turn": turn,
-        "runId": run_id,
-    });
+    for scope in &target.function.required_authority.scopes {
+        if !causal_context.has_scope(scope) {
+            causal_context = causal_context.with_scope(scope.clone());
+        }
+    }
+    let payload = effective_args;
     let runtime_execution = RuntimeToolExecution {
         tool_name: tool_name.to_owned(),
-        params: payload
-            .get("params")
-            .cloned()
-            .unwrap_or_else(|| Value::Object(Default::default())),
+        params: payload.clone(),
         context: tool_ctx,
     };
-    insert_runtime_tool_execution(runtime_invocation_id.clone(), runtime_execution);
-    let result = engine_host
-        .invoke(Invocation::new_sync(
-            function_id.clone(),
-            payload,
-            causal_context,
-        ))
-        .await;
+    let invocation = Invocation::new_sync(function_id.clone(), payload, causal_context)
+        .expecting_revision(target.function.revision);
+    let runtime_invocation_id = invocation.id.to_string();
+    if function_id.namespace() == "tool" {
+        insert_runtime_tool_execution(runtime_invocation_id.clone(), runtime_execution);
+    }
+    let result = engine_host.invoke(invocation.clone()).await;
     remove_runtime_tool_execution(&runtime_invocation_id);
 
     if let Some(error) = result.error {
@@ -904,13 +965,9 @@ mod tests {
             &self,
             invocation: crate::engine::Invocation,
         ) -> crate::engine::Result<Value> {
-            let runtime_id = invocation
-                .payload
-                .get("__runtimeToolInvocationId")
-                .and_then(Value::as_str)
-                .expect("runtime tool invocation id");
+            let runtime_id = invocation.id.to_string();
             let execution =
-                crate::tools::capability_runtime::take_runtime_tool_execution(runtime_id)
+                crate::tools::capability_runtime::take_runtime_tool_execution(&runtime_id)
                     .expect("runtime tool execution context");
             assert_eq!(execution.tool_name, "echo");
             assert_eq!(execution.context.session_id, "s1");
@@ -942,7 +999,7 @@ mod tests {
         )
         .unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
-        let function = FunctionDefinition::new(
+        let mut function = FunctionDefinition::new(
             FunctionId::new("tool::echo").unwrap(),
             worker_id,
             "test engine tool",
@@ -955,6 +1012,12 @@ mod tests {
         .with_provenance(Provenance::system())
         .with_request_schema(json!({"type": "object", "additionalProperties": true}))
         .with_response_schema(json!({"type": "object", "additionalProperties": true}));
+        function.metadata = json!({
+            "modelToolName": "echo",
+            "toolOrder": 0,
+            "stopsTurn": false,
+            "isInteractive": false,
+        });
         host.register_function_for_setup(
             function,
             Some(Arc::new(EngineEchoHandler {

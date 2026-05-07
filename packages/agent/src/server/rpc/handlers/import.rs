@@ -16,7 +16,10 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use super::{map_event_store_error, map_import_error, opt_string, require_string_param};
+#[cfg(test)]
+use super::map_event_store_error;
+use super::{map_import_error, opt_string, require_string_param};
+#[cfg(test)]
 use crate::core::paths::home_dir;
 use crate::import;
 use crate::server::rpc::context::RpcContext;
@@ -24,8 +27,10 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::registry::MethodHandler;
 
 /// List Claude Code project directories.
+#[cfg(test)]
 pub struct ListSourcesHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ListSourcesHandler {
     #[instrument(skip(self, ctx), fields(method = "import.listSources"))]
@@ -56,8 +61,10 @@ impl MethodHandler for ListSourcesHandler {
 }
 
 /// List sessions within a Claude Code project directory.
+#[cfg(test)]
 pub struct ListSessionsHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ListSessionsHandler {
     #[instrument(skip(self, ctx), fields(method = "import.listSessions"))]
@@ -101,8 +108,10 @@ impl MethodHandler for ListSessionsHandler {
 }
 
 /// Preview a Claude Code session before importing.
+#[cfg(test)]
 pub struct PreviewSessionHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for PreviewSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "import.previewSession"))]
@@ -304,6 +313,7 @@ fn import_warning_to_json(warning: &import::ImportWarning) -> Value {
 }
 
 /// Check if a Claude Code session has already been imported.
+#[cfg(test)]
 fn check_already_imported(
     event_store: &crate::events::EventStore,
     session_uuid: &str,
@@ -319,6 +329,7 @@ fn check_already_imported(
 }
 
 /// Extract a text preview from content, truncated to `max_len`.
+#[cfg(test)]
 fn content_preview(content: Option<&Value>, max_len: usize) -> String {
     let text = match content {
         Some(Value::String(s)) => s.clone(),

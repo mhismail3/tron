@@ -292,6 +292,7 @@ impl MethodRegistry {
             || method.starts_with("worktree.list")
             || method.starts_with("repo.list")
             || method.starts_with("repo.get")
+            || method.starts_with("sandbox.list")
             || method.starts_with("transcribe.list")
             || method.starts_with("plan.get")
             || method.starts_with("voiceNotes.list")

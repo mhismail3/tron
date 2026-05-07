@@ -20,9 +20,11 @@
 //! Depended on by: runtime, server.
 //!
 //! The server also projects registered tools into the engine catalog as
-//! `tool::*` functions. The provider-facing schema still comes from
-//! [`ToolRegistry`] during the current migration package, but agents can
-//! discover the same tool surface through the live capability fabric.
+//! `tool::*` functions. Provider-facing schemas now come from the live engine
+//! catalog at every model-call boundary, while [`ToolRegistry`] remains the
+//! temporary implementation store for built-ins during the migration.
+//! Dynamic MCP capabilities and future external workers can therefore appear
+//! or disappear from the model-visible tool surface without restarting a run.
 
 #![deny(unsafe_code)]
 // The TronTool trait returns `&str` from `fn name()` — clippy's `unnecessary_literal_bound`
@@ -35,6 +37,7 @@ pub(crate) mod testutil;
 
 pub mod backends;
 pub(crate) mod capability_runtime;
+pub(crate) mod capability_surface;
 pub mod engine;
 pub mod errors;
 pub mod registry;

@@ -7,19 +7,23 @@
 //! method-specific business handlers entirely. Prompt library, settings, logs,
 //! skills, notifications, plan, events, basic filesystem, all job methods,
 //! all current agent controls including `agent.prompt`, session
-//! create/delete/fork/archive/export except `session.resume`, and all context
-//! snapshot/compaction/clear methods now run through this generic-trigger path.
-//! The MCP group is also collapsed: `mcp.*` methods route to canonical
-//! `mcp::*` functions, and discovered MCP tools are projected into the live
-//! catalog as external-side-effect capabilities.
+//! create/delete/fork/archive/export except `session.resume`, all context
+//! snapshot/compaction/clear methods, and safe read groups for tree, repo,
+//! import, browser status, voice notes, transcription models, and sandbox
+//! listing now run through this generic-trigger path. The MCP group is also
+//! collapsed: `mcp.*` methods route to canonical `mcp::*` functions, and
+//! discovered MCP tools are projected into the live catalog with conservative
+//! effect/risk classification.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
 //! `mcp`, and `system` own executable function contracts and behavior
 //! metadata. A separate `tool` worker registers built-in agent tools as
-//! canonical `tool::*` functions so agents can discover the runtime tool
-//! surface through the same live catalog as domain capabilities.
+//! canonical `tool::*` functions. Provider requests now resolve schemas from
+//! the live catalog, so built-ins, engine meta-tools, and eligible MCP
+//! capabilities are all surfaced through the same agent-facing capability
+//! fabric instead of through a frozen `ToolRegistry` snapshot.
 //! `json_rpc` trigger records capture the old client method name and dispatch
 //! directly into canonical ids such as `skills::activate` or
 //! `session::reconstruct`; `rpc::<method>` names remain compatibility metadata
@@ -141,10 +145,10 @@ fn register_tool_worker_for_context(ctx: &RpcContext) -> EngineResult<()> {
 
     let registry = (agent_deps.tool_factory)();
     let tool_names = registry.names();
-    for tool in registry.list() {
+    for (tool_order, tool) in registry.list().into_iter().enumerate() {
         let name = tool.name().to_owned();
         let id = tool_function_id(&name)?;
-        let definition = tool_function_definition(&id, tool.as_ref(), &tool_names)?;
+        let definition = tool_function_definition(&id, tool.as_ref(), &tool_names, tool_order)?;
         let handler = ToolFunctionHandler {
             tool,
             process_manager: ctx.process_manager.clone(),
@@ -169,8 +173,10 @@ fn tool_function_definition(
     id: &FunctionId,
     tool: &dyn TronTool,
     all_tool_names: &[String],
+    tool_order: usize,
 ) -> EngineResult<FunctionDefinition> {
     let tool_def = tool.definition();
+    let local_tool_def = tool.local_definition();
     let (effect, risk, authority, approval_required) = classify_tool_capability(tool.name());
     let mut authority = AuthorityRequirement::scope(authority);
     if approval_required {
@@ -186,10 +192,9 @@ fn tool_function_definition(
     .with_risk(risk)
     .with_required_authority(authority)
     .with_provenance(Provenance::system())
-    .with_request_schema(json!({
-        "type": "object",
-        "additionalProperties": true
-    }))
+    .with_request_schema(normalize_engine_schema(
+        serde_json::to_value(&tool_def.parameters).unwrap_or_else(|_| json!({"type": "object"})),
+    ))
     .with_response_schema(json!({
         "type": "object",
         "additionalProperties": true
@@ -201,14 +206,52 @@ fn tool_function_definition(
     definition.metadata = json!({
         "domainWorker": "tool",
         "canonicalCapability": id.as_str(),
+        "modelToolName": tool.name(),
+        "toolOrder": tool_order,
         "toolName": tool.name(),
         "toolCategory": format!("{:?}", tool.category()),
+        "stopsTurn": tool.stops_turn(),
+        "isInteractive": tool.is_interactive(),
         "toolStopsTurn": tool.stops_turn(),
         "toolInteractive": tool.is_interactive(),
         "toolSchema": tool_def,
+        "localToolSchema": local_tool_def,
         "allToolNames": all_tool_names,
     });
     Ok(definition)
+}
+
+fn normalize_engine_schema(schema: Value) -> Value {
+    let Some(object) = schema.as_object() else {
+        return json!({"type": "object"});
+    };
+    let mut normalized = serde_json::Map::new();
+    for key in [
+        "type",
+        "description",
+        "required",
+        "additionalProperties",
+        "maxItems",
+        "enum",
+    ] {
+        if let Some(value) = object.get(key) {
+            let _ = normalized.insert(key.to_owned(), value.clone());
+        }
+    }
+    if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+        let props = properties
+            .iter()
+            .map(|(key, value)| (key.clone(), normalize_engine_schema(value.clone())))
+            .collect();
+        let _ = normalized.insert("properties".to_owned(), Value::Object(props));
+    }
+    if let Some(items) = object.get("items") {
+        let _ = normalized.insert("items".to_owned(), normalize_engine_schema(items.clone()));
+    }
+    if !normalized.contains_key("type") {
+        let _ = normalized.insert("type".to_owned(), Value::String("object".to_owned()));
+    }
+    Value::Object(normalized)
 }
 
 fn classify_tool_capability(tool_name: &str) -> (EffectClass, RiskLevel, &'static str, bool) {
@@ -256,20 +299,12 @@ struct ToolFunctionHandler {
 impl InProcessFunctionHandler for ToolFunctionHandler {
     async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
         let payload = invocation.payload;
-        if let Some(runtime_id) = payload
+        let runtime_id = payload
             .get("__runtimeToolInvocationId")
             .and_then(Value::as_str)
-        {
-            let execution = capability_runtime::take_runtime_tool_execution(runtime_id)
-                .ok_or_else(|| EngineError::AdapterFailure {
-                    adapter: "tool".to_owned(),
-                    code: "TOOL_RUNTIME_CONTEXT_MISSING".to_owned(),
-                    message: "tool runtime context is no longer available".to_owned(),
-                    details: Some(json!({
-                        "tool": self.tool.name(),
-                        "runtimeInvocationId": runtime_id,
-                    })),
-                })?;
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| invocation.id.to_string());
+        if let Some(execution) = capability_runtime::take_runtime_tool_execution(&runtime_id) {
             if execution.tool_name != self.tool.name() {
                 return Err(EngineError::AdapterFailure {
                     adapter: "tool".to_owned(),

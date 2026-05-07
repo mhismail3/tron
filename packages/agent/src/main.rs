@@ -570,6 +570,7 @@ async fn init_services(
 
     // Break circular dep: SubagentManager needs tool_factory to spawn children
     subagent_manager.set_tool_factory(tool_factory.clone());
+    subagent_manager.set_engine_host(tool_config.engine_host.clone());
 
     let agent_deps = Some(AgentDeps {
         provider_factory: provider_factory.clone(),

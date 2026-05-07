@@ -1,19 +1,19 @@
 //! Model Context Protocol (MCP) integration.
 //!
-//! Enables the Tron agent to discover and call tools exposed by external
-//! MCP servers. Instead of registering each MCP tool individually (which
-//! would consume ~500 tokens per tool in the LLM context), tools are exposed
-//! via two meta-tools: `McpSearch` and `McpCall`.
-//! The meta-tools are always registered, even before any MCP servers are
-//! configured, so adding a server through settings takes effect without a
+//! Enables the Tron agent to discover and call tools exposed by external MCP
+//! servers. The legacy `McpSearch` / `McpCall` meta-tools remain available as
+//! compressed browsing/call helpers, but MCP server tools are also registered
+//! as live `mcp::*` engine capabilities. Provider-facing tool schemas are
+//! resolved from that live catalog at every model-call boundary, so MCP tools
+//! added, removed, or marked unhealthy can appear or fail closed without a
 //! daemon restart.
 //!
 //! ## Architecture
 //!
 //! ```text
-//! LLM ←→ McpSearch / McpCall ←→ McpRouter ←→ McpServerManager ←→ MCP Servers
-//!                                   ↑
-//!                              ToolIndex (keyword search)
+//! LLM ←→ live engine catalog / McpSearch / McpCall ←→ McpRouter ←→ MCP Servers
+//!                  ↑                              ↑
+//!          `mcp::*` functions                ToolIndex
 //! ```
 //!
 //! ## Modules
@@ -27,6 +27,14 @@
 //! - [`router`] — Central coordinator (`McpServerManager` + `ToolIndex`)
 //! - [`search_tool`] — `McpSearch` `TronTool` implementation
 //! - [`call_tool`] — `McpCall` `TronTool` implementation
+//!
+//! # INVARIANT: unknown MCP tools are not autonomous writes
+//!
+//! MCP tools discovered from external servers are classified conservatively
+//! when registered into the engine catalog. Obvious read-only names become
+//! low-risk `PureRead` capabilities; mutation-like or unknown tools become
+//! approval-required external side effects until a stronger server/tool policy
+//! says otherwise.
 
 pub mod call_tool;
 pub mod client;

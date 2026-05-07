@@ -32,11 +32,13 @@
 //! `rpc.write` plus the domain write scope and engine-ledger idempotency.
 //! Prompt library, settings, logs, MCP, skills, notifications, plan, events,
 //! approval resolution, read-safe session/context queries, job commands, all
-//! current agent control methods including `agent.prompt`, and basic
-//! filesystem reads/create-dir are now generic-triggered with marker-only
-//! JSON-RPC registrations. Job background/cancel and agent prompt commands
-//! enqueue hidden apply functions and synchronously drain their own receipts
-//! for current wire compatibility. RPC remains a compatibility transport; the
+//! current agent control methods including `agent.prompt`, basic filesystem
+//! reads/create-dir, tree reads, repo divergence reads, import browse/preview
+//! reads, browser status, voice-note listing, transcription model listing, and
+//! sandbox listing are now generic-triggered with marker-only JSON-RPC
+//! registrations. Job background/cancel and agent prompt commands enqueue
+//! hidden apply functions and synchronously drain their own receipts for
+//! current wire compatibility. RPC remains a compatibility transport; the
 //! canonical capability surface is the domain/tool function catalog agents
 //! discover through the engine tools.
 //!

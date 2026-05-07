@@ -1,5 +1,6 @@
 //! Sandbox handlers: listContainers, startContainer, stopContainer, killContainer, removeContainer.
 
+#[cfg(test)]
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -15,6 +16,7 @@ use crate::server::rpc::sandbox_service;
 /// Inject `status` into each container entry from the runtime status map.
 ///
 /// Containers not found in the status map get `"gone"`.
+#[cfg(test)]
 fn enrich_with_status(containers: &mut [Value], statuses: &HashMap<String, String>) {
     for c in containers.iter_mut() {
         let name = c.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -27,8 +29,10 @@ fn enrich_with_status(containers: &mut [Value], statuses: &HashMap<String, Strin
 }
 
 /// List running sandbox containers.
+#[cfg(test)]
 pub struct ListContainersHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ListContainersHandler {
     #[instrument(skip(self, ctx), fields(method = "sandbox.listContainers"))]
