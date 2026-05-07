@@ -14,7 +14,7 @@ pub(super) async fn handle(
                 }
             })
         }
-        "settings.update" => settings_update_value(Some(payload), deps).await,
+        "settings.update" => settings_update_value(Some(payload), invocation, deps).await,
         "settings.resetToDefaults" => settings_reset_to_defaults_value(deps).await,
         _ => Err(RpcError::Internal {
             message: format!("settings method {method} is not engine-owned"),
@@ -30,6 +30,7 @@ fn settings_error(error: crate::settings::SettingsError) -> RpcError {
 
 async fn settings_update_value(
     params: Option<&Value>,
+    invocation: &Invocation,
     deps: &RpcEngineDeps,
 ) -> Result<Value, RpcError> {
     let updates = require_param(params, "settings")?.clone();
@@ -80,7 +81,7 @@ async fn settings_update_value(
             });
         }
         drop(router_guard);
-        broadcast_mcp_status_changed(deps).await;
+        broadcast_mcp_status_changed(invocation, deps).await;
         refresh_codex_app_server_if_needed(
             deps,
             &codex_updates,
@@ -253,11 +254,8 @@ async fn refresh_codex_app_server_if_needed(
     Ok(())
 }
 
-async fn broadcast_mcp_status_changed(deps: &RpcEngineDeps) {
+async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &RpcEngineDeps) {
     let Some(ref router_arc) = deps.mcp_router else {
-        return;
-    };
-    let Some(ref bm) = deps.broadcast_manager else {
         return;
     };
 
@@ -268,5 +266,5 @@ async fn broadcast_mcp_status_changed(deps: &RpcEngineDeps) {
         None,
         Some(serde_json::to_value(status).unwrap_or_default()),
     );
-    bm.broadcast_all(&event).await;
+    super::publish_rpc_event_or_broadcast(deps, "mcp", "settings", event, Some(invocation)).await;
 }

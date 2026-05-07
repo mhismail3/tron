@@ -219,6 +219,11 @@ impl TronServer {
     pub fn rpc_context(&self) -> &Arc<RpcContext> {
         &self.rpc_context
     }
+
+    /// Get the local external-worker runtime.
+    pub fn external_workers(&self) -> &SharedExternalWorkerRuntime {
+        &self.external_workers
+    }
 }
 
 /// GET /engine/workers — local engine worker WebSocket upgrade handler.

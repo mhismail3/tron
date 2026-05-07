@@ -11,7 +11,7 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 use crate::server::rpc::types::{RpcRequest, RpcResponse};
 
-use super::specs::{self, RpcIdempotencyMode, RpcMigrationState};
+use super::specs::{self, RpcIdempotencyMode};
 use super::{RPC_AUTHORITY_GRANT, engine_error_to_rpc, result_to_rpc};
 
 /// Fully typed invocation envelope produced by the JSON-RPC transport trigger.
@@ -44,11 +44,8 @@ impl RpcEngineInvocation {
         let Some(spec) = spec else {
             return Ok(None);
         };
-        if spec.migration_state != RpcMigrationState::GenericTrigger {
-            return Ok(None);
-        }
-
-        let params_payload = payload_for_rpc_method(ctx, spec.method, request.params.clone());
+        let params_payload = payload_for_rpc_method(ctx, spec.method, request.params.clone())?;
+        reject_compat_target(spec.method, &params_payload)?;
         let transport_authority_scope =
             spec.transport_authority_scope
                 .ok_or_else(|| RpcError::Internal {
@@ -66,6 +63,16 @@ impl RpcEngineInvocation {
         let mut causal_context =
             rpc_causal_context_for_method(spec.method, transport_authority_scope)
                 .with_scope(domain_authority_scope);
+        if spec.method == "engine.promote" {
+            causal_context = causal_context
+                .with_scope("engine.promote.workspace")
+                .with_scope("engine.promote.system");
+        }
+        if spec.method == "engine.invoke" {
+            for scope in target_authority_scopes_for_engine_invoke(&params_payload) {
+                causal_context = causal_context.with_scope(scope);
+            }
+        }
         if let Some(session_id) = extract_string(&params_payload, "sessionId") {
             causal_context = causal_context.with_session_id(session_id);
         }
@@ -80,13 +87,29 @@ impl RpcEngineInvocation {
                     causal_context = causal_context.with_idempotency_key(key);
                 }
                 RpcIdempotencyMode::ExplicitRequired => {
-                    return Err(RpcError::InvalidParams {
-                        message: format!("{} requires explicit engine idempotency", spec.method),
-                    });
+                    let key =
+                        extract_string(&params_payload, "idempotencyKey").ok_or_else(|| {
+                            RpcError::InvalidParams {
+                                message: format!(
+                                    "{} requires non-empty explicit idempotencyKey",
+                                    spec.method
+                                ),
+                            }
+                        })?;
+                    if key.trim().is_empty() {
+                        return Err(RpcError::InvalidParams {
+                            message: format!(
+                                "{} requires non-empty explicit idempotencyKey",
+                                spec.method
+                            ),
+                        });
+                    }
+                    causal_context = causal_context.with_idempotency_key(key);
                 }
                 RpcIdempotencyMode::NotRequired => {}
             }
         }
+        let params_payload = strip_transport_only_fields(spec.method, params_payload);
 
         Ok(Some(Self {
             request_id: request.id.clone(),
@@ -172,13 +195,13 @@ pub(super) fn payload_for_rpc_method(
     ctx: &RpcContext,
     method: &'static str,
     params: Option<Value>,
-) -> Value {
+) -> Result<Value, RpcError> {
     if method == "settings.resetToDefaults" {
-        return json!({});
+        return Ok(json!({}));
     }
     let mut payload = params.unwrap_or_else(|| json!({}));
     if !payload.is_object() {
-        return payload;
+        return Ok(payload);
     }
     if method == "system.getInfo" {
         if let Some(object) = payload.as_object_mut() {
@@ -200,7 +223,7 @@ pub(super) fn payload_for_rpc_method(
             );
         }
     }
-    payload
+    Ok(payload)
 }
 
 #[cfg(test)]
@@ -209,12 +232,12 @@ pub(super) fn rpc_causal_context_for_scope(scope: &str) -> CausalContext {
 }
 
 fn rpc_causal_context_for_method(method: &str, scope: &str) -> CausalContext {
-    let actor_kind = if method.starts_with("approval.") {
+    let actor_kind = if method.starts_with("approval.") || method == "engine.promote" {
         ActorKind::User
     } else {
         ActorKind::Client
     };
-    let actor_id = if method.starts_with("approval.") {
+    let actor_id = if method.starts_with("approval.") || method == "engine.promote" {
         "rpc-user"
     } else {
         "rpc-client"
@@ -226,6 +249,55 @@ fn rpc_causal_context_for_method(method: &str, scope: &str) -> CausalContext {
         TraceId::generate(),
     )
     .with_scope(scope)
+}
+
+fn reject_compat_target(method: &str, payload: &Value) -> Result<(), RpcError> {
+    if method != "engine.invoke" {
+        return Ok(());
+    }
+    let Some(function_id) = extract_string(payload, "functionId") else {
+        return Ok(());
+    };
+    if function_id.starts_with("rpc::") {
+        return Err(RpcError::InvalidParams {
+            message: "engine.invoke requires a canonical function id, not an rpc::* alias"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn target_authority_scopes_for_engine_invoke(payload: &Value) -> Vec<String> {
+    let Some(function_id) = extract_string(payload, "functionId") else {
+        return Vec::new();
+    };
+    let Some((namespace, _operation)) = function_id.split_once("::") else {
+        return Vec::new();
+    };
+    match namespace {
+        "engine" => vec![
+            "engine.read".to_owned(),
+            "engine.promote.workspace".to_owned(),
+            "engine.promote.system".to_owned(),
+        ],
+        "approval" => vec!["approval.read".to_owned(), "approval.resolve".to_owned()],
+        other => vec![format!("{other}.read"), format!("{other}.write")],
+    }
+}
+
+fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
+    if method.starts_with("engine.") && method != "engine.promote" {
+        if let Some(object) = payload.as_object_mut() {
+            let _ = object.remove("sessionId");
+            let _ = object.remove("workspaceId");
+        }
+    }
+    if method == "engine.promote" {
+        if let Some(object) = payload.as_object_mut() {
+            let _ = object.remove("idempotencyKey");
+        }
+    }
+    payload
 }
 
 fn rpc_error_response(id: &str, error: RpcError) -> RpcResponse {

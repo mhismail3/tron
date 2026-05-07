@@ -234,12 +234,17 @@ first-class workers.
   remote worker hosting remain deferred.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
-- `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
-  production adapter surface. They register the transport-only `rpc`
-  compatibility worker, domain-owned in-process workers, canonical domain
-  functions for every public RPC method, non-executable `rpc::<method>`
-  transport metadata, the `json_rpc` and `manual` trigger types, and
-  `json_rpc` trigger bindings from legacy method names into canonical targets.
+- `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the
+  production JSON-RPC transport-binding surface. They register the
+  transport-only `rpc` compatibility worker, domain-owned in-process workers,
+  canonical domain functions for every legacy public RPC method,
+  non-executable `rpc::<method>` metadata, the `json_rpc` and `manual` trigger
+  types, and `json_rpc` trigger bindings from legacy method names into
+  canonical targets. The public surface now also includes `engine.discover`,
+  `engine.inspect`, `engine.watch`, `engine.invoke`, and `engine.promote` as
+  strict-schema JSON-RPC triggers over reserved `engine::*` meta-capabilities.
+  `engine.invoke` rejects `rpc::*` ids, so compatibility names cannot become
+  the agent/client future contract.
   Prompt library, settings, logs, skills, notifications, plan, approval,
   events, filesystem, session, context, job, agent, MCP, cron, git/worktree,
   auth, device, media, sandbox, lifecycle, and runtime-tail groups are now
@@ -297,7 +302,7 @@ Implemented:
   that do not hold the host lock while handler futures run, including
   structured panic capture and idempotency completion for success, handler
   error, and panic paths;
-- RPC migration bridge specs for every current RPC method, with drift guards
+- JSON-RPC transport binding specs for every public method, with drift guards
   that fail if a method is registered without classification;
 - first generic-triggered read RPC functions for `system.ping`,
   `system.getInfo`, `settings.get`, `model.list`, `skill.list`, `logs.recent`,
@@ -360,7 +365,8 @@ Implemented:
   submitAnswers` are canonical `agent::*` functions with strict schemas,
   session-scoped idempotency for writes, approval metadata where high risk, and
   stream publication for queue/prompt state; `agent.prompt` now enqueues hidden
-  `agent::prompt_apply` and prompt completion enqueues hidden
+  `agent::prompt_apply`, `agent::prompt_apply` hands off actual turn execution
+  to hidden `agent::run_turn`, and prompt completion enqueues hidden
   `agent::prompt_queue_drain`;
 - approval runtime: `approval::request/resolve/get/list` records high-risk
   agent-visible pauses in the engine ledger, publishes scoped approval stream
@@ -372,9 +378,11 @@ Implemented:
   `approval::*` primitive functions; `approval.request` intentionally remains
   agent/tool-only;
 - server runtime services: `EngineRuntimeServices` starts queue drainers for
-  `default`, `jobs`, and `agent` plus a stream pump for approvals, jobs, agent queue,
-  session events, and catalog topics so engine primitives drive runtime
-  behavior instead of staying test-only stores;
+  `default`, `jobs`, and `agent`, a stream pump for approvals, auth, settings,
+  MCP, device, cron, updates, memory, display, sandbox, jobs, agent queue,
+  session events, and catalog topics, plus a heartbeat cleanup service for
+  local external workers. Engine primitives drive runtime behavior instead of
+  staying test-only stores;
 - stream-first runtime delivery: migrated turn/runtime event classes now publish
   compatible `RpcEvent` payloads into the `events.session` engine stream before
   WebSocket delivery; the stream pump is the delivery bridge, and WebSocket is
@@ -430,10 +438,15 @@ Implemented:
   domain functions. This includes `auth.*`, `device.*`, `voiceNotes.save/delete`,
   `transcribe.audio/downloadModel`, `browser.startStream/stopStream`,
   `display.stopStream`, sandbox lifecycle, `session.resume`,
-  `system.checkForUpdates`, and `system.shutdown`. The public method count stays
-  170 and generic-trigger coverage is now 170/170. Parallel integration tests
-  no longer share auth/onboarding/updater/prompt working paths, so each server
-  boot owns isolated runtime state;
+  `system.checkForUpdates`, and `system.shutdown`. At that checkpoint the 170
+  legacy domain methods reached 170/170 marker-trigger coverage. Parallel
+  integration tests no longer share auth/onboarding/updater/prompt working
+  paths, so each server boot owns isolated runtime state;
+- canonical public engine transport: `engine.discover`, `engine.inspect`,
+  `engine.watch`, `engine.invoke`, and `engine.promote` are additive
+  strict-schema JSON-RPC methods over the reserved engine meta-capabilities.
+  Existing 170 domain method names remain compatibility aliases, public method
+  count rises to 175, and every registration is still marker-only;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,

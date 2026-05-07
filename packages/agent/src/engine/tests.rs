@@ -1710,7 +1710,7 @@ fn engine_host_bootstrap_registers_reserved_meta_capabilities_once() {
     ] {
         let function = host.catalog().function(&fid(id)).unwrap();
         assert_eq!(function.owner_worker, wid("engine"));
-        assert_eq!(function.visibility, VisibilityScope::Agent);
+        assert_eq!(function.visibility, VisibilityScope::System);
     }
 
     host.bootstrap_meta_capabilities().unwrap();
@@ -2013,7 +2013,7 @@ fn engine_host_bootstrap_repairs_stale_system_meta_contracts() {
     let host = EngineHost::from_catalog(catalog).unwrap();
     let discover = host.catalog().function(&fid("engine::discover")).unwrap();
     assert_eq!(discover.description, "discover live engine capabilities");
-    assert_eq!(discover.visibility, VisibilityScope::Agent);
+    assert_eq!(discover.visibility, VisibilityScope::System);
     assert_eq!(discover.effect_class, EffectClass::PureRead);
     assert_eq!(discover.idempotency, None);
     assert_eq!(discover.revision, FunctionRevision(2));
@@ -4030,4 +4030,58 @@ async fn local_external_worker_runtime_registers_executable_proxy_handler() {
         result.value.as_ref().unwrap()["payload"],
         json!({"hello": "worker"})
     );
+}
+
+#[tokio::test]
+async fn local_external_worker_heartbeat_timeout_unregisters_volatile_capabilities() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("local-timeout-worker");
+    runtime
+        .hello(super::WorkerHello {
+            protocol_version: super::WORKER_PROTOCOL_VERSION,
+            worker: WorkerDefinition::new(
+                worker_id.clone(),
+                WorkerKind::External,
+                actor("owner"),
+                grant("external-grant"),
+            )
+            .with_namespace_claim("timeout_local"),
+            loopback_only: true,
+        })
+        .await
+        .unwrap();
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: FunctionDefinition::new(
+                fid("timeout_local::echo"),
+                worker_id.clone(),
+                "timeout external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )
+            .with_provenance(Provenance::system().with_session_id("session-a")),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+    runtime
+        .set_last_heartbeat_for_test(
+            &worker_id,
+            chrono::Utc::now() - chrono::Duration::seconds(120),
+        )
+        .unwrap();
+
+    let expired = runtime
+        .disconnect_timed_out(std::time::Duration::from_secs(30))
+        .await
+        .unwrap();
+    assert_eq!(expired, vec![worker_id]);
+    assert!(runtime.connections().is_empty());
+    assert!(matches!(
+        handle
+            .inspect_function(&fid("timeout_local::echo"), None)
+            .await,
+        Err(EngineError::NotFound { .. })
+    ));
 }

@@ -16,36 +16,6 @@ use super::{
     RPC_AUTHORITY_GRANT, RPC_OWNER_ACTOR, RPC_READ_AUTHORITY, RPC_WORKER_ID, RPC_WRITE_AUTHORITY,
 };
 
-/// Migration state for one JSON-RPC method.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RpcMigrationState {
-    /// Current handler only; engine catalog entry is metadata/non-routable.
-    HandlerOnly,
-    /// Engine can mirror through the current handler path during validation.
-    Mirrored,
-    /// Business behavior is owned by an engine function.
-    EngineOwned,
-    /// Current method-specific handler is a thin engine adapter.
-    ThinAdapter,
-    /// Method group is served by a generic RPC-to-engine trigger.
-    GenericTrigger,
-    /// Historical method intentionally removed.
-    Removed,
-}
-
-impl RpcMigrationState {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::HandlerOnly => "handler_only",
-            Self::Mirrored => "mirrored",
-            Self::EngineOwned => "engine_owned",
-            Self::ThinAdapter => "thin_adapter",
-            Self::GenericTrigger => "generic_trigger",
-            Self::Removed => "removed",
-        }
-    }
-}
-
 /// Idempotency source for a migrated RPC method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RpcIdempotencyMode {
@@ -53,7 +23,8 @@ pub enum RpcIdempotencyMode {
     NotRequired,
     /// Temporary migration mode: JSON-RPC request id can seed the engine key.
     JsonRpcRequestIdSeed,
-    /// Final engine-native mode: caller must provide an explicit key.
+    /// Engine-native transport mode: payload contains an explicit key that is
+    /// lifted into causal context before dispatch.
     ExplicitRequired,
 }
 
@@ -67,55 +38,7 @@ impl RpcIdempotencyMode {
     }
 }
 
-/// Execution path for a migrated RPC method.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RpcExecutionPolicy {
-    /// Current handler remains the only executable implementation.
-    CurrentHandler,
-    /// Engine function delegates to the current handler path for comparison.
-    MirrorThroughHandler,
-    /// Engine function is the source of behavior.
-    EngineFunction,
-    /// Thin method-specific RPC handler calls the engine function.
-    ThinAdapter,
-    /// Generic trigger routes the request without a method-specific handler.
-    GenericTrigger,
-    /// Removed methods have no executable path.
-    Removed,
-}
-
-impl RpcExecutionPolicy {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::CurrentHandler => "current_handler",
-            Self::MirrorThroughHandler => "mirror_through_handler",
-            Self::EngineFunction => "engine_function",
-            Self::ThinAdapter => "thin_adapter",
-            Self::GenericTrigger => "generic_trigger",
-            Self::Removed => "removed",
-        }
-    }
-}
-
-/// Schema mode for a migrated RPC method.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RpcSchemaMode {
-    /// Temporary mirrored/handler-only method with an opaque JSON contract.
-    OpaqueTransition,
-    /// Engine-owned method with explicit request and response schemas.
-    StrictJson,
-}
-
-impl RpcSchemaMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::OpaqueTransition => "opaque_transition",
-            Self::StrictJson => "strict_json",
-        }
-    }
-}
-
-/// Capability classification for one RPC method.
+/// Canonical transport binding for one JSON-RPC method.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RpcCapabilitySpec {
     /// RPC method name.
@@ -126,8 +49,6 @@ pub struct RpcCapabilitySpec {
     pub owner_worker: WorkerId,
     /// Domain worker that owns the capability behavior.
     pub domain_worker: WorkerId,
-    /// Migration state.
-    pub migration_state: RpcMigrationState,
     /// Effect class.
     pub effect_class: EffectClass,
     /// Risk level.
@@ -140,10 +61,6 @@ pub struct RpcCapabilitySpec {
     pub transport_authority_scope: Option<&'static str>,
     /// Idempotency mode.
     pub idempotency_mode: RpcIdempotencyMode,
-    /// Execution policy.
-    pub execution_policy: RpcExecutionPolicy,
-    /// Schema mode.
-    pub schema_mode: RpcSchemaMode,
     /// Current handler module/group.
     pub handler_module: &'static str,
 }
@@ -151,194 +68,193 @@ pub struct RpcCapabilitySpec {
 #[derive(Clone, Copy)]
 struct RpcCapabilitySpecSeed {
     method: &'static str,
-    migration_state: RpcMigrationState,
-    schema_mode: RpcSchemaMode,
 }
 
-macro_rules! generic_trigger {
+macro_rules! transport_binding {
     ($method:literal) => {
-        RpcCapabilitySpecSeed {
-            method: $method,
-            migration_state: RpcMigrationState::GenericTrigger,
-            schema_mode: RpcSchemaMode::StrictJson,
-        }
+        RpcCapabilitySpecSeed { method: $method }
     };
 }
 
 const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
-    generic_trigger!("system.ping"),
-    generic_trigger!("system.getInfo"),
-    generic_trigger!("system.getDiagnostics"),
-    generic_trigger!("system.shutdown"),
-    generic_trigger!("system.checkForUpdates"),
-    generic_trigger!("system.getUpdateStatus"),
-    generic_trigger!("codexApp.status"),
-    generic_trigger!("blob.get"),
-    generic_trigger!("session.create"),
-    generic_trigger!("session.resume"),
-    generic_trigger!("session.list"),
-    generic_trigger!("session.delete"),
-    generic_trigger!("session.fork"),
-    generic_trigger!("session.getHead"),
-    generic_trigger!("session.getState"),
-    generic_trigger!("session.getHistory"),
-    generic_trigger!("session.reconstruct"),
-    generic_trigger!("session.archive"),
-    generic_trigger!("session.unarchive"),
-    generic_trigger!("session.archiveOlderThan"),
-    generic_trigger!("session.export"),
-    generic_trigger!("agent.prompt"),
-    generic_trigger!("agent.abort"),
-    generic_trigger!("agent.abortTool"),
-    generic_trigger!("agent.status"),
-    generic_trigger!("agent.queuePrompt"),
-    generic_trigger!("agent.dequeuePrompt"),
-    generic_trigger!("agent.clearQueue"),
-    generic_trigger!("agent.deliverSubagentResults"),
-    generic_trigger!("agent.submitConfirmation"),
-    generic_trigger!("agent.submitAnswers"),
-    generic_trigger!("model.list"),
-    generic_trigger!("model.switch"),
-    generic_trigger!("config.setReasoningLevel"),
-    generic_trigger!("context.getSnapshot"),
-    generic_trigger!("context.getDetailedSnapshot"),
-    generic_trigger!("context.previewCompaction"),
-    generic_trigger!("context.getAuditTrace"),
-    generic_trigger!("context.shouldCompact"),
-    generic_trigger!("context.confirmCompaction"),
-    generic_trigger!("context.canAcceptTurn"),
-    generic_trigger!("context.clear"),
-    generic_trigger!("context.compact"),
-    generic_trigger!("events.getHistory"),
-    generic_trigger!("events.getSince"),
-    generic_trigger!("events.subscribe"),
-    generic_trigger!("events.unsubscribe"),
-    generic_trigger!("events.append"),
-    generic_trigger!("settings.get"),
-    generic_trigger!("settings.update"),
-    generic_trigger!("settings.resetToDefaults"),
-    generic_trigger!("approval.get"),
-    generic_trigger!("approval.list"),
-    generic_trigger!("approval.resolve"),
-    generic_trigger!("auth.get"),
-    generic_trigger!("auth.update"),
-    generic_trigger!("auth.clear"),
-    generic_trigger!("auth.oauthBegin"),
-    generic_trigger!("auth.oauthComplete"),
-    generic_trigger!("auth.renameAccount"),
-    generic_trigger!("auth.setActive"),
-    generic_trigger!("auth.removeAccount"),
-    generic_trigger!("auth.removeApiKey"),
-    generic_trigger!("tool.result"),
-    generic_trigger!("message.delete"),
-    generic_trigger!("logs.ingest"),
-    generic_trigger!("logs.recent"),
-    generic_trigger!("memory.retain"),
-    generic_trigger!("mcp.status"),
-    generic_trigger!("mcp.addServer"),
-    generic_trigger!("mcp.removeServer"),
-    generic_trigger!("mcp.enableServer"),
-    generic_trigger!("mcp.disableServer"),
-    generic_trigger!("mcp.restartServer"),
-    generic_trigger!("mcp.reload"),
-    generic_trigger!("mcp.listTools"),
-    generic_trigger!("skill.list"),
-    generic_trigger!("skill.get"),
-    generic_trigger!("skill.refresh"),
-    generic_trigger!("skill.activate"),
-    generic_trigger!("skill.deactivate"),
-    generic_trigger!("skill.active"),
-    generic_trigger!("filesystem.listDir"),
-    generic_trigger!("filesystem.getHome"),
-    generic_trigger!("filesystem.createDir"),
-    generic_trigger!("file.read"),
-    generic_trigger!("tree.getVisualization"),
-    generic_trigger!("tree.getBranches"),
-    generic_trigger!("tree.getSubtree"),
-    generic_trigger!("tree.getAncestors"),
-    generic_trigger!("tree.compareBranches"),
-    generic_trigger!("import.listSources"),
-    generic_trigger!("import.listSessions"),
-    generic_trigger!("import.previewSession"),
-    generic_trigger!("import.execute"),
-    generic_trigger!("browser.startStream"),
-    generic_trigger!("browser.stopStream"),
-    generic_trigger!("browser.getStatus"),
-    generic_trigger!("display.stopStream"),
-    generic_trigger!("job.background"),
-    generic_trigger!("job.cancel"),
-    generic_trigger!("job.list"),
-    generic_trigger!("job.subscribe"),
-    generic_trigger!("job.unsubscribe"),
-    generic_trigger!("worktree.getStatus"),
-    generic_trigger!("worktree.isGitRepo"),
-    generic_trigger!("worktree.commit"),
-    generic_trigger!("worktree.merge"),
-    generic_trigger!("worktree.list"),
-    generic_trigger!("worktree.getDiff"),
-    generic_trigger!("worktree.acquire"),
-    generic_trigger!("worktree.release"),
-    generic_trigger!("worktree.listSessionBranches"),
-    generic_trigger!("worktree.getCommittedDiff"),
-    generic_trigger!("worktree.finalizeSession"),
-    generic_trigger!("worktree.deleteBranch"),
-    generic_trigger!("worktree.pruneBranches"),
-    generic_trigger!("worktree.stageFiles"),
-    generic_trigger!("worktree.unstageFiles"),
-    generic_trigger!("worktree.discardFiles"),
-    generic_trigger!("transcribe.audio"),
-    generic_trigger!("transcribe.listModels"),
-    generic_trigger!("transcribe.downloadModel"),
-    generic_trigger!("device.register"),
-    generic_trigger!("device.unregister"),
-    generic_trigger!("device.respond"),
-    generic_trigger!("plan.enter"),
-    generic_trigger!("plan.exit"),
-    generic_trigger!("plan.getState"),
-    generic_trigger!("voiceNotes.save"),
-    generic_trigger!("voiceNotes.list"),
-    generic_trigger!("voiceNotes.delete"),
-    generic_trigger!("git.clone"),
-    generic_trigger!("git.syncMain"),
-    generic_trigger!("git.push"),
-    generic_trigger!("git.listLocalBranches"),
-    generic_trigger!("git.listRemoteBranches"),
-    generic_trigger!("worktree.rebaseOnMain"),
-    generic_trigger!("worktree.startMerge"),
-    generic_trigger!("worktree.listConflicts"),
-    generic_trigger!("worktree.resolveConflict"),
-    generic_trigger!("worktree.continueMerge"),
-    generic_trigger!("worktree.abortMerge"),
-    generic_trigger!("worktree.resolveConflictsWithSubagent"),
-    generic_trigger!("repo.listSessions"),
-    generic_trigger!("repo.getDivergence"),
-    generic_trigger!("sandbox.listContainers"),
-    generic_trigger!("sandbox.startContainer"),
-    generic_trigger!("sandbox.stopContainer"),
-    generic_trigger!("sandbox.killContainer"),
-    generic_trigger!("sandbox.removeContainer"),
-    generic_trigger!("notifications.list"),
-    generic_trigger!("notifications.markRead"),
-    generic_trigger!("notifications.markAllRead"),
-    generic_trigger!("promptHistory.list"),
-    generic_trigger!("promptHistory.delete"),
-    generic_trigger!("promptHistory.clear"),
-    generic_trigger!("promptSnippet.list"),
-    generic_trigger!("promptSnippet.get"),
-    generic_trigger!("promptSnippet.create"),
-    generic_trigger!("promptSnippet.update"),
-    generic_trigger!("promptSnippet.delete"),
-    generic_trigger!("cron.list"),
-    generic_trigger!("cron.get"),
-    generic_trigger!("cron.create"),
-    generic_trigger!("cron.update"),
-    generic_trigger!("cron.delete"),
-    generic_trigger!("cron.run"),
-    generic_trigger!("cron.status"),
-    generic_trigger!("cron.getRuns"),
+    transport_binding!("engine.discover"),
+    transport_binding!("engine.inspect"),
+    transport_binding!("engine.watch"),
+    transport_binding!("engine.invoke"),
+    transport_binding!("engine.promote"),
+    transport_binding!("system.ping"),
+    transport_binding!("system.getInfo"),
+    transport_binding!("system.getDiagnostics"),
+    transport_binding!("system.shutdown"),
+    transport_binding!("system.checkForUpdates"),
+    transport_binding!("system.getUpdateStatus"),
+    transport_binding!("codexApp.status"),
+    transport_binding!("blob.get"),
+    transport_binding!("session.create"),
+    transport_binding!("session.resume"),
+    transport_binding!("session.list"),
+    transport_binding!("session.delete"),
+    transport_binding!("session.fork"),
+    transport_binding!("session.getHead"),
+    transport_binding!("session.getState"),
+    transport_binding!("session.getHistory"),
+    transport_binding!("session.reconstruct"),
+    transport_binding!("session.archive"),
+    transport_binding!("session.unarchive"),
+    transport_binding!("session.archiveOlderThan"),
+    transport_binding!("session.export"),
+    transport_binding!("agent.prompt"),
+    transport_binding!("agent.abort"),
+    transport_binding!("agent.abortTool"),
+    transport_binding!("agent.status"),
+    transport_binding!("agent.queuePrompt"),
+    transport_binding!("agent.dequeuePrompt"),
+    transport_binding!("agent.clearQueue"),
+    transport_binding!("agent.deliverSubagentResults"),
+    transport_binding!("agent.submitConfirmation"),
+    transport_binding!("agent.submitAnswers"),
+    transport_binding!("model.list"),
+    transport_binding!("model.switch"),
+    transport_binding!("config.setReasoningLevel"),
+    transport_binding!("context.getSnapshot"),
+    transport_binding!("context.getDetailedSnapshot"),
+    transport_binding!("context.previewCompaction"),
+    transport_binding!("context.getAuditTrace"),
+    transport_binding!("context.shouldCompact"),
+    transport_binding!("context.confirmCompaction"),
+    transport_binding!("context.canAcceptTurn"),
+    transport_binding!("context.clear"),
+    transport_binding!("context.compact"),
+    transport_binding!("events.getHistory"),
+    transport_binding!("events.getSince"),
+    transport_binding!("events.subscribe"),
+    transport_binding!("events.unsubscribe"),
+    transport_binding!("events.append"),
+    transport_binding!("settings.get"),
+    transport_binding!("settings.update"),
+    transport_binding!("settings.resetToDefaults"),
+    transport_binding!("approval.get"),
+    transport_binding!("approval.list"),
+    transport_binding!("approval.resolve"),
+    transport_binding!("auth.get"),
+    transport_binding!("auth.update"),
+    transport_binding!("auth.clear"),
+    transport_binding!("auth.oauthBegin"),
+    transport_binding!("auth.oauthComplete"),
+    transport_binding!("auth.renameAccount"),
+    transport_binding!("auth.setActive"),
+    transport_binding!("auth.removeAccount"),
+    transport_binding!("auth.removeApiKey"),
+    transport_binding!("tool.result"),
+    transport_binding!("message.delete"),
+    transport_binding!("logs.ingest"),
+    transport_binding!("logs.recent"),
+    transport_binding!("memory.retain"),
+    transport_binding!("mcp.status"),
+    transport_binding!("mcp.addServer"),
+    transport_binding!("mcp.removeServer"),
+    transport_binding!("mcp.enableServer"),
+    transport_binding!("mcp.disableServer"),
+    transport_binding!("mcp.restartServer"),
+    transport_binding!("mcp.reload"),
+    transport_binding!("mcp.listTools"),
+    transport_binding!("skill.list"),
+    transport_binding!("skill.get"),
+    transport_binding!("skill.refresh"),
+    transport_binding!("skill.activate"),
+    transport_binding!("skill.deactivate"),
+    transport_binding!("skill.active"),
+    transport_binding!("filesystem.listDir"),
+    transport_binding!("filesystem.getHome"),
+    transport_binding!("filesystem.createDir"),
+    transport_binding!("file.read"),
+    transport_binding!("tree.getVisualization"),
+    transport_binding!("tree.getBranches"),
+    transport_binding!("tree.getSubtree"),
+    transport_binding!("tree.getAncestors"),
+    transport_binding!("tree.compareBranches"),
+    transport_binding!("import.listSources"),
+    transport_binding!("import.listSessions"),
+    transport_binding!("import.previewSession"),
+    transport_binding!("import.execute"),
+    transport_binding!("browser.startStream"),
+    transport_binding!("browser.stopStream"),
+    transport_binding!("browser.getStatus"),
+    transport_binding!("display.stopStream"),
+    transport_binding!("job.background"),
+    transport_binding!("job.cancel"),
+    transport_binding!("job.list"),
+    transport_binding!("job.subscribe"),
+    transport_binding!("job.unsubscribe"),
+    transport_binding!("worktree.getStatus"),
+    transport_binding!("worktree.isGitRepo"),
+    transport_binding!("worktree.commit"),
+    transport_binding!("worktree.merge"),
+    transport_binding!("worktree.list"),
+    transport_binding!("worktree.getDiff"),
+    transport_binding!("worktree.acquire"),
+    transport_binding!("worktree.release"),
+    transport_binding!("worktree.listSessionBranches"),
+    transport_binding!("worktree.getCommittedDiff"),
+    transport_binding!("worktree.finalizeSession"),
+    transport_binding!("worktree.deleteBranch"),
+    transport_binding!("worktree.pruneBranches"),
+    transport_binding!("worktree.stageFiles"),
+    transport_binding!("worktree.unstageFiles"),
+    transport_binding!("worktree.discardFiles"),
+    transport_binding!("transcribe.audio"),
+    transport_binding!("transcribe.listModels"),
+    transport_binding!("transcribe.downloadModel"),
+    transport_binding!("device.register"),
+    transport_binding!("device.unregister"),
+    transport_binding!("device.respond"),
+    transport_binding!("plan.enter"),
+    transport_binding!("plan.exit"),
+    transport_binding!("plan.getState"),
+    transport_binding!("voiceNotes.save"),
+    transport_binding!("voiceNotes.list"),
+    transport_binding!("voiceNotes.delete"),
+    transport_binding!("git.clone"),
+    transport_binding!("git.syncMain"),
+    transport_binding!("git.push"),
+    transport_binding!("git.listLocalBranches"),
+    transport_binding!("git.listRemoteBranches"),
+    transport_binding!("worktree.rebaseOnMain"),
+    transport_binding!("worktree.startMerge"),
+    transport_binding!("worktree.listConflicts"),
+    transport_binding!("worktree.resolveConflict"),
+    transport_binding!("worktree.continueMerge"),
+    transport_binding!("worktree.abortMerge"),
+    transport_binding!("worktree.resolveConflictsWithSubagent"),
+    transport_binding!("repo.listSessions"),
+    transport_binding!("repo.getDivergence"),
+    transport_binding!("sandbox.listContainers"),
+    transport_binding!("sandbox.startContainer"),
+    transport_binding!("sandbox.stopContainer"),
+    transport_binding!("sandbox.killContainer"),
+    transport_binding!("sandbox.removeContainer"),
+    transport_binding!("notifications.list"),
+    transport_binding!("notifications.markRead"),
+    transport_binding!("notifications.markAllRead"),
+    transport_binding!("promptHistory.list"),
+    transport_binding!("promptHistory.delete"),
+    transport_binding!("promptHistory.clear"),
+    transport_binding!("promptSnippet.list"),
+    transport_binding!("promptSnippet.get"),
+    transport_binding!("promptSnippet.create"),
+    transport_binding!("promptSnippet.update"),
+    transport_binding!("promptSnippet.delete"),
+    transport_binding!("cron.list"),
+    transport_binding!("cron.get"),
+    transport_binding!("cron.create"),
+    transport_binding!("cron.update"),
+    transport_binding!("cron.delete"),
+    transport_binding!("cron.run"),
+    transport_binding!("cron.status"),
+    transport_binding!("cron.getRuns"),
 ];
 
-/// Build and validate the complete bridge spec set for a registry.
+/// Build and validate the complete JSON-RPC transport-binding set for a registry.
 pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabilitySpec>> {
     validate_seed_uniqueness()?;
     let registered = registry.methods().into_iter().collect::<BTreeSet<_>>();
@@ -349,29 +265,20 @@ pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabi
 
     if let Some(method) = registered.difference(&seeded).next() {
         return Err(EngineError::PolicyViolation(format!(
-            "RPC method {method} is registered without an engine bridge spec"
+            "RPC method {method} is registered without a transport binding spec"
         )));
     }
     if let Some(method) = seeded.difference(&registered).next() {
-        let seed = RPC_CAPABILITY_SEEDS
-            .iter()
-            .find(|candidate| candidate.method == method.as_str())
-            .expect("seed came from the seed list");
-        if seed.migration_state != RpcMigrationState::Removed {
-            return Err(EngineError::PolicyViolation(format!(
-                "RPC bridge spec {method} does not match a registered method"
-            )));
-        }
+        return Err(EngineError::PolicyViolation(format!(
+            "RPC transport binding {method} does not match a registered method"
+        )));
     }
 
     let mut specs = Vec::with_capacity(RPC_CAPABILITY_SEEDS.len());
     for seed in RPC_CAPABILITY_SEEDS {
-        if seed.migration_state == RpcMigrationState::Removed {
-            continue;
-        }
         let policy = registry.method_policy(seed.method).ok_or_else(|| {
             EngineError::PolicyViolation(format!(
-                "RPC bridge spec {} has no registry policy",
+                "RPC transport binding {} has no registry policy",
                 seed.method
             ))
         })?;
@@ -385,66 +292,65 @@ pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabi
                 spec.method
             )));
         }
-        if is_engine_routable(&spec) && spec.schema_mode != RpcSchemaMode::StrictJson {
+        if request_schema_for_method(spec.method).is_none()
+            || response_schema_for_method(spec.method).is_none()
+        {
             return Err(EngineError::PolicyViolation(format!(
-                "generic-triggered RPC method {} must use strict schemas",
+                "JSON-RPC transport binding {} must declare strict request/response schemas",
                 spec.method
             )));
         }
-        if is_engine_routable(&spec) {
-            if spec.effect_class.is_mutating() {
-                if spec.transport_authority_scope != Some(RPC_WRITE_AUTHORITY) {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "mutating generic-triggered RPC method {} must grant rpc.write",
-                        spec.method
-                    )));
-                }
-                if spec.authority_scope.is_none() {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "mutating generic-triggered RPC method {} must require a domain authority scope",
-                        spec.method
-                    )));
-                }
-                if spec.idempotency_mode == RpcIdempotencyMode::NotRequired {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "mutating generic-triggered RPC method {} lacks idempotency",
-                        spec.method
-                    )));
-                }
-                if spec.risk_level >= RiskLevel::High
-                    && high_risk_contract_for_method(spec.method).is_none()
-                {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "high-risk generic-triggered RPC method {} lacks a high-risk contract",
-                        spec.method
-                    )));
-                }
-                let definition = function_definition_for_spec(&spec);
-                if spec.risk_level >= RiskLevel::High && definition.compensation.is_none() {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "high-risk generic-triggered RPC method {} lacks typed compensation metadata",
-                        spec.method
-                    )));
-                }
-                if requires_resource_lease_metadata(spec.method)
-                    && definition.resource_lease.is_none()
-                {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "generic-triggered RPC method {} lacks typed resource lease metadata",
-                        spec.method
-                    )));
-                }
-            } else if spec.transport_authority_scope != Some(RPC_READ_AUTHORITY) {
+        if spec.effect_class.is_mutating() {
+            if spec.transport_authority_scope != Some(RPC_WRITE_AUTHORITY) {
                 return Err(EngineError::PolicyViolation(format!(
-                    "read generic-triggered RPC method {} must grant rpc.read",
-                    spec.method
-                )));
-            } else if spec.authority_scope.is_none() {
-                return Err(EngineError::PolicyViolation(format!(
-                    "read generic-triggered RPC method {} must require a domain authority scope",
+                    "mutating JSON-RPC transport binding {} must grant rpc.write",
                     spec.method
                 )));
             }
+            if spec.authority_scope.is_none() {
+                return Err(EngineError::PolicyViolation(format!(
+                    "mutating JSON-RPC transport binding {} must require a domain authority scope",
+                    spec.method
+                )));
+            }
+            if spec.idempotency_mode == RpcIdempotencyMode::NotRequired {
+                return Err(EngineError::PolicyViolation(format!(
+                    "mutating JSON-RPC transport binding {} lacks idempotency",
+                    spec.method
+                )));
+            }
+            if spec.risk_level >= RiskLevel::High
+                && high_risk_contract_for_method(spec.method).is_none()
+            {
+                return Err(EngineError::PolicyViolation(format!(
+                    "high-risk JSON-RPC transport binding {} lacks a high-risk contract",
+                    spec.method
+                )));
+            }
+            let definition = function_definition_for_spec(&spec);
+            if spec.risk_level >= RiskLevel::High && definition.compensation.is_none() {
+                return Err(EngineError::PolicyViolation(format!(
+                    "high-risk JSON-RPC transport binding {} lacks typed compensation metadata",
+                    spec.method
+                )));
+            }
+            if requires_resource_lease_metadata(spec.method) && definition.resource_lease.is_none()
+            {
+                return Err(EngineError::PolicyViolation(format!(
+                    "JSON-RPC transport binding {} lacks typed resource lease metadata",
+                    spec.method
+                )));
+            }
+        } else if spec.transport_authority_scope != Some(RPC_READ_AUTHORITY) {
+            return Err(EngineError::PolicyViolation(format!(
+                "read JSON-RPC transport binding {} must grant rpc.read",
+                spec.method
+            )));
+        } else if spec.authority_scope.is_none() {
+            return Err(EngineError::PolicyViolation(format!(
+                "read JSON-RPC transport binding {} must require a domain authority scope",
+                spec.method
+            )));
         }
         specs.push(spec);
     }
@@ -461,9 +367,6 @@ pub(super) fn capability_spec_for_method(
     else {
         return Ok(None);
     };
-    if seed.migration_state == RpcMigrationState::Removed {
-        return Ok(None);
-    }
     let Some(policy) = registry.method_policy(method) else {
         return Ok(None);
     };
@@ -471,16 +374,20 @@ pub(super) fn capability_spec_for_method(
 }
 
 pub(super) fn is_engine_routable(spec: &RpcCapabilitySpec) -> bool {
-    matches!(
-        spec.execution_policy,
-        RpcExecutionPolicy::ThinAdapter | RpcExecutionPolicy::GenericTrigger
-    )
+    !uses_existing_engine_primitive(spec)
 }
 
 pub(super) fn uses_existing_engine_primitive(spec: &RpcCapabilitySpec) -> bool {
     matches!(
         spec.function_id.as_str(),
-        "approval::get" | "approval::list" | "approval::resolve"
+        "engine::discover"
+            | "engine::inspect"
+            | "engine::watch"
+            | "engine::invoke"
+            | "engine::promote"
+            | "approval::get"
+            | "approval::list"
+            | "approval::resolve"
     )
 }
 
@@ -489,7 +396,7 @@ fn validate_seed_uniqueness() -> EngineResult<()> {
     for seed in RPC_CAPABILITY_SEEDS {
         if !seen.insert(seed.method) {
             return Err(EngineError::PolicyViolation(format!(
-                "duplicate RPC bridge spec for {}",
+                "duplicate RPC transport binding spec for {}",
                 seed.method
             )));
         }
@@ -501,61 +408,45 @@ fn spec_from_seed(
     seed: RpcCapabilitySpecSeed,
     policy: HandlerExecutionPolicy,
 ) -> EngineResult<RpcCapabilitySpec> {
-    let execution_policy = match seed.migration_state {
-        RpcMigrationState::HandlerOnly => RpcExecutionPolicy::CurrentHandler,
-        RpcMigrationState::Mirrored => RpcExecutionPolicy::MirrorThroughHandler,
-        RpcMigrationState::EngineOwned => RpcExecutionPolicy::EngineFunction,
-        RpcMigrationState::ThinAdapter => RpcExecutionPolicy::ThinAdapter,
-        RpcMigrationState::GenericTrigger => RpcExecutionPolicy::GenericTrigger,
-        RpcMigrationState::Removed => RpcExecutionPolicy::Removed,
-    };
-    let is_routable = matches!(
-        seed.migration_state,
-        RpcMigrationState::ThinAdapter | RpcMigrationState::GenericTrigger
-    );
     let effect_class = effect_class_for_method(seed.method, policy);
-    let visibility = if is_routable {
-        VisibilityScope::System
-    } else {
-        VisibilityScope::Internal
-    };
-    let owner_worker = if is_routable {
-        domain_worker_for_method(seed.method)?
-    } else {
-        worker_id(RPC_WORKER_ID)?
-    };
+    let visibility = VisibilityScope::System;
+    let owner_worker = domain_worker_for_method(seed.method)?;
     Ok(RpcCapabilitySpec {
         method: seed.method,
-        function_id: if is_routable {
-            function_id_for_method(seed.method)?
-        } else {
-            compat_function_id_for_method(seed.method)?
-        },
+        function_id: function_id_for_method(seed.method)?,
         owner_worker: owner_worker.clone(),
         domain_worker: domain_worker_for_method(seed.method)?,
-        migration_state: seed.migration_state,
         effect_class,
         risk_level: risk_for_method(seed.method, effect_class),
         visibility,
-        authority_scope: is_routable
-            .then_some(domain_authority_scope_for_method(seed.method, effect_class)),
-        transport_authority_scope: is_routable.then_some(if effect_class.is_mutating() {
+        authority_scope: Some(domain_authority_scope_for_method(seed.method, effect_class)),
+        transport_authority_scope: Some(if effect_class.is_mutating() {
             RPC_WRITE_AUTHORITY
         } else {
             RPC_READ_AUTHORITY
         }),
-        idempotency_mode: if effect_class.is_mutating() {
-            RpcIdempotencyMode::JsonRpcRequestIdSeed
-        } else {
-            RpcIdempotencyMode::NotRequired
-        },
-        execution_policy,
-        schema_mode: seed.schema_mode,
+        idempotency_mode: idempotency_mode_for_method(seed.method, effect_class),
         handler_module: handler_module_for_method(seed.method),
     })
 }
 
+fn idempotency_mode_for_method(method: &str, effect_class: EffectClass) -> RpcIdempotencyMode {
+    if method == "engine.promote" {
+        RpcIdempotencyMode::ExplicitRequired
+    } else if effect_class.is_mutating() {
+        RpcIdempotencyMode::JsonRpcRequestIdSeed
+    } else {
+        RpcIdempotencyMode::NotRequired
+    }
+}
+
 fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> EffectClass {
+    if method == "engine.invoke" {
+        return EffectClass::DelegatedInvocation;
+    }
+    if method == "engine.promote" {
+        return EffectClass::IdempotentWrite;
+    }
     if policy != HandlerExecutionPolicy::Mutating {
         return EffectClass::PureRead;
     }
@@ -642,6 +533,8 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
 fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
     if matches!(method, "git.push" | "system.shutdown") {
         RiskLevel::Critical
+    } else if method == "engine.promote" {
+        RiskLevel::Medium
     } else if matches!(
         method,
         "auth.update"
@@ -733,15 +626,11 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
     if let Some(contract) = compensation_contract_for_method(spec.method, spec.effect_class) {
         definition = definition.with_compensation(contract);
     }
-    if spec.schema_mode == RpcSchemaMode::StrictJson {
-        if let Some(request_schema) = request_schema_for_method(spec.method) {
-            definition = definition.with_request_schema(request_schema);
-        }
-        if let Some(response_schema) = response_schema_for_method(spec.method) {
-            definition = definition.with_response_schema(response_schema);
-        }
-    } else {
-        definition.opaque_response = true;
+    if let Some(request_schema) = request_schema_for_method(spec.method) {
+        definition = definition.with_request_schema(request_schema);
+    }
+    if let Some(response_schema) = response_schema_for_method(spec.method) {
+        definition = definition.with_response_schema(response_schema);
     }
     definition.metadata = json!({
         "transport": "json_rpc",
@@ -751,9 +640,7 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
         "domainWorker": spec.domain_worker.as_str(),
         "canonicalCapability": spec.function_id.as_str(),
         "domainAuthorityScope": spec.authority_scope,
-        "migrationState": spec.migration_state.as_str(),
-        "executionPolicy": spec.execution_policy.as_str(),
-        "schemaMode": spec.schema_mode.as_str(),
+        "transportBinding": "json_rpc",
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "handlerModule": spec.handler_module,
         "highRiskContract": high_risk_contract_for_method(spec.method),
@@ -762,7 +649,9 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
 }
 
 fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
-    if method.starts_with("logs.")
+    if method == "engine.promote" {
+        IdempotencyContract::caller_session_engine_ledger()
+    } else if method.starts_with("logs.")
         || method.starts_with("mcp.")
         || method == "filesystem.createDir"
         || method == "job.unsubscribe"
@@ -796,7 +685,8 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
 fn settings_write_requires_approval(method: &str) -> bool {
     matches!(
         method,
-        "settings.update"
+        "engine.promote"
+            | "settings.update"
             | "settings.resetToDefaults"
             | "context.confirmCompaction"
             | "context.compact"
@@ -1280,9 +1170,6 @@ pub(super) fn cron_schedule_trigger_type() -> EngineResult<TriggerTypeDefinition
 pub(super) fn json_rpc_trigger_for_spec(
     spec: &RpcCapabilitySpec,
 ) -> EngineResult<Option<TriggerDefinition>> {
-    if !is_engine_routable(spec) {
-        return Ok(None);
-    }
     let mut trigger = TriggerDefinition::new(
         json_rpc_trigger_id_for_method(spec.method)?,
         worker_id(RPC_WORKER_ID)?,
@@ -1319,6 +1206,7 @@ pub(super) fn canonical_function_id_for_method(method: &str) -> EngineResult<Fun
 
 fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
     worker_id(match method {
+        method if method.starts_with("engine.") => "engine",
         method if method.starts_with("settings.") => "settings",
         method if method.starts_with("logs.") => "logs",
         method if method.starts_with("memory.") => "memory",
@@ -1367,6 +1255,11 @@ fn canonical_capability_for_method(method: &str) -> String {
 
 fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
     match method {
+        "engine.discover" => ("engine", "discover".to_owned()),
+        "engine.inspect" => ("engine", "inspect".to_owned()),
+        "engine.watch" => ("engine", "watch".to_owned()),
+        "engine.invoke" => ("engine", "invoke".to_owned()),
+        "engine.promote" => ("engine", "promote".to_owned()),
         "system.ping" => ("system", "ping".to_owned()),
         "system.getInfo" => ("system", "get_info".to_owned()),
         "system.getDiagnostics" => ("system", "get_diagnostics".to_owned()),
@@ -1583,6 +1476,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "worktree" => "worktree",
                     "settings" => "settings",
                     "system" => "system",
+                    "engine" => "engine",
                     _ => RPC_WORKER_ID,
                 };
                 (namespace, operation.to_owned())
@@ -1607,6 +1501,8 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
     ) {
         (Some("system"), "read") => "system.read",
         (Some("system"), "write") => "system.write",
+        (Some("engine"), "read") => "engine.read",
+        (Some("engine"), "write") => "engine.promote.workspace",
         (Some("model"), "read") => "model.read",
         (Some("model"), "write") => "model.write",
         (Some("config"), "read") => "config.read",
@@ -1711,6 +1607,7 @@ fn handler_module_for_method(method: &str) -> &'static str {
             "cron" => "cron",
             "device" => "device",
             "display" => "display",
+            "engine" => "engine",
             "events" => "events",
             "git" => "git_workflow",
             "import" => "import",

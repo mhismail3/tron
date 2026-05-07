@@ -326,7 +326,9 @@ Source-control operations are now canonical engine capabilities as well as iOS S
 
 ## RPC API
 
-Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **170 methods** across three groups.
+Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **175 methods** across three groups.
+
+The five `engine.*` methods are the canonical public capability transport. Existing domain method names such as `agent.prompt` and `settings.update` remain wire-compatible compatibility aliases; under the hood every public method is a `json_rpc` trigger into a canonical `namespace::function` engine capability.
 
 ### Connection
 
@@ -359,10 +361,11 @@ These fields are additive; older clients that ignore them continue to work uncha
 - `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
 - `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/internal/run/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
 
-### Core (68)
+### Core (73)
 
 | Group | Count | Methods |
 |-------|------:|---------|
+| `engine` | 5 | `engine.discover`, `engine.inspect`, `engine.watch`, `engine.invoke`, `engine.promote` |
 | `system` | 6 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.checkForUpdates`, `system.getUpdateStatus` |
 | `codexApp` | 1 | `codexApp.status` |
 | `blob` | 1 | `blob.get` |

@@ -23,11 +23,15 @@ registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
 ## RPC surface
 
 The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
-170 methods. The exploration branch now registers a `rpc` transport
-compatibility worker, domain-owned in-process workers for migrated groups,
-canonical domain functions for all public methods, non-executable
-`rpc::<method>` transport metadata, and `json_rpc` trigger bindings from the
-legacy method names into canonical functions.
+175 methods. Five `engine.*` methods are the canonical public capability
+transport for discovery, inspection, watch cursors, delegated invocation, and
+promotion. The older 170 domain method names remain wire-compatible aliases.
+The exploration branch registers a `rpc` transport compatibility worker,
+domain-owned in-process workers, canonical domain functions for every public
+legacy method, non-executable `rpc::<method>` transport metadata, and
+`json_rpc` trigger bindings from the legacy method names into canonical
+functions. `engine.invoke` rejects `rpc::*` ids so agents and newer clients use
+the canonical `namespace::function` surface instead of compatibility metadata.
 
 Fully collapsed groups now include prompt library, settings, logs, MCP, skills,
 notifications, plan, events, approval get/list/resolve, job controls, all
@@ -48,6 +52,7 @@ answers are explicit enough to test.
 
 | Prefix | Count | Future mapping | Default visibility | Effect/idempotency | Authority and causality |
 |--------|------:|----------------|--------------------|--------------------|-------------------------|
+| `engine` | 5 | Canonical public transport over reserved `engine::*` meta-capabilities: discover, inspect, watch, invoke, promote. | Client/agent/user/admin according to target visibility and authority. | Discovery/watch/inspect are reads; invoke is delegated and inherits target idempotency; promote is an audited idempotent visibility mutation. | Rejects `rpc::*`, records parent/child invocation causality, promotion authority, catalog revision, expected function revision, explicit idempotency, and catalog-change stream records. |
 | `system` | 6 | Fully generic-triggered `system::*` functions, including shutdown and active update checks. | Client/admin/system. | Status/update reads are pure; shutdown is a critical idempotent lifecycle side effect with approval metadata. | Trace client/system actor, update fetcher outcomes, shutdown acknowledgement, resource leases, and lifecycle stream effects. |
 | `codexApp` | 1 | `codex_app::status` is a generic-triggered status function. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
 | `blob` | 1 | `blob::get` is a generic-triggered read. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |

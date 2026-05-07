@@ -182,7 +182,7 @@ Acceptance:
   host.
 - RPC method registration count and wire behavior remain unchanged.
 
-## Phase 1.95: host hardening and RPC migration bridge
+## Phase 1.95: host hardening and JSON-RPC transport bindings
 
 Harden the host boundary, then make JSON-RPC an explicit migration surface
 rather than an untracked parallel layer.
@@ -197,16 +197,17 @@ Deliverables:
   records finish under lock.
 - Handler panics are caught and stored as structured engine errors so
   idempotency replay does not rerun a panicking mutating function.
-- `rpc` compatibility worker with classified specs for every registered
-  JSON-RPC method, non-executable `rpc::<method>` transport metadata, and
-  canonical domain function ids for migrated methods.
-- `RpcCapabilitySpec` metadata for every method: method name, executable or
-  compatibility function id, canonical domain owner, migration state, effect
-  class, risk, visibility, transport authority, domain authority, idempotency
-  mode, execution policy, schema mode, and handler module.
-- Drift guards: a registered method without a spec fails; a spec without a
-  registered method fails unless it is marked removed; agent-visible mutating
-  methods require idempotency.
+- `rpc` compatibility worker with classified transport specs for every
+  registered JSON-RPC method, non-executable `rpc::<method>` transport
+  metadata, and canonical domain function ids.
+- `RpcCapabilitySpec` metadata for every method: legacy method name,
+  canonical function id, trigger id, canonical domain owner, effect class,
+  risk, visibility, transport authority, domain authority, idempotency source,
+  strict schemas, stream/lease/compensation contracts, and handler-module
+  provenance.
+- Drift guards: a registered method without a transport spec fails, a spec
+  without a registered method fails, and agent-visible mutating methods require
+  idempotency.
 - Before full collapse, handler-owned methods were internal and non-routable
   through the engine until their behavior migrated; after WP85-WP96 the public
   inventory is fully generic-triggered.
@@ -217,11 +218,13 @@ Acceptance:
   host handle.
 - Success, handler error, panic, missing-function, schema, policy, and
   idempotency replay paths all produce invocation records.
-- All 170 current JSON-RPC methods have bridge specs.
-- The bridge is explicitly temporary: historical `HandlerOnly` / `EngineOwned`
-  / `ThinAdapter` checkpoints are no longer acceptable for public RPC
-  behavior. Completed groups end at `GenericTrigger` with old production
-  handlers removed.
+- All public JSON-RPC methods have transport specs. After the canonical
+  engine transport methods land, that means 175 registered methods: five
+  `engine.*` methods plus 170 legacy compatibility aliases.
+- Historical `HandlerOnly` / `Mirrored` / `EngineOwned` / `ThinAdapter`
+  checkpoints are gone from production. Every public method is a marker
+  `json_rpc` trigger over a canonical engine function or reserved engine
+  meta-capability, with old production handlers removed.
 - A migration package is incomplete unless it advances at least one method
   group and deletes any superseded method-specific business logic. Mirroring,
   thin adapters, or fallback paths are only acceptable as short-lived parity
@@ -626,7 +629,8 @@ surface into long-running server behavior:
 
 Acceptance:
 
-- public JSON-RPC count is 170 and every method has exactly one bridge spec;
+- public JSON-RPC count is 170 and every method has exactly one transport
+  binding spec;
 - generic-trigger count rises from 66 to 75;
 - approval resolution is user/system/admin-gated and preserves original
   approval causality;
@@ -662,8 +666,8 @@ the remaining method-specific agent handler path:
 
 Acceptance:
 
-- public JSON-RPC count remains 170 and every method has exactly one bridge
-  spec;
+- public JSON-RPC count remains 170 and every method has exactly one transport
+  binding spec;
 - generic-trigger count rises from 75 to 76;
 - all current agent control methods are generic-triggered marker
   registrations;
@@ -876,20 +880,62 @@ Delivered:
   JSON-RPC wire behavior while adding strict schemas, domain write authority,
   idempotency, resource leases, stream topics, and approval metadata where
   autonomous agents would otherwise perform high-risk effects.
-- Generic-trigger coverage is now 170/170 while the public JSON-RPC method
-  count remains 170.
+- The 170 legacy domain methods reached 170/170 marker-trigger coverage before
+  the additive `engine.*` transport methods raised the current public method
+  count to 175.
 
 Acceptance gates:
 
 - Every public registration in `server/rpc/handlers/mod.rs` is a
   `RpcGenericTriggerHandler` marker.
-- Every public method has exactly one bridge spec and one canonical function
-  mapping.
+- Every public method has exactly one transport binding and one canonical
+  function mapping.
 - No mutating generic trigger can register without strict schemas, domain
   authority, idempotency, risk metadata, approval metadata when required,
   resource leases for shared resources, stream topics, and compensation notes.
 - Legacy handler modules compile only as test fixtures where needed for parity;
   production execution is canonical engine function execution.
+
+### WP97-WP108 canonical capability API and transport cleanup
+
+The next layer after full RPC tail collapse exposes the canonical engine
+surface directly instead of treating legacy method names as the future API:
+
+- `engine.discover`, `engine.inspect`, `engine.watch`, `engine.invoke`, and
+  `engine.promote` are additive public JSON-RPC triggers over the reserved
+  `engine::*` meta-capabilities, raising the public method count from 170 to
+  175;
+- the old 170 method names remain compatibility aliases over canonical
+  `namespace::function` ids, while `engine.invoke` rejects `rpc::*`
+  compatibility ids so callers cannot build new workflows on transport
+  metadata;
+- `RpcMigrationState`, thin/mirrored/handler-only branches, and schema/execution
+  migration modes are removed from production specs. The remaining spec model
+  is a transport binding: method name, canonical function id, trigger id,
+  transport/domain authority, idempotency source, strict schemas, effect/risk
+  metadata, and provenance;
+- stream ownership tightens for migrated direct-broadcast classes. Auth,
+  settings/MCP status, device, cron/update, memory, display, sandbox, jobs,
+  agent queue, session-event, approval, and catalog topics flow through the
+  engine stream pump when stream publication succeeds, with direct WebSocket
+  fallback reserved for publish failure or unmigrated event classes;
+- `agent::prompt_apply` now hands actual turn execution to hidden
+  `agent::run_turn`, which records run/turn metadata and starts the existing
+  provider runtime without changing the `{ acknowledged: true, runId }`
+  transport contract;
+- local external workers gain heartbeat-timeout cleanup so volatile
+  session-scoped functions/triggers unregister automatically when a loopback
+  worker disappears.
+
+Acceptance gates:
+
+- all 175 registered methods have exactly one transport binding;
+- every registration is marker-only;
+- direct `engine.*` JSON-RPC dispatch matches the reserved meta-capability
+  behavior;
+- legacy JSON-RPC wire behavior remains unchanged;
+- `rpc::*` compatibility ids are never discoverable as the primary
+  agent/client capability surface and are rejected by `engine.invoke`.
 
 ## Phase 7: tools, MCP, approvals, and effects
 

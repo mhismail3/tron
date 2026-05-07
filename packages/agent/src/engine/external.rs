@@ -3,13 +3,17 @@
 //! This is deliberately loopback-only and protocol-bound. It gives tests and
 //! future local worker processes a small runtime for registering volatile
 //! session-scoped functions/triggers, receiving catalog snapshots, heartbeat
-//! liveness, and disconnect cleanup without opening remote execution or
-//! sandboxing yet.
+//! liveness, timeout-driven cleanup, and disconnect cleanup without opening
+//! remote execution or sandboxing yet. Volatile registrations disappear on
+//! disconnect or missed heartbeats so agents never discover stale local
+//! capabilities as runnable.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
@@ -40,6 +44,8 @@ pub struct ExternalWorkerConnection {
     pub owner_actor: ActorId,
     /// Last heartbeat sequence.
     pub heartbeat_sequence: u64,
+    /// Last accepted heartbeat/hello timestamp.
+    pub last_heartbeat_at: DateTime<Utc>,
     /// Protocol is loopback/local only.
     pub loopback_only: bool,
     /// Registered function ids.
@@ -106,6 +112,7 @@ impl EngineExternalWorkerRuntime {
                 worker_id: worker_id.clone(),
                 owner_actor,
                 heartbeat_sequence: 0,
+                last_heartbeat_at: Utc::now(),
                 loopback_only: true,
                 functions: BTreeSet::new(),
                 triggers: BTreeSet::new(),
@@ -218,7 +225,33 @@ impl EngineExternalWorkerRuntime {
             )));
         }
         connection.heartbeat_sequence = heartbeat.sequence;
+        connection.last_heartbeat_at = Utc::now();
         Ok(())
+    }
+
+    /// Disconnect workers whose heartbeat timestamp is older than `timeout`.
+    pub async fn disconnect_timed_out(&mut self, timeout: Duration) -> Result<Vec<WorkerId>> {
+        let now = Utc::now();
+        let expired = self
+            .connections
+            .values()
+            .filter(|connection| {
+                let age = now
+                    .signed_duration_since(connection.last_heartbeat_at)
+                    .to_std()
+                    .unwrap_or(Duration::ZERO);
+                age > timeout
+            })
+            .map(|connection| connection.worker_id.clone())
+            .collect::<Vec<_>>();
+        for worker_id in &expired {
+            self.disconnect(WorkerDisconnect {
+                worker_id: worker_id.clone(),
+                reason: "heartbeat timeout".to_owned(),
+            })
+            .await?;
+        }
+        Ok(expired)
     }
 
     /// Disconnect a worker and unregister its volatile registrations.
@@ -251,6 +284,17 @@ impl EngineExternalWorkerRuntime {
     #[must_use]
     pub fn connections(&self) -> Vec<WorkerId> {
         self.connections.keys().cloned().collect()
+    }
+
+    /// Test helper for deterministic heartbeat-expiry coverage.
+    #[cfg(test)]
+    pub fn set_last_heartbeat_for_test(
+        &mut self,
+        worker_id: &WorkerId,
+        last_heartbeat_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.connection_mut(worker_id)?.last_heartbeat_at = last_heartbeat_at;
+        Ok(())
     }
 
     async fn catalog_snapshot_for(&self, worker_id: &WorkerId) -> CatalogSnapshot {

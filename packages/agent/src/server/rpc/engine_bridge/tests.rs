@@ -205,6 +205,14 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "worktree.resolveConflictsWithSubagent",
 ];
 
+const ENGINE_TRANSPORT_METHODS: &[&str] = &[
+    "engine.discover",
+    "engine.inspect",
+    "engine.watch",
+    "engine.invoke",
+    "engine.promote",
+];
+
 const SETTINGS_METHODS: &[&str] = &[
     "settings.get",
     "settings.update",
@@ -879,11 +887,11 @@ fn assert_scope(scopes: &[String], scope: &str) {
 }
 
 #[test]
-fn bridge_specs_cover_every_registered_rpc_method() {
+fn transport_bindings_cover_every_registered_rpc_method() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
-    assert_eq!(registry.methods().len(), 170);
+    assert_eq!(registry.methods().len(), 175);
     assert_eq!(specs.len(), registry.methods().len());
 
     let spec_methods = specs
@@ -893,12 +901,13 @@ fn bridge_specs_cover_every_registered_rpc_method() {
     let registry_methods = registry.methods().into_iter().collect::<BTreeSet<_>>();
     assert_eq!(spec_methods, registry_methods);
     assert_eq!(
-        GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(),
-        170
+        GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len() + ENGINE_TRANSPORT_METHODS.len(),
+        175
     );
     for method in GENERIC_READ_METHODS
         .iter()
         .chain(GENERIC_WRITE_METHODS.iter())
+        .chain(ENGINE_TRANSPORT_METHODS.iter())
     {
         assert!(
             registry.is_generic_trigger_marker(method),
@@ -908,16 +917,101 @@ fn bridge_specs_cover_every_registered_rpc_method() {
 }
 
 #[test]
-fn bridge_specs_classify_selected_reads_as_generic_triggers() {
+fn transport_specs_expose_canonical_engine_api_methods() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in ENGINE_TRANSPORT_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.owner_worker, specs::worker_id("engine").unwrap());
+        assert_eq!(spec.domain_worker, specs::worker_id("engine").unwrap());
+        assert_eq!(
+            spec.function_id,
+            specs::function_id_for_method(method).unwrap()
+        );
+        assert_eq!(spec.visibility, VisibilityScope::System);
+        assert!(registry.is_generic_trigger_marker(method));
+        assert!(super::schemas::request_schema_for_method(method).is_some());
+        assert!(super::schemas::response_schema_for_method(method).is_some());
+    }
+
+    let invoke = specs
+        .iter()
+        .find(|spec| spec.method == "engine.invoke")
+        .unwrap();
+    assert_eq!(invoke.effect_class, EffectClass::DelegatedInvocation);
+    assert_eq!(invoke.risk_level, RiskLevel::Low);
+    assert_eq!(invoke.transport_authority_scope, Some(RPC_READ_AUTHORITY));
+    assert_eq!(invoke.authority_scope, Some("engine.read"));
+    assert_eq!(invoke.idempotency_mode, RpcIdempotencyMode::NotRequired);
+
+    let promote = specs
+        .iter()
+        .find(|spec| spec.method == "engine.promote")
+        .unwrap();
+    assert_eq!(promote.effect_class, EffectClass::IdempotentWrite);
+    assert_eq!(promote.risk_level, RiskLevel::Medium);
+    assert_eq!(promote.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+    assert_eq!(promote.authority_scope, Some("engine.promote.workspace"));
+    assert_eq!(
+        promote.idempotency_mode,
+        RpcIdempotencyMode::ExplicitRequired
+    );
+}
+
+#[tokio::test]
+async fn engine_json_rpc_transport_methods_route_to_meta_capabilities() {
+    let ctx = make_test_context();
+    let discovered = rpc_dispatch_value(&ctx, "engine.discover", json!({})).await;
+    assert!(
+        discovered["functions"]
+            .as_array()
+            .is_some_and(|functions| functions
+                .iter()
+                .any(|function| function["id"] == "system::ping")),
+        "engine.discover must expose canonical ids, got {discovered:?}"
+    );
+
+    let inspected = rpc_dispatch_value(
+        &ctx,
+        "engine.inspect",
+        json!({"kind": "function", "id": "system::ping"}),
+    )
+    .await;
+    assert_eq!(inspected["definition"]["id"], "system::ping");
+
+    let invoked = rpc_dispatch_value(
+        &ctx,
+        "engine.invoke",
+        json!({
+            "functionId": "system::ping",
+            "payload": {"protocolVersion": 1}
+        }),
+    )
+    .await;
+    assert_eq!(invoked["child"]["value"]["pong"], true);
+
+    let rejected = rpc_dispatch_error_body(
+        &ctx,
+        "engine.invoke",
+        json!({
+            "functionId": "rpc::system.ping",
+            "payload": {"protocolVersion": 1}
+        }),
+    )
+    .await;
+    assert_eq!(rejected["code"], errors::INVALID_PARAMS);
+}
+
+#[test]
+fn transport_bindings_classify_selected_reads_as_generic_triggers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
     for method in GENERIC_READ_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
         assert_eq!(spec.effect_class, EffectClass::PureRead);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert_eq!(spec.visibility, VisibilityScope::System);
         assert_eq!(spec.transport_authority_scope, Some(RPC_READ_AUTHORITY));
         assert!(
@@ -937,16 +1031,13 @@ fn bridge_specs_classify_selected_reads_as_generic_triggers() {
 }
 
 #[test]
-fn bridge_specs_classify_generic_writes_as_generic_triggers() {
+fn transport_bindings_classify_generic_writes_as_generic_triggers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
     for method in GENERIC_WRITE_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
         assert!(spec.effect_class.is_mutating());
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert_eq!(spec.visibility, VisibilityScope::System);
         assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
         let expected_write_scope = if *method == "approval.resolve" {
@@ -983,7 +1074,7 @@ fn bridge_specs_classify_generic_writes_as_generic_triggers() {
 }
 
 #[test]
-fn bridge_specs_classify_agent_prompt_as_queue_backed_engine_prompt() {
+fn transport_bindings_classify_agent_prompt_as_queue_backed_engine_prompt() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -991,9 +1082,6 @@ fn bridge_specs_classify_agent_prompt_as_queue_backed_engine_prompt() {
         .iter()
         .find(|spec| spec.method == "agent.prompt")
         .unwrap();
-
-    assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-    assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
     assert_eq!(spec.function_id, FunctionId::new("agent::prompt").unwrap());
     assert_eq!(spec.owner_worker, specs::worker_id("agent").unwrap());
     assert_eq!(spec.effect_class, EffectClass::ExternalSideEffect);
@@ -1025,16 +1113,13 @@ fn bridge_specs_classify_agent_prompt_as_queue_backed_engine_prompt() {
 }
 
 #[test]
-fn bridge_specs_classify_prompt_library_as_fully_generic_triggered() {
+fn transport_bindings_classify_prompt_library_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for method in PROMPT_LIBRARY_METHODS {
-        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
             registry.is_generic_trigger_marker(method),
             "{method} must be marker-registered, not method-specific business logic"
@@ -1043,7 +1128,7 @@ fn bridge_specs_classify_prompt_library_as_fully_generic_triggered() {
 }
 
 #[test]
-fn bridge_specs_classify_prompt_history_writes_as_guarded_irreversible_triggers() {
+fn transport_bindings_classify_prompt_history_writes_as_guarded_irreversible_triggers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1066,16 +1151,13 @@ fn bridge_specs_classify_prompt_history_writes_as_guarded_irreversible_triggers(
 }
 
 #[test]
-fn bridge_specs_classify_settings_as_fully_generic_triggered() {
+fn transport_bindings_classify_settings_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for method in SETTINGS_METHODS {
-        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
             registry.is_generic_trigger_marker(method),
             "{method} must be marker-registered, not method-specific business logic"
@@ -1084,7 +1166,7 @@ fn bridge_specs_classify_settings_as_fully_generic_triggered() {
 }
 
 #[test]
-fn bridge_specs_classify_settings_writes_as_guarded_reversible_triggers() {
+fn transport_bindings_classify_settings_writes_as_guarded_reversible_triggers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1114,16 +1196,13 @@ fn bridge_specs_classify_settings_writes_as_guarded_reversible_triggers() {
 }
 
 #[test]
-fn bridge_specs_classify_logs_as_fully_generic_triggered() {
+fn transport_bindings_classify_logs_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for method in LOGS_METHODS {
-        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
             registry.is_generic_trigger_marker(method),
             "{method} must be marker-registered, not method-specific business logic"
@@ -1132,7 +1211,7 @@ fn bridge_specs_classify_logs_as_fully_generic_triggered() {
 }
 
 #[test]
-fn bridge_specs_classify_logs_ingest_as_guarded_append_only_trigger() {
+fn transport_bindings_classify_logs_ingest_as_guarded_append_only_trigger() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1163,16 +1242,13 @@ fn bridge_specs_classify_logs_ingest_as_guarded_append_only_trigger() {
 }
 
 #[test]
-fn bridge_specs_classify_mcp_as_fully_generic_triggered() {
+fn transport_bindings_classify_mcp_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for method in MCP_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert_eq!(spec.owner_worker, specs::worker_id("mcp").unwrap());
         assert_eq!(spec.domain_worker, specs::worker_id("mcp").unwrap());
         assert!(
@@ -1185,7 +1261,7 @@ fn bridge_specs_classify_mcp_as_fully_generic_triggered() {
 }
 
 #[test]
-fn bridge_specs_classify_mcp_writes_as_guarded_external_side_effects() {
+fn transport_bindings_classify_mcp_writes_as_guarded_external_side_effects() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1220,7 +1296,7 @@ fn bridge_specs_classify_mcp_writes_as_guarded_external_side_effects() {
 }
 
 #[test]
-fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
+fn transport_bindings_classify_new_domain_groups_as_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1237,10 +1313,7 @@ fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
         .chain(SAFE_READ_COLLAPSE_METHODS)
         .chain(["events.append", "events.subscribe", "events.unsubscribe"].iter())
     {
-        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
             registry.is_generic_trigger_marker(method),
             "{method} must be marker-registered, not method-specific business logic"
@@ -1251,16 +1324,13 @@ fn bridge_specs_classify_new_domain_groups_as_generic_triggered() {
 }
 
 #[test]
-fn bridge_specs_classify_cron_as_fully_generic_triggered() {
+fn transport_bindings_classify_cron_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for method in CRON_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert_eq!(spec.owner_worker, specs::worker_id("cron").unwrap());
         assert_eq!(spec.domain_worker, specs::worker_id("cron").unwrap());
         assert!(
@@ -1273,7 +1343,7 @@ fn bridge_specs_classify_cron_as_fully_generic_triggered() {
 }
 
 #[test]
-fn bridge_specs_classify_cron_writes_as_guarded_trigger_capabilities() {
+fn transport_bindings_classify_cron_writes_as_guarded_trigger_capabilities() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1418,16 +1488,13 @@ async fn cron_schedule_trigger_dispatch_records_ledger_and_replays_duplicate_fir
 }
 
 #[test]
-fn bridge_specs_classify_runtime_tail_as_generic_triggered() {
+fn transport_bindings_classify_runtime_tail_as_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for method in RUNTIME_TAIL_METHODS {
-        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
             registry.is_generic_trigger_marker(method),
             "{method} must be marker-registered, not method-specific business logic"
@@ -1438,16 +1505,13 @@ fn bridge_specs_classify_runtime_tail_as_generic_triggered() {
 }
 
 #[test]
-fn bridge_specs_classify_first_high_risk_command_collapse() {
+fn transport_bindings_classify_first_high_risk_command_collapse() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for method in HIGH_RISK_COMMAND_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
         assert!(spec.effect_class.is_mutating());
         assert_eq!(spec.risk_level, RiskLevel::High);
         assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
@@ -1535,16 +1599,13 @@ fn bridge_specs_classify_first_high_risk_command_collapse() {
 }
 
 #[test]
-fn bridge_specs_classify_git_worktree_as_fully_generic_triggered() {
+fn transport_bindings_classify_git_worktree_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
 
     for &method in GIT_WORKTREE_METHODS {
-        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
-        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
-        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
-        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(specs.iter().any(|spec| spec.method == method));
         assert!(
             registry.is_generic_trigger_marker(method),
             "{method} must be marker-registered, not method-specific business logic"
@@ -1653,7 +1714,7 @@ async fn git_worktree_generic_triggers_match_direct_engine_error_shapes() {
 }
 
 #[test]
-fn bridge_specs_assign_generic_methods_to_domain_workers() {
+fn transport_bindings_assign_generic_methods_to_domain_workers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1952,7 +2013,7 @@ async fn direct_canonical_invocation_requires_domain_scope() {
 }
 
 #[test]
-fn bridge_specs_classify_representative_effect_and_risk_levels() {
+fn transport_bindings_classify_representative_effect_and_risk_levels() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let specs = capability_specs(&registry).unwrap();
@@ -1993,7 +2054,7 @@ fn bridge_specs_classify_representative_effect_and_risk_levels() {
 }
 
 #[test]
-fn bridge_specs_fail_closed_for_unclassified_registry_methods() {
+fn transport_bindings_fail_closed_for_unclassified_registry_methods() {
     struct Echo;
 
     #[async_trait]
@@ -2014,7 +2075,7 @@ fn bridge_specs_fail_closed_for_unclassified_registry_methods() {
     assert!(matches!(
         err,
         EngineError::PolicyViolation(message)
-            if message.contains("new.method") && message.contains("without an engine bridge spec")
+            if message.contains("new.method") && message.contains("without a transport binding spec")
     ));
 }
 
@@ -2900,6 +2961,7 @@ async fn hidden_agent_prompt_runtime_functions_are_not_agent_discoverable() {
         .collect::<BTreeSet<_>>();
     assert!(ids.contains("agent::prompt"));
     assert!(!ids.contains("agent::prompt_apply"));
+    assert!(!ids.contains("agent::run_turn"));
     assert!(!ids.contains("agent::prompt_queue_drain"));
 }
 

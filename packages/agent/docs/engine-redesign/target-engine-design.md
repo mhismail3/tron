@@ -489,12 +489,15 @@ before migration:
 | `session.resume` | Collapsed as a transport-aware canonical function; future client-native session resume should add explicit resume tokens and stronger stream/event ordering guarantees. |
 
 During the compatibility period, old JSON-RPC clients keep their stable method
-names as `json_rpc` trigger ids and trigger config. Migrated methods execute as
-canonical domain function ids such as `skills::activate` or `events::append`;
-`rpc::<method>` metadata now exists only as transport compatibility inventory,
-not as an executable center. The end-state migration removes that compatibility
-inventory after clients and agents invoke canonical domain capabilities
-directly.
+names as `json_rpc` trigger ids and trigger config. Newer clients can use the
+canonical transport methods `engine.discover`, `engine.inspect`,
+`engine.watch`, `engine.invoke`, and `engine.promote` to interact with the live
+catalog directly. Legacy methods execute as canonical domain function ids such
+as `skills::activate` or `events::append`; `rpc::<method>` metadata now exists
+only as transport compatibility inventory, not as an executable center, and
+`engine.invoke` rejects those ids. The end-state migration removes that
+compatibility inventory after clients and agents invoke canonical domain
+capabilities directly.
 
 ## State, streams, queues, and events
 
@@ -537,11 +540,12 @@ specific namespace and function set, not its full authority.
 The final client API can break, but transition should be controlled:
 
 1. Keep current `/ws` JSON-RPC while compatibility triggers preserve it.
-2. Keep every current method classified in the bridge inventory, but treat
-   `rpc::<method>` as transport metadata only.
-3. Route every current method through `json_rpc` triggers targeting canonical
+2. Expose `engine.*` as the canonical JSON-RPC transport for discovery,
+   inspection, watch, invocation, and promotion.
+3. Keep every legacy method classified in the transport-binding inventory, but
+   treat `rpc::<method>` as metadata only.
+4. Route every legacy method through `json_rpc` triggers targeting canonical
    domain functions.
-4. Add live catalog discovery and catalog streams behind the server.
 5. Move clients and agents from legacy method names to canonical capability ids,
    then delete the compatibility inventory.
 6. Move selected client flows to engine-native calls once stable.

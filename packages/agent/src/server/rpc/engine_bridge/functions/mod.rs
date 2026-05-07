@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::engine::{ActorKind, EngineError, InProcessFunctionHandler, Invocation};
+use crate::engine::{
+    ActorKind, EngineError, InProcessFunctionHandler, Invocation, PublishStreamEvent,
+    VisibilityScope,
+};
 use crate::events::EventStore;
 use crate::prompt_library::store;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
@@ -132,6 +135,48 @@ impl InProcessFunctionHandler for RpcFunctionHandler {
     }
 }
 
+async fn publish_rpc_event_or_broadcast(
+    deps: &RpcEngineDeps,
+    topic: &str,
+    producer: &str,
+    event: RpcEvent,
+    invocation: Option<&Invocation>,
+) {
+    let published = deps
+        .engine_host
+        .publish_stream_event(PublishStreamEvent {
+            topic: topic.to_owned(),
+            payload: json!({
+                "__rpcEvent": event.clone(),
+                "sourceEventType": event.event_type.clone(),
+            }),
+            visibility: VisibilityScope::System,
+            session_id: invocation
+                .and_then(|invocation| invocation.causal_context.session_id.clone())
+                .or_else(|| event.session_id.clone()),
+            workspace_id: invocation
+                .and_then(|invocation| invocation.causal_context.workspace_id.clone()),
+            producer: producer.to_owned(),
+            trace_id: invocation.map(|invocation| invocation.causal_context.trace_id.clone()),
+            parent_invocation_id: invocation.map(|invocation| invocation.id.clone()),
+        })
+        .await
+        .is_ok();
+    if published {
+        return;
+    }
+    let Some(ref broadcast_manager) = deps.broadcast_manager else {
+        return;
+    };
+    if let Some(session_id) = event.session_id.as_deref() {
+        broadcast_manager
+            .broadcast_to_session(session_id, &event)
+            .await;
+    } else {
+        broadcast_manager.broadcast_all(&event).await;
+    }
+}
+
 async fn rpc_function_value(
     method: &str,
     invocation: &Invocation,
@@ -173,6 +218,7 @@ async fn rpc_function_value(
         | "skill.active" => skills::handle(method, invocation, deps).await,
         "agent.prompt"
         | "agent.prompt.apply"
+        | "agent.run_turn"
         | "agent.prompt.queue_drain"
         | "agent.status"
         | "agent.abort"

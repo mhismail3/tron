@@ -26,6 +26,7 @@ pub(super) async fn handle(
     match method {
         "agent.prompt" => prompt_value(invocation, deps).await,
         "agent.prompt.apply" => prompt_apply_value(Some(payload), invocation, deps).await,
+        "agent.run_turn" => run_turn_value(Some(payload), invocation, deps).await,
         "agent.prompt.queue_drain" => {
             prompt_queue_drain_value(Some(payload), invocation, deps).await
         }
@@ -71,11 +72,45 @@ async fn prompt_value(invocation: &Invocation, deps: &RpcEngineDeps) -> Result<V
         json!({}),
     )
     .await;
-    enqueue_and_sync_drain_prompt_apply(invocation, deps, &submission.session_id, apply_payload)
-        .await
+    enqueue_and_sync_drain_agent_function(
+        invocation,
+        deps,
+        &submission.session_id,
+        "agent::prompt_apply",
+        "agent.prompt.apply",
+        apply_payload,
+    )
+    .await
 }
 
 async fn prompt_apply_value(
+    params: Option<&Value>,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let run_id = require_string_param(params, "runId")?;
+    let (submission, _session, _agent_deps) = validate_prompt_submission(params, deps).await?;
+
+    publish_prompt_stream(
+        invocation,
+        deps,
+        &submission.session_id,
+        "apply_started",
+        json!({"runId": run_id}),
+    )
+    .await;
+    enqueue_and_sync_drain_agent_function(
+        invocation,
+        deps,
+        &submission.session_id,
+        "agent::run_turn",
+        "agent.run_turn",
+        params.cloned().unwrap_or_else(|| json!({})),
+    )
+    .await
+}
+
+async fn run_turn_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &RpcEngineDeps,
@@ -97,8 +132,13 @@ async fn prompt_apply_value(
         invocation,
         deps,
         &submission.session_id,
-        "apply_started",
-        json!({"runId": run_id}),
+        "run_turn_started",
+        json!({
+            "runId": run_id,
+            "model": session.latest_model,
+            "provider": "unknown",
+            "catalogRevision": invocation.causal_context.catalog_revision.0,
+        }),
     )
     .await;
     spawn_prompt_run(
@@ -249,13 +289,15 @@ fn validate_attachment_arrays(
     Ok(())
 }
 
-async fn enqueue_and_sync_drain_prompt_apply(
+async fn enqueue_and_sync_drain_agent_function(
     invocation: &Invocation,
     deps: &RpcEngineDeps,
     session_id: &str,
-    apply_payload: Value,
+    function_id: &str,
+    idempotency_prefix: &str,
+    payload: Value,
 ) -> Result<Value, RpcError> {
-    let function_id = FunctionId::new("agent::prompt_apply").map_err(|e| RpcError::Internal {
+    let function_id = FunctionId::new(function_id).map_err(|e| RpcError::Internal {
         message: e.to_string(),
     })?;
     let mut authority_scopes = invocation.causal_context.authority_scopes.clone();
@@ -271,7 +313,7 @@ async fn enqueue_and_sync_drain_prompt_apply(
             queue: "agent".to_owned(),
             function_id,
             target_revision: None,
-            payload: apply_payload,
+            payload,
             actor_id: invocation.causal_context.actor_id.clone(),
             actor_kind: invocation.causal_context.actor_kind.clone(),
             authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
@@ -281,7 +323,7 @@ async fn enqueue_and_sync_drain_prompt_apply(
             trigger_id: invocation.causal_context.trigger_id.clone(),
             session_id: invocation.causal_context.session_id.clone(),
             workspace_id: invocation.causal_context.workspace_id.clone(),
-            idempotency_key: Some(format!("agent.prompt.apply:{}", invocation.id)),
+            idempotency_key: Some(format!("{idempotency_prefix}:{}", invocation.id)),
         })
         .await
         .map_err(super::super::engine_error_to_rpc)?;
@@ -295,7 +337,7 @@ async fn enqueue_and_sync_drain_prompt_apply(
             .as_deref()
             .unwrap_or_default(),
         "apply_enqueued",
-        json!({"receiptId": item.receipt_id, "queue": item.queue}),
+        json!({"receiptId": item.receipt_id, "queue": item.queue, "function": idempotency_prefix}),
     )
     .await;
 

@@ -247,19 +247,7 @@ async fn publish_mcp_status_changed(invocation: &Invocation, deps: &RpcEngineDep
         return;
     };
     let event = RpcEvent::new("mcp.status_changed", None, Some(status));
-    let _ = deps
-        .engine_host
-        .publish_stream_event(crate::engine::PublishStreamEvent {
-            topic: "catalog".to_owned(),
-            payload: json!({ "__rpcEvent": event }),
-            visibility: VisibilityScope::System,
-            session_id: invocation.causal_context.session_id.clone(),
-            workspace_id: invocation.causal_context.workspace_id.clone(),
-            producer: "mcp".to_owned(),
-            trace_id: Some(invocation.causal_context.trace_id.clone()),
-            parent_invocation_id: Some(invocation.id.clone()),
-        })
-        .await;
+    super::publish_rpc_event_or_broadcast(deps, "mcp", "mcp", event, Some(invocation)).await;
 }
 
 async fn refresh_mcp_tool_catalog(deps: &RpcEngineDeps) {

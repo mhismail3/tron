@@ -251,7 +251,10 @@ impl MethodRegistry {
     fn policy_for_method(method: &str) -> HandlerExecutionPolicy {
         if matches!(
             method,
-            "system.ping"
+            "engine.discover"
+                | "engine.inspect"
+                | "engine.watch"
+                | "system.ping"
                 | "system.getInfo"
                 | "system.getDiagnostics"
                 | "agent.status"

@@ -21,31 +21,25 @@
 //! [`context::RpcContext::run_blocking`], which enforces concurrency
 //! limits and drains through server shutdown.
 //!
-//! The context also owns the shared engine host handle. The RPC migration
-//! bridge classifies every registered JSON-RPC method, keeps handler-only
-//! entries as non-routable `rpc::<method>` metadata, and registers canonical
-//! domain functions such as `skills::activate` for migrated methods. Generic
-//! trigger methods bypass method-specific business handlers: the registry
+//! The context also owns the shared engine host handle. JSON-RPC is now a
+//! transport-binding layer over canonical engine functions, not a method-owned
+//! business layer. Every public registration is a marker handler: the registry
 //! validates method existence/depth, then dispatches JSON-RPC as a `json_rpc`
-//! transport trigger into the canonical domain function. Read triggers carry
-//! `rpc.read` plus the domain read scope; migrated write triggers carry
-//! `rpc.write` plus the domain write scope and engine-ledger idempotency.
-//! Prompt library, settings, logs, MCP, skills, notifications, plan, events,
-//! approval resolution, read-safe session/context queries, job commands, all
-//! current agent control methods including `agent.prompt`, basic filesystem
-//! reads/create-dir, tree reads, repo divergence reads, import browse/preview
-//! reads, browser status, voice-note listing, transcription model listing, and
-//! sandbox listing are now generic-triggered with marker-only JSON-RPC
-//! registrations. Job background/cancel and agent prompt commands enqueue
-//! hidden apply functions and synchronously drain their own receipts for
-//! current wire compatibility. RPC remains a compatibility transport; the
-//! canonical capability surface is the domain/tool function catalog agents
-//! discover through the engine tools.
-//! Model switching, reasoning-level updates, manual memory retention, and
-//! import execution are the first higher-risk command collapse: each is now a
-//! canonical function with strict schemas, approval metadata, engine-ledger
-//! idempotency, and a resource lease for the shared session/import resource it
-//! mutates.
+//! trigger into a canonical `namespace::function` id such as
+//! `skills::activate` or `agent::prompt`. The five `engine.*` methods are the
+//! canonical public capability transport for discover, inspect, watch, invoke,
+//! and promote; the older 170 domain method names remain compatibility aliases.
+//! Compatibility `rpc::<method>` names are metadata only and must not become
+//! executable or agent-facing ids again.
+//!
+//! Read triggers carry `rpc.read` plus the domain read scope. Write triggers
+//! carry `rpc.write`, the domain write scope, strict schemas, engine-ledger
+//! idempotency, and approval/lease/compensation metadata when the effect class
+//! requires it. Job background/cancel and agent prompt commands enqueue hidden
+//! apply functions and synchronously drain their own receipts for current wire
+//! compatibility. `agent::prompt_apply` now hands off actual turn execution to
+//! the hidden `agent::run_turn` boundary so the turn runner can continue moving
+//! behind canonical engine functions without changing client acknowledgements.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

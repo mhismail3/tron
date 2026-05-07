@@ -5,7 +5,12 @@
 //! the source of truth for delayed work and push delivery.
 //! The `agent` queue drains hidden prompt apply/drain functions so `agent.prompt`
 //! can remain wire-compatible while startup and queued follow-up prompts run
-//! through canonical engine functions.
+//! through canonical engine functions. The stream pump now owns the migrated
+//! broadcast topics for approvals, auth/settings/MCP/device/cron/update/memory
+//! status, jobs, agent queue, session events, sandbox/display lifecycle, and
+//! catalog changes. The heartbeat service unregisters stale volatile local
+//! external-worker capabilities so the live catalog reflects what can actually
+//! run.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +27,8 @@ use tokio_util::sync::CancellationToken;
 const QUEUE_DRAIN_INTERVAL: Duration = Duration::from_millis(100);
 const STREAM_PUMP_INTERVAL: Duration = Duration::from_millis(250);
 const STREAM_PUMP_LIMIT: usize = 100;
+const EXTERNAL_WORKER_HEARTBEAT_SCAN_INTERVAL: Duration = Duration::from_secs(10);
+const EXTERNAL_WORKER_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Runtime-owned engine services.
 pub struct EngineRuntimeServices;
@@ -47,6 +54,15 @@ impl EngineRuntimeServices {
             shutdown.clone(),
             [
                 "approvals",
+                "auth",
+                "settings",
+                "mcp",
+                "device",
+                "cron",
+                "updates",
+                "memory",
+                "display",
+                "sandbox",
                 "jobs",
                 "agent.queue",
                 "events.session",
@@ -57,6 +73,13 @@ impl EngineRuntimeServices {
             .collect(),
         );
         shutdown.register_task(tokio::spawn(pump.run()));
+
+        let heartbeat = ExternalWorkerHeartbeatService::new(
+            server.external_workers().clone(),
+            shutdown.token(),
+            EXTERNAL_WORKER_HEARTBEAT_TIMEOUT,
+        );
+        shutdown.register_task(tokio::spawn(heartbeat.run()));
     }
 }
 
@@ -65,6 +88,49 @@ struct EngineQueueDrainerService {
     queue: String,
     lease_owner: String,
     cancel: CancellationToken,
+}
+
+struct ExternalWorkerHeartbeatService {
+    runtime: crate::server::external_workers::SharedExternalWorkerRuntime,
+    cancel: CancellationToken,
+    timeout: Duration,
+}
+
+impl ExternalWorkerHeartbeatService {
+    fn new(
+        runtime: crate::server::external_workers::SharedExternalWorkerRuntime,
+        cancel: CancellationToken,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            runtime,
+            cancel,
+            timeout,
+        }
+    }
+
+    async fn run(self) {
+        loop {
+            tokio::select! {
+                () = self.cancel.cancelled() => break,
+                () = tokio::time::sleep(EXTERNAL_WORKER_HEARTBEAT_SCAN_INTERVAL) => {
+                    let result = self
+                        .runtime
+                        .lock()
+                        .await
+                        .disconnect_timed_out(self.timeout)
+                        .await;
+                    match result {
+                        Ok(expired) if !expired.is_empty() => {
+                            tracing::warn!(count = expired.len(), "external engine workers timed out");
+                        }
+                        Ok(_) => {}
+                        Err(error) => tracing::warn!(error = %error, "external worker heartbeat cleanup failed"),
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl EngineQueueDrainerService {

@@ -25,14 +25,14 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     match method {
         "auth.get" => auth_get(deps).await,
-        "auth.update" => auth_update(&invocation.payload, deps).await,
-        "auth.clear" => auth_clear(&invocation.payload, deps).await,
+        "auth.update" => auth_update(invocation, deps).await,
+        "auth.clear" => auth_clear(invocation, deps).await,
         "auth.oauthBegin" => auth_oauth_begin(&invocation.payload, deps).await,
-        "auth.oauthComplete" => auth_oauth_complete(&invocation.payload, deps).await,
-        "auth.renameAccount" => auth_rename_account(&invocation.payload, deps).await,
-        "auth.setActive" => auth_set_active(&invocation.payload, deps).await,
-        "auth.removeAccount" => auth_remove_account(&invocation.payload, deps).await,
-        "auth.removeApiKey" => auth_remove_api_key(&invocation.payload, deps).await,
+        "auth.oauthComplete" => auth_oauth_complete(invocation, deps).await,
+        "auth.renameAccount" => auth_rename_account(invocation, deps).await,
+        "auth.setActive" => auth_set_active(invocation, deps).await,
+        "auth.removeAccount" => auth_remove_account(invocation, deps).await,
+        "auth.removeApiKey" => auth_remove_api_key(invocation, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("auth method {method} is not engine-owned"),
         }),
@@ -48,7 +48,8 @@ async fn auth_get(deps: &RpcEngineDeps) -> Result<Value, RpcError> {
         .await
 }
 
-async fn auth_update(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+async fn auth_update(invocation: &Invocation, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
     let service = opt_string(Some(payload), "service");
 
@@ -86,11 +87,12 @@ async fn auth_update(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, Rpc
         })
         .await?;
 
-    broadcast_auth_updated(&deps.rpc_context, &masked_state).await;
+    broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
 
-async fn auth_clear(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+async fn auth_clear(invocation: &Invocation, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
     let service = opt_string(Some(payload), "service");
 
@@ -118,7 +120,7 @@ async fn auth_clear(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcE
         })
         .await?;
 
-    broadcast_auth_updated(&deps.rpc_context, &masked_state).await;
+    broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
 
@@ -201,7 +203,11 @@ async fn auth_oauth_begin(payload: &Value, deps: &RpcEngineDeps) -> Result<Value
     }))
 }
 
-async fn auth_oauth_complete(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+async fn auth_oauth_complete(
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let payload = &invocation.payload;
     let flow_id = require_string_param(Some(payload), "flowId")?;
     let code = require_string_param(Some(payload), "code")?;
     let label = require_string_param(Some(payload), "label")?;
@@ -288,23 +294,28 @@ async fn auth_oauth_complete(payload: &Value, deps: &RpcEngineDeps) -> Result<Va
         })
         .await?;
 
-    broadcast_auth_updated(&deps.rpc_context, &masked_state).await;
+    broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
 
-async fn auth_rename_account(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+async fn auth_rename_account(
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let old_label = require_string_param(Some(payload), "oldLabel")?;
     let new_label = require_string_param(Some(payload), "newLabel")?;
 
-    write_auth_and_broadcast(deps, "auth.renameAccount", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth.renameAccount", move |auth_path| {
         crate::llm::auth::storage::rename_account(auth_path, &provider, &old_label, &new_label)
             .map_err(map_auth_error)
     })
     .await
 }
 
-async fn auth_set_active(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+async fn auth_set_active(invocation: &Invocation, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let cred_val = payload
         .get("credential")
@@ -316,7 +327,7 @@ async fn auth_set_active(payload: &Value, deps: &RpcEngineDeps) -> Result<Value,
             message: format!("Invalid credential: {error}"),
         })?;
 
-    write_auth_and_broadcast(deps, "auth.setActive", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth.setActive", move |auth_path| {
         crate::llm::auth::storage::set_active_credential(auth_path, &provider, &credential).map_err(
             |error| RpcError::InvalidParams {
                 message: format!("Failed to set active credential: {error}"),
@@ -326,20 +337,28 @@ async fn auth_set_active(payload: &Value, deps: &RpcEngineDeps) -> Result<Value,
     .await
 }
 
-async fn auth_remove_account(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+async fn auth_remove_account(
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;
-    write_auth_and_broadcast(deps, "auth.removeAccount", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth.removeAccount", move |auth_path| {
         crate::llm::auth::storage::remove_account(auth_path, &provider, &label)
             .map_err(map_auth_error)
     })
     .await
 }
 
-async fn auth_remove_api_key(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+async fn auth_remove_api_key(
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;
-    write_auth_and_broadcast(deps, "auth.removeApiKey", move |auth_path| {
+    write_auth_and_broadcast(deps, invocation, "auth.removeApiKey", move |auth_path| {
         crate::llm::auth::storage::remove_named_api_key(auth_path, &provider, &label)
             .map_err(map_auth_error)
     })
@@ -348,6 +367,7 @@ async fn auth_remove_api_key(payload: &Value, deps: &RpcEngineDeps) -> Result<Va
 
 async fn write_auth_and_broadcast<F>(
     deps: &RpcEngineDeps,
+    invocation: &Invocation,
     task_name: &'static str,
     mutate: F,
 ) -> Result<Value, RpcError>
@@ -365,7 +385,7 @@ where
             build_masked_state(&auth_path).map_err(map_auth_error)
         })
         .await?;
-    broadcast_auth_updated(&deps.rpc_context, &masked_state).await;
+    broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
 
@@ -704,11 +724,10 @@ fn mask_key(key: &str) -> String {
 }
 
 async fn broadcast_auth_updated(
-    ctx: &crate::server::rpc::context::RpcContext,
+    deps: &RpcEngineDeps,
+    invocation: &Invocation,
     masked_state: &Value,
 ) {
-    if let Some(ref broadcast_manager) = ctx.broadcast_manager {
-        let event = RpcEvent::new("auth.updated", None, Some(masked_state.clone()));
-        broadcast_manager.broadcast_all(&event).await;
-    }
+    let event = RpcEvent::new("auth.updated", None, Some(masked_state.clone()));
+    super::publish_rpc_event_or_broadcast(deps, "auth", "auth", event, Some(invocation)).await;
 }

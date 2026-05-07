@@ -4,6 +4,7 @@
 //!
 //! ## `register_core` — Session and agent lifecycle
 //!
+//! `engine` (canonical capability discovery/inspection/watch/invoke/promote),
 //! `system` (ping, info, shutdown, update checks), `session` (CRUD, fork, archive, export,
 //! resume), `agent` (prompt/status/abort/tool/submission
 //! controls generic), `model`/`config` (list, switch, reasoning level
@@ -90,6 +91,30 @@ pub fn register_all(registry: &mut MethodRegistry) {
 }
 
 fn register_core(registry: &mut MethodRegistry) {
+    // Engine capability transport. These are the canonical public JSON-RPC
+    // entry points; legacy domain method names below remain compatibility
+    // aliases over their canonical `namespace::function` ids.
+    registry.register(
+        "engine.discover",
+        RpcGenericTriggerHandler::new("engine.discover"),
+    );
+    registry.register(
+        "engine.inspect",
+        RpcGenericTriggerHandler::new("engine.inspect"),
+    );
+    registry.register(
+        "engine.watch",
+        RpcGenericTriggerHandler::new("engine.watch"),
+    );
+    registry.register(
+        "engine.invoke",
+        RpcGenericTriggerHandler::new("engine.invoke"),
+    );
+    registry.register(
+        "engine.promote",
+        RpcGenericTriggerHandler::new("engine.promote"),
+    );
+
     // System
     registry.register("system.ping", RpcGenericTriggerHandler::new("system.ping"));
     registry.register(
@@ -789,6 +814,11 @@ mod tests {
     fn register_all_populates_registry() {
         let mut reg = MethodRegistry::new();
         register_all(&mut reg);
+        assert!(reg.has_method("engine.discover"));
+        assert!(reg.has_method("engine.inspect"));
+        assert!(reg.has_method("engine.watch"));
+        assert!(reg.has_method("engine.invoke"));
+        assert!(reg.has_method("engine.promote"));
         assert!(reg.has_method("system.ping"));
         assert!(reg.has_method("session.create"));
         assert!(reg.has_method("agent.prompt"));
@@ -809,8 +839,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            170,
-            "expected 170 methods, got {}",
+            175,
+            "expected 175 methods, got {}",
             reg.methods().len()
         );
     }

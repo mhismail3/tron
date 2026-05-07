@@ -14,6 +14,79 @@ fn session_scoped_schema() -> Value {
 
 pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
     Some(match method {
+        "engine.discover" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "visibility": {"type": "string"},
+                "namespacePrefix": {"type": "string"},
+                "text": {"type": "string"},
+                "effectClass": {"type": "string"},
+                "maxRisk": {"type": "string"},
+                "health": {"type": "string"},
+                "includeInternal": {"type": "boolean"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "engine.inspect" => json!({
+            "type": "object",
+            "required": ["kind", "id"],
+            "additionalProperties": false,
+            "properties": {
+                "kind": {"type": "string", "enum": ["function", "worker", "trigger_type", "trigger"]},
+                "id": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "engine.watch" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "afterRevision": {"type": "integer"},
+                "limit": {"type": "integer"},
+                "classes": {"type": "array", "items": {"type": "string"}},
+                "kinds": {"type": "array", "items": {"type": "string"}},
+                "subjectPrefix": {"type": "string"},
+                "ownerWorker": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "engine.invoke" => json!({
+            "type": "object",
+            "required": ["functionId"],
+            "additionalProperties": false,
+            "properties": {
+                "functionId": {"type": "string"},
+                "payload": {},
+                "expectedFunctionRevision": {"type": "integer"},
+                "deliveryMode": {"type": "string", "enum": ["sync"]},
+                "idempotencyKey": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "engine.promote" => json!({
+            "type": "object",
+            "required": [
+                "functionId",
+                "ownerWorker",
+                "targetVisibility",
+                "expectedFunctionRevision",
+                "idempotencyKey"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "functionId": {"type": "string"},
+                "ownerWorker": {"type": "string"},
+                "targetVisibility": {"type": "string", "enum": ["workspace", "system"]},
+                "expectedFunctionRevision": {"type": "integer"},
+                "workspaceId": {"type": "string"},
+                "idempotencyKey": {"type": "string"}
+            }
+        }),
         "system.ping" => json!({
             "type": "object",
             "required": ["protocolVersion"],
@@ -1334,6 +1407,54 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
 
 pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
     Some(match method {
+        "engine.discover" => json!({
+            "type": "object",
+            "required": ["catalogRevision", "functions"],
+            "additionalProperties": false,
+            "properties": {
+                "catalogRevision": {"type": "integer"},
+                "functions": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+            }
+        }),
+        "engine.inspect" => json!({
+            "type": "object",
+            "required": ["catalogRevision", "kind", "definition"],
+            "additionalProperties": false,
+            "properties": {
+                "catalogRevision": {"type": "integer"},
+                "kind": {"type": "string"},
+                "definition": {"type": "object", "additionalProperties": true}
+            }
+        }),
+        "engine.watch" => json!({
+            "type": "object",
+            "required": ["changes", "currentRevision", "hasMore"],
+            "additionalProperties": false,
+            "properties": {
+                "changes": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+                "currentRevision": {"type": "integer"},
+                "hasMore": {"type": "boolean"}
+            }
+        }),
+        "engine.invoke" => json!({
+            "type": "object",
+            "required": ["catalogRevision", "child"],
+            "additionalProperties": false,
+            "properties": {
+                "catalogRevision": {"type": "integer"},
+                "child": {"type": "object", "additionalProperties": true}
+            }
+        }),
+        "engine.promote" => json!({
+            "type": "object",
+            "required": ["functionId", "revision", "visibility"],
+            "additionalProperties": false,
+            "properties": {
+                "functionId": {"type": "string"},
+                "revision": {"type": "integer"},
+                "visibility": {"type": "string"}
+            }
+        }),
         "system.ping" => json!({
             "type": "object",
             "required": [

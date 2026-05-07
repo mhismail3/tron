@@ -2235,7 +2235,7 @@ fn meta_function(id: &str, description: &str, effect: EffectClass) -> FunctionDe
         function_id(id).expect("valid static engine function id"),
         worker_id(ENGINE_WORKER_ID).expect("valid engine worker id"),
         description,
-        VisibilityScope::Agent,
+        VisibilityScope::System,
         effect,
     )
 }

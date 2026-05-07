@@ -1,21 +1,15 @@
-//! RPC-to-engine migration bridge.
+//! JSON-RPC transport bindings for the engine capability fabric.
 //!
-//! JSON-RPC is becoming a trigger transport into engine functions. This module
-//! owns the temporary migration inventory for that path: every registered RPC
-//! method has an explicit capability spec, domain-owned in-process workers
-//! register executable functions, and generic-trigger methods bypass
-//! method-specific business handlers entirely. As of the full tail collapse,
-//! all 170 public JSON-RPC methods are marker-only `json_rpc` triggers over
-//! canonical domain functions. The final command groups moved into this fabric
-//! include auth/account management, device approval responses, voice-note
-//! mutation, transcription audio/model commands, browser/display stream
-//! controls, sandbox lifecycle, `session.resume`, update checks, and shutdown.
-//! Mutating tail capabilities use strict schemas, domain write authority,
-//! engine-ledger idempotency, resource leases where shared local state is
-//! touched, approval metadata for autonomous agents, and compensation notes for
-//! high-risk or externally irreversible effects.
+//! JSON-RPC is a compatibility transport into engine functions. This module
+//! owns the binding inventory for that path: every registered method has an
+//! explicit transport spec, domain-owned in-process workers register executable
+//! canonical functions, and marker handlers never own production business
+//! behavior. The public surface is now 175 methods: five canonical `engine.*`
+//! capability methods plus the existing 170 legacy domain method names. All are
+//! marker-only `json_rpc` triggers over canonical domain functions or reserved
+//! engine meta-capabilities.
 //!
-//! The `rpc` worker is now transport compatibility only. Domain workers such as
+//! The `rpc` worker is transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
 //! `git`, `worktree`, `auth`, `device`, `voice_notes`, `transcription`,
@@ -30,19 +24,19 @@
 //! directly into canonical ids such as `skills::activate` or
 //! `session::reconstruct`; `cron_schedule` trigger records capture scheduled
 //! automation fires. `rpc::<method>` names are no longer executable centers;
-//! they survive only as transport/migration metadata while clients still speak
-//! the legacy JSON-RPC method names.
+//! they survive only as transport metadata while clients still speak legacy
+//! JSON-RPC method names, and `engine.invoke` rejects them.
 //!
-//! # INVARIANT: the bridge is temporary demolition scaffolding
+//! # INVARIANT: JSON-RPC is a transport, not a capability namespace
 //!
 //! The desired end state is a collapsed engine architecture where JSON-RPC is
 //! only a transport trigger over canonical domain functions. The public RPC
-//! surface has reached 170/170 generic-trigger coverage; future work should
-//! delete the compatibility inventory itself as clients and agents move to
-//! canonical ids. Compatibility ids must not become the agent-facing surface
-//! again. Every migration package must advance the collapsed fabric and remove
-//! superseded behavior; adding a mirror or fallback without deletion is not
-//! progress toward the architecture.
+//! surface has reached full marker-trigger coverage, and the canonical
+//! `engine.*` methods are the public discovery/invocation/promote transport for
+//! clients that are ready to stop calling legacy method aliases. Future work
+//! should delete the compatibility inventory itself as clients and agents move
+//! to canonical ids. Compatibility ids must not become the agent-facing surface
+//! again.
 
 mod dispatch;
 mod functions;
@@ -68,10 +62,7 @@ use crate::tools::capability_runtime;
 use crate::tools::traits::{ToolContext, TronTool};
 
 pub use dispatch::{RpcEngineInvocation, RpcGenericTriggerHandler, try_dispatch_generic_rpc};
-pub use specs::{
-    RpcCapabilitySpec, RpcExecutionPolicy, RpcIdempotencyMode, RpcMigrationState, RpcSchemaMode,
-    capability_specs,
-};
+pub use specs::{RpcCapabilitySpec, RpcIdempotencyMode, capability_specs};
 
 pub(super) const RPC_WORKER_ID: &str = "rpc";
 pub(super) const RPC_OWNER_ACTOR: &str = "system";
@@ -410,6 +401,13 @@ fn register_hidden_agent_prompt_functions(
             "agent::prompt_apply",
             "agent.prompt.apply",
             "apply a queued agent prompt command",
+            agent_prompt_apply_request_schema(),
+            agent_prompt_response_schema(),
+        ),
+        (
+            "agent::run_turn",
+            "agent.run_turn",
+            "start one accepted agent turn behind the engine runtime boundary",
             agent_prompt_apply_request_schema(),
             agent_prompt_response_schema(),
         ),
