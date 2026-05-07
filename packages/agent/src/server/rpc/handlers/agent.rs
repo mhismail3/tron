@@ -1,4 +1,4 @@
-//! Agent RPC handlers.
+//! Agent runtime test fixtures and prompt runtime support.
 //!
 //! ## Submodules
 //!
@@ -9,7 +9,10 @@
 //!
 //! ## Invariants
 //!
-//! - `agent.prompt` rejects an already-active session before slower prompt
+//! - `agent.prompt` is production-owned by the engine bridge. The test fixture
+//!   below preserves legacy wire-behavior regression coverage while production
+//!   registration uses the generic JSON-RPC trigger into `agent::prompt`.
+//! - Prompt execution rejects an already-active session before slower prompt
 //!   setup, starts exactly one orchestrator run per accepted prompt, and always
 //!   releases the run guard when execution ends.
 //! - Completion should emit a best-effort `session_updated` event after SQLite
@@ -19,14 +22,22 @@
 
 #[cfg(test)]
 use crate::events::EventType;
+#[cfg(test)]
 use async_trait::async_trait;
+#[cfg(test)]
 use serde_json::Value;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use crate::server::rpc::agent_commands::AgentCommandService;
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
 use crate::server::rpc::errors::{RpcError, SESSION_BUSY};
+#[cfg(test)]
 use crate::server::rpc::handlers::{opt_array, opt_string, require_string_param};
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 #[path = "agent_prompt_runtime.rs"]
 pub(crate) mod prompt_runtime;
@@ -37,11 +48,14 @@ pub(crate) mod prompt_service;
 use prompt_runtime::{
     build_user_event_payload, format_subagent_results, get_pending_subagent_results,
 };
+#[cfg(test)]
 use prompt_service::{PromptRequest, spawn_prompt_run};
 
 /// Submit a prompt to the agent for a session.
+#[cfg(test)]
 pub struct PromptHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for PromptHandler {
     #[instrument(skip(self, ctx), fields(method = "agent.prompt", session_id))]
@@ -168,6 +182,7 @@ impl MethodHandler for PromptHandler {
                 images,
                 attachments,
                 message_metadata: None,
+                engine_causality: None,
             },
         );
 

@@ -353,12 +353,13 @@ Implemented:
   apply functions, synchronously drain their own receipt for current JSON-RPC
   compatibility, publish job/queue stream events, and use engine-ledger
   idempotency;
-- agent command collapse: `agent.status/abort/abortTool/queuePrompt/
+- agent command collapse: `agent.prompt/status/abort/abortTool/queuePrompt/
   dequeuePrompt/clearQueue/deliverSubagentResults/submitConfirmation/
   submitAnswers` are canonical `agent::*` functions with strict schemas,
   session-scoped idempotency for writes, approval metadata where high risk, and
-  stream publication for queue state; `agent.prompt` remains handler-owned
-  until the full turn runtime is collapsed;
+  stream publication for queue/prompt state; `agent.prompt` now enqueues hidden
+  `agent::prompt_apply` and prompt completion enqueues hidden
+  `agent::prompt_queue_drain`;
 - approval runtime: `approval::request/resolve/get/list` records high-risk
   agent-visible pauses in the engine ledger, publishes scoped approval stream
   events, and resumes approved invocations with their original trace/authority/
@@ -369,7 +370,7 @@ Implemented:
   `approval::*` primitive functions; `approval.request` intentionally remains
   agent/tool-only;
 - server runtime services: `EngineRuntimeServices` starts queue drainers for
-  `default` and `jobs` plus a stream pump for approvals, jobs, agent queue,
+  `default`, `jobs`, and `agent` plus a stream pump for approvals, jobs, agent queue,
   session events, and catalog topics so engine primitives drive runtime
   behavior instead of staying test-only stores;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
@@ -384,12 +385,11 @@ Still deferred:
 - RPC migrations and generic-trigger conversion for the remaining handler-only
   method groups beyond prompt library, settings, logs, skills, notifications,
   plan, events, basic filesystem, session commands/reads except resume, context
-  commands/reads, job controls, and current agent command controls except
-  prompt;
+  commands/reads, job controls, and current agent controls;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
-- full engine-owned `agent.prompt` turn execution and queue-backed prompt
-  draining;
+- stream-first token/text turn delivery beyond the existing compatibility
+  EventBridge;
 - sandbox workers, remote worker hosting, durable reconnect semantics, and
   stronger executable-worker supervision beyond the authenticated local
   loopback endpoint;

@@ -125,7 +125,10 @@ async fn rpc_function_value(
         "model.list" => model::handle(method, invocation, deps, allow_rpc_context).await,
         "skill.list" | "skill.get" | "skill.refresh" | "skill.activate" | "skill.deactivate"
         | "skill.active" => skills::handle(method, invocation, deps).await,
-        "agent.status"
+        "agent.prompt"
+        | "agent.prompt.apply"
+        | "agent.prompt.queue_drain"
+        | "agent.status"
         | "agent.abort"
         | "agent.abortTool"
         | "agent.queuePrompt"

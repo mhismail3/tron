@@ -107,6 +107,7 @@ impl MethodHandler for DeliverSubagentResultsHandler {
                             images: None,
                             attachments: None,
                             message_metadata: Some(metadata),
+                            engine_causality: None,
                         },
                     );
                     return Ok(serde_json::json!({

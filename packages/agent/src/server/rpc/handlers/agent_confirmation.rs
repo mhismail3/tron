@@ -87,6 +87,7 @@ impl MethodHandler for SubmitConfirmationHandler {
                         images: None,
                         attachments: None,
                         message_metadata,
+                        engine_causality: None,
                     },
                 );
                 Ok(serde_json::json!({
@@ -214,6 +215,7 @@ impl MethodHandler for SubmitAnswersHandler {
                         images: None,
                         attachments: None,
                         message_metadata,
+                        engine_causality: None,
                     },
                 );
                 Ok(serde_json::json!({

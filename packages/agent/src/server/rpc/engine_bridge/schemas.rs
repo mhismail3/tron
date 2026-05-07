@@ -312,6 +312,26 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "agent.prompt" => json!({
+            "type": "object",
+            "required": ["sessionId", "prompt"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "prompt": {"type": "string"},
+                "reasoningLevel": {"type": "string"},
+                "images": {
+                    "type": "array",
+                    "items": {"type": "object", "additionalProperties": true}
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": {"type": "object", "additionalProperties": true}
+                },
+                "source": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "agent.queuePrompt" => json!({
             "type": "object",
             "required": ["sessionId", "prompt"],
@@ -919,8 +939,20 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         | "context.canAcceptTurn"
         | "context.confirmCompaction"
         | "context.clear"
-        | "context.compact"
-        | "agent.status"
+        | "context.compact" => json!({
+            "type": "object",
+            "additionalProperties": true
+        }),
+        "agent.prompt" => json!({
+            "type": "object",
+            "required": ["acknowledged", "runId"],
+            "additionalProperties": false,
+            "properties": {
+                "acknowledged": {"type": "boolean"},
+                "runId": {"type": "string"}
+            }
+        }),
+        "agent.status"
         | "agent.abort"
         | "agent.abortTool"
         | "agent.queuePrompt"

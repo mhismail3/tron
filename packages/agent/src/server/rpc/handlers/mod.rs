@@ -5,19 +5,19 @@
 //! ## `register_core` — Session and agent lifecycle
 //!
 //! `system` (ping, info, shutdown), `session` (CRUD, fork, archive, export
-//! generic except resume), `agent` (prompt direct; status/abort/tool/submission
+//! generic except resume), `agent` (prompt/status/abort/tool/submission
 //! controls generic), `model` (list, switch), `context` (snapshot and
 //! compaction generic), `events`, `settings`, `approval`, `tool` (result),
 //! `message`, `memory`, `logs`
 //!
 //! ## `register_capabilities` — Domain features
 //!
-//! `skills`, `skill_session`, and basic filesystem operations are fully
-//! generic-triggered engine functions;
+//! `skills`, `skill_session`, prompt library, and basic filesystem operations
+//! are fully generic-triggered engine functions;
 //!
 //! The remaining capability modules are
 //! `tree` (visualization, branches), `import` (listSources, listSessions,
-//! previewSession, execute), `mcp`, `prompt_library`, and `cron`
+//! previewSession, execute), `mcp`, and `cron`
 //!
 //! ## `register_platform` — Platform-specific
 //!
@@ -148,7 +148,10 @@ fn register_core(registry: &mut MethodRegistry) {
         RpcGenericTriggerHandler::new("session.export"),
     );
     // Agent
-    registry.register("agent.prompt", agent::PromptHandler);
+    registry.register(
+        "agent.prompt",
+        RpcGenericTriggerHandler::new("agent.prompt"),
+    );
     registry.register("agent.abort", RpcGenericTriggerHandler::new("agent.abort"));
     registry.register(
         "agent.abortTool",

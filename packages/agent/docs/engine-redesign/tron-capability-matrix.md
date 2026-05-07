@@ -30,8 +30,8 @@ canonical domain functions for generic-triggered methods, non-routable
 bindings from the legacy method names into the canonical functions.
 
 Fully collapsed groups now include prompt library, settings, logs, skills,
-notifications, plan, events, approval get/list/resolve, job controls, the
-current agent command controls except `agent.prompt`, and basic filesystem.
+notifications, plan, events, approval get/list/resolve, job controls, all
+current agent controls including `agent.prompt`, and basic filesystem.
 Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
 context compaction/clear commands are also generic-triggered canonical
 functions. Migrated groups delete their method-specific business handlers as
@@ -50,7 +50,7 @@ answers are explicit enough to test.
 | `codexApp` | 1 | `codex_app::*` lifecycle/status functions. | Client/admin. | Pure status read initially; future lifecycle writes need idempotency. | Managed app-server status links to server startup/shutdown authority. |
 | `blob` | 1 | `blob::get`. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
 | `session` | 13 | `session` domain worker; all create/delete/fork/archive/export plus safe reads are generic-triggered except resume. | Client/session/workspace. | Reads plus idempotent mutations; create/archiveOlderThan use system idempotency, session-specific commands use session idempotency. | Reads preserve event-store reconstruction; mutations call the existing command service behind canonical functions and preserve broadcasts/worktree cleanup. |
-| `agent` | 10 | `agent::*` functions and queue triggers; status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered. | Session by default. | `agent.prompt` remains deferred; migrated writes are session-scoped idempotent commands, with approval metadata on high-risk abort. | Turn id, parent invocation, catalog revision, authority grant, stream event, and queue/event-store causality are mandatory. |
+| `agent` | 10 | `agent::*` functions and queue triggers; prompt, status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered. | Session by default. | Prompt and other writes are session-scoped idempotent commands; high-risk prompt/abort carry approval metadata for autonomous agent visibility. | Prompt acceptance records trigger/idempotency causality, enqueues hidden `agent::prompt_apply`, completion enqueues hidden `agent::prompt_queue_drain`, and event-store turn truth remains authoritative. |
 | `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
 | `context` | 9 | `context` domain worker; safe reads and compaction/clear commands are generic-triggered. | Session. | Reads plus high-risk reversible/irreversible context mutations with idempotency and approval metadata where destructive. | Compaction ordering, event writes, cache invalidation, and broadcasts remain deterministic behind canonical functions. |
 | `events` | 5 | Fully generic-triggered `events` domain worker functions, including stream-backed subscribe/unsubscribe. | Session/workspace/admin. | Reads plus append-only `events.append` and idempotent subscribe/unsubscribe. | Event append and stream subscription records carry trigger/invocation metadata. |
@@ -93,7 +93,7 @@ Live fabric mapping:
 
 | Current concept | Future primitive | Agent-native requirement |
 |-----------------|------------------|--------------------------|
-| `agent.prompt` | Trigger that invokes or enqueues `agent::run_turn`. | Record actor, session, catalog revision, idempotency key, and prompt causality. |
+| `agent.prompt` | Generic `json_rpc` trigger into canonical `agent::prompt`; it enqueues hidden `agent::prompt_apply` and queue-drain work. | Record actor, session, catalog/function revision, trigger id, queue receipt, idempotency key, child apply invocation, and prompt causality. |
 | Turn runner | `agent::run_turn` function. | Uses stable meta-capabilities over live catalog. |
 | Tool executor | `engine::capabilities::invoke` over tool functions. | Enforce visibility, authority, effect, idempotency, and approvals before each tool. |
 | Context manager | `context::*` functions. | Context can include live discovery instructions, not static full catalog dumps. |

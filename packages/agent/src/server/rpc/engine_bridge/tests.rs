@@ -9,14 +9,14 @@ use serde_json::{Value, json};
 use super::*;
 use crate::engine::{
     ActorContext, ActorKind, CausalContext, DeliveryMode, EffectClass, EngineError, FunctionId,
-    FunctionQuery, Invocation, RiskLevel, TraceId, VisibilityScope,
+    FunctionQuery, Invocation, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
 };
 use crate::server::codex_app::{
     CodexAppServerChild, CodexAppServerExit, CodexAppServerLaunchSpec, CodexAppServerManager,
     CodexAppServerSpawner, CodexAppServerState,
 };
 use crate::server::rpc::handlers;
-use crate::server::rpc::handlers::test_helpers::make_test_context;
+use crate::server::rpc::handlers::test_helpers::{make_test_agent_deps, make_test_context};
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 use crate::server::rpc::types::RpcRequest;
 use crate::tools::errors::ToolError;
@@ -73,6 +73,7 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "session.archive",
     "session.unarchive",
     "session.archiveOlderThan",
+    "agent.prompt",
     "agent.abort",
     "agent.abortTool",
     "agent.queuePrompt",
@@ -199,6 +200,14 @@ fn migration_parity_registry() -> MethodRegistry {
     let mut registry = MethodRegistry::with_handler_timeout(MIGRATION_PARITY_TIMEOUT);
     handlers::register_all(&mut registry);
     registry
+}
+
+fn make_prompt_context() -> crate::server::rpc::context::RpcContext {
+    let mut ctx = make_test_context();
+    ctx.agent_deps = Some(make_test_agent_deps());
+    let registry = migration_parity_registry();
+    super::register_rpc_worker_for_context(&ctx, &registry).unwrap();
+    ctx
 }
 
 struct SettingsTestGuard {
@@ -393,6 +402,9 @@ fn normalize_unstable_fields(method: &str, mut value: Value) -> Value {
         value["queueId"] = json!("<queue>");
         value["timestamp"] = json!("<timestamp>");
     }
+    if method == "agent.prompt" {
+        value["runId"] = json!("<run>");
+    }
     value
 }
 
@@ -433,7 +445,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
         .collect::<BTreeSet<_>>();
     let registry_methods = registry.methods().into_iter().collect::<BTreeSet<_>>();
     assert_eq!(spec_methods, registry_methods);
-    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 75);
+    assert_eq!(GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(), 76);
 }
 
 #[test]
@@ -509,6 +521,48 @@ fn bridge_specs_classify_generic_writes_as_generic_triggers() {
     assert_eq!(delete.effect_class, EffectClass::IrreversibleSideEffect);
     let definition = specs::function_definition_for_spec(delete);
     assert!(definition.required_authority.approval_required);
+}
+
+#[test]
+fn bridge_specs_classify_agent_prompt_as_queue_backed_engine_prompt() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+    let spec = specs
+        .iter()
+        .find(|spec| spec.method == "agent.prompt")
+        .unwrap();
+
+    assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+    assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+    assert_eq!(spec.function_id, FunctionId::new("agent::prompt").unwrap());
+    assert_eq!(spec.owner_worker, specs::worker_id("agent").unwrap());
+    assert_eq!(spec.effect_class, EffectClass::ExternalSideEffect);
+    assert_eq!(spec.risk_level, RiskLevel::High);
+    assert_eq!(spec.visibility, VisibilityScope::System);
+    assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+    assert_eq!(spec.authority_scope, Some("agent.write"));
+    assert_eq!(
+        spec.idempotency_mode,
+        RpcIdempotencyMode::JsonRpcRequestIdSeed
+    );
+    assert!(super::schemas::request_schema_for_method("agent.prompt").is_some());
+    assert!(super::schemas::response_schema_for_method("agent.prompt").is_some());
+    let definition = specs::function_definition_for_spec(spec);
+    assert!(definition.required_authority.approval_required);
+    assert_eq!(
+        definition
+            .idempotency
+            .as_ref()
+            .unwrap()
+            .dedupe_scope
+            .as_str(),
+        "session"
+    );
+    assert!(
+        registry.is_generic_trigger_marker("agent.prompt"),
+        "agent.prompt must be marker-registered, not a method-specific business handler"
+    );
 }
 
 #[test]
@@ -1402,6 +1456,197 @@ async fn agent_queue_prompt_outputs_match_direct_engine_and_replays_rpc_retry() 
     )
     .unwrap();
     assert_eq!(pending.len(), 1, "idempotent retry must not enqueue twice");
+}
+
+#[tokio::test]
+async fn agent_prompt_outputs_match_direct_engine_and_json_rpc_dispatch() {
+    let direct_ctx = make_prompt_context();
+    let direct_session = direct_ctx
+        .event_store
+        .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+        .unwrap()
+        .session
+        .id;
+    let direct = normalize_unstable_fields(
+        "agent.prompt",
+        direct_engine_value(
+            &direct_ctx,
+            "agent.prompt",
+            json!({"sessionId": direct_session, "prompt": "hello from engine"}),
+        )
+        .await,
+    );
+
+    let rpc_ctx = make_prompt_context();
+    let rpc_session = rpc_ctx
+        .event_store
+        .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+        .unwrap()
+        .session
+        .id;
+    let rpc = normalize_unstable_fields(
+        "agent.prompt",
+        rpc_dispatch_value(
+            &rpc_ctx,
+            "agent.prompt",
+            json!({"sessionId": rpc_session, "prompt": "hello from engine"}),
+        )
+        .await,
+    );
+    assert_eq!(direct, json!({"acknowledged": true, "runId": "<run>"}));
+    assert_eq!(direct, rpc);
+}
+
+#[tokio::test]
+async fn agent_prompt_publishes_engine_stream_lifecycle_records() {
+    let ctx = make_prompt_context();
+    let session_id = ctx
+        .event_store
+        .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+        .unwrap()
+        .session
+        .id;
+
+    let result = rpc_dispatch_value(
+        &ctx,
+        "agent.prompt",
+        json!({"sessionId": session_id, "prompt": "stream me"}),
+    )
+    .await;
+    assert_eq!(
+        normalize_unstable_fields("agent.prompt", result),
+        json!({"acknowledged": true, "runId": "<run>"})
+    );
+
+    ctx.engine_host
+        .subscribe_stream(
+            "agent-prompt-lifecycle-test".to_owned(),
+            "agent.queue".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some(session_id.clone()),
+            None,
+        )
+        .await
+        .unwrap();
+    let actor = StreamActorScope::scoped(Some(session_id.clone()), None);
+    let mut cursor = StreamCursor(0);
+    let mut actions = BTreeSet::new();
+    for _ in 0..240 {
+        let page = ctx
+            .engine_host
+            .poll_stream("agent-prompt-lifecycle-test", Some(cursor), 100, &actor)
+            .await
+            .unwrap();
+        cursor = page.next_cursor;
+        for event in page.events {
+            if event.payload["sessionId"] == session_id
+                && let Some(action) = event.payload["action"].as_str()
+            {
+                actions.insert(action.to_owned());
+            }
+        }
+        if actions.contains("completed") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    for expected in ["accepted", "apply_enqueued", "apply_started", "completed"] {
+        assert!(
+            actions.contains(expected),
+            "missing prompt lifecycle stream action {expected}; saw {actions:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn agent_prompt_duplicate_transport_replays_without_second_apply() {
+    let ctx = make_prompt_context();
+    let session_id = ctx
+        .event_store
+        .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+        .unwrap()
+        .session
+        .id;
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: "prompt-retry".to_owned(),
+        method: "agent.prompt".to_owned(),
+        params: Some(json!({"sessionId": session_id, "prompt": "dedupe me"})),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+
+    let host = ctx.engine_host.lock().await;
+    let apply_invocations = host
+        .catalog()
+        .invocations()
+        .iter()
+        .filter(|record| record.function_id == FunctionId::new("agent::prompt_apply").unwrap())
+        .count();
+    assert_eq!(
+        apply_invocations, 1,
+        "transport retry must replay the public prompt result without applying twice"
+    );
+    let replay = host.catalog().invocations().last().unwrap();
+    assert!(replay.replayed_from.is_some());
+}
+
+#[tokio::test]
+async fn agent_prompt_agent_invocation_requires_approval_before_execution() {
+    let ctx = make_prompt_context();
+    let client = crate::engine::AgentCapabilityClient::new(
+        ctx.engine_host.clone(),
+        specs::actor_id("agent:test").unwrap(),
+        specs::grant_id("agent-test").unwrap(),
+    )
+    .with_scopes(["agent.write"])
+    .with_session_id("approval-session");
+    let result = client
+        .invoke(
+            FunctionId::new("agent::prompt").unwrap(),
+            json!({"sessionId": "approval-session", "prompt": "needs approval"}),
+            Some("agent-prompt-approval-key".to_owned()),
+            None,
+        )
+        .await;
+
+    let Some(EngineError::AdapterFailure { code, details, .. }) = result.error else {
+        panic!(
+            "expected approval-required adapter failure, got {:?}",
+            result.error
+        );
+    };
+    assert_eq!(code, "APPROVAL_REQUIRED");
+    assert_eq!(details.unwrap()["code"], "APPROVAL_REQUIRED");
+}
+
+#[tokio::test]
+async fn hidden_agent_prompt_runtime_functions_are_not_agent_discoverable() {
+    let ctx = make_prompt_context();
+    let functions = ctx
+        .engine_host
+        .discover(&FunctionQuery {
+            actor: Some(ActorContext::new(
+                specs::actor_id("agent:test").unwrap(),
+                ActorKind::Agent,
+                specs::grant_id("agent-test").unwrap(),
+            )),
+            ..Default::default()
+        })
+        .await;
+    let ids = functions
+        .iter()
+        .map(|function| function.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(ids.contains("agent::prompt"));
+    assert!(!ids.contains("agent::prompt_apply"));
+    assert!(!ids.contains("agent::prompt_queue_drain"));
 }
 
 #[tokio::test]

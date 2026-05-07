@@ -196,7 +196,7 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("session.unarchive"),
     generic_trigger!("session.archiveOlderThan"),
     generic_trigger!("session.export"),
-    handler_only!("agent.prompt"),
+    generic_trigger!("agent.prompt"),
     generic_trigger!("agent.abort"),
     generic_trigger!("agent.abortTool"),
     generic_trigger!("agent.status"),
@@ -556,6 +556,9 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
     ) {
         return EffectClass::ReversibleSideEffect;
     }
+    if method == "agent.prompt" {
+        return EffectClass::ExternalSideEffect;
+    }
     if matches!(method, "events.append" | "logs.ingest") {
         return EffectClass::AppendOnlyEvent;
     }
@@ -603,6 +606,7 @@ fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
             | "session.archiveOlderThan"
             | "job.cancel"
             | "approval.resolve"
+            | "agent.prompt"
             | "agent.abort"
     ) {
         RiskLevel::High
@@ -698,6 +702,7 @@ fn settings_write_requires_approval(method: &str) -> bool {
             | "context.compact"
             | "session.archiveOlderThan"
             | "job.cancel"
+            | "agent.prompt"
             | "agent.abort"
     )
 }
@@ -879,6 +884,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "session.archiveOlderThan" => ("session", "archive_older_than".to_owned()),
         "session.export" => ("session", "export".to_owned()),
         "agent.status" => ("agent", "status".to_owned()),
+        "agent.prompt" => ("agent", "prompt".to_owned()),
         "agent.abort" => ("agent", "abort".to_owned()),
         "agent.abortTool" => ("agent", "abort_tool".to_owned()),
         "agent.queuePrompt" => ("agent", "queue_prompt".to_owned()),

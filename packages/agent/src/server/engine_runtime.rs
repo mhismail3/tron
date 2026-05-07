@@ -3,6 +3,9 @@
 //! JSON-RPC and WebSocket remain transports: queue draining and stream fan-out
 //! live here so the engine's durable queue/stream primitives, not handlers, are
 //! the source of truth for delayed work and push delivery.
+//! The `agent` queue drains hidden prompt apply/drain functions so `agent.prompt`
+//! can remain wire-compatible while startup and queued follow-up prompts run
+//! through canonical engine functions.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,7 +31,7 @@ impl EngineRuntimeServices {
     pub fn start(server: &TronServer) {
         let host = server.rpc_context().engine_host.clone();
         let shutdown = server.shutdown().clone();
-        for queue in ["default", "jobs"] {
+        for queue in ["default", "jobs", "agent"] {
             let service = EngineQueueDrainerService::new(
                 host.clone(),
                 queue.to_owned(),

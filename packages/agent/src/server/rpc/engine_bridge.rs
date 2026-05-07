@@ -6,9 +6,9 @@
 //! in-process worker functions, and generic-trigger methods bypass
 //! method-specific business handlers entirely. Prompt library, settings, logs,
 //! skills, notifications, plan, events, basic filesystem, all job methods,
-//! agent queue controls, session create/delete/fork/archive/export except
-//! `session.resume`, and all context snapshot/compaction/clear methods now run
-//! through this generic-trigger path.
+//! all current agent controls including `agent.prompt`, session
+//! create/delete/fork/archive/export except `session.resume`, and all context
+//! snapshot/compaction/clear methods now run through this generic-trigger path.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
@@ -39,7 +39,7 @@ mod specs;
 #[cfg(test)]
 mod tests;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::engine::{
     AuthorityRequirement, EffectClass, EngineError, EngineHostHandle, FunctionDefinition,
@@ -103,12 +103,120 @@ fn register_rpc_worker(
         )?;
     }
     register_hidden_job_apply_functions(handle, &deps)?;
+    register_hidden_agent_prompt_functions(handle, &deps)?;
     for spec in &specs {
         if let Some(trigger) = specs::json_rpc_trigger_for_spec(spec)? {
             handle.register_trigger_for_setup(trigger, false)?;
         }
     }
     Ok(())
+}
+
+fn register_hidden_agent_prompt_functions(
+    handle: &EngineHostHandle,
+    deps: &functions::RpcEngineDeps,
+) -> EngineResult<()> {
+    for (id, method, description, request_schema, response_schema) in [
+        (
+            "agent::prompt_apply",
+            "agent.prompt.apply",
+            "apply a queued agent prompt command",
+            agent_prompt_apply_request_schema(),
+            agent_prompt_response_schema(),
+        ),
+        (
+            "agent::prompt_queue_drain",
+            "agent.prompt.queue_drain",
+            "drain the next queued prompt after a run completes",
+            agent_prompt_queue_drain_request_schema(),
+            agent_prompt_queue_drain_response_schema(),
+        ),
+    ] {
+        let mut definition = FunctionDefinition::new(
+            FunctionId::new(id)?,
+            specs::worker_id("agent")?,
+            description,
+            VisibilityScope::Internal,
+            EffectClass::ExternalSideEffect,
+        )
+        .with_risk(RiskLevel::High)
+        .with_required_authority(AuthorityRequirement::scope("agent.write"))
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_provenance(Provenance::system())
+        .with_request_schema(request_schema)
+        .with_response_schema(response_schema);
+        definition.metadata = serde_json::json!({
+            "internal": true,
+            "canonicalCapability": id,
+            "hiddenPromptRuntimeFunction": true,
+        });
+        handle.register_function_for_setup(
+            definition,
+            Some(std::sync::Arc::new(functions::RpcFunctionHandler {
+                method,
+                deps: deps.clone(),
+            })),
+            false,
+        )?;
+    }
+    Ok(())
+}
+
+fn agent_prompt_apply_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["runId", "sessionId", "prompt"],
+        "additionalProperties": false,
+        "properties": {
+            "runId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "prompt": {"type": "string"},
+            "reasoningLevel": {"type": "string"},
+            "images": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "source": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["acknowledged", "runId"],
+        "additionalProperties": false,
+        "properties": {
+            "acknowledged": {"type": "boolean"},
+            "runId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_queue_drain_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["sessionId", "completedRunId"],
+        "additionalProperties": false,
+        "properties": {
+            "sessionId": {"type": "string"},
+            "completedRunId": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_queue_drain_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["drained", "count"],
+        "additionalProperties": false,
+        "properties": {
+            "drained": {"type": "boolean"},
+            "count": {"type": "integer"},
+            "runId": {"type": ["string", "null"]},
+            "reason": {"type": ["string", "null"]}
+        }
+    })
 }
 
 fn register_hidden_job_apply_functions(

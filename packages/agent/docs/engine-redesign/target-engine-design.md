@@ -440,7 +440,7 @@ isolation does.
 | `events` | Session/event-store append, read, reconstruct, subscribe/unsubscribe. All current `events.*` RPC methods are generic-triggered; subscribe/unsubscribe create stream subscription records while preserving current acknowledgements. |
 | `session` | Session create/delete/fork/archive/unarchive/archiveOlderThan/export plus safe reads are generic-triggered canonical functions; `session.resume` remains handler-owned because it is still coupled to transport/session lifecycle. |
 | `context` | Snapshot/audit/compaction/clear/canAcceptTurn methods are generic-triggered canonical functions with approval metadata on destructive commands. |
-| `agent` | Status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered canonical functions; `agent.prompt` remains handler-owned until turn execution and prompt queue draining collapse into engine runtime. |
+| `agent` | Prompt, status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered canonical functions. `agent.prompt` validates and enqueues hidden `agent::prompt_apply`, while completion enqueues hidden `agent::prompt_queue_drain` so prompt startup and queued follow-up turns are queue-backed and causally recorded. |
 | `job` | Background/cancel/list/subscribe/unsubscribe are generic-triggered canonical functions; background/cancel enqueue hidden internal apply functions and synchronously drain their own receipts for current JSON-RPC compatibility. |
 | `notifications` | Notification inbox read-state functions; currently fully generic-triggered for RPC compatibility. |
 | `plan` | Session plan-mode state; currently fully generic-triggered for RPC compatibility. |

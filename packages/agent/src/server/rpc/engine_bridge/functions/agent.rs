@@ -1,13 +1,18 @@
 use super::*;
 
 use crate::core::events::{BaseEvent, TronEvent};
+use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::queue::publish_queue_lifecycle_event;
+use crate::engine::{EngineQueueDrainer, EnqueueInvocation, FunctionId};
 use crate::events::EventType;
 use crate::server::rpc::agent_commands::AgentCommandService;
 use crate::server::rpc::errors;
 use crate::server::rpc::handlers::agent::prompt_runtime::{
     format_subagent_results, get_pending_subagent_results,
 };
-use crate::server::rpc::handlers::agent::prompt_service::{PromptRequest, spawn_prompt_run};
+use crate::server::rpc::handlers::agent::prompt_service::{
+    PromptEngineCausality, PromptRequest, drain_prompt_queue, spawn_prompt_run,
+};
 use crate::server::rpc::prompt_queue::PromptQueueService;
 use crate::server::rpc::validation;
 use serde::Deserialize;
@@ -19,6 +24,11 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     let payload = &invocation.payload;
     match method {
+        "agent.prompt" => prompt_value(invocation, deps).await,
+        "agent.prompt.apply" => prompt_apply_value(Some(payload), invocation, deps).await,
+        "agent.prompt.queue_drain" => {
+            prompt_queue_drain_value(Some(payload), invocation, deps).await
+        }
         "agent.status" => status_value(Some(payload), deps).await,
         "agent.abort" => abort_value(Some(payload), deps).await,
         "agent.abortTool" => abort_tool_value(Some(payload), deps).await,
@@ -32,6 +42,361 @@ pub(super) async fn handle(
             message: format!("agent method {method} is not engine-owned"),
         }),
     }
+}
+
+struct PromptSubmission {
+    session_id: String,
+    prompt: String,
+    reasoning_level: Option<String>,
+    images: Option<Vec<Value>>,
+    attachments: Option<Vec<Value>>,
+    source: Option<String>,
+}
+
+async fn prompt_value(invocation: &Invocation, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let (submission, _, _) = validate_prompt_submission(Some(&invocation.payload), deps).await?;
+    let run_id = uuid::Uuid::now_v7().to_string();
+    let mut apply_payload = invocation.payload.clone();
+    let Some(object) = apply_payload.as_object_mut() else {
+        return Err(RpcError::InvalidParams {
+            message: "agent.prompt params must be an object".into(),
+        });
+    };
+    object.insert("runId".to_owned(), json!(run_id));
+    publish_prompt_stream(
+        invocation,
+        deps,
+        &submission.session_id,
+        "accepted",
+        json!({}),
+    )
+    .await;
+    enqueue_and_sync_drain_prompt_apply(invocation, deps, &submission.session_id, apply_payload)
+        .await
+}
+
+async fn prompt_apply_value(
+    params: Option<&Value>,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let run_id = require_string_param(params, "runId")?;
+    let (submission, session, agent_deps) = validate_prompt_submission(params, deps).await?;
+
+    let started_run = deps
+        .orchestrator
+        .begin_run(&submission.session_id, &run_id)
+        .map_err(|e| RpcError::Custom {
+            code: e.category().to_uppercase(),
+            message: e.to_string(),
+            details: None,
+        })?;
+
+    record_prompt_history(deps, &submission.prompt, submission.source.as_deref());
+    publish_prompt_stream(
+        invocation,
+        deps,
+        &submission.session_id,
+        "apply_started",
+        json!({"runId": run_id}),
+    )
+    .await;
+    spawn_prompt_run(
+        &deps.rpc_context,
+        &agent_deps,
+        &session,
+        started_run,
+        run_id.clone(),
+        PromptRequest {
+            session_id: submission.session_id,
+            prompt: submission.prompt,
+            reasoning_level: submission.reasoning_level,
+            images: submission.images,
+            attachments: submission.attachments,
+            message_metadata: None,
+            engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
+        },
+    );
+
+    Ok(json!({
+        "acknowledged": true,
+        "runId": run_id,
+    }))
+}
+
+async fn prompt_queue_drain_value(
+    params: Option<&Value>,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let session = AgentCommandService::load_prompt_session(&deps.rpc_context, &session_id).await?;
+    let agent_deps = deps
+        .agent_deps
+        .as_ref()
+        .ok_or_else(|| RpcError::NotAvailable {
+            message: "Agent execution dependencies are not configured".into(),
+        })?;
+    let outcome = drain_prompt_queue(
+        &deps.event_store,
+        &deps.orchestrator,
+        &deps.session_manager,
+        &session_id,
+        &session.latest_model,
+        &session.working_directory,
+        deps.orchestrator.broadcast().clone(),
+        agent_deps.provider_factory.clone(),
+        agent_deps.tool_factory.clone(),
+        agent_deps.guardrails.clone(),
+        deps.rpc_context.health_tracker.clone(),
+        deps.rpc_context.context_artifacts.clone(),
+        deps.skill_registry.clone(),
+        deps.rpc_context.memory_registry.clone(),
+        deps.profile_runtime.clone(),
+        deps.rpc_context.subagent_manager.clone(),
+        deps.rpc_context
+            .shutdown_coordinator
+            .as_ref()
+            .map(|coord| coord.token()),
+        deps.rpc_context.worktree_coordinator.clone(),
+        deps.process_manager.clone(),
+        deps.job_manager.clone(),
+        deps.output_buffer_registry.clone(),
+        deps.rpc_context.hook_abort_tracker.clone(),
+        deps.rpc_context.origin.clone(),
+        deps.engine_host.clone(),
+        Some(PromptEngineCausality::from_invocation(invocation)),
+    )?;
+    publish_prompt_stream(
+        invocation,
+        deps,
+        &session_id,
+        "queue_drained",
+        serde_json::to_value(&outcome).unwrap_or_else(|_| json!({})),
+    )
+    .await;
+    serde_json::to_value(outcome).map_err(|e| RpcError::Internal {
+        message: format!("Failed to serialize prompt queue drain outcome: {e}"),
+    })
+}
+
+async fn validate_prompt_submission(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<
+    (
+        PromptSubmission,
+        crate::events::sqlite::row_types::SessionRow,
+        crate::server::rpc::context::AgentDeps,
+    ),
+    RpcError,
+> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let prompt = require_string_param(params, "prompt")?;
+    validation::validate_string_param(&prompt, "prompt", validation::MAX_PROMPT_LENGTH)?;
+    let images = opt_array(params, "images").cloned();
+    let attachments = opt_array(params, "attachments").cloned();
+    validate_attachment_arrays(images.as_deref(), attachments.as_deref())?;
+
+    if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
+        return Err(RpcError::Custom {
+            code: errors::SESSION_BUSY.into(),
+            message: format!("Session '{session_id}' is already processing run '{active_run_id}'"),
+            details: Some(json!({ "runId": active_run_id })),
+        });
+    }
+
+    let session = AgentCommandService::load_prompt_session(&deps.rpc_context, &session_id).await?;
+    let agent_deps = deps
+        .agent_deps
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| RpcError::NotAvailable {
+            message: "Agent execution dependencies are not configured".into(),
+        })?;
+    Ok((
+        PromptSubmission {
+            session_id,
+            prompt,
+            reasoning_level: opt_string(params, "reasoningLevel"),
+            images,
+            attachments,
+            source: opt_string(params, "source"),
+        },
+        session,
+        agent_deps,
+    ))
+}
+
+fn validate_attachment_arrays(
+    images: Option<&[Value]>,
+    attachments: Option<&[Value]>,
+) -> Result<(), RpcError> {
+    if let Some(images) = images {
+        for image in images {
+            if let Some(data) = image.get("data").and_then(Value::as_str) {
+                validation::validate_attachment_size(data)?;
+            }
+        }
+    }
+    if let Some(attachments) = attachments {
+        for attachment in attachments {
+            if let Some(data) = attachment.get("data").and_then(Value::as_str) {
+                validation::validate_attachment_size(data)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn enqueue_and_sync_drain_prompt_apply(
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+    session_id: &str,
+    apply_payload: Value,
+) -> Result<Value, RpcError> {
+    let function_id = FunctionId::new("agent::prompt_apply").map_err(|e| RpcError::Internal {
+        message: e.to_string(),
+    })?;
+    let mut authority_scopes = invocation.causal_context.authority_scopes.clone();
+    if !authority_scopes
+        .iter()
+        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
+    {
+        authority_scopes.push(ENGINE_INTERNAL_INVOKE_SCOPE.to_owned());
+    }
+    let item = deps
+        .engine_host
+        .enqueue_invocation(EnqueueInvocation {
+            queue: "agent".to_owned(),
+            function_id,
+            target_revision: None,
+            payload: apply_payload,
+            actor_id: invocation.causal_context.actor_id.clone(),
+            actor_kind: invocation.causal_context.actor_kind.clone(),
+            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+            authority_scopes,
+            trace_id: invocation.causal_context.trace_id.clone(),
+            parent_invocation_id: Some(invocation.id.clone()),
+            trigger_id: invocation.causal_context.trigger_id.clone(),
+            session_id: invocation.causal_context.session_id.clone(),
+            workspace_id: invocation.causal_context.workspace_id.clone(),
+            idempotency_key: Some(format!("agent.prompt.apply:{}", invocation.id)),
+        })
+        .await
+        .map_err(super::super::engine_error_to_rpc)?;
+    publish_queue_lifecycle_event(&deps.engine_host, "enqueue", &item, None).await;
+    publish_prompt_stream(
+        invocation,
+        deps,
+        invocation
+            .causal_context
+            .session_id
+            .as_deref()
+            .unwrap_or_default(),
+        "apply_enqueued",
+        json!({"receiptId": item.receipt_id, "queue": item.queue}),
+    )
+    .await;
+
+    let drained = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        EngineQueueDrainer::drain_receipt(&deps.engine_host, &item.receipt_id, "rpc-agent-sync"),
+    )
+    .await
+    .map_err(|_| RpcError::Internal {
+        message: format!(
+            "Timed out waiting for queued prompt command receipt {}",
+            item.receipt_id
+        ),
+    })?
+    .map_err(super::super::engine_error_to_rpc)?;
+    let Some(result) = drained else {
+        return Err(RpcError::Internal {
+            message: format!(
+                "Queued prompt command receipt {} was not claimable",
+                item.receipt_id
+            ),
+        });
+    };
+    if let Some(error) = &result.error {
+        publish_prompt_stream(
+            invocation,
+            deps,
+            session_id,
+            "apply_failed",
+            json!({
+                "receiptId": item.receipt_id,
+                "error": error.to_string(),
+            }),
+        )
+        .await;
+    }
+    super::super::result_to_rpc(result)
+}
+
+fn record_prompt_history(deps: &RpcEngineDeps, prompt: &str, source: Option<&str>) {
+    let is_cron = source
+        .map(|source| source.starts_with("cron"))
+        .unwrap_or(false);
+    let prompt_library_settings = crate::settings::get_settings().prompt_library.clone();
+    if is_cron || !prompt_library_settings.history_enabled {
+        return;
+    }
+    let pool = deps.event_store.pool().clone();
+    let text_for_history = prompt.to_owned();
+    let auto_prune = prompt_library_settings.history_auto_prune;
+    let max_entries = auto_prune
+        .then_some(prompt_library_settings.history_max_entries)
+        .filter(|n| *n > 0);
+    let max_age_days = auto_prune
+        .then_some(prompt_library_settings.history_max_age_days)
+        .filter(|n| *n > 0);
+    deps.rpc_context
+        .spawn_blocking_detached("agent.prompt.history", move || {
+            match crate::prompt_library::store::record_prompt_and_prune(
+                &pool,
+                &text_for_history,
+                max_entries,
+                max_age_days,
+            ) {
+                Ok(outcome) => {
+                    let char_count = text_for_history.chars().count();
+                    tracing::debug!(char_count, ?outcome, "recorded prompt history");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to record prompt history");
+                }
+            }
+            Ok(())
+        });
+}
+
+async fn publish_prompt_stream(
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+    session_id: &str,
+    action: &str,
+    payload: Value,
+) {
+    let _ = deps
+        .engine_host
+        .publish_stream_event(crate::engine::PublishStreamEvent {
+            topic: "agent.queue".to_owned(),
+            payload: json!({
+                "type": format!("agent.prompt.{action}"),
+                "action": action,
+                "sessionId": session_id,
+                "payload": payload,
+            }),
+            visibility: crate::engine::VisibilityScope::Session,
+            session_id: Some(session_id.to_owned()),
+            workspace_id: invocation.causal_context.workspace_id.clone(),
+            producer: "agent::prompt".to_owned(),
+            trace_id: Some(invocation.causal_context.trace_id.clone()),
+            parent_invocation_id: Some(invocation.id.clone()),
+        })
+        .await;
 }
 
 async fn status_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
@@ -428,6 +793,7 @@ async fn start_or_queue_prompt_with_loaded_session(
                     images: None,
                     attachments: None,
                     message_metadata,
+                    engine_causality: None,
                 },
             );
             let mut result = json!({

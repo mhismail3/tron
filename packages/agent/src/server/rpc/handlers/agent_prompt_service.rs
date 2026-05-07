@@ -7,10 +7,18 @@ use crate::runtime::orchestrator::orchestrator::StartedRun;
 use crate::runtime::types::{AgentConfig, RunContext, VolatileTokens};
 use crate::skills::registry::SkillRegistry;
 use parking_lot::RwLock;
+use serde::Serialize;
 use serde_json::Value;
 use tracing::{debug, warn};
 
+use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::queue::publish_queue_lifecycle_event;
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineQueueDrainer, EnqueueInvocation,
+    FunctionId, Invocation, InvocationId, PublishStreamEvent, TraceId, VisibilityScope,
+};
 use crate::server::rpc::context::{AgentDeps, RpcContext};
+use crate::server::rpc::errors::RpcError;
 
 use super::prompt_runtime::{
     PromptBootstrapData, PromptContextArtifacts, build_user_content_override,
@@ -31,6 +39,54 @@ pub struct PromptRequest {
     /// answers) to tag the message with `messageKind` and structured fields
     /// so iOS can render a chip without parsing text content.
     pub message_metadata: Option<Value>,
+    /// Optional engine causality propagated from accepted/apply invocations
+    /// into completion-triggered prompt queue drains.
+    pub engine_causality: Option<PromptEngineCausality>,
+}
+
+#[derive(Clone)]
+pub struct PromptEngineCausality {
+    context: CausalContext,
+    parent_invocation_id: Option<InvocationId>,
+}
+
+impl PromptEngineCausality {
+    #[must_use]
+    pub fn from_invocation(invocation: &Invocation) -> Self {
+        Self {
+            context: invocation.causal_context.clone(),
+            parent_invocation_id: Some(invocation.id.clone()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptDrainOutcome {
+    pub drained: bool,
+    pub count: usize,
+    pub run_id: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl PromptDrainOutcome {
+    fn drained(run_id: String, count: usize) -> Self {
+        Self {
+            drained: true,
+            count,
+            run_id: Some(run_id),
+            reason: None,
+        }
+    }
+
+    fn not_drained(reason: impl Into<String>) -> Self {
+        Self {
+            drained: false,
+            count: 0,
+            run_id: None,
+            reason: Some(reason.into()),
+        }
+    }
 }
 
 struct PromptRunPlan {
@@ -55,6 +111,8 @@ struct PromptRunPlan {
     output_buffer_registry:
         Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
+    engine_host: crate::engine::EngineHostHandle,
+    engine_causality: Option<PromptEngineCausality>,
     sequence_counter: Option<Arc<AtomicI64>>,
     server_origin: String,
     run_id: String,
@@ -137,6 +195,7 @@ pub fn spawn_prompt_run(
     run_id: String,
     request: PromptRequest,
 ) {
+    let engine_causality = request.engine_causality.clone();
     let plan = PromptRunPlan {
         started_run,
         orchestrator: ctx.orchestrator.clone(),
@@ -158,6 +217,8 @@ pub fn spawn_prompt_run(
         job_manager: ctx.job_manager.clone(),
         output_buffer_registry: ctx.output_buffer_registry.clone(),
         hook_abort_tracker: ctx.hook_abort_tracker.clone(),
+        engine_host: ctx.engine_host.clone(),
+        engine_causality,
         sequence_counter: {
             let sid = &request.session_id;
             let max_seq = ctx.event_store.get_max_sequence(sid).unwrap_or(0);
@@ -206,6 +267,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         job_manager,
         output_buffer_registry,
         hook_abort_tracker,
+        engine_host,
+        engine_causality,
         sequence_counter,
         server_origin,
         run_id,
@@ -260,25 +323,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         images,
         attachments,
         message_metadata,
+        engine_causality: _,
     } = request;
-
-    // Pre-clone deps needed for auto-drain after the run completes
-    let drain_provider_factory = provider_factory.clone();
-    let drain_tool_factory = tool_factory.clone();
-    let drain_guardrails = guardrails.clone();
-    let drain_health_tracker = health_tracker.clone();
-    let drain_context_artifacts = context_artifacts.clone();
-    let drain_skill_registry = skill_registry.clone();
-    let drain_memory_registry = memory_registry.clone();
-    let drain_profile_runtime = profile_runtime.clone();
-    let drain_subagent_manager = subagent_manager.clone();
-    let drain_shutdown_token = shutdown_token.clone();
-    let drain_worktree_coordinator = worktree_coordinator.clone();
-    let drain_process_manager = process_manager.clone();
-    let drain_job_manager = job_manager.clone();
-    let drain_output_buffer_registry = output_buffer_registry.clone();
-    let drain_hook_abort_tracker = hook_abort_tracker.clone();
-    let drain_server_origin = server_origin.clone();
 
     // Create per-session hook engine: builtins + discovered user/project hooks.
     // Fresh each session so new/modified hook files are picked up without restart.
@@ -1000,41 +1046,37 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         turns = result.turns_executed,
         "prompt run completed"
     );
-
-    // Auto-drain: check the prompt queue and start the next queued message if present.
-    // This runs after the run is fully complete (agent.ready emitted, cleanup done),
-    // so the session is free for a new run.
-    drain_prompt_queue(
-        &event_store,
-        &orchestrator,
-        &session_manager,
+    publish_prompt_runtime_stream(
+        &engine_host,
+        engine_causality.as_ref(),
         &session_id,
-        &model,
-        &working_dir,
-        orchestrator.broadcast().clone(),
-        drain_provider_factory,
-        drain_tool_factory,
-        drain_guardrails,
-        drain_health_tracker,
-        drain_context_artifacts,
-        drain_skill_registry,
-        drain_memory_registry,
-        drain_profile_runtime,
-        drain_subagent_manager,
-        drain_shutdown_token,
-        drain_worktree_coordinator,
-        drain_process_manager,
-        drain_job_manager,
-        drain_output_buffer_registry,
-        drain_hook_abort_tracker,
-        drain_server_origin,
-    );
+        "completed",
+        serde_json::json!({
+            "runId": run_id,
+            "turnsExecuted": result.turns_executed,
+            "interrupted": result.interrupted,
+            "stopReason": format!("{:?}", result.stop_reason),
+            "error": result.error,
+        }),
+    )
+    .await;
+
+    // Auto-drain is now hidden engine queue work. Completion only enqueues
+    // the drain capability, so queue handoff, trace propagation, and
+    // idempotency are visible through the engine ledger and stream records.
+    enqueue_prompt_queue_drain(
+        &engine_host,
+        &session_id,
+        &run_id,
+        engine_causality.as_ref(),
+    )
+    .await;
 }
 
 /// Check the prompt queue for the session and, if there is a pending message,
 /// dequeue it and spawn a new prompt run for it.
 #[allow(clippy::too_many_arguments)]
-fn drain_prompt_queue(
+pub(crate) fn drain_prompt_queue(
     event_store: &Arc<crate::events::EventStore>,
     orchestrator: &Arc<crate::runtime::orchestrator::orchestrator::Orchestrator>,
     session_manager: &Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
@@ -1060,7 +1102,9 @@ fn drain_prompt_queue(
     >,
     hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
     server_origin: String,
-) {
+    engine_host: crate::engine::EngineHostHandle,
+    engine_causality: Option<PromptEngineCausality>,
+) -> Result<PromptDrainOutcome, RpcError> {
     use crate::server::rpc::prompt_queue::PromptQueueService;
     use crate::settings::types::QueueDrainMode;
 
@@ -1072,11 +1116,11 @@ fn drain_prompt_queue(
         Ok(items) => items,
         Err(e) => {
             warn!(session_id, error = %e, "failed to query prompt queue");
-            return;
+            return Err(e);
         }
     };
     if pending.is_empty() {
-        return;
+        return Ok(PromptDrainOutcome::not_drained("empty"));
     }
 
     // Determine prompt text based on drain mode.
@@ -1115,7 +1159,7 @@ fn drain_prompt_queue(
         Ok(run) => run,
         Err(e) => {
             warn!(session_id, error = %e, "failed to begin run for queued prompt, messages preserved in queue");
-            return;
+            return Ok(PromptDrainOutcome::not_drained("busy"));
         }
     };
 
@@ -1174,6 +1218,8 @@ fn drain_prompt_queue(
         job_manager,
         output_buffer_registry,
         hook_abort_tracker,
+        engine_host,
+        engine_causality: engine_causality.clone(),
         sequence_counter,
         source: session_row.as_ref().and_then(|s| s.source.clone()),
         profile: session_row
@@ -1181,7 +1227,7 @@ fn drain_prompt_queue(
             .map(|s| s.profile.clone())
             .unwrap_or_else(|| crate::core::profile::NORMAL_PROFILE.to_string()),
         server_origin,
-        run_id,
+        run_id: run_id.clone(),
         model: model.to_string(),
         working_dir: working_dir.to_string(),
         request: PromptRequest {
@@ -1191,12 +1237,111 @@ fn drain_prompt_queue(
             images: None,
             attachments: None,
             message_metadata: drained_metadata,
+            engine_causality,
         },
     };
 
     let _handle = tokio::spawn(async move {
         execute_prompt_run(plan).await;
     });
+    Ok(PromptDrainOutcome::drained(run_id, items_to_dequeue.len()))
+}
+
+async fn enqueue_prompt_queue_drain(
+    engine_host: &crate::engine::EngineHostHandle,
+    session_id: &str,
+    completed_run_id: &str,
+    causality: Option<&PromptEngineCausality>,
+) {
+    let function_id = match FunctionId::new("agent::prompt_queue_drain") {
+        Ok(id) => id,
+        Err(error) => {
+            warn!(session_id, error = %error, "invalid prompt queue drain function id");
+            return;
+        }
+    };
+    let mut authority_scopes = causality
+        .map(|causality| causality.context.authority_scopes.clone())
+        .unwrap_or_else(|| vec!["agent.write".to_owned()]);
+    for scope in ["agent.write", ENGINE_INTERNAL_INVOKE_SCOPE] {
+        if !authority_scopes.iter().any(|existing| existing == scope) {
+            authority_scopes.push(scope.to_owned());
+        }
+    }
+    let item = engine_host
+        .enqueue_invocation(EnqueueInvocation {
+            queue: "agent".to_owned(),
+            function_id,
+            target_revision: None,
+            payload: serde_json::json!({
+                "sessionId": session_id,
+                "completedRunId": completed_run_id,
+            }),
+            actor_id: causality
+                .map(|causality| causality.context.actor_id.clone())
+                .unwrap_or_else(|| ActorId::new("system").expect("valid static actor id")),
+            actor_kind: causality
+                .map(|causality| causality.context.actor_kind.clone())
+                .unwrap_or(ActorKind::System),
+            authority_grant_id: causality
+                .map(|causality| causality.context.authority_grant_id.clone())
+                .unwrap_or_else(|| {
+                    AuthorityGrantId::new("prompt-runtime").expect("valid static grant id")
+                }),
+            authority_scopes,
+            trace_id: causality
+                .map(|causality| causality.context.trace_id.clone())
+                .unwrap_or_else(TraceId::generate),
+            parent_invocation_id: causality
+                .and_then(|causality| causality.parent_invocation_id.clone()),
+            trigger_id: causality.and_then(|causality| causality.context.trigger_id.clone()),
+            session_id: Some(session_id.to_owned()),
+            workspace_id: causality.and_then(|causality| causality.context.workspace_id.clone()),
+            idempotency_key: Some(format!(
+                "agent.prompt.queue_drain:{session_id}:{completed_run_id}"
+            )),
+        })
+        .await;
+    let item = match item {
+        Ok(item) => item,
+        Err(error) => {
+            warn!(session_id, error = %error, "failed to enqueue prompt queue drain");
+            return;
+        }
+    };
+    publish_queue_lifecycle_event(engine_host, "enqueue", &item, None).await;
+    let host = engine_host.clone();
+    let receipt = item.receipt_id.clone();
+    drop(tokio::spawn(async move {
+        let _ = EngineQueueDrainer::drain_receipt(&host, &receipt, "agent-prompt-auto-drain").await;
+    }));
+}
+
+async fn publish_prompt_runtime_stream(
+    engine_host: &crate::engine::EngineHostHandle,
+    causality: Option<&PromptEngineCausality>,
+    session_id: &str,
+    action: &str,
+    payload: serde_json::Value,
+) {
+    let _ = engine_host
+        .publish_stream_event(PublishStreamEvent {
+            topic: "agent.queue".to_owned(),
+            payload: serde_json::json!({
+                "type": format!("agent.prompt.{action}"),
+                "action": action,
+                "sessionId": session_id,
+                "payload": payload,
+            }),
+            visibility: VisibilityScope::Session,
+            session_id: Some(session_id.to_owned()),
+            workspace_id: causality.and_then(|causality| causality.context.workspace_id.clone()),
+            producer: "agent::prompt_apply".to_owned(),
+            trace_id: causality.map(|causality| causality.context.trace_id.clone()),
+            parent_invocation_id: causality
+                .and_then(|causality| causality.parent_invocation_id.clone()),
+        })
+        .await;
 }
 
 /// Returns true if a new prompt run for this session should attempt worktree

@@ -605,9 +605,9 @@ Acceptance:
 Implemented runtime integration now moves the engine from a catalog/adapter
 surface into long-running server behavior:
 
-- `EngineRuntimeServices` starts queue drainer loops for `default` and `jobs`
-  and a stream pump for approval, job, agent queue, session-event, and catalog
-  topics;
+- `EngineRuntimeServices` starts queue drainer loops for `default`, `jobs`,
+  and `agent` and a stream pump for approval, job, agent queue,
+  session-event, and catalog topics;
 - `approval.get`, `approval.list`, and `approval.resolve` are additive public
   JSON-RPC methods, increasing the method count from 167 to 170 while keeping
   `approval.request` available only through agent/tool invocation;
@@ -616,8 +616,7 @@ surface into long-running server behavior:
   preserve existing JSON-RPC response timing;
 - `agent.status`, `agent.abort`, `agent.abortTool`,
   `agent.deliverSubagentResults`, `agent.submitConfirmation`, and
-  `agent.submitAnswers` are now canonical generic-trigger functions; only
-  `agent.prompt` remains handler-owned in the current agent group;
+  `agent.submitAnswers` are now canonical generic-trigger functions;
 - `/engine/workers` is an authenticated loopback WebSocket endpoint backed by
   the local external-worker runtime. Registered external functions receive
   executable proxy handlers over the worker socket. External workers remain
@@ -633,6 +632,42 @@ Acceptance:
 - queue lifecycle events are published from enqueue/claim/complete/fail paths;
 - WebSocket delivery is a pump over engine stream state, not the source of
   truth for migrated stream topics.
+
+### WP38-WP43 agent prompt runtime collapse
+
+`agent.prompt` is now part of the canonical agent capability fabric instead of
+the remaining method-specific agent handler path:
+
+- `agent.prompt` is a marker-registered generic JSON-RPC trigger into
+  canonical `agent::prompt`;
+- `agent::prompt` validates the current wire payload, uses session-scoped
+  engine-ledger idempotency, derives a stable `runId`, enqueues hidden
+  `agent::prompt_apply`, and synchronously drains that receipt so existing
+  clients still receive `{ acknowledged: true, runId }` after startup is
+  accepted;
+- `agent::prompt_apply` owns the old prompt startup behavior: busy-session
+  checks, prompt history capture, run guard acquisition, hook/worktree/runtime
+  setup, and asynchronous turn spawning;
+- prompt completion enqueues hidden `agent::prompt_queue_drain` so queued
+  follow-up turns are also engine queue work. Dequeue still happens only after
+  the next run guard is acquired, preserving the existing `message.queued` and
+  `message.dequeued` event-store semantics;
+- autonomous agent invocation of `agent::prompt` pauses in the approval
+  primitive because the function is high-risk, `agent.write`, and approval
+  metadata-bearing; paired JSON-RPC clients remain wire-compatible and do not
+  receive an additional approval prompt;
+- hidden prompt runtime functions are internal and are not visible through
+  normal agent discovery.
+
+Acceptance:
+
+- public JSON-RPC count remains 170 and every method has exactly one bridge
+  spec;
+- generic-trigger count rises from 75 to 76;
+- all current agent control methods are generic-triggered marker
+  registrations;
+- duplicate JSON-RPC prompt retries replay the first `runId` without executing
+  `agent::prompt_apply` a second time.
 
 ## Phase 4: stream push, event unification, and job output
 
