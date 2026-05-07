@@ -59,7 +59,7 @@ pub const IDEMPOTENCY_CONFLICT: &str = "IDEMPOTENCY_CONFLICT";
 // Every git workflow handler (`git.push`, `git.syncMain`,
 // `worktree.commit`, `worktree.finalizeSession`, etc.) maps its
 // `WorktreeError` variants to these codes via `map_worktree_error` in
-// `handlers/mod.rs`. Clients switch on the code to show a friendly
+// `error_mapping.rs`. Clients switch on the code to show a friendly
 // message instead of a generic "internal error".
 
 /// Push/finalize refused because the target branch is in the user's

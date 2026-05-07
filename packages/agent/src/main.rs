@@ -1018,7 +1018,7 @@ async fn main() -> Result<()> {
 
     // Phase 5: Build and start server
     let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::bindings::register_all(&mut registry);
     let method_count = registry.methods().len();
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);

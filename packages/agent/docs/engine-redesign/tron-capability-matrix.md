@@ -22,7 +22,7 @@ registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
 
 ## RPC surface
 
-The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
+The current source-of-truth registry in `server/capabilities/catalog.rs` registers
 175 methods. Five `engine.*` methods are the canonical public capability
 transport for discovery, inspection, watch cursors, delegated invocation, and
 promotion. The older 170 domain method names remain wire-compatible aliases.
@@ -42,9 +42,9 @@ checks, shutdown, and runtime-tail status/blob/message/tool methods.
 Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
 context compaction/clear commands are also generic-triggered canonical
 functions. Migrated groups delete their method-specific production business
-handlers as they move behind canonical functions; old handler-shaped code
-remains only as test fixtures where older regression suites still need wire
-parity.
+handlers as they move behind canonical functions; the single-shape cleanup
+deleted the old handler namespace and moved parity coverage beside canonical
+capability modules or the JSON-RPC transport binding tests.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,

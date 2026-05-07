@@ -265,12 +265,6 @@ impl ContextArtifactsService {
             artifacts,
         }
     }
-
-    #[cfg(test)]
-    pub(crate) fn rules_index_builds(&self) -> usize {
-        self.rules_index_builds
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
 }
 
 impl Default for ContextArtifactsService {
@@ -571,7 +565,7 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 mod tests {
     use super::*;
     use crate::events::{AppendOptions, EventType};
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
 
     #[tokio::test]
     async fn loads_rules_from_project_and_global() {

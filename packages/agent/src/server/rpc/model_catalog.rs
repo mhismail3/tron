@@ -4,7 +4,7 @@
 //! canonical engine functions. The provider catalog helpers in this file remain
 //! the source of truth for model support/deprecation/default reasoning checks,
 //! and the mutating helpers are plain domain functions rather than JSON-RPC
-//! handler adapters.
+//! domain functions.
 //!
 //! Model data is derived from the provider registries (single source of truth).
 //! See `anthropic/types.rs`, `openai/types.rs`, `google/types.rs`, `minimax/types.rs`.
@@ -177,16 +177,6 @@ pub(crate) async fn switch_model(
     }))
 }
 
-#[cfg(test)]
-pub struct SwitchModelHandler;
-
-#[cfg(test)]
-impl SwitchModelHandler {
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        switch_model(params.as_ref(), ctx).await
-    }
-}
-
 /// Look up the default reasoning level for a model ID from the provider registries.
 pub(crate) fn default_reasoning_level(
     model_id: &str,
@@ -266,26 +256,16 @@ pub(crate) async fn set_reasoning_level(
 }
 
 #[cfg(test)]
-pub struct SetReasoningLevelHandler;
-
-#[cfg(test)]
-impl SetReasoningLevelHandler {
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        set_reasoning_level(params.as_ref(), ctx).await
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::test_support::make_test_context;
     use crate::server::rpc::types::RpcRequest;
     use serde_json::json;
 
     async fn list_models_result(ctx: &RpcContext) -> Value {
         let mut registry = MethodRegistry::new();
-        crate::server::rpc::handlers::register_all(&mut registry);
+        crate::server::rpc::bindings::register_all(&mut registry);
         let response = registry
             .dispatch(
                 RpcRequest {
@@ -604,13 +584,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let result = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
         assert_eq!(result["previousModel"], "claude-opus-4-6");
         assert_eq!(result["newModel"], "claude-sonnet-4-5-20250929");
     }
@@ -623,13 +602,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let result = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "openai/gpt-5.5"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = switch_model(
+            Some(&json!({"sessionId": sid, "model": "openai/gpt-5.5"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
         assert_eq!(result["newModel"], "gpt-5.5");
 
         let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
@@ -644,13 +622,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let err = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "gpt-5.2-codex"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = switch_model(
+            Some(&json!({"sessionId": sid, "model": "gpt-5.2-codex"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
         assert!(err.to_string().contains("deprecated"));
     }
@@ -672,13 +649,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let err = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "gpt-5.3-codex-spark"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = switch_model(
+            Some(&json!({"sessionId": sid, "model": "gpt-5.3-codex-spark"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
         assert!(err.to_string().contains("platform-api-key"));
     }
@@ -700,13 +676,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let result = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "gpt-5.4-pro"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = switch_model(
+            Some(&json!({"sessionId": sid, "model": "gpt-5.4-pro"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
         assert_eq!(result["newModel"], "gpt-5.4-pro");
     }
 
@@ -718,36 +693,31 @@ mod tests {
             .create_session("m", "/tmp", None, None)
             .unwrap();
 
-        let err = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "nonexistent-model"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = switch_model(
+            Some(&json!({"sessionId": sid, "model": "nonexistent-model"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     #[tokio::test]
     async fn switch_model_missing_session() {
         let ctx = make_test_context();
-        let err = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": "nope", "model": "claude-opus-4-6"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = switch_model(
+            Some(&json!({"sessionId": "nope", "model": "claude-opus-4-6"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "SESSION_NOT_FOUND");
     }
 
     #[tokio::test]
     async fn switch_model_missing_params() {
         let ctx = make_test_context();
-        let err = SwitchModelHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
+        let err = switch_model(Some(&json!({})), &ctx).await.unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
@@ -759,13 +729,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let _ = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let _ = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
 
         let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
         assert_eq!(session.latest_model, "claude-sonnet-4-5-20250929");
@@ -781,13 +750,12 @@ mod tests {
 
         let mut rx = ctx.orchestrator.subscribe();
 
-        let _ = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let _ = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
 
         let event = rx.try_recv().unwrap();
         assert_eq!(event.event_type(), "session_updated");
@@ -801,13 +769,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let _ = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let _ = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
 
         let events = ctx
             .event_store
@@ -830,13 +797,12 @@ mod tests {
         // Simulate a running session by starting a run via orchestrator
         let _run = ctx.orchestrator.begin_run(&sid, "run-1").unwrap();
 
-        let err = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "SESSION_BUSY");
     }
 
@@ -852,13 +818,12 @@ mod tests {
         let _ = ctx.session_manager.resume_session(&sid);
         assert!(ctx.session_manager.is_active(&sid));
 
-        let _ = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let _ = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
 
         // After switch, cache should be invalidated
         assert!(!ctx.session_manager.is_active(&sid));
@@ -887,13 +852,12 @@ mod tests {
 
         let mut rx = ctx.orchestrator.subscribe();
 
-        let _ = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let _ = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
 
         let event = rx.try_recv().unwrap();
         if let crate::core::events::TronEvent::SessionUpdated { cost, .. } = event {
@@ -914,13 +878,12 @@ mod tests {
 
         let mut rx = ctx.orchestrator.subscribe();
 
-        let _ = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let _ = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-sonnet-4-5-20250929"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
 
         let event = rx.try_recv().unwrap();
         if let crate::core::events::TronEvent::SessionUpdated { model, .. } = event {
@@ -938,13 +901,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let err = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "gemini-3-pro-preview"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = switch_model(
+            Some(&json!({"sessionId": sid, "model": "gemini-3-pro-preview"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
         assert!(err.to_string().contains("deprecated"));
     }
@@ -957,13 +919,12 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let err = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "claude-3-7-sonnet-20250219"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = switch_model(
+            Some(&json!({"sessionId": sid, "model": "claude-3-7-sonnet-20250219"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
@@ -1004,17 +965,14 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
-        let result = SwitchModelHandler
-            .handle(
-                Some(json!({"sessionId": sid, "model": "gemini-3.1-pro-preview"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
+        let result = switch_model(
+            Some(&json!({"sessionId": sid, "model": "gemini-3.1-pro-preview"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
         assert_eq!(result["newModel"], "gemini-3.1-pro-preview");
     }
-
-    // ── SetReasoningLevelHandler ──
 
     #[tokio::test]
     async fn set_reasoning_level_emits_event() {
@@ -1026,8 +984,7 @@ mod tests {
             .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
-        let result = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+        let result = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "max"})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["previousLevel"], "medium");
@@ -1053,8 +1010,7 @@ mod tests {
             .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
-        let result = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "medium"})), &ctx)
+        let result = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "medium"})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["changed"], false);
@@ -1074,8 +1030,7 @@ mod tests {
             .create_session("gpt-5.4", "/tmp", None, None)
             .unwrap();
 
-        let result = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "medium"})), &ctx)
+        let result = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "medium"})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["previousLevel"], "xhigh");
@@ -1100,8 +1055,7 @@ mod tests {
             .create_session("gpt-5.4", "/tmp", None, None)
             .unwrap();
 
-        let result = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "medium"})), &ctx)
+        let result = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "medium"})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["previousLevel"], "none");
@@ -1117,14 +1071,12 @@ mod tests {
             .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
-        let _ = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+        let _ = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "max"})), &ctx)
             .await
             .unwrap();
 
         // Same level again — server resolves previous from event history
-        let result = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+        let result = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "max"})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["changed"], false);
@@ -1144,13 +1096,11 @@ mod tests {
             .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
-        let _ = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "Max"})), &ctx)
+        let _ = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "Max"})), &ctx)
             .await
             .unwrap();
 
-        let result = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+        let result = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "max"})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["changed"], false);
@@ -1165,15 +1115,13 @@ mod tests {
             .unwrap();
 
         // First change: medium (default) → high
-        let r1 = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "high"})), &ctx)
+        let r1 = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "high"})), &ctx)
             .await
             .unwrap();
         assert_eq!(r1["previousLevel"], "medium");
 
         // Second change: high (from event) → max
-        let r2 = SetReasoningLevelHandler
-            .handle(Some(json!({"sessionId": sid, "level": "max"})), &ctx)
+        let r2 = set_reasoning_level(Some(&json!({"sessionId": sid, "level": "max"})), &ctx)
             .await
             .unwrap();
         assert_eq!(r2["previousLevel"], "high");
@@ -1190,13 +1138,12 @@ mod tests {
     #[tokio::test]
     async fn set_reasoning_level_session_not_found() {
         let ctx = make_test_context();
-        let err = SetReasoningLevelHandler
-            .handle(
-                Some(json!({"sessionId": "nonexistent", "level": "high"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
+        let err = set_reasoning_level(
+            Some(&json!({"sessionId": "nonexistent", "level": "high"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, RpcError::NotFound { .. }));
     }
 

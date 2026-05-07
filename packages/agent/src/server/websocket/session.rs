@@ -271,16 +271,16 @@ mod tests {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
 
-    use crate::server::rpc::handlers;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::bindings;
     use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::test_support::make_test_context;
     use crate::server::websocket::broadcast::BroadcastManager;
 
     async fn boot_session_server_with_limits(
         limits: ConnectionLimits,
     ) -> (String, Arc<BroadcastManager>, tokio::task::JoinHandle<()>) {
         let mut registry = MethodRegistry::new();
-        handlers::register_all(&mut registry);
+        bindings::register_all(&mut registry);
         let registry = Arc::new(registry);
         let ctx = Arc::new(make_test_context());
         let broadcast = Arc::new(BroadcastManager::new());

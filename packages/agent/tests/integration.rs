@@ -131,7 +131,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     };
 
     let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::bindings::register_all(&mut registry);
 
     let config = ServerConfig::default(); // port 0 = auto-assign
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -435,7 +435,7 @@ async fn boot_server_with_provider_and_handles(
     };
 
     let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::bindings::register_all(&mut registry);
 
     let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()

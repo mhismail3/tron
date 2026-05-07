@@ -325,7 +325,7 @@ mod tests {
 
     use super::*;
     use crate::events::{AppendOptions, EventType};
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
 
     /// A freshly-created session always has exactly one event — the
     /// `session.start` event inserted inside the create transaction.

@@ -119,7 +119,8 @@ Tron sources analyzed:
 - `packages/agent/src/lib.rs`
 - `packages/agent/src/server/mod.rs`
 - `packages/agent/src/server/app/server.rs`
-- `packages/agent/src/server/rpc/handlers/mod.rs`
+- `packages/agent/src/server/capabilities/catalog.rs`
+- `packages/agent/src/server/rpc/bindings.rs`
 - `packages/agent/src/runtime/mod.rs`
 - `packages/agent/src/runtime/agent/mod.rs`
 - `packages/agent/src/runtime/orchestrator/mod.rs`
@@ -234,13 +235,17 @@ first-class workers.
   remote worker hosting remain deferred.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
-- `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the
-  production JSON-RPC transport-binding surface. They register the
-  transport-only `rpc` compatibility worker, domain-owned in-process workers,
-  canonical domain functions for every legacy public RPC method,
-  non-executable `rpc::<method>` metadata, the `json_rpc` and `manual` trigger
-  types, and `json_rpc` trigger bindings from legacy method names into
-  canonical targets. The public surface now also includes `engine.discover`,
+- `server/capabilities/catalog.rs` is now the canonical source of truth for
+  public JSON-RPC aliases and canonical capability contracts. It owns the
+  `JsonRpcAliasSpec` projection, schema/effect/risk/authority/idempotency
+  metadata, domain worker ownership, non-executable `rpc::<method>` metadata,
+  and the `json_rpc` trigger definitions. `server/rpc/bindings.rs` only
+  projects alias method names into the transport registry.
+- `server/rpc/engine_bridge.rs` registers the transport-only `rpc`
+  compatibility worker, domain-owned in-process workers, canonical domain
+  functions for every legacy public RPC method, the `json_rpc` and `manual`
+  trigger types, and `json_rpc` trigger bindings from legacy method names into
+  canonical targets. The public surface also includes `engine.discover`,
   `engine.inspect`, `engine.watch`, `engine.invoke`, and `engine.promote` as
   strict-schema JSON-RPC triggers over reserved `engine::*` meta-capabilities.
   `engine.invoke` rejects `rpc::*` ids, so compatibility names cannot become
@@ -251,7 +256,7 @@ first-class workers.
   generic-triggered. Migrated writes use `rpc.write`, strict schemas, domain
   write scopes, scoped engine-ledger idempotency, resource leases where shared
   state is touched, and approval/compensation metadata for high-risk effects;
-  superseded method-specific business handlers are deleted as each group
+  superseded business handlers are deleted as each group
   migrates.
 - `tools/engine` adds first-party agent tools: `engine_discover`,
   `engine_inspect`, `engine_watch`, and `engine_invoke`. These are stable
@@ -319,7 +324,7 @@ Implemented:
   `promptHistory.clear` now join the generic-trigger path with `rpc.write`,
   `prompt_library.write`, strict schemas, system-scoped engine-ledger
   idempotency, approval metadata for irreversible effects, and tests proving
-  generic-trigger registrations are marker-only;
+  generic-trigger registrations are transport-bound;
 - full settings collapse: `settings.update` and `settings.resetToDefaults` now
   join `settings.get` on the generic-trigger path with strict schemas,
   `rpc.write`, `settings.write`, system-scoped engine-ledger idempotency,
@@ -394,7 +399,7 @@ Implemented:
   and event persistence are preserved while idempotency/ledger bookkeeping
   lives in the engine;
 - MCP collapse and live capabilities: all eight public `mcp.*` methods are now
-  marker-only `json_rpc` triggers into canonical `mcp::*` functions, and
+  JSON-RPC transport aliases into canonical `mcp::*` functions, and
   discovered MCP tools are registered/unregistered as live `mcp::*`
   capabilities with conservative classifier reason/confidence metadata;
 - live catalog tool surface: provider-facing tool schemas now resolve from the
@@ -404,11 +409,11 @@ Implemented:
   provenance rather than a frozen `ToolRegistry` snapshot;
 - safe read collapse: tree reads, repo divergence reads, import browse/preview
   reads, browser status, voice-note listing, transcription model listing, and
-  sandbox listing are now marker-only generic triggers into canonical domain
+  sandbox listing are now JSON-RPC transport aliases into canonical domain
   functions, raising generic-trigger coverage to 98 while the public JSON-RPC
   method count stays 170;
 - cron and runtime-tail collapse: all eight public `cron.*` methods are
-  marker-only `json_rpc` triggers into canonical `cron::*` functions, cron jobs
+  JSON-RPC transport aliases into canonical `cron::*` functions, cron jobs
   project live `cron_schedule` triggers into hidden `cron::scheduled_fire`, and
   scheduled fires now dispatch through `EngineTriggerRuntime` before starting
   existing payload execution. `system.getDiagnostics`,
@@ -417,7 +422,7 @@ Implemented:
   coverage to 112 while the public JSON-RPC method count stays 170;
 - high-risk command collapse: `model.switch`,
   `config.setReasoningLevel`, `memory.retain`, and `import.execute` are now
-  marker-only `json_rpc` triggers into canonical `model::switch`,
+  JSON-RPC transport aliases into canonical `model::switch`,
   `config::set_reasoning_level`, `memory::retain`, and `import::execute`,
   each with strict schemas, approval metadata for autonomous agents,
   engine-ledger idempotency, and resource-lease contract metadata. This raises
@@ -426,7 +431,7 @@ Implemented:
 - high-risk contract enforcement plus git/worktree collapse: resource leases
   and compensation contracts are now enforced by the host invocation lifecycle,
   compensation records are persisted in the isolated engine ledger, and every
-  public `git.*` / `worktree.*` method is a marker-only `json_rpc` trigger into
+  public `git.*` / `worktree.*` method is a transport-bound `json_rpc` trigger into
   canonical `git::*` / `worktree::*` functions. Safe stage/acquire/release
   commands remain agent-visible with explicit idempotency and leases; publishing,
   branch deletion, merge/rebase, clone/sync, discard, finalize, and conflict
@@ -434,23 +439,24 @@ Implemented:
   generic-trigger coverage to 144 while the public JSON-RPC method count stays
   170;
 - full RPC tail collapse and CI isolation: the last 26 handler-owned public
-  JSON-RPC methods are now marker-only `json_rpc` triggers into canonical
+  JSON-RPC methods are now JSON-RPC transport aliases into canonical
   domain functions. This includes `auth.*`, `device.*`, `voiceNotes.save/delete`,
   `transcribe.audio/downloadModel`, `browser.startStream/stopStream`,
   `display.stopStream`, sandbox lifecycle, `session.resume`,
   `system.checkForUpdates`, and `system.shutdown`. At that checkpoint the 170
-  legacy domain methods reached 170/170 marker-trigger coverage. Parallel
+  legacy domain methods reached 170/170 transport-trigger coverage. Parallel
   integration tests no longer share auth/onboarding/updater/prompt working
   paths, so each server boot owns isolated runtime state;
 - canonical public engine transport: `engine.discover`, `engine.inspect`,
   `engine.watch`, `engine.invoke`, and `engine.promote` are additive
   strict-schema JSON-RPC methods over the reserved engine meta-capabilities.
   Existing 170 domain method names remain compatibility aliases, public method
-  count rises to 175, and every registration is still marker-only;
-- single-shape cleanup: shared production helpers moved out of
-  `server/rpc/handlers`, engine-owned function modules no longer call old
-  `MethodHandler` adapters, and legacy method-specific code is test-only
-  wire-contract fixture code;
+  count rises to 175, and every registration is still transport-bound;
+- single-shape cleanup: `server/rpc/handlers` is deleted, the production
+  registry stores `JsonRpcTransportBinding` entries instead of handler trait
+  objects, engine-owned capability modules no longer call old `MethodHandler`
+  adapters, and parity coverage now lives in canonical capability and
+  transport-binding tests;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,

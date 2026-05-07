@@ -3,11 +3,11 @@
 //! JSON-RPC is a compatibility transport into engine functions. This module
 //! owns the binding inventory for that path: every registered method has an
 //! explicit transport spec, domain-owned in-process workers register executable
-//! canonical functions, and marker handlers never own production business
+//! canonical functions, and the registry never owns production business
 //! behavior. The public surface is now 175 methods: five canonical `engine.*`
 //! capability methods plus the existing 170 legacy domain method names. All are
-//! marker-only `json_rpc` triggers over canonical domain functions or reserved
-//! engine meta-capabilities.
+//! `json_rpc` triggers over canonical domain functions or reserved engine
+//! meta-capabilities.
 //!
 //! The `rpc` worker is transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
@@ -31,7 +31,7 @@
 //!
 //! The desired end state is a collapsed engine architecture where JSON-RPC is
 //! only a transport trigger over canonical domain functions. The public RPC
-//! surface has reached full marker-trigger coverage, and the canonical
+//! surface has reached full transport-trigger coverage, and the canonical
 //! `engine.*` methods are the public discovery/invocation/promote transport for
 //! clients that are ready to stop calling legacy method aliases. Future work
 //! should delete the compatibility inventory itself as clients and agents move
@@ -39,9 +39,6 @@
 //! again.
 
 mod dispatch;
-mod functions;
-mod schemas;
-mod specs;
 
 #[cfg(test)]
 mod tests;
@@ -61,14 +58,21 @@ use crate::server::rpc::registry::MethodRegistry;
 use crate::tools::capability_runtime;
 use crate::tools::traits::{ToolContext, TronTool};
 
-pub use dispatch::{RpcEngineInvocation, RpcGenericTriggerHandler, try_dispatch_generic_rpc};
-pub use specs::{RpcCapabilitySpec, RpcIdempotencyMode, capability_specs};
+use crate::server::capabilities::catalog;
 
-pub(super) const RPC_WORKER_ID: &str = "rpc";
-pub(super) const RPC_OWNER_ACTOR: &str = "system";
-pub(super) const RPC_AUTHORITY_GRANT: &str = "rpc-bridge";
-pub(super) const RPC_READ_AUTHORITY: &str = "rpc.read";
-pub(super) const RPC_WRITE_AUTHORITY: &str = "rpc.write";
+pub use crate::server::capabilities::catalog::{
+    CanonicalCapabilitySpec, JsonRpcAliasSpec, JsonRpcIdempotencyMode, json_rpc_alias_specs,
+};
+pub use dispatch::{RpcEngineInvocation, dispatch_json_rpc_transport};
+
+pub(crate) use crate::server::capabilities::catalog::{RPC_AUTHORITY_GRANT, RPC_OWNER_ACTOR};
+
+#[cfg(test)]
+pub(crate) use crate::server::capabilities::catalog as specs;
+#[cfg(test)]
+pub(crate) use crate::server::capabilities::catalog::{
+    RPC_READ_AUTHORITY, RPC_WORKER_ID, RPC_WRITE_AUTHORITY,
+};
 
 /// Register the in-process RPC worker and its current capability inventory.
 pub fn register_rpc_worker_for_context(
@@ -78,7 +82,7 @@ pub fn register_rpc_worker_for_context(
     register_rpc_worker(
         &ctx.engine_host,
         registry,
-        functions::RpcEngineDeps::from_context(ctx),
+        crate::server::capabilities::EngineCapabilityDeps::from_context(ctx),
     )?;
     register_tool_worker_for_context(ctx)?;
     Ok(())
@@ -87,28 +91,32 @@ pub fn register_rpc_worker_for_context(
 fn register_rpc_worker(
     handle: &EngineHostHandle,
     registry: &MethodRegistry,
-    deps: functions::RpcEngineDeps,
+    deps: crate::server::capabilities::EngineCapabilityDeps,
 ) -> EngineResult<()> {
-    let specs = specs::capability_specs(registry)?;
-    handle.register_worker_for_setup(specs::rpc_worker(), false)?;
-    for worker in specs::domain_workers()? {
+    let canonical_specs = catalog::canonical_capability_specs(registry)?;
+    let specs = canonical_specs
+        .iter()
+        .flat_map(|spec| spec.aliases.iter())
+        .collect::<Vec<_>>();
+    handle.register_worker_for_setup(catalog::rpc_worker(), false)?;
+    for worker in catalog::domain_workers()? {
         handle.register_worker_for_setup(worker, false)?;
     }
-    handle.register_trigger_type_for_setup(specs::json_rpc_trigger_type()?, false)?;
-    handle.register_trigger_type_for_setup(specs::manual_trigger_type()?, false)?;
-    handle.register_trigger_type_for_setup(specs::cron_schedule_trigger_type()?, false)?;
+    handle.register_trigger_type_for_setup(catalog::json_rpc_trigger_type()?, false)?;
+    handle.register_trigger_type_for_setup(catalog::manual_trigger_type()?, false)?;
+    handle.register_trigger_type_for_setup(catalog::cron_schedule_trigger_type()?, false)?;
     for spec in &specs {
-        if specs::uses_existing_engine_primitive(spec) {
+        if catalog::uses_existing_engine_primitive(spec) {
             continue;
         }
-        let handler = specs::is_engine_routable(&spec).then(|| {
-            std::sync::Arc::new(functions::RpcFunctionHandler {
+        let handler = catalog::is_engine_routable(&spec).then(|| {
+            std::sync::Arc::new(crate::server::capabilities::CanonicalFunctionHandler {
                 method: spec.method,
                 deps: deps.clone(),
             }) as std::sync::Arc<dyn crate::engine::InProcessFunctionHandler>
         });
         handle.register_function_for_setup(
-            specs::function_definition_for_spec(&spec),
+            catalog::function_definition_for_alias(&spec),
             handler,
             false,
         )?;
@@ -117,11 +125,11 @@ fn register_rpc_worker(
     register_hidden_agent_prompt_functions(handle, &deps)?;
     register_hidden_cron_schedule_function(handle, &deps)?;
     for spec in &specs {
-        if let Some(trigger) = specs::json_rpc_trigger_for_spec(spec)? {
+        if let Some(trigger) = catalog::json_rpc_trigger_for_spec(spec)? {
             handle.register_trigger_for_setup(trigger, false)?;
         }
     }
-    functions::cron::project_all_cron_triggers_for_setup(handle, &deps)?;
+    crate::server::capabilities::cron::project_all_cron_triggers_for_setup(handle, &deps)?;
     Ok(())
 }
 
@@ -132,10 +140,10 @@ fn register_tool_worker_for_context(ctx: &RpcContext) -> EngineResult<()> {
     };
     handle.register_worker_for_setup(
         WorkerDefinition::new(
-            specs::worker_id("tool")?,
+            catalog::worker_id("tool")?,
             WorkerKind::InProcess,
-            specs::actor_id(RPC_OWNER_ACTOR)?,
-            specs::grant_id(RPC_AUTHORITY_GRANT)?,
+            catalog::actor_id(RPC_OWNER_ACTOR)?,
+            catalog::grant_id(RPC_AUTHORITY_GRANT)?,
         )
         .with_namespace_claim("tool"),
         false,
@@ -182,7 +190,7 @@ fn tool_function_definition(
     }
     let mut definition = FunctionDefinition::new(
         id.clone(),
-        specs::worker_id("tool")?,
+        catalog::worker_id("tool")?,
         tool_def.description.clone(),
         VisibilityScope::System,
         effect,
@@ -394,7 +402,7 @@ async fn execute_tool_with_runtime_context(
 
 fn register_hidden_agent_prompt_functions(
     handle: &EngineHostHandle,
-    deps: &functions::RpcEngineDeps,
+    deps: &crate::server::capabilities::EngineCapabilityDeps,
 ) -> EngineResult<()> {
     for (id, method, description, request_schema, response_schema) in [
         (
@@ -421,7 +429,7 @@ fn register_hidden_agent_prompt_functions(
     ] {
         let mut definition = FunctionDefinition::new(
             FunctionId::new(id)?,
-            specs::worker_id("agent")?,
+            catalog::worker_id("agent")?,
             description,
             VisibilityScope::Internal,
             EffectClass::ExternalSideEffect,
@@ -443,10 +451,12 @@ fn register_hidden_agent_prompt_functions(
         });
         handle.register_function_for_setup(
             definition,
-            Some(std::sync::Arc::new(functions::RpcFunctionHandler {
-                method,
-                deps: deps.clone(),
-            })),
+            Some(std::sync::Arc::new(
+                crate::server::capabilities::CanonicalFunctionHandler {
+                    method,
+                    deps: deps.clone(),
+                },
+            )),
             false,
         )?;
     }
@@ -512,7 +522,7 @@ fn agent_prompt_queue_drain_response_schema() -> Value {
 
 fn register_hidden_job_apply_functions(
     handle: &EngineHostHandle,
-    deps: &functions::RpcEngineDeps,
+    deps: &crate::server::capabilities::EngineCapabilityDeps,
 ) -> EngineResult<()> {
     for (id, method, public_method, description) in [
         (
@@ -530,7 +540,7 @@ fn register_hidden_job_apply_functions(
     ] {
         let mut definition = FunctionDefinition::new(
             FunctionId::new(id)?,
-            specs::worker_id("job")?,
+            catalog::worker_id("job")?,
             description,
             VisibilityScope::Internal,
             EffectClass::ReversibleSideEffect,
@@ -543,10 +553,14 @@ fn register_hidden_job_apply_functions(
             "hidden job apply functions delegate to the process manager; queue/idempotency records prevent duplicate starts or cancellations",
         ))
         .with_provenance(Provenance::system());
-        if let Some(schema) = schemas::request_schema_for_method(public_method) {
+        if let Some(schema) =
+            crate::server::capabilities::schemas::request_schema_for_method(public_method)
+        {
             definition = definition.with_request_schema(schema);
         }
-        if let Some(schema) = schemas::response_schema_for_method(public_method) {
+        if let Some(schema) =
+            crate::server::capabilities::schemas::response_schema_for_method(public_method)
+        {
             definition = definition.with_response_schema(schema);
         }
         definition.metadata = serde_json::json!({
@@ -556,10 +570,12 @@ fn register_hidden_job_apply_functions(
         });
         handle.register_function_for_setup(
             definition,
-            Some(std::sync::Arc::new(functions::RpcFunctionHandler {
-                method,
-                deps: deps.clone(),
-            })),
+            Some(std::sync::Arc::new(
+                crate::server::capabilities::CanonicalFunctionHandler {
+                    method,
+                    deps: deps.clone(),
+                },
+            )),
             false,
         )?;
     }
@@ -568,11 +584,11 @@ fn register_hidden_job_apply_functions(
 
 fn register_hidden_cron_schedule_function(
     handle: &EngineHostHandle,
-    deps: &functions::RpcEngineDeps,
+    deps: &crate::server::capabilities::EngineCapabilityDeps,
 ) -> EngineResult<()> {
     let mut definition = FunctionDefinition::new(
         FunctionId::new("cron::scheduled_fire")?,
-        specs::worker_id("cron")?,
+        catalog::worker_id("cron")?,
         "apply one cron schedule fire through the engine trigger runtime",
         VisibilityScope::Internal,
         EffectClass::ExternalSideEffect,
@@ -614,16 +630,18 @@ fn register_hidden_cron_schedule_function(
     });
     handle.register_function_for_setup(
         definition,
-        Some(std::sync::Arc::new(functions::RpcFunctionHandler {
-            method: "cron.scheduled_fire",
-            deps: deps.clone(),
-        })),
+        Some(std::sync::Arc::new(
+            crate::server::capabilities::CanonicalFunctionHandler {
+                method: "cron.scheduled_fire",
+                deps: deps.clone(),
+            },
+        )),
         false,
     )?;
     Ok(())
 }
 
-pub(super) fn rpc_error_to_engine(error: RpcError) -> EngineError {
+pub(crate) fn rpc_error_to_engine(error: RpcError) -> EngineError {
     let body = error.to_error_body();
     EngineError::AdapterFailure {
         adapter: "rpc".to_owned(),
@@ -633,14 +651,14 @@ pub(super) fn rpc_error_to_engine(error: RpcError) -> EngineError {
     }
 }
 
-pub(super) fn result_to_rpc(result: InvocationResult) -> Result<Value, RpcError> {
+pub(crate) fn result_to_rpc(result: InvocationResult) -> Result<Value, RpcError> {
     if let Some(error) = result.error {
         return Err(engine_error_to_rpc(error));
     }
     Ok(result.value.unwrap_or(Value::Null))
 }
 
-pub(super) fn engine_error_to_rpc(error: EngineError) -> RpcError {
+pub(crate) fn engine_error_to_rpc(error: EngineError) -> RpcError {
     match error {
         EngineError::AdapterFailure {
             adapter: _,

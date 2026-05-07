@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -6,12 +5,12 @@ use crate::engine::{
     ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, TraceId, TriggerDispatchRequest,
     TriggerId,
 };
+use crate::server::capabilities::catalog::{self, JsonRpcIdempotencyMode};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
+use crate::server::rpc::registry::MethodRegistry;
 use crate::server::rpc::types::{RpcRequest, RpcResponse};
 
-use super::specs::{self, RpcIdempotencyMode};
 use super::{RPC_AUTHORITY_GRANT, engine_error_to_rpc, result_to_rpc};
 
 /// Fully typed invocation envelope produced by the JSON-RPC transport trigger.
@@ -39,7 +38,7 @@ impl RpcEngineInvocation {
         ctx: &RpcContext,
         request: &RpcRequest,
     ) -> Result<Option<Self>, RpcError> {
-        let spec = specs::capability_spec_for_method(registry, &request.method)
+        let spec = catalog::json_rpc_alias_for_method(registry, &request.method)
             .map_err(engine_error_to_rpc)?;
         let Some(spec) = spec else {
             return Ok(None);
@@ -81,12 +80,12 @@ impl RpcEngineInvocation {
         }
         if spec.effect_class.is_mutating() {
             match spec.idempotency_mode {
-                RpcIdempotencyMode::JsonRpcRequestIdSeed => {
+                JsonRpcIdempotencyMode::JsonRpcRequestIdSeed => {
                     let key =
                         derive_json_rpc_idempotency_key(spec.method, &request.id, &params_payload)?;
                     causal_context = causal_context.with_idempotency_key(key);
                 }
-                RpcIdempotencyMode::ExplicitRequired => {
+                JsonRpcIdempotencyMode::ExplicitRequired => {
                     let key =
                         extract_string(&params_payload, "idempotencyKey").ok_or_else(|| {
                             RpcError::InvalidParams {
@@ -106,7 +105,7 @@ impl RpcEngineInvocation {
                     }
                     causal_context = causal_context.with_idempotency_key(key);
                 }
-                RpcIdempotencyMode::NotRequired => {}
+                JsonRpcIdempotencyMode::NotRequired => {}
             }
         }
         let params_payload = strip_transport_only_fields(spec.method, params_payload);
@@ -115,7 +114,7 @@ impl RpcEngineInvocation {
             request_id: request.id.clone(),
             method: request.method.clone(),
             function_id: spec.function_id,
-            trigger_id: specs::json_rpc_trigger_id_for_method(spec.method)
+            trigger_id: catalog::json_rpc_trigger_id_for_method(spec.method)
                 .map_err(engine_error_to_rpc)?,
             params_payload,
             causal_context,
@@ -123,16 +122,26 @@ impl RpcEngineInvocation {
     }
 }
 
-/// Return a response only for methods served by the generic RPC trigger.
-pub async fn try_dispatch_generic_rpc(
+/// Dispatch one registered JSON-RPC alias through its canonical engine trigger.
+pub async fn dispatch_json_rpc_transport(
     registry: &MethodRegistry,
     ctx: &RpcContext,
     request: &RpcRequest,
-) -> Option<RpcResponse> {
+) -> RpcResponse {
     let envelope = match RpcEngineInvocation::from_request(registry, ctx, request) {
         Ok(Some(envelope)) => envelope,
-        Ok(None) => return None,
-        Err(error) => return Some(rpc_error_response(&request.id, error)),
+        Ok(None) => {
+            return rpc_error_response(
+                &request.id,
+                RpcError::Internal {
+                    message: format!(
+                        "registered JSON-RPC method {} has no transport alias",
+                        request.method
+                    ),
+                },
+            );
+        }
+        Err(error) => return rpc_error_response(&request.id, error),
     };
 
     let actor_id = envelope.causal_context.actor_id.clone();
@@ -154,40 +163,9 @@ pub async fn try_dispatch_generic_rpc(
     dispatch.workspace_id = workspace_id;
     dispatch.idempotency_key = idempotency_key;
     let result = EngineTriggerRuntime::dispatch(&ctx.engine_host, dispatch).await;
-    Some(match result_to_rpc(result) {
+    match result_to_rpc(result) {
         Ok(value) => RpcResponse::success(&envelope.request_id, value),
         Err(error) => rpc_error_response(&envelope.request_id, error),
-    })
-}
-
-/// Marker handler for methods that must be intercepted by
-/// [`try_dispatch_generic_rpc`].
-pub struct RpcGenericTriggerHandler {
-    method: &'static str,
-}
-
-impl RpcGenericTriggerHandler {
-    /// Build a marker for one generic-triggered RPC method.
-    #[must_use]
-    pub fn new(method: &'static str) -> Self {
-        Self { method }
-    }
-}
-
-#[async_trait]
-impl MethodHandler for RpcGenericTriggerHandler {
-    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        Err(RpcError::Internal {
-            message: format!(
-                "generic RPC trigger marker for {} executed; registry interception failed",
-                self.method
-            ),
-        })
-    }
-
-    #[cfg(test)]
-    fn is_generic_trigger_marker(&self) -> bool {
-        true
     }
 }
 
@@ -243,9 +221,9 @@ fn rpc_causal_context_for_method(method: &str, scope: &str) -> CausalContext {
         "rpc-client"
     };
     CausalContext::new(
-        specs::actor_id(actor_id).expect("valid static rpc actor id"),
+        catalog::actor_id(actor_id).expect("valid static rpc actor id"),
         actor_kind,
-        specs::grant_id(RPC_AUTHORITY_GRANT).expect("valid static rpc grant id"),
+        catalog::grant_id(RPC_AUTHORITY_GRANT).expect("valid static rpc grant id"),
         TraceId::generate(),
     )
     .with_scope(scope)

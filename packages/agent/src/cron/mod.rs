@@ -11,7 +11,7 @@
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
 //! - **Delivery**: Result notification (silent, WebSocket, APNS, webhook)
 //!
-//! Public `cron.*` JSON-RPC methods are marker-only triggers into canonical
+//! Public `cron.*` JSON-RPC methods are transport aliases into canonical
 //! `cron::*` functions. Schedule fires target hidden `cron::scheduled_fire`,
 //! which preserves the existing overlap, misfire, retry, timeout, delivery, and
 //! run-history behavior while adding engine trigger/idempotency/ledger records.

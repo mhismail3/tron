@@ -77,7 +77,7 @@ that does not route turns through the Tron agent.
 ### Data Path
 
 1. Client sends JSON-RPC 2.0 over WebSocket
-2. The `server` module validates the method and dispatches a marker-only transport binding
+2. The `server` module validates the method and dispatches a catalog-derived transport binding
 3. The binding invokes a canonical `namespace::function` engine capability through a `json_rpc` trigger
 4. Canonical functions call runtime, orchestrator, event store, or domain services as needed
 5. Domain output is serialized at the RPC/WebSocket boundary when clients need wire-compatible shapes
@@ -327,7 +327,7 @@ Source-control operations are now canonical engine capabilities as well as iOS S
 
 ## RPC API
 
-Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **175 methods** across three groups.
+Tron RPC over WebSocket. Public methods are generated from the canonical capability catalog in `packages/agent/src/server/capabilities/catalog.rs`, with `packages/agent/src/server/rpc/bindings.rs` projecting those aliases into the transport registry. The current registration totals **175 methods** across three groups.
 
 The five `engine.*` methods are the canonical public capability transport. Existing domain method names such as `agent.prompt` and `settings.update` remain wire-compatible compatibility aliases; under the hood every public method is a `json_rpc` trigger into a canonical `namespace::function` engine capability.
 

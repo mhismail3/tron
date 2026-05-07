@@ -350,7 +350,7 @@ fn record_blocking_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::rpc::handlers::test_helpers::{
+    use crate::server::rpc::test_support::{
         ModelAwareMockFactory, StrictMockFactory, make_test_agent_deps, make_test_context,
     };
 

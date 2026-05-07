@@ -540,7 +540,7 @@ mod tests {
 
     // ─── maybe_fire_with_interval end-to-end ───────────────────────────────
 
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
 
     fn deps_from_ctx(
         ctx: &crate::server::rpc::context::RpcContext,

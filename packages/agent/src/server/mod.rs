@@ -15,6 +15,7 @@
 //!
 //! | Module        | Purpose                                                                            |
 //! |---------------|------------------------------------------------------------------------------------|
+//! | `capabilities` | Canonical domain function handlers and capability runtime dependencies           |
 //! | `config`      | `ServerConfig` (host/port + heartbeat/buffer tuning)                               |
 //! | `codex_app`   | Server-owned `codex app-server` child lifecycle + iOS discovery status             |
 //! | `cron_adapters` | Server transport adapters for cron WebSocket/APNS callbacks                      |
@@ -34,6 +35,8 @@
 
 #![deny(unsafe_code)]
 
+/// Canonical server-owned engine capability modules and JSON-RPC alias catalog.
+pub mod capabilities;
 pub mod codex_app;
 #[path = "app/config.rs"]
 pub mod config;

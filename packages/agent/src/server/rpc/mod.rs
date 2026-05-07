@@ -23,9 +23,10 @@
 //!
 //! The context also owns the shared engine host handle. JSON-RPC is now a
 //! transport-binding layer over canonical engine functions, not a method-owned
-//! business layer. Every public registration is a marker handler: the registry
-//! validates method existence/depth, then dispatches JSON-RPC as a `json_rpc`
-//! trigger into a canonical `namespace::function` id such as
+//! business layer. Every public registration is a binding generated from the
+//! canonical capability catalog: the registry validates method existence/depth,
+//! then dispatches JSON-RPC as a `json_rpc` trigger into a canonical
+//! `namespace::function` id such as
 //! `skills::activate` or `agent::prompt`. The five `engine.*` methods are the
 //! canonical public capability transport for discover, inspect, watch, invoke,
 //! and promote; the older 170 domain method names remain compatibility aliases.
@@ -59,6 +60,7 @@
 pub(crate) mod agent_commands;
 pub(crate) mod agent_runtime;
 pub(crate) mod auth_flows;
+pub mod bindings;
 pub(crate) mod client_logs;
 pub mod context;
 pub(crate) mod context_commands;
@@ -70,7 +72,6 @@ pub mod errors;
 pub(crate) mod events_wire;
 pub(crate) mod filesystem_service;
 pub(crate) mod git_service;
-pub mod handlers;
 pub(crate) mod interactive_tool_enrichment;
 pub(crate) mod memory_retain;
 pub(crate) mod model_catalog;
@@ -85,6 +86,8 @@ pub mod session_context;
 pub(crate) mod session_queries;
 pub(crate) mod session_reconstruct;
 pub(crate) mod skill_state;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod types;
 pub mod validation;
 pub(crate) mod voice_notes_service;

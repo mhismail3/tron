@@ -18,9 +18,9 @@ use crate::server::codex_app::{
     CodexAppServerChild, CodexAppServerExit, CodexAppServerLaunchSpec, CodexAppServerManager,
     CodexAppServerSpawner, CodexAppServerState,
 };
-use crate::server::rpc::handlers;
-use crate::server::rpc::handlers::test_helpers::{make_test_agent_deps, make_test_context};
-use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
+use crate::server::rpc::bindings;
+use crate::server::rpc::registry::MethodRegistry;
+use crate::server::rpc::test_support::{make_test_agent_deps, make_test_context};
 use crate::server::rpc::types::RpcRequest;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
@@ -389,8 +389,8 @@ const SAFE_READ_COLLAPSE_METHODS: &[&str] = &[
 const MIGRATION_PARITY_TIMEOUT: Duration = Duration::from_secs(180);
 
 fn migration_parity_registry() -> MethodRegistry {
-    let mut registry = MethodRegistry::with_handler_timeout(MIGRATION_PARITY_TIMEOUT);
-    handlers::register_all(&mut registry);
+    let mut registry = MethodRegistry::with_transport_timeout(MIGRATION_PARITY_TIMEOUT);
+    bindings::register_all(&mut registry);
     registry
 }
 
@@ -865,7 +865,7 @@ fn normalize_cron_ids(value: &mut Value) {
 
 fn domain_scope_for_method(method: &str) -> &'static str {
     let registry = migration_parity_registry();
-    let spec = specs::capability_spec_for_method(&registry, method)
+    let spec = specs::json_rpc_alias_for_method(&registry, method)
         .unwrap()
         .unwrap();
     spec.authority_scope.unwrap()
@@ -889,8 +889,8 @@ fn assert_scope(scopes: &[String], scope: &str) {
 #[test]
 fn transport_bindings_cover_every_registered_rpc_method() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     assert_eq!(registry.methods().len(), 175);
     assert_eq!(specs.len(), registry.methods().len());
 
@@ -910,8 +910,8 @@ fn transport_bindings_cover_every_registered_rpc_method() {
         .chain(ENGINE_TRANSPORT_METHODS.iter())
     {
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered now that the RPC surface is fully engine-owned"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered now that the RPC surface is fully engine-owned"
         );
     }
 }
@@ -929,8 +929,7 @@ fn engine_function_modules_do_not_use_rpc_handler_adapters() {
         }
     }
 
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/server/rpc/engine_bridge/functions");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/server/capabilities");
     let mut files = Vec::new();
     rust_files(&root, &mut files);
     assert!(!files.is_empty());
@@ -1005,32 +1004,17 @@ fn shared_rpc_helpers_live_outside_handler_namespace() {
 fn production_handler_namespace_contains_no_method_specific_handlers() {
     let handlers_root =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/server/rpc/handlers");
-    for production_module in [
-        "filesystem.rs",
-        "job.rs",
-        "logs.rs",
-        "mcp.rs",
-        "notifications.rs",
-        "plan.rs",
-        "prompt_library.rs",
-        "settings.rs",
-        "skills.rs",
-    ] {
-        let path = handlers_root.join(production_module);
-        let source = std::fs::read_to_string(&path).unwrap();
-        assert!(
-            !source.contains("MethodHandler"),
-            "{} is production-visible from handlers/mod.rs and must not contain method-specific handlers",
-            path.display()
-        );
-    }
+    assert!(
+        !handlers_root.exists(),
+        "server/rpc/handlers must stay deleted; JSON-RPC is a transport binding over canonical capabilities"
+    );
 }
 
 #[test]
 fn transport_specs_expose_canonical_engine_api_methods() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in ENGINE_TRANSPORT_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
@@ -1041,9 +1025,9 @@ fn transport_specs_expose_canonical_engine_api_methods() {
             specs::function_id_for_method(method).unwrap()
         );
         assert_eq!(spec.visibility, VisibilityScope::System);
-        assert!(registry.is_generic_trigger_marker(method));
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
+        assert!(registry.is_transport_binding(method));
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
     }
 
     let invoke = specs
@@ -1054,7 +1038,7 @@ fn transport_specs_expose_canonical_engine_api_methods() {
     assert_eq!(invoke.risk_level, RiskLevel::Low);
     assert_eq!(invoke.transport_authority_scope, Some(RPC_READ_AUTHORITY));
     assert_eq!(invoke.authority_scope, Some("engine.read"));
-    assert_eq!(invoke.idempotency_mode, RpcIdempotencyMode::NotRequired);
+    assert_eq!(invoke.idempotency_mode, JsonRpcIdempotencyMode::NotRequired);
 
     let promote = specs
         .iter()
@@ -1066,7 +1050,7 @@ fn transport_specs_expose_canonical_engine_api_methods() {
     assert_eq!(promote.authority_scope, Some("engine.promote.workspace"));
     assert_eq!(
         promote.idempotency_mode,
-        RpcIdempotencyMode::ExplicitRequired
+        JsonRpcIdempotencyMode::ExplicitRequired
     );
 }
 
@@ -1117,8 +1101,8 @@ async fn engine_json_rpc_transport_methods_route_to_meta_capabilities() {
 #[test]
 fn transport_bindings_classify_selected_reads_as_generic_triggers() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for method in GENERIC_READ_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
         assert_eq!(spec.effect_class, EffectClass::PureRead);
@@ -1130,11 +1114,11 @@ fn transport_bindings_classify_selected_reads_as_generic_triggers() {
             "{method} must require a domain read scope"
         );
         assert!(
-            super::schemas::request_schema_for_method(method).is_some(),
+            crate::server::capabilities::schemas::request_schema_for_method(method).is_some(),
             "{method} must declare a request schema"
         );
         assert!(
-            super::schemas::response_schema_for_method(method).is_some(),
+            crate::server::capabilities::schemas::response_schema_for_method(method).is_some(),
             "{method} must declare a response schema"
         );
     }
@@ -1143,8 +1127,8 @@ fn transport_bindings_classify_selected_reads_as_generic_triggers() {
 #[test]
 fn transport_bindings_classify_generic_writes_as_generic_triggers() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for method in GENERIC_WRITE_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
         assert!(spec.effect_class.is_mutating());
@@ -1162,14 +1146,14 @@ fn transport_bindings_classify_generic_writes_as_generic_triggers() {
         );
         assert_eq!(
             spec.idempotency_mode,
-            RpcIdempotencyMode::JsonRpcRequestIdSeed
+            JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
         );
         assert!(
-            super::schemas::request_schema_for_method(method).is_some(),
+            crate::server::capabilities::schemas::request_schema_for_method(method).is_some(),
             "{method} must declare a request schema"
         );
         assert!(
-            super::schemas::response_schema_for_method(method).is_some(),
+            crate::server::capabilities::schemas::response_schema_for_method(method).is_some(),
             "{method} must declare a response schema"
         );
     }
@@ -1179,15 +1163,15 @@ fn transport_bindings_classify_generic_writes_as_generic_triggers() {
         .find(|spec| spec.method == "promptSnippet.delete")
         .unwrap();
     assert_eq!(delete.effect_class, EffectClass::IrreversibleSideEffect);
-    let definition = specs::function_definition_for_spec(delete);
+    let definition = specs::function_definition_for_alias(delete);
     assert!(definition.required_authority.approval_required);
 }
 
 #[test]
 fn transport_bindings_classify_agent_prompt_as_queue_backed_engine_prompt() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     let spec = specs
         .iter()
         .find(|spec| spec.method == "agent.prompt")
@@ -1201,11 +1185,15 @@ fn transport_bindings_classify_agent_prompt_as_queue_backed_engine_prompt() {
     assert_eq!(spec.authority_scope, Some("agent.write"));
     assert_eq!(
         spec.idempotency_mode,
-        RpcIdempotencyMode::JsonRpcRequestIdSeed
+        JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
     );
-    assert!(super::schemas::request_schema_for_method("agent.prompt").is_some());
-    assert!(super::schemas::response_schema_for_method("agent.prompt").is_some());
-    let definition = specs::function_definition_for_spec(spec);
+    assert!(
+        crate::server::capabilities::schemas::request_schema_for_method("agent.prompt").is_some()
+    );
+    assert!(
+        crate::server::capabilities::schemas::response_schema_for_method("agent.prompt").is_some()
+    );
+    let definition = specs::function_definition_for_alias(spec);
     assert!(definition.required_authority.approval_required);
     assert_eq!(
         definition
@@ -1217,22 +1205,22 @@ fn transport_bindings_classify_agent_prompt_as_queue_backed_engine_prompt() {
         "session"
     );
     assert!(
-        registry.is_generic_trigger_marker("agent.prompt"),
-        "agent.prompt must be marker-registered, not a method-specific business handler"
+        registry.is_transport_binding("agent.prompt"),
+        "agent.prompt must be alias-registered, not a method-specific business handler"
     );
 }
 
 #[test]
 fn transport_bindings_classify_prompt_library_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in PROMPT_LIBRARY_METHODS {
         assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
     }
 }
@@ -1240,8 +1228,8 @@ fn transport_bindings_classify_prompt_library_as_fully_generic_triggered() {
 #[test]
 fn transport_bindings_classify_prompt_history_writes_as_guarded_irreversible_triggers() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for method in ["promptHistory.delete", "promptHistory.clear"] {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
         assert_eq!(spec.effect_class, EffectClass::IrreversibleSideEffect);
@@ -1251,11 +1239,11 @@ fn transport_bindings_classify_prompt_history_writes_as_guarded_irreversible_tri
         assert_eq!(spec.authority_scope, Some("prompt_library.write"));
         assert_eq!(
             spec.idempotency_mode,
-            RpcIdempotencyMode::JsonRpcRequestIdSeed
+            JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
         );
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
-        let definition = specs::function_definition_for_spec(spec);
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
+        let definition = specs::function_definition_for_alias(spec);
         assert!(definition.required_authority.approval_required);
     }
 }
@@ -1263,14 +1251,14 @@ fn transport_bindings_classify_prompt_history_writes_as_guarded_irreversible_tri
 #[test]
 fn transport_bindings_classify_settings_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in SETTINGS_METHODS {
         assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
     }
 }
@@ -1278,8 +1266,8 @@ fn transport_bindings_classify_settings_as_fully_generic_triggered() {
 #[test]
 fn transport_bindings_classify_settings_writes_as_guarded_reversible_triggers() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for method in ["settings.update", "settings.resetToDefaults"] {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
         assert_eq!(spec.effect_class, EffectClass::ReversibleSideEffect);
@@ -1289,11 +1277,11 @@ fn transport_bindings_classify_settings_writes_as_guarded_reversible_triggers() 
         assert_eq!(spec.authority_scope, Some("settings.write"));
         assert_eq!(
             spec.idempotency_mode,
-            RpcIdempotencyMode::JsonRpcRequestIdSeed
+            JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
         );
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
-        let definition = specs::function_definition_for_spec(spec);
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
+        let definition = specs::function_definition_for_alias(spec);
         assert!(definition.required_authority.approval_required);
         assert_eq!(
             definition
@@ -1308,14 +1296,14 @@ fn transport_bindings_classify_settings_writes_as_guarded_reversible_triggers() 
 #[test]
 fn transport_bindings_classify_logs_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in LOGS_METHODS {
         assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
     }
 }
@@ -1323,8 +1311,8 @@ fn transport_bindings_classify_logs_as_fully_generic_triggered() {
 #[test]
 fn transport_bindings_classify_logs_ingest_as_guarded_append_only_trigger() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     let spec = specs
         .iter()
         .find(|spec| spec.method == "logs.ingest")
@@ -1336,11 +1324,15 @@ fn transport_bindings_classify_logs_ingest_as_guarded_append_only_trigger() {
     assert_eq!(spec.authority_scope, Some("logs.write"));
     assert_eq!(
         spec.idempotency_mode,
-        RpcIdempotencyMode::JsonRpcRequestIdSeed
+        JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
     );
-    assert!(super::schemas::request_schema_for_method("logs.ingest").is_some());
-    assert!(super::schemas::response_schema_for_method("logs.ingest").is_some());
-    let definition = specs::function_definition_for_spec(spec);
+    assert!(
+        crate::server::capabilities::schemas::request_schema_for_method("logs.ingest").is_some()
+    );
+    assert!(
+        crate::server::capabilities::schemas::response_schema_for_method("logs.ingest").is_some()
+    );
+    let definition = specs::function_definition_for_alias(spec);
     assert_eq!(
         definition
             .idempotency
@@ -1354,27 +1346,27 @@ fn transport_bindings_classify_logs_ingest_as_guarded_append_only_trigger() {
 #[test]
 fn transport_bindings_classify_mcp_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in MCP_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
         assert_eq!(spec.owner_worker, specs::worker_id("mcp").unwrap());
         assert_eq!(spec.domain_worker, specs::worker_id("mcp").unwrap());
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
     }
 }
 
 #[test]
 fn transport_bindings_classify_mcp_writes_as_guarded_external_side_effects() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for method in [
         "mcp.addServer",
         "mcp.removeServer",
@@ -1391,9 +1383,9 @@ fn transport_bindings_classify_mcp_writes_as_guarded_external_side_effects() {
         assert_eq!(spec.authority_scope, Some("mcp.write"));
         assert_eq!(
             spec.idempotency_mode,
-            RpcIdempotencyMode::JsonRpcRequestIdSeed
+            JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
         );
-        let definition = specs::function_definition_for_spec(spec);
+        let definition = specs::function_definition_for_alias(spec);
         assert!(definition.required_authority.approval_required);
         assert_eq!(
             definition
@@ -1408,8 +1400,8 @@ fn transport_bindings_classify_mcp_writes_as_guarded_external_side_effects() {
 #[test]
 fn transport_bindings_classify_new_domain_groups_as_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for method in SKILL_METHODS
         .iter()
         .chain(FILESYSTEM_ENGINE_METHODS)
@@ -1425,38 +1417,38 @@ fn transport_bindings_classify_new_domain_groups_as_generic_triggered() {
     {
         assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
     }
 }
 
 #[test]
 fn transport_bindings_classify_cron_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in CRON_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
         assert_eq!(spec.owner_worker, specs::worker_id("cron").unwrap());
         assert_eq!(spec.domain_worker, specs::worker_id("cron").unwrap());
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
     }
 }
 
 #[test]
 fn transport_bindings_classify_cron_writes_as_guarded_trigger_capabilities() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in ["cron.create", "cron.update", "cron.delete", "cron.run"] {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
@@ -1467,9 +1459,9 @@ fn transport_bindings_classify_cron_writes_as_guarded_trigger_capabilities() {
         assert_eq!(spec.authority_scope, Some("cron.write"));
         assert_eq!(
             spec.idempotency_mode,
-            RpcIdempotencyMode::JsonRpcRequestIdSeed
+            JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
         );
-        let definition = specs::function_definition_for_spec(spec);
+        let definition = specs::function_definition_for_alias(spec);
         assert!(definition.required_authority.approval_required);
         assert_eq!(
             definition
@@ -1600,25 +1592,25 @@ async fn cron_schedule_trigger_dispatch_records_ledger_and_replays_duplicate_fir
 #[test]
 fn transport_bindings_classify_runtime_tail_as_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in RUNTIME_TAIL_METHODS {
         assert!(specs.iter().any(|spec| spec.method == *method));
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
     }
 }
 
 #[test]
 fn transport_bindings_classify_first_high_risk_command_collapse() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for method in HIGH_RISK_COMMAND_METHODS {
         let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
@@ -1627,15 +1619,15 @@ fn transport_bindings_classify_first_high_risk_command_collapse() {
         assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
         assert_eq!(
             spec.idempotency_mode,
-            RpcIdempotencyMode::JsonRpcRequestIdSeed
+            JsonRpcIdempotencyMode::JsonRpcRequestIdSeed
         );
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
-        assert!(super::schemas::request_schema_for_method(method).is_some());
-        assert!(super::schemas::response_schema_for_method(method).is_some());
-        let definition = specs::function_definition_for_spec(spec);
+        assert!(crate::server::capabilities::schemas::request_schema_for_method(method).is_some());
+        assert!(crate::server::capabilities::schemas::response_schema_for_method(method).is_some());
+        let definition = specs::function_definition_for_alias(spec);
         assert!(definition.required_authority.approval_required);
         assert!(
             definition.metadata["highRiskContract"]["resourceLock"]["required"]
@@ -1658,7 +1650,7 @@ fn transport_bindings_classify_first_high_risk_command_collapse() {
     assert_eq!(model.authority_scope, Some("model.write"));
     assert_eq!(model.effect_class, EffectClass::ReversibleSideEffect);
     assert_eq!(
-        specs::function_definition_for_spec(model)
+        specs::function_definition_for_alias(model)
             .idempotency
             .as_ref()
             .map(|contract| contract.dedupe_scope.clone()),
@@ -1700,7 +1692,7 @@ fn transport_bindings_classify_first_high_risk_command_collapse() {
     assert_eq!(import.authority_scope, Some("import.write"));
     assert_eq!(import.effect_class, EffectClass::AppendOnlyEvent);
     assert_eq!(
-        specs::function_definition_for_spec(import)
+        specs::function_definition_for_alias(import)
             .idempotency
             .as_ref()
             .map(|contract| contract.dedupe_scope.clone()),
@@ -1711,21 +1703,21 @@ fn transport_bindings_classify_first_high_risk_command_collapse() {
 #[test]
 fn transport_bindings_classify_git_worktree_as_fully_generic_triggered() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
 
     for &method in GIT_WORKTREE_METHODS {
         assert!(specs.iter().any(|spec| spec.method == method));
         assert!(
-            registry.is_generic_trigger_marker(method),
-            "{method} must be marker-registered, not method-specific business logic"
+            registry.is_transport_binding(method),
+            "{method} must be alias-registered, not method-specific business logic"
         );
         assert!(
-            super::schemas::request_schema_for_method(method).is_some(),
+            crate::server::capabilities::schemas::request_schema_for_method(method).is_some(),
             "{method} must declare a request schema"
         );
         assert!(
-            super::schemas::response_schema_for_method(method).is_some(),
+            crate::server::capabilities::schemas::response_schema_for_method(method).is_some(),
             "{method} must declare a response schema"
         );
     }
@@ -1739,12 +1731,12 @@ fn transport_bindings_classify_git_worktree_as_fully_generic_triggered() {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
         assert_eq!(spec.risk_level, RiskLevel::Medium);
         assert!(
-            !specs::function_definition_for_spec(spec)
+            !specs::function_definition_for_alias(spec)
                 .required_authority
                 .approval_required
         );
         assert!(
-            specs::function_definition_for_spec(spec)
+            specs::function_definition_for_alias(spec)
                 .resource_lease
                 .is_some(),
             "{method} must still be lease-guarded"
@@ -1770,7 +1762,7 @@ fn transport_bindings_classify_git_worktree_as_fully_generic_triggered() {
     ] {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
         assert!(spec.risk_level >= RiskLevel::High);
-        let definition = specs::function_definition_for_spec(spec);
+        let definition = specs::function_definition_for_alias(spec);
         assert!(definition.required_authority.approval_required);
         assert!(definition.resource_lease.is_some());
         assert!(definition.compensation.is_some());
@@ -1826,8 +1818,8 @@ async fn git_worktree_generic_triggers_match_direct_engine_error_shapes() {
 #[test]
 fn transport_bindings_assign_generic_methods_to_domain_workers() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for (method, worker) in [
         ("system.ping", "system"),
         ("settings.update", "settings"),
@@ -1855,7 +1847,7 @@ fn transport_bindings_assign_generic_methods_to_domain_workers() {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
         assert_eq!(spec.owner_worker, specs::worker_id(worker).unwrap());
         assert_eq!(spec.domain_worker, specs::worker_id(worker).unwrap());
-        let definition = specs::function_definition_for_spec(spec);
+        let definition = specs::function_definition_for_alias(spec);
         assert_eq!(definition.owner_worker, specs::worker_id(worker).unwrap());
         assert_eq!(definition.metadata["domainWorker"], worker);
     }
@@ -2010,8 +2002,8 @@ async fn provider_tool_surface_is_resolved_from_live_catalog_each_call() {
 #[test]
 fn generic_trigger_specs_use_canonical_domain_function_ids() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     for spec in specs.iter().filter(|spec| specs::is_engine_routable(spec)) {
         assert_ne!(
             spec.function_id.namespace(),
@@ -2019,7 +2011,7 @@ fn generic_trigger_specs_use_canonical_domain_function_ids() {
             "{} must execute as a canonical domain function",
             spec.method
         );
-        let definition = specs::function_definition_for_spec(spec);
+        let definition = specs::function_definition_for_alias(spec);
         assert_eq!(
             definition.metadata["canonicalCapability"],
             spec.function_id.as_str()
@@ -2125,8 +2117,8 @@ async fn direct_canonical_invocation_requires_domain_scope() {
 #[test]
 fn transport_bindings_classify_representative_effect_and_risk_levels() {
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    let specs = capability_specs(&registry).unwrap();
+    bindings::register_all(&mut registry);
+    let specs = json_rpc_alias_specs(&registry).unwrap();
     let find = |method: &str| specs.iter().find(|spec| spec.method == method).unwrap();
 
     let session_list = find("session.list");
@@ -2165,23 +2157,10 @@ fn transport_bindings_classify_representative_effect_and_risk_levels() {
 
 #[test]
 fn transport_bindings_fail_closed_for_unclassified_registry_methods() {
-    struct Echo;
-
-    #[async_trait]
-    impl MethodHandler for Echo {
-        async fn handle(
-            &self,
-            _params: Option<Value>,
-            _ctx: &RpcContext,
-        ) -> Result<Value, RpcError> {
-            Ok(Value::Null)
-        }
-    }
-
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
-    registry.register("new.method", Echo);
-    let err = capability_specs(&registry).unwrap_err();
+    bindings::register_all(&mut registry);
+    registry.register("new.method");
+    let err = json_rpc_alias_specs(&registry).unwrap_err();
     assert!(matches!(
         err,
         EngineError::PolicyViolation(message)
@@ -2193,7 +2172,7 @@ fn transport_bindings_fail_closed_for_unclassified_registry_methods() {
 fn rpc_engine_invocation_preserves_transport_metadata() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "req-123".to_owned(),
         method: "events.getHistory".to_owned(),
@@ -2231,7 +2210,7 @@ fn rpc_engine_invocation_preserves_transport_metadata() {
 fn rpc_engine_invocation_derives_write_authority_and_idempotency_key() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let payload = json!({"name": "Greeting", "text": "Hello!"});
     let request = RpcRequest {
         id: "write-1".to_owned(),
@@ -2283,7 +2262,7 @@ fn rpc_engine_invocation_derives_write_authority_and_idempotency_key() {
 fn rpc_engine_invocation_rejects_empty_write_request_id() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let err = RpcEngineInvocation::from_request(
         &registry,
         &ctx,
@@ -2302,7 +2281,7 @@ fn rpc_engine_invocation_rejects_empty_write_request_id() {
 fn rpc_engine_invocation_rejects_empty_prompt_history_write_request_id() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let err = RpcEngineInvocation::from_request(
         &registry,
         &ctx,
@@ -2321,7 +2300,7 @@ fn rpc_engine_invocation_rejects_empty_prompt_history_write_request_id() {
 fn rpc_engine_invocation_rejects_empty_settings_write_request_id() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let err = RpcEngineInvocation::from_request(
         &registry,
         &ctx,
@@ -2340,7 +2319,7 @@ fn rpc_engine_invocation_rejects_empty_settings_write_request_id() {
 fn rpc_engine_invocation_defaults_missing_params_to_empty_object() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "req-empty".to_owned(),
         method: "settings.get".to_owned(),
@@ -2356,7 +2335,7 @@ fn rpc_engine_invocation_defaults_missing_params_to_empty_object() {
 fn fully_collapsed_methods_build_generic_envelopes() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "req-resume".to_owned(),
         method: "session.resume".to_owned(),
@@ -2387,24 +2366,17 @@ async fn fully_collapsed_engine_functions_are_client_routable() {
 }
 
 #[tokio::test]
-async fn generic_trigger_bypasses_marker_handlers() {
+async fn json_rpc_transport_dispatches_without_marker_handlers() {
     let ctx = make_test_context();
     let result = rpc_dispatch_value(&ctx, "system.ping", json!({"protocolVersion": 1})).await;
     assert_eq!(result["pong"], true);
-
-    let err = RpcGenericTriggerHandler::new("system.ping")
-        .handle(None, &ctx)
-        .await
-        .unwrap_err();
-    assert_eq!(err.code(), errors::INTERNAL_ERROR);
-    assert!(err.to_string().contains("registry interception failed"));
 }
 
 #[tokio::test]
 async fn generic_trigger_engine_errors_keep_rpc_error_shape() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let response = registry
         .dispatch(
             RpcRequest {
@@ -2425,7 +2397,7 @@ async fn generic_trigger_engine_errors_keep_rpc_error_shape() {
 async fn generic_trigger_strict_request_schemas_reject_unknown_fields() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let response = registry
         .dispatch(
             RpcRequest {
@@ -3245,7 +3217,7 @@ async fn prompt_history_delete_missing_target_returns_false() {
 async fn logs_ingest_duplicate_transport_replays_without_second_db_write() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "logs-ingest-retry".to_owned(),
         method: "logs.ingest".to_owned(),
@@ -3293,7 +3265,7 @@ async fn logs_ingest_duplicate_transport_replays_without_second_db_write() {
 async fn logs_ingest_errors_complete_idempotency_and_replay() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let entries: Vec<Value> = (0..10_001)
         .map(|i| {
             json!({"timestamp": format!("2026-03-03T14:30:{:02}.{:03}Z", i / 1000, i % 1000), "level": "info", "category": "A", "message": "x"})
@@ -3335,7 +3307,7 @@ async fn logs_ingest_errors_complete_idempotency_and_replay() {
 async fn logs_ingest_reused_request_id_with_different_payload_is_distinct_command() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
 
     for message in ["first", "second"] {
         let response = registry
@@ -3402,7 +3374,7 @@ async fn logs_ingest_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
 async fn logs_ingest_rejects_strict_schema_violations() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let cases = [
         json!({}),
         json!({"entries": "not-array"}),
@@ -3431,7 +3403,7 @@ async fn logs_ingest_rejects_strict_schema_violations() {
 async fn logs_ingest_rejects_empty_rpc_request_id() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let response = registry
         .dispatch(
             RpcRequest {
@@ -3450,7 +3422,7 @@ async fn logs_ingest_rejects_empty_rpc_request_id() {
 async fn prompt_snippet_write_duplicate_transport_replays_without_rerun() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "snippet-create-retry".to_owned(),
         method: "promptSnippet.create".to_owned(),
@@ -3483,7 +3455,7 @@ async fn prompt_snippet_write_duplicate_transport_replays_without_rerun() {
 async fn prompt_snippet_reused_request_id_with_different_payload_is_distinct_command() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
 
     for name in ["first", "second"] {
         let response = registry
@@ -3510,7 +3482,7 @@ async fn prompt_snippet_update_duplicate_transport_replays_without_second_mutati
         crate::prompt_library::store::create_snippet(ctx.event_store.pool(), "original", "body")
             .unwrap();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "update-retry".to_owned(),
         method: "promptSnippet.update".to_owned(),
@@ -3553,7 +3525,7 @@ async fn prompt_snippet_delete_duplicate_transport_replays_true() {
         crate::prompt_library::store::create_snippet(ctx.event_store.pool(), "delete", "body")
             .unwrap();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "delete-retry".to_owned(),
         method: "promptSnippet.delete".to_owned(),
@@ -3570,7 +3542,7 @@ async fn prompt_snippet_delete_duplicate_transport_replays_true() {
 async fn prompt_snippet_write_errors_complete_idempotency_and_replay() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "invalid-create-retry".to_owned(),
         method: "promptSnippet.create".to_owned(),
@@ -3617,7 +3589,7 @@ async fn prompt_history_delete_duplicate_transport_replays_without_second_delete
     let page = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
     let id = page.items[0].id.clone();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "history-delete-retry".to_owned(),
         method: "promptHistory.delete".to_owned(),
@@ -3637,7 +3609,7 @@ async fn prompt_history_clear_duplicate_transport_replays_original_count() {
     crate::prompt_library::store::record_prompt(pool, "first").unwrap();
     crate::prompt_library::store::record_prompt(pool, "second").unwrap();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     let request = RpcRequest {
         id: "history-clear-retry".to_owned(),
         method: "promptHistory.clear".to_owned(),
@@ -3674,7 +3646,7 @@ async fn prompt_history_reused_request_id_with_different_payload_is_distinct_com
     crate::prompt_library::store::record_prompt(pool, "second").unwrap();
     let page = crate::prompt_library::store::list_history(pool, 10, None, None).unwrap();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
 
     for item in page.items.iter().take(2) {
         let response = registry
@@ -4025,7 +3997,7 @@ async fn settings_update_duplicate_transport_replays_without_second_side_effect(
     let (manager, spawner) = attach_codex_manager(&mut ctx, &token_dir);
     ctx.engine_host = crate::engine::EngineHostHandle::new_in_memory().unwrap();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
     register_rpc_worker_for_context(&ctx, &registry).unwrap();
     let request = RpcRequest {
         id: "settings-update-retry".to_owned(),
@@ -4060,7 +4032,7 @@ async fn settings_reset_duplicate_transport_replays_without_second_reset() {
     let _guard = settings_test_guard();
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
 
     let seed = registry
         .dispatch(
@@ -4104,7 +4076,7 @@ async fn settings_update_reused_request_id_with_different_payload_is_distinct_co
     let _guard = settings_test_guard();
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    handlers::register_all(&mut registry);
+    bindings::register_all(&mut registry);
 
     for interval in [40_000, 45_000] {
         let response = registry
@@ -4201,23 +4173,10 @@ async fn fully_collapsed_json_rpc_methods_dispatch_through_engine() {
 }
 
 #[tokio::test]
-async fn custom_unclassified_methods_are_not_intercepted_by_generic_dispatch() {
-    struct Echo;
-
-    #[async_trait]
-    impl MethodHandler for Echo {
-        async fn handle(
-            &self,
-            params: Option<Value>,
-            _ctx: &RpcContext,
-        ) -> Result<Value, RpcError> {
-            Ok(params.unwrap_or(Value::Null))
-        }
-    }
-
+async fn registered_unaliased_methods_fail_closed_without_fallback_handlers() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
-    registry.register("custom.echo", Echo);
+    registry.register("custom.echo");
     let response = registry
         .dispatch(
             RpcRequest {
@@ -4228,8 +4187,10 @@ async fn custom_unclassified_methods_are_not_intercepted_by_generic_dispatch() {
             &ctx,
         )
         .await;
-    assert!(response.success, "{:?}", response.error);
-    assert_eq!(response.result.unwrap(), json!({"ok": true}));
+    assert!(!response.success);
+    let error = response.error.unwrap();
+    assert_eq!(error.code, errors::INTERNAL_ERROR);
+    assert!(error.message.contains("Internal error"));
 }
 
 #[tokio::test]

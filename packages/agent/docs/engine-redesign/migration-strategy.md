@@ -200,7 +200,7 @@ Deliverables:
 - `rpc` compatibility worker with classified transport specs for every
   registered JSON-RPC method, non-executable `rpc::<method>` transport
   metadata, and canonical domain function ids.
-- `RpcCapabilitySpec` metadata for every method: legacy method name,
+- `JsonRpcAliasSpec` metadata for every method: legacy method name,
   canonical function id, trigger id, canonical domain owner, effect class,
   risk, visibility, transport authority, domain authority, idempotency source,
   strict schemas, stream/lease/compensation contracts, and handler-module
@@ -222,9 +222,9 @@ Acceptance:
   engine transport methods land, that means 175 registered methods: five
   `engine.*` methods plus 170 legacy compatibility aliases.
 - Historical `HandlerOnly` / `Mirrored` / `EngineOwned` / `ThinAdapter`
-  checkpoints are gone from production. Every public method is a marker
+  checkpoints are gone from production. Every public method is a catalog-derived
   `json_rpc` trigger over a canonical engine function or reserved engine
-  meta-capability, with old production handlers removed.
+  meta-capability, with old production handlers removed and the handler namespace deleted.
 - A migration package is incomplete unless it advances at least one method
   group and deletes any superseded method-specific business logic. Mirroring,
   thin adapters, or fallback paths are only acceptable as short-lived parity
@@ -256,7 +256,7 @@ Acceptance:
   and direct engine invocation.
 - Invocation ledger records actor, trace, authority scopes, catalog revision,
   function revision, delivery mode, and result for migrated reads.
-- README RPC counts remain reconciled with `server/rpc/handlers/mod.rs`.
+- README RPC counts remain reconciled with `server/capabilities/catalog.rs`.
 
 ## Phase 3: first generic RPC trigger and next read wave
 
@@ -283,13 +283,11 @@ Acceptance:
 - Each migrated read has schema metadata, authority metadata, visibility, and
   causal records.
 - `MethodRegistry::dispatch` validates method existence and JSON depth, then
-  lets `try_dispatch_generic_rpc` intercept `GenericTrigger` specs before the
-  marker handler can run.
-- `RpcGenericTriggerHandler` is only a loud marker; if it executes, registry
-  interception failed.
+  calls `dispatch_json_rpc_transport` directly. There is no handler fallback.
+- `JsonRpcTransportBinding` is pure transport metadata.
 - Direct engine invocation and JSON-RPC dispatch return identical payloads for
   all twelve reads, including stateful event and prompt-library reads.
-- Handler-only methods and custom local test methods still pass through the
+- Unaliased registered methods fail closed instead of passing through hidden handlers.
   current handler path, proving generic dispatch is opt-in by spec.
 - The old thin/read handler structs and duplicated business logic are deleted
   for every method in the completed generic-trigger set.
@@ -320,8 +318,7 @@ Semantics:
 
 Acceptance:
 
-- Method registrations for the three prompt-snippet writes are generic-trigger
-  markers only.
+- Method registrations for the three prompt-snippet writes are transport aliases only.
 - The old `CreateSnippetHandler`, `UpdateSnippetHandler`, and
   `DeleteSnippetHandler` business handlers are deleted.
 - Direct engine invocation and JSON-RPC dispatch return the same success/error
@@ -341,13 +338,13 @@ Implemented generic-trigger functions:
 
 Semantics:
 
-- all eight prompt-library RPC methods are now `GenericTrigger`;
+- all eight prompt-library RPC methods are transport aliases;
 - prompt history writes use `rpc.write`, `prompt_library.write`, strict
   schemas, and system-scoped engine-ledger idempotency;
 - `promptHistory.delete`, `promptHistory.clear`, and `promptSnippet.delete`
   remain irreversible side-effect capabilities with approval-required metadata;
-- generic-trigger registrations are marker-only, and tests fail if a completed
-  group keeps hidden method-specific business handlers.
+- transport registrations are binding-only, and tests fail if a completed
+  group keeps hidden business handlers.
 
 Acceptance:
 
@@ -372,7 +369,7 @@ Implemented generic-trigger functions:
 
 Semantics:
 
-- all three settings RPC methods are now `GenericTrigger`;
+- all three settings RPC methods are transport aliases;
 - settings writes use `rpc.write`, `settings.write`, strict schemas, and
   system-scoped engine-ledger idempotency;
 - settings writes are high-risk reversible side-effect capabilities with
@@ -404,7 +401,7 @@ Implemented generic-trigger function:
 
 Semantics:
 
-- both logs RPC methods are now `GenericTrigger`;
+- both logs RPC methods are transport aliases;
 - `logs.ingest` is an append-only event capability with `rpc.write`,
   `logs.write`, strict schemas, and system-scoped engine-ledger idempotency;
 - JSON-RPC request-id-derived idempotency replays exact duplicate transports
@@ -417,7 +414,7 @@ Semantics:
 Acceptance:
 
 - `IngestLogsHandler` is deleted.
-- The logs group is marker-registered only.
+- The logs group is transport-bound only.
 - Direct engine invocation and JSON-RPC dispatch return the same payloads for
   ingest success cases.
 - Duplicate ingest transports replay through the engine ledger without
@@ -492,7 +489,7 @@ Semantics:
 
 Acceptance:
 
-- migrated registrations are marker-only generic triggers;
+- migrated registrations are JSON-RPC transport aliases;
 - old business handlers for the collapsed groups are deleted;
 - direct engine invocation and JSON-RPC dispatch agree for every newly
   migrated method's success path and representative legacy errors;
@@ -594,9 +591,8 @@ Acceptance:
 
 - generic-trigger count rises from 51 to 66 while the public JSON-RPC method
   count stays 167;
-- the old job business handlers are deleted, and migrated session/context/
-  agent-queue handlers are test-only wire fixtures until their remaining
-  regression tests move fully to engine parity;
+- the old job/session/context/agent-queue handler fixtures were later deleted;
+  regression coverage now lives in canonical capability and transport tests;
 - focused tests prove approval request/resolve causality, SQLite approval
   durability, local external-worker disconnect cleanup, session create parity,
   and agent queue retry idempotency;
@@ -643,7 +639,7 @@ Acceptance:
 `agent.prompt` is now part of the canonical agent capability fabric instead of
 the remaining method-specific agent handler path:
 
-- `agent.prompt` is a marker-registered generic JSON-RPC trigger into
+- `agent.prompt` is a transport-bound generic JSON-RPC trigger into
   canonical `agent::prompt`;
 - `agent::prompt` validates the current wire payload, uses session-scoped
   engine-ledger idempotency, derives a stable `runId`, enqueues hidden
@@ -668,9 +664,8 @@ Acceptance:
 
 - public JSON-RPC count remains 170 and every method has exactly one transport
   binding spec;
-- generic-trigger count rises from 75 to 76;
-- all current agent control methods are generic-triggered marker
-  registrations;
+- transport-bound method count rises from 75 to 76;
+- all current agent control methods are catalog-derived transport aliases;
 - duplicate JSON-RPC prompt retries replay the first `runId` without executing
   `agent::prompt_apply` a second time.
 
@@ -773,11 +768,11 @@ Semantics:
   `message.write`, strict schema, idempotency, and approval-required metadata
   for autonomous agent visibility.
 - The old cron/blob/codex-app/tool/message handlers are test-only fixtures;
-  production registrations are marker-only generic triggers.
+  production registrations are JSON-RPC transport aliases.
 
 High-risk deferred groups stay explicitly blocked from migration until their
 contracts cover strict schema, domain authority, idempotency, risk metadata,
-approval metadata where required, and marker-only registration. Those groups
+approval metadata where required, and transport-bound registration. Those groups
 include auth, sandbox lifecycle/execution, transcription audio/download,
 browser/display stream mutation, voice-note mutation, device mutation, system
 shutdown/update actions, and `session.resume`.
@@ -810,7 +805,7 @@ to 116 while keeping the public JSON-RPC method count at 170:
 
 Acceptance gates:
 
-- The four production registrations are marker-only generic triggers.
+- The four production registrations are JSON-RPC transport aliases.
 - Legacy handler structs are test fixtures only.
 - Duplicate JSON-RPC retries replay from engine idempotency without duplicate
   model/reasoning events, memory retain starts, or imports.
@@ -846,7 +841,7 @@ public JSON-RPC method count at 170:
 
 Acceptance gates:
 
-- All 28 git/worktree registrations are marker-only generic triggers.
+- All 28 git/worktree registrations are JSON-RPC transport aliases.
 - Legacy git/worktree handler modules are test-only wire-contract fixtures.
 - Direct canonical invocation and JSON-RPC trigger dispatch produce matching
   sanitized error shapes for the migrated surface.
@@ -857,14 +852,14 @@ Acceptance gates:
 ## Phase 6.5: CI isolation and full RPC tail collapse
 
 Finish the public JSON-RPC collapse and remove the last production
-method-specific business handlers before broader client-native cutover work.
+business handlers before broader client-native cutover work.
 
 Delivered:
 
 - Parallel integration server boots now use unique auth, onboarding, updater,
   and prompt working paths instead of shared `/tmp` fixtures, and spawned test
   server/bridge tasks shut down against isolated state.
-- The final 26 handler-owned public methods are now marker-only
+- The final 26 handler-owned public methods are now transport-bound
   `json_rpc` triggers into canonical domain functions:
   `auth.get/update/clear/oauthBegin/oauthComplete/renameAccount/setActive/
   removeAccount/removeApiKey`, `device.register/unregister/respond`,
@@ -880,20 +875,20 @@ Delivered:
   JSON-RPC wire behavior while adding strict schemas, domain write authority,
   idempotency, resource leases, stream topics, and approval metadata where
   autonomous agents would otherwise perform high-risk effects.
-- The 170 legacy domain methods reached 170/170 marker-trigger coverage before
+- The 170 legacy domain methods reached 170/170 transport-trigger coverage before
   the additive `engine.*` transport methods raised the current public method
   count to 175.
 
 Acceptance gates:
 
-- Every public registration in `server/rpc/handlers/mod.rs` is a
-  `RpcGenericTriggerHandler` marker.
+- Every public JSON-RPC alias is generated from `server/capabilities/catalog.rs`
+  and projected by `server/rpc/bindings.rs`.
 - Every public method has exactly one transport binding and one canonical
   function mapping.
 - No mutating generic trigger can register without strict schemas, domain
   authority, idempotency, risk metadata, approval metadata when required,
   resource leases for shared resources, stream topics, and compensation notes.
-- Legacy handler modules compile only as test fixtures where needed for parity;
+- Legacy handler modules are deleted; parity lives in canonical capability and transport-binding tests;
   production execution is canonical engine function execution.
 
 ### WP97-WP108 canonical capability API and transport cleanup
@@ -931,12 +926,44 @@ surface directly instead of treating legacy method names as the future API:
 Acceptance gates:
 
 - all 175 registered methods have exactly one transport binding;
-- every registration is marker-only;
+- every registration is transport-bound;
 - direct `engine.*` JSON-RPC dispatch matches the reserved meta-capability
   behavior;
 - legacy JSON-RPC wire behavior remains unchanged;
 - `rpc::*` compatibility ids are never discoverable as the primary
   agent/client capability surface and are rejected by `engine.invoke`.
+
+### WP109-WP120 canonical catalog and handler demolition
+
+The single-shape cleanup removes the last handler-shaped production concept:
+
+- executable domain modules live under `server/capabilities`, not the old
+  `server/rpc/engine_bridge/functions` path;
+- `server/capabilities/catalog.rs` owns the canonical alias inventory and
+  function metadata projection. It records canonical function ids, owning
+  workers, schemas, effect/risk class, authority, visibility, idempotency,
+  leases, compensation metadata, provenance, hidden/internal status, and
+  optional JSON-RPC aliases;
+- `server/rpc/bindings.rs` is the only public alias registration layer. It
+  projects catalog aliases into `MethodRegistry`;
+- `MethodRegistry` stores `JsonRpcTransportBinding` entries only. There is no
+  production `MethodHandler` trait object, no fallback `.handle(...)` branch,
+  and no marker handler that must be intercepted;
+- `server/rpc/handlers` is deleted. Parity and demolition tests now live beside
+  canonical capabilities and the transport binding layer;
+- hidden internal functions such as job apply, prompt apply/run-turn, cron
+  scheduled apply, and tool internals remain cataloged as engine functions but
+  do not receive public JSON-RPC aliases.
+
+Acceptance gates:
+
+- no executable or discoverable `rpc::*` functions are registered;
+- every JSON-RPC alias maps to exactly one canonical function id and trigger id;
+- every registered public method dispatches through `dispatch_json_rpc_transport`;
+- no production `MethodHandler`, `HandlerEntry`, `RpcGenericTriggerHandler`, or
+  fallback handler dispatch remains;
+- normal agent discovery shows canonical `namespace::function` ids and never
+  compatibility aliases.
 
 ## Phase 7: tools, MCP, approvals, and effects
 
@@ -963,7 +990,7 @@ Delivered so far:
   implementation/policy backing for built-in tools, so newly registered,
   removed, or unhealthy engine/MCP capabilities affect the next provider call
   without a server restart or frozen turn snapshot.
-- All public `mcp.*` methods are marker-only JSON-RPC triggers into canonical
+- All public `mcp.*` methods are JSON-RPC transport aliases into canonical
   `mcp::*` functions, raising the generic-trigger count from 76 to 84 while
   preserving the public method count at 170.
 - Discovered MCP tools register/unregister as live `mcp::*` external-side-effect

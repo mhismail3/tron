@@ -432,31 +432,31 @@ isolation does.
 |--------|----------------|
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
 | `rpc` | Transport compatibility worker for current JSON-RPC methods during migration. It owns the `json_rpc` trigger type and trigger bindings, not long-term business behavior. |
-| `system` | Server status, ping, diagnostics, update checks, and shutdown are canonical generic-trigger functions; shutdown is critical-risk and approval-gated for autonomous agents. |
-| `model` | Model catalog reads plus generic-triggered `model::switch`; switch uses session idempotency, approval metadata for autonomous agents, and a session model resource lease before mutating event-store/session cache state. |
+| `system` | Server status, ping, diagnostics, update checks, and shutdown are canonical transport functions; shutdown is critical-risk and approval-gated for autonomous agents. |
+| `model` | Model catalog reads plus transport-bound `model::switch`; switch uses session idempotency, approval metadata for autonomous agents, and a session model resource lease before mutating event-store/session cache state. |
 | `config` | Generic-triggered `config::set_reasoning_level`; the command is a high-risk reversible session write with session idempotency, approval metadata, and a session reasoning resource lease. |
-| `settings` | Typed settings with iOS parity guarantees; currently fully generic-triggered for RPC compatibility. |
-| `logs` | Local observability reads and append-only client-log ingestion; currently fully generic-triggered for RPC compatibility. |
-| `prompt_library` | Prompt history/snippet reads and writes; currently fully generic-triggered for RPC compatibility. |
-| `skills` | Skill registry and session-scoped active-skill state; currently fully generic-triggered for RPC compatibility. |
-| `filesystem` | Home/list/read/create-dir capabilities now generic-triggered; broader file writes remain deferred until path authority and idempotent file mutation contracts are hardened. |
-| `events` | Session/event-store append, read, reconstruct, subscribe/unsubscribe. All current `events.*` RPC methods are generic-triggered; subscribe/unsubscribe create stream subscription records while preserving current acknowledgements. |
-| `session` | Session create/delete/fork/archive/unarchive/archiveOlderThan/export/resume plus safe reads are generic-triggered canonical functions. |
-| `context` | Snapshot/audit/compaction/clear/canAcceptTurn methods are generic-triggered canonical functions with approval metadata on destructive commands. |
-| `agent` | Prompt, status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered canonical functions. `agent.prompt` validates and enqueues hidden `agent::prompt_apply`, while completion enqueues hidden `agent::prompt_queue_drain` so prompt startup and queued follow-up turns are queue-backed and causally recorded. |
-| `job` | Background/cancel/list/subscribe/unsubscribe are generic-triggered canonical functions; background/cancel enqueue hidden internal apply functions and synchronously drain their own receipts for current JSON-RPC compatibility. |
-| `notifications` | Notification inbox read-state functions; currently fully generic-triggered for RPC compatibility. |
-| `plan` | Session plan-mode state; currently fully generic-triggered for RPC compatibility. |
+| `settings` | Typed settings with iOS parity guarantees; currently fully transport-bound for RPC compatibility. |
+| `logs` | Local observability reads and append-only client-log ingestion; currently fully transport-bound for RPC compatibility. |
+| `prompt_library` | Prompt history/snippet reads and writes; currently fully transport-bound for RPC compatibility. |
+| `skills` | Skill registry and session-scoped active-skill state; currently fully transport-bound for RPC compatibility. |
+| `filesystem` | Home/list/read/create-dir capabilities now transport-bound; broader file writes remain deferred until path authority and idempotent file mutation contracts are hardened. |
+| `events` | Session/event-store append, read, reconstruct, subscribe/unsubscribe. All current `events.*` RPC methods are transport-bound; subscribe/unsubscribe create stream subscription records while preserving current acknowledgements. |
+| `session` | Session create/delete/fork/archive/unarchive/archiveOlderThan/export/resume plus safe reads are transport-bound canonical functions. |
+| `context` | Snapshot/audit/compaction/clear/canAcceptTurn methods are transport-bound canonical functions with approval metadata on destructive commands. |
+| `agent` | Prompt, status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are transport-bound canonical functions. `agent.prompt` validates and enqueues hidden `agent::prompt_apply`, while completion enqueues hidden `agent::prompt_queue_drain` so prompt startup and queued follow-up turns are queue-backed and causally recorded. |
+| `job` | Background/cancel/list/subscribe/unsubscribe are transport-bound canonical functions; background/cancel enqueue hidden internal apply functions and synchronously drain their own receipts for current JSON-RPC compatibility. |
+| `notifications` | Notification inbox read-state functions; currently fully transport-bound for RPC compatibility. |
+| `plan` | Session plan-mode state; currently fully transport-bound for RPC compatibility. |
 | `approval` | Pending/approved/denied/executed approval records for high-risk agent-visible invocations, with scoped approval lifecycle stream events and additive `approval.get/list/resolve` JSON-RPC transport triggers. |
 | `stream` | Durable subscriptions for catalog, session events, approvals, jobs, tool output, browser/display, transcription, notifications. |
 | `state` | Scoped state for non-event-sourced data. |
 | `queue` | Durable named queues, receipts, retries, cancellation, DLQ/redrive. |
 | `cron` | Canonical `cron::*` job management functions plus a `cron_schedule` trigger type backed by current automations definitions and SQLite runtime state. Scheduled fires target hidden `cron::scheduled_fire`, preserving existing overlap/misfire/retry execution while recording trigger id, actor, authority, schedule time, idempotency key, and ledger outcome. |
 | `tool` | Built-in tools are registered as canonical `tool::*` capabilities with strict schema metadata, effect/risk/authority/provenance, model-facing names/order, and model tool-call idempotency. Provider requests resolve tool schemas from the live catalog on every model call; prompt-time execution invokes those functions through the engine while handing off the exact runtime `ToolContext`, so progress output, cancellation, hooks, process/job managers, and event persistence survive the collapse. |
-| `mcp` | MCP server lifecycle, search/list, and discovered server tools. Public `mcp.*` RPC methods are marker triggers into canonical `mcp::*`; discovered MCP tools register/unregister live capabilities with conservative classifier metadata, read-only downgrades only when obvious, and approval-required external-side-effect defaults otherwise. |
-| `tree` | Event tree visualization and branch/subtree/ancestor comparison reads are canonical generic-trigger functions. |
-| `repo` | Worktree/repository peer-session and divergence reads are canonical generic-trigger functions. |
-| `import` | Claude Code import source/session/preview reads plus `import::execute` are canonical generic-trigger functions. Execute is a high-risk append-only import command with system idempotency, approval metadata, and an import-source resource lease; full rollback remains deferred. |
+| `mcp` | MCP server lifecycle, search/list, and discovered server tools. Public `mcp.*` RPC methods are transport aliases into canonical `mcp::*`; discovered MCP tools register/unregister live capabilities with conservative classifier metadata, read-only downgrades only when obvious, and approval-required external-side-effect defaults otherwise. |
+| `tree` | Event tree visualization and branch/subtree/ancestor comparison reads are canonical transport functions. |
+| `repo` | Worktree/repository peer-session and divergence reads are canonical transport functions. |
+| `import` | Claude Code import source/session/preview reads plus `import::execute` are canonical transport functions. Execute is a high-risk append-only import command with system idempotency, approval metadata, and an import-source resource lease; full rollback remains deferred. |
 | `browser` | Browser status plus start/stop stream controls are canonical functions with stream resource leases and idempotent start/stop semantics. |
 | `display` | Display stream stop is a canonical stream-control function with stream idempotency and local client authority. |
 | `voice_notes` | Voice-note list/save/delete are canonical functions; save links audio/transcription provenance and delete carries approval metadata. |
@@ -469,7 +469,7 @@ isolation does.
 
 ## High-Risk Migration Contracts
 
-Deferred high-risk groups must not become `GenericTrigger` merely because a
+Deferred high-risk groups must not become `transport alias` merely because a
 wire-compatible adapter exists. Each group needs a first-principles contract
 before migration:
 
@@ -549,7 +549,7 @@ The final client API can break, but transition should be controlled:
 5. Move clients and agents from legacy method names to canonical capability ids,
    then delete the compatibility inventory.
 6. Move selected client flows to engine-native calls once stable.
-7. Remove compatibility handlers only after Mac/iOS clients consume the new
+7. Remove compatibility aliases only after Mac/iOS clients consume the new
    contract.
 
 Compatibility is for migration and validation, not a permanent second system.

@@ -117,10 +117,7 @@ mod tests {
     use crate::events::EventStore;
     use crate::runtime::orchestrator::orchestrator::Orchestrator;
     use crate::runtime::orchestrator::session_manager::SessionManager;
-    use crate::server::rpc::errors::RpcError;
-    use crate::server::rpc::registry::MethodHandler;
-    use async_trait::async_trait;
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     fn make_test_ctx() -> RpcContext {
         let pool =
@@ -132,12 +129,10 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store.clone()));
         let orch = Arc::new(Orchestrator::new(mgr.clone()));
-        let home = crate::server::rpc::handlers::test_helpers::unique_tron_home();
-        let settings_path =
-            crate::server::rpc::handlers::test_helpers::test_user_profile_path(&home);
-        let profile_runtime =
-            crate::server::rpc::handlers::test_helpers::test_profile_runtime(&home);
-        let auth_path = crate::server::rpc::handlers::test_helpers::test_auth_path(&home);
+        let home = crate::server::rpc::test_support::unique_tron_home();
+        let settings_path = crate::server::rpc::test_support::test_user_profile_path(&home);
+        let profile_runtime = crate::server::rpc::test_support::test_profile_runtime(&home);
+        let auth_path = crate::server::rpc::test_support::test_auth_path(&home);
         RpcContext {
             orchestrator: orch,
             session_manager: mgr,
@@ -183,41 +178,29 @@ mod tests {
         }
     }
 
-    struct EchoHandler;
-
-    #[async_trait]
-    impl MethodHandler for EchoHandler {
-        async fn handle(
-            &self,
-            params: Option<Value>,
-            _ctx: &RpcContext,
-        ) -> Result<Value, RpcError> {
-            Ok(params.unwrap_or(json!(null)))
-        }
-    }
-
-    fn registry_with_echo() -> MethodRegistry {
+    fn registry_with_transport(ctx: &RpcContext) -> MethodRegistry {
         let mut reg = MethodRegistry::new();
-        reg.register("test.echo", EchoHandler);
+        crate::server::rpc::bindings::register_all(&mut reg);
+        crate::server::rpc::engine_bridge::register_rpc_worker_for_context(ctx, &reg).unwrap();
         reg
     }
 
     #[tokio::test]
     async fn valid_request_dispatches() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let msg = r#"{"id":"r1","method":"test.echo","params":{"x":1}}"#;
+        let reg = registry_with_transport(&ctx);
+        let msg = r#"{"id":"r1","method":"system.ping","params":{"protocolVersion":1}}"#;
         let result = handle_message(msg, &reg, &ctx).await;
         let resp = result.response;
         assert!(resp.success);
         assert_eq!(resp.id, "r1");
-        assert_eq!(resp.result.unwrap()["x"], 1);
+        assert_eq!(resp.result.unwrap()["pong"], true);
     }
 
     #[tokio::test]
     async fn invalid_json_returns_error() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
+        let reg = registry_with_transport(&ctx);
         let result = handle_message("not json at all", &reg, &ctx).await;
         let resp = result.response;
         assert!(!resp.success);
@@ -229,8 +212,8 @@ mod tests {
 
     #[tokio::test]
     async fn empty_message_returns_error() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
+        let reg = registry_with_transport(&ctx);
         let result = handle_message("", &reg, &ctx).await;
         let resp = result.response;
         assert!(!resp.success);
@@ -239,8 +222,8 @@ mod tests {
 
     #[tokio::test]
     async fn missing_method_returns_not_found() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
+        let reg = registry_with_transport(&ctx);
         let msg = r#"{"id":"r2","method":"no.such"}"#;
         let result = handle_message(msg, &reg, &ctx).await;
         let resp = result.response;
@@ -250,9 +233,9 @@ mod tests {
 
     #[tokio::test]
     async fn response_preserves_request_id() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let msg = r#"{"id":"unique_42","method":"test.echo"}"#;
+        let reg = registry_with_transport(&ctx);
+        let msg = r#"{"id":"unique_42","method":"system.ping","params":{"protocolVersion":1}}"#;
         let result = handle_message(msg, &reg, &ctx).await;
         let resp = result.response;
         assert_eq!(resp.id, "unique_42");
@@ -260,8 +243,8 @@ mod tests {
 
     #[tokio::test]
     async fn non_object_json_returns_error() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
+        let reg = registry_with_transport(&ctx);
         let result = handle_message("[1,2,3]", &reg, &ctx).await;
         let resp = result.response;
         assert!(!resp.success);
@@ -270,9 +253,9 @@ mod tests {
 
     #[tokio::test]
     async fn json_missing_id_field() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let msg = r#"{"method":"test.echo"}"#;
+        let reg = registry_with_transport(&ctx);
+        let msg = r#"{"method":"system.ping","params":{"protocolVersion":1}}"#;
         let result = handle_message(msg, &reg, &ctx).await;
         let resp = result.response;
         assert!(!resp.success);
@@ -281,8 +264,8 @@ mod tests {
 
     #[tokio::test]
     async fn json_missing_method_field() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
+        let reg = registry_with_transport(&ctx);
         let msg = r#"{"id":"r3"}"#;
         let result = handle_message(msg, &reg, &ctx).await;
         let resp = result.response;
@@ -292,67 +275,51 @@ mod tests {
 
     #[tokio::test]
     async fn request_with_null_params() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let msg = r#"{"id":"r4","method":"test.echo","params":null}"#;
+        let reg = registry_with_transport(&ctx);
+        let msg = r#"{"id":"r4","method":"system.ping","params":null}"#;
         let result = handle_message(msg, &reg, &ctx).await;
         let resp = result.response;
-        assert!(resp.success);
-        // null params → EchoHandler returns Value::Null → Some(Null)
-        assert_eq!(resp.result, Some(serde_json::Value::Null));
+        assert!(!resp.success);
+        assert_eq!(resp.error.unwrap().code, "INVALID_PARAMS");
     }
 
     #[tokio::test]
     async fn request_without_params_field() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let msg = r#"{"id":"r5","method":"test.echo"}"#;
-        let result = handle_message(msg, &reg, &ctx).await;
-        let resp = result.response;
-        assert!(resp.success);
-        // No params → EchoHandler returns Value::Null → Some(Null)
-        assert_eq!(resp.result, Some(serde_json::Value::Null));
-    }
-
-    #[tokio::test]
-    async fn handler_error_propagates() {
-        struct FailHandler;
-
-        #[async_trait]
-        impl MethodHandler for FailHandler {
-            async fn handle(
-                &self,
-                _params: Option<Value>,
-                _ctx: &RpcContext,
-            ) -> Result<Value, RpcError> {
-                Err(RpcError::Internal {
-                    message: "boom".into(),
-                })
-            }
-        }
-
-        let mut reg = MethodRegistry::new();
-        reg.register("test.fail", FailHandler);
-        let ctx = make_test_ctx();
-
-        let msg = r#"{"id":"r6","method":"test.fail"}"#;
+        let reg = registry_with_transport(&ctx);
+        let msg = r#"{"id":"r5","method":"system.ping"}"#;
         let result = handle_message(msg, &reg, &ctx).await;
         let resp = result.response;
         assert!(!resp.success);
-        assert_eq!(resp.error.unwrap().code, "INTERNAL_ERROR");
+        assert_eq!(resp.error.unwrap().code, "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn engine_error_propagates() {
+        let ctx = make_test_ctx();
+        let reg = registry_with_transport(&ctx);
+
+        let msg = r#"{"id":"r6","method":"system.ping","params":{}}"#;
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
+        assert!(!resp.success);
+        assert_eq!(resp.error.unwrap().code, "INVALID_PARAMS");
     }
 
     #[tokio::test]
     async fn large_params_handled() {
-        let reg = registry_with_echo();
         let ctx = make_test_ctx();
+        let reg = registry_with_transport(&ctx);
         let large_val = "x".repeat(10_000);
-        let msg = format!(r#"{{"id":"r7","method":"test.echo","params":{{"big":"{large_val}"}}}}"#);
+        let msg = format!(
+            r#"{{"id":"r7","method":"settings.resetToDefaults","params":{{"big":"{large_val}"}}}}"#
+        );
         let handle_result = handle_message(&msg, &reg, &ctx).await;
         let resp = handle_result.response;
-        assert!(resp.success);
+        assert!(resp.success, "{:?}", resp.error);
         let result = resp.result.unwrap();
-        assert_eq!(result["big"].as_str().unwrap().len(), 10_000);
+        assert!(result.is_object());
     }
 
     #[test]

@@ -600,59 +600,6 @@ pub fn format_user_job_actions(actions: &[(String, Value)]) -> String {
     ctx
 }
 
-/// Gather recent event types and Bash tool call commands since the last compact.boundary.
-///
-/// Returns `(event_types, bash_commands)` for the compaction trigger's progress-signal check.
-#[cfg(test)]
-pub fn gather_recent_events(
-    event_store: &crate::events::EventStore,
-    session_id: &str,
-) -> (Vec<String>, Vec<String>) {
-    let boundary = event_store
-        .get_events_by_type(session_id, &["compact.boundary"], None)
-        .ok()
-        .and_then(|rows| rows.into_iter().last())
-        .or_else(|| {
-            event_store
-                .get_events_by_type(session_id, &["compact.summary"], None)
-                .ok()
-                .and_then(|rows| rows.into_iter().last())
-        });
-
-    let events = if let Some(ref boundary) = boundary {
-        event_store
-            .get_events_since(session_id, boundary.sequence)
-            .unwrap_or_default()
-    } else {
-        event_store
-            .get_events_by_session(
-                session_id,
-                &crate::events::sqlite::repositories::event::ListEventsOptions::default(),
-            )
-            .unwrap_or_default()
-    };
-
-    let mut event_types = Vec::new();
-    let mut bash_commands = Vec::new();
-
-    for event in &events {
-        event_types.push(event.event_type.clone());
-
-        if event.event_type == "tool.call"
-            && event.tool_name.as_deref() == Some("Bash")
-            && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
-            && let Some(command) = payload
-                .get("arguments")
-                .and_then(|arguments| arguments.get("command"))
-                .and_then(|command| command.as_str())
-        {
-            bash_commands.push(command.to_owned());
-        }
-    }
-
-    (event_types, bash_commands)
-}
-
 pub async fn resume_prompt_session(
     session_manager: Arc<SessionManager>,
     session_id: String,
@@ -1097,7 +1044,7 @@ mod skills_cleared_emission_tests {
 
     use super::*;
     use crate::events::types::payloads::skill::{SkillsClearedMode, SkillsClearedPayload};
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
     use crate::settings::types::CompactionPolicy;
 
     fn settings_lock() -> &'static std::sync::Mutex<()> {

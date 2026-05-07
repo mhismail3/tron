@@ -347,7 +347,7 @@ async fn ws_upgrade_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;

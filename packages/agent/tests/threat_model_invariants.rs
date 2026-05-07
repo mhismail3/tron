@@ -40,7 +40,7 @@ const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
     // L7 — no per-client RPC rate limiting
     ("src/server/rpc/mod.rs", "trusted-local"),
     // L8 — client-supplied bundleId trusted at register time
-    ("src/server/rpc/handlers/device.rs", "trusted-local"),
+    ("src/server/capabilities/device.rs", "trusted-local"),
     // L14 — `is_path_within` is lexical, no symlink resolution
     ("src/runtime/guardrails/rules/path.rs", "trusted-local"),
 ];

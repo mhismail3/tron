@@ -1546,7 +1546,7 @@ mod tests {
 
     #[tokio::test]
     async fn handler_requires_session_id() {
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
         let err = trigger_manual_retain(Some(&serde_json::json!({})), &ctx)
             .await
@@ -1556,7 +1556,7 @@ mod tests {
 
     #[tokio::test]
     async fn handler_returns_nothing_new_for_empty_session() {
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
 
         // Create a session first so the handler can find it
@@ -1576,7 +1576,7 @@ mod tests {
     #[tokio::test]
     async fn auto_source_persists_trigger_event() {
         use crate::events::EventType;
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
 
         let cr = ctx
@@ -1609,7 +1609,7 @@ mod tests {
 
     #[tokio::test]
     async fn trigger_retain_skips_when_already_in_flight() {
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
 
         let cr = ctx
@@ -1654,7 +1654,7 @@ mod tests {
 
     #[tokio::test]
     async fn manual_source_does_not_persist_trigger_event() {
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
 
         let cr = ctx
@@ -1685,7 +1685,7 @@ mod tests {
     /// the triggered/failed pair iOS consumes.
     #[tokio::test]
     async fn emit_auto_retain_failed_persists_event_with_reason() {
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
 
         let cr = ctx
@@ -1730,7 +1730,7 @@ mod tests {
     /// ordering to transition the retain pill from "started" → "failed".
     #[tokio::test]
     async fn auto_retain_triggered_and_failed_land_in_order() {
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
 
         let cr = ctx
@@ -1769,7 +1769,7 @@ mod tests {
     /// `auto_retain_failed` — that event is auto-only.
     #[tokio::test]
     async fn manual_retain_never_emits_auto_retain_failed() {
-        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        use crate::server::rpc::test_support::make_test_context;
         let ctx = make_test_context();
 
         let cr = ctx

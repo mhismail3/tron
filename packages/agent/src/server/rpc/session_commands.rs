@@ -451,7 +451,7 @@ mod tests {
 
     use crate::events::EventStore;
     use crate::runtime::Orchestrator;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
     use crate::skills::registry::SkillRegistry;
     use crate::worktree::{AcquireResult, WorktreeConfig, WorktreeCoordinator};
 
@@ -491,12 +491,10 @@ mod tests {
             WorktreeConfig::default(),
             store.clone(),
         ));
-        let home = crate::server::rpc::handlers::test_helpers::unique_tron_home();
-        let settings_path =
-            crate::server::rpc::handlers::test_helpers::test_user_profile_path(&home);
-        let profile_runtime =
-            crate::server::rpc::handlers::test_helpers::test_profile_runtime(&home);
-        let auth_path = crate::server::rpc::handlers::test_helpers::test_auth_path(&home);
+        let home = crate::server::rpc::test_support::unique_tron_home();
+        let settings_path = crate::server::rpc::test_support::test_user_profile_path(&home);
+        let profile_runtime = crate::server::rpc::test_support::test_profile_runtime(&home);
+        let auth_path = crate::server::rpc::test_support::test_auth_path(&home);
 
         let ctx = RpcContext {
             orchestrator: orch,

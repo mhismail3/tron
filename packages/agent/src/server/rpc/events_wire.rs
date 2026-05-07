@@ -1,8 +1,8 @@
 //! Events RPC support helpers.
 //!
-//! Every `events.*` method is marker-registered in `handlers::mod` and served
-//! by canonical `events::*` engine functions. This module keeps only shared
-//! wire-format helpers and wire-compatibility tests.
+//! Every `events.*` public method is a JSON-RPC transport alias over canonical
+//! `events::*` engine functions. This module keeps only shared wire-format
+//! helpers and wire-compatibility tests.
 
 use crate::events::sqlite::row_types::EventRow;
 use serde_json::Value;
@@ -74,14 +74,14 @@ mod tests {
     use super::*;
     use crate::server::rpc::context::RpcContext;
     use crate::server::rpc::errors::RpcError;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::test_support::make_test_context;
     use crate::server::rpc::types::RpcRequest;
     use serde_json::json;
 
     async fn dispatch_ok(ctx: &RpcContext, method: &str, params: Value) -> Value {
         let mut registry = MethodRegistry::new();
-        crate::server::rpc::handlers::register_all(&mut registry);
+        crate::server::rpc::bindings::register_all(&mut registry);
         let response = registry
             .dispatch(
                 RpcRequest {
@@ -98,7 +98,7 @@ mod tests {
 
     async fn dispatch_err(ctx: &RpcContext, method: &str, params: Value) -> RpcError {
         let mut registry = MethodRegistry::new();
-        crate::server::rpc::handlers::register_all(&mut registry);
+        crate::server::rpc::bindings::register_all(&mut registry);
         let response = registry
             .dispatch(
                 RpcRequest {

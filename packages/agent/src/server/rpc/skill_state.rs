@@ -1,10 +1,9 @@
 //! Session-scoped skill state.
 //!
-//! `skill.activate`, `skill.deactivate`, and `skill.active` are
-//! marker-registered in `handlers::mod` and executed by canonical `skills::*`
-//! engine functions. This module keeps the event-sourced reconstruction helper
-//! used by runtime prompt assembly and wire-compatibility tests for the
-//! collapsed skill-session group.
+//! `skill.activate`, `skill.deactivate`, and `skill.active` are JSON-RPC
+//! transport aliases over canonical `skills::*` engine functions. This module
+//! keeps the event-sourced reconstruction helper used by runtime prompt
+//! assembly and wire-compatibility tests for the collapsed skill-session group.
 
 use serde_json::Value;
 
@@ -57,8 +56,8 @@ pub fn reconstruct_tracker(
 mod tests {
     use super::*;
     use crate::server::rpc::context::RpcContext;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::test_support::make_test_context;
     use crate::server::rpc::types::{RpcErrorBody, RpcRequest};
     use crate::settings::types::CompactionPolicy;
     use crate::skills::types::{SkillFrontmatter, SkillMetadata, SkillSource};
@@ -91,7 +90,7 @@ mod tests {
     async fn dispatch_skill_state_ok(ctx: &RpcContext, method: &str, params: Value) -> Value {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
         let mut registry = MethodRegistry::new();
-        crate::server::rpc::handlers::register_all(&mut registry);
+        crate::server::rpc::bindings::register_all(&mut registry);
         let response = registry
             .dispatch(
                 RpcRequest {
@@ -113,7 +112,7 @@ mod tests {
     ) -> RpcErrorBody {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
         let mut registry = MethodRegistry::new();
-        crate::server::rpc::handlers::register_all(&mut registry);
+        crate::server::rpc::bindings::register_all(&mut registry);
         let response = registry
             .dispatch(
                 RpcRequest {

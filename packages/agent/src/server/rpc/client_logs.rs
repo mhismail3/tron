@@ -142,7 +142,7 @@ fn insert_client_logs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
 
     #[test]
     fn ingest_deduplicates_replayed_rows() {

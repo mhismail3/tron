@@ -237,7 +237,7 @@ fn parse_notification_content(event_id: &str, payload_str: &str) -> Option<Notif
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::test_support::make_test_context;
     use serde_json::json;
 
     fn setup_test_data(conn: &Connection) {

@@ -484,7 +484,7 @@ async fn server_boots_and_responds() {
     };
 
     let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::bindings::register_all(&mut registry);
 
     let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -682,7 +682,7 @@ async fn init_mcp_registers_meta_tools_without_servers() {
 #[test]
 fn server_registers_all_rpc_methods() {
     let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::bindings::register_all(&mut registry);
     // Should have a substantial number of methods registered
     assert!(registry.methods().len() >= 50);
 }
@@ -690,7 +690,7 @@ fn server_registers_all_rpc_methods() {
 #[test]
 fn readme_rpc_count_matches_registry() {
     let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::bindings::register_all(&mut registry);
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
@@ -762,7 +762,7 @@ async fn server_graceful_shutdown() {
     };
 
     let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
+    tron::server::rpc::bindings::register_all(&mut registry);
 
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()

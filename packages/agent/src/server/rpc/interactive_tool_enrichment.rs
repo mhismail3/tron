@@ -42,9 +42,9 @@
 //! ## INVARIANT
 //!
 //! The text formats parsed here must match exactly what
-//! `server/rpc/engine_bridge/functions/agent.rs` generates. If that file
-//! changes the confirmation/answer prefix format, update this module in
-//! lockstep. Tests below pin the exact formats.
+//! `server/capabilities/agent.rs` generates. If that file changes the
+//! confirmation/answer prefix format, update this module in lockstep. Tests
+//! below pin the exact formats.
 
 use serde_json::{Map, Value, json};
 
