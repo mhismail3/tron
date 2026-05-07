@@ -15,8 +15,9 @@
 //!
 //! ## Entry points
 //!
-//! - [`RetainMemoryHandler`] — `memory.retain` RPC (manual). Builds a
-//!   [`RetainDeps`] from `RpcContext` and calls [`trigger_retain`] with
+//! - `memory::retain` engine function — manual `memory.retain` JSON-RPC now
+//!   arrives as a generic trigger, acquires a session resource lease, builds a
+//!   [`RetainDeps`] from `RpcContext`, and calls [`trigger_retain`] with
 //!   [`RetainSource::Manual`].
 //! - [`auto_retain::maybe_fire`] — called from `agent_prompt_service` after
 //!   each successful agent run. Evaluates the auto-retain policy against the
@@ -34,10 +35,13 @@
 //! [`RetainGuard`]: crate::runtime::orchestrator::orchestrator::RetainGuard
 //! [`Orchestrator::try_begin_retain`]: crate::runtime::orchestrator::orchestrator::Orchestrator::try_begin_retain
 
+#[cfg(test)]
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{Value, json};
-use tracing::{debug, instrument, warn};
+#[cfg(test)]
+use tracing::instrument;
+use tracing::{debug, warn};
 
 use crate::events::types::EventType;
 use crate::events::types::state::Message;
@@ -48,7 +52,10 @@ use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{map_event_store_error, require_string_param};
+use crate::server::rpc::handlers::map_event_store_error;
+#[cfg(test)]
+use crate::server::rpc::handlers::require_string_param;
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 
 use std::collections::HashSet;
@@ -79,8 +86,8 @@ pub(crate) enum RetainSource {
 /// The narrow set of dependencies the retain pipeline needs.
 ///
 /// Exists so the pipeline can be driven from two different call sites without
-/// requiring the full `RpcContext`: the manual RPC handler constructs one via
-/// [`RetainDeps::from_rpc`], while the auto-retain path in
+/// requiring the full `RpcContext`: the manual engine function constructs one
+/// via [`RetainDeps::from_rpc`], while the auto-retain path in
 /// `agent_prompt_service::execute_prompt_run` builds it directly from the
 /// fields it already holds.
 #[derive(Clone)]
@@ -110,8 +117,10 @@ impl RetainDeps {
 /// This handler is non-blocking — it emits `MemoryUpdating` immediately,
 /// spawns the summarizer as a background task, and returns. The background
 /// task emits `MemoryUpdated` when done.
+#[cfg(test)]
 pub struct RetainMemoryHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for RetainMemoryHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.retain", session_id))]

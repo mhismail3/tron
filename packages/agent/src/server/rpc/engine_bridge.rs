@@ -18,7 +18,10 @@
 //! `cron_schedule` trigger type into the hidden `cron::scheduled_fire`
 //! function. Runtime-tail methods such as `system.getDiagnostics`,
 //! `system.getUpdateStatus`, `codexApp.status`, `blob.get`, `tool.result`,
-//! and `message.delete` are now domain-owned functions too.
+//! and `message.delete` are now domain-owned functions too. The first
+//! higher-risk command package moved model switching, reasoning-level updates,
+//! manual memory retention, and import execution behind canonical domain
+//! functions with resource leases and high-risk contract metadata.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,

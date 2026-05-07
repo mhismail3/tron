@@ -207,8 +207,8 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("agent.submitConfirmation"),
     generic_trigger!("agent.submitAnswers"),
     generic_trigger!("model.list"),
-    handler_only!("model.switch"),
-    handler_only!("config.setReasoningLevel"),
+    generic_trigger!("model.switch"),
+    generic_trigger!("config.setReasoningLevel"),
     generic_trigger!("context.getSnapshot"),
     generic_trigger!("context.getDetailedSnapshot"),
     generic_trigger!("context.previewCompaction"),
@@ -242,7 +242,7 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("message.delete"),
     generic_trigger!("logs.ingest"),
     generic_trigger!("logs.recent"),
-    handler_only!("memory.retain"),
+    generic_trigger!("memory.retain"),
     generic_trigger!("mcp.status"),
     generic_trigger!("mcp.addServer"),
     generic_trigger!("mcp.removeServer"),
@@ -269,7 +269,7 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("import.listSources"),
     generic_trigger!("import.listSessions"),
     generic_trigger!("import.previewSession"),
-    handler_only!("import.execute"),
+    generic_trigger!("import.execute"),
     handler_only!("browser.startStream"),
     handler_only!("browser.stopStream"),
     generic_trigger!("browser.getStatus"),
@@ -420,6 +420,14 @@ pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabi
                         spec.method
                     )));
                 }
+                if spec.risk_level >= RiskLevel::High
+                    && high_risk_contract_for_method(spec.method).is_none()
+                {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "high-risk generic-triggered RPC method {} lacks a high-risk contract",
+                        spec.method
+                    )));
+                }
             } else if spec.transport_authority_scope != Some(RPC_READ_AUTHORITY) {
                 return Err(EngineError::PolicyViolation(format!(
                     "read generic-triggered RPC method {} must grant rpc.read",
@@ -560,6 +568,8 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
         method,
         "settings.update"
             | "settings.resetToDefaults"
+            | "model.switch"
+            | "config.setReasoningLevel"
             | "context.confirmCompaction"
             | "context.compact"
             | "agent.abort"
@@ -572,7 +582,10 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
     if matches!(method, "agent.prompt" | "cron.run") {
         return EffectClass::ExternalSideEffect;
     }
-    if matches!(method, "events.append" | "logs.ingest") {
+    if matches!(method, "memory.retain") {
+        return EffectClass::ExternalSideEffect;
+    }
+    if matches!(method, "events.append" | "logs.ingest" | "import.execute") {
         return EffectClass::AppendOnlyEvent;
     }
     if matches!(
@@ -626,6 +639,10 @@ fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
             | "cron.update"
             | "cron.delete"
             | "cron.run"
+            | "model.switch"
+            | "config.setReasoningLevel"
+            | "memory.retain"
+            | "import.execute"
     ) {
         RiskLevel::High
     } else if matches!(effect, EffectClass::IrreversibleSideEffect) {
@@ -686,6 +703,7 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
         "schemaMode": spec.schema_mode.as_str(),
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "handlerModule": spec.handler_module,
+        "highRiskContract": high_risk_contract_for_method(spec.method),
     });
     definition
 }
@@ -700,6 +718,7 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
         || method == "session.create"
         || method == "session.archiveOlderThan"
         || method == "approval.resolve"
+        || method == "import.execute"
         || method.starts_with("notifications.")
         || method.starts_with("promptHistory.")
         || method.starts_with("promptSnippet.")
@@ -735,7 +754,109 @@ fn settings_write_requires_approval(method: &str) -> bool {
             | "cron.update"
             | "cron.delete"
             | "cron.run"
+            | "model.switch"
+            | "config.setReasoningLevel"
+            | "memory.retain"
+            | "import.execute"
     )
+}
+
+fn high_risk_contract_for_method(method: &str) -> Option<serde_json::Value> {
+    let (resource_required, resource_kind, resource_id_template, lease_ttl_ms, resource_reason) =
+        match method {
+            "model.switch" => (
+                true,
+                "session",
+                "session:{sessionId}:model",
+                60_000,
+                "serializes model selection and session cache invalidation",
+            ),
+            "config.setReasoningLevel" => (
+                true,
+                "session",
+                "session:{sessionId}:reasoning",
+                60_000,
+                "serializes reasoning-level event writes and session cache invalidation",
+            ),
+            "memory.retain" => (
+                true,
+                "session",
+                "session:{sessionId}:memory-retain",
+                300_000,
+                "serializes retain startup before the existing background retain guard owns the long-running summarizer",
+            ),
+            "import.execute" => (
+                true,
+                "import",
+                "import:{canonicalSessionPath}",
+                300_000,
+                "serializes session import for one source transcript path",
+            ),
+            method
+                if matches!(
+                    method,
+                    "settings.update"
+                        | "settings.resetToDefaults"
+                        | "context.confirmCompaction"
+                        | "context.clear"
+                        | "context.compact"
+                        | "session.delete"
+                        | "session.archiveOlderThan"
+                        | "job.cancel"
+                        | "approval.resolve"
+                        | "agent.prompt"
+                        | "agent.abort"
+                        | "message.delete"
+                        | "promptHistory.delete"
+                        | "promptHistory.clear"
+                        | "promptSnippet.delete"
+                        | "cron.create"
+                        | "cron.update"
+                        | "cron.delete"
+                        | "cron.run"
+                ) =>
+            {
+                (
+                    false,
+                    "documented-by-domain",
+                    "not-required",
+                    0,
+                    "existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract",
+                )
+            }
+            _ => return None,
+        };
+    Some(json!({
+        "version": 1,
+        "approvalRequiredForAgentVisibility": settings_write_requires_approval(method),
+        "resourceLock": {
+            "required": resource_required,
+            "kind": resource_kind,
+            "idTemplate": resource_id_template,
+            "ttlMs": lease_ttl_ms,
+            "reason": resource_reason
+        },
+        "streamTopics": ["resource.leases", "catalog.changes"],
+        "rollbackOrCompensation": rollback_contract_for_method(method),
+    }))
+}
+
+fn rollback_contract_for_method(method: &str) -> &'static str {
+    match method {
+        "model.switch" => {
+            "previousModel is returned and persisted in config.model_switch for manual reversal"
+        }
+        "config.setReasoningLevel" => {
+            "previousLevel is returned and persisted in config.reasoning_level for manual reversal"
+        }
+        "memory.retain" => {
+            "background retain writes a memory.retained boundary; failures emit memory update completion without duplicate retention"
+        }
+        "import.execute" => {
+            "import is append-only and duplicate sources return alreadyImported; full rollback is deferred"
+        }
+        _ => "domain-specific tests preserve current rollback, no-op, or replay behavior",
+    }
 }
 
 pub(super) fn rpc_worker() -> WorkerDefinition {
@@ -752,8 +873,10 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
     let domains = [
         "system",
         "model",
+        "config",
         "settings",
         "logs",
+        "memory",
         "mcp",
         "prompt_library",
         "skills",
@@ -889,6 +1012,8 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
     worker_id(match method {
         method if method.starts_with("settings.") => "settings",
         method if method.starts_with("logs.") => "logs",
+        method if method.starts_with("memory.") => "memory",
+        method if method.starts_with("config.") => "config",
         method if method.starts_with("promptHistory.") || method.starts_with("promptSnippet.") => {
             "prompt_library"
         }
@@ -945,11 +1070,14 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "cron.status" => ("cron", "status".to_owned()),
         "cron.getRuns" => ("cron", "get_runs".to_owned()),
         "model.list" => ("model", "list".to_owned()),
+        "model.switch" => ("model", "switch".to_owned()),
+        "config.setReasoningLevel" => ("config", "set_reasoning_level".to_owned()),
         "settings.get" => ("settings", "get".to_owned()),
         "settings.update" => ("settings", "update".to_owned()),
         "settings.resetToDefaults" => ("settings", "reset_to_defaults".to_owned()),
         "logs.ingest" => ("logs", "ingest".to_owned()),
         "logs.recent" => ("logs", "recent".to_owned()),
+        "memory.retain" => ("memory", "retain".to_owned()),
         "skill.list" => ("skills", "list".to_owned()),
         "skill.get" => ("skills", "get".to_owned()),
         "skill.refresh" => ("skills", "refresh".to_owned()),
@@ -1036,6 +1164,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "import.listSources" => ("import", "list_sources".to_owned()),
         "import.listSessions" => ("import", "list_sessions".to_owned()),
         "import.previewSession" => ("import", "preview_session".to_owned()),
+        "import.execute" => ("import", "execute".to_owned()),
         "browser.getStatus" => ("browser", "get_status".to_owned()),
         "voiceNotes.list" => ("voice_notes", "list".to_owned()),
         "transcribe.listModels" => ("transcription", "list_models".to_owned()),
@@ -1061,6 +1190,8 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "approval" => "approval",
                     "logs" => "logs",
                     "model" => "model",
+                    "config" => "config",
+                    "memory" => "memory",
                     "notifications" => "notifications",
                     "plan" => "plan",
                     "tree" => "tree",
@@ -1103,10 +1234,14 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("system"), "write") => "system.write",
         (Some("model"), "read") => "model.read",
         (Some("model"), "write") => "model.write",
+        (Some("config"), "read") => "config.read",
+        (Some("config"), "write") => "config.write",
         (Some("settings"), "read") => "settings.read",
         (Some("settings"), "write") => "settings.write",
         (Some("logs"), "read") => "logs.read",
         (Some("logs"), "write") => "logs.write",
+        (Some("memory"), "read") => "memory.read",
+        (Some("memory"), "write") => "memory.write",
         (Some("prompt_library"), "read") => "prompt_library.read",
         (Some("prompt_library"), "write") => "prompt_library.write",
         (Some("skills"), "read") => "skills.read",

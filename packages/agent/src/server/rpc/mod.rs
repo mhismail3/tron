@@ -41,6 +41,11 @@
 //! current wire compatibility. RPC remains a compatibility transport; the
 //! canonical capability surface is the domain/tool function catalog agents
 //! discover through the engine tools.
+//! Model switching, reasoning-level updates, manual memory retention, and
+//! import execution are the first higher-risk command collapse: each is now a
+//! canonical function with strict schemas, approval metadata, engine-ledger
+//! idempotency, and a resource lease for the shared session/import resource it
+//! mutates.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

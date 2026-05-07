@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::io;
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -145,6 +145,10 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "cron.update",
     "cron.delete",
     "cron.run",
+    "model.switch",
+    "config.setReasoningLevel",
+    "memory.retain",
+    "import.execute",
 ];
 
 const SETTINGS_METHODS: &[&str] = &[
@@ -263,6 +267,13 @@ const RUNTIME_TAIL_METHODS: &[&str] = &[
     "blob.get",
     "tool.result",
     "message.delete",
+];
+
+const HIGH_RISK_COMMAND_METHODS: &[&str] = &[
+    "model.switch",
+    "config.setReasoningLevel",
+    "memory.retain",
+    "import.execute",
 ];
 
 const SAFE_READ_COLLAPSE_METHODS: &[&str] = &[
@@ -570,6 +581,54 @@ fn attach_codex_manager(
     (manager, spawner)
 }
 
+fn write_import_sample_session(dir: &std::path::Path) -> std::path::PathBuf {
+    let file = dir.join("test-session-uuid.jsonl");
+    let mut writer = std::fs::File::create(&file).unwrap();
+    writeln!(
+        writer,
+        "{}",
+        json!({
+            "type": "user",
+            "uuid": "u1",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "promptId": "p1",
+            "message": {"role": "user", "content": "Hello"}
+        })
+    )
+    .unwrap();
+    writeln!(
+        writer,
+        "{}",
+        json!({
+            "type": "assistant",
+            "uuid": "a1",
+            "parentUuid": "u1",
+            "timestamp": "2026-01-01T00:00:01Z",
+            "message": {
+                "id": "msg_01",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Hi"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "model": "claude-opus-4-6"
+            }
+        })
+    )
+    .unwrap();
+    writeln!(
+        writer,
+        "{}",
+        json!({
+            "type": "custom-title",
+            "uuid": "ct1",
+            "customTitle": "Imported",
+            "sessionId": "s1"
+        })
+    )
+    .unwrap();
+    file
+}
+
 async fn direct_engine_value(ctx: &RpcContext, method: &'static str, params: Value) -> Value {
     let registry = migration_parity_registry();
     let request = RpcRequest {
@@ -710,7 +769,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
     assert_eq!(spec_methods, registry_methods);
     assert_eq!(
         GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(),
-        112
+        116
     );
 }
 
@@ -1245,6 +1304,103 @@ fn bridge_specs_classify_runtime_tail_as_generic_triggered() {
 }
 
 #[test]
+fn bridge_specs_classify_first_high_risk_command_collapse() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for method in HIGH_RISK_COMMAND_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == *method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(spec.effect_class.is_mutating());
+        assert_eq!(spec.risk_level, RiskLevel::High);
+        assert_eq!(spec.transport_authority_scope, Some(RPC_WRITE_AUTHORITY));
+        assert_eq!(
+            spec.idempotency_mode,
+            RpcIdempotencyMode::JsonRpcRequestIdSeed
+        );
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+        assert!(super::schemas::request_schema_for_method(method).is_some());
+        assert!(super::schemas::response_schema_for_method(method).is_some());
+        let definition = specs::function_definition_for_spec(spec);
+        assert!(definition.required_authority.approval_required);
+        assert!(
+            definition.metadata["highRiskContract"]["resourceLock"]["required"]
+                .as_bool()
+                .unwrap(),
+            "{method} must declare resource-lock metadata"
+        );
+        assert!(
+            definition.metadata["highRiskContract"]["rollbackOrCompensation"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty())
+        );
+    }
+
+    let model = specs
+        .iter()
+        .find(|spec| spec.method == "model.switch")
+        .unwrap();
+    assert_eq!(model.function_id, FunctionId::new("model::switch").unwrap());
+    assert_eq!(model.authority_scope, Some("model.write"));
+    assert_eq!(model.effect_class, EffectClass::ReversibleSideEffect);
+    assert_eq!(
+        specs::function_definition_for_spec(model)
+            .idempotency
+            .as_ref()
+            .map(|contract| contract.dedupe_scope.clone()),
+        Some(VisibilityScope::Session)
+    );
+
+    let config = specs
+        .iter()
+        .find(|spec| spec.method == "config.setReasoningLevel")
+        .unwrap();
+    assert_eq!(
+        config.function_id,
+        FunctionId::new("config::set_reasoning_level").unwrap()
+    );
+    assert_eq!(config.owner_worker, specs::worker_id("config").unwrap());
+    assert_eq!(config.authority_scope, Some("config.write"));
+    assert_eq!(config.effect_class, EffectClass::ReversibleSideEffect);
+
+    let memory = specs
+        .iter()
+        .find(|spec| spec.method == "memory.retain")
+        .unwrap();
+    assert_eq!(
+        memory.function_id,
+        FunctionId::new("memory::retain").unwrap()
+    );
+    assert_eq!(memory.owner_worker, specs::worker_id("memory").unwrap());
+    assert_eq!(memory.authority_scope, Some("memory.write"));
+    assert_eq!(memory.effect_class, EffectClass::ExternalSideEffect);
+
+    let import = specs
+        .iter()
+        .find(|spec| spec.method == "import.execute")
+        .unwrap();
+    assert_eq!(
+        import.function_id,
+        FunctionId::new("import::execute").unwrap()
+    );
+    assert_eq!(import.authority_scope, Some("import.write"));
+    assert_eq!(import.effect_class, EffectClass::AppendOnlyEvent);
+    assert_eq!(
+        specs::function_definition_for_spec(import)
+            .idempotency
+            .as_ref()
+            .map(|contract| contract.dedupe_scope.clone()),
+        Some(VisibilityScope::System)
+    );
+}
+
+#[test]
 fn bridge_specs_assign_generic_methods_to_domain_workers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
@@ -1262,6 +1418,10 @@ fn bridge_specs_assign_generic_methods_to_domain_workers() {
         ("tree.getVisualization", "tree"),
         ("repo.getDivergence", "repo"),
         ("import.previewSession", "import"),
+        ("import.execute", "import"),
+        ("model.switch", "model"),
+        ("config.setReasoningLevel", "config"),
+        ("memory.retain", "memory"),
         ("browser.getStatus", "browser"),
         ("voiceNotes.list", "voice_notes"),
         ("transcribe.listModels", "transcription"),
@@ -3185,6 +3345,213 @@ async fn events_append_duplicate_transport_replays_without_second_append() {
             .replayed_from
             .is_some()
     );
+}
+
+#[tokio::test]
+async fn model_switch_outputs_match_direct_engine_and_replays_transport_retry() {
+    let ctx = make_test_context();
+    let direct_session = ctx
+        .session_manager
+        .create_session("claude-sonnet-4-6", "/tmp", Some("direct"), None)
+        .unwrap();
+    let rpc_session = ctx
+        .session_manager
+        .create_session("claude-sonnet-4-6", "/tmp", Some("rpc"), None)
+        .unwrap();
+
+    let direct = direct_engine_value(
+        &ctx,
+        "model.switch",
+        json!({"sessionId": direct_session, "model": "claude-opus-4-6"}),
+    )
+    .await;
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: "model-switch-retry".to_owned(),
+        method: "model.switch".to_owned(),
+        params: Some(json!({"sessionId": rpc_session, "model": "claude-opus-4-6"})),
+    };
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+
+    assert_eq!(direct, first.result.clone().unwrap());
+    assert_eq!(first.result, second.result);
+    let events = ctx
+        .event_store
+        .get_events_by_type(&rpc_session, &["config.model_switch"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    let host = ctx.engine_host.lock().await;
+    assert!(
+        host.catalog()
+            .invocations()
+            .last()
+            .unwrap()
+            .replayed_from
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn reasoning_level_outputs_match_direct_engine_and_replays_transport_retry() {
+    let ctx = make_test_context();
+    let direct_session = ctx
+        .session_manager
+        .create_session("claude-sonnet-4-6", "/tmp", Some("direct"), None)
+        .unwrap();
+    let rpc_session = ctx
+        .session_manager
+        .create_session("claude-sonnet-4-6", "/tmp", Some("rpc"), None)
+        .unwrap();
+
+    let direct = direct_engine_value(
+        &ctx,
+        "config.setReasoningLevel",
+        json!({"sessionId": direct_session, "level": "high"}),
+    )
+    .await;
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: "reasoning-retry".to_owned(),
+        method: "config.setReasoningLevel".to_owned(),
+        params: Some(json!({"sessionId": rpc_session, "level": "high"})),
+    };
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+
+    assert_eq!(direct, first.result.clone().unwrap());
+    assert_eq!(first.result, second.result);
+    let events = ctx
+        .event_store
+        .get_events_by_type(&rpc_session, &["config.reasoning_level"], None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+}
+
+#[tokio::test]
+async fn memory_retain_outputs_match_direct_engine_and_replays_transport_retry() {
+    let ctx = make_test_context();
+    let direct_session = ctx
+        .session_manager
+        .create_session("claude-sonnet-4-6", "/tmp", Some("direct"), None)
+        .unwrap();
+    let rpc_session = ctx
+        .session_manager
+        .create_session("claude-sonnet-4-6", "/tmp", Some("rpc"), None)
+        .unwrap();
+
+    let direct =
+        direct_engine_value(&ctx, "memory.retain", json!({"sessionId": direct_session})).await;
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: "memory-retain-retry".to_owned(),
+        method: "memory.retain".to_owned(),
+        params: Some(json!({"sessionId": rpc_session})),
+    };
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+
+    assert_eq!(direct, first.result.clone().unwrap());
+    assert_eq!(first.result, second.result);
+    assert_eq!(first.result.as_ref().unwrap()["retained"], false);
+    let host = ctx.engine_host.lock().await;
+    assert!(
+        host.catalog()
+            .invocations()
+            .last()
+            .unwrap()
+            .replayed_from
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn import_execute_replays_transport_retry_without_second_import() {
+    let ctx = make_test_context();
+    let dir = tempfile::tempdir().unwrap();
+    let session_path = write_import_sample_session(dir.path());
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: "import-execute-retry".to_owned(),
+        method: "import.execute".to_owned(),
+        params: Some(json!({
+            "sessionPath": session_path.to_string_lossy(),
+            "workingDirectory": "/tmp/project",
+            "tags": ["test"]
+        })),
+    };
+
+    let first = registry.dispatch(request.clone(), &ctx).await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(first.result.as_ref().unwrap()["alreadyImported"], false);
+    let second = registry.dispatch(request, &ctx).await;
+    assert!(second.success, "{:?}", second.error);
+    assert_eq!(first.result, second.result);
+
+    let sessions = ctx
+        .event_store
+        .list_sessions(
+            &crate::events::sqlite::repositories::session::ListSessionsOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(sessions.len(), 1);
+    let third = registry
+        .dispatch(
+            RpcRequest {
+                id: "import-execute-distinct".to_owned(),
+                method: "import.execute".to_owned(),
+                params: Some(json!({
+                    "sessionPath": session_path.to_string_lossy(),
+                    "workingDirectory": "/tmp/project",
+                    "tags": ["test"]
+                })),
+            },
+            &ctx,
+        )
+        .await;
+    assert!(third.success, "{:?}", third.error);
+    assert_eq!(third.result.as_ref().unwrap()["alreadyImported"], true);
+}
+
+#[tokio::test]
+async fn high_risk_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
+    let ctx = make_test_context();
+    let session_id = ctx
+        .session_manager
+        .create_session("claude-sonnet-4-6", "/tmp", Some("model"), None)
+        .unwrap();
+    let context = rpc_and_domain_context("model.switch", RPC_WRITE_AUTHORITY)
+        .with_session_id(&session_id)
+        .with_idempotency_key("explicit-model-switch");
+    let first = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("model::switch").unwrap(),
+            json!({"sessionId": session_id, "model": "claude-opus-4-6"}),
+            context.clone(),
+        ))
+        .await;
+    assert!(first.error.is_none(), "{:?}", first.error);
+    let conflict = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("model::switch").unwrap(),
+            json!({"sessionId": session_id, "model": "claude-sonnet-4-6"}),
+            context,
+        ))
+        .await;
+    assert!(matches!(
+        conflict.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+    let rpc = super::engine_error_to_rpc(conflict.error.unwrap());
+    assert_eq!(rpc.code(), errors::IDEMPOTENCY_CONFLICT);
 }
 
 #[tokio::test]

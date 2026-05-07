@@ -207,6 +207,7 @@ The engine is the live capability fabric. It owns:
 - idempotency ledgers;
 - topology streams;
 - approval records and approval lifecycle streams;
+- resource leases for high-risk shared-state mutations;
 - health and observability surfaces.
 
 The engine should not hide system liveness from agents. It should expose
@@ -432,7 +433,8 @@ isolation does.
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
 | `rpc` | Transport compatibility worker for current JSON-RPC methods during migration. It owns the `json_rpc` trigger type and trigger bindings, not long-term business behavior. |
 | `system` | Server status, ping, diagnostics, and update status are canonical generic-trigger reads; shutdown and active update checks remain handler-owned high-risk lifecycle effects. |
-| `model` | Model catalog reads and future model/profile selection capabilities. |
+| `model` | Model catalog reads plus generic-triggered `model::switch`; switch uses session idempotency, approval metadata for autonomous agents, and a session model resource lease before mutating event-store/session cache state. |
+| `config` | Generic-triggered `config::set_reasoning_level`; the command is a high-risk reversible session write with session idempotency, approval metadata, and a session reasoning resource lease. |
 | `settings` | Typed settings with iOS parity guarantees; currently fully generic-triggered for RPC compatibility. |
 | `logs` | Local observability reads and append-only client-log ingestion; currently fully generic-triggered for RPC compatibility. |
 | `prompt_library` | Prompt history/snippet reads and writes; currently fully generic-triggered for RPC compatibility. |
@@ -454,7 +456,7 @@ isolation does.
 | `mcp` | MCP server lifecycle, search/list, and discovered server tools. Public `mcp.*` RPC methods are marker triggers into canonical `mcp::*`; discovered MCP tools register/unregister live capabilities with conservative classifier metadata, read-only downgrades only when obvious, and approval-required external-side-effect defaults otherwise. |
 | `tree` | Event tree visualization and branch/subtree/ancestor comparison reads are canonical generic-trigger functions. |
 | `repo` | Worktree/repository peer-session and divergence reads are canonical generic-trigger functions; git mutations remain deferred. |
-| `import` | Claude Code import source/session/preview reads are canonical generic-trigger functions; import execution remains deferred until append/idempotency contracts are hardened. |
+| `import` | Claude Code import source/session/preview reads plus `import::execute` are canonical generic-trigger functions. Execute is a high-risk append-only import command with system idempotency, approval metadata, and an import-source resource lease; full rollback remains deferred. |
 | `browser` | Browser status is a canonical read function; browser/display stream mutations remain deferred. |
 | `voice_notes` | Voice-note listing is a canonical read function; save/delete stay handler-owned until audio/transcription effects are modeled. |
 | `transcription` | Transcription model listing is a canonical read function; audio/download mutations stay deferred. |
@@ -478,10 +480,10 @@ before migration:
 | Browser/display stream mutation | Device/session authority, stream ownership, reconnect cleanup, and no cross-session visual leakage. |
 | Voice-note mutation | Audio blob provenance, retention/deletion policy, transcription linkage, and irreversible delete approval. |
 | Device mutation | Pairing-token authority, per-device idempotency, revocation cleanup, and approval-response causality. |
-| Import execution | Source provenance, append-only event dedupe, preview-to-execute revision checks, and rollback/compensation story. |
-| Memory retention | User-memory governance, no personal literals in code/tests/docs, explicit retention reason, and idempotency by memory key/content hash. |
+| Import execution | Collapsed with source provenance, append-only dedupe, system idempotency, and import-source leases; preview-to-execute revision tokens and full rollback remain future hardening. |
+| Memory retention | Collapsed with user-memory governance, no personal literals in code/tests/docs, session idempotency, and a startup resource lease before the existing background retain guard; richer retention reasons/content-hash governance remain future hardening. |
 | System shutdown/update checks | User/system actor only, high-risk approval, no autonomous shutdown, update artifact verification, and lifecycle stream records. |
-| Model/config mutation | Settings parity, runtime reload rollback, provider authority, and explicit approval for changes that affect future agent behavior. |
+| Model/config mutation | Collapsed for session model/reasoning changes with provider checks, session idempotency, approval metadata, event-store causality, cache invalidation, and resource leases; broader profile/model-config mutation remains deferred. |
 | `session.resume` | Transport/session ownership, turn-state preconditions, idempotent resume token, and stream/event ordering guarantees. |
 
 During the compatibility period, old JSON-RPC clients keep their stable method

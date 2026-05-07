@@ -10,7 +10,8 @@ use tokio::sync::{Barrier, Notify};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
-    ActorId, AuthorityGrantId, FunctionId, TraceId, TriggerId, TriggerTypeId, WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
+    WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation};
 use super::ledger::{
@@ -26,9 +27,10 @@ use super::types::{
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use super::{
-    AgentCapabilityClient, ApprovalStatus, EngineExternalWorkerRuntime, EngineHost,
-    EngineHostHandle, EngineQueueDrainer, EngineTriggerRuntime, EngineWatchRequest,
-    StreamActorScope, StreamCursor, TriggerDispatchRequest,
+    AcquireResourceLease, AgentCapabilityClient, ApprovalStatus, EngineExternalWorkerRuntime,
+    EngineHost, EngineHostHandle, EngineQueueDrainer, EngineResourceLeaseStatus,
+    EngineTriggerRuntime, EngineWatchRequest, StreamActorScope, StreamCursor,
+    TriggerDispatchRequest,
 };
 
 fn wid(value: &str) -> WorkerId {
@@ -49,6 +51,21 @@ fn grant(value: &str) -> AuthorityGrantId {
 
 fn trace(value: &str) -> TraceId {
     TraceId::new(value).unwrap()
+}
+
+fn lease_request(resource_kind: &str, resource_id: &str, ttl_ms: i64) -> AcquireResourceLease {
+    AcquireResourceLease {
+        resource_kind: resource_kind.to_owned(),
+        resource_id: resource_id.to_owned(),
+        holder_invocation_id: InvocationId::generate(),
+        function_id: fid("test::write"),
+        actor_id: actor("actor"),
+        authority_grant_id: grant("grant"),
+        trace_id: trace("trace"),
+        parent_invocation_id: None,
+        idempotency_key: Some("idem".to_owned()),
+        ttl_ms,
+    }
 }
 
 fn worker(id: &str, namespace: &str) -> WorkerDefinition {
@@ -3122,6 +3139,103 @@ async fn state_primitive_revisions_cas_list_and_delete_are_idempotent() {
         .await;
     assert_eq!(deleted.error, None);
     assert_eq!(deleted.value.as_ref().unwrap()["deleted"], true);
+}
+
+#[tokio::test]
+async fn resource_lease_acquire_release_conflict_and_stream_records() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let first = handle
+        .acquire_resource_lease(lease_request("session", "s1:model", 30_000))
+        .await
+        .unwrap();
+    assert_eq!(first.status, EngineResourceLeaseStatus::Active);
+    assert_eq!(first.resource_kind, "session");
+    assert_eq!(first.resource_id, "s1:model");
+
+    let conflict = handle
+        .acquire_resource_lease(lease_request("session", "s1:model", 30_000))
+        .await;
+    assert!(matches!(
+        conflict,
+        Err(EngineError::PolicyViolation(message)) if message.contains("resource lease conflict")
+    ));
+
+    let released = handle
+        .release_resource_lease(&first.lease_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(released.status, EngineResourceLeaseStatus::Released);
+    let released_again = handle
+        .release_resource_lease(&first.lease_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(released_again.status, EngineResourceLeaseStatus::Released);
+
+    let second = handle
+        .acquire_resource_lease(lease_request("session", "s1:model", 30_000))
+        .await
+        .unwrap();
+    assert_ne!(first.lease_id, second.lease_id);
+
+    handle
+        .subscribe_stream(
+            "lease-sub".to_owned(),
+            "resource.leases".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::System,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let page = handle
+        .poll_stream(
+            "lease-sub",
+            Some(StreamCursor(0)),
+            10,
+            &StreamActorScope::admin(),
+        )
+        .await
+        .unwrap();
+    let event_types = page
+        .events
+        .iter()
+        .map(|event| event.payload["type"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(event_types.contains(&"resource_lease.acquired"));
+    assert!(event_types.contains(&"resource_lease.released"));
+}
+
+#[tokio::test]
+async fn resource_lease_expiry_and_sqlite_reopen_preserve_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("engine-ledger.sqlite");
+    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
+    let first = handle
+        .acquire_resource_lease(lease_request("import", "session.json", 1))
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let second = handle
+        .acquire_resource_lease(lease_request("import", "session.json", 30_000))
+        .await
+        .unwrap();
+    assert_ne!(first.lease_id, second.lease_id);
+    drop(handle);
+
+    let reopened = EngineHostHandle::open_sqlite(&path).unwrap();
+    let loaded = reopened
+        .get_resource_lease(&second.lease_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.status, EngineResourceLeaseStatus::Active);
+    assert_eq!(loaded.resource_kind, "import");
+    assert_eq!(loaded.resource_id, "session.json");
+    assert_eq!(loaded.function_id, fid("test::write"));
+    assert_eq!(loaded.idempotency_key.as_deref(), Some("idem"));
 }
 
 #[tokio::test]

@@ -26,6 +26,10 @@ use super::ids::{
     WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
+use super::leases::{
+    AcquireResourceLease, EngineResourceLease, InMemoryEngineResourceLeaseStore,
+    SqliteEngineResourceLeaseStore,
+};
 use super::ledger::{
     EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
@@ -344,12 +348,41 @@ impl ApprovalStoreBackend {
     }
 }
 
+enum ResourceLeaseStoreBackend {
+    InMemory(InMemoryEngineResourceLeaseStore),
+    Sqlite(SqliteEngineResourceLeaseStore),
+}
+
+impl ResourceLeaseStoreBackend {
+    fn acquire(&mut self, request: AcquireResourceLease) -> Result<EngineResourceLease> {
+        match self {
+            Self::InMemory(store) => store.acquire(request),
+            Self::Sqlite(store) => store.acquire(request),
+        }
+    }
+
+    fn release(&mut self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
+        match self {
+            Self::InMemory(store) => store.release(lease_id),
+            Self::Sqlite(store) => store.release(lease_id),
+        }
+    }
+
+    fn get(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
+        match self {
+            Self::InMemory(store) => store.get(lease_id),
+            Self::Sqlite(store) => store.get(lease_id),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct PrimitiveStores {
     streams: Arc<StdMutex<StreamStoreBackend>>,
     state: Arc<StdMutex<StateStoreBackend>>,
     queue: Arc<StdMutex<QueueStoreBackend>>,
     approvals: Arc<StdMutex<ApprovalStoreBackend>>,
+    leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
 }
 
 impl PrimitiveStores {
@@ -367,6 +400,9 @@ impl PrimitiveStores {
             approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::InMemory(
                 InMemoryEngineApprovalStore::new(),
             ))),
+            leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::InMemory(
+                InMemoryEngineResourceLeaseStore::new(),
+            ))),
         }
     }
 
@@ -383,6 +419,9 @@ impl PrimitiveStores {
             ))),
             approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::Sqlite(
                 SqliteEngineApprovalStore::open(path)?,
+            ))),
+            leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::Sqlite(
+                SqliteEngineResourceLeaseStore::open(path)?,
             ))),
         })
     }
@@ -807,6 +846,79 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
             .list(status, session_id, limit)
+    }
+
+    /// Acquire a high-risk resource lease and publish a lease lifecycle stream
+    /// event. This is a primitive API for domain functions that mutate shared
+    /// resources and need fail-closed exclusion.
+    pub async fn acquire_resource_lease(
+        &self,
+        request: AcquireResourceLease,
+    ) -> Result<EngineResourceLease> {
+        let store = self.inner.lock().await.primitives.leases.clone();
+        let lease = {
+            store
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+                .acquire(request)?
+        };
+        let _ = self
+            .publish_stream_event(PublishStreamEvent {
+                topic: "resource.leases".to_owned(),
+                payload: json!({
+                    "type": "resource_lease.acquired",
+                    "lease": lease,
+                }),
+                visibility: VisibilityScope::System,
+                session_id: None,
+                workspace_id: None,
+                producer: "resource_lease".to_owned(),
+                trace_id: Some(lease.trace_id.clone()),
+                parent_invocation_id: Some(lease.holder_invocation_id.clone()),
+            })
+            .await;
+        Ok(lease)
+    }
+
+    /// Release a high-risk resource lease and publish a lifecycle stream event.
+    pub async fn release_resource_lease(
+        &self,
+        lease_id: &str,
+    ) -> Result<Option<EngineResourceLease>> {
+        let store = self.inner.lock().await.primitives.leases.clone();
+        let lease = {
+            store
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+                .release(lease_id)?
+        };
+        if let Some(lease) = lease.as_ref() {
+            let _ = self
+                .publish_stream_event(PublishStreamEvent {
+                    topic: "resource.leases".to_owned(),
+                    payload: json!({
+                        "type": "resource_lease.released",
+                        "lease": lease,
+                    }),
+                    visibility: VisibilityScope::System,
+                    session_id: None,
+                    workspace_id: None,
+                    producer: "resource_lease".to_owned(),
+                    trace_id: Some(lease.trace_id.clone()),
+                    parent_invocation_id: Some(lease.holder_invocation_id.clone()),
+                })
+                .await;
+        }
+        Ok(lease)
+    }
+
+    /// Get a high-risk resource lease record.
+    pub async fn get_resource_lease(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
+        let store = self.inner.lock().await.primitives.leases.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+            .get(lease_id)
     }
 
     /// Publish directly to the engine stream store.

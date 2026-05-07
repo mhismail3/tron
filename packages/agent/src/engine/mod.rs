@@ -29,6 +29,9 @@
 //!   production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution;
+//! - resource leases are a first-class primitive for high-risk shared-state
+//!   mutations, so functions can serialize one domain resource without
+//!   blocking the whole host or inventing per-handler locks;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
@@ -54,6 +57,7 @@ pub mod external;
 pub mod host;
 pub mod ids;
 pub mod invocation;
+pub mod leases;
 pub mod ledger;
 pub mod policy;
 pub mod protocol;
@@ -83,6 +87,10 @@ pub use ids::{
 };
 pub use invocation::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
+};
+pub use leases::{
+    AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus,
+    InMemoryEngineResourceLeaseStore, SqliteEngineResourceLeaseStore,
 };
 pub use ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,

@@ -1,7 +1,7 @@
 //! Claude Code session import handlers.
 //!
-//! Four RPC methods for discovering, previewing, and importing
-//! Claude Code sessions:
+//! RPC compatibility fixtures and helpers for discovering, previewing, and
+//! importing Claude Code sessions.
 //!
 //! | Method                 | Purpose |
 //! |------------------------|---------|
@@ -9,21 +9,34 @@
 //! | `import.listSessions`  | List sessions in a project |
 //! | `import.previewSession` | Preview a session before import |
 //! | `import.execute`       | Import a session into Tron |
+//!
+//! All four methods are now engine-owned generic triggers. The test-gated
+//! handlers in this file preserve historical wire parity while production
+//! behavior lives in the `import` domain function module.
 
+#[cfg(test)]
 use std::path::PathBuf;
 
+#[cfg(test)]
 use async_trait::async_trait;
+#[cfg(test)]
 use serde_json::{Value, json};
+#[cfg(test)]
 use tracing::instrument;
 
 #[cfg(test)]
 use super::map_event_store_error;
+#[cfg(test)]
 use super::{map_import_error, opt_string, require_string_param};
 #[cfg(test)]
 use crate::core::paths::home_dir;
+#[cfg(test)]
 use crate::import;
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
 use crate::server::rpc::errors::RpcError;
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 
 /// List Claude Code project directories.
@@ -220,8 +233,10 @@ impl MethodHandler for PreviewSessionHandler {
 }
 
 /// Execute the import of a Claude Code session into Tron.
+#[cfg(test)]
 pub struct ExecuteImportHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ExecuteImportHandler {
     #[instrument(skip(self, ctx), fields(method = "import.execute"))]
@@ -292,6 +307,7 @@ impl MethodHandler for ExecuteImportHandler {
 /// consumes. The `kind` discriminator is kebab-case to match our other
 /// enum-on-the-wire conventions; the optional `details` object carries
 /// category-specific context (line number, tool_use_id, etc.).
+#[cfg(test)]
 fn import_warning_to_json(warning: &import::ImportWarning) -> Value {
     let (kind, details) = match &warning.kind {
         import::ImportWarningKind::UnparseableLine { line_number } => {

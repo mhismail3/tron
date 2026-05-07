@@ -1,7 +1,10 @@
-//! Model handlers: switch and reasoning-level updates.
+//! Model RPC compatibility fixtures and provider catalog helpers.
 //!
-//! `model.list` is served by the engine bridge generic trigger; the provider
-//! catalog helpers in this file remain the source of truth for its response.
+//! `model.list`, `model.switch`, and `config.setReasoningLevel` are served by
+//! engine bridge generic triggers. The provider catalog helpers in this file
+//! remain the source of truth for model support/deprecation/default reasoning
+//! checks, while the old method-specific handlers are test fixtures that
+//! preserve historical wire-behavior coverage during the migration.
 //!
 //! Model data is derived from the provider registries (single source of truth).
 //! See `anthropic/types.rs`, `openai/types.rs`, `google/types.rs`, `minimax/types.rs`.
@@ -10,8 +13,10 @@
 //! audit-trail emissions. The RPC response has already been determined; a failed
 //! append should not change the client-visible result.
 
+#[cfg(test)]
 use async_trait::async_trait;
 use serde_json::Value;
+#[cfg(test)]
 use tracing::instrument;
 
 use crate::llm::anthropic::types::{all_claude_models_api_json, get_claude_model};
@@ -20,13 +25,18 @@ use crate::llm::kimi::types::all_kimi_models_api_json;
 use crate::llm::minimax::types::all_minimax_models_api_json;
 use crate::llm::models::registry::strip_provider_prefix;
 use crate::llm::ollama::types::all_ollama_models_api_json_with_availability;
+#[cfg(test)]
+use crate::llm::openai::types::openai_model_available_for_auth_path;
 use crate::llm::openai::types::{
     OpenAIAuthPath, all_openai_models_api_json_for_auth_path, get_openai_model,
-    get_openai_model_profile, openai_model_available_for_auth_path,
+    get_openai_model_profile,
 };
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
 use crate::server::rpc::errors::{self, RpcError};
+#[cfg(test)]
 use crate::server::rpc::handlers::require_string_param;
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 
 /// All known models, derived from provider registries (single source of truth).
@@ -43,7 +53,7 @@ pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value>
     models
 }
 
-fn is_model_supported(model_id: &str) -> bool {
+pub(crate) fn is_model_supported(model_id: &str) -> bool {
     let bare = strip_provider_prefix(model_id);
     get_claude_model(bare).is_some()
         || get_openai_model(bare).is_some()
@@ -53,7 +63,7 @@ fn is_model_supported(model_id: &str) -> bool {
         || crate::llm::ollama::types::get_ollama_model(bare).is_some()
 }
 
-fn is_model_deprecated(model_id: &str) -> bool {
+pub(crate) fn is_model_deprecated(model_id: &str) -> bool {
     let bare = strip_provider_prefix(model_id);
     if let Some(m) = get_claude_model(bare) {
         return m.is_deprecated;
@@ -74,8 +84,10 @@ pub(crate) fn active_openai_auth_path(ctx: &RpcContext) -> OpenAIAuthPath {
 }
 
 /// Switch the model for a session.
+#[cfg(test)]
 pub struct SwitchModelHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for SwitchModelHandler {
     #[instrument(skip(self, ctx), fields(method = "model.switch"))]
@@ -185,7 +197,10 @@ impl MethodHandler for SwitchModelHandler {
 }
 
 /// Look up the default reasoning level for a model ID from the provider registries.
-fn default_reasoning_level(model_id: &str, openai_auth_path: OpenAIAuthPath) -> Option<String> {
+pub(crate) fn default_reasoning_level(
+    model_id: &str,
+    openai_auth_path: OpenAIAuthPath,
+) -> Option<String> {
     let bare = strip_provider_prefix(model_id);
     if let Some(m) = get_claude_model(bare) {
         return m.default_reasoning_level.map(String::from);
@@ -202,8 +217,10 @@ fn default_reasoning_level(model_id: &str, openai_auth_path: OpenAIAuthPath) -> 
 /// The server is the source of truth: it resolves `previousLevel` from event
 /// history, falling back to the model's `defaultReasoningLevel` for the first
 /// change in a session. The client only sends `sessionId` and `level`.
+#[cfg(test)]
 pub struct SetReasoningLevelHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for SetReasoningLevelHandler {
     #[instrument(skip(self, ctx), fields(method = "config.setReasoningLevel"))]

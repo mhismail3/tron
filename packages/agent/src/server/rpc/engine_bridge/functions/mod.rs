@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::engine::{ActorKind, EngineError, InProcessFunctionHandler, Invocation};
+use crate::engine::{
+    AcquireResourceLease, ActorKind, EngineError, InProcessFunctionHandler, Invocation,
+};
 use crate::events::EventStore;
 use crate::prompt_library::store;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
@@ -41,6 +43,7 @@ mod import;
 mod job;
 mod logs;
 mod mcp;
+mod memory;
 mod message;
 mod model;
 mod notifications;
@@ -150,7 +153,9 @@ async fn rpc_function_value(
         "settings.get" | "settings.update" | "settings.resetToDefaults" => {
             settings::handle(method, invocation, deps).await
         }
-        "model.list" => model::handle(method, invocation, deps, allow_rpc_context).await,
+        "model.list" | "model.switch" | "config.setReasoningLevel" => {
+            model::handle(method, invocation, deps, allow_rpc_context).await
+        }
         "skill.list" | "skill.get" | "skill.refresh" | "skill.activate" | "skill.deactivate"
         | "skill.active" => skills::handle(method, invocation, deps).await,
         "agent.prompt"
@@ -170,6 +175,7 @@ async fn rpc_function_value(
             mcp::handle(method, invocation, deps).await
         }
         "logs.ingest" | "logs.recent" => logs::handle(method, invocation, deps).await,
+        "memory.retain" => memory::handle(method, invocation, deps).await,
         "events.getHistory" | "events.getSince" | "events.append" => {
             events::handle(method, invocation, deps).await
         }
@@ -226,9 +232,10 @@ async fn rpc_function_value(
         | "tree.getAncestors"
         | "tree.compareBranches" => tree::handle(method, invocation, deps).await,
         "repo.listSessions" | "repo.getDivergence" => repo::handle(method, invocation, deps).await,
-        "import.listSources" | "import.listSessions" | "import.previewSession" => {
-            import::handle(method, invocation, deps).await
-        }
+        "import.listSources"
+        | "import.listSessions"
+        | "import.previewSession"
+        | "import.execute" => import::handle(method, invocation, deps).await,
         "browser.getStatus"
         | "voiceNotes.list"
         | "transcribe.listModels"
@@ -236,6 +243,65 @@ async fn rpc_function_value(
         _ => Err(RpcError::Internal {
             message: format!("RPC method {method} is not engine-owned"),
         }),
+    }
+}
+
+pub(super) async fn acquire_invocation_lease(
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+    resource_kind: &str,
+    resource_id: String,
+    ttl_ms: i64,
+) -> Result<String, RpcError> {
+    let lease = deps
+        .engine_host
+        .acquire_resource_lease(AcquireResourceLease {
+            resource_kind: resource_kind.to_owned(),
+            resource_id,
+            holder_invocation_id: invocation.id.clone(),
+            function_id: invocation.function_id.clone(),
+            actor_id: invocation.causal_context.actor_id.clone(),
+            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
+            idempotency_key: invocation.causal_context.idempotency_key.clone(),
+            ttl_ms,
+        })
+        .await
+        .map_err(super::engine_error_to_rpc)?;
+    Ok(lease.lease_id)
+}
+
+pub(super) async fn release_invocation_lease(
+    deps: &RpcEngineDeps,
+    lease_id: Option<String>,
+) -> Result<(), RpcError> {
+    if let Some(lease_id) = lease_id {
+        deps.engine_host
+            .release_resource_lease(&lease_id)
+            .await
+            .map_err(super::engine_error_to_rpc)?;
+    }
+    Ok(())
+}
+
+pub(super) async fn release_invocation_lease_after<T>(
+    deps: &RpcEngineDeps,
+    lease_id: String,
+    primary: Result<T, RpcError>,
+) -> Result<T, RpcError> {
+    let release_result = release_invocation_lease(deps, Some(lease_id)).await;
+    match (primary, release_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(release_error)) => {
+            tracing::warn!(
+                ?release_error,
+                "resource lease release failed after engine function already failed"
+            );
+            Err(error)
+        }
     }
 }
 

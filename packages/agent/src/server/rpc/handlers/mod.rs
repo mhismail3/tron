@@ -6,18 +6,19 @@
 //!
 //! `system` (ping, info, shutdown), `session` (CRUD, fork, archive, export
 //! generic except resume), `agent` (prompt/status/abort/tool/submission
-//! controls generic), `model` (list, switch), `context` (snapshot and
-//! compaction generic), `events`, `settings`, `approval`, `tool` (result),
-//! `message`, `memory`, `logs`
+//! controls generic), `model`/`config` (list, switch, reasoning level
+//! generic), `context` (snapshot and compaction generic), `events`,
+//! `settings`, `approval`, `tool` (result), `message`, `memory` (retain
+//! generic), `logs`
 //!
 //! ## `register_capabilities` — Domain features
 //!
 //! `mcp`, `skills`, `skill_session`, prompt library, and basic filesystem
 //! operations are fully generic-triggered engine functions;
 //!
-//! The remaining capability modules are
-//! `tree` (visualization, branches), `import` (listSources, listSessions,
-//! previewSession, execute), and `cron`
+//! The remaining capability modules are mostly platform/high-risk tails:
+//! `tree` is generic, `import` is fully generic including execute, and `cron`
+//! is fully generic with schedule triggers.
 //!
 //! ## `register_platform` — Platform-specific
 //!
@@ -197,8 +198,14 @@ fn register_core(registry: &mut MethodRegistry) {
 
     // Model
     registry.register("model.list", RpcGenericTriggerHandler::new("model.list"));
-    registry.register("model.switch", model::SwitchModelHandler);
-    registry.register("config.setReasoningLevel", model::SetReasoningLevelHandler);
+    registry.register(
+        "model.switch",
+        RpcGenericTriggerHandler::new("model.switch"),
+    );
+    registry.register(
+        "config.setReasoningLevel",
+        RpcGenericTriggerHandler::new("config.setReasoningLevel"),
+    );
 
     // Context
     registry.register(
@@ -313,7 +320,10 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("logs.recent", RpcGenericTriggerHandler::new("logs.recent"));
 
     // Memory
-    registry.register("memory.retain", memory::RetainMemoryHandler);
+    registry.register(
+        "memory.retain",
+        RpcGenericTriggerHandler::new("memory.retain"),
+    );
 }
 
 fn register_capabilities(registry: &mut MethodRegistry) {
@@ -417,7 +427,10 @@ fn register_capabilities(registry: &mut MethodRegistry) {
         "import.previewSession",
         RpcGenericTriggerHandler::new("import.previewSession"),
     );
-    registry.register("import.execute", import::ExecuteImportHandler);
+    registry.register(
+        "import.execute",
+        RpcGenericTriggerHandler::new("import.execute"),
+    );
 }
 
 fn register_platform(registry: &mut MethodRegistry) {

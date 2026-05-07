@@ -405,6 +405,14 @@ Implemented:
   `system.getUpdateStatus`, `codexApp.status`, `blob.get`, `tool.result`, and
   `message.delete` are canonical functions as well, raising generic-trigger
   coverage to 112 while the public JSON-RPC method count stays 170;
+- high-risk command collapse: `model.switch`,
+  `config.setReasoningLevel`, `memory.retain`, and `import.execute` are now
+  marker-only `json_rpc` triggers into canonical `model::switch`,
+  `config::set_reasoning_level`, `memory::retain`, and `import::execute`,
+  each with strict schemas, approval metadata for autonomous agents,
+  engine-ledger idempotency, and resource-lease contract metadata. This raises
+  generic-trigger coverage to 116 while the public JSON-RPC method count stays
+  170;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -417,9 +425,8 @@ Still deferred:
 - RPC migrations and generic-trigger conversion for the remaining high-risk
   handler-only groups beyond the current collapsed set, especially auth,
   git/worktree mutation, sandbox lifecycle/execution, transcription mutation,
-  browser/display mutation, voice-note mutation, device mutation, import
-  execution, memory retention, system shutdown/update actions,
-  model/config mutation, and `session.resume`;
+  browser/display mutation, voice-note mutation, device mutation,
+  system shutdown/update actions, and `session.resume`;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
 - replacement of the compatibility EventBridge fallback and provider-native

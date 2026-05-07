@@ -14,6 +14,7 @@ pub(super) async fn handle(
         "import.listSources" => list_sources(deps).await,
         "import.listSessions" => list_sessions(&invocation.payload, deps).await,
         "import.previewSession" => preview_session(&invocation.payload, deps).await,
+        "import.execute" => execute_import(&invocation.payload, invocation, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("import method {method} is not engine-owned"),
         }),
@@ -161,6 +162,90 @@ async fn preview_session(payload: &Value, deps: &RpcEngineDeps) -> Result<Value,
             }))
         })
         .await
+}
+
+async fn execute_import(
+    payload: &Value,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_path = require_string_param(Some(payload), "sessionPath")?;
+    let resource_id = canonical_import_resource_id(&session_path);
+    let lease_id =
+        super::acquire_invocation_lease(invocation, deps, "import", resource_id, 300_000).await?;
+    let result = execute_import_under_lease(payload, &session_path, deps).await;
+    super::release_invocation_lease_after(deps, lease_id, result).await
+}
+
+async fn execute_import_under_lease(
+    payload: &Value,
+    session_path: &str,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let tags: Vec<String> = payload
+        .get("tags")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|value| value.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let working_directory = opt_string(Some(payload), "workingDirectory").unwrap_or_default();
+    let event_store = deps.event_store.clone();
+    let origin = deps.rpc_context.origin.clone();
+    let session_path = session_path.to_owned();
+
+    deps.rpc_context
+        .run_blocking("import.execute", move || {
+            let path = PathBuf::from(&session_path);
+            let wd = if working_directory.is_empty() {
+                path.parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .map(crate::import::parser::decode_project_dir)
+                    .ok_or_else(|| RpcError::InvalidParams {
+                        message: "Could not derive working directory from session path; pass `workingDirectory` explicitly".to_string(),
+                    })?
+            } else {
+                working_directory
+            };
+
+            match crate::import::import_session(&event_store, &path, &wd, &tags, Some(&origin)) {
+                Ok(result) => {
+                    let warnings_json = result
+                        .warnings
+                        .iter()
+                        .map(import_warning_to_json)
+                        .collect::<Vec<_>>();
+                    Ok(json!({
+                        "sessionId": result.tron_session_id,
+                        "workingDirectory": result.working_directory,
+                        "model": result.model,
+                        "eventCount": result.event_count,
+                        "turnCount": result.turn_count,
+                        "messageCount": result.message_count,
+                        "cost": result.total_cost,
+                        "alreadyImported": false,
+                        "warnings": warnings_json,
+                    }))
+                }
+                Err(crate::import::ImportError::AlreadyImported { tron_session_id }) => {
+                    Ok(json!({
+                        "alreadyImported": true,
+                        "existingSessionId": tron_session_id,
+                    }))
+                }
+                Err(error) => Err(map_import_error(error)),
+            }
+        })
+        .await
+}
+
+fn canonical_import_resource_id(session_path: &str) -> String {
+    std::fs::canonicalize(session_path)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| session_path.to_owned())
 }
 
 fn check_already_imported(

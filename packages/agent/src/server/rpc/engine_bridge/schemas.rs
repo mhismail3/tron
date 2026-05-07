@@ -355,6 +355,18 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "import.execute" => json!({
+            "type": "object",
+            "required": ["sessionPath"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionPath": {"type": "string"},
+                "workingDirectory": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "voiceNotes.list" => json!({
             "type": "object",
             "additionalProperties": false,
@@ -795,6 +807,35 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "model.switch" => json!({
+            "type": "object",
+            "required": ["sessionId", "model"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "model": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "config.setReasoningLevel" => json!({
+            "type": "object",
+            "required": ["sessionId", "level"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "level": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "memory.retain" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "promptHistory.list" => json!({
             "type": "object",
             "additionalProperties": false,
@@ -980,6 +1021,51 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                     "type": "array",
                     "items": {"type": "object", "additionalProperties": true}
                 }
+            }
+        }),
+        "model.switch" => json!({
+            "type": "object",
+            "required": ["previousModel", "newModel"],
+            "additionalProperties": false,
+            "properties": {
+                "previousModel": {"type": "string"},
+                "newModel": {"type": "string"}
+            }
+        }),
+        "config.setReasoningLevel" => json!({
+            "type": "object",
+            "required": ["previousLevel", "newLevel", "changed"],
+            "additionalProperties": false,
+            "properties": {
+                "previousLevel": {"type": ["string", "null"]},
+                "newLevel": {"type": "string"},
+                "changed": {"type": "boolean"}
+            }
+        }),
+        "memory.retain" => json!({
+            "type": "object",
+            "required": ["retained"],
+            "additionalProperties": false,
+            "properties": {
+                "retained": {"type": "boolean"},
+                "status": {"type": "string"},
+                "reason": {"type": "string"}
+            }
+        }),
+        "import.execute" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workingDirectory": {"type": "string"},
+                "model": {"type": "string"},
+                "eventCount": {"type": "integer"},
+                "turnCount": {"type": "integer"},
+                "messageCount": {"type": "integer"},
+                "cost": {"type": "number"},
+                "warnings": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+                "alreadyImported": {"type": "boolean"},
+                "existingSessionId": {"type": "string"}
             }
         }),
         "skill.list" => json!({

@@ -775,8 +775,45 @@ contracts cover strict schema, domain authority, idempotency, risk metadata,
 approval metadata where required, and marker-only registration. Those groups
 include auth, git/worktree mutation, sandbox lifecycle/execution,
 transcription audio/download, browser/display stream mutation, voice-note
-mutation, device mutation, import execution, memory retention, system
-shutdown/update actions, model/config mutation, and `session.resume`.
+mutation, device mutation, system shutdown/update actions, and
+`session.resume`.
+
+### WP67-WP74 resource leases and first high-risk command collapse
+
+Resource leases are now an engine primitive for shared-state mutations that
+need resource-level exclusion without holding the host lock. The in-memory and
+SQLite lease stores live beside the engine ledger and record lease id,
+resource kind/id, holder invocation, actor, authority grant, trace, parent,
+function id, idempotency key, status, acquisition, expiry, and release time.
+Lease lifecycle events publish to `resource.leases`.
+
+The first high-risk command package raises generic-trigger coverage from 112
+to 116 while keeping the public JSON-RPC method count at 170:
+
+- `model.switch` -> `model::switch`, high-risk reversible session write with
+  `model.write`, session idempotency, approval metadata, and
+  `session:{sessionId}:model` lease.
+- `config.setReasoningLevel` -> `config::set_reasoning_level`, high-risk
+  reversible session write with `config.write`, session idempotency, approval
+  metadata, and `session:{sessionId}:reasoning` lease.
+- `memory.retain` -> `memory::retain`, high-risk external side effect with
+  `memory.write`, session idempotency, approval metadata, and
+  `session:{sessionId}:memory-retain` lease before the existing retain guard
+  owns the long-running background summarizer.
+- `import.execute` -> `import::execute`, high-risk append-only import command
+  with `import.write`, system idempotency, approval metadata, and an
+  import-source lease based on the canonical session path.
+
+Acceptance gates:
+
+- The four production registrations are marker-only generic triggers.
+- Legacy handler structs are test fixtures only.
+- Duplicate JSON-RPC retries replay from engine idempotency without duplicate
+  model/reasoning events, memory retain starts, or imports.
+- Direct engine explicit-key payload conflicts return `IDEMPOTENCY_CONFLICT`.
+- High-risk generic triggers must carry strict schemas, domain authority,
+  idempotency, approval metadata, resource-lock metadata, stream topics, and a
+  rollback/compensation note.
 
 ## Phase 7: tools, MCP, approvals, and effects
 
