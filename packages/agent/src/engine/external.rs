@@ -125,7 +125,7 @@ impl EngineExternalWorkerRuntime {
                 Ok(Some(WorkerProtocolMessage::CatalogSnapshot(snapshot)))
             }
             WorkerProtocolMessage::RegisterFunction(message) => {
-                self.register_function(message).await?;
+                self.register_function(*message).await?;
                 Ok(None)
             }
             WorkerProtocolMessage::RegisterTrigger(message) => {

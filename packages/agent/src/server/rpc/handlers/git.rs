@@ -1,4 +1,8 @@
-//! Git handler: clone.
+//! Legacy git clone wire-contract fixture.
+//!
+//! Production `git.clone` now routes through the canonical `git::clone`
+//! engine function. This module remains `#[cfg(test)]` so the old handler tests
+//! keep verifying clone validation and wire errors during the migration.
 
 use async_trait::async_trait;
 use serde_json::Value;

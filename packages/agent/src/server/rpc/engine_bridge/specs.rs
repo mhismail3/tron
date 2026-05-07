@@ -3,10 +3,11 @@ use std::collections::BTreeSet;
 use serde_json::json;
 
 use crate::engine::{
-    ActorId, AuthorityGrantId, AuthorityRequirement, DeliveryMode, EffectClass, EngineError,
-    FunctionDefinition, FunctionId, IdempotencyContract, IdempotencyKeySource, Provenance,
-    Result as EngineResult, RiskLevel, TriggerDefinition, TriggerId, TriggerTypeDefinition,
-    TriggerTypeId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+    ActorId, AuthorityGrantId, AuthorityRequirement, CompensationContract, CompensationKind,
+    DeliveryMode, EffectClass, EngineError, FunctionDefinition, FunctionId, IdempotencyContract,
+    IdempotencyKeySource, Provenance, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
+    TriggerDefinition, TriggerId, TriggerTypeDefinition, TriggerTypeId, VisibilityScope,
+    WorkerDefinition, WorkerId, WorkerKind,
 };
 use crate::server::rpc::registry::{HandlerExecutionPolicy, MethodRegistry};
 
@@ -279,22 +280,22 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("job.list"),
     generic_trigger!("job.subscribe"),
     generic_trigger!("job.unsubscribe"),
-    handler_only!("worktree.getStatus"),
-    handler_only!("worktree.isGitRepo"),
-    handler_only!("worktree.commit"),
-    handler_only!("worktree.merge"),
-    handler_only!("worktree.list"),
-    handler_only!("worktree.getDiff"),
-    handler_only!("worktree.acquire"),
-    handler_only!("worktree.release"),
-    handler_only!("worktree.listSessionBranches"),
-    handler_only!("worktree.getCommittedDiff"),
-    handler_only!("worktree.finalizeSession"),
-    handler_only!("worktree.deleteBranch"),
-    handler_only!("worktree.pruneBranches"),
-    handler_only!("worktree.stageFiles"),
-    handler_only!("worktree.unstageFiles"),
-    handler_only!("worktree.discardFiles"),
+    generic_trigger!("worktree.getStatus"),
+    generic_trigger!("worktree.isGitRepo"),
+    generic_trigger!("worktree.commit"),
+    generic_trigger!("worktree.merge"),
+    generic_trigger!("worktree.list"),
+    generic_trigger!("worktree.getDiff"),
+    generic_trigger!("worktree.acquire"),
+    generic_trigger!("worktree.release"),
+    generic_trigger!("worktree.listSessionBranches"),
+    generic_trigger!("worktree.getCommittedDiff"),
+    generic_trigger!("worktree.finalizeSession"),
+    generic_trigger!("worktree.deleteBranch"),
+    generic_trigger!("worktree.pruneBranches"),
+    generic_trigger!("worktree.stageFiles"),
+    generic_trigger!("worktree.unstageFiles"),
+    generic_trigger!("worktree.discardFiles"),
     handler_only!("transcribe.audio"),
     generic_trigger!("transcribe.listModels"),
     handler_only!("transcribe.downloadModel"),
@@ -307,18 +308,18 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     handler_only!("voiceNotes.save"),
     generic_trigger!("voiceNotes.list"),
     handler_only!("voiceNotes.delete"),
-    handler_only!("git.clone"),
-    handler_only!("git.syncMain"),
-    handler_only!("git.push"),
-    handler_only!("git.listLocalBranches"),
-    handler_only!("git.listRemoteBranches"),
-    handler_only!("worktree.rebaseOnMain"),
-    handler_only!("worktree.startMerge"),
-    handler_only!("worktree.listConflicts"),
-    handler_only!("worktree.resolveConflict"),
-    handler_only!("worktree.continueMerge"),
-    handler_only!("worktree.abortMerge"),
-    handler_only!("worktree.resolveConflictsWithSubagent"),
+    generic_trigger!("git.clone"),
+    generic_trigger!("git.syncMain"),
+    generic_trigger!("git.push"),
+    generic_trigger!("git.listLocalBranches"),
+    generic_trigger!("git.listRemoteBranches"),
+    generic_trigger!("worktree.rebaseOnMain"),
+    generic_trigger!("worktree.startMerge"),
+    generic_trigger!("worktree.listConflicts"),
+    generic_trigger!("worktree.resolveConflict"),
+    generic_trigger!("worktree.continueMerge"),
+    generic_trigger!("worktree.abortMerge"),
+    generic_trigger!("worktree.resolveConflictsWithSubagent"),
     generic_trigger!("repo.listSessions"),
     generic_trigger!("repo.getDivergence"),
     generic_trigger!("sandbox.listContainers"),
@@ -425,6 +426,21 @@ pub fn capability_specs(registry: &MethodRegistry) -> EngineResult<Vec<RpcCapabi
                 {
                     return Err(EngineError::PolicyViolation(format!(
                         "high-risk generic-triggered RPC method {} lacks a high-risk contract",
+                        spec.method
+                    )));
+                }
+                let definition = function_definition_for_spec(&spec);
+                if spec.risk_level >= RiskLevel::High && definition.compensation.is_none() {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "high-risk generic-triggered RPC method {} lacks typed compensation metadata",
+                        spec.method
+                    )));
+                }
+                if requires_resource_lease_metadata(spec.method)
+                    && definition.resource_lease.is_none()
+                {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "generic-triggered RPC method {} lacks typed resource lease metadata",
                         spec.method
                     )));
                 }
@@ -576,6 +592,14 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
             | "agent.abortTool"
             | "cron.create"
             | "cron.update"
+            | "worktree.commit"
+            | "worktree.merge"
+            | "worktree.finalizeSession"
+            | "worktree.rebaseOnMain"
+            | "worktree.startMerge"
+            | "worktree.resolveConflict"
+            | "worktree.continueMerge"
+            | "worktree.abortMerge"
     ) {
         return EffectClass::ReversibleSideEffect;
     }
@@ -601,10 +625,17 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
             | "context.clear"
             | "worktree.deleteBranch"
             | "worktree.discardFiles"
+            | "worktree.pruneBranches"
             | "sandbox.killContainer"
             | "sandbox.removeContainer"
     ) {
         return EffectClass::IrreversibleSideEffect;
+    }
+    if matches!(
+        method,
+        "git.clone" | "git.syncMain" | "git.push" | "worktree.resolveConflictsWithSubagent"
+    ) {
+        return EffectClass::ExternalSideEffect;
     }
     if method.starts_with("git.")
         || method.starts_with("browser.")
@@ -643,6 +674,20 @@ fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
             | "config.setReasoningLevel"
             | "memory.retain"
             | "import.execute"
+            | "git.clone"
+            | "git.syncMain"
+            | "worktree.commit"
+            | "worktree.merge"
+            | "worktree.finalizeSession"
+            | "worktree.deleteBranch"
+            | "worktree.pruneBranches"
+            | "worktree.discardFiles"
+            | "worktree.rebaseOnMain"
+            | "worktree.startMerge"
+            | "worktree.resolveConflict"
+            | "worktree.continueMerge"
+            | "worktree.abortMerge"
+            | "worktree.resolveConflictsWithSubagent"
     ) {
         RiskLevel::High
     } else if matches!(effect, EffectClass::IrreversibleSideEffect) {
@@ -679,6 +724,12 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
     }
     if spec.effect_class.is_mutating() {
         definition = definition.with_idempotency(idempotency_contract_for_method(spec.method));
+    }
+    if let Some(requirement) = resource_lease_requirement_for_method(spec.method) {
+        definition = definition.with_resource_lease(requirement);
+    }
+    if let Some(contract) = compensation_contract_for_method(spec.method, spec.effect_class) {
+        definition = definition.with_compensation(contract);
     }
     if spec.schema_mode == RpcSchemaMode::StrictJson {
         if let Some(request_schema) = request_schema_for_method(spec.method) {
@@ -725,6 +776,7 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
         || method == "skill.refresh"
         || method.starts_with("settings.")
         || method.starts_with("cron.")
+        || method == "git.clone"
     {
         IdempotencyContract::caller_system_engine_ledger()
     } else {
@@ -758,7 +810,87 @@ fn settings_write_requires_approval(method: &str) -> bool {
             | "config.setReasoningLevel"
             | "memory.retain"
             | "import.execute"
+            | "git.clone"
+            | "git.syncMain"
+            | "git.push"
+            | "worktree.commit"
+            | "worktree.merge"
+            | "worktree.finalizeSession"
+            | "worktree.deleteBranch"
+            | "worktree.pruneBranches"
+            | "worktree.discardFiles"
+            | "worktree.rebaseOnMain"
+            | "worktree.startMerge"
+            | "worktree.resolveConflict"
+            | "worktree.continueMerge"
+            | "worktree.abortMerge"
+            | "worktree.resolveConflictsWithSubagent"
     )
+}
+
+fn requires_resource_lease_metadata(method: &str) -> bool {
+    resource_lease_requirement_for_method(method).is_some()
+}
+
+fn resource_lease_requirement_for_method(method: &str) -> Option<ResourceLeaseRequirement> {
+    let (kind, template, ttl_ms) = match method {
+        "model.switch" => ("session", "session:{sessionId}:model", 60_000),
+        "config.setReasoningLevel" => ("session", "session:{sessionId}:reasoning", 60_000),
+        "memory.retain" => ("session", "session:{sessionId}:memory-retain", 300_000),
+        "import.execute" => ("import", "import:{sessionPath}", 300_000),
+        "git.clone" => ("git", "clone:{targetPath}", 1_800_000),
+        "git.syncMain" => ("git", "session:{sessionId}:sync-main", 900_000),
+        "git.push" => ("git", "session:{sessionId}:push", 900_000),
+        "worktree.acquire" | "worktree.release" => {
+            ("worktree", "session:{sessionId}:assignment", 300_000)
+        }
+        "worktree.stageFiles" | "worktree.unstageFiles" | "worktree.discardFiles" => {
+            ("worktree", "session:{sessionId}:index", 300_000)
+        }
+        "worktree.commit"
+        | "worktree.merge"
+        | "worktree.finalizeSession"
+        | "worktree.deleteBranch"
+        | "worktree.pruneBranches"
+        | "worktree.rebaseOnMain"
+        | "worktree.startMerge"
+        | "worktree.resolveConflict"
+        | "worktree.continueMerge"
+        | "worktree.abortMerge"
+        | "worktree.resolveConflictsWithSubagent" => {
+            ("worktree", "session:{sessionId}:workflow", 900_000)
+        }
+        _ => return None,
+    };
+    Some(ResourceLeaseRequirement::exclusive_template(
+        kind, template, ttl_ms,
+    ))
+}
+
+fn compensation_contract_for_method(
+    method: &str,
+    effect_class: EffectClass,
+) -> Option<CompensationContract> {
+    if !effect_class.is_mutating() {
+        return None;
+    }
+    let kind = match effect_class {
+        EffectClass::AppendOnlyEvent => CompensationKind::EventSourced,
+        EffectClass::IdempotentWrite | EffectClass::ReversibleSideEffect => {
+            CompensationKind::InverseCommandAvailable
+        }
+        EffectClass::ExternalSideEffect => CompensationKind::ManualOnly,
+        EffectClass::IrreversibleSideEffect => CompensationKind::ExternalIrreversible,
+        EffectClass::PureRead
+        | EffectClass::DeterministicCompute
+        | EffectClass::DelegatedInvocation => CompensationKind::None,
+    };
+    let notes = rollback_contract_for_method(method);
+    if matches!(kind, CompensationKind::None) {
+        None
+    } else {
+        Some(CompensationContract::new(kind, notes))
+    }
 }
 
 fn high_risk_contract_for_method(method: &str) -> Option<serde_json::Value> {
@@ -791,6 +923,53 @@ fn high_risk_contract_for_method(method: &str) -> Option<serde_json::Value> {
                 "import:{canonicalSessionPath}",
                 300_000,
                 "serializes session import for one source transcript path",
+            ),
+            "git.clone" => (
+                true,
+                "git",
+                "clone:{targetPath}",
+                1_800_000,
+                "serializes clone operations into one target path",
+            ),
+            "git.syncMain" => (
+                true,
+                "git",
+                "session:{sessionId}:sync-main",
+                900_000,
+                "serializes main-branch synchronization for the session repository",
+            ),
+            "git.push" => (
+                true,
+                "git",
+                "session:{sessionId}:push",
+                900_000,
+                "serializes outbound pushes for a session worktree",
+            ),
+            "worktree.commit" | "worktree.merge" | "worktree.finalizeSession" => (
+                true,
+                "worktree",
+                "session:{sessionId}:workflow",
+                900_000,
+                "serializes high-risk branch/workflow mutations for a session worktree",
+            ),
+            "worktree.deleteBranch" | "worktree.pruneBranches" | "worktree.discardFiles" => (
+                true,
+                "worktree",
+                "session:{sessionId}:workflow",
+                900_000,
+                "serializes destructive branch/index mutations for a session worktree",
+            ),
+            "worktree.rebaseOnMain"
+            | "worktree.startMerge"
+            | "worktree.resolveConflict"
+            | "worktree.continueMerge"
+            | "worktree.abortMerge"
+            | "worktree.resolveConflictsWithSubagent" => (
+                true,
+                "worktree",
+                "session:{sessionId}:workflow",
+                900_000,
+                "serializes merge/rebase conflict workflows for a session worktree",
             ),
             method
                 if matches!(
@@ -855,6 +1034,43 @@ fn rollback_contract_for_method(method: &str) -> &'static str {
         "import.execute" => {
             "import is append-only and duplicate sources return alreadyImported; full rollback is deferred"
         }
+        "git.clone" => {
+            "manual cleanup of the target directory is required if clone partially succeeds"
+        }
+        "git.syncMain" => {
+            "sync_main uses existing stash/reset checks and must be manually inspected on failure"
+        }
+        "git.push" => {
+            "remote pushes are external side effects; force/protected-branch checks limit blast radius"
+        }
+        "worktree.acquire" => {
+            "worktree release is the inverse command and duplicate acquire replays"
+        }
+        "worktree.release" => "worktree acquire can recreate the assignment if needed",
+        "worktree.stageFiles" => "worktree.unstageFiles is the inverse command",
+        "worktree.unstageFiles" => "worktree.stageFiles is the inverse command",
+        "worktree.commit" => "git revert/reset is a manual recovery path after commit creation",
+        "worktree.merge" => {
+            "merge abort or manual conflict recovery is available while merge state exists"
+        }
+        "worktree.finalizeSession" => {
+            "finalize uses all-or-none branch publication; manual branch cleanup may be required"
+        }
+        "worktree.deleteBranch" => {
+            "deleted local branches require reflog/remote recovery if still available"
+        }
+        "worktree.pruneBranches" => "pruned branches require manual branch restoration if needed",
+        "worktree.discardFiles" => "discarded working-tree changes are externally irreversible",
+        "worktree.rebaseOnMain" => {
+            "rebase abort/manual reset is the recovery path while state exists"
+        }
+        "worktree.startMerge" => "worktree.abortMerge is the inverse command while merge is active",
+        "worktree.resolveConflict" => "conflict files can be manually edited before continueMerge",
+        "worktree.continueMerge" => "manual reset/revert is required after merge completion",
+        "worktree.abortMerge" => "startMerge can recreate the merge attempt if inputs still exist",
+        "worktree.resolveConflictsWithSubagent" => {
+            "subagent conflict resolution writes files; manual review/reset remains the recovery path"
+        }
         _ => "domain-specific tests preserve current rollback, no-op, or replay behavior",
     }
 }
@@ -900,6 +1116,8 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
         "codex_app",
         "tool",
         "message",
+        "git",
+        "worktree",
     ];
     domains
         .into_iter()
@@ -1040,6 +1258,8 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("codexApp.") => "codex_app",
         method if method.starts_with("tool.") => "tool",
         method if method.starts_with("message.") => "message",
+        method if method.starts_with("git.") => "git",
+        method if method.starts_with("worktree.") => "worktree",
         method if method.starts_with("system.") => "system",
         method if method.starts_with("model.") => "model",
         _ => RPC_WORKER_ID,
@@ -1169,6 +1389,36 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "voiceNotes.list" => ("voice_notes", "list".to_owned()),
         "transcribe.listModels" => ("transcription", "list_models".to_owned()),
         "sandbox.listContainers" => ("sandbox", "list_containers".to_owned()),
+        "git.clone" => ("git", "clone".to_owned()),
+        "git.syncMain" => ("git", "sync_main".to_owned()),
+        "git.push" => ("git", "push".to_owned()),
+        "git.listLocalBranches" => ("git", "list_local_branches".to_owned()),
+        "git.listRemoteBranches" => ("git", "list_remote_branches".to_owned()),
+        "worktree.getStatus" => ("worktree", "get_status".to_owned()),
+        "worktree.isGitRepo" => ("worktree", "is_git_repo".to_owned()),
+        "worktree.list" => ("worktree", "list".to_owned()),
+        "worktree.getDiff" => ("worktree", "get_diff".to_owned()),
+        "worktree.getCommittedDiff" => ("worktree", "get_committed_diff".to_owned()),
+        "worktree.listSessionBranches" => ("worktree", "list_session_branches".to_owned()),
+        "worktree.acquire" => ("worktree", "acquire".to_owned()),
+        "worktree.release" => ("worktree", "release".to_owned()),
+        "worktree.stageFiles" => ("worktree", "stage_files".to_owned()),
+        "worktree.unstageFiles" => ("worktree", "unstage_files".to_owned()),
+        "worktree.discardFiles" => ("worktree", "discard_files".to_owned()),
+        "worktree.commit" => ("worktree", "commit".to_owned()),
+        "worktree.merge" => ("worktree", "merge".to_owned()),
+        "worktree.finalizeSession" => ("worktree", "finalize_session".to_owned()),
+        "worktree.deleteBranch" => ("worktree", "delete_branch".to_owned()),
+        "worktree.pruneBranches" => ("worktree", "prune_branches".to_owned()),
+        "worktree.rebaseOnMain" => ("worktree", "rebase_on_main".to_owned()),
+        "worktree.startMerge" => ("worktree", "start_merge".to_owned()),
+        "worktree.listConflicts" => ("worktree", "list_conflicts".to_owned()),
+        "worktree.resolveConflict" => ("worktree", "resolve_conflict".to_owned()),
+        "worktree.continueMerge" => ("worktree", "continue_merge".to_owned()),
+        "worktree.abortMerge" => ("worktree", "abort_merge".to_owned()),
+        "worktree.resolveConflictsWithSubagent" => {
+            ("worktree", "resolve_conflicts_with_subagent".to_owned())
+        }
         _ => match method.split_once('.') {
             Some(("promptHistory", operation)) => {
                 ("prompt_library", format!("history_{operation}"))
@@ -1206,6 +1456,8 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "codexApp" => "codex_app",
                     "tool" => "tool",
                     "message" => "message",
+                    "git" => "git",
+                    "worktree" => "worktree",
                     "settings" => "settings",
                     "system" => "system",
                     _ => RPC_WORKER_ID,
@@ -1290,6 +1542,10 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("tool"), "write") => "tool.write",
         (Some("message"), "read") => "message.read",
         (Some("message"), "write") => "message.write",
+        (Some("git"), "read") => "git.read",
+        (Some("git"), "write") => "git.write",
+        (Some("worktree"), "read") => "worktree.read",
+        (Some("worktree"), "write") => "worktree.write",
         (_, "write") => "rpc.write",
         _ => "rpc.read",
     }

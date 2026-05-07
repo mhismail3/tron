@@ -19,6 +19,10 @@ use super::approval::{
     ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
     InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
 };
+use super::compensation::{
+    EngineCompensationRecord, InMemoryEngineCompensationStore, SqliteEngineCompensationStore,
+    compensation_record,
+};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
@@ -36,7 +40,10 @@ use super::ledger::{
 use super::queue::{
     EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore, SqliteEngineQueueStore,
 };
-use super::registry::{InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocationDecision};
+use super::registry::{
+    InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocation,
+    PreparedSyncInvocationDecision,
+};
 use super::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
 };
@@ -46,9 +53,10 @@ use super::streams::{
 };
 use super::types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
-    DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
-    IdempotencyContract, Provenance, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
-    VisibilityScope, WorkerDefinition, WorkerKind, WorkerRevision,
+    CompensationContract, CompensationKind, DeliveryMode, EffectClass, FunctionDefinition,
+    FunctionHealth, FunctionRevision, IdempotencyContract, Provenance,
+    ResourceLeaseFailureBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition,
+    TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind, WorkerRevision,
 };
 use super::{policy, schema};
 
@@ -376,6 +384,34 @@ impl ResourceLeaseStoreBackend {
     }
 }
 
+enum CompensationStoreBackend {
+    InMemory(InMemoryEngineCompensationStore),
+    Sqlite(SqliteEngineCompensationStore),
+}
+
+impl CompensationStoreBackend {
+    fn record(&mut self, record: EngineCompensationRecord) -> Result<EngineCompensationRecord> {
+        match self {
+            Self::InMemory(store) => store.record(record),
+            Self::Sqlite(store) => store.record(record),
+        }
+    }
+
+    fn get(&self, compensation_id: &str) -> Result<Option<EngineCompensationRecord>> {
+        match self {
+            Self::InMemory(store) => store.get(compensation_id),
+            Self::Sqlite(store) => store.get(compensation_id),
+        }
+    }
+
+    fn list(&self) -> Result<Vec<EngineCompensationRecord>> {
+        match self {
+            Self::InMemory(store) => store.list(),
+            Self::Sqlite(store) => store.list(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct PrimitiveStores {
     streams: Arc<StdMutex<StreamStoreBackend>>,
@@ -383,6 +419,7 @@ struct PrimitiveStores {
     queue: Arc<StdMutex<QueueStoreBackend>>,
     approvals: Arc<StdMutex<ApprovalStoreBackend>>,
     leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
+    compensation: Arc<StdMutex<CompensationStoreBackend>>,
 }
 
 impl PrimitiveStores {
@@ -403,6 +440,9 @@ impl PrimitiveStores {
             leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::InMemory(
                 InMemoryEngineResourceLeaseStore::new(),
             ))),
+            compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
+                InMemoryEngineCompensationStore::new(),
+            ))),
         }
     }
 
@@ -422,6 +462,9 @@ impl PrimitiveStores {
             ))),
             leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::Sqlite(
                 SqliteEngineResourceLeaseStore::open(path)?,
+            ))),
+            compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
+                SqliteEngineCompensationStore::open(path)?,
             ))),
         })
     }
@@ -693,21 +736,7 @@ impl EngineHostHandle {
             PreparedSyncInvocationDecision::Finished(result) => return *result,
         };
 
-        let handler_result = AssertUnwindSafe(prepared.handler.invoke(prepared.invocation.clone()))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|payload| {
-                Err(EngineError::HandlerFailed(format!(
-                    "handler panicked: {}",
-                    panic_payload_message(payload)
-                )))
-            });
-
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .finish_prepared_sync_invocation(*prepared, handler_result)
+        self.execute_prepared_regular(*prepared).await
     }
 
     async fn invoke_approval_request_unlocked(&self, invocation: Invocation) -> InvocationResult {
@@ -756,7 +785,51 @@ impl EngineHostHandle {
             PreparedSyncInvocationDecision::Execute(prepared) => prepared,
             PreparedSyncInvocationDecision::Finished(result) => return *result,
         };
-        let handler_result = AssertUnwindSafe(prepared.handler.invoke(prepared.invocation.clone()))
+        self.execute_prepared_regular(*prepared).await
+    }
+
+    async fn execute_prepared_regular(&self, prepared: PreparedSyncInvocation) -> InvocationResult {
+        let compensation_contract = prepared.function.compensation.clone();
+        let compensation_invocation = prepared.invocation.clone();
+        let lease_result = self.acquire_prepared_resource_lease(&prepared).await;
+        let mut lease_ids = Vec::new();
+        let handler_result = match lease_result {
+            Ok(Some(lease)) => {
+                lease_ids.push(lease.lease_id.clone());
+                let result = self.invoke_prepared_handler(&prepared).await;
+                release_after_primary(self.release_resource_lease(&lease.lease_id).await, result)
+            }
+            Ok(None) => self.invoke_prepared_handler(&prepared).await,
+            Err(error) => Err(error),
+        };
+        let compensation_status = prepared
+            .function
+            .compensation
+            .as_ref()
+            .map(|_| "recorded".to_owned());
+        let result = self
+            .inner
+            .lock()
+            .await
+            .catalog
+            .finish_prepared_sync_invocation_with_contracts(
+                prepared,
+                handler_result,
+                lease_ids.clone(),
+                compensation_status,
+            );
+        self.record_compensation_for_result(
+            &compensation_invocation,
+            compensation_contract,
+            &result,
+            lease_ids,
+        )
+        .await;
+        result
+    }
+
+    async fn invoke_prepared_handler(&self, prepared: &PreparedSyncInvocation) -> Result<Value> {
+        AssertUnwindSafe(prepared.handler.invoke(prepared.invocation.clone()))
             .catch_unwind()
             .await
             .unwrap_or_else(|payload| {
@@ -764,12 +837,58 @@ impl EngineHostHandle {
                     "handler panicked: {}",
                     panic_payload_message(payload)
                 )))
-            });
-        self.inner
+            })
+    }
+
+    async fn acquire_prepared_resource_lease(
+        &self,
+        prepared: &PreparedSyncInvocation,
+    ) -> Result<Option<EngineResourceLease>> {
+        let Some(requirement) = &prepared.function.resource_lease else {
+            return Ok(None);
+        };
+        let request = lease_request_from_requirement(requirement, &prepared.invocation)?;
+        self.acquire_resource_lease(request).await.map(Some)
+    }
+
+    async fn record_compensation_for_result(
+        &self,
+        invocation: &Invocation,
+        contract: Option<CompensationContract>,
+        result: &InvocationResult,
+        resource_lease_ids: Vec<String>,
+    ) {
+        let Some(contract) = contract else {
+            return;
+        };
+        let record = compensation_record(invocation, result, contract, resource_lease_ids);
+        let store = self.inner.lock().await.primitives.compensation.clone();
+        let stored = store
             .lock()
-            .await
-            .catalog
-            .finish_prepared_sync_invocation(*prepared, handler_result)
+            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))
+            .and_then(|mut store| store.record(record));
+        match stored {
+            Ok(record) => {
+                let _ = self
+                    .publish_stream_event(PublishStreamEvent {
+                        topic: "compensation.records".to_owned(),
+                        payload: json!({
+                            "type": "compensation.recorded",
+                            "compensation": record,
+                        }),
+                        visibility: VisibilityScope::System,
+                        session_id: None,
+                        workspace_id: None,
+                        producer: "compensation".to_owned(),
+                        trace_id: Some(result.trace_id.clone()),
+                        parent_invocation_id: Some(result.invocation_id.clone()),
+                    })
+                    .await;
+            }
+            Err(error) => {
+                tracing::error!(?error, "failed to record engine compensation contract");
+            }
+        }
     }
 
     /// Record a trigger dispatch attempt that failed before normal invocation
@@ -919,6 +1038,27 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
             .get(lease_id)
+    }
+
+    /// Get a durable compensation record.
+    pub async fn get_compensation_record(
+        &self,
+        compensation_id: &str,
+    ) -> Result<Option<EngineCompensationRecord>> {
+        let store = self.inner.lock().await.primitives.compensation.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))?
+            .get(compensation_id)
+    }
+
+    /// List durable compensation records.
+    pub async fn list_compensation_records(&self) -> Result<Vec<EngineCompensationRecord>> {
+        let store = self.inner.lock().await.primitives.compensation.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))?
+            .list()
     }
 
     /// Publish directly to the engine stream store.
@@ -1087,21 +1227,7 @@ impl EngineHostHandle {
 
         let child_result = match prepared.child {
             PreparedSyncInvocationDecision::Execute(child) => {
-                let handler_result =
-                    AssertUnwindSafe(child.handler.invoke(child.invocation.clone()))
-                        .catch_unwind()
-                        .await
-                        .unwrap_or_else(|payload| {
-                            Err(EngineError::HandlerFailed(format!(
-                                "handler panicked: {}",
-                                panic_payload_message(payload)
-                            )))
-                        });
-                self.inner
-                    .lock()
-                    .await
-                    .catalog
-                    .finish_prepared_sync_invocation(*child, handler_result)
+                self.execute_prepared_regular(*child).await
             }
             PreparedSyncInvocationDecision::Finished(result) => *result,
         };
@@ -1262,6 +1388,115 @@ pub fn engine_ledger_path_for_event_db(event_db_path: &Path) -> PathBuf {
         || PathBuf::from("engine-ledger.sqlite"),
         |parent| parent.join("engine-ledger.sqlite"),
     )
+}
+
+fn release_after_primary(
+    release: Result<Option<EngineResourceLease>>,
+    primary: Result<Value>,
+) -> Result<Value> {
+    match (primary, release) {
+        (Ok(value), Ok(_)) => Ok(value),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(release_error)) => {
+            tracing::warn!(
+                ?release_error,
+                "resource lease release failed after engine function already failed"
+            );
+            Err(error)
+        }
+    }
+}
+
+fn lease_request_from_requirement(
+    requirement: &ResourceLeaseRequirement,
+    invocation: &Invocation,
+) -> Result<AcquireResourceLease> {
+    if requirement.resolver_id != "payload_template" {
+        return match requirement.failure_behavior {
+            ResourceLeaseFailureBehavior::FailClosed => Err(EngineError::PolicyViolation(format!(
+                "unsupported resource lease resolver {} for {}",
+                requirement.resolver_id, invocation.function_id
+            ))),
+        };
+    }
+    if !requirement.exclusive {
+        return Err(EngineError::PolicyViolation(format!(
+            "resource lease for {} must be exclusive in this engine version",
+            invocation.function_id
+        )));
+    }
+    let resource_id =
+        render_resource_template(&requirement.resource_id_template, &invocation.payload)?;
+    Ok(AcquireResourceLease {
+        resource_kind: requirement.resource_kind.clone(),
+        resource_id,
+        holder_invocation_id: invocation.id.clone(),
+        function_id: invocation.function_id.clone(),
+        actor_id: invocation.causal_context.actor_id.clone(),
+        authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+        trace_id: invocation.causal_context.trace_id.clone(),
+        parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
+        idempotency_key: invocation.causal_context.idempotency_key.clone(),
+        ttl_ms: requirement.ttl_ms,
+    })
+}
+
+fn render_resource_template(template: &str, payload: &Value) -> Result<String> {
+    let mut rendered = String::new();
+    let mut rest = template;
+    while let Some(start) = rest.find('{') {
+        let (prefix, after_start) = rest.split_at(start);
+        rendered.push_str(prefix);
+        let after_start = &after_start[1..];
+        let Some(end) = after_start.find('}') else {
+            return Err(EngineError::PolicyViolation(format!(
+                "resource lease template {template} has an unclosed field"
+            )));
+        };
+        let (field, after_field) = after_start.split_at(end);
+        rendered.push_str(&resource_template_value(payload, field)?);
+        rest = &after_field[1..];
+    }
+    rendered.push_str(rest);
+    if rendered.trim().is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "resource lease resolved an empty resource id".to_owned(),
+        ));
+    }
+    Ok(rendered)
+}
+
+fn resource_template_value(payload: &Value, field: &str) -> Result<String> {
+    let field = field.trim();
+    if field.is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "resource lease template field must not be empty".to_owned(),
+        ));
+    }
+    let value = if field.starts_with('/') {
+        payload.pointer(field)
+    } else {
+        field
+            .split('.')
+            .try_fold(payload, |value, segment| value.get(segment))
+    }
+    .ok_or_else(|| {
+        EngineError::PolicyViolation(format!(
+            "resource lease resolver could not find payload field {field}"
+        ))
+    })?;
+    match value {
+        Value::String(value) if !value.trim().is_empty() => Ok(value.clone()),
+        Value::Number(value) => Ok(value.to_string()),
+        Value::Bool(value) => Ok(value.to_string()),
+        Value::String(_) => Err(EngineError::PolicyViolation(format!(
+            "resource lease payload field {field} must not be empty"
+        ))),
+        _ => Err(EngineError::PolicyViolation(format!(
+            "resource lease payload field {field} must be a scalar"
+        ))),
+    }
 }
 
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
@@ -2380,8 +2615,15 @@ fn primitive_function_definitions(
                     EffectClass::IdempotentWrite,
                     "approval.resolve",
                 )
+                .with_required_authority(
+                    AuthorityRequirement::scope("approval.resolve").with_approval_required(),
+                )
                 .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
                 .with_risk(RiskLevel::High)
+                .with_compensation(CompensationContract::new(
+                    CompensationKind::EventSourced,
+                    "approval resolution is event-sourced in the approval ledger; denied approvals are terminal and approved invocations keep their own compensation records",
+                ))
                 .with_request_schema(approval_resolve_schema())
                 .with_response_schema(json!({
                     "type": "object",

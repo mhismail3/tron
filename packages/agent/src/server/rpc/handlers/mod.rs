@@ -13,18 +13,20 @@
 //!
 //! ## `register_capabilities` — Domain features
 //!
-//! `mcp`, `skills`, `skill_session`, prompt library, and basic filesystem
-//! operations are fully generic-triggered engine functions;
+//! `mcp`, `skills`, `skill_session`, prompt library, basic filesystem
+//! operations, and the full git/worktree source-control surface are fully
+//! generic-triggered engine functions;
 //!
 //! The remaining capability modules are mostly platform/high-risk tails:
 //! `tree` is generic, `import` is fully generic including execute, and `cron`
-//! is fully generic with schedule triggers.
+//! is fully generic with schedule triggers. Old git/worktree handler modules
+//! are compiled only as test fixtures for wire-contract parity.
 //!
 //! ## `register_platform` — Platform-specific
 //!
-//! `browser` (stream), `worktree` (git), `job` (fully generic and queue-backed),
+//! `browser` (stream), `job` (fully generic and queue-backed),
 //! `transcription`, `device` (push tokens), `notifications` and `plan`
-//! (fully generic), `voice_notes`, `git`, `sandbox`
+//! (fully generic), `voice_notes`, `sandbox`
 
 pub mod agent;
 #[cfg(test)]
@@ -42,7 +44,9 @@ pub mod device;
 pub mod display;
 pub mod events;
 pub mod filesystem;
+#[cfg(test)]
 pub mod git;
+#[cfg(test)]
 pub mod git_workflow;
 pub mod import;
 pub(crate) mod job;
@@ -64,6 +68,7 @@ pub mod tool;
 pub mod transcription;
 pub mod tree;
 pub mod voice_notes;
+#[cfg(test)]
 pub mod worktree;
 
 use crate::server::rpc::engine_bridge::RpcGenericTriggerHandler;
@@ -462,27 +467,66 @@ fn register_platform(registry: &mut MethodRegistry) {
     );
 
     // Worktree
-    registry.register("worktree.getStatus", worktree::GetStatusHandler);
-    registry.register("worktree.isGitRepo", worktree::IsGitRepoHandler);
-    registry.register("worktree.commit", worktree::CommitHandler);
-    registry.register("worktree.merge", worktree::MergeHandler);
-    registry.register("worktree.list", worktree::ListHandler);
-    registry.register("worktree.getDiff", worktree::GetDiffHandler);
-    registry.register("worktree.acquire", worktree::AcquireHandler);
-    registry.register("worktree.release", worktree::ReleaseHandler);
+    registry.register(
+        "worktree.getStatus",
+        RpcGenericTriggerHandler::new("worktree.getStatus"),
+    );
+    registry.register(
+        "worktree.isGitRepo",
+        RpcGenericTriggerHandler::new("worktree.isGitRepo"),
+    );
+    registry.register(
+        "worktree.commit",
+        RpcGenericTriggerHandler::new("worktree.commit"),
+    );
+    registry.register(
+        "worktree.merge",
+        RpcGenericTriggerHandler::new("worktree.merge"),
+    );
+    registry.register(
+        "worktree.list",
+        RpcGenericTriggerHandler::new("worktree.list"),
+    );
+    registry.register(
+        "worktree.getDiff",
+        RpcGenericTriggerHandler::new("worktree.getDiff"),
+    );
+    registry.register(
+        "worktree.acquire",
+        RpcGenericTriggerHandler::new("worktree.acquire"),
+    );
+    registry.register(
+        "worktree.release",
+        RpcGenericTriggerHandler::new("worktree.release"),
+    );
     registry.register(
         "worktree.listSessionBranches",
-        worktree::ListSessionBranchesHandler,
+        RpcGenericTriggerHandler::new("worktree.listSessionBranches"),
     );
     registry.register(
         "worktree.getCommittedDiff",
-        worktree::GetCommittedDiffHandler,
+        RpcGenericTriggerHandler::new("worktree.getCommittedDiff"),
     );
-    registry.register("worktree.deleteBranch", worktree::DeleteBranchHandler);
-    registry.register("worktree.pruneBranches", worktree::PruneBranchesHandler);
-    registry.register("worktree.stageFiles", worktree::StageFilesHandler);
-    registry.register("worktree.unstageFiles", worktree::UnstageFilesHandler);
-    registry.register("worktree.discardFiles", worktree::DiscardFilesHandler);
+    registry.register(
+        "worktree.deleteBranch",
+        RpcGenericTriggerHandler::new("worktree.deleteBranch"),
+    );
+    registry.register(
+        "worktree.pruneBranches",
+        RpcGenericTriggerHandler::new("worktree.pruneBranches"),
+    );
+    registry.register(
+        "worktree.stageFiles",
+        RpcGenericTriggerHandler::new("worktree.stageFiles"),
+    );
+    registry.register(
+        "worktree.unstageFiles",
+        RpcGenericTriggerHandler::new("worktree.unstageFiles"),
+    );
+    registry.register(
+        "worktree.discardFiles",
+        RpcGenericTriggerHandler::new("worktree.discardFiles"),
+    );
 
     // Transcription
     registry.register("transcribe.audio", transcription::TranscribeAudioHandler);
@@ -517,35 +561,53 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("voiceNotes.delete", voice_notes::DeleteHandler);
 
     // Git
-    registry.register("git.clone", git::CloneHandler);
+    registry.register("git.clone", RpcGenericTriggerHandler::new("git.clone"));
 
     // Git workflow (Phase 5)
-    registry.register("git.syncMain", git_workflow::SyncMainHandler);
-    registry.register("git.push", git_workflow::PushHandler);
+    registry.register(
+        "git.syncMain",
+        RpcGenericTriggerHandler::new("git.syncMain"),
+    );
+    registry.register("git.push", RpcGenericTriggerHandler::new("git.push"));
     registry.register(
         "git.listLocalBranches",
-        git_workflow::ListLocalBranchesHandler,
+        RpcGenericTriggerHandler::new("git.listLocalBranches"),
     );
     registry.register(
         "git.listRemoteBranches",
-        git_workflow::ListRemoteBranchesHandler,
+        RpcGenericTriggerHandler::new("git.listRemoteBranches"),
     );
     registry.register(
         "worktree.finalizeSession",
-        git_workflow::FinalizeSessionHandler,
+        RpcGenericTriggerHandler::new("worktree.finalizeSession"),
     );
-    registry.register("worktree.rebaseOnMain", git_workflow::RebaseOnMainHandler);
-    registry.register("worktree.startMerge", git_workflow::StartMergeHandler);
-    registry.register("worktree.listConflicts", git_workflow::ListConflictsHandler);
+    registry.register(
+        "worktree.rebaseOnMain",
+        RpcGenericTriggerHandler::new("worktree.rebaseOnMain"),
+    );
+    registry.register(
+        "worktree.startMerge",
+        RpcGenericTriggerHandler::new("worktree.startMerge"),
+    );
+    registry.register(
+        "worktree.listConflicts",
+        RpcGenericTriggerHandler::new("worktree.listConflicts"),
+    );
     registry.register(
         "worktree.resolveConflict",
-        git_workflow::ResolveConflictHandler,
+        RpcGenericTriggerHandler::new("worktree.resolveConflict"),
     );
-    registry.register("worktree.continueMerge", git_workflow::ContinueMergeHandler);
-    registry.register("worktree.abortMerge", git_workflow::AbortMergeHandler);
+    registry.register(
+        "worktree.continueMerge",
+        RpcGenericTriggerHandler::new("worktree.continueMerge"),
+    );
+    registry.register(
+        "worktree.abortMerge",
+        RpcGenericTriggerHandler::new("worktree.abortMerge"),
+    );
     registry.register(
         "worktree.resolveConflictsWithSubagent",
-        git_workflow::ResolveConflictsWithSubagentHandler,
+        RpcGenericTriggerHandler::new("worktree.resolveConflictsWithSubagent"),
     );
     registry.register(
         "repo.listSessions",

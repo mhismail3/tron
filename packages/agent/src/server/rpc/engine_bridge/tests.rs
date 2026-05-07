@@ -88,6 +88,15 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "voiceNotes.list",
     "transcribe.listModels",
     "sandbox.listContainers",
+    "worktree.getStatus",
+    "worktree.isGitRepo",
+    "worktree.list",
+    "worktree.getDiff",
+    "worktree.listSessionBranches",
+    "worktree.getCommittedDiff",
+    "worktree.listConflicts",
+    "git.listLocalBranches",
+    "git.listRemoteBranches",
 ];
 
 const GENERIC_WRITE_METHODS: &[&str] = &[
@@ -149,6 +158,25 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "config.setReasoningLevel",
     "memory.retain",
     "import.execute",
+    "git.clone",
+    "git.syncMain",
+    "git.push",
+    "worktree.acquire",
+    "worktree.release",
+    "worktree.stageFiles",
+    "worktree.unstageFiles",
+    "worktree.commit",
+    "worktree.merge",
+    "worktree.finalizeSession",
+    "worktree.deleteBranch",
+    "worktree.pruneBranches",
+    "worktree.discardFiles",
+    "worktree.rebaseOnMain",
+    "worktree.startMerge",
+    "worktree.resolveConflict",
+    "worktree.continueMerge",
+    "worktree.abortMerge",
+    "worktree.resolveConflictsWithSubagent",
 ];
 
 const SETTINGS_METHODS: &[&str] = &[
@@ -274,6 +302,37 @@ const HIGH_RISK_COMMAND_METHODS: &[&str] = &[
     "config.setReasoningLevel",
     "memory.retain",
     "import.execute",
+];
+
+const GIT_WORKTREE_METHODS: &[&str] = &[
+    "git.clone",
+    "git.syncMain",
+    "git.push",
+    "git.listLocalBranches",
+    "git.listRemoteBranches",
+    "worktree.getStatus",
+    "worktree.isGitRepo",
+    "worktree.commit",
+    "worktree.merge",
+    "worktree.list",
+    "worktree.getDiff",
+    "worktree.acquire",
+    "worktree.release",
+    "worktree.listSessionBranches",
+    "worktree.getCommittedDiff",
+    "worktree.finalizeSession",
+    "worktree.deleteBranch",
+    "worktree.pruneBranches",
+    "worktree.stageFiles",
+    "worktree.unstageFiles",
+    "worktree.discardFiles",
+    "worktree.rebaseOnMain",
+    "worktree.startMerge",
+    "worktree.listConflicts",
+    "worktree.resolveConflict",
+    "worktree.continueMerge",
+    "worktree.abortMerge",
+    "worktree.resolveConflictsWithSubagent",
 ];
 
 const SAFE_READ_COLLAPSE_METHODS: &[&str] = &[
@@ -651,6 +710,30 @@ async fn direct_engine_value(ctx: &RpcContext, method: &'static str, params: Val
     result.value.unwrap()
 }
 
+async fn direct_engine_error_body(ctx: &RpcContext, method: &'static str, params: Value) -> Value {
+    let registry = migration_parity_registry();
+    let request = RpcRequest {
+        id: format!("direct-{method}"),
+        method: method.to_owned(),
+        params: Some(params),
+    };
+    let envelope = RpcEngineInvocation::from_request(&registry, ctx, &request)
+        .unwrap()
+        .unwrap();
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            envelope.function_id,
+            envelope.params_payload,
+            envelope.causal_context,
+        ))
+        .await;
+    let error = result_to_rpc(result).expect_err("direct engine invocation should fail");
+    let mut body = error.to_error_body();
+    body.message = crate::server::rpc::validation::sanitize_error_message(&error);
+    serde_json::to_value(body).unwrap()
+}
+
 async fn rpc_dispatch_value(ctx: &RpcContext, method: &str, params: Value) -> Value {
     let registry = migration_parity_registry();
     let response = registry
@@ -665,6 +748,22 @@ async fn rpc_dispatch_value(ctx: &RpcContext, method: &str, params: Value) -> Va
         .await;
     assert!(response.success, "{method}: {:?}", response.error);
     response.result.unwrap()
+}
+
+async fn rpc_dispatch_error_body(ctx: &RpcContext, method: &str, params: Value) -> Value {
+    let registry = migration_parity_registry();
+    let response = registry
+        .dispatch(
+            RpcRequest {
+                id: format!("test-{method}"),
+                method: method.to_owned(),
+                params: Some(params),
+            },
+            ctx,
+        )
+        .await;
+    assert!(!response.success, "{method}: {:?}", response.result);
+    serde_json::to_value(response.error.unwrap()).unwrap()
 }
 
 fn normalize_unstable_fields(method: &str, mut value: Value) -> Value {
@@ -769,7 +868,7 @@ fn bridge_specs_cover_every_registered_rpc_method() {
     assert_eq!(spec_methods, registry_methods);
     assert_eq!(
         GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(),
-        116
+        144
     );
 }
 
@@ -1401,6 +1500,124 @@ fn bridge_specs_classify_first_high_risk_command_collapse() {
 }
 
 #[test]
+fn bridge_specs_classify_git_worktree_as_fully_generic_triggered() {
+    let mut registry = MethodRegistry::new();
+    handlers::register_all(&mut registry);
+    let specs = capability_specs(&registry).unwrap();
+
+    for &method in GIT_WORKTREE_METHODS {
+        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
+        assert_eq!(spec.migration_state, RpcMigrationState::GenericTrigger);
+        assert_eq!(spec.execution_policy, RpcExecutionPolicy::GenericTrigger);
+        assert_eq!(spec.schema_mode, RpcSchemaMode::StrictJson);
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered, not method-specific business logic"
+        );
+        assert!(
+            super::schemas::request_schema_for_method(method).is_some(),
+            "{method} must declare a request schema"
+        );
+        assert!(
+            super::schemas::response_schema_for_method(method).is_some(),
+            "{method} must declare a response schema"
+        );
+    }
+
+    for method in [
+        "worktree.acquire",
+        "worktree.release",
+        "worktree.stageFiles",
+        "worktree.unstageFiles",
+    ] {
+        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
+        assert_eq!(spec.risk_level, RiskLevel::Medium);
+        assert!(
+            !specs::function_definition_for_spec(spec)
+                .required_authority
+                .approval_required
+        );
+        assert!(
+            specs::function_definition_for_spec(spec)
+                .resource_lease
+                .is_some(),
+            "{method} must still be lease-guarded"
+        );
+    }
+
+    for method in [
+        "git.clone",
+        "git.syncMain",
+        "git.push",
+        "worktree.commit",
+        "worktree.merge",
+        "worktree.finalizeSession",
+        "worktree.deleteBranch",
+        "worktree.pruneBranches",
+        "worktree.discardFiles",
+        "worktree.rebaseOnMain",
+        "worktree.startMerge",
+        "worktree.resolveConflict",
+        "worktree.continueMerge",
+        "worktree.abortMerge",
+        "worktree.resolveConflictsWithSubagent",
+    ] {
+        let spec = specs.iter().find(|spec| spec.method == method).unwrap();
+        assert!(spec.risk_level >= RiskLevel::High);
+        let definition = specs::function_definition_for_spec(spec);
+        assert!(definition.required_authority.approval_required);
+        assert!(definition.resource_lease.is_some());
+        assert!(definition.compensation.is_some());
+    }
+}
+
+fn git_worktree_error_payload(method: &str) -> Value {
+    match method {
+        "git.clone" => json!({
+            "url": "not a git url",
+            "targetPath": "/tmp/tron-engine-bridge-noop"
+        }),
+        "git.syncMain" | "git.push" | "git.listLocalBranches" | "git.listRemoteBranches" => {
+            json!({"sessionId": "missing-session"})
+        }
+        "worktree.isGitRepo" => json!({"path": "/tmp"}),
+        "worktree.list" => json!({}),
+        "worktree.commit" => {
+            json!({"sessionId": "missing-session", "message": "commit", "stageAll": true})
+        }
+        "worktree.merge" => json!({"sessionId": "missing-session", "targetBranch": "main"}),
+        "worktree.deleteBranch" => json!({"sessionId": "missing-session", "branch": "session/x"}),
+        "worktree.stageFiles" | "worktree.unstageFiles" | "worktree.discardFiles" => {
+            json!({"sessionId": "missing-session", "paths": ["src/main.rs"]})
+        }
+        "worktree.startMerge" => json!({
+            "sessionId": "missing-session",
+            "sourceBranch": "feature",
+            "targetBranch": "main"
+        }),
+        "worktree.resolveConflict" => json!({
+            "sessionId": "missing-session",
+            "path": "src/main.rs",
+            "resolution": "ours"
+        }),
+        "worktree.abortMerge" => json!({"sessionId": "missing-session", "reason": "test"}),
+        _ => json!({"sessionId": "missing-session"}),
+    }
+}
+
+#[tokio::test]
+async fn git_worktree_generic_triggers_match_direct_engine_error_shapes() {
+    let ctx = make_test_context();
+
+    for method in GIT_WORKTREE_METHODS {
+        let payload = git_worktree_error_payload(method);
+        let direct = direct_engine_error_body(&ctx, method, payload.clone()).await;
+        let rpc = rpc_dispatch_error_body(&ctx, method, payload).await;
+        assert_eq!(direct, rpc, "{method}");
+    }
+}
+
+#[test]
 fn bridge_specs_assign_generic_methods_to_domain_workers() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
@@ -1426,6 +1643,8 @@ fn bridge_specs_assign_generic_methods_to_domain_workers() {
         ("voiceNotes.list", "voice_notes"),
         ("transcribe.listModels", "transcription"),
         ("sandbox.listContainers", "sandbox"),
+        ("git.push", "git"),
+        ("worktree.commit", "worktree"),
     ] {
         let spec = specs.iter().find(|spec| spec.method == method).unwrap();
         assert_eq!(spec.owner_worker, specs::worker_id(worker).unwrap());
@@ -2532,7 +2751,7 @@ async fn agent_prompt_publishes_engine_stream_lifecycle_records() {
     let actor = StreamActorScope::scoped(Some(session_id.clone()), None);
     let mut cursor = StreamCursor(0);
     let mut actions = BTreeSet::new();
-    for _ in 0..240 {
+    for _ in 0..600 {
         let page = ctx
             .engine_host
             .poll_stream("agent-prompt-lifecycle-test", Some(cursor), 100, &actor)

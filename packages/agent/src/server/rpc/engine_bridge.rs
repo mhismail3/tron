@@ -21,12 +21,17 @@
 //! and `message.delete` are now domain-owned functions too. The first
 //! higher-risk command package moved model switching, reasoning-level updates,
 //! manual memory retention, and import execution behind canonical domain
-//! functions with resource leases and high-risk contract metadata.
+//! functions with resource leases and high-risk contract metadata. The next
+//! high-risk package made those contracts executable engine policy and moved
+//! every public `git.*` and `worktree.*` method into canonical `git::*` /
+//! `worktree::*` functions guarded by host-enforced leases, compensation
+//! records, strict schemas, and approval metadata where autonomous agents
+//! could otherwise create risky side effects.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
-//! `mcp`, and `system` own executable function contracts and behavior
+//! `git`, `worktree`, `mcp`, and `system` own executable function contracts and behavior
 //! metadata. A separate `tool` worker registers built-in agent tools as
 //! canonical `tool::*` functions. Provider requests now resolve schemas from
 //! the live catalog, so built-ins, engine meta-tools, and eligible MCP
@@ -62,9 +67,10 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::engine::{
-    AuthorityRequirement, EffectClass, EngineError, EngineHostHandle, FunctionDefinition,
-    FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation, InvocationResult,
-    Provenance, Result as EngineResult, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
+    AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, EngineError,
+    EngineHostHandle, FunctionDefinition, FunctionId, IdempotencyContract,
+    InProcessFunctionHandler, Invocation, InvocationResult, Provenance, Result as EngineResult,
+    RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
@@ -436,6 +442,10 @@ fn register_hidden_agent_prompt_functions(
         .with_risk(RiskLevel::High)
         .with_required_authority(AuthorityRequirement::scope("agent.write"))
         .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_compensation(CompensationContract::new(
+            CompensationKind::ExternalIrreversible,
+            "hidden prompt apply functions start or drain live agent runtime work; rollback is manual and event-store history remains authoritative",
+        ))
         .with_provenance(Provenance::system())
         .with_request_schema(request_schema)
         .with_response_schema(response_schema);
@@ -541,6 +551,10 @@ fn register_hidden_job_apply_functions(
         .with_risk(RiskLevel::High)
         .with_required_authority(AuthorityRequirement::scope("job.write"))
         .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .with_compensation(CompensationContract::new(
+            CompensationKind::ManualOnly,
+            "hidden job apply functions delegate to the process manager; queue/idempotency records prevent duplicate starts or cancellations",
+        ))
         .with_provenance(Provenance::system());
         if let Some(schema) = schemas::request_schema_for_method(public_method) {
             definition = definition.with_request_schema(schema);
@@ -579,6 +593,10 @@ fn register_hidden_cron_schedule_function(
     .with_risk(RiskLevel::High)
     .with_required_authority(AuthorityRequirement::scope("cron.write"))
     .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "cron scheduled fires execute existing cron payload boundaries and are audited through cron run history",
+    ))
     .with_provenance(Provenance::system())
     .with_request_schema(json!({
         "type": "object",

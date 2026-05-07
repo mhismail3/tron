@@ -306,6 +306,10 @@ pub struct InvocationRecord {
     pub idempotency_key: Option<String>,
     /// Concrete idempotency scope.
     pub idempotency_scope: Option<IdempotencyScope>,
+    /// Resource leases acquired by the engine for this invocation.
+    pub resource_lease_ids: Vec<String>,
+    /// Durable compensation record status for this invocation.
+    pub compensation_status: Option<String>,
     /// Replayed invocation, when this was an idempotency replay/no-op.
     pub replayed_from: Option<InvocationId>,
     /// Whether the result was successful.
@@ -342,12 +346,26 @@ impl InvocationRecord {
             delivery_mode: invocation.delivery_mode,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
             idempotency_scope,
+            resource_lease_ids: Vec::new(),
+            compensation_status: None,
             replayed_from: result.replayed_from.clone(),
             succeeded: result.error.is_none(),
             result_value: result.value.clone(),
             error: result.error.clone(),
             timestamp: Utc::now(),
         }
+    }
+
+    /// Attach host-enforced contract bookkeeping.
+    #[must_use]
+    pub fn with_contracts(
+        mut self,
+        resource_lease_ids: Vec<String>,
+        compensation_status: Option<String>,
+    ) -> Self {
+        self.resource_lease_ids = resource_lease_ids;
+        self.compensation_status = compensation_status;
+        self
     }
 }
 

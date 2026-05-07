@@ -7,9 +7,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::engine::{
-    AcquireResourceLease, ActorKind, EngineError, InProcessFunctionHandler, Invocation,
-};
+use crate::engine::{ActorKind, EngineError, InProcessFunctionHandler, Invocation};
 use crate::events::EventStore;
 use crate::prompt_library::store;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
@@ -39,6 +37,8 @@ mod context;
 pub(super) mod cron;
 mod events;
 mod filesystem;
+mod git;
+mod git_workflow;
 mod import;
 mod job;
 mod logs;
@@ -57,6 +57,7 @@ mod skills;
 mod system;
 mod tool;
 mod tree;
+mod worktree;
 
 #[derive(Clone)]
 pub(super) struct RpcEngineDeps {
@@ -236,6 +237,36 @@ async fn rpc_function_value(
         | "import.listSessions"
         | "import.previewSession"
         | "import.execute" => import::handle(method, invocation, deps).await,
+        "git.clone" => git::handle(method, invocation, deps).await,
+        "git.syncMain"
+        | "git.push"
+        | "git.listLocalBranches"
+        | "git.listRemoteBranches"
+        | "worktree.finalizeSession"
+        | "worktree.rebaseOnMain"
+        | "worktree.startMerge"
+        | "worktree.listConflicts"
+        | "worktree.resolveConflict"
+        | "worktree.continueMerge"
+        | "worktree.abortMerge"
+        | "worktree.resolveConflictsWithSubagent" => {
+            git_workflow::handle(method, invocation, deps).await
+        }
+        "worktree.getStatus"
+        | "worktree.isGitRepo"
+        | "worktree.commit"
+        | "worktree.merge"
+        | "worktree.list"
+        | "worktree.getDiff"
+        | "worktree.acquire"
+        | "worktree.release"
+        | "worktree.listSessionBranches"
+        | "worktree.getCommittedDiff"
+        | "worktree.deleteBranch"
+        | "worktree.pruneBranches"
+        | "worktree.stageFiles"
+        | "worktree.unstageFiles"
+        | "worktree.discardFiles" => worktree::handle(method, invocation, deps).await,
         "browser.getStatus"
         | "voiceNotes.list"
         | "transcribe.listModels"
@@ -243,65 +274,6 @@ async fn rpc_function_value(
         _ => Err(RpcError::Internal {
             message: format!("RPC method {method} is not engine-owned"),
         }),
-    }
-}
-
-pub(super) async fn acquire_invocation_lease(
-    invocation: &Invocation,
-    deps: &RpcEngineDeps,
-    resource_kind: &str,
-    resource_id: String,
-    ttl_ms: i64,
-) -> Result<String, RpcError> {
-    let lease = deps
-        .engine_host
-        .acquire_resource_lease(AcquireResourceLease {
-            resource_kind: resource_kind.to_owned(),
-            resource_id,
-            holder_invocation_id: invocation.id.clone(),
-            function_id: invocation.function_id.clone(),
-            actor_id: invocation.causal_context.actor_id.clone(),
-            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
-            trace_id: invocation.causal_context.trace_id.clone(),
-            parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
-            idempotency_key: invocation.causal_context.idempotency_key.clone(),
-            ttl_ms,
-        })
-        .await
-        .map_err(super::engine_error_to_rpc)?;
-    Ok(lease.lease_id)
-}
-
-pub(super) async fn release_invocation_lease(
-    deps: &RpcEngineDeps,
-    lease_id: Option<String>,
-) -> Result<(), RpcError> {
-    if let Some(lease_id) = lease_id {
-        deps.engine_host
-            .release_resource_lease(&lease_id)
-            .await
-            .map_err(super::engine_error_to_rpc)?;
-    }
-    Ok(())
-}
-
-pub(super) async fn release_invocation_lease_after<T>(
-    deps: &RpcEngineDeps,
-    lease_id: String,
-    primary: Result<T, RpcError>,
-) -> Result<T, RpcError> {
-    let release_result = release_invocation_lease(deps, Some(lease_id)).await;
-    match (primary, release_result) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Err(error), Err(release_error)) => {
-            tracing::warn!(
-                ?release_error,
-                "resource lease release failed after engine function already failed"
-            );
-            Err(error)
-        }
     }
 }
 

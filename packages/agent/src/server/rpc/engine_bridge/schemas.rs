@@ -1,5 +1,17 @@
 use serde_json::{Value, json};
 
+fn session_scoped_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["sessionId"],
+        "additionalProperties": false,
+        "properties": {
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
 pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
     Some(match method {
         "system.ping" => json!({
@@ -923,6 +935,206 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "git.clone" => json!({
+            "type": "object",
+            "required": ["url", "targetPath"],
+            "additionalProperties": false,
+            "properties": {
+                "url": {"type": "string"},
+                "targetPath": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "git.syncMain" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "targetBranch": {"type": "string"},
+                "remote": {"type": "string"},
+                "fetchTimeoutMs": {"type": "integer"},
+                "prune": {"type": "boolean"},
+                "dryRun": {"type": "boolean"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "git.push" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "branch": {"type": "string"},
+                "remote": {"type": "string"},
+                "forceWithLease": {"type": "boolean"},
+                "setUpstream": {"type": "boolean"},
+                "dryRun": {"type": "boolean"},
+                "overrideProtected": {"type": "boolean"},
+                "protectedBranches": {"type": "array", "items": {"type": "string"}},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "git.listLocalBranches" => session_scoped_schema(),
+        "git.listRemoteBranches" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "remote": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.getStatus"
+        | "worktree.listSessionBranches"
+        | "worktree.getCommittedDiff"
+        | "worktree.acquire"
+        | "worktree.release"
+        | "worktree.pruneBranches"
+        | "worktree.listConflicts"
+        | "worktree.continueMerge" => session_scoped_schema(),
+        "worktree.isGitRepo" => json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.list" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.getDiff" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "file": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.commit" => json!({
+            "type": "object",
+            "required": ["sessionId", "message", "stageAll"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "message": {"type": "string"},
+                "stageAll": {"type": "boolean"},
+                "amend": {"type": "boolean"},
+                "signoff": {"type": "boolean"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.merge" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "targetBranch": {"type": "string"},
+                "strategy": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.finalizeSession" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "sourceBranch": {"type": "string"},
+                "targetBranch": {"type": "string"},
+                "strategy": {"type": "string"},
+                "newBranchName": {"type": "string"},
+                "preserveOld": {"type": "boolean"},
+                "rebranch": {"type": "boolean"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.deleteBranch" => json!({
+            "type": "object",
+            "required": ["sessionId", "branch"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "branch": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.stageFiles" | "worktree.unstageFiles" | "worktree.discardFiles" => json!({
+            "type": "object",
+            "required": ["sessionId", "paths"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "paths": {"type": "array", "items": {"type": "string"}},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.rebaseOnMain" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "strategy": {"type": "string"},
+                "mainBranch": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.startMerge" => json!({
+            "type": "object",
+            "required": ["sessionId", "sourceBranch", "targetBranch"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "sourceBranch": {"type": "string"},
+                "targetBranch": {"type": "string"},
+                "strategy": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.resolveConflict" => json!({
+            "type": "object",
+            "required": ["sessionId", "path", "resolution"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "path": {"type": "string"},
+                "resolution": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.abortMerge" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "reason": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "worktree.resolveConflictsWithSubagent" => json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         _ => return None,
     })
 }
@@ -1527,6 +1739,12 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "deleted": {"type": "boolean"}
             }
         }),
+        method if method.starts_with("git.") || method.starts_with("worktree.") => {
+            json!({
+                "type": "object",
+                "additionalProperties": true
+            })
+        }
         _ => return None,
     })
 }

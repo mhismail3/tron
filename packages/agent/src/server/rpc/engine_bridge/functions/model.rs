@@ -10,10 +10,8 @@ pub(super) async fn handle(
 ) -> Result<Value, RpcError> {
     match method {
         "model.list" => model_list_value(&invocation.payload, deps, allow_rpc_context).await,
-        "model.switch" => model_switch_value(&invocation.payload, invocation, deps).await,
-        "config.setReasoningLevel" => {
-            set_reasoning_level_value(&invocation.payload, invocation, deps).await
-        }
+        "model.switch" => model_switch_value(&invocation.payload, deps).await,
+        "config.setReasoningLevel" => set_reasoning_level_value(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("model method {method} is not engine-owned"),
         }),
@@ -39,11 +37,7 @@ async fn model_list_value(
     Ok(json!({ "models": rpc_model::known_models(auth_path).await }))
 }
 
-async fn model_switch_value(
-    payload: &Value,
-    invocation: &Invocation,
-    deps: &RpcEngineDeps,
-) -> Result<Value, RpcError> {
+async fn model_switch_value(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let requested_model = require_string_param(Some(payload), "model")?;
     let model = crate::llm::models::registry::strip_provider_prefix(&requested_model).to_string();
@@ -72,26 +66,9 @@ async fn model_switch_value(
         }
     }
 
-    let lease_id = super::acquire_invocation_lease(
-        invocation,
-        deps,
-        "session",
-        format!("session:{session_id}:model"),
-        60_000,
-    )
-    .await?;
-    let result = model_switch_under_lease(&session_id, &model, deps).await;
-    super::release_invocation_lease_after(deps, lease_id, result).await
-}
-
-async fn model_switch_under_lease(
-    session_id: &str,
-    model: &str,
-    deps: &RpcEngineDeps,
-) -> Result<Value, RpcError> {
     let session = deps
         .event_store
-        .get_session(session_id)
+        .get_session(&session_id)
         .map_err(|e| RpcError::Internal {
             message: e.to_string(),
         })?
@@ -101,7 +78,7 @@ async fn model_switch_under_lease(
         })?;
     let previous_model = session.latest_model.clone();
 
-    if deps.orchestrator.has_active_run(session_id) {
+    if deps.orchestrator.has_active_run(&session_id) {
         return Err(RpcError::Custom {
             code: "SESSION_BUSY".into(),
             message: "Cannot switch model while session is running".into(),
@@ -111,13 +88,13 @@ async fn model_switch_under_lease(
 
     let _ = deps
         .event_store
-        .update_latest_model(session_id, model)
+        .update_latest_model(&session_id, &model)
         .map_err(|e| RpcError::Internal {
             message: e.to_string(),
         })?;
 
     let _ = deps.event_store.append(&crate::events::AppendOptions {
-        session_id,
+        session_id: &session_id,
         event_type: crate::events::EventType::ConfigModelSwitch,
         payload: json!({
             "previousModel": previous_model,
@@ -127,13 +104,13 @@ async fn model_switch_under_lease(
         sequence: None,
     });
 
-    deps.session_manager.invalidate_session(session_id);
-    let is_active = deps.session_manager.is_active(session_id);
+    deps.session_manager.invalidate_session(&session_id);
+    let is_active = deps.session_manager.is_active(&session_id);
     let _ = deps
         .orchestrator
         .broadcast()
         .emit(crate::core::events::TronEvent::SessionUpdated {
-            base: crate::core::events::BaseEvent::now(session_id),
+            base: crate::core::events::BaseEvent::now(&session_id),
             title: session.title.clone(),
             model: Some(model.to_owned()),
             message_count: Some(session.event_count),
@@ -159,32 +136,14 @@ async fn model_switch_under_lease(
 
 async fn set_reasoning_level_value(
     payload: &Value,
-    invocation: &Invocation,
     deps: &RpcEngineDeps,
 ) -> Result<Value, RpcError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
-    let lease_id = super::acquire_invocation_lease(
-        invocation,
-        deps,
-        "session",
-        format!("session:{session_id}:reasoning"),
-        60_000,
-    )
-    .await?;
-    let result = set_reasoning_level_under_lease(payload, &session_id, deps).await;
-    super::release_invocation_lease_after(deps, lease_id, result).await
-}
-
-async fn set_reasoning_level_under_lease(
-    payload: &Value,
-    session_id: &str,
-    deps: &RpcEngineDeps,
-) -> Result<Value, RpcError> {
     let new_level = require_string_param(Some(payload), "level")?;
 
     let _ = deps
         .event_store
-        .get_session(session_id)
+        .get_session(&session_id)
         .map_err(|e| RpcError::Internal {
             message: e.to_string(),
         })?
@@ -195,7 +154,7 @@ async fn set_reasoning_level_under_lease(
 
     let state = deps
         .event_store
-        .get_state_at_head(session_id)
+        .get_state_at_head(&session_id)
         .map_err(|e| RpcError::Internal {
             message: format!("failed to resolve session state: {e}"),
         })?;
@@ -215,7 +174,7 @@ async fn set_reasoning_level_under_lease(
     }
 
     let _ = deps.event_store.append(&crate::events::AppendOptions {
-        session_id,
+        session_id: &session_id,
         event_type: crate::events::EventType::ConfigReasoningLevel,
         payload: json!({
             "previousLevel": previous_level,
@@ -225,7 +184,7 @@ async fn set_reasoning_level_under_lease(
         sequence: None,
     });
 
-    deps.session_manager.invalidate_session(session_id);
+    deps.session_manager.invalidate_session(&session_id);
     Ok(json!({
         "previousLevel": previous_level,
         "newLevel": new_level,

@@ -568,7 +568,20 @@ impl SqliteEngineLedgerStore {
     fn initialize_schema(&self) -> Result<()> {
         self.conn
             .execute_batch(SQLITE_SCHEMA)
-            .map_err(|err| sqlite_err("initialize_schema", err))
+            .map_err(|err| sqlite_err("initialize_schema", err))?;
+        ensure_column(
+            &self.conn,
+            "engine_invocations",
+            "resource_lease_ids_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        ensure_column(
+            &self.conn,
+            "engine_invocations",
+            "compensation_status",
+            "TEXT",
+        )?;
+        Ok(())
     }
 
     fn get_idempotency_entry(&self, key: &IdempotencyKey) -> Result<Option<IdempotencyEntry>> {
@@ -768,10 +781,11 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                     catalog_revision, actor_id, actor_kind_json, authority_grant_id,
                     authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
                     delivery_mode_json, idempotency_scope_kind, idempotency_scope_value,
+                    resource_lease_ids_json, compensation_status,
                     idempotency_key, replayed_from, succeeded, result_json,
                     error_json, timestamp)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 params![
                     record.invocation_id.as_str(),
                     record.function_id.as_str(),
@@ -800,6 +814,11 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                         .idempotency_scope
                         .as_ref()
                         .map(|scope| scope.value.as_str()),
+                    to_json_string(
+                        "append_invocation.resource_lease_ids",
+                        &record.resource_lease_ids
+                    )?,
+                    record.compensation_status.as_deref(),
                     record.idempotency_key.as_deref(),
                     record.replayed_from.as_ref().map(InvocationId::as_str),
                     i64::from(record.succeeded),
@@ -820,6 +839,7 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                         catalog_revision, actor_id, actor_kind_json, authority_grant_id,
                         authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
                         delivery_mode_json, idempotency_scope_kind, idempotency_scope_value,
+                        resource_lease_ids_json, compensation_status,
                         idempotency_key, replayed_from, succeeded, result_json,
                         error_json, timestamp
                  FROM engine_invocations
@@ -860,19 +880,25 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                 idempotency_scope_value: row
                     .get(14)
                     .map_err(|err| sqlite_err("inv.scope_value", err))?,
-                idempotency_key: row
+                resource_lease_ids_json: row
                     .get(15)
+                    .map_err(|err| sqlite_err("inv.resource_leases", err))?,
+                compensation_status: row
+                    .get(16)
+                    .map_err(|err| sqlite_err("inv.compensation_status", err))?,
+                idempotency_key: row
+                    .get(17)
                     .map_err(|err| sqlite_err("inv.idempotency_key", err))?,
                 replayed_from: row
-                    .get(16)
+                    .get(18)
                     .map_err(|err| sqlite_err("inv.replayed_from", err))?,
                 succeeded: row
-                    .get(17)
+                    .get(19)
                     .map_err(|err| sqlite_err("inv.succeeded", err))?,
-                result_json: row.get(18).map_err(|err| sqlite_err("inv.result", err))?,
-                error_json: row.get(19).map_err(|err| sqlite_err("inv.error", err))?,
+                result_json: row.get(20).map_err(|err| sqlite_err("inv.result", err))?,
+                error_json: row.get(21).map_err(|err| sqlite_err("inv.error", err))?,
                 timestamp: row
-                    .get(20)
+                    .get(22)
                     .map_err(|err| sqlite_err("inv.timestamp", err))?,
             })?);
         }
@@ -1019,6 +1045,8 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   delivery_mode_json       TEXT NOT NULL,
   idempotency_scope_kind   TEXT,
   idempotency_scope_value  TEXT,
+  resource_lease_ids_json  TEXT NOT NULL DEFAULT '[]',
+  compensation_status      TEXT,
   idempotency_key          TEXT,
   replayed_from            TEXT,
   succeeded                INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
@@ -1083,6 +1111,8 @@ struct RawInvocationRow {
     delivery_mode_json: String,
     idempotency_scope_kind: Option<String>,
     idempotency_scope_value: Option<String>,
+    resource_lease_ids_json: String,
+    compensation_status: Option<String>,
     idempotency_key: Option<String>,
     replayed_from: Option<String>,
     succeeded: i64,
@@ -1162,6 +1192,11 @@ fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationRecord> {
             (Some(kind), Some(value)) => Some(IdempotencyScope::new(kind, value)),
             _ => None,
         },
+        resource_lease_ids: from_json_string(
+            "invocation.resource_lease_ids",
+            &row.resource_lease_ids_json,
+        )?,
+        compensation_status: row.compensation_status,
         replayed_from: row.replayed_from.map(InvocationId::new).transpose()?,
         succeeded: row.succeeded == 1,
         result_value: optional_from_json_string("invocation.result", &row.result_json)?,
@@ -1241,6 +1276,37 @@ fn from_json_string<T: DeserializeOwned>(operation: &'static str, value: &str) -
         operation,
         message: err.to_string(),
     })
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &'static str,
+    column: &'static str,
+    declaration: &'static str,
+) -> Result<()> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|err| sqlite_err("ensure_column.prepare", err))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|err| sqlite_err("ensure_column.query", err))?;
+    while let Some(row) = rows
+        .next()
+        .map_err(|err| sqlite_err("ensure_column.next", err))?
+    {
+        let name: String = row
+            .get(1)
+            .map_err(|err| sqlite_err("ensure_column.name", err))?;
+        if name == column {
+            return Ok(());
+        }
+    }
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {declaration}"),
+        [],
+    )
+    .map_err(|err| sqlite_err("ensure_column.alter", err))?;
+    Ok(())
 }
 
 fn parse_time(operation: &'static str, value: &str) -> Result<DateTime<Utc>> {

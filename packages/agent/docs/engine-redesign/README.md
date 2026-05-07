@@ -181,9 +181,11 @@ first-class workers.
   executes live discovery, scoped inspection, cursor watch, delegated
   invocation, and promotion without exposing those built-ins to ordinary worker
   replacement. The handle is now the adapter boundary: it prepares invocation
-  policy/idempotency/schema under lock, executes in-process handlers outside
-  the host lock, catches panics as structured errors, and finishes ledger
-  records under lock.
+  policy/idempotency/schema and typed resource-lease requirements under lock,
+  executes resolvers and in-process handlers outside the host lock, catches
+  panics as structured errors, releases acquired leases, persists compensation
+  records for high-risk effects, and finishes invocation ledger records under
+  lock.
 - `ledger.rs` defines the pluggable engine-ledger boundary plus in-memory and
   isolated SQLite implementations for catalog-change audit records,
   invocation records, and idempotency reservations/results. Its SQLite schema
@@ -413,6 +415,16 @@ Implemented:
   engine-ledger idempotency, and resource-lease contract metadata. This raises
   generic-trigger coverage to 116 while the public JSON-RPC method count stays
   170;
+- high-risk contract enforcement plus git/worktree collapse: resource leases
+  and compensation contracts are now enforced by the host invocation lifecycle,
+  compensation records are persisted in the isolated engine ledger, and every
+  public `git.*` / `worktree.*` method is a marker-only `json_rpc` trigger into
+  canonical `git::*` / `worktree::*` functions. Safe stage/acquire/release
+  commands remain agent-visible with explicit idempotency and leases; publishing,
+  branch deletion, merge/rebase, clone/sync, discard, finalize, and conflict
+  automation carry approval-required high-risk contracts. This raises
+  generic-trigger coverage to 144 while the public JSON-RPC method count stays
+  170;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -424,9 +436,9 @@ Still deferred:
 
 - RPC migrations and generic-trigger conversion for the remaining high-risk
   handler-only groups beyond the current collapsed set, especially auth,
-  git/worktree mutation, sandbox lifecycle/execution, transcription mutation,
-  browser/display mutation, voice-note mutation, device mutation,
-  system shutdown/update actions, and `session.resume`;
+  sandbox lifecycle/execution, transcription mutation, browser/display
+  mutation, voice-note mutation, device mutation, system shutdown/update
+  actions, and `session.resume`;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
 - replacement of the compatibility EventBridge fallback and provider-native

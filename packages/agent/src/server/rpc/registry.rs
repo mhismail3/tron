@@ -287,6 +287,7 @@ impl MethodRegistry {
             || method.starts_with("tree.")
             || method.starts_with("import.list")
             || method.starts_with("import.preview")
+            || method.starts_with("git.list")
             || method.starts_with("worktree.get")
             || method.starts_with("worktree.is")
             || method.starts_with("worktree.list")

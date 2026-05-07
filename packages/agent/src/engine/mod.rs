@@ -29,8 +29,9 @@
 //!   production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution;
-//! - resource leases are a first-class primitive for high-risk shared-state
-//!   mutations, so functions can serialize one domain resource without
+//! - resource leases and compensation contracts are first-class primitives for
+//!   high-risk shared-state mutations, so the host can acquire/release one
+//!   domain resource, record auditable rollback/compensation state, and avoid
 //!   blocking the whole host or inventing per-handler locks;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
@@ -51,6 +52,7 @@
 
 pub mod approval;
 pub mod capabilities;
+pub mod compensation;
 pub mod discovery;
 pub mod errors;
 pub mod external;
@@ -74,6 +76,10 @@ pub use approval::{
     InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
 };
 pub use capabilities::AgentCapabilityClient;
+pub use compensation::{
+    EngineCompensationRecord, EngineCompensationStatus, InMemoryEngineCompensationStore,
+    SqliteEngineCompensationStore,
+};
 pub use discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use errors::{EngineError, Result};
 pub use external::{EngineExternalWorkerRuntime, ExternalWorkerConnection};
@@ -117,11 +123,12 @@ pub use streams::{
 pub use triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
-    CatalogSubjectKind, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,
-    FunctionRevision, IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind,
-    Provenance, ReplayBehavior, RiskLevel, TriggerDefinition, TriggerRevision,
-    TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind, WorkerLifecycleState,
-    WorkerRevision,
+    CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode, EffectClass,
+    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
+    IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance, ReplayBehavior,
+    ResourceLeaseFailureBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition,
+    TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind,
+    WorkerLifecycleState, WorkerRevision,
 };
 
 #[cfg(test)]

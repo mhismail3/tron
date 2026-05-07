@@ -23,7 +23,7 @@ pub enum WorkerProtocolMessage {
     /// Engine catalog snapshot.
     CatalogSnapshot(CatalogSnapshot),
     /// Worker registers one function.
-    RegisterFunction(RegisterFunction),
+    RegisterFunction(Box<RegisterFunction>),
     /// Worker registers one trigger.
     RegisterTrigger(RegisterTrigger),
     /// Engine asks a worker to invoke a function.

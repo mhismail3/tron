@@ -21,10 +21,11 @@ use super::ledger::{
 use super::registry::LiveCatalog;
 use super::types::{
     AuthorityRequirement, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
-    CatalogSubjectKind, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,
-    FunctionRevision, IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind,
-    Provenance, ReplayBehavior, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
-    VisibilityScope, WorkerDefinition, WorkerKind,
+    CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode, EffectClass,
+    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
+    IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance, ReplayBehavior,
+    ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
+    WorkerDefinition, WorkerKind,
 };
 use super::{
     AcquireResourceLease, AgentCapabilityClient, ApprovalStatus, EngineExternalWorkerRuntime,
@@ -3239,6 +3240,124 @@ async fn resource_lease_expiry_and_sqlite_reopen_preserve_records() {
 }
 
 #[tokio::test]
+async fn host_invocation_enforces_resource_lease_and_records_compensation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("engine-ledger.sqlite");
+    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            write_function("alpha::write", "alpha")
+                .with_risk(RiskLevel::High)
+                .with_required_authority(
+                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
+                )
+                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+                    "session",
+                    "session:{sessionId}:write",
+                    30_000,
+                ))
+                .with_compensation(CompensationContract::new(
+                    CompensationKind::ManualOnly,
+                    "test writes are manually compensated",
+                )),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let result = handle
+        .invoke(host_invocation(
+            "alpha::write",
+            json!({"sessionId": "s1", "value": 1}),
+            mutating_causal("lease-key").with_scope("alpha.write"),
+        ))
+        .await;
+
+    assert_eq!(result.error, None);
+    let host = handle.lock().await;
+    let record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .rev()
+        .find(|record| record.function_id == fid("alpha::write"))
+        .unwrap();
+    assert_eq!(record.resource_lease_ids.len(), 1);
+    assert_eq!(record.compensation_status.as_deref(), Some("recorded"));
+    let lease_id = record.resource_lease_ids[0].clone();
+    drop(host);
+
+    let lease = handle.get_resource_lease(&lease_id).await.unwrap().unwrap();
+    assert_eq!(lease.status, EngineResourceLeaseStatus::Released);
+    let compensation = handle.list_compensation_records().await.unwrap();
+    assert_eq!(compensation.len(), 1);
+    assert_eq!(compensation[0].resource_lease_ids, vec![lease_id]);
+    assert!(compensation[0].succeeded);
+    drop(handle);
+
+    let reopened = EngineHostHandle::open_sqlite(&path).unwrap();
+    let compensation = reopened.list_compensation_records().await.unwrap();
+    assert_eq!(compensation.len(), 1);
+    assert_eq!(compensation[0].function_id, fid("alpha::write"));
+}
+
+#[tokio::test]
+async fn host_resource_lease_conflict_fails_before_handler_execution() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    handle
+        .register_function_for_setup(
+            write_function("alpha::locked", "alpha")
+                .with_risk(RiskLevel::High)
+                .with_required_authority(
+                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
+                )
+                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+                    "session",
+                    "session:{sessionId}:locked",
+                    30_000,
+                ))
+                .with_compensation(CompensationContract::new(
+                    CompensationKind::ManualOnly,
+                    "lease conflict should be auditable",
+                )),
+            Some(Arc::new(CountingHandler {
+                calls: Arc::clone(&calls),
+            })),
+            false,
+        )
+        .unwrap();
+    let held = handle
+        .acquire_resource_lease(lease_request("session", "session:s1:locked", 30_000))
+        .await
+        .unwrap();
+
+    let result = handle
+        .invoke(host_invocation(
+            "alpha::locked",
+            json!({"sessionId": "s1"}),
+            mutating_causal("locked-key").with_scope("alpha.write"),
+        ))
+        .await;
+
+    assert!(matches!(
+        result.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("resource lease conflict")
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let compensation = handle.list_compensation_records().await.unwrap();
+    assert_eq!(compensation.len(), 1);
+    assert!(!compensation[0].succeeded);
+    let _ = handle.release_resource_lease(&held.lease_id).await.unwrap();
+}
+
+#[tokio::test]
 async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
@@ -3482,10 +3601,11 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
         EffectClass::PureRead,
     )
     .with_provenance(Provenance::system().with_session_id("session-a"));
-    let register = super::WorkerProtocolMessage::RegisterFunction(super::RegisterFunction {
-        definition: function,
-        default_visibility: VisibilityScope::Session,
-    });
+    let register =
+        super::WorkerProtocolMessage::RegisterFunction(Box::new(super::RegisterFunction {
+            definition: function,
+            default_visibility: VisibilityScope::Session,
+        }));
     if let super::WorkerProtocolMessage::RegisterFunction(message) = &register {
         assert_eq!(message.default_visibility, VisibilityScope::Session);
         assert_eq!(message.definition.visibility, VisibilityScope::Session);
@@ -3529,7 +3649,11 @@ async fn agent_high_risk_invocation_creates_pending_approval_and_stream_event() 
     )
     .with_required_authority(AuthorityRequirement::scope("danger.write").with_approval_required())
     .with_risk(RiskLevel::High)
-    .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "approval test delete is manually compensated",
+    ));
     handle
         .register_function_for_setup(function, Some(handler()), false)
         .unwrap();
@@ -3701,7 +3825,11 @@ async fn approval_resolution_resumes_original_invocation_with_original_causality
     )
     .with_required_authority(AuthorityRequirement::scope("danger.write").with_approval_required())
     .with_risk(RiskLevel::High)
-    .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "approval test write is manually compensated",
+    ));
     handle
         .register_function_for_setup(
             function,

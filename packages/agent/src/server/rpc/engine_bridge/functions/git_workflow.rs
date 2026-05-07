@@ -1,11 +1,8 @@
-//! Legacy git/worktree workflow wire-contract fixtures.
+//! Canonical git/worktree workflow engine functions.
 //!
-//! Production `git.*` and `worktree.*` workflow registrations are marker-only
-//! generic triggers into canonical engine functions. This module remains
-//! `#[cfg(test)]` so the old handler tests keep verifying coordinator error
-//! mapping and wire shapes during the migration.
-//!
-//! Thin wrappers around the coordinator's Phase 3 operations:
+//! JSON-RPC now reaches these operations through `json_rpc` triggers targeting
+//! canonical `git::*` and `worktree::*` function ids. The private operation
+//! adapters below preserve the coordinator's Phase 3 behavior:
 //! - `git.syncMain`, `git.push`, `git.listLocalBranches`
 //! - `worktree.finalizeSession`
 //! - `worktree.startMerge`, `worktree.listConflicts`,
@@ -13,7 +10,7 @@
 //!   `worktree.abortMerge`, `worktree.resolveConflictsWithSubagent`
 //! - `repo.listSessions`, `repo.getDivergence`
 //!
-//! Handler implementations intentionally keep business logic minimal:
+//! Operation implementations intentionally keep business logic minimal:
 //! param extraction → coordinator call → JSON response. Event emission
 //! (`WorktreeMainSynced`, `RepoMainAdvanced`, lock acquire/release, …) is
 //! owned by the coordinator layer so it fires for every caller (tool,
@@ -41,6 +38,39 @@ use crate::worktree::types::{
 };
 use crate::worktree::{ConflictedFile, WorktreeCoordinator, WorktreeError};
 use std::path::PathBuf;
+
+use super::RpcEngineDeps;
+use crate::engine::Invocation;
+
+pub(super) async fn handle(
+    method: &str,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let params = Some(invocation.payload.clone());
+    let ctx = deps.rpc_context.as_ref();
+    match method {
+        "git.syncMain" => SyncMainHandler.handle(params, ctx).await,
+        "git.push" => PushHandler.handle(params, ctx).await,
+        "git.listLocalBranches" => ListLocalBranchesHandler.handle(params, ctx).await,
+        "git.listRemoteBranches" => ListRemoteBranchesHandler.handle(params, ctx).await,
+        "worktree.finalizeSession" => FinalizeSessionHandler.handle(params, ctx).await,
+        "worktree.rebaseOnMain" => RebaseOnMainHandler.handle(params, ctx).await,
+        "worktree.startMerge" => StartMergeHandler.handle(params, ctx).await,
+        "worktree.listConflicts" => ListConflictsHandler.handle(params, ctx).await,
+        "worktree.resolveConflict" => ResolveConflictHandler.handle(params, ctx).await,
+        "worktree.continueMerge" => ContinueMergeHandler.handle(params, ctx).await,
+        "worktree.abortMerge" => AbortMergeHandler.handle(params, ctx).await,
+        "worktree.resolveConflictsWithSubagent" => {
+            ResolveConflictsWithSubagentHandler
+                .handle(params, ctx)
+                .await
+        }
+        _ => Err(RpcError::Internal {
+            message: format!("RPC method {method} is not git workflow-owned"),
+        }),
+    }
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -629,530 +659,5 @@ impl MethodHandler for ResolveConflictsWithSubagentHandler {
             "sessionId": session_id,
             "reason": outcome.reason,
         }))
-    }
-}
-
-// ── repo.listSessions ────────────────────────────────────────────────
-
-/// Handler for `repo.listSessions` — sibling sessions sharing the repo.
-#[cfg(test)]
-pub struct ListRepoSessionsHandler;
-
-#[cfg(test)]
-#[async_trait]
-impl MethodHandler for ListRepoSessionsHandler {
-    #[instrument(skip(self, ctx), fields(method = "repo.listSessions"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let coord = require_coordinator(ctx)?;
-
-        let caller_info = coord
-            .get_info(&session_id)
-            .ok_or_else(|| RpcError::NotFound {
-                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
-                message: format!("No worktree found for session '{session_id}'"),
-            })?;
-        let caller_repo = caller_info.repo_root.clone();
-
-        // Filter to peers sharing the caller's repo, then fan-out the
-        // per-session queries concurrently. With N peers in the same repo
-        // each doing 2–3 `git` subprocess calls, sequential iteration was
-        // observably slow when opening the Repo Sessions sheet; `join_all`
-        // reduces wall time to ~max(query_time) instead of the sum.
-        let peers: Vec<_> = coord
-            .list_active()
-            .into_iter()
-            .filter(|info| info.repo_root == caller_repo)
-            .collect();
-
-        let coord_ref = &coord;
-        let futs = peers.into_iter().map(|info| async move {
-            let has_conflicts = coord_ref
-                .list_conflicts(&info.session_id)
-                .await
-                .map(|v| !v.is_empty())
-                .unwrap_or(false);
-            let (commit_count, base_behind) = if let Some(ref base_branch) = info.base_branch {
-                coord_ref
-                    .ahead_behind(&info.repo_root, base_branch, &info.branch)
-                    .await
-                    .unwrap_or((0, 0))
-            } else {
-                (0, 0)
-            };
-            json!({
-                "sessionId": info.session_id,
-                "branch": info.branch,
-                "baseBranch": info.base_branch,
-                "repoRoot": info.repo_root.to_string_lossy(),
-                "commitCount": commit_count,
-                "baseBehind": base_behind,
-                "hasConflicts": has_conflicts,
-            })
-        });
-        let out = futures::future::join_all(futs).await;
-
-        Ok(json!({ "sessions": out }))
-    }
-}
-
-// ── repo.getDivergence ───────────────────────────────────────────────
-
-/// Handler for `repo.getDivergence` — ahead/behind vs main and origin.
-#[cfg(test)]
-pub struct GetDivergenceHandler;
-
-#[cfg(test)]
-#[async_trait]
-impl MethodHandler for GetDivergenceHandler {
-    #[instrument(skip(self, ctx), fields(method = "repo.getDivergence"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let coord = require_coordinator(ctx)?;
-
-        let info = coord
-            .get_info(&session_id)
-            .ok_or_else(|| RpcError::NotFound {
-                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
-                message: format!("No worktree found for session '{session_id}'"),
-            })?;
-        let main_branch = info.base_branch.clone().unwrap_or_else(|| "main".into());
-
-        // Session-vs-main: null if `main_branch` itself doesn't resolve
-        // (e.g. detached, renamed default, fresh empty repo).
-        let main_pair = coord
-            .ahead_behind_optional(&info.repo_root, &main_branch, &info.branch)
-            .await
-            .unwrap_or(None);
-
-        // Origin-vs-main: null if no `origin` remote is configured or the
-        // remote ref hasn't been fetched. Distinguishes "no remote" from
-        // "synced at 0/0" so the UI can fade/hide these chips instead of
-        // silently lying about divergence.
-        let origin_pair = if coord.has_remote(&info.repo_root, "origin").await {
-            let remote_ref = format!("origin/{}", main_branch);
-            coord
-                .ahead_behind_optional(&info.repo_root, &remote_ref, &main_branch)
-                .await
-                .unwrap_or(None)
-        } else {
-            None
-        };
-
-        Ok(json!({
-            "aheadMain": main_pair.map(|(a, _)| a as u64),
-            "behindMain": main_pair.map(|(_, b)| b as u64),
-            "aheadOrigin": origin_pair.map(|(a, _)| a as u64),
-            "behindOrigin": origin_pair.map(|(_, b)| b as u64),
-            "hasOrigin": origin_pair.is_some(),
-        }))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
-    use serde_json::json;
-
-    #[tokio::test]
-    async fn sync_main_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = SyncMainHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[tokio::test]
-    async fn push_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = PushHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[tokio::test]
-    async fn finalize_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = FinalizeSessionHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    // ── Phase A — rebase_on_main parser & handler guards ───────────
-
-    #[tokio::test]
-    async fn rebase_on_main_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = RebaseOnMainHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[tokio::test]
-    async fn rebase_on_main_missing_session_id() {
-        let ctx = make_test_context();
-        let err = RebaseOnMainHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[tokio::test]
-    async fn rebase_on_main_rejects_squash_strategy() {
-        let ctx = make_test_context();
-        let err = RebaseOnMainHandler
-            .handle(Some(json!({"sessionId": "s1", "strategy": "squash"})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-        assert!(err.to_string().contains("squash"));
-    }
-
-    #[tokio::test]
-    async fn rebase_on_main_rejects_unknown_strategy() {
-        let ctx = make_test_context();
-        let err = RebaseOnMainHandler
-            .handle(
-                Some(json!({"sessionId": "s1", "strategy": "wizardry"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[test]
-    fn parse_strategy_defaults_to_rebase_when_absent() {
-        assert_eq!(parse_rebase_strategy(None).unwrap(), MergeStrategy::Rebase);
-        assert_eq!(
-            parse_rebase_strategy(Some("rebase")).unwrap(),
-            MergeStrategy::Rebase
-        );
-        assert_eq!(
-            parse_rebase_strategy(Some("merge")).unwrap(),
-            MergeStrategy::Merge
-        );
-        assert!(parse_rebase_strategy(Some("squash")).is_err());
-        assert!(parse_rebase_strategy(Some("foo")).is_err());
-    }
-
-    #[tokio::test]
-    async fn start_merge_requires_branches() {
-        let ctx = make_test_context();
-        let err = StartMergeHandler
-            .handle(Some(json!({"sessionId": "s1", "sourceBranch": "x"})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[tokio::test]
-    async fn list_conflicts_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = ListConflictsHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[tokio::test]
-    async fn resolve_conflict_rejects_bad_resolution() {
-        let ctx = make_test_context();
-        let err = ResolveConflictHandler
-            .handle(
-                Some(json!({
-                    "sessionId": "s1",
-                    "path": "f.txt",
-                    "resolution": "bogus",
-                })),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[tokio::test]
-    async fn continue_merge_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = ContinueMergeHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[tokio::test]
-    async fn abort_merge_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = AbortMergeHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[tokio::test]
-    async fn subagent_handler_returns_stub() {
-        let ctx = make_test_context();
-        // Without coordinator it errors; we just validate session id
-        // validation runs first.
-        let err = ResolveConflictsWithSubagentHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[tokio::test]
-    async fn list_repo_sessions_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = ListRepoSessionsHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[tokio::test]
-    async fn get_divergence_requires_coordinator() {
-        let ctx = make_test_context();
-        let err = GetDivergenceHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("not enabled"));
-    }
-
-    #[test]
-    fn parse_resolution_accepts_three_variants() {
-        assert_eq!(parse_resolution("ours").unwrap(), ConflictResolution::Ours);
-        assert_eq!(
-            parse_resolution("theirs").unwrap(),
-            ConflictResolution::Theirs
-        );
-        assert_eq!(
-            parse_resolution("markResolved").unwrap(),
-            ConflictResolution::MarkResolved
-        );
-        assert!(parse_resolution("???").is_err());
-    }
-
-    // ── PushHandler integration tests for typed-error mapping ─────
-    //
-    // These prove the handler routes through `map_worktree_error`
-    // rather than swallowing WorktreeError variants into
-    // INTERNAL_ERROR (the bug that shipped as a user-visible
-    // "internal error" popup). Every assertion here is a regression
-    // guard: if a future refactor re-introduces the generic
-    // `.map_err(|e| RpcError::Internal{...})?` pattern, these fail.
-
-    async fn push_test_context() -> (
-        tempfile::TempDir,
-        crate::server::rpc::context::RpcContext,
-        String,
-    ) {
-        use crate::events::EventStore;
-        use crate::runtime::orchestrator::orchestrator::Orchestrator;
-        use crate::runtime::orchestrator::session_manager::SessionManager;
-        use crate::server::rpc::context::RpcContext;
-        use crate::server::rpc::session_context::ContextArtifactsService;
-        use crate::skills::registry::SkillRegistry;
-        use crate::worktree::types::AcquireResult;
-        use crate::worktree::{WorktreeConfig, WorktreeCoordinator};
-        use std::sync::Arc;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let dir = tmp.path().to_str().unwrap().to_string();
-        // Seed a real repo (no origin — push will hit NoRemoteConfigured
-        // when we pick a non-protected branch name).
-        let run = |args: &[&str]| {
-            std::process::Command::new("git")
-                .args(args)
-                .output()
-                .unwrap();
-        };
-        run(&["init", &dir]);
-        run(&["-C", &dir, "config", "user.email", "t@t.com"]);
-        run(&["-C", &dir, "config", "user.name", "T"]);
-        run(&["-C", &dir, "config", "commit.gpgsign", "false"]);
-        run(&["-C", &dir, "symbolic-ref", "HEAD", "refs/heads/main"]);
-        std::fs::write(tmp.path().join("seed.txt"), "seed").unwrap();
-        run(&["-C", &dir, "add", "-A"]);
-        run(&["-C", &dir, "commit", "-m", "init"]);
-
-        let pool =
-            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
-        {
-            let conn = pool.get().unwrap();
-            let _ = crate::events::run_migrations(&conn).unwrap();
-        }
-        let store = Arc::new(EventStore::new(pool));
-        let mgr = Arc::new(SessionManager::new(store.clone()));
-        let orch = Arc::new(Orchestrator::new(mgr.clone()));
-        let coord = Arc::new(WorktreeCoordinator::new(
-            WorktreeConfig::default(),
-            store.clone(),
-        ));
-
-        let sid = mgr
-            .create_session("m", &dir, Some("push-test"), None)
-            .unwrap();
-        // Acquire a session worktree so active_info resolves.
-        match coord.maybe_acquire(&sid, tmp.path()).await.unwrap() {
-            AcquireResult::Acquired(_) => {}
-            other => panic!("expected Acquired, got {other:?}"),
-        };
-        let home = crate::server::rpc::handlers::test_helpers::unique_tron_home();
-        let settings_path =
-            crate::server::rpc::handlers::test_helpers::test_user_profile_path(&home);
-        let profile_runtime =
-            crate::server::rpc::handlers::test_helpers::test_profile_runtime(&home);
-        let auth_path = crate::server::rpc::handlers::test_helpers::test_auth_path(&home);
-
-        let ctx = RpcContext {
-            orchestrator: orch,
-            session_manager: mgr,
-            event_store: store,
-            engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
-            skill_registry: Arc::new(parking_lot::RwLock::new(SkillRegistry::new())),
-            memory_registry: Arc::new(parking_lot::Mutex::new(
-                crate::runtime::memory::MemoryRegistry::new(),
-            )),
-            settings_path,
-            profile_runtime,
-            agent_deps: None,
-            server_start_time: std::time::Instant::now(),
-            transcription_engine: Arc::new(std::sync::OnceLock::new()),
-            subagent_manager: None,
-            health_tracker: Arc::new(crate::llm::ProviderHealthTracker::new()),
-            shutdown_coordinator: None,
-            origin: "localhost:9847".to_string(),
-            cron_scheduler: None,
-            codex_app_server: None,
-            worktree_coordinator: Some(coord.clone()),
-            device_request_broker: None,
-            context_artifacts: Arc::new(ContextArtifactsService::new()),
-            auth_path,
-            broadcast_manager: None,
-            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-            mcp_router: None,
-            display_stream_registry: None,
-            process_manager: None,
-            job_manager: None,
-            output_buffer_registry: None,
-            hook_abort_tracker: Arc::new(
-                crate::runtime::hooks::abort_tracker::HookAbortTracker::new(),
-            ),
-            ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
-            onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
-            release_fetcher: None,
-            updater_state_path: std::path::PathBuf::from("/tmp/tron-test-updater-state.json"),
-        };
-
-        (tmp, ctx, sid)
-    }
-
-    #[tokio::test]
-    async fn push_handler_protected_branch_returns_typed_code() {
-        // The user-reported bug. Was `INTERNAL_ERROR`; now `PROTECTED_BRANCH`.
-        let (_tmp, ctx, sid) = push_test_context().await;
-        let err = PushHandler
-            .handle(Some(json!({"sessionId": sid, "branch": "main"})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(
-            err.code(),
-            "PROTECTED_BRANCH",
-            "protected-branch push must surface typed code, got {err:?}"
-        );
-        assert!(
-            err.to_string().contains("main"),
-            "message should carry the branch name; got {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn push_handler_no_remote_returns_typed_code() {
-        // Session has a worktree but no origin remote configured. scm::push
-        // classifies this as NoRemoteConfigured; the handler must expose it
-        // as NO_REMOTE, not INTERNAL_ERROR.
-        let (_tmp, ctx, sid) = push_test_context().await;
-        let err = PushHandler
-            .handle(Some(json!({"sessionId": sid, "branch": "feature/x"})), &ctx)
-            .await
-            .unwrap_err();
-        assert_eq!(
-            err.code(),
-            "NO_REMOTE",
-            "missing-origin push must surface typed code, got {err:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn push_handler_no_session_returns_worktree_not_found() {
-        // Coordinator is present but the session is unknown. Must surface
-        // WORKTREE_NOT_FOUND (was INTERNAL_ERROR with a raw Rust message).
-        let (_tmp, ctx, _sid) = push_test_context().await;
-        let err = PushHandler
-            .handle(
-                Some(json!({
-                    "sessionId": "session-that-does-not-exist",
-                    "branch": "feature/x",
-                })),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(
-            err.code(),
-            "WORKTREE_NOT_FOUND",
-            "unknown session must surface typed NotFound code, got {err:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn push_handler_missing_session_id_is_invalid_params() {
-        // Preserves existing param-validation behavior across the refactor.
-        let (_tmp, ctx, _sid) = push_test_context().await;
-        let err = PushHandler.handle(Some(json!({})), &ctx).await.unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-    }
-
-    #[test]
-    fn sync_outcome_json_shapes() {
-        let v = sync_outcome_json(&SyncOutcome::UpToDate { head: "abc".into() });
-        assert_eq!(v["outcome"], "upToDate");
-
-        let v = sync_outcome_json(&SyncOutcome::FastForwarded {
-            old_head: "a".into(),
-            new_head: "b".into(),
-            advanced_by: 3,
-        });
-        assert_eq!(v["outcome"], "fastForwarded");
-        assert_eq!(v["advancedBy"], 3);
-
-        let v = sync_outcome_json(&SyncOutcome::Blocked(SyncBlockReason::DirtyWorkingTree));
-        assert_eq!(v["outcome"], "blocked");
-        assert_eq!(v["reason"], "dirtyWorkingTree");
-
-        let v = sync_outcome_json(&SyncOutcome::Blocked(SyncBlockReason::Diverged {
-            ahead: 2,
-            behind: 3,
-        }));
-        assert_eq!(v["reason"], "diverged");
-        assert_eq!(v["ahead"], 2);
-        assert_eq!(v["behind"], 3);
     }
 }

@@ -828,6 +828,22 @@ impl LiveCatalog {
         prepared: PreparedSyncInvocation,
         handler_result: Result<Value>,
     ) -> InvocationResult {
+        self.finish_prepared_sync_invocation_with_contracts(
+            prepared,
+            handler_result,
+            Vec::new(),
+            None,
+        )
+    }
+
+    /// Finish an invocation with host-enforced contract bookkeeping.
+    pub(in crate::engine) fn finish_prepared_sync_invocation_with_contracts(
+        &mut self,
+        prepared: PreparedSyncInvocation,
+        handler_result: Result<Value>,
+        resource_lease_ids: Vec<String>,
+        compensation_status: Option<String>,
+    ) -> InvocationResult {
         let PreparedSyncInvocation {
             invocation,
             function,
@@ -890,15 +906,23 @@ impl LiveCatalog {
                     captured_revision,
                     err,
                 );
-                return self.finish_invocation(
+                return self.finish_invocation_with_contracts(
                     &invocation,
                     result,
                     Some(reservation.key.scope.clone()),
+                    resource_lease_ids,
+                    compensation_status,
                 );
             }
         }
         let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
-        self.finish_invocation(&invocation, result, idempotency_scope)
+        self.finish_invocation_with_contracts(
+            &invocation,
+            result,
+            idempotency_scope,
+            resource_lease_ids,
+            compensation_status,
+        )
     }
 
     fn result_for_existing_idempotency(
@@ -1102,6 +1126,23 @@ impl LiveCatalog {
         self.record_invocation_result(invocation, result, idempotency_scope)
     }
 
+    fn finish_invocation_with_contracts(
+        &mut self,
+        invocation: &Invocation,
+        result: InvocationResult,
+        idempotency_scope: Option<IdempotencyScope>,
+        resource_lease_ids: Vec<String>,
+        compensation_status: Option<String>,
+    ) -> InvocationResult {
+        self.record_invocation_result_with_contracts(
+            invocation,
+            result,
+            idempotency_scope,
+            resource_lease_ids,
+            compensation_status,
+        )
+    }
+
     /// Record an invocation result produced by a privileged host path.
     pub fn record_invocation_result(
         &mut self,
@@ -1109,7 +1150,26 @@ impl LiveCatalog {
         result: InvocationResult,
         idempotency_scope: Option<IdempotencyScope>,
     ) -> InvocationResult {
-        let record = InvocationRecord::from_result(invocation, &result, idempotency_scope);
+        self.record_invocation_result_with_contracts(
+            invocation,
+            result,
+            idempotency_scope,
+            Vec::new(),
+            None,
+        )
+    }
+
+    /// Record an invocation result with host-enforced contract metadata.
+    pub fn record_invocation_result_with_contracts(
+        &mut self,
+        invocation: &Invocation,
+        result: InvocationResult,
+        idempotency_scope: Option<IdempotencyScope>,
+        resource_lease_ids: Vec<String>,
+        compensation_status: Option<String>,
+    ) -> InvocationResult {
+        let record = InvocationRecord::from_result(invocation, &result, idempotency_scope)
+            .with_contracts(resource_lease_ids, compensation_status);
         if let Err(err) = self.ledger.append_invocation(&record) {
             return InvocationResult::error(
                 invocation,

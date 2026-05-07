@@ -5,7 +5,8 @@ use super::errors::{EngineError, Result};
 use super::invocation::{CausalContext, Invocation};
 use super::schema;
 use super::types::{
-    DeliveryMode, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
+    CompensationKind, DeliveryMode, FunctionDefinition, RiskLevel, TriggerDefinition,
+    TriggerTypeDefinition, VisibilityScope,
 };
 
 /// Delegation-only authority scope used by engine internals to execute hidden
@@ -29,6 +30,57 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
         {
             return Err(EngineError::PolicyViolation(format!(
                 "irreversible agent-visible function {} requires approval metadata",
+                function.id
+            )));
+        }
+        if function.effect_class.is_mutating()
+            && function.risk_level >= RiskLevel::High
+            && !function.required_authority.approval_required
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "high-risk agent-visible function {} requires approval metadata",
+                function.id
+            )));
+        }
+    }
+
+    if function.effect_class.is_mutating() && function.risk_level >= RiskLevel::High {
+        let Some(compensation) = &function.compensation else {
+            return Err(EngineError::PolicyViolation(format!(
+                "high-risk function {} requires a compensation contract",
+                function.id
+            )));
+        };
+        if compensation.kind != CompensationKind::None && !compensation.has_notes() {
+            return Err(EngineError::PolicyViolation(format!(
+                "high-risk function {} requires compensation notes",
+                function.id
+            )));
+        }
+    }
+
+    if let Some(lease) = &function.resource_lease {
+        if !function.effect_class.is_mutating() {
+            return Err(EngineError::PolicyViolation(format!(
+                "read function {} cannot require a resource lease",
+                function.id
+            )));
+        }
+        if !lease.exclusive {
+            return Err(EngineError::PolicyViolation(format!(
+                "function {} requested a non-exclusive resource lease; shared leases are deferred",
+                function.id
+            )));
+        }
+        if lease.ttl_ms <= 0 {
+            return Err(EngineError::PolicyViolation(format!(
+                "function {} resource lease ttl must be positive",
+                function.id
+            )));
+        }
+        if lease.resource_kind.trim().is_empty() || lease.resource_id_template.trim().is_empty() {
+            return Err(EngineError::PolicyViolation(format!(
+                "function {} resource lease kind/template must not be empty",
                 function.id
             )));
         }

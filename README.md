@@ -320,7 +320,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 | `ManageJob` | Inspect, signal, and clean up background jobs (Bash backgrounded processes + subagents). |
 | `Wait` | Block until specified background jobs complete or hit a timeout. |
 
-Source-control operations (sync main, push, switch branches, finalize a session into main, resolve merge conflicts) are driven by the user via the iOS Source Control sheet — the agent does not have typed git tools. When a session has a worktree, the agent is told through the profile-backed `profiles/default/prompts/git-workflow.md` block that it can inspect state and make commits via `Bash git …` but must defer destructive / publishing operations to the user.
+Source-control operations are now canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block still tells agents how to inspect state and use `Bash git ...` where appropriate while deferring risky / publishing operations to the user.
 
 ---
 
@@ -686,7 +686,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
-The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, and `leases.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, and high-risk resource leases; live catalog definitions are still in memory.
+The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, and compensation audit records; live catalog definitions are still in memory.
 
 ### Tables
 
@@ -956,7 +956,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
     +-- database/                  SQLite event store and audit records
     |   +-- log.db                 Events, sessions, tasks, journals, automation state, profile/context audit
     |   +-- log.db.lock            OS-level flock sidecar; one Tron process owns it while running
-    |   +-- engine-ledger.sqlite   Engine invocations, idempotency, catalog, streams, state, queues, approvals, and resource leases
+    |   +-- engine-ledger.sqlite   Engine invocations, idempotency, catalog, streams, state, queues, approvals, resource leases, and compensation records
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts
     |   +-- auth.lock              Auth-file refresh lock

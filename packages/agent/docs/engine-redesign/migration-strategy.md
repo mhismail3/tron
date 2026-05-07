@@ -773,10 +773,9 @@ Semantics:
 High-risk deferred groups stay explicitly blocked from migration until their
 contracts cover strict schema, domain authority, idempotency, risk metadata,
 approval metadata where required, and marker-only registration. Those groups
-include auth, git/worktree mutation, sandbox lifecycle/execution,
-transcription audio/download, browser/display stream mutation, voice-note
-mutation, device mutation, system shutdown/update actions, and
-`session.resume`.
+include auth, sandbox lifecycle/execution, transcription audio/download,
+browser/display stream mutation, voice-note mutation, device mutation, system
+shutdown/update actions, and `session.resume`.
 
 ### WP67-WP74 resource leases and first high-risk command collapse
 
@@ -814,6 +813,41 @@ Acceptance gates:
 - High-risk generic triggers must carry strict schemas, domain authority,
   idempotency, approval metadata, resource-lock metadata, stream topics, and a
   rollback/compensation note.
+
+### WP75-WP84 enforced contracts and git/worktree collapse
+
+High-risk contracts are now executable engine policy, not just metadata
+discipline in domain functions. `ResourceLeaseRequirement` definitions are
+resolved before handler execution, leases are acquired by the host, handlers run
+outside the host lock, and leases are released on success, error, or panic.
+Invocation records now carry acquired lease ids and compensation status, and
+the isolated engine ledger persists compensation records for high-risk
+invocations so future approval/rollback workers can inspect what happened.
+
+The package raises generic-trigger coverage from 116 to 144 while keeping the
+public JSON-RPC method count at 170:
+
+- `git.clone/syncMain/push/listLocalBranches/listRemoteBranches` now route to
+  canonical `git::*` functions.
+- `worktree.getStatus/isGitRepo/list/getDiff/getCommittedDiff/listSessionBranches/listConflicts`
+  are canonical pure reads.
+- `worktree.acquire/release/stageFiles/unstageFiles` are safe mutating
+  `worktree.write` capabilities with explicit idempotency, path/session
+  leases, and no autonomous approval requirement.
+- `worktree.commit/merge/finalizeSession/deleteBranch/pruneBranches/discardFiles/rebaseOnMain/startMerge/resolveConflict/continueMerge/abortMerge/resolveConflictsWithSubagent`
+  are high-risk mutating capabilities with strict schemas, idempotency,
+  approval-required metadata for autonomous agents, host-enforced leases, and
+  compensation notes.
+
+Acceptance gates:
+
+- All 28 git/worktree registrations are marker-only generic triggers.
+- Legacy git/worktree handler modules are test-only wire-contract fixtures.
+- Direct canonical invocation and JSON-RPC trigger dispatch produce matching
+  sanitized error shapes for the migrated surface.
+- No high-risk generic trigger can register without strict schema, authority,
+  idempotency, approval metadata when agent-visible, resource lease metadata,
+  stream topic metadata, and compensation notes.
 
 ## Phase 7: tools, MCP, approvals, and effects
 

@@ -14,7 +14,7 @@ pub(super) async fn handle(
         "import.listSources" => list_sources(deps).await,
         "import.listSessions" => list_sessions(&invocation.payload, deps).await,
         "import.previewSession" => preview_session(&invocation.payload, deps).await,
-        "import.execute" => execute_import(&invocation.payload, invocation, deps).await,
+        "import.execute" => execute_import(&invocation.payload, deps).await,
         _ => Err(RpcError::Internal {
             message: format!("import method {method} is not engine-owned"),
         }),
@@ -164,24 +164,8 @@ async fn preview_session(payload: &Value, deps: &RpcEngineDeps) -> Result<Value,
         .await
 }
 
-async fn execute_import(
-    payload: &Value,
-    invocation: &Invocation,
-    deps: &RpcEngineDeps,
-) -> Result<Value, RpcError> {
+async fn execute_import(payload: &Value, deps: &RpcEngineDeps) -> Result<Value, RpcError> {
     let session_path = require_string_param(Some(payload), "sessionPath")?;
-    let resource_id = canonical_import_resource_id(&session_path);
-    let lease_id =
-        super::acquire_invocation_lease(invocation, deps, "import", resource_id, 300_000).await?;
-    let result = execute_import_under_lease(payload, &session_path, deps).await;
-    super::release_invocation_lease_after(deps, lease_id, result).await
-}
-
-async fn execute_import_under_lease(
-    payload: &Value,
-    session_path: &str,
-    deps: &RpcEngineDeps,
-) -> Result<Value, RpcError> {
     let tags: Vec<String> = payload
         .get("tags")
         .and_then(Value::as_array)
@@ -240,12 +224,6 @@ async fn execute_import_under_lease(
             }
         })
         .await
-}
-
-fn canonical_import_resource_id(session_path: &str) -> String {
-    std::fs::canonicalize(session_path)
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| session_path.to_owned())
 }
 
 fn check_already_imported(

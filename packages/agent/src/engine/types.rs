@@ -349,6 +349,102 @@ impl IdempotencyScope {
     }
 }
 
+/// Fail-closed behavior when a declared resource lease cannot be acquired.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResourceLeaseFailureBehavior {
+    /// Reject the invocation before handler execution.
+    FailClosed,
+}
+
+/// Engine-owned resource lease contract for a mutating function.
+///
+/// The first implementation resolves `resource_id_template` from invocation
+/// payload fields, for example `session:{sessionId}:worktree`. Keeping this
+/// metadata on the function definition makes resource ownership visible through
+/// discovery and enforceable by the host before any domain handler runs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceLeaseRequirement {
+    /// Resolver identifier. `payload_template` is the built-in v1 resolver.
+    pub resolver_id: String,
+    /// Domain resource kind, such as `session`, `worktree`, or `git`.
+    pub resource_kind: String,
+    /// Template used by the resolver to derive a canonical resource id.
+    pub resource_id_template: String,
+    /// Lease TTL in milliseconds.
+    pub ttl_ms: i64,
+    /// Whether this lease is exclusive. Only exclusive leases exist in v1.
+    pub exclusive: bool,
+    /// Stream topic for lease lifecycle records.
+    pub stream_topic: String,
+    /// Behavior when resolution/acquisition fails.
+    pub failure_behavior: ResourceLeaseFailureBehavior,
+}
+
+impl ResourceLeaseRequirement {
+    /// Build an exclusive payload-template lease requirement.
+    #[must_use]
+    pub fn exclusive_template(
+        resource_kind: impl Into<String>,
+        resource_id_template: impl Into<String>,
+        ttl_ms: i64,
+    ) -> Self {
+        Self {
+            resolver_id: "payload_template".to_owned(),
+            resource_kind: resource_kind.into(),
+            resource_id_template: resource_id_template.into(),
+            ttl_ms,
+            exclusive: true,
+            stream_topic: "resource.leases".to_owned(),
+            failure_behavior: ResourceLeaseFailureBehavior::FailClosed,
+        }
+    }
+}
+
+/// Compensation strategy for a mutating function.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CompensationKind {
+    /// No compensation is needed.
+    None,
+    /// The domain event log preserves enough information for manual recovery.
+    EventSourced,
+    /// A documented inverse command exists.
+    InverseCommandAvailable,
+    /// Manual recovery is required.
+    ManualOnly,
+    /// The side effect is external and cannot be safely undone automatically.
+    ExternalIrreversible,
+}
+
+/// Durable compensation contract attached to high-risk functions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompensationContract {
+    /// Compensation kind.
+    pub kind: CompensationKind,
+    /// Required operator-facing notes.
+    pub notes: String,
+}
+
+impl CompensationContract {
+    /// Create a compensation contract with notes.
+    #[must_use]
+    pub fn new(kind: CompensationKind, notes: impl Into<String>) -> Self {
+        Self {
+            kind,
+            notes: notes.into(),
+        }
+    }
+
+    /// Whether this contract has useful notes for audit/recovery.
+    #[must_use]
+    pub fn has_notes(&self) -> bool {
+        !self.notes.trim().is_empty()
+    }
+}
+
 /// Authority needed to discover or invoke a capability.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorityRequirement {
@@ -512,6 +608,10 @@ pub struct FunctionDefinition {
     pub risk_level: RiskLevel,
     /// Idempotency contract.
     pub idempotency: Option<IdempotencyContract>,
+    /// Engine-enforced resource lease requirement.
+    pub resource_lease: Option<ResourceLeaseRequirement>,
+    /// Durable compensation/audit contract.
+    pub compensation: Option<CompensationContract>,
     /// Required authority.
     pub required_authority: AuthorityRequirement,
     /// Allowed delivery modes.
@@ -547,6 +647,8 @@ impl FunctionDefinition {
             effect_class,
             risk_level: RiskLevel::Low,
             idempotency: None,
+            resource_lease: None,
+            compensation: None,
             required_authority: AuthorityRequirement::none(),
             allowed_delivery_modes: vec![DeliveryMode::Sync],
             health: FunctionHealth::Healthy,
@@ -559,6 +661,20 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_idempotency(mut self, contract: IdempotencyContract) -> Self {
         self.idempotency = Some(contract);
+        self
+    }
+
+    /// Attach an engine-enforced resource lease requirement.
+    #[must_use]
+    pub fn with_resource_lease(mut self, requirement: ResourceLeaseRequirement) -> Self {
+        self.resource_lease = Some(requirement);
+        self
+    }
+
+    /// Attach a durable compensation contract.
+    #[must_use]
+    pub fn with_compensation(mut self, contract: CompensationContract) -> Self {
+        self.compensation = Some(contract);
         self
     }
 

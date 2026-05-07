@@ -1,15 +1,9 @@
-//! Legacy worktree wire-contract fixtures.
+//! Canonical worktree engine functions.
 //!
-//! Production worktree RPC registrations are marker-only generic triggers into
-//! canonical `worktree::*` engine functions. This module remains `#[cfg(test)]`
-//! so the historical handler tests keep locking down the coordinator-facing
-//! wire behavior while production business logic lives in
-//! `engine_bridge::functions::worktree`.
-//!
-//! All worktree operations require a `WorktreeCoordinator` on `RpcContext`.
-//! `GetDiffHandler` is the one exception — it works on any session's working
-//! directory (with or without a worktree) since "show me the diff" is useful
-//! regardless of isolation mode.
+//! JSON-RPC now reaches these operations through `json_rpc` triggers targeting
+//! canonical `worktree::*` function ids. The structs below are private
+//! operation adapters for the engine-owned function module, not registry-owned
+//! RPC handlers.
 
 use crate::worktree::{count_diff_stats, split_diff_by_file};
 use async_trait::async_trait;
@@ -23,6 +17,38 @@ use crate::server::rpc::handlers::{
 };
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::CommitOptions;
+
+use super::RpcEngineDeps;
+use crate::engine::Invocation;
+
+pub(super) async fn handle(
+    method: &str,
+    invocation: &Invocation,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let params = Some(invocation.payload.clone());
+    let ctx = deps.rpc_context.as_ref();
+    match method {
+        "worktree.getStatus" => GetStatusHandler.handle(params, ctx).await,
+        "worktree.isGitRepo" => IsGitRepoHandler.handle(params, ctx).await,
+        "worktree.commit" => CommitHandler.handle(params, ctx).await,
+        "worktree.merge" => MergeHandler.handle(params, ctx).await,
+        "worktree.list" => ListHandler.handle(params, ctx).await,
+        "worktree.getDiff" => GetDiffHandler.handle(params, ctx).await,
+        "worktree.acquire" => AcquireHandler.handle(params, ctx).await,
+        "worktree.release" => ReleaseHandler.handle(params, ctx).await,
+        "worktree.listSessionBranches" => ListSessionBranchesHandler.handle(params, ctx).await,
+        "worktree.getCommittedDiff" => GetCommittedDiffHandler.handle(params, ctx).await,
+        "worktree.deleteBranch" => DeleteBranchHandler.handle(params, ctx).await,
+        "worktree.pruneBranches" => PruneBranchesHandler.handle(params, ctx).await,
+        "worktree.stageFiles" => StageFilesHandler.handle(params, ctx).await,
+        "worktree.unstageFiles" => UnstageFilesHandler.handle(params, ctx).await,
+        "worktree.discardFiles" => DiscardFilesHandler.handle(params, ctx).await,
+        _ => Err(RpcError::Internal {
+            message: format!("RPC method {method} is not worktree-owned"),
+        }),
+    }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -840,7 +866,34 @@ fn require_session_and_paths(params: Option<&Value>) -> Result<(String, Vec<Stri
             message: "Missing or empty required parameter: paths".into(),
         });
     }
+    for path in &paths {
+        validate_relative_worktree_path(path)?;
+    }
     Ok((session_id, paths))
+}
+
+fn validate_relative_worktree_path(path: &str) -> Result<(), RpcError> {
+    if path.is_empty() || path.contains('\0') {
+        return Err(RpcError::InvalidParams {
+            message: "Path must be a non-empty relative path".into(),
+        });
+    }
+    let candidate = std::path::Path::new(path);
+    if candidate.is_absolute()
+        || candidate.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(RpcError::InvalidParams {
+            message: format!("Path escapes repository root: {path}"),
+        });
+    }
+    Ok(())
 }
 
 /// Stage files: `git add -- <paths>`
@@ -1021,7 +1074,3 @@ impl MethodHandler for DiscardFilesHandler {
         Ok(serde_json::json!({ "success": true }))
     }
 }
-
-#[cfg(test)]
-#[path = "worktree_tests.rs"]
-mod tests;
