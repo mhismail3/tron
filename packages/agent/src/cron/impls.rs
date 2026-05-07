@@ -223,6 +223,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
+                engine_host: None,
             },
         );
 

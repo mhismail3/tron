@@ -29,7 +29,7 @@ canonical domain functions for generic-triggered methods, non-routable
 `rpc::<method>` metadata for handler-only inventory, and `json_rpc` trigger
 bindings from the legacy method names into the canonical functions.
 
-Fully collapsed groups now include prompt library, settings, logs, skills,
+Fully collapsed groups now include prompt library, settings, logs, MCP, skills,
 notifications, plan, events, approval get/list/resolve, job controls, all
 current agent controls including `agent.prompt`, and basic filesystem.
 Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
@@ -61,7 +61,7 @@ answers are explicit enough to test.
 | `message` | 1 | `message::delete`. | Session/client. | Idempotent write. | Event-sourced deletion marker. |
 | `logs` | 2 | Fully generic-triggered `observability::logs::*` compatibility functions. | Admin/client filtered. | Ingest append-only with system idempotency; recent read. | Trace/log correlation mandatory; duplicate transport ingests replay before DB insertion. |
 | `memory` | 1 | `memory::retain`. | Session/workspace with policy. | Idempotent/append memory update. | User memory files remain governed; no hardcoded personal data. |
-| `mcp` | 8 | `mcp::*` worker functions. | Agent/client/admin filtered. | Lifecycle writes require idempotency; search/list are reads. | MCP tool calls inherit caller authority and trace. |
+| `mcp` | 8 | Fully generic-triggered `mcp` domain worker functions plus live discovered MCP tool functions. | Agent/client/admin filtered; discovered tools are system-visible until a safer server/tool policy is available. | Lifecycle writes use system idempotency; status/list are reads; discovered MCP tools default to approval-required external side effects. | Server lifecycle changes refresh the live catalog, unregister absent tools, publish catalog/status stream records, and MCP tool calls inherit caller authority and trace. |
 | `skill` | 6 | Fully generic-triggered `skills` domain worker functions over registry and session state. | Session/workspace. | Activate/deactivate are session-scoped idempotent writes; refresh is system-scoped. | Skill provenance and denied/allowed tools affect capability views; activation events are causally linked. |
 | `filesystem` / `file` | 4 | `filesystem` domain worker; home/list/read/createDir are generic-triggered compatibility functions. | Session/workspace by path policy. | Reads plus idempotent createDir; broader file writes later. | Path guards, workspace scope, and file effect metadata required before broader writes migrate. |
 | `tree` | 5 | `event_graph::*`. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
@@ -95,7 +95,7 @@ Live fabric mapping:
 |-----------------|------------------|--------------------------|
 | `agent.prompt` | Generic `json_rpc` trigger into canonical `agent::prompt`; it enqueues hidden `agent::prompt_apply` and queue-drain work. | Record actor, session, catalog/function revision, trigger id, queue receipt, idempotency key, child apply invocation, and prompt causality. |
 | Turn runner | `agent::run_turn` function. | Uses stable meta-capabilities over live catalog. |
-| Tool executor | `engine::capabilities::invoke` over tool functions. | Enforce visibility, authority, effect, idempotency, and approvals before each tool. |
+| Tool executor | Engine invocation over canonical `tool::*` functions. | Local-model policy, guardrails, and hooks still run before execution; actual tool execution runs under engine idempotency/ledger records with the original runtime `ToolContext` preserved. |
 | Context manager | `context::*` functions. | Context can include live discovery instructions, not static full catalog dumps. |
 | Hooks | Trigger conditions or post-invocation triggers. | Loop/depth and idempotency policy prevents runaway cascades. |
 | Subagents | Agent worker invocations with delegated authority. | Child agents inherit narrowed grants, not full parent authority. |
@@ -122,15 +122,16 @@ Live fabric mapping:
 | Bash/process | `process::*`, `job::*`, later `sandbox::*`. | High risk; queue-backed, audited, and approval-gated by policy. |
 | UI confirmation/questions | `approval::*`, `device::*`. | Approval trigger resolves pending invocation. |
 | Notify/display/computer-use | `client::*`, `display::*`, `computer::*`. | Client/device effects with explicit visibility and risk. |
-| Web fetch/search | `web::*`. | External reads; auth and network policy recorded. |
+| Web fetch/search | `tool::*` now, later `web::*`. | External network reads default to conservative approval-required tool invocation metadata until first-class web worker policy lands. |
 | Engine discover/inspect/watch/invoke | `engine::*` plus canonical domain functions. | Stable agent meta-tools over the live catalog; mutating invokes require explicit idempotency and approval-gated functions fail closed. |
 | SpawnSubagent | `agent::spawn`, `agent::run_turn`. | Delegated authority and session-scoped visibility. |
 | ManageJob/Wait | `job::*`. | Queue/job idempotency and causal status streams. |
-| MCP meta-tools | `mcp::search`, `mcp::call`. | Preserve compressed catalog for large MCP tool sets; calls inherit authority. |
+| MCP meta-tools and discovered tools | `mcp::*`. | Preserve compressed catalog for large MCP tool sets while registering discovered tools as live external-side-effect capabilities; calls inherit authority, trace, server/tool provenance, and engine idempotency. |
 
-MCP already resembles a live capability bridge. Tron should keep the searchable
-meta-tool pattern for large catalogs while allowing selected MCP functions to
-be promoted into the live catalog when safe.
+MCP already resembles a live capability bridge. Tron keeps the searchable
+meta-tool pattern for large catalogs and now projects discovered tools into the
+live catalog immediately, with conservative effect/risk defaults until a
+per-tool classifier can safely downgrade pure reads.
 
 ## Event store, state, streams, and queues
 

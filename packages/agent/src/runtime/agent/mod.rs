@@ -8,13 +8,14 @@
 //! | `turn_runner` | Single turn: build context → LLM call → process stream → tools |
 //! | `stream_processor` | Consumes `Stream<StreamEvent>`, drives the select loop |
 //! | `stream_state` | Accumulator struct + event handlers for stream processing |
-//! | `tool_executor` | Execute tool calls with pre/post hooks, guardrails, cancellation |
+//! | `tool_executor` | Execute tool calls with policy/hooks/cancellation, then route actual execution through canonical `tool::*` engine functions when an engine host is present |
 //! | `event_emitter` | Broadcast channel wrapper for agent lifecycle events |
 //! | `compaction_handler` | Post-turn compaction trigger and subagent summarizer |
 //!
 //! ## Data Flow
 //!
-//! `turn_runner` → LLM provider → `stream_processor` → `tool_executor` → loop
+//! `turn_runner` → LLM provider → `stream_processor` → `tool_executor` →
+//! optional `tool::*` engine invocation → loop
 
 pub mod compaction_handler;
 pub mod event_emitter;

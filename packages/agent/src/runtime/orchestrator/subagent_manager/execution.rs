@@ -167,6 +167,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            engine_host: None,
         },
     );
 
@@ -338,6 +339,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            engine_host: None,
         },
     );
 

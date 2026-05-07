@@ -1613,6 +1613,53 @@ async fn bridge_feeds_events_to_accumulator() {
 }
 
 #[tokio::test]
+async fn stream_first_runtime_events_publish_rpc_shape_to_engine_stream() {
+    let map = Arc::new(TurnAccumulatorMap::new());
+    let (tx, _) = broadcast::channel(16);
+    let bm = Arc::new(BroadcastManager::new());
+    let host = crate::engine::EngineHostHandle::new_in_memory().unwrap();
+    host.subscribe_stream(
+        "test-events-session".to_owned(),
+        "events.session".to_owned(),
+        crate::engine::StreamCursor(0),
+        crate::engine::VisibilityScope::Session,
+        Some("s1".to_owned()),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let rx = tx.subscribe();
+    let bridge =
+        EventBridge::new(rx, bm, CancellationToken::new(), map).with_engine_streams(host.clone());
+    let handle = tokio::spawn(bridge.run());
+
+    let _ = tx.send(TronEvent::MessageUpdate {
+        base: BaseEvent::now("s1"),
+        content: "hello".into(),
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let page = host
+        .poll_stream(
+            "test-events-session",
+            Some(crate::engine::StreamCursor(0)),
+            10,
+            &crate::engine::StreamActorScope::scoped(Some("s1".to_owned()), None),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.events.len(), 1);
+    let wrapped = &page.events[0].payload["__rpcEvent"];
+    assert_eq!(wrapped["type"], "agent.text_delta");
+    assert_eq!(wrapped["sessionId"], "s1");
+    assert_eq!(wrapped["data"]["delta"], "hello");
+
+    drop(tx);
+    let _ = handle.await;
+}
+
+#[tokio::test]
 async fn bridge_accumulator_clears_on_agent_end() {
     let map = Arc::new(TurnAccumulatorMap::new());
     let (tx, _) = broadcast::channel(16);

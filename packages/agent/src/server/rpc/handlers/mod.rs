@@ -12,12 +12,12 @@
 //!
 //! ## `register_capabilities` — Domain features
 //!
-//! `skills`, `skill_session`, prompt library, and basic filesystem operations
-//! are fully generic-triggered engine functions;
+//! `mcp`, `skills`, `skill_session`, prompt library, and basic filesystem
+//! operations are fully generic-triggered engine functions;
 //!
 //! The remaining capability modules are
 //! `tree` (visualization, branches), `import` (listSources, listSessions,
-//! previewSession, execute), `mcp`, and `cron`
+//! previewSession, execute), and `cron`
 //!
 //! ## `register_platform` — Platform-specific
 //!
@@ -306,14 +306,32 @@ fn register_core(registry: &mut MethodRegistry) {
 
 fn register_capabilities(registry: &mut MethodRegistry) {
     // MCP
-    registry.register("mcp.status", mcp::McpStatusHandler);
-    registry.register("mcp.addServer", mcp::McpAddServerHandler);
-    registry.register("mcp.removeServer", mcp::McpRemoveServerHandler);
-    registry.register("mcp.enableServer", mcp::McpEnableServerHandler);
-    registry.register("mcp.disableServer", mcp::McpDisableServerHandler);
-    registry.register("mcp.restartServer", mcp::McpRestartServerHandler);
-    registry.register("mcp.reload", mcp::McpReloadHandler);
-    registry.register("mcp.listTools", mcp::McpListToolsHandler);
+    registry.register("mcp.status", RpcGenericTriggerHandler::new("mcp.status"));
+    registry.register(
+        "mcp.addServer",
+        RpcGenericTriggerHandler::new("mcp.addServer"),
+    );
+    registry.register(
+        "mcp.removeServer",
+        RpcGenericTriggerHandler::new("mcp.removeServer"),
+    );
+    registry.register(
+        "mcp.enableServer",
+        RpcGenericTriggerHandler::new("mcp.enableServer"),
+    );
+    registry.register(
+        "mcp.disableServer",
+        RpcGenericTriggerHandler::new("mcp.disableServer"),
+    );
+    registry.register(
+        "mcp.restartServer",
+        RpcGenericTriggerHandler::new("mcp.restartServer"),
+    );
+    registry.register("mcp.reload", RpcGenericTriggerHandler::new("mcp.reload"));
+    registry.register(
+        "mcp.listTools",
+        RpcGenericTriggerHandler::new("mcp.listTools"),
+    );
 
     // Skills
     registry.register("skill.list", RpcGenericTriggerHandler::new("skill.list"));

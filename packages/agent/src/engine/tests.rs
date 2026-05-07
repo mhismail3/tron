@@ -27,8 +27,8 @@ use super::types::{
 };
 use super::{
     AgentCapabilityClient, ApprovalStatus, EngineExternalWorkerRuntime, EngineHost,
-    EngineHostHandle, EngineQueueDrainer, EngineTriggerRuntime, StreamActorScope, StreamCursor,
-    TriggerDispatchRequest,
+    EngineHostHandle, EngineQueueDrainer, EngineTriggerRuntime, EngineWatchRequest,
+    StreamActorScope, StreamCursor, TriggerDispatchRequest,
 };
 
 fn wid(value: &str) -> WorkerId {
@@ -1450,6 +1450,54 @@ fn unregister_function_removes_targeting_triggers_and_revisions_remain_monotonic
         catalog.changes().last().unwrap().kind,
         CatalogChangeKind::FunctionUnregistered
     );
+}
+
+#[tokio::test]
+async fn host_unregister_function_updates_discovery_and_watch() {
+    let host = EngineHostHandle::new_in_memory().unwrap();
+    host.register_worker_for_setup(worker("w1", "alpha"), true)
+        .unwrap();
+    host.register_function_for_setup(read_function("alpha::read", "w1"), Some(handler()), true)
+        .unwrap();
+
+    let actor_context = ActorContext::new(actor("system"), ActorKind::System, grant("grant"));
+    let query = FunctionQuery {
+        actor: Some(actor_context.clone()),
+        namespace_prefix: Some("alpha::".to_owned()),
+        include_internal: true,
+        ..FunctionQuery::default()
+    };
+    assert_eq!(host.discover(&query).await.len(), 1);
+
+    let before = host
+        .watch(&actor_context, EngineWatchRequest::default())
+        .await
+        .unwrap()
+        .current_revision;
+    host.unregister_function(&fid("alpha::read"), &wid("w1"))
+        .await
+        .unwrap();
+
+    assert!(host.discover(&query).await.is_empty());
+    let page = host
+        .watch(
+            &actor_context,
+            EngineWatchRequest {
+                after_revision: before,
+                classes: Some(vec![CatalogChangeClass::Availability]),
+                subject_prefix: Some("alpha::".to_owned()),
+                owner_worker: Some(wid("w1")),
+                ..EngineWatchRequest::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.changes.len(), 1);
+    assert_eq!(
+        page.changes[0].kind,
+        CatalogChangeKind::FunctionUnregistered
+    );
+    assert_eq!(page.changes[0].subject_id, "alpha::read");
 }
 
 #[tokio::test]

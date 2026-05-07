@@ -729,6 +729,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             process_manager: process_manager.clone(),
             job_manager: job_manager.clone(),
             output_buffer_registry,
+            engine_host: Some(engine_host.clone()),
         },
     );
 
@@ -855,6 +856,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         resolved_profile: Some(resolved_profile.clone()),
         user_content_override,
         volatile_tokens,
+        run_id: Some(run_id.clone()),
         ..Default::default()
     };
 

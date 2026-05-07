@@ -423,6 +423,50 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
+        "mcp.status" | "mcp.reload" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "mcp.listTools" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "server": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "mcp.addServer" => json!({
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+                "name": {"type": "string"},
+                "command": {"type": "string"},
+                "args": {"type": "array", "items": {"type": "string"}},
+                "env": {"type": "object", "additionalProperties": true},
+                "url": {"type": "string"},
+                "enabled": {"type": "boolean"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "mcp.removeServer" | "mcp.enableServer" | "mcp.disableServer" | "mcp.restartServer" => {
+            json!({
+                "type": "object",
+                "required": ["name"],
+                "additionalProperties": false,
+                "properties": {
+                    "name": {"type": "string"},
+                    "sessionId": {"type": "string"},
+                    "workspaceId": {"type": "string"}
+                }
+            })
+        }
         "job.list" => json!({
             "type": "object",
             "required": ["sessionId"],
@@ -963,6 +1007,40 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         | "agent.submitAnswers" => json!({
             "type": "object",
             "additionalProperties": true
+        }),
+        "mcp.status" => json!({
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": true}
+        }),
+        "mcp.listTools" => json!({
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": true}
+        }),
+        "mcp.addServer" | "mcp.restartServer" => json!({
+            "type": "object",
+            "required": ["success", "toolCount"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "toolCount": {"type": "integer"}
+            }
+        }),
+        "mcp.removeServer" | "mcp.enableServer" | "mcp.disableServer" => json!({
+            "type": "object",
+            "required": ["success"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"}
+            }
+        }),
+        "mcp.reload" => json!({
+            "type": "object",
+            "required": ["success", "serverCount"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "serverCount": {"type": "integer"}
+            }
         }),
         "job.background" => json!({
             "type": "object",

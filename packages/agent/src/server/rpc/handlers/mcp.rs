@@ -1,322 +1,86 @@
-//! MCP management RPC handlers.
+//! MCP RPC group.
 //!
-//! Seven handlers for managing MCP server lifecycle via RPC:
-//! status, addServer, removeServer, enableServer, disableServer, restartServer, reload.
-
-use async_trait::async_trait;
-use serde_json::Value;
-use tracing::instrument;
-
-use crate::mcp::types::McpServerConfig;
-use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::registry::MethodHandler;
-use crate::server::rpc::types::RpcEvent;
-
-use super::{opt_bool, opt_string, require_string_param};
-
-/// Helper: require that the router is configured.
-fn require_router(
-    ctx: &RpcContext,
-) -> Result<&std::sync::Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>, RpcError> {
-    ctx.mcp_router.as_ref().ok_or(RpcError::Internal {
-        message: "MCP is not configured on this server".into(),
-    })
-}
-
-/// Broadcast an `mcp.status_changed` event with current server statuses.
-pub(crate) async fn broadcast_status_changed(ctx: &RpcContext) {
-    let Some(ref router_arc) = ctx.mcp_router else {
-        return;
-    };
-    let Some(ref bm) = ctx.broadcast_manager else {
-        return;
-    };
-
-    let router = router_arc.read().await;
-    let status = router.status();
-    let event = RpcEvent::new(
-        "mcp.status_changed",
-        None,
-        Some(serde_json::to_value(status).unwrap_or_default()),
-    );
-    bm.broadcast_all(&event).await;
-}
-
-// ─── mcp.status ──────────────────────────────────────────────────────────
-
-/// Handler for the `mcp.status` RPC method.
-pub struct McpStatusHandler;
-
-#[async_trait]
-impl MethodHandler for McpStatusHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.status"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?;
-        let guard = router.read().await;
-        let status = guard.status();
-        serde_json::to_value(status).map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })
-    }
-}
-
-// ─── mcp.addServer ───────────────────────────────────────────────────────
-
-/// Handler for the `mcp.addServer` RPC method.
-pub struct McpAddServerHandler;
-
-#[async_trait]
-impl MethodHandler for McpAddServerHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.addServer"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?.clone();
-        let name = require_string_param(params.as_ref(), "name")?;
-        let command = opt_string(params.as_ref(), "command");
-        let url = opt_string(params.as_ref(), "url");
-        let enabled = opt_bool(params.as_ref(), "enabled").unwrap_or(true);
-
-        let args: Vec<String> = params
-            .as_ref()
-            .and_then(|p| p.get("args"))
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let env: std::collections::HashMap<String, String> = params
-            .as_ref()
-            .and_then(|p| p.get("env"))
-            .and_then(Value::as_object)
-            .map(|obj| {
-                obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let config = McpServerConfig {
-            name,
-            command,
-            args,
-            env,
-            url,
-            tool_timeout_ms: 30_000,
-            enabled,
-        };
-
-        let mut guard = router.write().await;
-        let tool_count = guard
-            .add_server(config)
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-        drop(guard);
-
-        broadcast_status_changed(ctx).await;
-
-        Ok(serde_json::json!({
-            "success": true,
-            "toolCount": tool_count,
-        }))
-    }
-}
-
-// ─── mcp.removeServer ────────────────────────────────────────────────────
-
-/// Handler for the `mcp.removeServer` RPC method.
-pub struct McpRemoveServerHandler;
-
-#[async_trait]
-impl MethodHandler for McpRemoveServerHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.removeServer"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?.clone();
-        let name = require_string_param(params.as_ref(), "name")?;
-
-        let mut guard = router.write().await;
-        guard
-            .remove_server(&name)
-            .await
-            .map_err(|message| RpcError::Internal { message })?;
-        drop(guard);
-
-        broadcast_status_changed(ctx).await;
-
-        Ok(serde_json::json!({ "success": true }))
-    }
-}
-
-// ─── mcp.enableServer ────────────────────────────────────────────────────
-
-/// Handler for the `mcp.enableServer` RPC method.
-pub struct McpEnableServerHandler;
-
-#[async_trait]
-impl MethodHandler for McpEnableServerHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.enableServer"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?.clone();
-        let name = require_string_param(params.as_ref(), "name")?;
-
-        let mut guard = router.write().await;
-        guard
-            .enable_server(&name)
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-        drop(guard);
-
-        broadcast_status_changed(ctx).await;
-
-        Ok(serde_json::json!({ "success": true }))
-    }
-}
-
-// ─── mcp.disableServer ───────────────────────────────────────────────────
-
-/// Handler for the `mcp.disableServer` RPC method.
-pub struct McpDisableServerHandler;
-
-#[async_trait]
-impl MethodHandler for McpDisableServerHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.disableServer"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?.clone();
-        let name = require_string_param(params.as_ref(), "name")?;
-
-        let mut guard = router.write().await;
-        guard
-            .disable_server(&name)
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-        drop(guard);
-
-        broadcast_status_changed(ctx).await;
-
-        Ok(serde_json::json!({ "success": true }))
-    }
-}
-
-// ─── mcp.restartServer ───────────────────────────────────────────────────
-
-/// Handler for the `mcp.restartServer` RPC method.
-pub struct McpRestartServerHandler;
-
-#[async_trait]
-impl MethodHandler for McpRestartServerHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.restartServer"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?.clone();
-        let name = require_string_param(params.as_ref(), "name")?;
-
-        let mut guard = router.write().await;
-        let tool_count = guard
-            .restart_server(&name)
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-        drop(guard);
-
-        broadcast_status_changed(ctx).await;
-
-        Ok(serde_json::json!({
-            "success": true,
-            "toolCount": tool_count,
-        }))
-    }
-}
-
-// ─── mcp.reload ──────────────────────────────────────────────────────────
-
-/// Handler for the `mcp.reload` RPC method.
-pub struct McpReloadHandler;
-
-#[async_trait]
-impl MethodHandler for McpReloadHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.reload"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?.clone();
-
-        let mut guard = router.write().await;
-        let server_count = guard
-            .reload_from_settings()
-            .await
-            .map_err(|e| RpcError::Internal { message: e })?;
-        drop(guard);
-
-        broadcast_status_changed(ctx).await;
-
-        Ok(serde_json::json!({
-            "success": true,
-            "serverCount": server_count,
-        }))
-    }
-}
-
-// ─── mcp.listTools ───────────────────────────────────────────────────
-
-/// Handler for the `mcp.listTools` RPC method.
-pub struct McpListToolsHandler;
-
-#[async_trait]
-impl MethodHandler for McpListToolsHandler {
-    #[instrument(skip(self, ctx), fields(method = "mcp.listTools"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let router = require_router(ctx)?;
-        let server_filter = opt_string(params.as_ref(), "server");
-
-        let guard = router.read().await;
-        let matches = guard.search("", server_filter.as_deref());
-
-        serde_json::to_value(matches).map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })
-    }
-}
+//! The public `mcp.*` JSON-RPC methods are marker-registered in
+//! `handlers::mod` and execute through canonical engine functions under
+//! `mcp::*`. MCP server lifecycle changes update the live capability catalog
+//! and publish status changes through engine streams; WebSocket remains only a
+//! delivery transport for the existing `mcp.status_changed` event shape.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::server::rpc::context::RpcContext;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::server::rpc::registry::MethodRegistry;
+    use crate::server::rpc::types::{RpcErrorBody, RpcRequest, RpcResponse};
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn next_request_id(method: &str) -> String {
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
+        format!("{method}-{}", NEXT_ID.fetch_add(1, Ordering::SeqCst))
+    }
+
+    async fn dispatch_mcp_response(
+        ctx: &RpcContext,
+        method: &str,
+        params: Option<Value>,
+    ) -> RpcResponse {
+        let mut registry = MethodRegistry::new();
+        crate::server::rpc::handlers::register_all(&mut registry);
+        crate::server::rpc::engine_bridge::register_rpc_worker_for_context(ctx, &registry).unwrap();
+        registry
+            .dispatch(
+                RpcRequest {
+                    id: next_request_id(method),
+                    method: method.to_owned(),
+                    params,
+                },
+                ctx,
+            )
+            .await
+    }
+
+    async fn dispatch_mcp_ok(ctx: &RpcContext, method: &str, params: Option<Value>) -> Value {
+        let response = dispatch_mcp_response(ctx, method, params).await;
+        assert!(response.success, "{method}: {:?}", response.error);
+        response.result.unwrap()
+    }
+
+    async fn dispatch_mcp_err(
+        ctx: &RpcContext,
+        method: &str,
+        params: Option<Value>,
+    ) -> RpcErrorBody {
+        let response = dispatch_mcp_response(ctx, method, params).await;
+        assert!(!response.success, "{method}: {:?}", response.result);
+        response.error.unwrap()
+    }
 
     #[tokio::test]
     async fn status_returns_error_when_no_router() {
         let ctx = make_test_context();
-        let result = McpStatusHandler.handle(None, &ctx).await;
-        assert!(result.is_err());
+        let error = dispatch_mcp_err(&ctx, "mcp.status", Some(json!({}))).await;
+        assert_eq!(error.message, "Internal error");
     }
 
     #[tokio::test]
     async fn add_server_returns_error_when_no_router() {
         let ctx = make_test_context();
-        let params = Some(serde_json::json!({"name": "test", "command": "echo"}));
-        let result = McpAddServerHandler.handle(params, &ctx).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn remove_server_returns_error_when_no_router() {
-        let ctx = make_test_context();
-        let params = Some(serde_json::json!({"name": "test"}));
-        let result = McpRemoveServerHandler.handle(params, &ctx).await;
-        assert!(result.is_err());
+        let error = dispatch_mcp_err(
+            &ctx,
+            "mcp.addServer",
+            Some(json!({"name": "test", "command": "echo"})),
+        )
+        .await;
+        assert_eq!(error.message, "Internal error");
     }
 
     #[tokio::test]
     async fn reload_returns_error_when_no_router() {
         let ctx = make_test_context();
-        let result = McpReloadHandler.handle(None, &ctx).await;
-        assert!(result.is_err());
+        let error = dispatch_mcp_err(&ctx, "mcp.reload", Some(json!({}))).await;
+        assert_eq!(error.message, "Internal error");
     }
 
     #[tokio::test]
@@ -330,9 +94,26 @@ mod tests {
             .join(crate::core::paths::files::PROFILE_TOML);
         let router = crate::mcp::router::McpRouter::new(Vec::new(), settings_path, 0).await;
         let mut ctx = make_test_context();
-        ctx.mcp_router = Some(std::sync::Arc::new(tokio::sync::RwLock::new(router)));
+        ctx.mcp_router = Some(Arc::new(tokio::sync::RwLock::new(router)));
 
-        let result = McpStatusHandler.handle(None, &ctx).await.unwrap();
+        let result = dispatch_mcp_ok(&ctx, "mcp.status", Some(json!({}))).await;
+        assert!(result.as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_tools_with_empty_router() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).unwrap();
+        let settings_path = home
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE)
+            .join(crate::core::paths::files::PROFILE_TOML);
+        let router = crate::mcp::router::McpRouter::new(Vec::new(), settings_path, 0).await;
+        let mut ctx = make_test_context();
+        ctx.mcp_router = Some(Arc::new(tokio::sync::RwLock::new(router)));
+
+        let result = dispatch_mcp_ok(&ctx, "mcp.listTools", Some(json!({}))).await;
         assert!(result.as_array().unwrap().is_empty());
     }
 }

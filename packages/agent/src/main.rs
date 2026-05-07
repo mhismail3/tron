@@ -1067,7 +1067,8 @@ async fn main() -> Result<()> {
         server.broadcast().clone(),
         server.shutdown().token(),
         orchestrator_for_bridge.turn_accumulators().clone(),
-    );
+    )
+    .with_engine_streams(server.rpc_context().engine_host.clone());
     let bridge_handle = tokio::spawn(bridge.run());
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 

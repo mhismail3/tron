@@ -9,11 +9,17 @@
 //! all current agent controls including `agent.prompt`, session
 //! create/delete/fork/archive/export except `session.resume`, and all context
 //! snapshot/compaction/clear methods now run through this generic-trigger path.
+//! The MCP group is also collapsed: `mcp.*` methods route to canonical
+//! `mcp::*` functions, and discovered MCP tools are projected into the live
+//! catalog as external-side-effect capabilities.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
-//! and `system` own executable function contracts and behavior metadata.
+//! `mcp`, and `system` own executable function contracts and behavior
+//! metadata. A separate `tool` worker registers built-in agent tools as
+//! canonical `tool::*` functions so agents can discover the runtime tool
+//! surface through the same live catalog as domain capabilities.
 //! `json_rpc` trigger records capture the old client method name and dispatch
 //! directly into canonical ids such as `skills::activate` or
 //! `session::reconstruct`; `rpc::<method>` names remain compatibility metadata
@@ -39,16 +45,19 @@ mod specs;
 #[cfg(test)]
 mod tests;
 
+use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::engine::{
     AuthorityRequirement, EffectClass, EngineError, EngineHostHandle, FunctionDefinition,
-    FunctionId, IdempotencyContract, InvocationResult, Provenance, Result as EngineResult,
-    RiskLevel, VisibilityScope,
+    FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation, InvocationResult,
+    Provenance, Result as EngineResult, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::registry::MethodRegistry;
+use crate::tools::capability_runtime;
+use crate::tools::traits::{ToolContext, TronTool};
 
 pub use dispatch::{RpcEngineInvocation, RpcGenericTriggerHandler, try_dispatch_generic_rpc};
 pub use specs::{
@@ -71,7 +80,9 @@ pub fn register_rpc_worker_for_context(
         &ctx.engine_host,
         registry,
         functions::RpcEngineDeps::from_context(ctx),
-    )
+    )?;
+    register_tool_worker_for_context(ctx)?;
+    Ok(())
 }
 
 fn register_rpc_worker(
@@ -110,6 +121,242 @@ fn register_rpc_worker(
         }
     }
     Ok(())
+}
+
+fn register_tool_worker_for_context(ctx: &RpcContext) -> EngineResult<()> {
+    let handle = &ctx.engine_host;
+    let Some(agent_deps) = ctx.agent_deps.as_ref() else {
+        return Ok(());
+    };
+    handle.register_worker_for_setup(
+        WorkerDefinition::new(
+            specs::worker_id("tool")?,
+            WorkerKind::InProcess,
+            specs::actor_id(RPC_OWNER_ACTOR)?,
+            specs::grant_id(RPC_AUTHORITY_GRANT)?,
+        )
+        .with_namespace_claim("tool"),
+        false,
+    )?;
+
+    let registry = (agent_deps.tool_factory)();
+    let tool_names = registry.names();
+    for tool in registry.list() {
+        let name = tool.name().to_owned();
+        let id = tool_function_id(&name)?;
+        let definition = tool_function_definition(&id, tool.as_ref(), &tool_names)?;
+        let handler = ToolFunctionHandler {
+            tool,
+            process_manager: ctx.process_manager.clone(),
+            job_manager: ctx.job_manager.clone(),
+            output_buffer_registry: ctx.output_buffer_registry.clone(),
+            all_tool_names: tool_names.clone(),
+        };
+        handle.register_function_for_setup(
+            definition,
+            Some(std::sync::Arc::new(handler)),
+            false,
+        )?;
+    }
+    Ok(())
+}
+
+fn tool_function_id(tool_name: &str) -> EngineResult<FunctionId> {
+    FunctionId::new(capability_runtime::canonical_tool_function_id(tool_name))
+}
+
+fn tool_function_definition(
+    id: &FunctionId,
+    tool: &dyn TronTool,
+    all_tool_names: &[String],
+) -> EngineResult<FunctionDefinition> {
+    let tool_def = tool.definition();
+    let (effect, risk, authority, approval_required) = classify_tool_capability(tool.name());
+    let mut authority = AuthorityRequirement::scope(authority);
+    if approval_required {
+        authority = authority.with_approval_required();
+    }
+    let mut definition = FunctionDefinition::new(
+        id.clone(),
+        specs::worker_id("tool")?,
+        tool_def.description.clone(),
+        VisibilityScope::System,
+        effect,
+    )
+    .with_risk(risk)
+    .with_required_authority(authority)
+    .with_provenance(Provenance::system())
+    .with_request_schema(json!({
+        "type": "object",
+        "additionalProperties": true
+    }))
+    .with_response_schema(json!({
+        "type": "object",
+        "additionalProperties": true
+    }));
+    if effect.is_mutating() {
+        definition =
+            definition.with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+    }
+    definition.metadata = json!({
+        "domainWorker": "tool",
+        "canonicalCapability": id.as_str(),
+        "toolName": tool.name(),
+        "toolCategory": format!("{:?}", tool.category()),
+        "toolStopsTurn": tool.stops_turn(),
+        "toolInteractive": tool.is_interactive(),
+        "toolSchema": tool_def,
+        "allToolNames": all_tool_names,
+    });
+    Ok(definition)
+}
+
+fn classify_tool_capability(tool_name: &str) -> (EffectClass, RiskLevel, &'static str, bool) {
+    match tool_name {
+        "Read" | "Search" | "Find" | "engine_discover" | "engine_inspect" | "engine_watch" => {
+            (EffectClass::PureRead, RiskLevel::Low, "tool.read", false)
+        }
+        "WebFetch" | "WebSearch" => (
+            EffectClass::ExternalSideEffect,
+            RiskLevel::Medium,
+            "tool.invoke",
+            true,
+        ),
+        "Write" | "Edit" => (
+            EffectClass::ReversibleSideEffect,
+            RiskLevel::High,
+            "tool.write",
+            true,
+        ),
+        "engine_invoke" => (
+            EffectClass::DelegatedInvocation,
+            RiskLevel::High,
+            "tool.invoke",
+            true,
+        ),
+        _ => (
+            EffectClass::ExternalSideEffect,
+            RiskLevel::Medium,
+            "tool.invoke",
+            true,
+        ),
+    }
+}
+
+struct ToolFunctionHandler {
+    tool: std::sync::Arc<dyn TronTool>,
+    process_manager: Option<std::sync::Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    job_manager: Option<std::sync::Arc<dyn crate::tools::traits::JobManagerOps>>,
+    output_buffer_registry:
+        Option<std::sync::Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    all_tool_names: Vec<String>,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for ToolFunctionHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
+        let payload = invocation.payload;
+        if let Some(runtime_id) = payload
+            .get("__runtimeToolInvocationId")
+            .and_then(Value::as_str)
+        {
+            let execution = capability_runtime::take_runtime_tool_execution(runtime_id)
+                .ok_or_else(|| EngineError::AdapterFailure {
+                    adapter: "tool".to_owned(),
+                    code: "TOOL_RUNTIME_CONTEXT_MISSING".to_owned(),
+                    message: "tool runtime context is no longer available".to_owned(),
+                    details: Some(json!({
+                        "tool": self.tool.name(),
+                        "runtimeInvocationId": runtime_id,
+                    })),
+                })?;
+            if execution.tool_name != self.tool.name() {
+                return Err(EngineError::AdapterFailure {
+                    adapter: "tool".to_owned(),
+                    code: "TOOL_RUNTIME_CONTEXT_MISMATCH".to_owned(),
+                    message: "tool runtime context was prepared for a different tool".to_owned(),
+                    details: Some(json!({
+                        "expected": self.tool.name(),
+                        "actual": execution.tool_name,
+                        "runtimeInvocationId": runtime_id,
+                    })),
+                });
+            }
+            let result = execute_tool_with_runtime_context(
+                self.tool.as_ref(),
+                execution.params,
+                &execution.context,
+            )
+            .await;
+            return serde_json::to_value(result).map_err(|error| {
+                EngineError::HandlerFailed(format!("failed to serialize tool result: {error}"))
+            });
+        }
+
+        let params = payload
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| payload.clone());
+        let session_id = payload
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .or(invocation.causal_context.session_id.as_deref())
+            .unwrap_or("engine-tool")
+            .to_owned();
+        let working_directory = payload
+            .get("workingDirectory")
+            .and_then(Value::as_str)
+            .unwrap_or(".")
+            .to_owned();
+        let tool_call_id = payload
+            .get("toolCallId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| invocation.id.to_string());
+        let tool_ctx = ToolContext {
+            tool_call_id,
+            session_id,
+            working_directory,
+            cancellation: tokio_util::sync::CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: invocation.causal_context.workspace_id.clone(),
+            output_tx: None,
+            process_manager: self.process_manager.clone(),
+            job_manager: self.job_manager.clone(),
+            output_buffer_registry: self.output_buffer_registry.clone(),
+            event_emitter: None,
+            event_persister: None,
+            turn: 0,
+            all_tool_names: self.all_tool_names.clone(),
+        };
+        let result = execute_tool_with_runtime_context(self.tool.as_ref(), params, &tool_ctx).await;
+        serde_json::to_value(result).map_err(|error| {
+            EngineError::HandlerFailed(format!("failed to serialize tool result: {error}"))
+        })
+    }
+}
+
+async fn execute_tool_with_runtime_context(
+    tool: &dyn TronTool,
+    params: Value,
+    tool_ctx: &ToolContext,
+) -> crate::core::tools::TronToolResult {
+    if tool_ctx.cancellation.is_cancelled() {
+        return crate::core::tools::error_result("Operation cancelled");
+    }
+    tokio::select! {
+        biased;
+        () = tool_ctx.cancellation.cancelled() => {
+            crate::core::tools::error_result("Operation cancelled")
+        }
+        result = tool.execute(params, tool_ctx) => {
+            match result {
+                Ok(result) => result,
+                Err(error) => crate::core::tools::error_result(error.to_string()),
+            }
+        }
+    }
 }
 
 fn register_hidden_agent_prompt_functions(

@@ -30,15 +30,15 @@
 //! transport trigger into the canonical domain function. Read triggers carry
 //! `rpc.read` plus the domain read scope; migrated write triggers carry
 //! `rpc.write` plus the domain write scope and engine-ledger idempotency.
-//! Prompt library, settings, logs, skills, notifications, plan, events,
+//! Prompt library, settings, logs, MCP, skills, notifications, plan, events,
 //! approval resolution, read-safe session/context queries, job commands, all
 //! current agent control methods including `agent.prompt`, and basic
 //! filesystem reads/create-dir are now generic-triggered with marker-only
 //! JSON-RPC registrations. Job background/cancel and agent prompt commands
 //! enqueue hidden apply functions and synchronously drain their own receipts
 //! for current wire compatibility. RPC remains a compatibility transport; the
-//! canonical capability surface is the domain function catalog agents discover
-//! through the engine tools.
+//! canonical capability surface is the domain/tool function catalog agents
+//! discover through the engine tools.
 //!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!

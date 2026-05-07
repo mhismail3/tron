@@ -36,6 +36,7 @@ mod events;
 mod filesystem;
 mod job;
 mod logs;
+mod mcp;
 mod model;
 mod notifications;
 mod plan;
@@ -137,6 +138,10 @@ async fn rpc_function_value(
         | "agent.deliverSubagentResults"
         | "agent.submitConfirmation"
         | "agent.submitAnswers" => agent::handle(method, invocation, deps).await,
+        "mcp.status" | "mcp.addServer" | "mcp.removeServer" | "mcp.enableServer"
+        | "mcp.disableServer" | "mcp.restartServer" | "mcp.reload" | "mcp.listTools" => {
+            mcp::handle(method, invocation, deps).await
+        }
         "logs.ingest" | "logs.recent" => logs::handle(method, invocation, deps).await,
         "events.getHistory" | "events.getSince" | "events.append" => {
             events::handle(method, invocation, deps).await

@@ -52,6 +52,11 @@ pub(super) struct ToolPhaseParams<'a> {
     pub execution_spec: Option<&'a crate::core::profile::AgentExecutionSpec>,
     /// Optional per-tool abort registry (see `TurnParams::tool_abort_registry`).
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
+    /// Optional engine host used to route actual tool execution through
+    /// canonical `tool::*` functions.
+    pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
+    /// Stable run id used for runtime tool-call idempotency.
+    pub run_id: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -151,6 +156,8 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     event_persister: params.persister_arc,
                     turn: i64::from(params.turn),
                     tool_abort_registry: params.tool_abort_registry,
+                    engine_host: params.engine_host,
+                    run_id: params.run_id,
                 };
                 async move {
                     let result = tool_executor::execute_tool(

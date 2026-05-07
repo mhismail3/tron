@@ -18,6 +18,11 @@
 //!
 //! Depends on: core.
 //! Depended on by: runtime, server.
+//!
+//! The server also projects registered tools into the engine catalog as
+//! `tool::*` functions. The provider-facing schema still comes from
+//! [`ToolRegistry`] during the current migration package, but agents can
+//! discover the same tool surface through the live capability fabric.
 
 #![deny(unsafe_code)]
 // The TronTool trait returns `&str` from `fn name()` — clippy's `unnecessary_literal_bound`
@@ -29,6 +34,7 @@
 pub(crate) mod testutil;
 
 pub mod backends;
+pub(crate) mod capability_runtime;
 pub mod engine;
 pub mod errors;
 pub mod registry;

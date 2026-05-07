@@ -185,6 +185,11 @@ fn stream_pump_subscription_id(topic: &str) -> String {
 }
 
 fn stream_event_to_rpc_event(event: &crate::engine::EngineStreamEvent) -> RpcEvent {
+    if let Some(wrapped) = event.payload.get("__rpcEvent")
+        && let Ok(rpc_event) = serde_json::from_value::<RpcEvent>(wrapped.clone())
+    {
+        return rpc_event;
+    }
     let event_type = event
         .payload
         .get("type")

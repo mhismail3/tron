@@ -493,6 +493,15 @@ impl EngineHostHandle {
             .register_function(definition, handler, volatile)
     }
 
+    /// Unregister a function through the host boundary.
+    pub async fn unregister_function(&self, id: &FunctionId, owner: &WorkerId) -> Result<()> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .unregister_function(id, owner)
+    }
+
     /// Register or update a trigger type through the host boundary.
     pub async fn register_trigger_type(
         &self,

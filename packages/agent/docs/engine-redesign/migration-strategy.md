@@ -728,22 +728,39 @@ Acceptance:
 
 ## Phase 7: tools, MCP, approvals, and effects
 
-Move tool invocation behind engine functions.
+Move tool and MCP execution behind engine functions without losing the runtime
+semantics that made the old path reliable.
 
-Deliverables:
+Delivered so far:
 
-- Tool worker registers built-in tool functions with effect class, risk,
-  authority, and idempotency metadata.
-- MCP worker preserves `mcp::search` and `mcp::call` meta-tool behavior.
-- Approval/question/device flows become functions plus stream/device triggers.
-- Tool executor invokes engine functions where migrated.
+- The `tool` worker registers built-in tools as canonical `tool::*` functions
+  with effect class, risk, authority, approval, provenance, and tool-schema
+  metadata.
+- Prompt-time tool execution now invokes the matching `tool::*` function after
+  local-model policy, guardrails, and PreToolUse hooks. A one-shot runtime
+  handoff gives the engine handler the exact `ToolContext`, preserving progress
+  streams, abort tokens, PostToolUse hooks, process/job managers, output buffer
+  access, and event persistence while the engine records idempotency and
+  invocation ledger entries.
+- Model tool-call retries derive stable idempotency keys from run id, session,
+  turn, tool call id, tool name, working directory, workspace, and argument
+  fingerprint. Direct engine/agent mutations still require explicit
+  idempotency.
+- All public `mcp.*` methods are marker-only JSON-RPC triggers into canonical
+  `mcp::*` functions, raising the generic-trigger count from 76 to 84 while
+  preserving the public method count at 170.
+- Discovered MCP tools register/unregister as live `mcp::*` external-side-effect
+  functions with server/tool provenance, conservative approval-required
+  authority, system idempotency, and catalog availability changes.
 
-Acceptance:
+Still to do:
 
-- Existing tool unit tests pass.
-- Agent can call migrated tools through the engine path.
-- Approval-required tools preserve current client/device behavior.
-- High-risk or non-idempotent functions are not autonomously agent-visible.
+- Make provider-facing tool schema assembly read directly from the live engine
+  catalog instead of the legacy `ToolRegistry` compatibility surface.
+- Replace remaining direct compatibility broadcasts for tool/MCP/device flows
+  with stream-owned delivery classes.
+- Add richer effect classification for known MCP tools instead of the current
+  conservative external-side-effect default.
 
 ## Phase 8: agent worker and live self-modification
 

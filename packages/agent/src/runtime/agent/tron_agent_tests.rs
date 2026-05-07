@@ -244,6 +244,7 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
+        engine_host: None,
     }
 }
 
@@ -689,6 +690,7 @@ fn make_agent_with_store(
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            engine_host: None,
         },
         sid.clone(),
     );
@@ -1060,6 +1062,7 @@ fn make_agent_with_tools(
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
+        engine_host: None,
     };
     for tool in tools {
         deps.registry.register(tool);

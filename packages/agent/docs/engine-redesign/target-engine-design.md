@@ -449,8 +449,8 @@ isolation does.
 | `state` | Scoped state for non-event-sourced data. |
 | `queue` | Durable named queues, receipts, retries, cancellation, DLQ/redrive. |
 | `cron` | Cron trigger type backed by current automations definitions and SQLite runtime state. |
-| `tool` | Built-in tool capabilities and tool invocation. |
-| `mcp` | MCP search/call and server lifecycle. |
+| `tool` | Built-in tools are registered as canonical `tool::*` capabilities with schema metadata, effect/risk/authority/provenance, and model tool-call idempotency. Prompt-time execution invokes those functions through the engine while handing off the exact runtime `ToolContext`, so progress output, cancellation, hooks, process/job managers, and event persistence survive the collapse. |
+| `mcp` | MCP server lifecycle, search/list, and discovered server tools. Public `mcp.*` RPC methods are marker triggers into canonical `mcp::*`; discovered MCP tools register/unregister live external-side-effect capabilities with conservative approval/idempotency defaults. |
 | `worktree` | Git/worktree capabilities and conflict workflows. |
 | `auth` | Provider auth, client auth, future worker tokens and grants. |
 | `observability` | Logs, metrics, traces, causal graph queries, diagnostics. |

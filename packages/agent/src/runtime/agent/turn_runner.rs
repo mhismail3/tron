@@ -98,6 +98,8 @@ pub struct TurnParams<'a> {
     /// so each in-flight tool call registers a child `CancellationToken` that
     /// `agent.abortTool` can cancel independently of the turn token.
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
+    /// Optional engine host for engine-owned tool execution.
+    pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -130,6 +132,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         output_buffer_registry,
         sequence_counter,
         tool_abort_registry,
+        engine_host,
     } = params;
     let turn_start = Instant::now();
 
@@ -614,6 +617,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             .as_deref()
             .map(|profile| &profile.spec),
         tool_abort_registry,
+        engine_host,
+        run_id: run_context.run_id.as_deref(),
     })
     .await;
 

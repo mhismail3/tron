@@ -216,6 +216,11 @@ pub struct VolatileTokens {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunContext {
+    /// Stable runtime run id for causal/idempotency metadata. This is assigned
+    /// by the prompt runtime and is intentionally not serialized into prompt
+    /// context snapshots.
+    #[serde(skip)]
+    pub run_id: Option<String>,
     /// Lightweight skill index context (auto-generated from registry).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_index_context: Option<String>,

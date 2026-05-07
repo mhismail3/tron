@@ -232,6 +232,7 @@ mod tests {
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
+                engine_host: None,
             },
             session_id,
         );

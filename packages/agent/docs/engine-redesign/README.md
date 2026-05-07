@@ -373,6 +373,21 @@ Implemented:
   `default`, `jobs`, and `agent` plus a stream pump for approvals, jobs, agent queue,
   session events, and catalog topics so engine primitives drive runtime
   behavior instead of staying test-only stores;
+- stream-first runtime delivery: migrated turn/runtime event classes now publish
+  compatible `RpcEvent` payloads into the `events.session` engine stream before
+  WebSocket delivery; the stream pump is the delivery bridge, and WebSocket is
+  no longer the source of truth for those event classes;
+- engine-owned tool execution: startup registers built-in tools as canonical
+  `tool::*` functions with effect/risk/authority/provenance metadata, and the
+  prompt-time tool executor invokes those functions with a one-shot runtime
+  context handoff so progress streams, abort tokens, hooks, process managers,
+  and event persistence are preserved while idempotency/ledger bookkeeping
+  lives in the engine;
+- MCP collapse and live capabilities: all eight public `mcp.*` methods are now
+  marker-only `json_rpc` triggers into canonical `mcp::*` functions, and
+  discovered MCP tools are registered/unregistered as live `mcp::*`
+  external-side-effect capabilities with conservative approval/idempotency
+  metadata;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -388,8 +403,8 @@ Still deferred:
   commands/reads, job controls, and current agent controls;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
-- stream-first token/text turn delivery beyond the existing compatibility
-  EventBridge;
+- replacement of the compatibility EventBridge fallback and provider-native
+  stream ownership for event classes that have not yet moved to engine streams;
 - sandbox workers, remote worker hosting, durable reconnect semantics, and
   stronger executable-worker supervision beyond the authenticated local
   loopback endpoint;

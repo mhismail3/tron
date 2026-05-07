@@ -7,13 +7,22 @@ use std::time::{Duration, Instant};
 use crate::core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
 use crate::core::messages::Provider;
 use crate::core::messages::ToolCall;
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
+    TraceId,
+};
 use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::runtime::hooks::engine::HookEngine;
 use crate::runtime::hooks::types::{HookAction, HookContext};
+use crate::tools::capability_runtime::{
+    RuntimeToolExecution, canonical_tool_function_id, insert_runtime_tool_execution,
+    remove_runtime_tool_execution,
+};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::traits::ToolContext;
-use serde_json::Value;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use metrics::{counter, histogram};
@@ -83,6 +92,11 @@ pub struct ToolExecutionContext<'a> {
     /// tool without aborting the whole turn. When `None`, the turn-level
     /// `cancel` token is passed through unchanged.
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
+    /// Optional engine host for routing actual tool execution through
+    /// canonical `tool::*` functions after runtime guardrails and hooks.
+    pub engine_host: Option<&'a EngineHostHandle>,
+    /// Stable run id used for model tool-call idempotency.
+    pub run_id: Option<&'a str>,
 }
 
 /// Execute a single tool call through the full pipeline.
@@ -343,6 +357,20 @@ pub async fn execute_tool(
 
     let tool_result = if per_tool_cancel.is_cancelled() {
         crate::core::tools::error_result("Operation cancelled")
+    } else if let Some(engine_host) = ctx.engine_host {
+        execute_tool_via_engine(
+            engine_host,
+            &tool_name,
+            &tool_call_id,
+            session_id,
+            working_directory,
+            ctx.workspace_id,
+            ctx.turn,
+            ctx.run_id,
+            effective_args,
+            tool_ctx.clone(),
+        )
+        .await
     } else {
         tokio::select! {
             biased;
@@ -479,6 +507,135 @@ pub async fn execute_tool(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn execute_tool_via_engine(
+    engine_host: &EngineHostHandle,
+    tool_name: &str,
+    tool_call_id: &str,
+    session_id: &str,
+    working_directory: &str,
+    workspace_id: Option<&str>,
+    turn: i64,
+    run_id: Option<&str>,
+    effective_args: Value,
+    tool_ctx: ToolContext,
+) -> crate::core::tools::TronToolResult {
+    let material = stable_tool_call_material(
+        run_id,
+        session_id,
+        turn,
+        tool_call_id,
+        tool_name,
+        working_directory,
+        workspace_id,
+        &effective_args,
+    );
+    let fingerprint = sha256_hex(material.as_bytes());
+    let runtime_invocation_id = format!("tool-runtime:{fingerprint}");
+    let idempotency_key = format!("model-tool-call:v1:{fingerprint}");
+    let function_id = match FunctionId::new(canonical_tool_function_id(tool_name)) {
+        Ok(id) => id,
+        Err(error) => return crate::core::tools::error_result(error.to_string()),
+    };
+    let actor_id = match ActorId::new(format!("agent:{session_id}")) {
+        Ok(id) => id,
+        Err(error) => return crate::core::tools::error_result(error.to_string()),
+    };
+    let grant_id = match AuthorityGrantId::new("agent-tool-runtime") {
+        Ok(id) => id,
+        Err(error) => return crate::core::tools::error_result(error.to_string()),
+    };
+    let trace_id = match TraceId::new(format!("tool:{fingerprint}")) {
+        Ok(id) => id,
+        Err(error) => return crate::core::tools::error_result(error.to_string()),
+    };
+    let mut causal_context = CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
+        .with_scope("tool.read")
+        .with_scope("tool.write")
+        .with_scope("tool.invoke")
+        .with_session_id(session_id.to_owned())
+        .with_idempotency_key(idempotency_key);
+    if let Some(workspace_id) = workspace_id {
+        causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
+    }
+    let payload = json!({
+        "__runtimeToolInvocationId": runtime_invocation_id.clone(),
+        "params": effective_args,
+        "sessionId": session_id,
+        "workingDirectory": working_directory,
+        "workspaceId": workspace_id,
+        "toolCallId": tool_call_id,
+        "turn": turn,
+        "runId": run_id,
+    });
+    let runtime_execution = RuntimeToolExecution {
+        tool_name: tool_name.to_owned(),
+        params: payload
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default())),
+        context: tool_ctx,
+    };
+    insert_runtime_tool_execution(runtime_invocation_id.clone(), runtime_execution);
+    let result = engine_host
+        .invoke(Invocation::new_sync(
+            function_id.clone(),
+            payload,
+            causal_context,
+        ))
+        .await;
+    remove_runtime_tool_execution(&runtime_invocation_id);
+
+    if let Some(error) = result.error {
+        return crate::core::tools::error_result(format!(
+            "Engine tool invocation failed for {function_id}: {error}"
+        ));
+    }
+    let Some(value) = result.value else {
+        return crate::core::tools::error_result(format!(
+            "Engine tool invocation returned no result for {function_id}"
+        ));
+    };
+    serde_json::from_value(value).unwrap_or_else(|error| {
+        crate::core::tools::error_result(format!(
+            "Engine tool invocation returned invalid tool result for {function_id}: {error}"
+        ))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stable_tool_call_material(
+    run_id: Option<&str>,
+    session_id: &str,
+    turn: i64,
+    tool_call_id: &str,
+    tool_name: &str,
+    working_directory: &str,
+    workspace_id: Option<&str>,
+    effective_args: &Value,
+) -> String {
+    let payload = json!({
+        "runId": run_id,
+        "sessionId": session_id,
+        "turn": turn,
+        "toolCallId": tool_call_id,
+        "toolName": tool_name,
+        "workingDirectory": working_directory,
+        "workspaceId": workspace_id,
+        "arguments": effective_args,
+    });
+    serde_json::to_string(&payload).unwrap_or_else(|_| format!(
+        "{:?}:{session_id}:{turn}:{tool_call_id}:{tool_name}:{working_directory}:{workspace_id:?}:{effective_args}",
+        run_id
+    ))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,7 +653,7 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::{Map, json};
     use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     fn test_execution_spec() -> &'static crate::core::profile::AgentExecutionSpec {
         static SPEC: OnceLock<crate::core::profile::AgentExecutionSpec> = OnceLock::new();
@@ -523,6 +680,8 @@ mod tests {
                 event_persister: None,
                 turn: 0,
                 tool_abort_registry: None,
+                engine_host: None,
+                run_id: None,
             }
         };
         ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr, $provider:expr) => {
@@ -544,6 +703,8 @@ mod tests {
                 event_persister: None,
                 turn: 0,
                 tool_abort_registry: None,
+                engine_host: None,
+                run_id: None,
             }
         };
     }
@@ -699,6 +860,16 @@ mod tests {
         ToolCall::new("tc-1", name, args)
     }
 
+    fn tool_result_text(result: &ToolExecutionResult) -> &str {
+        let ToolResultBody::Blocks(blocks) = &result.result.content else {
+            panic!("expected blocks result");
+        };
+        let ToolResultContent::Text { text } = &blocks[0] else {
+            panic!("expected text block");
+        };
+        text
+    }
+
     #[tokio::test]
     async fn successful_execution() {
         let registry = make_registry(vec![Arc::new(EchoTool)]);
@@ -720,6 +891,98 @@ mod tests {
         assert!(!result.stops_turn);
         assert!(!result.is_interactive);
         assert!(result.duration_ms < 1000);
+    }
+
+    #[derive(Clone)]
+    struct EngineEchoHandler {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl crate::engine::InProcessFunctionHandler for EngineEchoHandler {
+        async fn invoke(
+            &self,
+            invocation: crate::engine::Invocation,
+        ) -> crate::engine::Result<Value> {
+            let runtime_id = invocation
+                .payload
+                .get("__runtimeToolInvocationId")
+                .and_then(Value::as_str)
+                .expect("runtime tool invocation id");
+            let execution =
+                crate::tools::capability_runtime::take_runtime_tool_execution(runtime_id)
+                    .expect("runtime tool execution context");
+            assert_eq!(execution.tool_name, "echo");
+            assert_eq!(execution.context.session_id, "s1");
+            assert_eq!(execution.context.tool_call_id, "tc-1");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(serde_json::to_value(text_result("engine path", false)).unwrap())
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_execution_routes_through_engine_and_replays_duplicate_model_call() {
+        use crate::engine::{
+            ActorId, AuthorityGrantId, AuthorityRequirement, EffectClass, FunctionDefinition,
+            FunctionId, IdempotencyContract, Provenance, RiskLevel, VisibilityScope,
+            WorkerDefinition, WorkerId, WorkerKind,
+        };
+
+        let host = EngineHostHandle::new_in_memory().unwrap();
+        let worker_id = WorkerId::new("tool").unwrap();
+        host.register_worker_for_setup(
+            WorkerDefinition::new(
+                worker_id.clone(),
+                WorkerKind::InProcess,
+                ActorId::new("system").unwrap(),
+                AuthorityGrantId::new("test").unwrap(),
+            )
+            .with_namespace_claim("tool"),
+            false,
+        )
+        .unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let function = FunctionDefinition::new(
+            FunctionId::new("tool::echo").unwrap(),
+            worker_id,
+            "test engine tool",
+            VisibilityScope::System,
+            EffectClass::IdempotentWrite,
+        )
+        .with_risk(RiskLevel::Medium)
+        .with_required_authority(AuthorityRequirement::scope("tool.write"))
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_provenance(Provenance::system())
+        .with_request_schema(json!({"type": "object", "additionalProperties": true}))
+        .with_response_schema(json!({"type": "object", "additionalProperties": true}));
+        host.register_function_for_setup(
+            function,
+            Some(Arc::new(EngineEchoHandler {
+                calls: calls.clone(),
+            })),
+            false,
+        )
+        .unwrap();
+
+        let registry = make_registry(vec![Arc::new(EchoTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+        let mut args = Map::new();
+        let _ = args.insert("text".into(), json!("hello"));
+        let tc = make_tool_call("echo", args);
+        let mut ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
+        ctx.engine_host = Some(&host);
+        ctx.run_id = Some("run-1");
+        ctx.turn = 7;
+
+        let first = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+        let second = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(tool_result_text(&first), "engine path");
+        assert_eq!(tool_result_text(&second), "engine path");
     }
 
     #[tokio::test]
@@ -1346,6 +1609,8 @@ mod tests {
             event_persister: None,
             turn: 0,
             tool_abort_registry: Some(abort_registry),
+            engine_host: None,
+            run_id: None,
         }
     }
 

@@ -1,10 +1,19 @@
 //! Event bridge — converts `TronEvent`s from the Orchestrator broadcast into
-//! `RpcEvent`s and routes them through the `BroadcastManager`.
+//! `RpcEvent`s and routes them through WebSocket-compatible delivery.
+//!
+//! Migrated runtime event classes publish first to the engine stream primitive
+//! (`events.session`) when an [`EngineHostHandle`] is attached. The stream pump
+//! then rebroadcasts the wrapped `RpcEvent` shape. This keeps WebSocket as
+//! delivery while making engine streams the live/resumable source for agent
+//! runtime updates. Tests and unmigrated contexts may still construct a bridge
+//! without engine streams and use direct broadcast.
 
 use std::sync::Arc;
 
 use crate::core::events::TronEvent;
+use crate::engine::{EngineHostHandle, PublishStreamEvent, VisibilityScope};
 use crate::runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
+use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -43,6 +52,7 @@ pub struct EventBridge {
     broadcast: Arc<BroadcastManager>,
     cancel: CancellationToken,
     accumulators: Arc<TurnAccumulatorMap>,
+    engine_streams: Option<EngineHostHandle>,
 }
 
 impl EventBridge {
@@ -58,7 +68,20 @@ impl EventBridge {
             broadcast,
             cancel,
             accumulators,
+            engine_streams: None,
         }
+    }
+
+    /// Route stream-first runtime events through the engine stream primitive.
+    ///
+    /// WebSocket remains the delivery transport: migrated event classes are
+    /// published to `events.session`, and the server stream pump rebroadcasts
+    /// the wrapped [`RpcEvent`] shape. If publication fails, the bridge falls
+    /// back to direct broadcast so existing clients do not lose live updates.
+    #[must_use]
+    pub fn with_engine_streams(mut self, host: EngineHostHandle) -> Self {
+        self.engine_streams = Some(host);
+        self
     }
 
     /// Run the bridge loop. Exits on shutdown signal or when the broadcast sender is dropped.
@@ -109,6 +132,37 @@ impl EventBridge {
         tracing::debug!(event_type, "bridging event to client");
         let bridged = tron_event_to_bridged(event);
 
+        if should_publish_stream_first(event)
+            && let Some(host) = self.engine_streams.as_ref()
+        {
+            let published = host
+                .publish_stream_event(PublishStreamEvent {
+                    topic: "events.session".to_owned(),
+                    payload: json!({
+                        "__rpcEvent": bridged.rpc_event.clone(),
+                        "sourceEventType": event.event_type(),
+                        "sourceSequence": event.sequence(),
+                    }),
+                    visibility: VisibilityScope::Session,
+                    session_id: Some(event.session_id().to_owned()),
+                    workspace_id: None,
+                    producer: "agent-runtime".to_owned(),
+                    trace_id: None,
+                    parent_invocation_id: None,
+                })
+                .await;
+            match published {
+                Ok(_) => return,
+                Err(error) => {
+                    tracing::warn!(
+                        event_type,
+                        error = %error,
+                        "engine stream publish failed; falling back to direct WebSocket broadcast"
+                    );
+                }
+            }
+        }
+
         match bridged.scope {
             BroadcastScope::All => self.broadcast.broadcast_all(&bridged.rpc_event).await,
             BroadcastScope::Session(session_id) => {
@@ -118,6 +172,35 @@ impl EventBridge {
             }
         }
     }
+}
+
+fn should_publish_stream_first(event: &TronEvent) -> bool {
+    matches!(
+        event,
+        TronEvent::AgentStart { .. }
+            | TronEvent::AgentEnd { .. }
+            | TronEvent::AgentReady { .. }
+            | TronEvent::AgentInterrupted { .. }
+            | TronEvent::TurnStart { .. }
+            | TronEvent::TurnEnd { .. }
+            | TronEvent::TurnFailed { .. }
+            | TronEvent::ResponseComplete { .. }
+            | TronEvent::MessageUpdate { .. }
+            | TronEvent::ToolUseBatch { .. }
+            | TronEvent::ToolExecutionStart { .. }
+            | TronEvent::ToolExecutionUpdate { .. }
+            | TronEvent::ToolExecutionProgress { .. }
+            | TronEvent::ToolExecutionEnd { .. }
+            | TronEvent::ToolCallArgumentDelta { .. }
+            | TronEvent::ToolCallGenerating { .. }
+            | TronEvent::Error { .. }
+            | TronEvent::ApiRetry { .. }
+            | TronEvent::ThinkingStart { .. }
+            | TronEvent::ThinkingDelta { .. }
+            | TronEvent::ThinkingEnd { .. }
+            | TronEvent::SessionUpdated { .. }
+            | TronEvent::JobBackgrounded { .. }
+    )
 }
 
 #[cfg(test)]

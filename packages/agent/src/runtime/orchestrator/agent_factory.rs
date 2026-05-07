@@ -62,6 +62,9 @@ pub struct CreateAgentOpts {
     /// Optional output buffer registry for process output streaming.
     pub output_buffer_registry:
         Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    /// Optional engine host for routing actual tool execution through
+    /// canonical `tool::*` functions.
+    pub engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -147,6 +150,7 @@ impl AgentFactory {
                 process_manager: opts.process_manager,
                 job_manager: opts.job_manager,
                 output_buffer_registry: opts.output_buffer_registry,
+                engine_host: opts.engine_host,
             },
             session_id,
         )
@@ -235,6 +239,7 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
+            engine_host: None,
         }
     }
 

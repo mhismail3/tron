@@ -243,14 +243,14 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("logs.ingest"),
     generic_trigger!("logs.recent"),
     handler_only!("memory.retain"),
-    handler_only!("mcp.status"),
-    handler_only!("mcp.addServer"),
-    handler_only!("mcp.removeServer"),
-    handler_only!("mcp.enableServer"),
-    handler_only!("mcp.disableServer"),
-    handler_only!("mcp.restartServer"),
-    handler_only!("mcp.reload"),
-    handler_only!("mcp.listTools"),
+    generic_trigger!("mcp.status"),
+    generic_trigger!("mcp.addServer"),
+    generic_trigger!("mcp.removeServer"),
+    generic_trigger!("mcp.enableServer"),
+    generic_trigger!("mcp.disableServer"),
+    generic_trigger!("mcp.restartServer"),
+    generic_trigger!("mcp.reload"),
+    generic_trigger!("mcp.listTools"),
     generic_trigger!("skill.list"),
     generic_trigger!("skill.get"),
     generic_trigger!("skill.refresh"),
@@ -547,6 +547,17 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
     }
     if matches!(
         method,
+        "mcp.addServer"
+            | "mcp.removeServer"
+            | "mcp.enableServer"
+            | "mcp.disableServer"
+            | "mcp.restartServer"
+            | "mcp.reload"
+    ) {
+        return EffectClass::ExternalSideEffect;
+    }
+    if matches!(
+        method,
         "settings.update"
             | "settings.resetToDefaults"
             | "context.confirmCompaction"
@@ -580,7 +591,6 @@ fn effect_class_for_method(method: &str, policy: HandlerExecutionPolicy) -> Effe
         return EffectClass::IrreversibleSideEffect;
     }
     if method.starts_with("git.")
-        || method.starts_with("mcp.")
         || method.starts_with("browser.")
         || method.starts_with("display.")
         || method.starts_with("device.")
@@ -674,6 +684,7 @@ pub(super) fn function_definition_for_spec(spec: &RpcCapabilitySpec) -> Function
 
 fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
     if method.starts_with("logs.")
+        || method.starts_with("mcp.")
         || method == "filesystem.createDir"
         || method == "job.unsubscribe"
         || method == "job.background"
@@ -704,6 +715,12 @@ fn settings_write_requires_approval(method: &str) -> bool {
             | "job.cancel"
             | "agent.prompt"
             | "agent.abort"
+            | "mcp.addServer"
+            | "mcp.removeServer"
+            | "mcp.enableServer"
+            | "mcp.disableServer"
+            | "mcp.restartServer"
+            | "mcp.reload"
     )
 }
 
@@ -723,6 +740,7 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
         "model",
         "settings",
         "logs",
+        "mcp",
         "prompt_library",
         "skills",
         "filesystem",
@@ -832,6 +850,7 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("context.") => "context",
         method if method.starts_with("job.") => "job",
         method if method.starts_with("agent.") => "agent",
+        method if method.starts_with("mcp.") => "mcp",
         method if method.starts_with("approval.") => "approval",
         method if method.starts_with("notifications.") => "notifications",
         method if method.starts_with("plan.") => "plan",
@@ -893,6 +912,14 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "agent.deliverSubagentResults" => ("agent", "deliver_subagent_results".to_owned()),
         "agent.submitConfirmation" => ("agent", "submit_confirmation".to_owned()),
         "agent.submitAnswers" => ("agent", "submit_answers".to_owned()),
+        "mcp.status" => ("mcp", "status".to_owned()),
+        "mcp.addServer" => ("mcp", "add_server".to_owned()),
+        "mcp.removeServer" => ("mcp", "remove_server".to_owned()),
+        "mcp.enableServer" => ("mcp", "enable_server".to_owned()),
+        "mcp.disableServer" => ("mcp", "disable_server".to_owned()),
+        "mcp.restartServer" => ("mcp", "restart_server".to_owned()),
+        "mcp.reload" => ("mcp", "reload".to_owned()),
+        "mcp.listTools" => ("mcp", "list_tools".to_owned()),
         "context.getSnapshot" => ("context", "get_snapshot".to_owned()),
         "context.getDetailedSnapshot" => ("context", "get_detailed_snapshot".to_owned()),
         "context.getAuditTrace" => ("context", "get_audit_trace".to_owned()),
@@ -941,6 +968,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "context" => "context",
                     "job" => "job",
                     "agent" => "agent",
+                    "mcp" => "mcp",
                     "approval" => "approval",
                     "logs" => "logs",
                     "model" => "model",
@@ -994,6 +1022,8 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("job"), "write") => "job.write",
         (Some("agent"), "read") => "agent.read",
         (Some("agent"), "write") => "agent.write",
+        (Some("mcp"), "read") => "mcp.read",
+        (Some("mcp"), "write") => "mcp.write",
         (Some("approval"), "read") => "approval.read",
         (Some("approval"), "write") => "approval.resolve",
         (Some("notifications"), "read") => "notifications.read",

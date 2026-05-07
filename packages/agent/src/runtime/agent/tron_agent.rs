@@ -66,6 +66,9 @@ pub struct AgentDeps {
     /// Optional output buffer registry for process output streaming.
     pub output_buffer_registry:
         Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    /// Optional engine host for routing actual tool execution through
+    /// canonical `tool::*` functions.
+    pub engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -99,6 +102,9 @@ pub struct TronAgent {
     /// cancel a single in-flight tool without aborting the whole turn. When
     /// `None` (subagents, older code paths) tools share the turn-level token.
     tool_abort_registry: Option<Arc<ToolAbortRegistry>>,
+    /// Optional engine host used by the tool executor to invoke canonical
+    /// `tool::*` functions while preserving runtime tool context.
+    engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
 impl TronAgent {
@@ -124,6 +130,7 @@ impl TronAgent {
             process_manager: deps.process_manager,
             job_manager: deps.job_manager,
             output_buffer_registry: deps.output_buffer_registry,
+            engine_host: deps.engine_host,
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
@@ -225,6 +232,7 @@ impl TronAgent {
                 output_buffer_registry: self.output_buffer_registry.as_ref(),
                 sequence_counter: self.sequence_counter.as_ref().map(|c| c.as_ref()),
                 tool_abort_registry: self.tool_abort_registry.as_ref(),
+                engine_host: self.engine_host.as_ref(),
             })
             .await;
 
