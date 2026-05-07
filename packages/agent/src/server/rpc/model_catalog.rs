@@ -1,10 +1,10 @@
-//! Model RPC compatibility fixtures and provider catalog helpers.
+//! Model provider catalog and session model-configuration helpers.
 //!
 //! `model.list`, `model.switch`, and `config.setReasoningLevel` are served by
-//! engine bridge generic triggers. The provider catalog helpers in this file
-//! remain the source of truth for model support/deprecation/default reasoning
-//! checks, while the old method-specific handlers are test fixtures that
-//! preserve historical wire-behavior coverage during the migration.
+//! canonical engine functions. The provider catalog helpers in this file remain
+//! the source of truth for model support/deprecation/default reasoning checks,
+//! and the mutating helpers are plain domain functions rather than JSON-RPC
+//! handler adapters.
 //!
 //! Model data is derived from the provider registries (single source of truth).
 //! See `anthropic/types.rs`, `openai/types.rs`, `google/types.rs`, `minimax/types.rs`.
@@ -13,11 +13,7 @@
 //! audit-trail emissions. The RPC response has already been determined; a failed
 //! append should not change the client-visible result.
 
-#[cfg(test)]
-use async_trait::async_trait;
 use serde_json::Value;
-#[cfg(test)]
-use tracing::instrument;
 
 use crate::llm::anthropic::types::{all_claude_models_api_json, get_claude_model};
 use crate::llm::google::types::{all_gemini_models_api_json, get_gemini_model};
@@ -25,19 +21,14 @@ use crate::llm::kimi::types::all_kimi_models_api_json;
 use crate::llm::minimax::types::all_minimax_models_api_json;
 use crate::llm::models::registry::strip_provider_prefix;
 use crate::llm::ollama::types::all_ollama_models_api_json_with_availability;
-#[cfg(test)]
 use crate::llm::openai::types::openai_model_available_for_auth_path;
 use crate::llm::openai::types::{
     OpenAIAuthPath, all_openai_models_api_json_for_auth_path, get_openai_model,
     get_openai_model_profile,
 };
 use crate::server::rpc::context::RpcContext;
-#[cfg(test)]
 use crate::server::rpc::errors::{self, RpcError};
-#[cfg(test)]
-use crate::server::rpc::handlers::require_string_param;
-#[cfg(test)]
-use crate::server::rpc::registry::MethodHandler;
+use crate::server::rpc::params::require_string_param;
 
 /// All known models, derived from provider registries (single source of truth).
 ///
@@ -84,115 +75,115 @@ pub(crate) fn active_openai_auth_path(ctx: &RpcContext) -> OpenAIAuthPath {
 }
 
 /// Switch the model for a session.
+pub(crate) async fn switch_model(
+    params: Option<&Value>,
+    ctx: &RpcContext,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let requested_model = require_string_param(params, "model")?;
+    let model = strip_provider_prefix(&requested_model).to_string();
+
+    if !is_model_supported(&model) {
+        return Err(RpcError::InvalidParams {
+            message: format!("Unknown model: {requested_model}"),
+        });
+    }
+
+    if is_model_deprecated(&model) {
+        return Err(RpcError::InvalidParams {
+            message: format!("Model '{model}' is deprecated and cannot be selected"),
+        });
+    }
+
+    if get_openai_model(&model).is_some() {
+        let auth_path = active_openai_auth_path(ctx);
+        if !openai_model_available_for_auth_path(&model, auth_path) {
+            return Err(RpcError::InvalidParams {
+                message: format!(
+                    "OpenAI model '{model}' is not available for the active auth path ({})",
+                    auth_path.as_str()
+                ),
+            });
+        }
+    }
+
+    let session = ctx
+        .event_store
+        .get_session(&session_id)
+        .map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| RpcError::NotFound {
+            code: errors::SESSION_NOT_FOUND.into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+
+    let previous_model = session.latest_model.clone();
+
+    if ctx.orchestrator.has_active_run(&session_id) {
+        return Err(RpcError::Custom {
+            code: "SESSION_BUSY".into(),
+            message: "Cannot switch model while session is running".into(),
+            details: None,
+        });
+    }
+
+    let _ = ctx
+        .event_store
+        .update_latest_model(&session_id, &model)
+        .map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })?;
+
+    let _ = ctx.event_store.append(&crate::events::AppendOptions {
+        session_id: &session_id,
+        event_type: crate::events::EventType::ConfigModelSwitch,
+        payload: serde_json::json!({
+            "previousModel": previous_model,
+            "newModel": model,
+        }),
+        parent_id: None,
+        sequence: None,
+    });
+
+    ctx.session_manager.invalidate_session(&session_id);
+
+    let is_active = ctx.session_manager.is_active(&session_id);
+    let _ = ctx
+        .orchestrator
+        .broadcast()
+        .emit(crate::core::events::TronEvent::SessionUpdated {
+            base: crate::core::events::BaseEvent::now(&session_id),
+            title: session.title.clone(),
+            model: Some(model.clone()),
+            message_count: Some(session.event_count),
+            input_tokens: Some(session.total_input_tokens),
+            output_tokens: Some(session.total_output_tokens),
+            last_turn_input_tokens: Some(session.last_turn_input_tokens),
+            cache_read_tokens: Some(session.total_cache_read_tokens),
+            cache_creation_tokens: Some(session.total_cache_creation_tokens),
+            cost: Some(session.total_cost),
+            last_activity: session.last_activity_at.clone(),
+            is_active,
+            last_user_prompt: None,
+            last_assistant_response: None,
+            parent_session_id: session.parent_session_id.clone(),
+            activity_lines: None,
+        });
+
+    Ok(serde_json::json!({
+        "previousModel": previous_model,
+        "newModel": model,
+    }))
+}
+
 #[cfg(test)]
 pub struct SwitchModelHandler;
 
 #[cfg(test)]
-#[async_trait]
-impl MethodHandler for SwitchModelHandler {
-    #[instrument(skip(self, ctx), fields(method = "model.switch"))]
+impl SwitchModelHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let requested_model = require_string_param(params.as_ref(), "model")?;
-        let model = strip_provider_prefix(&requested_model).to_string();
-
-        if !is_model_supported(&model) {
-            return Err(RpcError::InvalidParams {
-                message: format!("Unknown model: {requested_model}"),
-            });
-        }
-
-        if is_model_deprecated(&model) {
-            return Err(RpcError::InvalidParams {
-                message: format!("Model '{model}' is deprecated and cannot be selected"),
-            });
-        }
-
-        if get_openai_model(&model).is_some() {
-            let auth_path = active_openai_auth_path(ctx);
-            if !openai_model_available_for_auth_path(&model, auth_path) {
-                return Err(RpcError::InvalidParams {
-                    message: format!(
-                        "OpenAI model '{model}' is not available for the active auth path ({})",
-                        auth_path.as_str()
-                    ),
-                });
-            }
-        }
-
-        // Get current model for response
-        let session = ctx
-            .event_store
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        let previous_model = session.latest_model.clone();
-
-        // Reject if session is busy (agent running)
-        if ctx.orchestrator.has_active_run(&session_id) {
-            return Err(RpcError::Custom {
-                code: "SESSION_BUSY".into(),
-                message: "Cannot switch model while session is running".into(),
-                details: None,
-            });
-        }
-
-        let _ = ctx
-            .event_store
-            .update_latest_model(&session_id, &model)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
-
-        // Persist config.model_switch event
-        let _ = ctx.event_store.append(&crate::events::AppendOptions {
-            session_id: &session_id,
-            event_type: crate::events::EventType::ConfigModelSwitch,
-            payload: serde_json::json!({
-                "previousModel": previous_model,
-                "newModel": model,
-            }),
-            parent_id: None,
-            sequence: None,
-        });
-
-        // Invalidate cached session so next resume reconstructs with new model
-        ctx.session_manager.invalidate_session(&session_id);
-
-        // Emit session.updated event via broadcast
-        let is_active = ctx.session_manager.is_active(&session_id);
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(crate::core::events::TronEvent::SessionUpdated {
-                base: crate::core::events::BaseEvent::now(&session_id),
-                title: session.title.clone(),
-                model: Some(model.clone()),
-                message_count: Some(session.event_count),
-                input_tokens: Some(session.total_input_tokens),
-                output_tokens: Some(session.total_output_tokens),
-                last_turn_input_tokens: Some(session.last_turn_input_tokens),
-                cache_read_tokens: Some(session.total_cache_read_tokens),
-                cache_creation_tokens: Some(session.total_cache_creation_tokens),
-                cost: Some(session.total_cost),
-                last_activity: session.last_activity_at.clone(),
-                is_active,
-                last_user_prompt: None,
-                last_assistant_response: None,
-                parent_session_id: session.parent_session_id.clone(),
-                activity_lines: None,
-            });
-
-        Ok(serde_json::json!({
-            "previousModel": previous_model,
-            "newModel": model,
-        }))
+        switch_model(params.as_ref(), ctx).await
     }
 }
 
@@ -217,71 +208,70 @@ pub(crate) fn default_reasoning_level(
 /// The server is the source of truth: it resolves `previousLevel` from event
 /// history, falling back to the model's `defaultReasoningLevel` for the first
 /// change in a session. The client only sends `sessionId` and `level`.
+pub(crate) async fn set_reasoning_level(
+    params: Option<&Value>,
+    ctx: &RpcContext,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let new_level = require_string_param(params, "level")?;
+
+    let _ = ctx
+        .event_store
+        .get_session(&session_id)
+        .map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| RpcError::NotFound {
+            code: errors::SESSION_NOT_FOUND.into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+
+    let state = ctx
+        .event_store
+        .get_state_at_head(&session_id)
+        .map_err(|e| RpcError::Internal {
+            message: format!("failed to resolve session state: {e}"),
+        })?;
+    let previous_level = state
+        .reasoning_level
+        .clone()
+        .or_else(|| default_reasoning_level(&state.model, active_openai_auth_path(ctx)));
+
+    if previous_level.as_deref().map(str::to_lowercase) == Some(new_level.to_lowercase()) {
+        return Ok(serde_json::json!({
+            "previousLevel": previous_level,
+            "newLevel": new_level,
+            "changed": false,
+        }));
+    }
+
+    let _ = ctx.event_store.append(&crate::events::AppendOptions {
+        session_id: &session_id,
+        event_type: crate::events::EventType::ConfigReasoningLevel,
+        payload: serde_json::json!({
+            "previousLevel": previous_level,
+            "newLevel": new_level,
+        }),
+        parent_id: None,
+        sequence: None,
+    });
+
+    ctx.session_manager.invalidate_session(&session_id);
+
+    Ok(serde_json::json!({
+        "previousLevel": previous_level,
+        "newLevel": new_level,
+        "changed": true,
+    }))
+}
+
 #[cfg(test)]
 pub struct SetReasoningLevelHandler;
 
 #[cfg(test)]
-#[async_trait]
-impl MethodHandler for SetReasoningLevelHandler {
-    #[instrument(skip(self, ctx), fields(method = "config.setReasoningLevel"))]
+impl SetReasoningLevelHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let new_level = require_string_param(params.as_ref(), "level")?;
-
-        // Verify session exists
-        let _ = ctx
-            .event_store
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        // Resolve previous level: event history first, then model default.
-        // A DB error here is a real failure, not "no prior state" — surface it.
-        let state = ctx
-            .event_store
-            .get_state_at_head(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: format!("failed to resolve session state: {e}"),
-            })?;
-        let previous_level = state
-            .reasoning_level
-            .clone()
-            .or_else(|| default_reasoning_level(&state.model, active_openai_auth_path(ctx)));
-
-        // Skip if level hasn't actually changed (case-insensitive)
-        if previous_level.as_deref().map(str::to_lowercase) == Some(new_level.to_lowercase()) {
-            return Ok(serde_json::json!({
-                "previousLevel": previous_level,
-                "newLevel": new_level,
-                "changed": false,
-            }));
-        }
-
-        // Persist config.reasoning_level event
-        let _ = ctx.event_store.append(&crate::events::AppendOptions {
-            session_id: &session_id,
-            event_type: crate::events::EventType::ConfigReasoningLevel,
-            payload: serde_json::json!({
-                "previousLevel": previous_level,
-                "newLevel": new_level,
-            }),
-            parent_id: None,
-            sequence: None,
-        });
-
-        // Invalidate cached session so next resume reconstructs with new level
-        ctx.session_manager.invalidate_session(&session_id);
-
-        Ok(serde_json::json!({
-            "previousLevel": previous_level,
-            "newLevel": new_level,
-            "changed": true,
-        }))
+        set_reasoning_level(params.as_ref(), ctx).await
     }
 }
 

@@ -20,7 +20,7 @@ use crate::engine::{
 use crate::server::rpc::context::{AgentDeps, RpcContext};
 use crate::server::rpc::errors::RpcError;
 
-use super::prompt_runtime::{
+use super::runtime::{
     PromptBootstrapData, PromptContextArtifacts, build_user_content_override,
     build_user_event_payload, collect_pending_skill_payloads, load_prompt_bootstrap,
     load_prompt_bootstrap_minimal, load_session_update_data, persist_user_message_event,
@@ -788,7 +788,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 error = %error,
                 "failed to build skill context from session"
             );
-            super::prompt_runtime::SkillContextResult {
+            super::runtime::SkillContextResult {
                 skill_activation_context: None,
                 skill_context: None,
                 skill_removal_context: None,
@@ -981,14 +981,14 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     // response returns immediately; the summarizer itself is async inside
     // `trigger_retain`.
     if result.error.is_none() && !result.interrupted && retain_eligible(&result.stop_reason) {
-        let deps = crate::server::rpc::handlers::memory::RetainDeps {
+        let deps = crate::server::rpc::memory_retain::RetainDeps {
             orchestrator: orchestrator.clone(),
             event_store: event_store.clone(),
             subagent_manager: subagent_manager.clone(),
         };
         let auto_retain_session_id = session_id.clone();
         drop(tokio::spawn(async move {
-            crate::server::rpc::handlers::memory::auto_retain::maybe_fire(
+            crate::server::rpc::memory_retain::auto_retain::maybe_fire(
                 &deps,
                 &auto_retain_session_id,
             )

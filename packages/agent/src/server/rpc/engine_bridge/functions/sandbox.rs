@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::params::require_string_param;
 use crate::server::rpc::sandbox_service;
 
 pub(super) async fn handle(

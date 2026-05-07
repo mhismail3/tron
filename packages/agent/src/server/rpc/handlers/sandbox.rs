@@ -9,7 +9,7 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::params::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::sandbox_service;
 

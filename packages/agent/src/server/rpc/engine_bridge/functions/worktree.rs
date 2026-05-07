@@ -2,20 +2,17 @@
 //!
 //! JSON-RPC now reaches these operations through `json_rpc` triggers targeting
 //! canonical `worktree::*` function ids. The structs below are private
-//! operation adapters for the engine-owned function module, not registry-owned
-//! RPC handlers.
+//! operation helpers for the engine-owned function module, not registry-owned
+//! RPC handlers or registry-trait adapters.
 
 use crate::worktree::{count_diff_stats, split_diff_by_file};
-use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::error_mapping::map_worktree_error;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{
-    map_worktree_error, opt_bool, opt_string, require_bool, require_string_param,
-};
-use crate::server::rpc::registry::MethodHandler;
+use crate::server::rpc::params::{opt_bool, opt_string, require_bool, require_string_param};
 use crate::worktree::types::CommitOptions;
 
 use super::RpcEngineDeps;
@@ -29,21 +26,21 @@ pub(super) async fn handle(
     let params = Some(invocation.payload.clone());
     let ctx = deps.rpc_context.as_ref();
     match method {
-        "worktree.getStatus" => GetStatusHandler.handle(params, ctx).await,
-        "worktree.isGitRepo" => IsGitRepoHandler.handle(params, ctx).await,
-        "worktree.commit" => CommitHandler.handle(params, ctx).await,
-        "worktree.merge" => MergeHandler.handle(params, ctx).await,
-        "worktree.list" => ListHandler.handle(params, ctx).await,
-        "worktree.getDiff" => GetDiffHandler.handle(params, ctx).await,
-        "worktree.acquire" => AcquireHandler.handle(params, ctx).await,
-        "worktree.release" => ReleaseHandler.handle(params, ctx).await,
-        "worktree.listSessionBranches" => ListSessionBranchesHandler.handle(params, ctx).await,
-        "worktree.getCommittedDiff" => GetCommittedDiffHandler.handle(params, ctx).await,
-        "worktree.deleteBranch" => DeleteBranchHandler.handle(params, ctx).await,
-        "worktree.pruneBranches" => PruneBranchesHandler.handle(params, ctx).await,
-        "worktree.stageFiles" => StageFilesHandler.handle(params, ctx).await,
-        "worktree.unstageFiles" => UnstageFilesHandler.handle(params, ctx).await,
-        "worktree.discardFiles" => DiscardFilesHandler.handle(params, ctx).await,
+        "worktree.getStatus" => GetStatusHandler.run(params, ctx).await,
+        "worktree.isGitRepo" => IsGitRepoHandler.run(params, ctx).await,
+        "worktree.commit" => CommitHandler.run(params, ctx).await,
+        "worktree.merge" => MergeHandler.run(params, ctx).await,
+        "worktree.list" => ListHandler.run(params, ctx).await,
+        "worktree.getDiff" => GetDiffHandler.run(params, ctx).await,
+        "worktree.acquire" => AcquireHandler.run(params, ctx).await,
+        "worktree.release" => ReleaseHandler.run(params, ctx).await,
+        "worktree.listSessionBranches" => ListSessionBranchesHandler.run(params, ctx).await,
+        "worktree.getCommittedDiff" => GetCommittedDiffHandler.run(params, ctx).await,
+        "worktree.deleteBranch" => DeleteBranchHandler.run(params, ctx).await,
+        "worktree.pruneBranches" => PruneBranchesHandler.run(params, ctx).await,
+        "worktree.stageFiles" => StageFilesHandler.run(params, ctx).await,
+        "worktree.unstageFiles" => UnstageFilesHandler.run(params, ctx).await,
+        "worktree.discardFiles" => DiscardFilesHandler.run(params, ctx).await,
         _ => Err(RpcError::Internal {
             message: format!("RPC method {method} is not worktree-owned"),
         }),
@@ -100,10 +97,10 @@ fn resolve_diff_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcErr
 /// and `commitCount` fields that the iOS client expects.
 pub struct GetStatusHandler;
 
-#[async_trait]
-impl MethodHandler for GetStatusHandler {
+#[allow(dead_code)]
+impl GetStatusHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.getStatus"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -162,10 +159,10 @@ impl MethodHandler for GetStatusHandler {
 /// per-session worktree-isolation toggle.
 pub struct IsGitRepoHandler;
 
-#[async_trait]
-impl MethodHandler for IsGitRepoHandler {
+#[allow(dead_code)]
+impl IsGitRepoHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.isGitRepo"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let path = require_string_param(params.as_ref(), "path")?;
         let coord = require_coordinator(ctx)?;
         let is_git = coord.is_git_repo(std::path::Path::new(&path)).await;
@@ -178,10 +175,10 @@ impl MethodHandler for IsGitRepoHandler {
 /// Commit worktree changes.
 pub struct CommitHandler;
 
-#[async_trait]
-impl MethodHandler for CommitHandler {
+#[allow(dead_code)]
+impl CommitHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.commit"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = require_string_param(params.as_ref(), "message")?;
         let coord = require_coordinator(ctx)?;
@@ -233,10 +230,10 @@ impl MethodHandler for CommitHandler {
 /// Merge worktree.
 pub struct MergeHandler;
 
-#[async_trait]
-impl MethodHandler for MergeHandler {
+#[allow(dead_code)]
+impl MergeHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.merge"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target_branch = opt_string(params.as_ref(), "targetBranch");
         let target_branch = target_branch.as_deref().unwrap_or("main");
@@ -279,10 +276,10 @@ impl MethodHandler for MergeHandler {
 /// List worktrees across all sessions.
 pub struct ListHandler;
 
-#[async_trait]
-impl MethodHandler for ListHandler {
+#[allow(dead_code)]
+impl ListHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.list"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let coord = require_coordinator(ctx)?;
 
         let active = coord.list_active();
@@ -308,10 +305,10 @@ impl MethodHandler for ListHandler {
 /// Explicitly acquire a worktree for a session.
 pub struct AcquireHandler;
 
-#[async_trait]
-impl MethodHandler for AcquireHandler {
+#[allow(dead_code)]
+impl AcquireHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.acquire"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -345,10 +342,10 @@ impl MethodHandler for AcquireHandler {
 /// Explicitly release a session's worktree.
 pub struct ReleaseHandler;
 
-#[async_trait]
-impl MethodHandler for ReleaseHandler {
+#[allow(dead_code)]
+impl ReleaseHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.release"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -369,10 +366,10 @@ impl MethodHandler for ReleaseHandler {
 /// List all session branches (active and preserved) for the repo.
 pub struct ListSessionBranchesHandler;
 
-#[async_trait]
-impl MethodHandler for ListSessionBranchesHandler {
+#[allow(dead_code)]
+impl ListSessionBranchesHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.listSessionBranches"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -395,10 +392,10 @@ impl MethodHandler for ListSessionBranchesHandler {
 /// Get committed diff for a session (base..HEAD).
 pub struct GetCommittedDiffHandler;
 
-#[async_trait]
-impl MethodHandler for GetCommittedDiffHandler {
+#[allow(dead_code)]
+impl GetCommittedDiffHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.getCommittedDiff"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -426,10 +423,10 @@ impl MethodHandler for GetCommittedDiffHandler {
 /// Delete a single session branch.
 pub struct DeleteBranchHandler;
 
-#[async_trait]
-impl MethodHandler for DeleteBranchHandler {
+#[allow(dead_code)]
+impl DeleteBranchHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.deleteBranch"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let branch = require_string_param(params.as_ref(), "branch")?;
         let coord = require_coordinator(ctx)?;
@@ -456,10 +453,10 @@ impl MethodHandler for DeleteBranchHandler {
 /// Prune all inactive session branches.
 pub struct PruneBranchesHandler;
 
-#[async_trait]
-impl MethodHandler for PruneBranchesHandler {
+#[allow(dead_code)]
+impl PruneBranchesHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.pruneBranches"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -490,10 +487,10 @@ const MAX_DIFF_BYTES: usize = 1_024 * 1_024; // 1 MB
 /// the session's original working directory. Does not require a coordinator.
 pub struct GetDiffHandler;
 
-#[async_trait]
-impl MethodHandler for GetDiffHandler {
+#[allow(dead_code)]
+impl GetDiffHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.getDiff"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -899,10 +896,10 @@ fn validate_relative_worktree_path(path: &str) -> Result<(), RpcError> {
 /// Stage files: `git add -- <paths>`
 pub struct StageFilesHandler;
 
-#[async_trait]
-impl MethodHandler for StageFilesHandler {
+#[allow(dead_code)]
+impl StageFilesHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.stageFiles"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -931,10 +928,10 @@ impl MethodHandler for StageFilesHandler {
 /// Unstage files: `git restore --staged -- <paths>` (or `git rm --cached` for repos with no commits)
 pub struct UnstageFilesHandler;
 
-#[async_trait]
-impl MethodHandler for UnstageFilesHandler {
+#[allow(dead_code)]
+impl UnstageFilesHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.unstageFiles"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
@@ -993,10 +990,10 @@ impl MethodHandler for UnstageFilesHandler {
 /// Discard file changes: restores tracked files from HEAD, deletes untracked files.
 pub struct DiscardFilesHandler;
 
-#[async_trait]
-impl MethodHandler for DiscardFilesHandler {
+#[allow(dead_code)]
+impl DiscardFilesHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.discardFiles"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let (session_id, paths) = require_session_and_paths(params.as_ref())?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
         let repo_root = std::path::Path::new(&dir);

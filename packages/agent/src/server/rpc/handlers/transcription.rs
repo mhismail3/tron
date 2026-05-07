@@ -8,7 +8,7 @@ use tracing::{debug, instrument, warn};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::opt_string;
+use crate::server::rpc::params::opt_string;
 use crate::server::rpc::registry::MethodHandler;
 
 /// Maximum audio size in bytes (150 MB).

@@ -1,6 +1,7 @@
 use super::*;
 
-use crate::server::rpc::handlers::{map_event_store_error, opt_string, require_string_param};
+use crate::server::rpc::error_mapping::map_event_store_error;
+use crate::server::rpc::params::{opt_string, require_string_param};
 
 pub(super) async fn handle(
     method: &str,

@@ -15,8 +15,8 @@ use tracing::{debug, warn};
 
 use crate::events::EventStore;
 use crate::server::rpc::context::run_blocking_task;
+use crate::server::rpc::error_mapping::map_event_store_error;
 use crate::server::rpc::errors::{RpcError, SESSION_NOT_FOUND};
-use crate::server::rpc::handlers::map_event_store_error;
 
 use super::RetainDeps;
 
@@ -544,8 +544,8 @@ mod tests {
 
     fn deps_from_ctx(
         ctx: &crate::server::rpc::context::RpcContext,
-    ) -> crate::server::rpc::handlers::memory::RetainDeps {
-        crate::server::rpc::handlers::memory::RetainDeps::from_rpc(ctx)
+    ) -> crate::server::rpc::memory_retain::RetainDeps {
+        crate::server::rpc::memory_retain::RetainDeps::from_rpc(ctx)
     }
 
     #[tokio::test]

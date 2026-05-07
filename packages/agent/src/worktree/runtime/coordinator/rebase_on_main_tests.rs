@@ -1,6 +1,6 @@
 //! Tests for `rebase_on_main` — phases B through I of the plan's TDD
 //! matrix. Phase A (RPC-level parser tests) lives in
-//! `server::rpc::handlers::git_workflow::tests`.
+//! the JSON-RPC wire-fixture tests.
 //!
 //! Fixtures run real `git` against `tempfile::tempdir()` directories —
 //! the conflict state machine's semantics depend on the index state

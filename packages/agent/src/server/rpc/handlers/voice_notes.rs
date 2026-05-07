@@ -8,10 +8,10 @@ use uuid::Uuid;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-#[cfg(test)]
-use crate::server::rpc::handlers::opt_u64;
 use crate::server::rpc::handlers::transcription::{normalize_base64, transcribe_audio};
-use crate::server::rpc::handlers::{opt_string, require_string_param};
+#[cfg(test)]
+use crate::server::rpc::params::opt_u64;
+use crate::server::rpc::params::{opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::voice_notes_service;
 

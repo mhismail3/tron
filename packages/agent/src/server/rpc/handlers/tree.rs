@@ -10,9 +10,10 @@ use tracing::instrument;
 #[cfg(test)]
 use crate::server::rpc::context::RpcContext;
 #[cfg(test)]
-use crate::server::rpc::errors::{self, RpcError};
+use crate::server::rpc::error_mapping::map_event_store_error;
 #[cfg(test)]
-use crate::server::rpc::handlers::{map_event_store_error, require_string_param};
+use crate::server::rpc::errors::{self, RpcError};
+use crate::server::rpc::params::require_string_param;
 #[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 

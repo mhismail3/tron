@@ -17,10 +17,9 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::error_mapping::map_worktree_error;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{
-    map_worktree_error, opt_bool, opt_string, require_bool, require_string_param,
-};
+use crate::server::rpc::params::{opt_bool, opt_string, require_bool, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::CommitOptions;
 

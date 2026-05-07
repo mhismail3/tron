@@ -20,7 +20,7 @@
 //! RPC, subagent).
 //!
 //! Error mapping: every coordinator error is routed through
-//! `super::map_worktree_error`, which classifies `WorktreeError`
+//! `crate::server::rpc::error_mapping::map_worktree_error`, which classifies `WorktreeError`
 //! variants into typed RPC error codes (`PROTECTED_BRANCH`,
 //! `NON_FAST_FORWARD`, `NO_REMOTE`, `GIT_AUTH_FAILED`, …). No handler
 //! should produce `RpcError::Internal` for a predictable git failure —
@@ -31,10 +31,9 @@ use serde_json::{Value, json};
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::error_mapping::map_worktree_error;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{
-    map_worktree_error, opt_bool, opt_string, opt_u64, require_string_param,
-};
+use crate::server::rpc::params::{opt_bool, opt_string, opt_u64, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::{
     ConflictResolution, MergeStrategy, RebaseOnMainResult, SyncBlockReason, SyncOutcome,

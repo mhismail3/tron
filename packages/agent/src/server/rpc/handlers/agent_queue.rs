@@ -20,7 +20,7 @@ use crate::server::rpc::context::RpcContext;
 #[cfg(test)]
 use crate::server::rpc::errors::RpcError;
 #[cfg(test)]
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::params::require_string_param;
 #[cfg(test)]
 use crate::server::rpc::prompt_queue::PromptQueueService;
 #[cfg(test)]

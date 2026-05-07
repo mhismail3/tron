@@ -918,7 +918,8 @@ surface directly instead of treating legacy method names as the future API:
   settings/MCP status, device, cron/update, memory, display, sandbox, jobs,
   agent queue, session-event, approval, and catalog topics flow through the
   engine stream pump when stream publication succeeds, with direct WebSocket
-  fallback reserved for publish failure or unmigrated event classes;
+  fallback reserved for explicit stream publish failure rather than a second
+  compatibility delivery path;
 - `agent::prompt_apply` now hands actual turn execution to hidden
   `agent::run_turn`, which records run/turn metadata and starts the existing
   provider runtime without changing the `{ acknowledged: true, runId }`

@@ -5,6 +5,7 @@ use crate::core::messages::TokenUsage;
 use crate::events::sqlite::row_types::EventRow;
 use crate::llm::models::types::Provider as ProviderKind;
 use crate::llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
+use crate::server::rpc::agent_runtime::runtime as prompt_runtime;
 use crate::server::rpc::context::AgentDeps;
 use crate::server::rpc::handlers::session::CreateSessionHandler;
 use crate::server::rpc::handlers::test_helpers::{FixedProviderFactory, make_test_context};

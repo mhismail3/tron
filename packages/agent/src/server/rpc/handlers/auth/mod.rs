@@ -37,11 +37,15 @@ use crate::llm::auth::types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, OAuthTokens, ProviderAuth, ServiceAuth,
 };
 #[cfg(test)]
+use crate::server::rpc::auth_flows::PendingOAuthFlow;
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
+use crate::server::rpc::error_mapping::map_auth_error;
 #[cfg(test)]
 use crate::server::rpc::errors::RpcError;
 #[cfg(test)]
-use crate::server::rpc::handlers::{map_auth_error, opt_string, require_string_param};
+use crate::server::rpc::params::{opt_string, require_string_param};
 #[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 #[cfg(test)]
@@ -70,16 +74,6 @@ pub use get::GetAuthHandler;
 pub use oauth::{OAuthBeginHandler, OAuthCompleteHandler};
 #[cfg(test)]
 pub use update::UpdateAuthHandler;
-
-/// In-memory state for a pending OAuth flow.
-pub struct PendingOAuthFlow {
-    /// PKCE code verifier (Anthropic/Google) or random state (OpenAI) for this flow.
-    pub verifier: String,
-    /// OAuth provider name (e.g. `"anthropic"`, `"openai-codex"`).
-    pub provider: String,
-    /// When this flow was initiated.
-    pub created_at: std::time::Instant,
-}
 
 /// Known LLM provider identifiers.
 #[cfg(test)]

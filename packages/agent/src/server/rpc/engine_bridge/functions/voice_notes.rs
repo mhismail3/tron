@@ -3,7 +3,7 @@ use super::*;
 use base64::Engine;
 use uuid::Uuid;
 
-use crate::server::rpc::handlers::{opt_string, require_string_param};
+use crate::server::rpc::params::{opt_string, require_string_param};
 use crate::server::rpc::voice_notes_service;
 
 pub(super) async fn handle(

@@ -12,7 +12,7 @@ use tracing::instrument;
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::git_service;
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::params::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);

@@ -16,16 +16,15 @@
 //! - `cron.status` — Scheduler health/status
 //! - `cron.getRuns` — Paginated run history for a job
 
-#![cfg(test)]
-
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::error_mapping::map_cron_error;
 use crate::server::rpc::errors::{RpcError, to_json_value};
-use crate::server::rpc::handlers::{
-    map_cron_error, opt_array, opt_bool, opt_u64, require_param, require_string_param,
+use crate::server::rpc::params::{
+    opt_array, opt_bool, opt_u64, require_param, require_string_param,
 };
 use crate::server::rpc::registry::MethodHandler;
 

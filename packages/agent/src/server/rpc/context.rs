@@ -239,7 +239,7 @@ pub struct RpcContext {
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
     pub oauth_flows: Arc<
         tokio::sync::Mutex<
-            std::collections::HashMap<String, crate::server::rpc::handlers::auth::PendingOAuthFlow>,
+            std::collections::HashMap<String, crate::server::rpc::auth_flows::PendingOAuthFlow>,
         >,
     >,
     /// MCP router for managing MCP servers. Production contexts always provide

@@ -19,13 +19,13 @@ use crate::runtime::profile_runtime::ProfileRuntime;
 use crate::server::codex_app::CodexAppServerManager;
 use crate::server::rpc::client_logs::{ClientLogEntry, ClientLogsService};
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
+use crate::server::rpc::error_mapping::{map_cron_error, map_event_store_error};
 use crate::server::rpc::errors::{self, CLIENT_VERSION_UNSUPPORTED, RpcError, to_json_value};
 use crate::server::rpc::filesystem_service;
-use crate::server::rpc::handlers::{
-    map_cron_error, map_event_store_error, opt_array, opt_bool, opt_string, opt_u64, require_param,
-    require_string_param,
-};
 use crate::server::rpc::notification_inbox::NotificationInboxService;
+use crate::server::rpc::params::{
+    opt_array, opt_bool, opt_string, opt_u64, require_param, require_string_param,
+};
 use crate::server::rpc::types::RpcEvent;
 use crate::server::rpc::validation::validate_string_param;
 use crate::server::websocket::broadcast::BroadcastManager;

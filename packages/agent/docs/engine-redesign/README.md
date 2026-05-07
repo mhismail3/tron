@@ -447,6 +447,10 @@ Implemented:
   strict-schema JSON-RPC methods over the reserved engine meta-capabilities.
   Existing 170 domain method names remain compatibility aliases, public method
   count rises to 175, and every registration is still marker-only;
+- single-shape cleanup: shared production helpers moved out of
+  `server/rpc/handlers`, engine-owned function modules no longer call old
+  `MethodHandler` adapters, and legacy method-specific code is test-only
+  wire-contract fixture code;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,

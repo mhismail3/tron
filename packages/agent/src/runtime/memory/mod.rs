@@ -24,7 +24,7 @@
 //!
 //! Sibling to `runtime/context/` and `runtime/agent/`. Depends on
 //! `core::paths`. Depended on by `server::rpc::context_queries` and
-//! `server::rpc::handlers::agent::prompt_runtime` which inject the loaded
+//! `server::rpc::agent_runtime::runtime` which inject the loaded
 //! content into the LLM-bound `Context`.
 
 #![deny(unsafe_code)]

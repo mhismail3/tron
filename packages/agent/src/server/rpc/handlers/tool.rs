@@ -5,15 +5,13 @@
 //! idempotency metadata before resolving the orchestrator tool call. This
 //! module is test-only while older handler tests are retained.
 
-#![cfg(test)]
-
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
-use crate::server::rpc::handlers::{require_param, require_string_param};
+use crate::server::rpc::params::{require_param, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 /// Submit a tool result back to the agent.

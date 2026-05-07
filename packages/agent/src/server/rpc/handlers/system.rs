@@ -1,9 +1,8 @@
-//! System protocol constants and legacy wire-contract fixtures.
+//! System legacy wire-contract fixtures.
 //!
 //! Every public `system.*` JSON-RPC method is marker-registered as a generic
-//! trigger into canonical `system::*` engine functions. This module keeps the
-//! shared wire-protocol constants in production and compiles old
-//! method-specific handlers only in tests for parity coverage.
+//! trigger into canonical `system::*` engine functions. This module compiles
+//! old method-specific handlers only in tests for parity coverage.
 
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -22,6 +21,8 @@ use crate::server::rpc::errors::CLIENT_VERSION_UNSUPPORTED;
 #[cfg(test)]
 use crate::server::rpc::errors::RpcError;
 #[cfg(test)]
+use crate::server::rpc::protocol::{CURRENT_PROTOCOL_VERSION, MIN_CLIENT_PROTOCOL_VERSION};
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 #[cfg(test)]
 use crate::server::rpc::registry::MethodRegistry;
@@ -36,19 +37,6 @@ use crate::server::updater::{UpdateDecision, check_for_update};
 fn load_settings(ctx: &RpcContext) -> crate::settings::TronSettings {
     ctx.profile_runtime.current().settings.clone()
 }
-
-/// Current RPC wire-protocol version.
-///
-/// Bumped only on breaking changes — fields that old clients can
-/// silently ignore do not bump this. The current version is documented
-/// in the iOS client's handshake and any value `>= MIN_CLIENT_PROTOCOL_VERSION`
-/// is accepted.
-pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
-
-/// Minimum `protocolVersion` the server will accept. Every supported client
-/// must send this field in `system.ping`; missing or malformed values are
-/// rejected as invalid params instead of being treated as an older client.
-pub const MIN_CLIENT_PROTOCOL_VERSION: u32 = 1;
 
 /// Returns a structured snapshot of server state for the debug-only iOS
 /// Diagnostics page. Includes server identity (version, protocol, pid,

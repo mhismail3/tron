@@ -17,22 +17,19 @@
 //! RPC, subagent).
 //!
 //! Error mapping: every coordinator error is routed through
-//! `super::map_worktree_error`, which classifies `WorktreeError`
+//! `crate::server::rpc::error_mapping::map_worktree_error`, which classifies `WorktreeError`
 //! variants into typed RPC error codes (`PROTECTED_BRANCH`,
 //! `NON_FAST_FORWARD`, `NO_REMOTE`, `GIT_AUTH_FAILED`, …). No handler
 //! should produce `RpcError::Internal` for a predictable git failure —
 //! use the helper instead.
 
-use async_trait::async_trait;
 use serde_json::{Value, json};
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::error_mapping::map_worktree_error;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{
-    map_worktree_error, opt_bool, opt_string, opt_u64, require_string_param,
-};
-use crate::server::rpc::registry::MethodHandler;
+use crate::server::rpc::params::{opt_bool, opt_string, opt_u64, require_string_param};
 use crate::worktree::types::{
     ConflictResolution, MergeStrategy, RebaseOnMainResult, SyncBlockReason, SyncOutcome,
 };
@@ -50,21 +47,19 @@ pub(super) async fn handle(
     let params = Some(invocation.payload.clone());
     let ctx = deps.rpc_context.as_ref();
     match method {
-        "git.syncMain" => SyncMainHandler.handle(params, ctx).await,
-        "git.push" => PushHandler.handle(params, ctx).await,
-        "git.listLocalBranches" => ListLocalBranchesHandler.handle(params, ctx).await,
-        "git.listRemoteBranches" => ListRemoteBranchesHandler.handle(params, ctx).await,
-        "worktree.finalizeSession" => FinalizeSessionHandler.handle(params, ctx).await,
-        "worktree.rebaseOnMain" => RebaseOnMainHandler.handle(params, ctx).await,
-        "worktree.startMerge" => StartMergeHandler.handle(params, ctx).await,
-        "worktree.listConflicts" => ListConflictsHandler.handle(params, ctx).await,
-        "worktree.resolveConflict" => ResolveConflictHandler.handle(params, ctx).await,
-        "worktree.continueMerge" => ContinueMergeHandler.handle(params, ctx).await,
-        "worktree.abortMerge" => AbortMergeHandler.handle(params, ctx).await,
+        "git.syncMain" => SyncMainHandler.run(params, ctx).await,
+        "git.push" => PushHandler.run(params, ctx).await,
+        "git.listLocalBranches" => ListLocalBranchesHandler.run(params, ctx).await,
+        "git.listRemoteBranches" => ListRemoteBranchesHandler.run(params, ctx).await,
+        "worktree.finalizeSession" => FinalizeSessionHandler.run(params, ctx).await,
+        "worktree.rebaseOnMain" => RebaseOnMainHandler.run(params, ctx).await,
+        "worktree.startMerge" => StartMergeHandler.run(params, ctx).await,
+        "worktree.listConflicts" => ListConflictsHandler.run(params, ctx).await,
+        "worktree.resolveConflict" => ResolveConflictHandler.run(params, ctx).await,
+        "worktree.continueMerge" => ContinueMergeHandler.run(params, ctx).await,
+        "worktree.abortMerge" => AbortMergeHandler.run(params, ctx).await,
         "worktree.resolveConflictsWithSubagent" => {
-            ResolveConflictsWithSubagentHandler
-                .handle(params, ctx)
-                .await
+            ResolveConflictsWithSubagentHandler.run(params, ctx).await
         }
         _ => Err(RpcError::Internal {
             message: format!("RPC method {method} is not git workflow-owned"),
@@ -218,10 +213,10 @@ fn sync_outcome_json(o: &SyncOutcome) -> Value {
 /// Handler for `git.syncMain` — fast-forward local main from its upstream.
 pub struct SyncMainHandler;
 
-#[async_trait]
-impl MethodHandler for SyncMainHandler {
+#[allow(dead_code)]
+impl SyncMainHandler {
     #[instrument(skip(self, ctx), fields(method = "git.syncMain"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target = opt_string(params.as_ref(), "targetBranch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
@@ -252,10 +247,10 @@ impl MethodHandler for SyncMainHandler {
 /// Handler for `git.push` — push a session branch to its remote.
 pub struct PushHandler;
 
-#[async_trait]
-impl MethodHandler for PushHandler {
+#[allow(dead_code)]
+impl PushHandler {
     #[instrument(skip(self, ctx), fields(method = "git.push"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let branch = opt_string(params.as_ref(), "branch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
@@ -310,10 +305,10 @@ impl MethodHandler for PushHandler {
 /// session's repo (mainline branches first, session/* branches last).
 pub struct ListLocalBranchesHandler;
 
-#[async_trait]
-impl MethodHandler for ListLocalBranchesHandler {
+#[allow(dead_code)]
+impl ListLocalBranchesHandler {
     #[instrument(skip(self, ctx), fields(method = "git.listLocalBranches"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
         let fallback = session_working_dir(ctx, &session_id);
@@ -350,10 +345,10 @@ impl MethodHandler for ListLocalBranchesHandler {
 /// picker so unpublished/session branches never appear as merge targets.
 pub struct ListRemoteBranchesHandler;
 
-#[async_trait]
-impl MethodHandler for ListRemoteBranchesHandler {
+#[allow(dead_code)]
+impl ListRemoteBranchesHandler {
     #[instrument(skip(self, ctx), fields(method = "git.listRemoteBranches"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let remote = opt_string(params.as_ref(), "remote");
         let coord = require_coordinator(ctx)?;
@@ -374,10 +369,10 @@ impl MethodHandler for ListRemoteBranchesHandler {
 /// Handler for `worktree.finalizeSession` — merge session into main and rebranch.
 pub struct FinalizeSessionHandler;
 
-#[async_trait]
-impl MethodHandler for FinalizeSessionHandler {
+#[allow(dead_code)]
+impl FinalizeSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.finalizeSession"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
@@ -443,10 +438,10 @@ impl MethodHandler for FinalizeSessionHandler {
 /// session's branch.
 pub struct RebaseOnMainHandler;
 
-#[async_trait]
-impl MethodHandler for RebaseOnMainHandler {
+#[allow(dead_code)]
+impl RebaseOnMainHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.rebaseOnMain"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Parse strategy BEFORE touching the coordinator so "squash" is
         // rejected at the RPC boundary (plan requirement).
@@ -492,10 +487,10 @@ impl MethodHandler for RebaseOnMainHandler {
 /// Handler for `worktree.startMerge` — begin a merge that keeps conflicts.
 pub struct StartMergeHandler;
 
-#[async_trait]
-impl MethodHandler for StartMergeHandler {
+#[allow(dead_code)]
+impl StartMergeHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.startMerge"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let source = require_string_param(params.as_ref(), "sourceBranch")?;
         let target = require_string_param(params.as_ref(), "targetBranch")?;
@@ -528,10 +523,10 @@ impl MethodHandler for StartMergeHandler {
 /// Handler for `worktree.listConflicts`.
 pub struct ListConflictsHandler;
 
-#[async_trait]
-impl MethodHandler for ListConflictsHandler {
+#[allow(dead_code)]
+impl ListConflictsHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.listConflicts"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
         let conflicts = coord
@@ -549,10 +544,10 @@ impl MethodHandler for ListConflictsHandler {
 /// Handler for `worktree.resolveConflict`.
 pub struct ResolveConflictHandler;
 
-#[async_trait]
-impl MethodHandler for ResolveConflictHandler {
+#[allow(dead_code)]
+impl ResolveConflictHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.resolveConflict"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let path = require_string_param(params.as_ref(), "path")?;
         let resolution_str = require_string_param(params.as_ref(), "resolution")?;
@@ -580,10 +575,10 @@ impl MethodHandler for ResolveConflictHandler {
 /// Handler for `worktree.continueMerge`.
 pub struct ContinueMergeHandler;
 
-#[async_trait]
-impl MethodHandler for ContinueMergeHandler {
+#[allow(dead_code)]
+impl ContinueMergeHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.continueMerge"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = opt_string(params.as_ref(), "message");
         let coord = require_coordinator(ctx)?;
@@ -600,10 +595,10 @@ impl MethodHandler for ContinueMergeHandler {
 /// Handler for `worktree.abortMerge`.
 pub struct AbortMergeHandler;
 
-#[async_trait]
-impl MethodHandler for AbortMergeHandler {
+#[allow(dead_code)]
+impl AbortMergeHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.abortMerge"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let reason = opt_string(params.as_ref(), "reason").unwrap_or_else(|| "user".into());
         let coord = require_coordinator(ctx)?;
@@ -626,13 +621,13 @@ impl MethodHandler for AbortMergeHandler {
 /// `spawned == false`).
 pub struct ResolveConflictsWithSubagentHandler;
 
-#[async_trait]
-impl MethodHandler for ResolveConflictsWithSubagentHandler {
+#[allow(dead_code)]
+impl ResolveConflictsWithSubagentHandler {
     #[instrument(
         skip(self, ctx),
         fields(method = "worktree.resolveConflictsWithSubagent")
     )]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Must have a live coordinator to resolve worktree + merge state.
         let coord = ctx.worktree_coordinator.clone().ok_or(RpcError::Internal {

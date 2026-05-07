@@ -8,10 +8,10 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::agent_commands::AgentCommandService;
+use crate::server::rpc::agent_runtime::service::{PromptRequest, spawn_prompt_run};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::agent::prompt_service::{PromptRequest, spawn_prompt_run};
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::params::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 
 /// Submit a confirmation decision (Approved/Denied) for a GetConfirmation tool call.

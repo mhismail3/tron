@@ -6,13 +6,13 @@ use crate::engine::queue::publish_queue_lifecycle_event;
 use crate::engine::{EngineQueueDrainer, EnqueueInvocation, FunctionId};
 use crate::events::EventType;
 use crate::server::rpc::agent_commands::AgentCommandService;
-use crate::server::rpc::errors;
-use crate::server::rpc::handlers::agent::prompt_runtime::{
+use crate::server::rpc::agent_runtime::runtime::{
     format_subagent_results, get_pending_subagent_results,
 };
-use crate::server::rpc::handlers::agent::prompt_service::{
+use crate::server::rpc::agent_runtime::service::{
     PromptEngineCausality, PromptRequest, drain_prompt_queue, spawn_prompt_run,
 };
+use crate::server::rpc::errors;
 use crate::server::rpc::prompt_queue::PromptQueueService;
 use crate::server::rpc::validation;
 use serde::Deserialize;
@@ -449,7 +449,7 @@ async fn status_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Va
         event_store
             .get_session(&sid_for_check)
             .map(|opt| opt.is_some())
-            .map_err(crate::server::rpc::handlers::map_event_store_error)
+            .map_err(crate::server::rpc::error_mapping::map_event_store_error)
     })
     .await?;
     if !session_exists {
@@ -478,7 +478,7 @@ async fn status_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Va
         })?;
         crate::events::sqlite::repositories::event::EventRepo::get_latest(&conn, &sid_for_latest)
             .map(|opt| opt.map(|row| row.timestamp))
-            .map_err(crate::server::rpc::handlers::map_event_store_error)
+            .map_err(crate::server::rpc::error_mapping::map_event_store_error)
     })
     .await?;
     let time_since_last_event_ms = latest_timestamp

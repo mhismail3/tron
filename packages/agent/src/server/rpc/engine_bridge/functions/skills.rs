@@ -89,7 +89,7 @@ fn skill_activate_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<
         )
     };
 
-    let already_active = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+    let already_active = crate::server::rpc::skill_state::reconstruct_tracker(
         &deps.event_store,
         &session_id,
         &crate::settings::types::CompactionPolicy::ClearAll,
@@ -146,7 +146,7 @@ fn skill_deactivate_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Resul
             message: format!("Session '{session_id}' not found"),
         })?;
 
-    let is_active = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+    let is_active = crate::server::rpc::skill_state::reconstruct_tracker(
         &deps.event_store,
         &session_id,
         &crate::settings::types::CompactionPolicy::ClearAll,
@@ -189,7 +189,7 @@ fn skill_active_value(params: Option<&Value>, deps: &RpcEngineDeps) -> Result<Va
             message: format!("Session '{session_id}' not found"),
         })?;
 
-    let tracker = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+    let tracker = crate::server::rpc::skill_state::reconstruct_tracker(
         &deps.event_store,
         &session_id,
         &crate::settings::types::CompactionPolicy::ClearAll,

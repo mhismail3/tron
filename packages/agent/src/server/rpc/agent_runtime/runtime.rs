@@ -848,7 +848,7 @@ pub async fn prepare_skill_context_from_session(
             settings.skills.compaction_policy.clone()
         };
 
-        let tracker = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
+        let tracker = crate::server::rpc::skill_state::reconstruct_tracker(
             &event_store,
             &session_id,
             &policy,

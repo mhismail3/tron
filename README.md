@@ -77,10 +77,11 @@ that does not route turns through the Tron agent.
 ### Data Path
 
 1. Client sends JSON-RPC 2.0 over WebSocket
-2. The `server` module dispatches to the appropriate RPC handler
-3. Handlers call into runtime, orchestrator, and event store
-4. Domain output is serialized at the RPC/WebSocket boundary when clients need wire-compatible shapes
-5. Events and responses broadcast back through WebSocket channels
+2. The `server` module validates the method and dispatches a marker-only transport binding
+3. The binding invokes a canonical `namespace::function` engine capability through a `json_rpc` trigger
+4. Canonical functions call runtime, orchestrator, event store, or domain services as needed
+5. Domain output is serialized at the RPC/WebSocket boundary when clients need wire-compatible shapes
+6. Events and responses broadcast back through WebSocket channels
 
 ---
 
@@ -141,7 +142,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |
   +-- runtime          Agent loop, context, hooks, orchestrator, tasks
   |
-  +-- server           Axum HTTP/WS, RPC handlers, event bridge, APNS
+  +-- server           Axum HTTP/WS, RPC transport bindings, event bridge, APNS
   |                    +-- onboarding      Bearer token + `.onboarded` sentinel lifecycle
   |                    +-- codex_app       Managed `codex app-server` child lifecycle
   |                    +-- websocket       WS upgrade handler + mandatory bearer-auth middleware
@@ -1081,7 +1082,7 @@ style/pedantic suggestions stay advisory so the signal is not buried.
 
 These constraints are enforced in code with `// INVARIANT:` markers at the enforcement site.
 
-1. **Canonical internal model**: Handlers and runtime use canonical shapes. Client-specific wire compatibility belongs at the RPC/WebSocket boundary.
+1. **Canonical engine execution**: Production behavior is owned by canonical engine functions. JSON-RPC method names are transport aliases, and client-specific wire compatibility belongs at the RPC/WebSocket boundary.
 
 2. **Fail-fast on unknown models**: Unknown model or provider returns a typed `UnsupportedModel` error immediately. No silent fallback or default provider substitution.
 

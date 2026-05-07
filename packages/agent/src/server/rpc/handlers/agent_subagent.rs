@@ -6,14 +6,14 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::events::EventType;
+use crate::server::rpc::agent_runtime::runtime::{
+    format_subagent_results, get_pending_subagent_results,
+};
+use crate::server::rpc::agent_runtime::service::{PromptRequest, spawn_prompt_run};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::agent::prompt_runtime::{
-    format_subagent_results, get_pending_subagent_results,
-};
-use crate::server::rpc::handlers::agent::prompt_service::{PromptRequest, spawn_prompt_run};
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::params::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 
 /// Deliver pending subagent results as a server-constructed prompt.

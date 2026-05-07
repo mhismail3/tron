@@ -10,7 +10,8 @@ use crate::llm::auth::storage::{
 use crate::llm::auth::types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, OAuthTokens, ProviderAuth, ServiceAuth,
 };
-use crate::server::rpc::handlers::{map_auth_error, opt_string, require_string_param};
+use crate::server::rpc::error_mapping::map_auth_error;
+use crate::server::rpc::params::{opt_string, require_string_param};
 
 const DEFAULT_API_KEY_LABEL: &str = "Default";
 const KNOWN_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "google", "minimax", "kimi"];
@@ -190,7 +191,7 @@ async fn auth_oauth_begin(payload: &Value, deps: &RpcEngineDeps) -> Result<Value
     });
     let _ = flows.insert(
         flow_id.clone(),
-        crate::server::rpc::handlers::auth::PendingOAuthFlow {
+        crate::server::rpc::auth_flows::PendingOAuthFlow {
             verifier: verifier_or_state,
             provider,
             created_at: std::time::Instant::now(),

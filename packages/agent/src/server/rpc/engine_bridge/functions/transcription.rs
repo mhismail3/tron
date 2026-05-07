@@ -3,7 +3,7 @@ use super::*;
 use base64::Engine;
 use tracing::{debug, warn};
 
-use crate::server::rpc::handlers::opt_string;
+use crate::server::rpc::params::opt_string;
 use crate::transcription::TranscriptionResult;
 
 const MAX_AUDIO_SIZE: usize = 150 * 1024 * 1024;

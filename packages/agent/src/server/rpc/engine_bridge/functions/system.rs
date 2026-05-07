@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 
-use crate::server::rpc::handlers::system as rpc_system;
+use crate::server::rpc::protocol as rpc_system;
 use crate::server::rpc::registry::MethodRegistry;
 use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
 

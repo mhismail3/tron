@@ -32,24 +32,19 @@ use tracing::instrument;
 #[cfg(test)]
 use crate::server::rpc::agent_commands::AgentCommandService;
 #[cfg(test)]
+use crate::server::rpc::agent_runtime::runtime::{
+    build_user_event_payload, format_subagent_results, get_pending_subagent_results,
+};
+#[cfg(test)]
+use crate::server::rpc::agent_runtime::service::{PromptRequest, spawn_prompt_run};
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
 #[cfg(test)]
 use crate::server::rpc::errors::{RpcError, SESSION_BUSY};
 #[cfg(test)]
-use crate::server::rpc::handlers::{opt_array, opt_string, require_string_param};
+use crate::server::rpc::params::{opt_array, opt_string, require_string_param};
 #[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
-#[path = "agent_prompt_runtime.rs"]
-pub(crate) mod prompt_runtime;
-#[path = "agent_prompt_service.rs"]
-pub(crate) mod prompt_service;
-
-#[cfg(test)]
-use prompt_runtime::{
-    build_user_event_payload, format_subagent_results, get_pending_subagent_results,
-};
-#[cfg(test)]
-use prompt_service::{PromptRequest, spawn_prompt_run};
 
 /// Submit a prompt to the agent for a session.
 #[cfg(test)]
@@ -272,7 +267,7 @@ impl MethodHandler for StatusHandler {
                 event_store
                     .get_session(&sid_for_check)
                     .map(|opt| opt.is_some())
-                    .map_err(crate::server::rpc::handlers::map_event_store_error)
+                    .map_err(crate::server::rpc::error_mapping::map_event_store_error)
             })
             .await?;
         if !session_exists {
@@ -309,7 +304,7 @@ impl MethodHandler for StatusHandler {
                     &sid_for_latest,
                 )
                 .map(|opt| opt.map(|row| row.timestamp))
-                .map_err(crate::server::rpc::handlers::map_event_store_error)
+                .map_err(crate::server::rpc::error_mapping::map_event_store_error)
             })
             .await?;
 

@@ -1,6 +1,14 @@
-//! RPC handler modules and registration.
+//! JSON-RPC transport bindings and test-only wire fixtures.
 //!
-//! Handlers are grouped into three registration sets:
+//! Production JSON-RPC methods are marker-only bindings into canonical engine
+//! functions. The modules that still define method-specific handlers are
+//! compiled only for tests and exist strictly as wire-compatibility fixtures.
+//! Shared production helpers live outside this namespace (`params`,
+//! `error_mapping`, `events_wire`, `skill_state`, `model_catalog`,
+//! `memory_retain`, and `agent_runtime`), so `handlers/` is no longer a second
+//! business-logic architecture.
+//!
+//! Bindings are grouped into three registration sets:
 //!
 //! ## `register_core` — Session and agent lifecycle
 //!
@@ -19,8 +27,8 @@
 //! generic-triggered engine functions;
 //!
 //! `tree` is generic, `import` is fully generic including execute, and `cron`
-//! is fully generic with schedule triggers. Old git/worktree handler modules
-//! are compiled only as test fixtures for wire-contract parity.
+//! is fully generic with schedule triggers. Old method-specific modules are
+//! test-only fixtures for wire-contract parity, not production dispatch paths.
 //!
 //! ## `register_platform` — Platform-specific
 //!
@@ -29,36 +37,42 @@
 //! all marker-registered generic triggers. JSON-RPC is a transport trigger for
 //! every public method; domain behavior lives behind canonical engine functions.
 
+#[cfg(test)]
 pub mod agent;
 #[cfg(test)]
 pub mod agent_confirmation;
+#[cfg(test)]
 pub mod agent_queue;
 #[cfg(test)]
 pub mod agent_subagent;
+#[cfg(test)]
 pub mod auth;
+#[cfg(test)]
 pub mod blob;
 #[cfg(test)]
 pub mod browser;
+#[cfg(test)]
 pub mod codex_app;
+#[cfg(test)]
 pub mod context;
+#[cfg(test)]
 pub mod cron;
 #[cfg(test)]
 pub mod device;
 #[cfg(test)]
 pub mod display;
-pub mod events;
 pub mod filesystem;
 #[cfg(test)]
 pub mod git;
 #[cfg(test)]
 pub mod git_workflow;
+#[cfg(test)]
 pub mod import;
 pub(crate) mod job;
 pub mod logs;
 pub mod mcp;
-pub mod memory;
+#[cfg(test)]
 pub mod message;
-pub mod model;
 pub mod notifications;
 pub mod plan;
 pub mod prompt_library;
@@ -67,12 +81,14 @@ pub mod sandbox;
 #[cfg(test)]
 pub mod session;
 pub mod settings;
-pub mod skill_session;
 pub mod skills;
+#[cfg(test)]
 pub mod system;
+#[cfg(test)]
 pub mod tool;
 #[cfg(test)]
 pub mod transcription;
+#[cfg(test)]
 pub mod tree;
 #[cfg(test)]
 pub mod voice_notes;
@@ -82,7 +98,7 @@ pub mod worktree;
 use crate::server::rpc::engine_bridge::RpcGenericTriggerHandler;
 use crate::server::rpc::registry::MethodRegistry;
 
-/// Register all RPC handlers with the registry.
+/// Register all JSON-RPC transport bindings with the registry.
 #[allow(clippy::too_many_lines)]
 pub fn register_all(registry: &mut MethodRegistry) {
     register_core(registry);
@@ -787,20 +803,6 @@ fn register_platform(registry: &mut MethodRegistry) {
         RpcGenericTriggerHandler::new("cron.getRuns"),
     );
 }
-
-// Param extraction helpers (require_param, opt_string, etc.) live in
-// params.rs; the typed `WorktreeError` → `RpcError` mapper lives in
-// error_mapping.rs. Both are re-exported under this module's namespace
-// so handler files can keep using `super::*` imports.
-mod error_mapping;
-mod params;
-
-pub(crate) use error_mapping::{
-    map_auth_error, map_cron_error, map_event_store_error, map_import_error, map_worktree_error,
-};
-pub(crate) use params::{
-    opt_array, opt_bool, opt_string, opt_u64, require_bool, require_param, require_string_param,
-};
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

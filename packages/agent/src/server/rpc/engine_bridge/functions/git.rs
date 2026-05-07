@@ -5,7 +5,6 @@
 //! behavior but run behind engine policy, idempotency, leases, and compensation
 //! metadata.
 
-use async_trait::async_trait;
 use serde_json::Value;
 use tokio::time::{Duration, timeout};
 use tracing::instrument;
@@ -13,8 +12,7 @@ use tracing::instrument;
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::git_service;
-use crate::server::rpc::handlers::require_string_param;
-use crate::server::rpc::registry::MethodHandler;
+use crate::server::rpc::params::require_string_param;
 
 use super::RpcEngineDeps;
 use crate::engine::Invocation;
@@ -29,7 +27,7 @@ pub(super) async fn handle(
     match method {
         "git.clone" => {
             CloneHandler
-                .handle(Some(invocation.payload.clone()), deps.rpc_context.as_ref())
+                .run(Some(invocation.payload.clone()), deps.rpc_context.as_ref())
                 .await
         }
         _ => Err(RpcError::Internal {
@@ -41,10 +39,10 @@ pub(super) async fn handle(
 /// Clone a git repository.
 pub struct CloneHandler;
 
-#[async_trait]
-impl MethodHandler for CloneHandler {
+#[allow(dead_code)]
+impl CloneHandler {
     #[instrument(skip(self, ctx), fields(method = "git.clone"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn run(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let url = require_string_param(params.as_ref(), "url")?;
         let target_path = require_string_param(params.as_ref(), "targetPath")?;
         let url_for_clone = url.clone();

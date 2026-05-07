@@ -1,4 +1,4 @@
-//! Memory handlers: retain (manual + auto).
+//! Memory retain runtime: manual + auto.
 //!
 //! The retain system is the bridge between ephemeral conversations and
 //! persistent memory. It runs as an async background task (non-blocking)
@@ -35,12 +35,8 @@
 //! [`RetainGuard`]: crate::runtime::orchestrator::orchestrator::RetainGuard
 //! [`Orchestrator::try_begin_retain`]: crate::runtime::orchestrator::orchestrator::Orchestrator::try_begin_retain
 
-#[cfg(test)]
-use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{Value, json};
-#[cfg(test)]
-use tracing::instrument;
 use tracing::{debug, warn};
 
 use crate::events::types::EventType;
@@ -51,12 +47,9 @@ use crate::events::{
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
+use crate::server::rpc::error_mapping::map_event_store_error;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::map_event_store_error;
-#[cfg(test)]
-use crate::server::rpc::handlers::require_string_param;
-#[cfg(test)]
-use crate::server::rpc::registry::MethodHandler;
+use crate::server::rpc::params::require_string_param;
 
 use std::collections::HashSet;
 use std::fs;
@@ -108,34 +101,29 @@ impl RetainDeps {
 }
 
 // =============================================================================
-// Handler
+// Manual entry point
 // =============================================================================
 
 /// Trigger a memory retain: summarize session history since the last boundary
 /// and write to `~/.tron/memory/sessions/{session_id}.md`.
 ///
-/// This handler is non-blocking — it emits `MemoryUpdating` immediately,
+/// This operation is non-blocking — it emits `MemoryUpdating` immediately,
 /// spawns the summarizer as a background task, and returns. The background
 /// task emits `MemoryUpdated` when done.
-#[cfg(test)]
-pub struct RetainMemoryHandler;
-
-#[cfg(test)]
-#[async_trait]
-impl MethodHandler for RetainMemoryHandler {
-    #[instrument(skip(self, ctx), fields(method = "memory.retain", session_id))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let deps = RetainDeps::from_rpc(ctx);
-        trigger_retain(&deps, session_id, RetainSource::Manual).await
-    }
+pub(crate) async fn trigger_manual_retain(
+    params: Option<&Value>,
+    ctx: &RpcContext,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    let deps = RetainDeps::from_rpc(ctx);
+    trigger_retain(&deps, session_id, RetainSource::Manual).await
 }
 
 // =============================================================================
 // Core logic
 // =============================================================================
 
-/// Entry point for both manual (`RetainMemoryHandler`) and automatic
+/// Entry point for both manual (`trigger_manual_retain`) and automatic
 /// (`auto_retain::maybe_fire`) retentions. Async-spawns the summarizer and
 /// returns immediately with `{ retained, status }`.
 ///
@@ -1560,9 +1548,7 @@ mod tests {
     async fn handler_requires_session_id() {
         use crate::server::rpc::handlers::test_helpers::make_test_context;
         let ctx = make_test_context();
-        let handler = RetainMemoryHandler;
-        let err = handler
-            .handle(Some(serde_json::json!({})), &ctx)
+        let err = trigger_manual_retain(Some(&serde_json::json!({})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");

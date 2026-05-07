@@ -24,9 +24,9 @@ use crate::server::rpc::context_queries::ContextQueryService;
 #[cfg(test)]
 use crate::server::rpc::errors::RpcError;
 #[cfg(test)]
-use crate::server::rpc::handlers::opt_string;
+use crate::server::rpc::params::opt_string;
 #[cfg(test)]
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::params::require_string_param;
 #[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 

@@ -42,8 +42,9 @@ checks, shutdown, and runtime-tail status/blob/message/tool methods.
 Session create/delete/fork/archive/unarchive/archiveOlderThan/export and
 context compaction/clear commands are also generic-triggered canonical
 functions. Migrated groups delete their method-specific production business
-handlers as they move behind canonical functions; legacy handler structs remain
-only as test fixtures where older regression suites still need wire parity.
+handlers as they move behind canonical functions; old handler-shaped code
+remains only as test fixtures where older regression suites still need wire
+parity.
 
 The table is intentionally not just a method inventory. Each row maps current
 behavior to first-principles engine concerns: visibility, effect, idempotency,
@@ -91,7 +92,8 @@ answers are explicit enough to test.
 Current runtime path:
 
 1. Client sends WebSocket RPC.
-2. RPC handler calls orchestrator/session/runtime services.
+2. JSON-RPC transport binding dispatches a `json_rpc` trigger into a canonical
+   engine function.
 3. Runtime builds context, calls the LLM provider, processes stream events,
    executes tools, records events, and loops.
 4. Orchestrator broadcasts events back to clients.

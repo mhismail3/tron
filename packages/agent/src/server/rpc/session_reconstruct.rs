@@ -33,7 +33,7 @@ use tracing::{debug, instrument};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
-use crate::server::rpc::handlers::events::event_row_to_wire;
+use crate::server::rpc::events_wire::event_row_to_wire;
 use crate::server::rpc::prompt_queue::PromptQueueService;
 
 /// Hard ceiling on the number of events returned by a single

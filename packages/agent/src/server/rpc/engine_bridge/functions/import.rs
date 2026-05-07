@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::server::rpc::handlers::map_import_error;
+use crate::server::rpc::error_mapping::map_import_error;
 
 pub(super) async fn handle(
     method: &str,

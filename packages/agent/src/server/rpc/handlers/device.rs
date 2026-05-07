@@ -22,8 +22,9 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::error_mapping::map_event_store_error;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{map_event_store_error, opt_string, require_string_param};
+use crate::server::rpc::params::{opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 /// Register an APNS device token.

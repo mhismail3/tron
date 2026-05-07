@@ -1,6 +1,6 @@
 //! # RPC
 //!
-//! JSON-RPC 2.0 protocol layer, method registry, and handlers.
+//! JSON-RPC 2.0 protocol layer, method registry, and transport bindings.
 //!
 //! Implements the full RPC surface that clients connect to:
 //! - Session: create, resume, list, delete, fork, getHead, getState, reconstruct
@@ -13,13 +13,13 @@
 //! - Skills: list, get, refresh, activate, deactivate, active
 //! - Plus: browser, device, task, transcription, worktree, tree
 //!
-//! Handler registration carries an execution policy. Quick and
-//! blocking-read calls run under bounded timeouts, while mutating calls
-//! do not use the generic timeout wrapper because a timed-out response
-//! must never leave a write continuing in the background. Production
-//! blocking work is owned by [`context::BlockingTaskSupervisor`] via
-//! [`context::RpcContext::run_blocking`], which enforces concurrency
-//! limits and drains through server shutdown.
+//! Transport-binding registration carries an execution policy. Quick and
+//! blocking-read calls run under bounded timeouts, while mutating calls do not
+//! use the generic timeout wrapper because a timed-out response must never
+//! leave a write continuing in the background. Production blocking work is
+//! owned by [`context::BlockingTaskSupervisor`] via
+//! [`context::RpcContext::run_blocking`], which enforces concurrency limits and
+//! drains through server shutdown.
 //!
 //! The context also owns the shared engine host handle. JSON-RPC is now a
 //! transport-binding layer over canonical engine functions, not a method-owned
@@ -57,25 +57,34 @@
 //! with per-method quotas loaded from settings.
 
 pub(crate) mod agent_commands;
+pub(crate) mod agent_runtime;
+pub(crate) mod auth_flows;
 pub(crate) mod client_logs;
 pub mod context;
 pub(crate) mod context_commands;
 pub(crate) mod context_queries;
 pub(crate) mod context_service;
 pub mod engine_bridge;
+pub(crate) mod error_mapping;
 pub mod errors;
+pub(crate) mod events_wire;
 pub(crate) mod filesystem_service;
 pub(crate) mod git_service;
 pub mod handlers;
 pub(crate) mod interactive_tool_enrichment;
+pub(crate) mod memory_retain;
+pub(crate) mod model_catalog;
 pub(crate) mod notification_inbox;
+pub(crate) mod params;
 pub(crate) mod prompt_queue;
+pub(crate) mod protocol;
 pub mod registry;
 pub(crate) mod sandbox_service;
 pub(crate) mod session_commands;
 pub mod session_context;
 pub(crate) mod session_queries;
 pub(crate) mod session_reconstruct;
+pub(crate) mod skill_state;
 pub mod types;
 pub mod validation;
 pub(crate) mod voice_notes_service;

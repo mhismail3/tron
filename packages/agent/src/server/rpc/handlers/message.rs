@@ -6,15 +6,13 @@
 //! idempotency, risk metadata, and approval-required metadata for autonomous
 //! agent visibility.
 
-#![cfg(test)]
-
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
-use crate::server::rpc::handlers::{opt_string, require_string_param};
+use crate::server::rpc::params::{opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 /// Delete a message from a session.

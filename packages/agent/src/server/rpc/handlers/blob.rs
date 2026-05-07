@@ -4,8 +4,6 @@
 //! `blob::get`. This test-only fixture preserves the old wire behavior while
 //! direct engine parity tests own the production contract.
 
-#![cfg(test)]
-
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;

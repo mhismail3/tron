@@ -25,17 +25,18 @@ use serde_json::{Value, json};
 use tracing::instrument;
 
 #[cfg(test)]
-use super::map_event_store_error;
-#[cfg(test)]
-use super::{map_import_error, opt_string, require_string_param};
-#[cfg(test)]
 use crate::core::paths::home_dir;
 #[cfg(test)]
 use crate::import;
 #[cfg(test)]
 use crate::server::rpc::context::RpcContext;
 #[cfg(test)]
+use crate::server::rpc::error_mapping::map_event_store_error;
+#[cfg(test)]
+use crate::server::rpc::error_mapping::map_import_error;
+#[cfg(test)]
 use crate::server::rpc::errors::RpcError;
+use crate::server::rpc::params::{opt_string, require_string_param};
 #[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 

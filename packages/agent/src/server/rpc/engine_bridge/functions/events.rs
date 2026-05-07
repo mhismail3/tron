@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::rpc::handlers::events as rpc_events;
+use crate::server::rpc::events_wire as rpc_events;
 
 pub(super) async fn handle(
     method: &str,

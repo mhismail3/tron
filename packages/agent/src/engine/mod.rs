@@ -40,6 +40,13 @@
 //!   session-visible volatile functions/triggers, and unregisters them on
 //!   disconnect; sandbox execution and remote workers remain deferred.
 //!
+//! # INVARIANT: one production execution shape
+//!
+//! Production behavior must enter the fabric as a canonical engine function.
+//! JSON-RPC names are transport aliases, not executable `rpc::*` functions, and
+//! production engine modules must not call old RPC `MethodHandler` adapters.
+//! Legacy handler code may exist only as `#[cfg(test)]` wire fixtures.
+//!
 //! ## Module Position
 //!
 //! Depends on: `serde`, `serde_json`, `async_trait`, `thiserror`, `chrono`,

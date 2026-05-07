@@ -917,6 +917,116 @@ fn transport_bindings_cover_every_registered_rpc_method() {
 }
 
 #[test]
+fn engine_function_modules_do_not_use_rpc_handler_adapters() {
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/server/rpc/engine_bridge/functions");
+    let mut files = Vec::new();
+    rust_files(&root, &mut files);
+    assert!(!files.is_empty());
+
+    for path in files {
+        let source = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !source.contains("MethodHandler"),
+            "{} must not implement or import RPC MethodHandler; engine functions are plain domain functions",
+            path.display()
+        );
+        assert!(
+            !source.contains(".handle("),
+            "{} must not call old RPC handler adapters from canonical engine functions",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn shared_rpc_helpers_live_outside_handler_namespace() {
+    let rpc_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/server/rpc");
+    for removed in [
+        "handlers/params.rs",
+        "handlers/error_mapping.rs",
+        "handlers/events.rs",
+        "handlers/skill_session.rs",
+        "handlers/model.rs",
+        "handlers/memory.rs",
+        "handlers/memory/auto_retain.rs",
+        "handlers/agent_prompt_runtime.rs",
+        "handlers/agent_prompt_service.rs",
+    ] {
+        assert!(
+            !rpc_root.join(removed).exists(),
+            "{removed} is shared production code and must not live under handlers/"
+        );
+    }
+    for present in [
+        "params.rs",
+        "error_mapping.rs",
+        "events_wire.rs",
+        "skill_state.rs",
+        "model_catalog.rs",
+        "memory_retain/mod.rs",
+        "memory_retain/auto_retain.rs",
+        "agent_runtime/runtime.rs",
+        "agent_runtime/service.rs",
+    ] {
+        assert!(
+            rpc_root.join(present).exists(),
+            "{present} should own the shared production behavior"
+        );
+    }
+    for helper in [
+        "events_wire.rs",
+        "skill_state.rs",
+        "model_catalog.rs",
+        "memory_retain/mod.rs",
+        "agent_runtime/runtime.rs",
+        "agent_runtime/service.rs",
+    ] {
+        let source = std::fs::read_to_string(rpc_root.join(helper)).unwrap();
+        assert!(
+            !source.contains("impl MethodHandler"),
+            "{helper} is shared production code and must expose plain domain functions, not MethodHandler adapters"
+        );
+    }
+}
+
+#[test]
+fn production_handler_namespace_contains_no_method_specific_handlers() {
+    let handlers_root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/server/rpc/handlers");
+    for production_module in [
+        "filesystem.rs",
+        "job.rs",
+        "logs.rs",
+        "mcp.rs",
+        "notifications.rs",
+        "plan.rs",
+        "prompt_library.rs",
+        "settings.rs",
+        "skills.rs",
+    ] {
+        let path = handlers_root.join(production_module);
+        let source = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !source.contains("MethodHandler"),
+            "{} is production-visible from handlers/mod.rs and must not contain method-specific handlers",
+            path.display()
+        );
+    }
+}
+
+#[test]
 fn transport_specs_expose_canonical_engine_api_methods() {
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
