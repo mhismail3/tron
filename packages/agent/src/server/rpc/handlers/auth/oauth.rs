@@ -1,15 +1,5 @@
 use super::*;
 
-/// In-memory state for a pending OAuth flow.
-pub struct PendingOAuthFlow {
-    /// PKCE code verifier (Anthropic) or random state (OpenAI) for this flow.
-    pub verifier: String,
-    /// OAuth provider name (e.g., "anthropic", "openai-codex").
-    pub provider: String,
-    /// When this flow was initiated.
-    pub created_at: std::time::Instant,
-}
-
 /// Providers that support OAuth login.
 const OAUTH_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "google"];
 

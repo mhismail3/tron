@@ -155,16 +155,6 @@ struct RpcCapabilitySpecSeed {
     schema_mode: RpcSchemaMode,
 }
 
-macro_rules! handler_only {
-    ($method:literal) => {
-        RpcCapabilitySpecSeed {
-            method: $method,
-            migration_state: RpcMigrationState::HandlerOnly,
-            schema_mode: RpcSchemaMode::OpaqueTransition,
-        }
-    };
-}
-
 macro_rules! generic_trigger {
     ($method:literal) => {
         RpcCapabilitySpecSeed {
@@ -179,13 +169,13 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("system.ping"),
     generic_trigger!("system.getInfo"),
     generic_trigger!("system.getDiagnostics"),
-    handler_only!("system.shutdown"),
-    handler_only!("system.checkForUpdates"),
+    generic_trigger!("system.shutdown"),
+    generic_trigger!("system.checkForUpdates"),
     generic_trigger!("system.getUpdateStatus"),
     generic_trigger!("codexApp.status"),
     generic_trigger!("blob.get"),
     generic_trigger!("session.create"),
-    handler_only!("session.resume"),
+    generic_trigger!("session.resume"),
     generic_trigger!("session.list"),
     generic_trigger!("session.delete"),
     generic_trigger!("session.fork"),
@@ -230,15 +220,15 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("approval.get"),
     generic_trigger!("approval.list"),
     generic_trigger!("approval.resolve"),
-    handler_only!("auth.get"),
-    handler_only!("auth.update"),
-    handler_only!("auth.clear"),
-    handler_only!("auth.oauthBegin"),
-    handler_only!("auth.oauthComplete"),
-    handler_only!("auth.renameAccount"),
-    handler_only!("auth.setActive"),
-    handler_only!("auth.removeAccount"),
-    handler_only!("auth.removeApiKey"),
+    generic_trigger!("auth.get"),
+    generic_trigger!("auth.update"),
+    generic_trigger!("auth.clear"),
+    generic_trigger!("auth.oauthBegin"),
+    generic_trigger!("auth.oauthComplete"),
+    generic_trigger!("auth.renameAccount"),
+    generic_trigger!("auth.setActive"),
+    generic_trigger!("auth.removeAccount"),
+    generic_trigger!("auth.removeApiKey"),
     generic_trigger!("tool.result"),
     generic_trigger!("message.delete"),
     generic_trigger!("logs.ingest"),
@@ -271,10 +261,10 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("import.listSessions"),
     generic_trigger!("import.previewSession"),
     generic_trigger!("import.execute"),
-    handler_only!("browser.startStream"),
-    handler_only!("browser.stopStream"),
+    generic_trigger!("browser.startStream"),
+    generic_trigger!("browser.stopStream"),
     generic_trigger!("browser.getStatus"),
-    handler_only!("display.stopStream"),
+    generic_trigger!("display.stopStream"),
     generic_trigger!("job.background"),
     generic_trigger!("job.cancel"),
     generic_trigger!("job.list"),
@@ -296,18 +286,18 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("worktree.stageFiles"),
     generic_trigger!("worktree.unstageFiles"),
     generic_trigger!("worktree.discardFiles"),
-    handler_only!("transcribe.audio"),
+    generic_trigger!("transcribe.audio"),
     generic_trigger!("transcribe.listModels"),
-    handler_only!("transcribe.downloadModel"),
-    handler_only!("device.register"),
-    handler_only!("device.unregister"),
-    handler_only!("device.respond"),
+    generic_trigger!("transcribe.downloadModel"),
+    generic_trigger!("device.register"),
+    generic_trigger!("device.unregister"),
+    generic_trigger!("device.respond"),
     generic_trigger!("plan.enter"),
     generic_trigger!("plan.exit"),
     generic_trigger!("plan.getState"),
-    handler_only!("voiceNotes.save"),
+    generic_trigger!("voiceNotes.save"),
     generic_trigger!("voiceNotes.list"),
-    handler_only!("voiceNotes.delete"),
+    generic_trigger!("voiceNotes.delete"),
     generic_trigger!("git.clone"),
     generic_trigger!("git.syncMain"),
     generic_trigger!("git.push"),
@@ -323,10 +313,10 @@ const RPC_CAPABILITY_SEEDS: &[RpcCapabilitySpecSeed] = &[
     generic_trigger!("repo.listSessions"),
     generic_trigger!("repo.getDivergence"),
     generic_trigger!("sandbox.listContainers"),
-    handler_only!("sandbox.startContainer"),
-    handler_only!("sandbox.stopContainer"),
-    handler_only!("sandbox.killContainer"),
-    handler_only!("sandbox.removeContainer"),
+    generic_trigger!("sandbox.startContainer"),
+    generic_trigger!("sandbox.stopContainer"),
+    generic_trigger!("sandbox.killContainer"),
+    generic_trigger!("sandbox.removeContainer"),
     generic_trigger!("notifications.list"),
     generic_trigger!("notifications.markRead"),
     generic_trigger!("notifications.markAllRead"),
@@ -654,7 +644,15 @@ fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
         RiskLevel::Critical
     } else if matches!(
         method,
-        "settings.update"
+        "auth.update"
+            | "auth.clear"
+            | "auth.oauthBegin"
+            | "auth.oauthComplete"
+            | "auth.renameAccount"
+            | "auth.setActive"
+            | "auth.removeAccount"
+            | "auth.removeApiKey"
+            | "settings.update"
             | "settings.resetToDefaults"
             | "context.confirmCompaction"
             | "context.clear"
@@ -688,6 +686,10 @@ fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
             | "worktree.continueMerge"
             | "worktree.abortMerge"
             | "worktree.resolveConflictsWithSubagent"
+            | "sandbox.startContainer"
+            | "sandbox.stopContainer"
+            | "sandbox.killContainer"
+            | "sandbox.removeContainer"
     ) {
         RiskLevel::High
     } else if matches!(effect, EffectClass::IrreversibleSideEffect) {
@@ -769,7 +771,14 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
         || method == "session.create"
         || method == "session.archiveOlderThan"
         || method == "approval.resolve"
+        || method.starts_with("auth.")
+        || method.starts_with("browser.")
+        || method.starts_with("display.")
+        || method.starts_with("device.")
         || method == "import.execute"
+        || method.starts_with("sandbox.")
+        || method.starts_with("transcribe.")
+        || method.starts_with("voiceNotes.")
         || method.starts_with("notifications.")
         || method.starts_with("promptHistory.")
         || method.starts_with("promptSnippet.")
@@ -825,6 +834,20 @@ fn settings_write_requires_approval(method: &str) -> bool {
             | "worktree.continueMerge"
             | "worktree.abortMerge"
             | "worktree.resolveConflictsWithSubagent"
+            | "auth.update"
+            | "auth.clear"
+            | "auth.oauthBegin"
+            | "auth.oauthComplete"
+            | "auth.renameAccount"
+            | "auth.setActive"
+            | "auth.removeAccount"
+            | "auth.removeApiKey"
+            | "sandbox.startContainer"
+            | "sandbox.stopContainer"
+            | "sandbox.killContainer"
+            | "sandbox.removeContainer"
+            | "voiceNotes.delete"
+            | "system.shutdown"
     )
 }
 
@@ -838,6 +861,23 @@ fn resource_lease_requirement_for_method(method: &str) -> Option<ResourceLeaseRe
         "config.setReasoningLevel" => ("session", "session:{sessionId}:reasoning", 60_000),
         "memory.retain" => ("session", "session:{sessionId}:memory-retain", 300_000),
         "import.execute" => ("import", "import:{sessionPath}", 300_000),
+        "auth.update" | "auth.clear" | "auth.oauthBegin" | "auth.oauthComplete"
+        | "auth.renameAccount" | "auth.setActive" | "auth.removeAccount" | "auth.removeApiKey" => {
+            ("auth", "auth:auth-json", 60_000)
+        }
+        "system.shutdown" => ("system", "system:shutdown", 60_000),
+        "browser.startStream" | "browser.stopStream" => ("browser", "browser:stream", 60_000),
+        "display.stopStream" => ("display", "display:{streamId}", 60_000),
+        "device.register" | "device.unregister" => ("device", "device:{deviceToken}", 60_000),
+        "device.respond" => ("device", "device-request:{requestId}", 60_000),
+        "transcribe.audio" => ("transcription", "transcription:audio", 300_000),
+        "transcribe.downloadModel" => ("transcription", "transcription:model-cache", 900_000),
+        "voiceNotes.save" => ("voice_notes", "voice-notes:inbox", 60_000),
+        "voiceNotes.delete" => ("voice_notes", "voice-note:{filename}", 60_000),
+        "sandbox.startContainer"
+        | "sandbox.stopContainer"
+        | "sandbox.killContainer"
+        | "sandbox.removeContainer" => ("sandbox", "container:{name}", 300_000),
         "git.clone" => ("git", "clone:{targetPath}", 1_800_000),
         "git.syncMain" => ("git", "session:{sessionId}:sync-main", 900_000),
         "git.push" => ("git", "session:{sessionId}:push", 900_000),
@@ -930,6 +970,39 @@ fn high_risk_contract_for_method(method: &str) -> Option<serde_json::Value> {
                 "clone:{targetPath}",
                 1_800_000,
                 "serializes clone operations into one target path",
+            ),
+            "auth.update" | "auth.clear" | "auth.oauthBegin" | "auth.oauthComplete"
+            | "auth.renameAccount" | "auth.setActive" | "auth.removeAccount"
+            | "auth.removeApiKey" => (
+                true,
+                "auth",
+                "auth:auth-json",
+                60_000,
+                "serializes credential-file mutation, OAuth flow mutation, and auth broadcasts",
+            ),
+            "system.shutdown" => (
+                true,
+                "system",
+                "system:shutdown",
+                60_000,
+                "serializes the graceful server shutdown command",
+            ),
+            "sandbox.startContainer"
+            | "sandbox.stopContainer"
+            | "sandbox.killContainer"
+            | "sandbox.removeContainer" => (
+                true,
+                "sandbox",
+                "container:{name}",
+                300_000,
+                "serializes lifecycle operations for one local sandbox container",
+            ),
+            "voiceNotes.delete" => (
+                true,
+                "voice_notes",
+                "voice-note:{filename}",
+                60_000,
+                "serializes deletion of one local voice-note file",
             ),
             "git.syncMain" => (
                 true,
@@ -1034,6 +1107,21 @@ fn rollback_contract_for_method(method: &str) -> &'static str {
         "import.execute" => {
             "import is append-only and duplicate sources return alreadyImported; full rollback is deferred"
         }
+        "auth.update" | "auth.clear" | "auth.oauthBegin" | "auth.oauthComplete" => {
+            "auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available"
+        }
+        "auth.renameAccount" | "auth.setActive" | "auth.removeAccount" | "auth.removeApiKey" => {
+            "account/key changes can be manually restored through auth update or OAuth login"
+        }
+        "system.shutdown" => {
+            "shutdown is irreversible for the current process; restart Tron manually"
+        }
+        "sandbox.startContainer" | "sandbox.stopContainer" => {
+            "inverse container lifecycle command can be run manually if the runtime is still available"
+        }
+        "sandbox.killContainer" | "sandbox.removeContainer" => {
+            "sandbox kill/remove is external and may require manual container recreation"
+        }
         "git.clone" => {
             "manual cleanup of the target directory is required if clone partially succeeds"
         }
@@ -1094,6 +1182,7 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
         "logs",
         "memory",
         "mcp",
+        "auth",
         "prompt_library",
         "skills",
         "filesystem",
@@ -1108,6 +1197,8 @@ pub(super) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
         "repo",
         "import",
         "browser",
+        "display",
+        "device",
         "voice_notes",
         "transcription",
         "sandbox",
@@ -1243,6 +1334,7 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("job.") => "job",
         method if method.starts_with("agent.") => "agent",
         method if method.starts_with("mcp.") => "mcp",
+        method if method.starts_with("auth.") => "auth",
         method if method.starts_with("approval.") => "approval",
         method if method.starts_with("notifications.") => "notifications",
         method if method.starts_with("plan.") => "plan",
@@ -1250,6 +1342,8 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("repo.") => "repo",
         method if method.starts_with("import.") => "import",
         method if method.starts_with("browser.") => "browser",
+        method if method.starts_with("display.") => "display",
+        method if method.starts_with("device.") => "device",
         method if method.starts_with("voiceNotes.") => "voice_notes",
         method if method.starts_with("transcribe.") => "transcription",
         method if method.starts_with("sandbox.") => "sandbox",
@@ -1277,6 +1371,8 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "system.getInfo" => ("system", "get_info".to_owned()),
         "system.getDiagnostics" => ("system", "get_diagnostics".to_owned()),
         "system.getUpdateStatus" => ("system", "get_update_status".to_owned()),
+        "system.shutdown" => ("system", "shutdown".to_owned()),
+        "system.checkForUpdates" => ("system", "check_for_updates".to_owned()),
         "codexApp.status" => ("codex_app", "status".to_owned()),
         "blob.get" => ("blob", "get".to_owned()),
         "tool.result" => ("tool", "result".to_owned()),
@@ -1319,6 +1415,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "session.getHistory" => ("session", "get_history".to_owned()),
         "session.reconstruct" => ("session", "reconstruct".to_owned()),
         "session.create" => ("session", "create".to_owned()),
+        "session.resume" => ("session", "resume".to_owned()),
         "session.delete" => ("session", "delete".to_owned()),
         "session.fork" => ("session", "fork".to_owned()),
         "session.archive" => ("session", "archive".to_owned()),
@@ -1360,6 +1457,15 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "approval.get" => ("approval", "get".to_owned()),
         "approval.list" => ("approval", "list".to_owned()),
         "approval.resolve" => ("approval", "resolve".to_owned()),
+        "auth.get" => ("auth", "get".to_owned()),
+        "auth.update" => ("auth", "update".to_owned()),
+        "auth.clear" => ("auth", "clear".to_owned()),
+        "auth.oauthBegin" => ("auth", "oauth_begin".to_owned()),
+        "auth.oauthComplete" => ("auth", "oauth_complete".to_owned()),
+        "auth.renameAccount" => ("auth", "rename_account".to_owned()),
+        "auth.setActive" => ("auth", "set_active".to_owned()),
+        "auth.removeAccount" => ("auth", "remove_account".to_owned()),
+        "auth.removeApiKey" => ("auth", "remove_api_key".to_owned()),
         "notifications.list" => ("notifications", "list".to_owned()),
         "notifications.markRead" => ("notifications", "mark_read".to_owned()),
         "notifications.markAllRead" => ("notifications", "mark_all_read".to_owned()),
@@ -1386,9 +1492,23 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
         "import.previewSession" => ("import", "preview_session".to_owned()),
         "import.execute" => ("import", "execute".to_owned()),
         "browser.getStatus" => ("browser", "get_status".to_owned()),
+        "browser.startStream" => ("browser", "start_stream".to_owned()),
+        "browser.stopStream" => ("browser", "stop_stream".to_owned()),
+        "display.stopStream" => ("display", "stop_stream".to_owned()),
         "voiceNotes.list" => ("voice_notes", "list".to_owned()),
+        "voiceNotes.save" => ("voice_notes", "save".to_owned()),
+        "voiceNotes.delete" => ("voice_notes", "delete".to_owned()),
         "transcribe.listModels" => ("transcription", "list_models".to_owned()),
+        "transcribe.audio" => ("transcription", "audio".to_owned()),
+        "transcribe.downloadModel" => ("transcription", "download_model".to_owned()),
+        "device.register" => ("device", "register".to_owned()),
+        "device.unregister" => ("device", "unregister".to_owned()),
+        "device.respond" => ("device", "respond".to_owned()),
         "sandbox.listContainers" => ("sandbox", "list_containers".to_owned()),
+        "sandbox.startContainer" => ("sandbox", "start_container".to_owned()),
+        "sandbox.stopContainer" => ("sandbox", "stop_container".to_owned()),
+        "sandbox.killContainer" => ("sandbox", "kill_container".to_owned()),
+        "sandbox.removeContainer" => ("sandbox", "remove_container".to_owned()),
         "git.clone" => ("git", "clone".to_owned()),
         "git.syncMain" => ("git", "sync_main".to_owned()),
         "git.push" => ("git", "push".to_owned()),
@@ -1437,6 +1557,7 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "job" => "job",
                     "agent" => "agent",
                     "mcp" => "mcp",
+                    "auth" => "auth",
                     "approval" => "approval",
                     "logs" => "logs",
                     "model" => "model",
@@ -1448,6 +1569,8 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
                     "repo" => "repo",
                     "import" => "import",
                     "browser" => "browser",
+                    "display" => "display",
+                    "device" => "device",
                     "voiceNotes" => "voice_notes",
                     "transcribe" => "transcription",
                     "sandbox" => "sandbox",
@@ -1512,6 +1635,8 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("agent"), "write") => "agent.write",
         (Some("mcp"), "read") => "mcp.read",
         (Some("mcp"), "write") => "mcp.write",
+        (Some("auth"), "read") => "auth.read",
+        (Some("auth"), "write") => "auth.write",
         (Some("approval"), "read") => "approval.read",
         (Some("approval"), "write") => "approval.resolve",
         (Some("notifications"), "read") => "notifications.read",
@@ -1526,6 +1651,10 @@ fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) ->
         (Some("import"), "write") => "import.write",
         (Some("browser"), "read") => "browser.read",
         (Some("browser"), "write") => "browser.write",
+        (Some("display"), "read") => "display.read",
+        (Some("display"), "write") => "display.write",
+        (Some("device"), "read") => "device.read",
+        (Some("device"), "write") => "device.write",
         (Some("voice_notes"), "read") => "voice_notes.read",
         (Some("voice_notes"), "write") => "voice_notes.write",
         (Some("transcription"), "read") => "transcription.read",

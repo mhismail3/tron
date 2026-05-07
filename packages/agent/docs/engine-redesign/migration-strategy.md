@@ -198,8 +198,8 @@ Deliverables:
 - Handler panics are caught and stored as structured engine errors so
   idempotency replay does not rerun a panicking mutating function.
 - `rpc` compatibility worker with classified specs for every registered
-  JSON-RPC method, non-routable `rpc::<method>` metadata for handler-only
-  inventory, and canonical domain function ids for migrated methods.
+  JSON-RPC method, non-executable `rpc::<method>` transport metadata, and
+  canonical domain function ids for migrated methods.
 - `RpcCapabilitySpec` metadata for every method: method name, executable or
   compatibility function id, canonical domain owner, migration state, effect
   class, risk, visibility, transport authority, domain authority, idempotency
@@ -207,8 +207,9 @@ Deliverables:
 - Drift guards: a registered method without a spec fails; a spec without a
   registered method fails unless it is marked removed; agent-visible mutating
   methods require idempotency.
-- Handler-only methods are internal and non-routable through the engine until
-  their behavior is migrated.
+- Before full collapse, handler-owned methods were internal and non-routable
+  through the engine until their behavior migrated; after WP85-WP96 the public
+  inventory is fully generic-triggered.
 
 Acceptance:
 
@@ -217,10 +218,10 @@ Acceptance:
 - Success, handler error, panic, missing-function, schema, policy, and
   idempotency replay paths all produce invocation records.
 - All 170 current JSON-RPC methods have bridge specs.
-- The bridge is explicitly temporary: `HandlerOnly` may use `EngineOwned` or
-  `ThinAdapter` as short parity checkpoints, but completed groups end at
-  `GenericTrigger` with old handlers removed. Low-risk groups should skip
-  intermediate states when tests can prove parity directly.
+- The bridge is explicitly temporary: historical `HandlerOnly` / `EngineOwned`
+  / `ThinAdapter` checkpoints are no longer acceptable for public RPC
+  behavior. Completed groups end at `GenericTrigger` with old production
+  handlers removed.
 - A migration package is incomplete unless it advances at least one method
   group and deletes any superseded method-specific business logic. Mirroring,
   thin adapters, or fallback paths are only acceptable as short-lived parity
@@ -476,8 +477,8 @@ Semantics:
 - generic-triggered methods now execute as canonical domain ids such as
   `skills::activate`, `events::append`, `filesystem::read_file`, and
   `prompt_library::snippet_create`;
-- `rpc::<method>` ids remain as compatibility metadata for handler-only
-  inventory until those methods migrate;
+- `rpc::<method>` ids remain only as compatibility metadata for legacy
+  transport method names; canonical domain ids are the executable surface;
 - read triggers carry `rpc.read` plus domain read scope; write triggers carry
   `rpc.write` plus domain write scope;
 - skill activation/deactivation and plan writes use session-scoped
@@ -538,7 +539,7 @@ Acceptance:
 ## Phase 3.11: approval runtime, local external runtime, and command collapse
 
 Make the primitive layer participate in real server behavior instead of only
-metadata tests, while continuing to shrink handler-owned RPC code.
+metadata tests, while continuing to shrink old RPC code.
 
 Implemented primitives:
 
@@ -849,6 +850,47 @@ Acceptance gates:
   idempotency, approval metadata when agent-visible, resource lease metadata,
   stream topic metadata, and compensation notes.
 
+## Phase 6.5: CI isolation and full RPC tail collapse
+
+Finish the public JSON-RPC collapse and remove the last production
+method-specific business handlers before broader client-native cutover work.
+
+Delivered:
+
+- Parallel integration server boots now use unique auth, onboarding, updater,
+  and prompt working paths instead of shared `/tmp` fixtures, and spawned test
+  server/bridge tasks shut down against isolated state.
+- The final 26 handler-owned public methods are now marker-only
+  `json_rpc` triggers into canonical domain functions:
+  `auth.get/update/clear/oauthBegin/oauthComplete/renameAccount/setActive/
+  removeAccount/removeApiKey`, `device.register/unregister/respond`,
+  `voiceNotes.save/delete`, `transcribe.audio/downloadModel`,
+  `browser.startStream/stopStream`, `display.stopStream`,
+  `sandbox.startContainer/stopContainer/killContainer/removeContainer`,
+  `session.resume`, `system.checkForUpdates`, and `system.shutdown`.
+- Auth writes preserve secure `auth.json` handling, OAuth flow state,
+  provider-specific response shapes, active-account semantics, and secret
+  redaction while using auth-file leases, system idempotency, approval metadata,
+  and manual/inverse compensation notes.
+- Local runtime/media/device/sandbox/lifecycle commands preserve current
+  JSON-RPC wire behavior while adding strict schemas, domain write authority,
+  idempotency, resource leases, stream topics, and approval metadata where
+  autonomous agents would otherwise perform high-risk effects.
+- Generic-trigger coverage is now 170/170 while the public JSON-RPC method
+  count remains 170.
+
+Acceptance gates:
+
+- Every public registration in `server/rpc/handlers/mod.rs` is a
+  `RpcGenericTriggerHandler` marker.
+- Every public method has exactly one bridge spec and one canonical function
+  mapping.
+- No mutating generic trigger can register without strict schemas, domain
+  authority, idempotency, risk metadata, approval metadata when required,
+  resource leases for shared resources, stream topics, and compensation notes.
+- Legacy handler modules compile only as test fixtures where needed for parity;
+  production execution is canonical engine function execution.
+
 ## Phase 7: tools, MCP, approvals, and effects
 
 Move tool and MCP execution behind engine functions without losing the runtime
@@ -893,8 +935,8 @@ Still to do:
 
 - Replace remaining direct compatibility broadcasts for tool/MCP/device flows
   with stream-owned delivery classes.
-- Move the remaining handler-owned write and external-effect groups only after
-  their authority, approval, idempotency, and rollback contracts are explicit.
+- Delete the JSON-RPC compatibility inventory after clients and agents move to
+  canonical domain ids.
 
 ## Phase 8: agent worker and live self-modification
 

@@ -639,14 +639,14 @@ async fn e2e_graceful_shutdown() {
 // Phase 12: Event streaming tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-const INTEGRATION_PROMPT_WORKDIR: &str = "/tmp/tron-integration-prompt-workdir";
 const PROMPT_EVENT_TIMEOUT: Duration = Duration::from_secs(20);
 const PROMPT_STATE_TIMEOUT: Duration = Duration::from_secs(20);
 const PROMPT_STATE_POLL: Duration = Duration::from_millis(10);
 
-fn integration_prompt_workdir() -> &'static str {
-    std::fs::create_dir_all(INTEGRATION_PROMPT_WORKDIR).unwrap();
-    INTEGRATION_PROMPT_WORKDIR
+fn integration_prompt_workdir() -> String {
+    let path = unique_runtime_path("prompt-workdir", "dir");
+    std::fs::create_dir_all(&path).unwrap();
+    path.to_string_lossy().into_owned()
 }
 
 /// Helper to create a session and bind the client to it.

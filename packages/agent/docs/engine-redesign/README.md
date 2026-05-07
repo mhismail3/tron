@@ -237,15 +237,15 @@ first-class workers.
 - `server/rpc/engine_bridge.rs` plus `server/rpc/engine_bridge/*` are the first
   production adapter surface. They register the transport-only `rpc`
   compatibility worker, domain-owned in-process workers, canonical domain
-  functions for migrated methods, non-routable `rpc::<method>` metadata for
-  handler-only inventory, the `json_rpc` and `manual` trigger types, and
+  functions for every public RPC method, non-executable `rpc::<method>`
+  transport metadata, the `json_rpc` and `manual` trigger types, and
   `json_rpc` trigger bindings from legacy method names into canonical targets.
-  Handler-only methods remain internal/non-routable until their behavior moves.
-  Prompt library, settings, logs, skills, notifications, plan, approval
-  get/list/resolve, events, basic filesystem, safe session reads, safe context
-  reads, job controls, and agent status/abort/submission controls are
+  Prompt library, settings, logs, skills, notifications, plan, approval,
+  events, filesystem, session, context, job, agent, MCP, cron, git/worktree,
+  auth, device, media, sandbox, lifecycle, and runtime-tail groups are now
   generic-triggered. Migrated writes use `rpc.write`, strict schemas, domain
-  write scopes, and scoped engine-ledger idempotency;
+  write scopes, scoped engine-ledger idempotency, resource leases where shared
+  state is touched, and approval/compensation metadata for high-risk effects;
   superseded method-specific business handlers are deleted as each group
   migrates.
 - `tools/engine` adds first-party agent tools: `engine_discover`,
@@ -341,11 +341,11 @@ Implemented:
   on the canonical `filesystem::*` path with strict schema, `rpc.write`,
   `filesystem.write`, engine-ledger idempotency, and current path/error
   behavior preserved through the existing filesystem service;
-- session command/read collapse: `session.create/delete/fork/archive/
+- session command/read collapse: `session.create/resume/delete/fork/archive/
   unarchive/archiveOlderThan/export` now join
   `session.list/getHead/getState/getHistory/reconstruct` on canonical
-  `session::*` functions; `session.resume` remains handler-owned because it is
-  still tied to transport/session lifecycle;
+  `session::*` functions while preserving current transport-bound resume
+  response shape;
 - context command/read collapse:
   `context.getSnapshot/getDetailedSnapshot/getAuditTrace/shouldCompact/
   previewCompaction/canAcceptTurn/confirmCompaction/clear/compact` are now
@@ -425,6 +425,15 @@ Implemented:
   automation carry approval-required high-risk contracts. This raises
   generic-trigger coverage to 144 while the public JSON-RPC method count stays
   170;
+- full RPC tail collapse and CI isolation: the last 26 handler-owned public
+  JSON-RPC methods are now marker-only `json_rpc` triggers into canonical
+  domain functions. This includes `auth.*`, `device.*`, `voiceNotes.save/delete`,
+  `transcribe.audio/downloadModel`, `browser.startStream/stopStream`,
+  `display.stopStream`, sandbox lifecycle, `session.resume`,
+  `system.checkForUpdates`, and `system.shutdown`. The public method count stays
+  170 and generic-trigger coverage is now 170/170. Parallel integration tests
+  no longer share auth/onboarding/updater/prompt working paths, so each server
+  boot owns isolated runtime state;
 - `RpcEngineInvocation` envelopes that preserve request id, method, params,
   canonical domain function id, actor `rpc-client`, authority grant
   `rpc-bridge`, transport read/write authority scope, domain authority scope,
@@ -434,11 +443,8 @@ Implemented:
 
 Still deferred:
 
-- RPC migrations and generic-trigger conversion for the remaining high-risk
-  handler-only groups beyond the current collapsed set, especially auth,
-  sandbox lifecycle/execution, transcription mutation, browser/display
-  mutation, voice-note mutation, device mutation, system shutdown/update
-  actions, and `session.resume`;
+- deletion of the JSON-RPC compatibility inventory itself after clients and
+  agents call canonical domain capabilities directly;
 - runtime/client-native cutover beyond the first agent engine tools and RPC
   adapters;
 - replacement of the compatibility EventBridge fallback and provider-native

@@ -31,10 +31,14 @@ use crate::skills::registry::SkillRegistry;
 use super::rpc_error_to_engine;
 
 mod agent;
+mod auth;
 mod blob;
+mod browser;
 mod codex_app;
 mod context;
 pub(super) mod cron;
+mod device;
+mod display;
 mod events;
 mod filesystem;
 mod git;
@@ -51,12 +55,15 @@ mod plan;
 mod prompt_library;
 mod repo;
 mod safe_reads;
+mod sandbox;
 mod session;
 mod settings;
 mod skills;
 mod system;
 mod tool;
+mod transcription;
 mod tree;
+mod voice_notes;
 mod worktree;
 
 #[derive(Clone)]
@@ -135,9 +142,10 @@ async fn rpc_function_value(
         "system.ping" | "system.getInfo" => {
             system::handle(method, invocation, deps, allow_rpc_context).await
         }
-        "system.getDiagnostics" | "system.getUpdateStatus" => {
-            system::handle(method, invocation, deps, allow_rpc_context).await
-        }
+        "system.getDiagnostics"
+        | "system.getUpdateStatus"
+        | "system.checkForUpdates"
+        | "system.shutdown" => system::handle(method, invocation, deps, allow_rpc_context).await,
         "codexApp.status" => codex_app::handle(method, invocation, deps).await,
         "blob.get" => blob::handle(method, invocation, deps).await,
         "tool.result" => tool::handle(method, invocation, deps).await,
@@ -153,6 +161,10 @@ async fn rpc_function_value(
         | "cron.scheduled_fire" => cron::handle(method, invocation, deps).await,
         "settings.get" | "settings.update" | "settings.resetToDefaults" => {
             settings::handle(method, invocation, deps).await
+        }
+        "auth.get" | "auth.update" | "auth.clear" | "auth.oauthBegin" | "auth.oauthComplete"
+        | "auth.renameAccount" | "auth.setActive" | "auth.removeAccount" | "auth.removeApiKey" => {
+            auth::handle(method, invocation, deps).await
         }
         "model.list" | "model.switch" | "config.setReasoningLevel" => {
             model::handle(method, invocation, deps, allow_rpc_context).await
@@ -187,6 +199,7 @@ async fn rpc_function_value(
         "filesystem.createDir" => filesystem::handle(method, invocation, deps).await,
         "session.list"
         | "session.create"
+        | "session.resume"
         | "session.delete"
         | "session.fork"
         | "session.getHead"
@@ -267,6 +280,21 @@ async fn rpc_function_value(
         | "worktree.stageFiles"
         | "worktree.unstageFiles"
         | "worktree.discardFiles" => worktree::handle(method, invocation, deps).await,
+        "browser.startStream" | "browser.stopStream" => browser::handle(method).await,
+        "display.stopStream" => display::handle(method, invocation, deps).await,
+        "device.register" | "device.unregister" | "device.respond" => {
+            device::handle(method, invocation, deps).await
+        }
+        "transcribe.audio" | "transcribe.downloadModel" => {
+            transcription::handle(method, invocation, deps).await
+        }
+        "voiceNotes.save" | "voiceNotes.delete" => {
+            voice_notes::handle(method, invocation, deps).await
+        }
+        "sandbox.startContainer"
+        | "sandbox.stopContainer"
+        | "sandbox.killContainer"
+        | "sandbox.removeContainer" => sandbox::handle(method, invocation, deps).await,
         "browser.getStatus"
         | "voiceNotes.list"
         | "transcribe.listModels"

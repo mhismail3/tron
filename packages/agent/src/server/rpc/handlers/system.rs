@@ -1,26 +1,27 @@
-//! System handlers and legacy read fixtures.
+//! System protocol constants and legacy wire-contract fixtures.
 //!
-//! `system.ping`, `system.getInfo`, `system.getDiagnostics`, and
-//! `system.getUpdateStatus` are served by generic JSON-RPC triggers into
-//! canonical `system::*` engine functions. Keep their protocol constants here
-//! because diagnostics and the engine-owned read implementation share them.
-//!
-//! `system.checkForUpdates` and `system.shutdown` remain handler-owned. Update
-//! checks support GitHub Releases checks and verified DMG downloads. They do
-//! not mutate the running app bundle; production updates are DMG replacement
-//! until a full app-bundle updater exists.
+//! Every public `system.*` JSON-RPC method is marker-registered as a generic
+//! trigger into canonical `system::*` engine functions. This module keeps the
+//! shared wire-protocol constants in production and compiles old
+//! method-specific handlers only in tests for parity coverage.
 
 #[cfg(test)]
 use std::collections::BTreeMap;
 
+#[cfg(test)]
 use async_trait::async_trait;
+#[cfg(test)]
 use serde_json::Value;
+#[cfg(test)]
 use tracing::{instrument, warn};
 
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
 #[cfg(test)]
 use crate::server::rpc::errors::CLIENT_VERSION_UNSUPPORTED;
+#[cfg(test)]
 use crate::server::rpc::errors::RpcError;
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
 #[cfg(test)]
 use crate::server::rpc::registry::MethodRegistry;
@@ -28,8 +29,10 @@ use crate::server::rpc::registry::MethodRegistry;
 use crate::server::updater::UpdaterState;
 #[cfg(test)]
 use crate::server::updater::read_update_state;
+#[cfg(test)]
 use crate::server::updater::{UpdateDecision, check_for_update};
 
+#[cfg(test)]
 fn load_settings(ctx: &RpcContext) -> crate::settings::TronSettings {
     ctx.profile_runtime.current().settings.clone()
 }
@@ -112,8 +115,10 @@ impl MethodHandler for GetDiagnosticsHandler {
 }
 
 /// Triggers a graceful shutdown of all active sessions.
+#[cfg(test)]
 pub struct ShutdownHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for ShutdownHandler {
     #[instrument(skip(self, ctx), fields(method = "system.shutdown"))]
@@ -187,8 +192,10 @@ fn build_status_value(
 /// - No in-memory TTL cache in v1. Rate-limit concerns (Plan §N.22)
 ///   are hedged by the daily / weekly default frequencies; manual UI
 ///   presses are negligible in the per-user budget.
+#[cfg(test)]
 pub struct CheckForUpdatesHandler;
 
+#[cfg(test)]
 #[async_trait]
 impl MethodHandler for CheckForUpdatesHandler {
     #[instrument(skip(self, ctx), fields(method = "system.checkForUpdates"))]

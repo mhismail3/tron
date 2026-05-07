@@ -308,6 +308,7 @@ impl MethodRegistry {
             || method.starts_with("auth.get")
             || method.starts_with("approval.get")
             || method.starts_with("approval.list")
+            || method.starts_with("system.checkForUpdates")
             || method.starts_with("system.getUpdateStatus")
         {
             return HandlerExecutionPolicy::BlockingRead;

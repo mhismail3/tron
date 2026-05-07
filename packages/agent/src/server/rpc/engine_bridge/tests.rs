@@ -33,6 +33,7 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "system.ping",
     "system.getInfo",
     "system.getDiagnostics",
+    "system.checkForUpdates",
     "system.getUpdateStatus",
     "codexApp.status",
     "blob.get",
@@ -49,6 +50,7 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "session.getState",
     "session.getHistory",
     "session.reconstruct",
+    "session.resume",
     "session.export",
     "context.getSnapshot",
     "context.getDetailedSnapshot",
@@ -61,6 +63,7 @@ const GENERIC_READ_METHODS: &[&str] = &[
     "mcp.listTools",
     "approval.get",
     "approval.list",
+    "auth.get",
     "filesystem.listDir",
     "filesystem.getHome",
     "file.read",
@@ -104,6 +107,29 @@ const GENERIC_WRITE_METHODS: &[&str] = &[
     "events.append",
     "events.subscribe",
     "events.unsubscribe",
+    "system.shutdown",
+    "auth.update",
+    "auth.clear",
+    "auth.oauthBegin",
+    "auth.oauthComplete",
+    "auth.renameAccount",
+    "auth.setActive",
+    "auth.removeAccount",
+    "auth.removeApiKey",
+    "browser.startStream",
+    "browser.stopStream",
+    "display.stopStream",
+    "transcribe.audio",
+    "transcribe.downloadModel",
+    "device.register",
+    "device.unregister",
+    "device.respond",
+    "voiceNotes.save",
+    "voiceNotes.delete",
+    "sandbox.startContainer",
+    "sandbox.stopContainer",
+    "sandbox.killContainer",
+    "sandbox.removeContainer",
     "session.create",
     "session.delete",
     "session.fork",
@@ -868,8 +894,17 @@ fn bridge_specs_cover_every_registered_rpc_method() {
     assert_eq!(spec_methods, registry_methods);
     assert_eq!(
         GENERIC_READ_METHODS.len() + GENERIC_WRITE_METHODS.len(),
-        144
+        170
     );
+    for method in GENERIC_READ_METHODS
+        .iter()
+        .chain(GENERIC_WRITE_METHODS.iter())
+    {
+        assert!(
+            registry.is_generic_trigger_marker(method),
+            "{method} must be marker-registered now that the RPC surface is fully engine-owned"
+        );
+    }
 }
 
 #[test]
@@ -2147,37 +2182,37 @@ fn rpc_engine_invocation_defaults_missing_params_to_empty_object() {
 }
 
 #[test]
-fn handler_only_methods_do_not_build_generic_envelopes() {
+fn fully_collapsed_methods_build_generic_envelopes() {
     let ctx = make_test_context();
     let mut registry = MethodRegistry::new();
     handlers::register_all(&mut registry);
     let request = RpcRequest {
-        id: "req-handler".to_owned(),
+        id: "req-resume".to_owned(),
         method: "session.resume".to_owned(),
-        params: Some(json!({})),
+        params: Some(json!({"sessionId": "s1"})),
     };
     assert!(
         RpcEngineInvocation::from_request(&registry, &ctx, &request)
             .unwrap()
-            .is_none()
+            .is_some()
     );
 }
 
 #[tokio::test]
-async fn handler_only_engine_functions_are_not_client_routable() {
+async fn fully_collapsed_engine_functions_are_client_routable() {
     let ctx = make_test_context();
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
             specs::function_id_for_method("session.resume").unwrap(),
             json!({}),
-            super::dispatch::rpc_causal_context(),
+            rpc_and_domain_context("session.resume", RPC_READ_AUTHORITY),
         ))
         .await;
-    assert!(
-        result.error.is_some(),
-        "handler-only bridge functions must stay non-routable through engine invocation"
-    );
+    assert!(matches!(
+        result.error,
+        Some(EngineError::SchemaViolation { .. })
+    ));
 }
 
 #[tokio::test]
@@ -3987,7 +4022,7 @@ async fn prompt_snippet_direct_engine_explicit_key_conflict_maps_to_rpc_code() {
 }
 
 #[tokio::test]
-async fn handler_only_methods_pass_through_current_handlers() {
+async fn fully_collapsed_json_rpc_methods_dispatch_through_engine() {
     let ctx = make_test_context();
     let result = rpc_dispatch_value(&ctx, "session.list", json!({})).await;
     assert!(result["sessions"].is_array());

@@ -8,6 +8,7 @@ pub(super) async fn handle(
     let payload = &invocation.payload;
     match method {
         "session.create" => session_create_value(Some(payload), deps).await,
+        "session.resume" => session_resume_value(Some(payload), deps).await,
         "session.list" => session_list_value(Some(payload), deps).await,
         "session.delete" => session_delete_value(Some(payload), deps).await,
         "session.fork" => session_fork_value(Some(payload), deps).await,
@@ -23,6 +24,18 @@ pub(super) async fn handle(
             message: format!("session method {method} is not engine-owned"),
         }),
     }
+}
+
+async fn session_resume_value(
+    params: Option<&Value>,
+    deps: &RpcEngineDeps,
+) -> Result<Value, RpcError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    crate::server::rpc::session_queries::SessionQueryService::resume(
+        &rpc_context_view(deps),
+        session_id,
+    )
+    .await
 }
 
 async fn session_create_value(

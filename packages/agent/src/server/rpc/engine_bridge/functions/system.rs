@@ -4,7 +4,7 @@ use super::*;
 
 use crate::server::rpc::handlers::system as rpc_system;
 use crate::server::rpc::registry::MethodRegistry;
-use crate::server::updater::{UpdaterState, read_update_state};
+use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
 
 pub(super) async fn handle(
     method: &str,
@@ -18,10 +18,72 @@ pub(super) async fn handle(
         "system.getInfo" => Ok(system_info_value(payload, deps, allow_rpc_context)),
         "system.getDiagnostics" => system_diagnostics_value(deps),
         "system.getUpdateStatus" => system_update_status_value(deps).await,
+        "system.checkForUpdates" => system_check_for_updates_value(deps).await,
+        "system.shutdown" => system_shutdown_value(deps).await,
         _ => Err(RpcError::Internal {
             message: format!("system method {method} is not engine-owned"),
         }),
     }
+}
+
+async fn system_shutdown_value(deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    deps.orchestrator
+        .shutdown()
+        .await
+        .map_err(|error| RpcError::Internal {
+            message: error.to_string(),
+        })?;
+    Ok(json!({ "acknowledged": true }))
+}
+
+async fn system_check_for_updates_value(deps: &RpcEngineDeps) -> Result<Value, RpcError> {
+    let settings = deps.profile_runtime.current().settings.clone();
+    let update_cfg = &settings.server.update;
+
+    if !update_cfg.enabled {
+        return Ok(json!({
+            "available": false,
+            "disabled": true,
+            "channel": update_cfg.channel.as_str(),
+            "currentVersion": env!("CARGO_PKG_VERSION"),
+        }));
+    }
+
+    let Some(fetcher) = deps.rpc_context.release_fetcher.as_ref() else {
+        tracing::warn!(
+            "system.checkForUpdates called but RpcContext::release_fetcher is None; \
+             responding as if no release was found"
+        );
+        return Ok(json!({
+            "available": false,
+            "disabled": false,
+            "channel": update_cfg.channel.as_str(),
+            "currentVersion": env!("CARGO_PKG_VERSION"),
+            "unavailableReason": "fetcher-unwired",
+        }));
+    };
+
+    let outcome = check_for_update(
+        env!("CARGO_PKG_VERSION"),
+        update_cfg.channel,
+        fetcher.as_ref(),
+    )
+    .await
+    .map_err(|error| RpcError::Internal {
+        message: format!("release check failed: {error}"),
+    })?;
+
+    let available = matches!(outcome.decision, UpdateDecision::Available);
+    Ok(json!({
+        "available": available,
+        "disabled": false,
+        "channel": update_cfg.channel.as_str(),
+        "currentVersion": outcome.current_version,
+        "latestVersion": outcome.latest.as_ref().map(|release| release.version.clone()),
+        "downloadUrl": outcome.latest.as_ref().and_then(|release| release.download_url.clone()),
+        "releaseNotes": outcome.latest.as_ref().and_then(|release| release.release_notes.clone()),
+        "isPrerelease": outcome.latest.as_ref().map(|release| release.is_prerelease),
+    }))
 }
 
 fn system_diagnostics_value(deps: &RpcEngineDeps) -> Result<Value, RpcError> {

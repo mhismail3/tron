@@ -432,7 +432,7 @@ isolation does.
 |--------|----------------|
 | `engine` | Discovery, catalog watch, health, authority metadata, promotion. |
 | `rpc` | Transport compatibility worker for current JSON-RPC methods during migration. It owns the `json_rpc` trigger type and trigger bindings, not long-term business behavior. |
-| `system` | Server status, ping, diagnostics, and update status are canonical generic-trigger reads; shutdown and active update checks remain handler-owned high-risk lifecycle effects. |
+| `system` | Server status, ping, diagnostics, update checks, and shutdown are canonical generic-trigger functions; shutdown is critical-risk and approval-gated for autonomous agents. |
 | `model` | Model catalog reads plus generic-triggered `model::switch`; switch uses session idempotency, approval metadata for autonomous agents, and a session model resource lease before mutating event-store/session cache state. |
 | `config` | Generic-triggered `config::set_reasoning_level`; the command is a high-risk reversible session write with session idempotency, approval metadata, and a session reasoning resource lease. |
 | `settings` | Typed settings with iOS parity guarantees; currently fully generic-triggered for RPC compatibility. |
@@ -441,7 +441,7 @@ isolation does.
 | `skills` | Skill registry and session-scoped active-skill state; currently fully generic-triggered for RPC compatibility. |
 | `filesystem` | Home/list/read/create-dir capabilities now generic-triggered; broader file writes remain deferred until path authority and idempotent file mutation contracts are hardened. |
 | `events` | Session/event-store append, read, reconstruct, subscribe/unsubscribe. All current `events.*` RPC methods are generic-triggered; subscribe/unsubscribe create stream subscription records while preserving current acknowledgements. |
-| `session` | Session create/delete/fork/archive/unarchive/archiveOlderThan/export plus safe reads are generic-triggered canonical functions; `session.resume` remains handler-owned because it is still coupled to transport/session lifecycle. |
+| `session` | Session create/delete/fork/archive/unarchive/archiveOlderThan/export/resume plus safe reads are generic-triggered canonical functions. |
 | `context` | Snapshot/audit/compaction/clear/canAcceptTurn methods are generic-triggered canonical functions with approval metadata on destructive commands. |
 | `agent` | Prompt, status, abort/tool abort, queue controls, subagent-result delivery, and confirmation/answer submission are generic-triggered canonical functions. `agent.prompt` validates and enqueues hidden `agent::prompt_apply`, while completion enqueues hidden `agent::prompt_queue_drain` so prompt startup and queued follow-up turns are queue-backed and causally recorded. |
 | `job` | Background/cancel/list/subscribe/unsubscribe are generic-triggered canonical functions; background/cancel enqueue hidden internal apply functions and synchronously drain their own receipts for current JSON-RPC compatibility. |
@@ -457,10 +457,11 @@ isolation does.
 | `tree` | Event tree visualization and branch/subtree/ancestor comparison reads are canonical generic-trigger functions. |
 | `repo` | Worktree/repository peer-session and divergence reads are canonical generic-trigger functions. |
 | `import` | Claude Code import source/session/preview reads plus `import::execute` are canonical generic-trigger functions. Execute is a high-risk append-only import command with system idempotency, approval metadata, and an import-source resource lease; full rollback remains deferred. |
-| `browser` | Browser status is a canonical read function; browser/display stream mutations remain deferred. |
-| `voice_notes` | Voice-note listing is a canonical read function; save/delete stay handler-owned until audio/transcription effects are modeled. |
-| `transcription` | Transcription model listing is a canonical read function; audio/download mutations stay deferred. |
-| `sandbox` | Sandbox listing is a canonical read function; lifecycle and execution effects remain approval-gated deferred work. |
+| `browser` | Browser status plus start/stop stream controls are canonical functions with stream resource leases and idempotent start/stop semantics. |
+| `display` | Display stream stop is a canonical stream-control function with stream idempotency and local client authority. |
+| `voice_notes` | Voice-note list/save/delete are canonical functions; save links audio/transcription provenance and delete carries approval metadata. |
+| `transcription` | Transcription model listing, audio transcription, and model download are canonical functions with audio/model-cache leases. |
+| `sandbox` | Sandbox list/start/stop/kill/remove are canonical functions; lifecycle effects are local-only, leased, and approval-required for autonomous agents. |
 | `git` | Clone/sync/push and branch-list capabilities. Reads are pure; clone/sync/push are high-risk leased side effects with approval metadata for autonomous agents and compensation records for audit. |
 | `worktree` | Worktree status/diff/branch/conflict reads plus acquire/release/stage/unstage and high-risk commit/merge/rebase/finalize/delete/discard/conflict workflows. Safe writes require idempotency and leases; destructive/publishing workflows also require approval metadata and compensation notes. |
 | `auth` | Provider auth, client auth, future worker tokens and grants. |
@@ -474,26 +475,26 @@ before migration:
 
 | Area | Required contract before collapse |
 |------|-----------------------------------|
-| Auth and provider accounts | Admin/user actor only, explicit approval, credential redaction, token-store idempotency, and audit records that never persist secrets. |
+| Auth and provider accounts | Collapsed behind canonical `auth::*` functions with admin/user actor authority, explicit approval for autonomous agents, credential redaction, auth-file leases, token-store idempotency, and audit records that never persist secrets. |
 | Git/worktree mutation | Collapsed behind canonical `git::*` and `worktree::*` functions with strict schemas, domain authority, host-enforced resource leases, idempotent command ids, path/session guardrails, approval metadata on high-risk autonomous effects, and durable compensation records. Broader rollback automation remains future work. |
-| Sandbox lifecycle/execution | Session-default visibility, explicit delegated authority, resource/network limits, teardown cleanup, and approval for code execution. |
-| Transcription audio/download | Input hash idempotency, sidecar health, file-size and privacy policy, progress streams, and cancellation records. |
-| Browser/display stream mutation | Device/session authority, stream ownership, reconnect cleanup, and no cross-session visual leakage. |
-| Voice-note mutation | Audio blob provenance, retention/deletion policy, transcription linkage, and irreversible delete approval. |
-| Device mutation | Pairing-token authority, per-device idempotency, revocation cleanup, and approval-response causality. |
+| Sandbox lifecycle/execution | Lifecycle is collapsed with local authority, container leases, and approval metadata; arbitrary sandbox execution still needs resource/network limits, delegated authority, teardown cleanup, and approval for code execution. |
+| Transcription audio/download | Collapsed with input/model-cache leases, sidecar health, file-size and privacy validation, progress behavior, and cancellation records; richer stream-first progress ownership remains future hardening. |
+| Browser/display stream mutation | Collapsed with device/session authority, stream ownership, idempotent start/stop, reconnect cleanup, and no cross-session visual leakage. |
+| Voice-note mutation | Collapsed with audio blob provenance, retention/deletion policy, transcription linkage, path guards, and irreversible delete approval. |
+| Device mutation | Collapsed with pairing-token authority, per-device idempotency, revocation cleanup, and approval-response causality. |
 | Import execution | Collapsed with source provenance, append-only dedupe, system idempotency, and import-source leases; preview-to-execute revision tokens and full rollback remain future hardening. |
 | Memory retention | Collapsed with user-memory governance, no personal literals in code/tests/docs, session idempotency, and a startup resource lease before the existing background retain guard; richer retention reasons/content-hash governance remain future hardening. |
-| System shutdown/update checks | User/system actor only, high-risk approval, no autonomous shutdown, update artifact verification, and lifecycle stream records. |
+| System shutdown/update checks | Collapsed with user/system actor authority, high-risk approval, no autonomous shutdown, update artifact verification path preservation, and lifecycle stream records. |
 | Model/config mutation | Collapsed for session model/reasoning changes with provider checks, session idempotency, approval metadata, event-store causality, cache invalidation, and resource leases; broader profile/model-config mutation remains deferred. |
-| `session.resume` | Transport/session ownership, turn-state preconditions, idempotent resume token, and stream/event ordering guarantees. |
+| `session.resume` | Collapsed as a transport-aware canonical function; future client-native session resume should add explicit resume tokens and stronger stream/event ordering guarantees. |
 
 During the compatibility period, old JSON-RPC clients keep their stable method
 names as `json_rpc` trigger ids and trigger config. Migrated methods execute as
 canonical domain function ids such as `skills::activate` or `events::append`;
-handler-only methods may still appear as internal `rpc::<method>` metadata so
-the migration inventory remains complete. The end-state migration removes that
-compatibility inventory after clients and agents invoke canonical domain
-capabilities directly.
+`rpc::<method>` metadata now exists only as transport compatibility inventory,
+not as an executable center. The end-state migration removes that compatibility
+inventory after clients and agents invoke canonical domain capabilities
+directly.
 
 ## State, streams, queues, and events
 
@@ -536,15 +537,13 @@ specific namespace and function set, not its full authority.
 The final client API can break, but transition should be controlled:
 
 1. Keep current `/ws` JSON-RPC while compatibility triggers preserve it.
-2. Register every current method as a classified bridge spec; handler-only
-   methods may keep internal `rpc::<method>` metadata, while migrated methods
-   register canonical domain functions.
-3. Move selected method behavior into domain-owned engine functions. Use
-   method-specific thin adapters only as temporary parity scaffolding when a
-   method group is not ready for generic dispatch.
-4. Replace thin adapters in a method group with `json_rpc` triggers targeting
-   canonical domain functions as soon as tests prove parity.
-5. Add live catalog discovery and catalog streams behind the server.
+2. Keep every current method classified in the bridge inventory, but treat
+   `rpc::<method>` as transport metadata only.
+3. Route every current method through `json_rpc` triggers targeting canonical
+   domain functions.
+4. Add live catalog discovery and catalog streams behind the server.
+5. Move clients and agents from legacy method names to canonical capability ids,
+   then delete the compatibility inventory.
 6. Move selected client flows to engine-native calls once stable.
 7. Remove compatibility handlers only after Mac/iOS clients consume the new
    contract.

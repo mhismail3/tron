@@ -1,8 +1,9 @@
 //! End-to-end integration tests using a real WebSocket client.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -35,6 +36,8 @@ use tron::tools::registry::ToolRegistry;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
+static TEST_SERVER_AUTH_PATHS: LazyLock<Mutex<HashMap<String, PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -54,6 +57,14 @@ fn unique_settings_path() -> PathBuf {
     home.join(tron::core::paths::dirs::PROFILES)
         .join(tron::core::profile::USER_PROFILE)
         .join(tron::core::paths::files::PROFILE_TOML)
+}
+
+fn unique_runtime_path(name: &str, extension: &str) -> PathBuf {
+    let path = unique_test_path(name, extension);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    path
 }
 
 fn profile_runtime_for_settings_path(path: &std::path::Path) -> Arc<tron::runtime::ProfileRuntime> {
@@ -104,7 +115,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         context_artifacts: Arc::new(
             tron::server::rpc::session_context::ContextArtifactsService::new(),
         ),
-        auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
+        auth_path: unique_runtime_path("auth", "json"),
         broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
@@ -114,9 +125,9 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         output_buffer_registry: None,
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
-        onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
+        onboarded_marker_path: unique_runtime_path("onboarded", "marker"),
         release_fetcher: None,
-        updater_state_path: std::path::PathBuf::from("/tmp/tron-test-updater-state.json"),
+        updater_state_path: unique_runtime_path("updater-state", "json"),
     };
 
     let mut registry = MethodRegistry::new();
@@ -148,6 +159,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
 
     let (addr, _handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
+    register_server_auth_path(&ws_url, &server.rpc_context().auth_path);
 
     (ws_url, server)
 }
@@ -407,7 +419,7 @@ async fn boot_server_with_provider_and_handles(
         context_artifacts: Arc::new(
             tron::server::rpc::session_context::ContextArtifactsService::new(),
         ),
-        auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
+        auth_path: unique_runtime_path("auth", "json"),
         broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
@@ -417,9 +429,9 @@ async fn boot_server_with_provider_and_handles(
         output_buffer_registry: None,
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
-        onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
+        onboarded_marker_path: unique_runtime_path("onboarded", "marker"),
         release_fetcher: None,
-        updater_state_path: std::path::PathBuf::from("/tmp/tron-test-updater-state.json"),
+        updater_state_path: unique_runtime_path("updater-state", "json"),
     };
 
     let mut registry = MethodRegistry::new();
@@ -451,22 +463,34 @@ async fn boot_server_with_provider_and_handles(
 
     let (addr, server_handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
+    register_server_auth_path(&ws_url, &server.rpc_context().auth_path);
 
     (ws_url, server, vec![bridge_handle, server_handle])
 }
 
 /// Connect and skip the initial system.connected message.
 async fn connect(url: &str) -> WsStream {
-    let token = tron::server::onboarding::load_or_create_bearer_token(std::path::Path::new(
-        "/tmp/tron-test-auth.json",
-    ))
-    .unwrap();
+    let auth_path = TEST_SERVER_AUTH_PATHS
+        .lock()
+        .unwrap()
+        .get(url)
+        .cloned()
+        .expect("test server auth path should be registered before connect");
+    let token = tron::server::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
     let mut request = url.into_client_request().unwrap();
     request
         .headers_mut()
         .insert("authorization", format!("Bearer {token}").parse().unwrap());
     let (ws, _) = connect_async(request).await.unwrap();
     ws
+}
+
+fn register_server_auth_path(url: &str, auth_path: &std::path::Path) {
+    let _ = tron::server::onboarding::load_or_create_bearer_token(auth_path).unwrap();
+    TEST_SERVER_AUTH_PATHS
+        .lock()
+        .unwrap()
+        .insert(url.to_owned(), auth_path.to_path_buf());
 }
 
 /// Read the next text message as JSON.

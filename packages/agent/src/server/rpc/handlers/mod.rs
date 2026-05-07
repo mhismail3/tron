@@ -4,11 +4,11 @@
 //!
 //! ## `register_core` — Session and agent lifecycle
 //!
-//! `system` (ping, info, shutdown), `session` (CRUD, fork, archive, export
-//! generic except resume), `agent` (prompt/status/abort/tool/submission
+//! `system` (ping, info, shutdown, update checks), `session` (CRUD, fork, archive, export,
+//! resume), `agent` (prompt/status/abort/tool/submission
 //! controls generic), `model`/`config` (list, switch, reasoning level
 //! generic), `context` (snapshot and compaction generic), `events`,
-//! `settings`, `approval`, `tool` (result), `message`, `memory` (retain
+//! `settings`, `approval`, `auth`, `tool` (result), `message`, `memory` (retain
 //! generic), `logs`
 //!
 //! ## `register_capabilities` — Domain features
@@ -17,16 +17,16 @@
 //! operations, and the full git/worktree source-control surface are fully
 //! generic-triggered engine functions;
 //!
-//! The remaining capability modules are mostly platform/high-risk tails:
 //! `tree` is generic, `import` is fully generic including execute, and `cron`
 //! is fully generic with schedule triggers. Old git/worktree handler modules
 //! are compiled only as test fixtures for wire-contract parity.
 //!
 //! ## `register_platform` — Platform-specific
 //!
-//! `browser` (stream), `job` (fully generic and queue-backed),
-//! `transcription`, `device` (push tokens), `notifications` and `plan`
-//! (fully generic), `voice_notes`, `sandbox`
+//! `browser`, `job` (fully generic and queue-backed), `transcription`, `device`
+//! (push tokens), `notifications` and `plan`, `voice_notes`, and `sandbox` are
+//! all marker-registered generic triggers. JSON-RPC is a transport trigger for
+//! every public method; domain behavior lives behind canonical engine functions.
 
 pub mod agent;
 #[cfg(test)]
@@ -36,11 +36,14 @@ pub mod agent_queue;
 pub mod agent_subagent;
 pub mod auth;
 pub mod blob;
+#[cfg(test)]
 pub mod browser;
 pub mod codex_app;
 pub mod context;
 pub mod cron;
+#[cfg(test)]
 pub mod device;
+#[cfg(test)]
 pub mod display;
 pub mod events;
 pub mod filesystem;
@@ -58,15 +61,19 @@ pub mod model;
 pub mod notifications;
 pub mod plan;
 pub mod prompt_library;
+#[cfg(test)]
 pub mod sandbox;
+#[cfg(test)]
 pub mod session;
 pub mod settings;
 pub mod skill_session;
 pub mod skills;
 pub mod system;
 pub mod tool;
+#[cfg(test)]
 pub mod transcription;
 pub mod tree;
+#[cfg(test)]
 pub mod voice_notes;
 #[cfg(test)]
 pub mod worktree;
@@ -93,9 +100,15 @@ fn register_core(registry: &mut MethodRegistry) {
         "system.getDiagnostics",
         RpcGenericTriggerHandler::new("system.getDiagnostics"),
     );
-    registry.register("system.shutdown", system::ShutdownHandler);
+    registry.register(
+        "system.shutdown",
+        RpcGenericTriggerHandler::new("system.shutdown"),
+    );
     // System — user-mode update checks/downloads.
-    registry.register("system.checkForUpdates", system::CheckForUpdatesHandler);
+    registry.register(
+        "system.checkForUpdates",
+        RpcGenericTriggerHandler::new("system.checkForUpdates"),
+    );
     registry.register(
         "system.getUpdateStatus",
         RpcGenericTriggerHandler::new("system.getUpdateStatus"),
@@ -117,7 +130,10 @@ fn register_core(registry: &mut MethodRegistry) {
         "session.create",
         RpcGenericTriggerHandler::new("session.create"),
     );
-    registry.register("session.resume", session::ResumeSessionHandler);
+    registry.register(
+        "session.resume",
+        RpcGenericTriggerHandler::new("session.resume"),
+    );
     registry.register(
         "session.list",
         RpcGenericTriggerHandler::new("session.list"),
@@ -301,15 +317,33 @@ fn register_core(registry: &mut MethodRegistry) {
     );
 
     // Auth
-    registry.register("auth.get", auth::GetAuthHandler);
-    registry.register("auth.update", auth::UpdateAuthHandler);
-    registry.register("auth.clear", auth::ClearAuthHandler);
-    registry.register("auth.oauthBegin", auth::OAuthBeginHandler);
-    registry.register("auth.oauthComplete", auth::OAuthCompleteHandler);
-    registry.register("auth.renameAccount", auth::RenameAccountHandler);
-    registry.register("auth.setActive", auth::SetActiveCredentialHandler);
-    registry.register("auth.removeAccount", auth::RemoveAccountHandler);
-    registry.register("auth.removeApiKey", auth::RemoveApiKeyHandler);
+    registry.register("auth.get", RpcGenericTriggerHandler::new("auth.get"));
+    registry.register("auth.update", RpcGenericTriggerHandler::new("auth.update"));
+    registry.register("auth.clear", RpcGenericTriggerHandler::new("auth.clear"));
+    registry.register(
+        "auth.oauthBegin",
+        RpcGenericTriggerHandler::new("auth.oauthBegin"),
+    );
+    registry.register(
+        "auth.oauthComplete",
+        RpcGenericTriggerHandler::new("auth.oauthComplete"),
+    );
+    registry.register(
+        "auth.renameAccount",
+        RpcGenericTriggerHandler::new("auth.renameAccount"),
+    );
+    registry.register(
+        "auth.setActive",
+        RpcGenericTriggerHandler::new("auth.setActive"),
+    );
+    registry.register(
+        "auth.removeAccount",
+        RpcGenericTriggerHandler::new("auth.removeAccount"),
+    );
+    registry.register(
+        "auth.removeApiKey",
+        RpcGenericTriggerHandler::new("auth.removeApiKey"),
+    );
 
     // Tool
     registry.register("tool.result", RpcGenericTriggerHandler::new("tool.result"));
@@ -440,15 +474,24 @@ fn register_capabilities(registry: &mut MethodRegistry) {
 
 fn register_platform(registry: &mut MethodRegistry) {
     // Browser
-    registry.register("browser.startStream", browser::StartStreamHandler);
-    registry.register("browser.stopStream", browser::StopStreamHandler);
+    registry.register(
+        "browser.startStream",
+        RpcGenericTriggerHandler::new("browser.startStream"),
+    );
+    registry.register(
+        "browser.stopStream",
+        RpcGenericTriggerHandler::new("browser.stopStream"),
+    );
     registry.register(
         "browser.getStatus",
         RpcGenericTriggerHandler::new("browser.getStatus"),
     );
 
     // Display
-    registry.register("display.stopStream", display::StopStreamHandler);
+    registry.register(
+        "display.stopStream",
+        RpcGenericTriggerHandler::new("display.stopStream"),
+    );
 
     // Unified job management
     registry.register(
@@ -529,20 +572,32 @@ fn register_platform(registry: &mut MethodRegistry) {
     );
 
     // Transcription
-    registry.register("transcribe.audio", transcription::TranscribeAudioHandler);
+    registry.register(
+        "transcribe.audio",
+        RpcGenericTriggerHandler::new("transcribe.audio"),
+    );
     registry.register(
         "transcribe.listModels",
         RpcGenericTriggerHandler::new("transcribe.listModels"),
     );
     registry.register(
         "transcribe.downloadModel",
-        transcription::DownloadModelHandler,
+        RpcGenericTriggerHandler::new("transcribe.downloadModel"),
     );
 
     // Device
-    registry.register("device.register", device::RegisterTokenHandler);
-    registry.register("device.unregister", device::UnregisterTokenHandler);
-    registry.register("device.respond", device::DeviceRespondHandler);
+    registry.register(
+        "device.register",
+        RpcGenericTriggerHandler::new("device.register"),
+    );
+    registry.register(
+        "device.unregister",
+        RpcGenericTriggerHandler::new("device.unregister"),
+    );
+    registry.register(
+        "device.respond",
+        RpcGenericTriggerHandler::new("device.respond"),
+    );
 
     // Plan
     registry.register("plan.enter", RpcGenericTriggerHandler::new("plan.enter"));
@@ -553,12 +608,18 @@ fn register_platform(registry: &mut MethodRegistry) {
     );
 
     // Voice Notes
-    registry.register("voiceNotes.save", voice_notes::SaveHandler);
+    registry.register(
+        "voiceNotes.save",
+        RpcGenericTriggerHandler::new("voiceNotes.save"),
+    );
     registry.register(
         "voiceNotes.list",
         RpcGenericTriggerHandler::new("voiceNotes.list"),
     );
-    registry.register("voiceNotes.delete", voice_notes::DeleteHandler);
+    registry.register(
+        "voiceNotes.delete",
+        RpcGenericTriggerHandler::new("voiceNotes.delete"),
+    );
 
     // Git
     registry.register("git.clone", RpcGenericTriggerHandler::new("git.clone"));
@@ -623,10 +684,22 @@ fn register_platform(registry: &mut MethodRegistry) {
         "sandbox.listContainers",
         RpcGenericTriggerHandler::new("sandbox.listContainers"),
     );
-    registry.register("sandbox.startContainer", sandbox::StartContainerHandler);
-    registry.register("sandbox.stopContainer", sandbox::StopContainerHandler);
-    registry.register("sandbox.killContainer", sandbox::KillContainerHandler);
-    registry.register("sandbox.removeContainer", sandbox::RemoveContainerHandler);
+    registry.register(
+        "sandbox.startContainer",
+        RpcGenericTriggerHandler::new("sandbox.startContainer"),
+    );
+    registry.register(
+        "sandbox.stopContainer",
+        RpcGenericTriggerHandler::new("sandbox.stopContainer"),
+    );
+    registry.register(
+        "sandbox.killContainer",
+        RpcGenericTriggerHandler::new("sandbox.killContainer"),
+    );
+    registry.register(
+        "sandbox.removeContainer",
+        RpcGenericTriggerHandler::new("sandbox.removeContainer"),
+    );
 
     // Notifications
     registry.register(

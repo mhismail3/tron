@@ -58,7 +58,13 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "system.getDiagnostics" | "system.getUpdateStatus" | "codexApp.status" | "cron.status" => {
+        "system.getDiagnostics"
+        | "system.getUpdateStatus"
+        | "system.checkForUpdates"
+        | "system.shutdown"
+        | "codexApp.status"
+        | "cron.status"
+        | "transcribe.downloadModel" => {
             json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -68,6 +74,192 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 }
             })
         }
+        "auth.get" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "auth.update" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "provider": {"type": "string"},
+                "service": {"type": "string"},
+                "apiKey": {"type": ["string", "null"]},
+                "apiKeyLabel": {"type": "string"},
+                "oauth": {"type": ["object", "null"], "additionalProperties": true},
+                "clientId": {"type": ["string", "null"]},
+                "clientSecret": {"type": ["string", "null"]},
+                "projectId": {"type": ["string", "null"]},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "auth.clear" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "provider": {"type": "string"},
+                "service": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "auth.oauthBegin" => json!({
+            "type": "object",
+            "required": ["provider"],
+            "additionalProperties": false,
+            "properties": {
+                "provider": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "auth.oauthComplete" => json!({
+            "type": "object",
+            "required": ["flowId", "code", "label"],
+            "additionalProperties": false,
+            "properties": {
+                "flowId": {"type": "string"},
+                "code": {"type": "string"},
+                "label": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "auth.renameAccount" => json!({
+            "type": "object",
+            "required": ["provider", "oldLabel", "newLabel"],
+            "additionalProperties": false,
+            "properties": {
+                "provider": {"type": "string"},
+                "oldLabel": {"type": "string"},
+                "newLabel": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "auth.setActive" => json!({
+            "type": "object",
+            "required": ["provider", "credential"],
+            "additionalProperties": false,
+            "properties": {
+                "provider": {"type": "string"},
+                "credential": {"type": "object", "additionalProperties": true},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "auth.removeAccount" | "auth.removeApiKey" => json!({
+            "type": "object",
+            "required": ["provider", "label"],
+            "additionalProperties": false,
+            "properties": {
+                "provider": {"type": "string"},
+                "label": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "browser.startStream" | "browser.stopStream" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "display.stopStream" => json!({
+            "type": "object",
+            "required": ["streamId"],
+            "additionalProperties": false,
+            "properties": {
+                "streamId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "device.register" => json!({
+            "type": "object",
+            "required": ["deviceToken", "bundleId"],
+            "additionalProperties": false,
+            "properties": {
+                "deviceToken": {"type": "string"},
+                "bundleId": {"type": "string"},
+                "environment": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "device.unregister" => json!({
+            "type": "object",
+            "required": ["deviceToken"],
+            "additionalProperties": false,
+            "properties": {
+                "deviceToken": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "device.respond" => json!({
+            "type": "object",
+            "required": ["requestId"],
+            "additionalProperties": false,
+            "properties": {
+                "requestId": {"type": "string"},
+                "result": {},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "transcribe.audio" => json!({
+            "type": "object",
+            "required": ["audioBase64"],
+            "additionalProperties": false,
+            "properties": {
+                "audioBase64": {"type": "string"},
+                "mimeType": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "voiceNotes.save" => json!({
+            "type": "object",
+            "required": ["audioBase64"],
+            "additionalProperties": false,
+            "properties": {
+                "audioBase64": {"type": "string"},
+                "mimeType": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "voiceNotes.delete" => json!({
+            "type": "object",
+            "required": ["filename"],
+            "additionalProperties": false,
+            "properties": {
+                "filename": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
+        "sandbox.startContainer"
+        | "sandbox.stopContainer"
+        | "sandbox.killContainer"
+        | "sandbox.removeContainer" => json!({
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+                "name": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"}
+            }
+        }),
         "blob.get" => json!({
             "type": "object",
             "required": ["blobId"],
@@ -421,7 +613,8 @@ pub(super) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "session.delete" | "session.archive" | "session.unarchive" | "session.export" => json!({
+        "session.resume" | "session.delete" | "session.archive" | "session.unarchive"
+        | "session.export" => json!({
             "type": "object",
             "required": ["sessionId"],
             "additionalProperties": false,
@@ -1360,6 +1553,7 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         }),
         "system.getDiagnostics"
         | "system.getUpdateStatus"
+        | "system.checkForUpdates"
         | "codexApp.status"
         | "cron.list"
         | "cron.get"
@@ -1369,6 +1563,33 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         | "cron.getRuns" => json!({
             "type": "object",
             "additionalProperties": true
+        }),
+        "system.shutdown" => json!({
+            "type": "object",
+            "required": ["acknowledged"],
+            "additionalProperties": false,
+            "properties": {
+                "acknowledged": {"type": "boolean"}
+            }
+        }),
+        "auth.get" | "auth.update" | "auth.clear" | "auth.oauthComplete" | "auth.renameAccount"
+        | "auth.setActive" | "auth.removeAccount" | "auth.removeApiKey" => json!({
+            "type": "object",
+            "required": ["providers", "services"],
+            "additionalProperties": false,
+            "properties": {
+                "providers": {"type": "object", "additionalProperties": true},
+                "services": {"type": "object", "additionalProperties": true}
+            }
+        }),
+        "auth.oauthBegin" => json!({
+            "type": "object",
+            "required": ["flowId", "authUrl"],
+            "additionalProperties": false,
+            "properties": {
+                "flowId": {"type": "string"},
+                "authUrl": {"type": "string"}
+            }
         }),
         "blob.get" => json!({
             "type": "object",
@@ -1508,6 +1729,7 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
         }),
         "session.list"
         | "session.create"
+        | "session.resume"
         | "session.delete"
         | "session.fork"
         | "session.getHead"
@@ -1551,6 +1773,111 @@ pub(super) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "hasBrowser": {"type": "boolean"},
                 "isStreaming": {"type": "boolean"}
             }
+        }),
+        "browser.startStream" => json!({
+            "type": "object",
+            "additionalProperties": true
+        }),
+        "browser.stopStream" => json!({
+            "type": "object",
+            "required": ["success"],
+            "additionalProperties": false,
+            "properties": {"success": {"type": "boolean"}}
+        }),
+        "display.stopStream" => json!({
+            "type": "object",
+            "required": ["streamId", "stopped"],
+            "additionalProperties": false,
+            "properties": {
+                "streamId": {"type": "string"},
+                "stopped": {"type": "boolean"}
+            }
+        }),
+        "device.register" => json!({
+            "type": "object",
+            "required": ["id", "created"],
+            "additionalProperties": false,
+            "properties": {
+                "id": {"type": "string"},
+                "created": {"type": "boolean"}
+            }
+        }),
+        "device.unregister" => json!({
+            "type": "object",
+            "required": ["success"],
+            "additionalProperties": false,
+            "properties": {"success": {"type": "boolean"}}
+        }),
+        "device.respond" => json!({
+            "type": "object",
+            "required": ["resolved"],
+            "additionalProperties": false,
+            "properties": {"resolved": {"type": "boolean"}}
+        }),
+        "transcribe.audio" => json!({
+            "type": "object",
+            "required": [
+                "text",
+                "rawText",
+                "language",
+                "durationSeconds",
+                "processingTimeMs",
+                "model",
+                "device",
+                "computeType",
+                "cleanupMode"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "text": {"type": "string"},
+                "rawText": {"type": "string"},
+                "language": {"type": "string"},
+                "durationSeconds": {"type": "number"},
+                "processingTimeMs": {"type": "integer"},
+                "model": {"type": "string"},
+                "device": {"type": "string"},
+                "computeType": {"type": "string"},
+                "cleanupMode": {"type": "string"}
+            }
+        }),
+        "transcribe.downloadModel" => json!({
+            "type": "object",
+            "required": ["started", "reason"],
+            "additionalProperties": false,
+            "properties": {
+                "started": {"type": "boolean"},
+                "reason": {"type": "string"},
+                "message": {"type": "string"}
+            }
+        }),
+        "voiceNotes.save" => json!({
+            "type": "object",
+            "required": ["success", "filename", "filepath", "transcription"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "filename": {"type": "string"},
+                "filepath": {"type": "string"},
+                "transcription": {"type": "object", "additionalProperties": true}
+            }
+        }),
+        "voiceNotes.delete" => json!({
+            "type": "object",
+            "required": ["success", "filename"],
+            "additionalProperties": false,
+            "properties": {
+                "success": {"type": "boolean"},
+                "filename": {"type": "string"}
+            }
+        }),
+        "sandbox.startContainer"
+        | "sandbox.stopContainer"
+        | "sandbox.killContainer"
+        | "sandbox.removeContainer" => json!({
+            "type": "object",
+            "required": ["success"],
+            "additionalProperties": false,
+            "properties": {"success": {"type": "boolean"}}
         }),
         "agent.prompt" => json!({
             "type": "object",

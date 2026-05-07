@@ -1,61 +1,98 @@
-//! Auth handlers: get, update, clear, oauthBegin, oauthComplete.
+//! Auth wire-contract fixtures and shared OAuth flow state.
 //!
-//! Manages provider API keys and OAuth tokens stored in `auth.json`.
-//! All handlers return masked key hints — full secrets are never sent over the wire.
+//! Auth business behavior is owned by canonical `auth::*` engine functions.
+//! JSON-RPC registrations are marker-only generic triggers, so the old
+//! method-specific handlers compile only in tests to preserve wire-contract
+//! regression coverage. Full secrets are never returned over the wire.
 //!
 //! ## Submodules
 //!
 //! | Module    | Handlers |
 //! |-----------|----------|
-//! | `get`     | `GetAuthHandler` — read masked auth state |
-//! | `update`  | `UpdateAuthHandler` — set keys/tokens for providers and services |
-//! | `clear`   | `ClearAuthHandler` — wipe provider or service credentials |
-//! | `oauth`   | `OAuthBeginHandler`, `OAuthCompleteHandler` — OAuth PKCE flows |
-//! | `account` | `RenameAccountHandler`, `SetActiveCredentialHandler`, `RemoveAccountHandler`, `RemoveApiKeyHandler` |
+//! | `get`     | test fixture for masked auth state |
+//! | `update`  | test fixture for provider/service credential writes |
+//! | `clear`   | test fixture for provider/service credential clearing |
+//! | `oauth`   | test fixture for OAuth begin/complete flows |
+//! | `account` | test fixtures for account/credential selection mutations |
 
+#[cfg(test)]
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::Path;
 
+#[cfg(test)]
 use async_trait::async_trait;
+#[cfg(test)]
 use serde_json::{Value, json};
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use crate::llm::auth::storage::{
     acquire_auth_file_lock, clear_provider_auth, load_auth_storage, load_or_init_for_write,
     save_auth_storage, save_named_api_key,
 };
+#[cfg(test)]
 use crate::llm::auth::types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, OAuthTokens, ProviderAuth, ServiceAuth,
 };
+#[cfg(test)]
 use crate::server::rpc::context::RpcContext;
+#[cfg(test)]
 use crate::server::rpc::errors::RpcError;
+#[cfg(test)]
 use crate::server::rpc::handlers::{map_auth_error, opt_string, require_string_param};
+#[cfg(test)]
 use crate::server::rpc::registry::MethodHandler;
+#[cfg(test)]
 use crate::server::rpc::types::RpcEvent;
 
+#[cfg(test)]
 mod account;
+#[cfg(test)]
 mod clear;
+#[cfg(test)]
 mod get;
+#[cfg(test)]
 mod oauth;
+#[cfg(test)]
 mod update;
 
+#[cfg(test)]
 pub use account::{
     RemoveAccountHandler, RemoveApiKeyHandler, RenameAccountHandler, SetActiveCredentialHandler,
 };
+#[cfg(test)]
 pub use clear::ClearAuthHandler;
+#[cfg(test)]
 pub use get::GetAuthHandler;
-pub use oauth::{OAuthBeginHandler, OAuthCompleteHandler, PendingOAuthFlow};
+#[cfg(test)]
+pub use oauth::{OAuthBeginHandler, OAuthCompleteHandler};
+#[cfg(test)]
 pub use update::UpdateAuthHandler;
 
+/// In-memory state for a pending OAuth flow.
+pub struct PendingOAuthFlow {
+    /// PKCE code verifier (Anthropic/Google) or random state (OpenAI) for this flow.
+    pub verifier: String,
+    /// OAuth provider name (e.g. `"anthropic"`, `"openai-codex"`).
+    pub provider: String,
+    /// When this flow was initiated.
+    pub created_at: std::time::Instant,
+}
+
 /// Known LLM provider identifiers.
+#[cfg(test)]
 const KNOWN_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "google", "minimax", "kimi"];
 
 /// Known service identifiers.
+#[cfg(test)]
 const KNOWN_SERVICES: &[&str] = &["brave", "exa"];
 
 // ─── Masking ─────────────────────────────────────────────────────────────────
 
 /// Mask an API key for safe display. Shows prefix up to second dash and last 4 chars.
+#[cfg(test)]
 fn mask_key(key: &str) -> String {
     if key.len() <= 8 {
         return "***".to_string();
@@ -78,6 +115,7 @@ fn mask_key(key: &str) -> String {
 /// Populates: `hasApiKey`, `apiKeyHint`, `hasOAuth`, `accounts`, `apiKeys`,
 /// and `activeCredential`. These fields are consumed by the iOS settings UI
 /// to render credential status for each provider.
+#[cfg(test)]
 fn build_provider_info(pa: &ProviderAuth) -> serde_json::Map<String, Value> {
     let mut info = serde_json::Map::new();
 
@@ -136,6 +174,7 @@ fn build_provider_info(pa: &ProviderAuth) -> serde_json::Map<String, Value> {
 /// the error to the client rather than silently showing an empty auth state
 /// (which would lead a user to believe they have no credentials when they
 /// really have a broken file on disk).
+#[cfg(test)]
 fn build_masked_state(auth_path: &Path) -> Result<Value, crate::llm::auth::errors::AuthError> {
     let storage = load_auth_storage(auth_path)?;
 
@@ -229,6 +268,7 @@ fn build_masked_state(auth_path: &Path) -> Result<Value, crate::llm::auth::error
 }
 
 /// Build accounts list from provider auth (masked).
+#[cfg(test)]
 fn build_accounts_list(pa: &ProviderAuth) -> Vec<Value> {
     pa.accounts
         .as_ref()
@@ -250,6 +290,7 @@ fn build_accounts_list(pa: &ProviderAuth) -> Vec<Value> {
 }
 
 /// Broadcast the `auth.updated` event to all connected clients.
+#[cfg(test)]
 async fn broadcast_auth_updated(ctx: &RpcContext, masked_state: &Value) {
     if let Some(ref bm) = ctx.broadcast_manager {
         let event = RpcEvent::new("auth.updated", None, Some(masked_state.clone()));

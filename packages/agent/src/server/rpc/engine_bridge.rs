@@ -2,37 +2,26 @@
 //!
 //! JSON-RPC is becoming a trigger transport into engine functions. This module
 //! owns the temporary migration inventory for that path: every registered RPC
-//! method has an explicit capability spec, migrated specs register domain-owned
-//! in-process worker functions, and generic-trigger methods bypass
-//! method-specific business handlers entirely. Prompt library, settings, logs,
-//! skills, notifications, plan, events, basic filesystem, all job methods,
-//! all current agent controls including `agent.prompt`, session
-//! create/delete/fork/archive/export except `session.resume`, all context
-//! snapshot/compaction/clear methods, and safe read groups for tree, repo,
-//! import, browser status, voice notes, transcription models, and sandbox
-//! listing now run through this generic-trigger path. The MCP and cron groups
-//! are also collapsed: `mcp.*` methods route to canonical `mcp::*` functions,
-//! discovered MCP tools are projected into the live catalog with conservative
-//! effect/risk classification, and `cron.*` methods route to canonical
-//! `cron::*` functions while schedule fires dispatch through the
-//! `cron_schedule` trigger type into the hidden `cron::scheduled_fire`
-//! function. Runtime-tail methods such as `system.getDiagnostics`,
-//! `system.getUpdateStatus`, `codexApp.status`, `blob.get`, `tool.result`,
-//! and `message.delete` are now domain-owned functions too. The first
-//! higher-risk command package moved model switching, reasoning-level updates,
-//! manual memory retention, and import execution behind canonical domain
-//! functions with resource leases and high-risk contract metadata. The next
-//! high-risk package made those contracts executable engine policy and moved
-//! every public `git.*` and `worktree.*` method into canonical `git::*` /
-//! `worktree::*` functions guarded by host-enforced leases, compensation
-//! records, strict schemas, and approval metadata where autonomous agents
-//! could otherwise create risky side effects.
+//! method has an explicit capability spec, domain-owned in-process workers
+//! register executable functions, and generic-trigger methods bypass
+//! method-specific business handlers entirely. As of the full tail collapse,
+//! all 170 public JSON-RPC methods are marker-only `json_rpc` triggers over
+//! canonical domain functions. The final command groups moved into this fabric
+//! include auth/account management, device approval responses, voice-note
+//! mutation, transcription audio/model commands, browser/display stream
+//! controls, sandbox lifecycle, `session.resume`, update checks, and shutdown.
+//! Mutating tail capabilities use strict schemas, domain write authority,
+//! engine-ledger idempotency, resource leases where shared local state is
+//! touched, approval metadata for autonomous agents, and compensation notes for
+//! high-risk or externally irreversible effects.
 //!
 //! The `rpc` worker is now transport compatibility only. Domain workers such as
 //! `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
-//! `git`, `worktree`, `mcp`, and `system` own executable function contracts and behavior
-//! metadata. A separate `tool` worker registers built-in agent tools as
+//! `git`, `worktree`, `auth`, `device`, `voice_notes`, `transcription`,
+//! `browser`, `display`, `sandbox`, `mcp`, and `system` own executable
+//! function contracts and behavior metadata. A separate `tool` worker registers
+//! built-in agent tools as
 //! canonical `tool::*` functions. Provider requests now resolve schemas from
 //! the live catalog, so built-ins, engine meta-tools, and eligible MCP
 //! capabilities are all surfaced through the same agent-facing capability
@@ -40,20 +29,20 @@
 //! `json_rpc` trigger records capture the old client method name and dispatch
 //! directly into canonical ids such as `skills::activate` or
 //! `session::reconstruct`; `cron_schedule` trigger records capture scheduled
-//! automation fires; `rpc::<method>` names remain compatibility metadata for
-//! handler-only inventory during the migration.
+//! automation fires. `rpc::<method>` names are no longer executable centers;
+//! they survive only as transport/migration metadata while clients still speak
+//! the legacy JSON-RPC method names.
 //!
 //! # INVARIANT: the bridge is temporary demolition scaffolding
 //!
 //! The desired end state is a collapsed engine architecture where JSON-RPC is
-//! only a transport trigger over canonical domain functions. Handler-only specs
-//! remain non-routable internal catalog metadata until their behavior moves
-//! behind the engine boundary, then groups advance to generic triggers and the
-//! method-specific handlers are deleted. Compatibility ids must not become the
-//! agent-facing surface again.
-//! Every migration package must advance at least one method group and remove
-//! superseded business handlers; adding a mirror or fallback without deletion
-//! is not progress toward the collapsed architecture.
+//! only a transport trigger over canonical domain functions. The public RPC
+//! surface has reached 170/170 generic-trigger coverage; future work should
+//! delete the compatibility inventory itself as clients and agents move to
+//! canonical ids. Compatibility ids must not become the agent-facing surface
+//! again. Every migration package must advance the collapsed fabric and remove
+//! superseded behavior; adding a mirror or fallback without deletion is not
+//! progress toward the architecture.
 
 mod dispatch;
 mod functions;

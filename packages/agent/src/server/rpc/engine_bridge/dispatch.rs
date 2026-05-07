@@ -204,11 +204,6 @@ pub(super) fn payload_for_rpc_method(
 }
 
 #[cfg(test)]
-pub(super) fn rpc_causal_context() -> CausalContext {
-    rpc_causal_context_for_scope(super::RPC_READ_AUTHORITY)
-}
-
-#[cfg(test)]
 pub(super) fn rpc_causal_context_for_scope(scope: &str) -> CausalContext {
     rpc_causal_context_for_method("rpc.transport", scope)
 }
