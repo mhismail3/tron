@@ -1,11 +1,26 @@
 //! model domain worker.
 //!
 //! This module owns canonical function execution for the model namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    auth_path: PathBuf,
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            auth_path: deps.auth_path.clone(),
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 pub(crate) mod catalog;
 use crate::server::domains::model::catalog as model_catalog;
@@ -13,7 +28,7 @@ use crate::server::domains::model::catalog as model_catalog;
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     allow_capability_context: bool,
 ) -> Result<Value, CapabilityError> {
     match method {
@@ -35,7 +50,7 @@ pub(super) async fn handle(
 
 async fn model_list_value(
     payload: &Value,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     allow_capability_context: bool,
 ) -> Result<Value, CapabilityError> {
     let auth_json_path = allow_capability_context

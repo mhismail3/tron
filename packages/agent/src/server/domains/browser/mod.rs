@@ -1,13 +1,22 @@
 //! browser domain worker.
 //!
 //! This module owns canonical function execution for the browser namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps;
 
-pub(super) async fn handle(method: &str) -> Result<Value, CapabilityError> {
+impl Deps {
+    pub(crate) fn from_engine(_deps: &EngineCapabilityDeps) -> Self {
+        Self
+    }
+}
+
+pub(super) async fn handle(method: &str, _deps: &Deps) -> Result<Value, CapabilityError> {
     match method {
         "browser::get_status" => Ok(json!({
             "hasBrowser": false,

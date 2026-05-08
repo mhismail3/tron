@@ -1,11 +1,24 @@
 //! transcription domain worker.
 //!
 //! This module owns canonical function execution for the transcription namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 use base64::Engine;
 use tracing::{debug, warn};
@@ -32,7 +45,7 @@ struct TranscribeResponse {
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "transcription::audio" => transcribe_audio_value(&invocation.payload, deps).await,
@@ -44,7 +57,7 @@ pub(super) async fn handle(
     }
 }
 
-fn list_models_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+fn list_models_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let engine_loaded = deps.capability_context.transcription_engine.get().is_some();
     let enabled = crate::settings::get_settings().server.transcription.enabled;
     Ok(json!({
@@ -63,10 +76,7 @@ fn list_models_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityErr
     }))
 }
 
-async fn transcribe_audio_value(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn transcribe_audio_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let audio_base64 =
         opt_string(Some(payload), "audioBase64").ok_or_else(|| CapabilityError::InvalidParams {
             message: "Missing required parameter: audioBase64".into(),
@@ -101,7 +111,7 @@ async fn transcribe_audio_value(
     })
 }
 
-fn download_model_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+fn download_model_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let engine_loaded = deps.capability_context.transcription_engine.get().is_some();
     let enabled = crate::settings::get_settings().server.transcription.enabled;
 

@@ -1,16 +1,37 @@
 //! settings domain worker.
 //!
 //! This module owns canonical function execution for the settings namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    codex_app_server: Option<Arc<CodexAppServerManager>>,
+    engine_host: crate::engine::EngineHostHandle,
+    mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
+    profile_runtime: Arc<ProfileRuntime>,
+    settings_path: PathBuf,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            codex_app_server: deps.codex_app_server.clone(),
+            engine_host: deps.engine_host.clone(),
+            mcp_router: deps.mcp_router.clone(),
+            profile_runtime: deps.profile_runtime.clone(),
+            settings_path: deps.settings_path.clone(),
+        }
+    }
+}
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -38,7 +59,7 @@ fn settings_error(error: crate::settings::SettingsError) -> CapabilityError {
 async fn settings_update_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let updates = require_param(params, "settings")?.clone();
     let codex_updates = updates.clone();
@@ -129,9 +150,7 @@ async fn settings_update_value(
     Ok(json!({ "success": true }))
 }
 
-async fn settings_reset_to_defaults_value(
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn settings_reset_to_defaults_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
     let previous_sparse = read_sparse_settings_snapshot(deps).await?;
     let previous_codex_app_server = deps
@@ -166,9 +185,7 @@ async fn settings_reset_to_defaults_value(
     Ok(result)
 }
 
-async fn read_sparse_settings_snapshot(
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn read_sparse_settings_snapshot(deps: &Deps) -> Result<Value, CapabilityError> {
     let path = deps.settings_path.clone();
     run_blocking_task("settings.readSparseSnapshot", move || {
         crate::settings::SettingsStore::new(path)
@@ -179,7 +196,7 @@ async fn read_sparse_settings_snapshot(
 }
 
 async fn restore_sparse_settings_file(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     previous_sparse: Value,
     reason: &str,
 ) -> Result<(), CapabilityError> {
@@ -195,7 +212,7 @@ async fn restore_sparse_settings_file(
 }
 
 async fn rollback_sparse_settings(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     previous_sparse: Value,
     reason: &str,
 ) -> Result<(), CapabilityError> {
@@ -205,7 +222,7 @@ async fn rollback_sparse_settings(
 }
 
 async fn reload_profile_runtime_or_rollback(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     previous_sparse: Value,
     reason: &'static str,
 ) -> Result<(), CapabilityError> {
@@ -223,7 +240,7 @@ async fn reload_profile_runtime_or_rollback(
 }
 
 async fn refresh_codex_app_server_if_needed(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     updates: &Value,
     previous_sparse: Value,
     previous_settings: crate::settings::CodexAppServerSettings,
@@ -269,7 +286,7 @@ async fn refresh_codex_app_server_if_needed(
     Ok(())
 }
 
-async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &EngineCapabilityDeps) {
+async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
     let Some(ref router_arc) = deps.mcp_router else {
         return;
     };
@@ -281,5 +298,12 @@ async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &EngineCapa
         None,
         Some(serde_json::to_value(status).unwrap_or_default()),
     );
-    super::publish_engine_stream_event(deps, "mcp", "settings", event, Some(invocation)).await;
+    super::publish_engine_stream_event(
+        &deps.engine_host,
+        "mcp",
+        "settings",
+        event,
+        Some(invocation),
+    )
+    .await;
 }

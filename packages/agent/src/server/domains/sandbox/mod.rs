@@ -1,11 +1,24 @@
 //! sandbox domain worker.
 //!
 //! This module owns canonical function execution for the sandbox namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 pub(crate) mod service;
 
@@ -15,7 +28,7 @@ use crate::server::shared::params::require_string_param;
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "sandbox::list_containers" => list_containers(deps).await,
@@ -29,7 +42,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn list_containers(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn list_containers(deps: &Deps) -> Result<Value, CapabilityError> {
     let path = sandbox_service::containers_json_path();
     let mut containers = deps
         .capability_context
@@ -61,10 +74,7 @@ async fn run_container_command(action: &str, payload: &Value) -> Result<Value, C
     sandbox_service::run_container_command(action, &name).await
 }
 
-async fn remove_container(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn remove_container(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let name = require_string_param(Some(payload), "name")?;
     sandbox_service::remove_container_runtime_best_effort(&name).await;
 

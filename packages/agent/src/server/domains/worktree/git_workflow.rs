@@ -31,13 +31,13 @@ use crate::worktree::types::{
 use crate::worktree::{ConflictedFile, WorktreeCoordinator, WorktreeError};
 use std::path::PathBuf;
 
-use super::EngineCapabilityDeps;
+use super::Deps;
 use crate::engine::Invocation;
 
 pub(crate) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let params = Some(invocation.payload.clone());
     let ctx = deps.capability_context.as_ref();

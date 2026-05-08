@@ -1,27 +1,22 @@
 //! Aggregated canonical capability catalog.
 //!
-//! Domain workers own their canonical function inventories in local `spec.rs`
-//! modules. This file assembles those inventories into the engine registration,
-//! discovery, diagnostics, and guardrail views, while contract-specific metadata
-//! lives in `catalog::contracts`.
+//! Domain workers own their canonical function contracts in local `contract.rs`
+//! modules. This file only assembles those contracts into discovery,
+//! diagnostics, and guardrail views.
 
 use std::collections::BTreeSet;
 
 use serde_json::json;
 
-use super::schemas::{request_schema_for_method, response_schema_for_method};
+pub(crate) use super::contract::function_definition_for_capability;
+use super::contract::{
+    high_risk_contract_for_method, request_schema_for_method, requires_resource_lease_metadata,
+    response_schema_for_method,
+};
 use crate::engine::{
     ActorId, AuthorityGrantId, DeliveryMode, EffectClass, EngineError, FunctionId,
     IdempotencyKeySource, Result as EngineResult, RiskLevel, TriggerDefinition, TriggerId,
     TriggerTypeDefinition, TriggerTypeId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
-};
-
-mod contracts;
-
-pub(crate) use contracts::function_definition_for_capability;
-use contracts::{
-    effect_class_for_method, high_risk_contract_for_method, idempotency_mode_for_method,
-    requires_resource_lease_metadata, risk_for_method,
 };
 
 /// System actor used for server-owned capability registration.
@@ -39,7 +34,7 @@ pub enum TransportIdempotencyMode {
 }
 
 impl TransportIdempotencyMode {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::NotRequired => "not_required",
             Self::ExplicitRequired => "explicit_required",
@@ -92,7 +87,8 @@ pub struct CanonicalCapabilitySpec {
     pub method: &'static str,
 }
 
-/// Domain worker ownership view used by registration, diagnostics, and guards.
+/// Domain worker ownership view used by guard tests.
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DomainWorkerModule {
     /// Worker definition registered with the engine.
@@ -106,7 +102,7 @@ pub struct DomainWorkerModule {
 const PUBLIC_ENGINE_TRANSPORT_METHODS: &[&str] =
     &["discover", "inspect", "watch", "invoke", "promote"];
 
-const ENGINE_META_CAPABILITY_METHODS: &[&str] = &[
+pub(crate) const ENGINE_META_CAPABILITY_METHODS: &[&str] = &[
     "engine::discover",
     "engine::inspect",
     "engine::watch",
@@ -114,51 +110,48 @@ const ENGINE_META_CAPABILITY_METHODS: &[&str] = &[
     "engine::promote",
 ];
 
-const ENGINE_PRIMITIVE_CAPABILITY_METHODS: &[&str] =
+pub(crate) const ENGINE_PRIMITIVE_CAPABILITY_METHODS: &[&str] =
     &["approval::get", "approval::list", "approval::resolve"];
 
-fn canonical_capability_methods() -> Vec<&'static str> {
-    let groups: &[&[&str]] = &[
-        ENGINE_META_CAPABILITY_METHODS,
+fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
+    let mut specs = super::contract::capability_specs_for_methods(ENGINE_META_CAPABILITY_METHODS)?;
+    specs.extend(super::contract::capability_specs_for_methods(
         ENGINE_PRIMITIVE_CAPABILITY_METHODS,
-        super::agent::spec::FUNCTIONS,
-        super::auth::spec::FUNCTIONS,
-        super::blob::spec::FUNCTIONS,
-        super::browser::spec::FUNCTIONS,
-        super::codex_app::spec::FUNCTIONS,
-        super::context::spec::FUNCTIONS,
-        super::cron::spec::FUNCTIONS,
-        super::device::spec::FUNCTIONS,
-        super::display::spec::FUNCTIONS,
-        super::events::spec::FUNCTIONS,
-        super::filesystem::spec::FUNCTIONS,
-        super::git::spec::FUNCTIONS,
-        super::import::spec::FUNCTIONS,
-        super::job::spec::FUNCTIONS,
-        super::logs::spec::FUNCTIONS,
-        super::mcp::spec::FUNCTIONS,
-        super::memory::spec::FUNCTIONS,
-        super::message::spec::FUNCTIONS,
-        super::model::spec::FUNCTIONS,
-        super::notifications::spec::FUNCTIONS,
-        super::plan::spec::FUNCTIONS,
-        super::prompt_library::spec::FUNCTIONS,
-        super::repo::spec::FUNCTIONS,
-        super::sandbox::spec::FUNCTIONS,
-        super::session::spec::FUNCTIONS,
-        super::settings::spec::FUNCTIONS,
-        super::skills::spec::FUNCTIONS,
-        super::system::spec::FUNCTIONS,
-        super::tools::spec::FUNCTIONS,
-        super::transcription::spec::FUNCTIONS,
-        super::tree::spec::FUNCTIONS,
-        super::voice_notes::spec::FUNCTIONS,
-        super::worktree::spec::FUNCTIONS,
-    ];
-    groups
-        .iter()
-        .flat_map(|group| group.iter().copied())
-        .collect()
+    )?);
+    specs.extend(super::agent::contract::capabilities()?);
+    specs.extend(super::auth::contract::capabilities()?);
+    specs.extend(super::blob::contract::capabilities()?);
+    specs.extend(super::browser::contract::capabilities()?);
+    specs.extend(super::codex_app::contract::capabilities()?);
+    specs.extend(super::context::contract::capabilities()?);
+    specs.extend(super::cron::contract::capabilities()?);
+    specs.extend(super::device::contract::capabilities()?);
+    specs.extend(super::display::contract::capabilities()?);
+    specs.extend(super::events::contract::capabilities()?);
+    specs.extend(super::filesystem::contract::capabilities()?);
+    specs.extend(super::git::contract::capabilities()?);
+    specs.extend(super::import::contract::capabilities()?);
+    specs.extend(super::job::contract::capabilities()?);
+    specs.extend(super::logs::contract::capabilities()?);
+    specs.extend(super::mcp::contract::capabilities()?);
+    specs.extend(super::memory::contract::capabilities()?);
+    specs.extend(super::message::contract::capabilities()?);
+    specs.extend(super::model::contract::capabilities()?);
+    specs.extend(super::notifications::contract::capabilities()?);
+    specs.extend(super::plan::contract::capabilities()?);
+    specs.extend(super::prompt_library::contract::capabilities()?);
+    specs.extend(super::repo::contract::capabilities()?);
+    specs.extend(super::sandbox::contract::capabilities()?);
+    specs.extend(super::session::contract::capabilities()?);
+    specs.extend(super::settings::contract::capabilities()?);
+    specs.extend(super::skills::contract::capabilities()?);
+    specs.extend(super::system::contract::capabilities()?);
+    specs.extend(super::tools::contract::capabilities()?);
+    specs.extend(super::transcription::contract::capabilities()?);
+    specs.extend(super::tree::contract::capabilities()?);
+    specs.extend(super::voice_notes::contract::capabilities()?);
+    specs.extend(super::worktree::contract::capabilities()?);
+    Ok(specs)
 }
 
 /// Public `/engine` client protocol meta-methods.
@@ -169,10 +162,9 @@ pub fn public_engine_transport_methods() -> impl Iterator<Item = &'static str> {
 /// Build canonical capability specs from the complete domain capability catalog.
 pub fn canonical_capability_specs() -> EngineResult<Vec<CanonicalCapabilitySpec>> {
     validate_seed_uniqueness()?;
-    canonical_capability_methods()
+    canonical_capability_contracts()?
         .into_iter()
-        .map(|method| {
-            let spec = spec_from_method(method)?;
+        .map(|spec| {
             Ok(CanonicalCapabilitySpec {
                 function_id: spec.function_id,
                 owner_worker: spec.owner_worker,
@@ -190,7 +182,7 @@ pub fn canonical_capability_specs() -> EngineResult<Vec<CanonicalCapabilitySpec>
 pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
     let mut specs = Vec::with_capacity(PUBLIC_ENGINE_TRANSPORT_METHODS.len());
     for method in PUBLIC_ENGINE_TRANSPORT_METHODS {
-        let spec = spec_from_method(method)?;
+        let spec = super::contract::capability_spec_for_method(method)?;
         if spec.visibility.is_agent_visible()
             && spec.effect_class.is_mutating()
             && spec.idempotency_mode == TransportIdempotencyMode::NotRequired
@@ -264,10 +256,11 @@ pub(crate) fn public_engine_transport_spec_for_method(
     else {
         return Ok(None);
     };
-    spec_from_method(method).map(Some)
+    super::contract::capability_spec_for_method(method).map(Some)
 }
 
 /// Group canonical functions by their owning domain worker.
+#[cfg(test)]
 pub(crate) fn domain_worker_modules() -> EngineResult<Vec<DomainWorkerModule>> {
     let specs = canonical_capability_specs()?;
     domain_workers()?
@@ -292,47 +285,17 @@ pub(crate) fn domain_worker_modules() -> EngineResult<Vec<DomainWorkerModule>> {
         .collect()
 }
 
-pub(crate) fn capability_spec_for_method(method: &str) -> EngineResult<CapabilitySpec> {
-    let Some(canonical_method) = canonical_capability_methods()
-        .into_iter()
-        .find(|candidate| *candidate == method)
-    else {
-        return Err(EngineError::PolicyViolation(format!(
-            "canonical capability operation {method} is not registered"
-        )));
-    };
-    spec_from_method(canonical_method)
-}
-
 fn validate_seed_uniqueness() -> EngineResult<()> {
     let mut seen = BTreeSet::new();
-    for method in canonical_capability_methods() {
-        if !seen.insert(method) {
+    for spec in canonical_capability_contracts()? {
+        if !seen.insert(spec.method) {
             return Err(EngineError::PolicyViolation(format!(
                 "duplicate canonical capability spec for {}",
-                method
+                spec.method
             )));
         }
     }
     Ok(())
-}
-
-fn spec_from_method(method: &'static str) -> EngineResult<CapabilitySpec> {
-    let effect_class = effect_class_for_method(method);
-    let visibility = VisibilityScope::System;
-    let owner_worker = domain_worker_for_method(method)?;
-    Ok(CapabilitySpec {
-        method,
-        function_id: function_id_for_method(method)?,
-        owner_worker: owner_worker.clone(),
-        domain_worker: domain_worker_for_method(method)?,
-        effect_class,
-        risk_level: risk_for_method(method, effect_class),
-        visibility,
-        authority_scope: Some(domain_authority_scope_for_method(method, effect_class)),
-        idempotency_mode: idempotency_mode_for_method(method, effect_class),
-        domain_module: domain_module_for_method(method),
-    })
 }
 
 pub(crate) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
@@ -472,7 +435,7 @@ pub(crate) fn canonical_function_id_for_method(method: &str) -> EngineResult<Fun
     FunctionId::new(canonical_capability_for_method(method))
 }
 
-fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
+pub(crate) fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
     worker_id(match method {
         method
             if matches!(
@@ -766,7 +729,10 @@ fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
     }
 }
 
-fn domain_authority_scope_for_method(method: &str, effect_class: EffectClass) -> &'static str {
+pub(crate) fn domain_authority_scope_for_method(
+    method: &str,
+    effect_class: EffectClass,
+) -> &'static str {
     let access = if effect_class.is_mutating() {
         "write"
     } else {
@@ -868,7 +834,7 @@ pub(crate) fn grant_id(value: &str) -> EngineResult<AuthorityGrantId> {
     AuthorityGrantId::new(value)
 }
 
-fn domain_module_for_method(method: &str) -> &'static str {
+pub(crate) fn domain_module_for_method(method: &str) -> &'static str {
     match method {
         "git::sync_main"
         | "git::push"

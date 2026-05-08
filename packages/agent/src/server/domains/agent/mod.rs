@@ -1,7 +1,7 @@
 //! agent domain worker.
 //!
 //! This module owns canonical function execution for the agent namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 //!
 //! ## Prompt Execution Flow
 //!
@@ -17,9 +17,43 @@
 //! 6. `/engine` subscriptions deliver those stream records to clients; the
 //!    transport never owns agent behavior.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    agent_deps: Option<crate::server::shared::context::AgentDeps>,
+    capability_context: Arc<ServerCapabilityContext>,
+    engine_host: crate::engine::EngineHostHandle,
+    event_store: Arc<EventStore>,
+    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    orchestrator: Arc<Orchestrator>,
+    output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    profile_runtime: Arc<ProfileRuntime>,
+    session_manager: Arc<SessionManager>,
+    skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            agent_deps: deps.agent_deps.clone(),
+            capability_context: deps.capability_context.clone(),
+            engine_host: deps.engine_host.clone(),
+            event_store: deps.event_store.clone(),
+            job_manager: deps.job_manager.clone(),
+            orchestrator: deps.orchestrator.clone(),
+            output_buffer_registry: deps.output_buffer_registry.clone(),
+            process_manager: deps.process_manager.clone(),
+            profile_runtime: deps.profile_runtime.clone(),
+            session_manager: deps.session_manager.clone(),
+            skill_registry: deps.skill_registry.clone(),
+        }
+    }
+}
 
 pub(crate) mod commands;
 pub(crate) mod prompt_queue;
@@ -28,7 +62,10 @@ pub(crate) mod runtime;
 use crate::core::events::{BaseEvent, TronEvent};
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::queue::publish_queue_lifecycle_event;
-use crate::engine::{EngineQueueDrainer, EnqueueInvocation, FunctionId};
+use crate::engine::{
+    AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, EngineQueueDrainer,
+    EnqueueInvocation, FunctionDefinition, FunctionId, IdempotencyContract, Provenance, RiskLevel,
+};
 use crate::events::EventType;
 use crate::server::domains::agent::commands::AgentCommandService;
 use crate::server::domains::agent::prompt_queue::PromptQueueService;
@@ -45,7 +82,7 @@ use serde::Deserialize;
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -72,6 +109,123 @@ pub(super) async fn handle(
     }
 }
 
+pub(crate) fn hidden_function_registrations(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    let hidden = [
+        (
+            "agent::prompt_apply",
+            "apply a queued agent prompt command",
+            agent_prompt_apply_request_schema(),
+            agent_prompt_response_schema(),
+        ),
+        (
+            "agent::run_turn",
+            "start one accepted agent turn behind the engine runtime boundary",
+            agent_prompt_apply_request_schema(),
+            agent_prompt_response_schema(),
+        ),
+        (
+            "agent::prompt_queue_drain",
+            "drain the next queued prompt after a run completes",
+            agent_prompt_queue_drain_request_schema(),
+            agent_prompt_queue_drain_response_schema(),
+        ),
+    ];
+    hidden
+        .into_iter()
+        .map(|(id, description, request_schema, response_schema)| {
+            let mut definition = FunctionDefinition::new(
+                FunctionId::new(id)?,
+                catalog::worker_id("agent")?,
+                description,
+                VisibilityScope::Internal,
+                EffectClass::ExternalSideEffect,
+            )
+            .with_risk(RiskLevel::High)
+            .with_required_authority(AuthorityRequirement::scope("agent.write"))
+            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .with_compensation(CompensationContract::new(
+                CompensationKind::ExternalIrreversible,
+                "hidden prompt apply functions start or drain live agent runtime work; rollback is manual and event-store history remains authoritative",
+            ))
+            .with_provenance(Provenance::system())
+            .with_request_schema(request_schema)
+            .with_response_schema(response_schema);
+            definition.metadata = json!({
+                "internal": true,
+                "canonicalCapability": id,
+                "hiddenPromptRuntimeFunction": true,
+            });
+            Ok(DomainFunctionRegistration {
+                definition,
+                handler: Arc::new(DomainFunctionHandler {
+                    method: id,
+                    deps: deps.clone(),
+                    handler: super::agent_handler,
+                }),
+            })
+        })
+        .collect()
+}
+
+fn agent_prompt_apply_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["runId", "sessionId", "prompt"],
+        "additionalProperties": false,
+        "properties": {
+            "runId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "prompt": {"type": "string"},
+            "reasoningLevel": {"type": "string"},
+            "images": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "source": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["acknowledged", "runId"],
+        "additionalProperties": false,
+        "properties": {
+            "acknowledged": {"type": "boolean"},
+            "runId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_queue_drain_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["sessionId", "completedRunId"],
+        "additionalProperties": false,
+        "properties": {
+            "sessionId": {"type": "string"},
+            "completedRunId": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_queue_drain_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["drained", "count"],
+        "additionalProperties": false,
+        "properties": {
+            "drained": {"type": "boolean"},
+            "count": {"type": "integer"},
+            "runId": {"type": ["string", "null"]},
+            "reason": {"type": ["string", "null"]}
+        }
+    })
+}
+
 struct PromptSubmission {
     session_id: String,
     prompt: String,
@@ -81,10 +235,7 @@ struct PromptSubmission {
     source: Option<String>,
 }
 
-async fn prompt_value(
-    invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn prompt_value(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
     let (submission, _, _) = validate_prompt_submission(Some(&invocation.payload), deps).await?;
     let run_id = uuid::Uuid::now_v7().to_string();
     let mut apply_payload = invocation.payload.clone();
@@ -116,7 +267,7 @@ async fn prompt_value(
 async fn prompt_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, _session, _agent_deps) = validate_prompt_submission(params, deps).await?;
@@ -143,7 +294,7 @@ async fn prompt_apply_value(
 async fn run_turn_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, session, agent_deps) = validate_prompt_submission(params, deps).await?;
@@ -197,7 +348,7 @@ async fn run_turn_value(
 async fn prompt_queue_drain_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let session =
@@ -253,7 +404,7 @@ async fn prompt_queue_drain_value(
 
 async fn validate_prompt_submission(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<
     (
         PromptSubmission,
@@ -323,7 +474,7 @@ fn validate_attachment_arrays(
 
 async fn enqueue_and_sync_drain_agent_function(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     session_id: &str,
     function_id: &str,
     idempotency_prefix: &str,
@@ -409,7 +560,7 @@ async fn enqueue_and_sync_drain_agent_function(
     crate::server::shared::error_mapping::result_to_capability_value(result)
 }
 
-fn record_prompt_history(deps: &EngineCapabilityDeps, prompt: &str, source: Option<&str>) {
+fn record_prompt_history(deps: &Deps, prompt: &str, source: Option<&str>) {
     let is_cron = source
         .map(|source| source.starts_with("cron"))
         .unwrap_or(false);
@@ -448,7 +599,7 @@ fn record_prompt_history(deps: &EngineCapabilityDeps, prompt: &str, source: Opti
 
 async fn publish_prompt_stream(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     session_id: &str,
     action: &str,
     payload: Value,
@@ -473,10 +624,7 @@ async fn publish_prompt_stream(
         .await;
 }
 
-async fn status_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn status_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_store = deps.event_store.clone();
     let sid_for_check = session_id.clone();
@@ -543,18 +691,12 @@ async fn status_value(
     }))
 }
 
-async fn abort_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn abort_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     AgentCommandService::abort(&deps.capability_context, &session_id)
 }
 
-async fn abort_tool_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn abort_tool_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let tool_call_id = require_string_param(params, "toolCallId")?;
     AgentCommandService::abort_tool(&deps.capability_context, &session_id, &tool_call_id)
@@ -563,7 +705,7 @@ async fn abort_tool_value(
 async fn queue_prompt_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let prompt = require_string_param(params, "prompt")?;
@@ -596,7 +738,7 @@ async fn queue_prompt_value(
 async fn dequeue_prompt_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let queue_id = require_string_param(params, "queueId")?;
@@ -632,7 +774,7 @@ async fn dequeue_prompt_value(
 async fn clear_queue_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_store = deps.event_store.clone();
@@ -674,7 +816,7 @@ async fn clear_queue_value(
 
 async fn submit_confirmation_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let action = require_string_param(params, "action")?;
@@ -726,7 +868,7 @@ struct AnswerSubmission {
 
 async fn submit_answers_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let questions_value =
@@ -780,7 +922,7 @@ async fn submit_answers_value(
 
 async fn deliver_subagent_results_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let session =
@@ -832,7 +974,7 @@ async fn deliver_subagent_results_value(
 }
 
 async fn start_or_queue_prompt(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     session_id: String,
     prompt: String,
     message_metadata: Option<Value>,
@@ -855,7 +997,7 @@ async fn start_or_queue_prompt(
 }
 
 async fn start_or_queue_prompt_with_loaded_session(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     session: crate::events::sqlite::row_types::SessionRow,
     session_id: String,
     prompt: String,
@@ -927,7 +1069,7 @@ fn merge_success_fields(target: &mut Value, extra: Option<Value>) {
 }
 
 async fn load_prompt_session(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     session_id: &str,
     task: &'static str,
 ) -> Result<crate::events::sqlite::row_types::SessionRow, CapabilityError> {
@@ -949,7 +1091,7 @@ async fn load_prompt_session(
 
 async fn publish_agent_queue_stream(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     session_id: &str,
     action: &str,
     payload: Value,

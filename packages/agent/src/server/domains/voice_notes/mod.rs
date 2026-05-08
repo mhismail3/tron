@@ -1,11 +1,24 @@
 //! voice notes domain worker.
 //!
 //! This module owns canonical function execution for the voice notes namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 pub(crate) mod service;
 
@@ -18,7 +31,7 @@ use crate::server::shared::params::{opt_string, opt_u64, require_string_param};
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "voice_notes::list" => list(&invocation.payload, deps).await,
@@ -30,7 +43,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn list(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn list(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let limit = usize::try_from(opt_u64(Some(payload), "limit", 50)).unwrap_or(usize::MAX);
     let offset = usize::try_from(opt_u64(Some(payload), "offset", 0)).unwrap_or(0);
     let dir = voice_notes_service::notes_dir();
@@ -41,7 +54,7 @@ async fn list(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, Cap
         .await
 }
 
-async fn save(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn save(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let audio_base64 = require_string_param(Some(payload), "audioBase64")?;
     let mime_type_owned = opt_string(Some(payload), "mimeType");
     let mime_type = mime_type_owned.as_deref().unwrap_or("audio/wav");
@@ -92,7 +105,7 @@ async fn save(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, Cap
     }))
 }
 
-async fn delete(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn delete(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let filename = require_string_param(Some(payload), "filename")?;
     let filepath = format!("{}/{filename}", voice_notes_service::notes_dir());
     let filename_for_response = filename.clone();

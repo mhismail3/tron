@@ -1,15 +1,42 @@
 //! job domain worker.
 //!
 //! This module owns canonical function execution for the job namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    engine_host: crate::engine::EngineHostHandle,
+    event_store: Arc<EventStore>,
+    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    orchestrator: Arc<Orchestrator>,
+    output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            engine_host: deps.engine_host.clone(),
+            event_store: deps.event_store.clone(),
+            job_manager: deps.job_manager.clone(),
+            orchestrator: deps.orchestrator.clone(),
+            output_buffer_registry: deps.output_buffer_registry.clone(),
+            process_manager: deps.process_manager.clone(),
+        }
+    }
+}
 
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::queue::publish_queue_lifecycle_event;
-use crate::engine::{EngineQueueDrainer, EnqueueInvocation, FunctionId};
+use crate::engine::{
+    AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, EngineQueueDrainer,
+    EnqueueInvocation, FunctionDefinition, FunctionId, IdempotencyContract, Provenance, RiskLevel,
+};
 use tokio_util::sync::CancellationToken;
 
 static ACTIVE_SUBSCRIPTIONS: std::sync::LazyLock<dashmap::DashMap<String, CancellationToken>> =
@@ -18,7 +45,7 @@ static ACTIVE_SUBSCRIPTIONS: std::sync::LazyLock<dashmap::DashMap<String, Cancel
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -53,11 +80,66 @@ pub(super) async fn handle(
     }
 }
 
+pub(crate) fn hidden_function_registrations(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    [
+        (
+            "job::background_apply",
+            "job::background",
+            "apply a queued background-job command",
+        ),
+        (
+            "job::cancel_apply",
+            "job::cancel",
+            "apply a queued job-cancel command",
+        ),
+    ]
+    .into_iter()
+    .map(|(id, public_method, description)| {
+        let mut definition = FunctionDefinition::new(
+            FunctionId::new(id)?,
+            catalog::worker_id("job")?,
+            description,
+            VisibilityScope::Internal,
+            EffectClass::ReversibleSideEffect,
+        )
+        .with_risk(RiskLevel::High)
+        .with_required_authority(AuthorityRequirement::scope("job.write"))
+        .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .with_compensation(CompensationContract::new(
+            CompensationKind::ManualOnly,
+            "hidden job apply functions delegate to the process manager; queue/idempotency records prevent duplicate starts or cancellations",
+        ))
+        .with_provenance(Provenance::system());
+        if let Some(schema) = crate::server::domains::contract::request_schema_for_method(public_method) {
+            definition = definition.with_request_schema(schema);
+        }
+        if let Some(schema) = crate::server::domains::contract::response_schema_for_method(public_method) {
+            definition = definition.with_response_schema(schema);
+        }
+        definition.metadata = json!({
+            "internal": true,
+            "canonicalCapability": id,
+            "hiddenApplyFunction": true,
+        });
+        Ok(DomainFunctionRegistration {
+            definition,
+            handler: Arc::new(DomainFunctionHandler {
+                method: id,
+                deps: deps.clone(),
+                handler: super::job_handler,
+            }),
+        })
+    })
+    .collect()
+}
+
 async fn enqueue_and_sync_drain_job_apply(
     function_id: &str,
     idempotency_prefix: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let function_id = FunctionId::new(function_id).map_err(|e| CapabilityError::Internal {
         message: e.to_string(),
@@ -117,7 +199,7 @@ async fn enqueue_and_sync_drain_job_apply(
 async fn job_background_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let job_id = require_string_param(params, "jobId")?;
     let session_id = require_string_param(params, "sessionId")?;
@@ -154,7 +236,7 @@ async fn job_background_apply_value(
 async fn job_cancel_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let job_id = require_string_param(params, "jobId")?;
     let session_id = require_string_param(params, "sessionId")?;
@@ -192,10 +274,7 @@ async fn job_cancel_apply_value(
     }))
 }
 
-fn job_list_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+fn job_list_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     if let Some(ref jm) = deps.job_manager {
         Ok(json!({ "jobs": jm.list_jobs(&session_id) }))
@@ -243,7 +322,7 @@ fn persist_user_action(
 
 async fn publish_job_stream(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     session_id: &str,
     job_id: &str,
     action: &str,
@@ -269,7 +348,7 @@ async fn publish_job_stream(
 
 async fn job_subscribe_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let job_id = require_string_param(params, "jobId")?;
     let session_id = require_string_param(params, "sessionId")?;

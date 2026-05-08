@@ -27,10 +27,9 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::engine::{
-    AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, EngineError,
-    EngineHostHandle, FunctionDefinition, FunctionId, IdempotencyContract,
-    InProcessFunctionHandler, Invocation, Provenance, Result as EngineResult, RiskLevel,
-    VisibilityScope, WorkerDefinition, WorkerKind,
+    AuthorityRequirement, EffectClass, EngineError, FunctionDefinition, FunctionId,
+    IdempotencyContract, InProcessFunctionHandler, Invocation, Provenance, Result as EngineResult,
+    RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use crate::server::shared::context::ServerCapabilityContext;
 use crate::tools::capability_runtime;
@@ -42,65 +41,36 @@ pub(crate) use crate::server::domains::catalog::{SYSTEM_AUTHORITY_GRANT, SYSTEM_
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
 pub fn register_domain_workers_for_context(ctx: &ServerCapabilityContext) -> EngineResult<()> {
-    register_domain_workers(
-        &ctx.engine_host,
-        crate::server::domains::EngineCapabilityDeps::from_context(ctx),
-    )?;
+    register_domain_workers(ctx)?;
     register_tool_worker_for_context(ctx)?;
     Ok(())
 }
 
-fn register_domain_workers(
-    handle: &EngineHostHandle,
-    deps: crate::server::domains::EngineCapabilityDeps,
-) -> EngineResult<()> {
-    let canonical_specs = catalog::canonical_capability_specs()?;
+fn register_domain_workers(ctx: &ServerCapabilityContext) -> EngineResult<()> {
+    let handle = &ctx.engine_host;
     let public_transport_specs = catalog::public_engine_transport_specs()?;
-    for module in catalog::domain_worker_modules()? {
+    for module in crate::server::domains::all_worker_modules(ctx)? {
+        let _stream_topics = module.stream_topics;
         handle.register_worker_for_setup(module.worker, false)?;
+        for function in module.functions {
+            handle.register_function_for_setup(
+                function.definition,
+                Some(function.handler),
+                false,
+            )?;
+        }
     }
     handle.register_trigger_type_for_setup(catalog::engine_ws_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(catalog::manual_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(catalog::cron_schedule_trigger_type()?, false)?;
-    for spec in &canonical_specs {
-        if matches!(
-            spec.function_id.as_str(),
-            "engine::discover"
-                | "engine::inspect"
-                | "engine::watch"
-                | "engine::invoke"
-                | "engine::promote"
-                | "approval::get"
-                | "approval::list"
-                | "approval::resolve"
-        ) {
-            continue;
-        }
-        let handler = Some({
-            std::sync::Arc::new(crate::server::domains::CanonicalFunctionHandler {
-                method: spec.method,
-                deps: deps.clone(),
-                handler: crate::server::domains::handler_for_method(spec.method)
-                    .map_err(crate::server::shared::error_mapping::capability_error_to_engine)?,
-            }) as std::sync::Arc<dyn crate::engine::InProcessFunctionHandler>
-        });
-        handle.register_function_for_setup(
-            catalog::function_definition_for_capability(&catalog::capability_spec_for_method(
-                spec.method,
-            )?),
-            handler,
-            false,
-        )?;
-    }
-    register_hidden_job_apply_functions(handle, &deps)?;
-    register_hidden_agent_prompt_functions(handle, &deps)?;
-    register_hidden_cron_schedule_function(handle, &deps)?;
     for spec in &public_transport_specs {
         if let Some(trigger) = catalog::engine_ws_trigger_for_spec(spec)? {
             handle.register_trigger_for_setup(trigger, false)?;
         }
     }
-    crate::server::domains::cron::project_all_cron_triggers_for_setup(handle, &deps)?;
+    let deps = crate::server::domains::EngineCapabilityDeps::from_context(ctx);
+    let cron_deps = crate::server::domains::cron::Deps::from_engine(&deps);
+    crate::server::domains::cron::project_all_cron_triggers_for_setup(handle, &cron_deps)?;
     Ok(())
 }
 
@@ -369,253 +339,4 @@ async fn execute_tool_with_runtime_context(
             }
         }
     }
-}
-
-fn register_hidden_agent_prompt_functions(
-    handle: &EngineHostHandle,
-    deps: &crate::server::domains::EngineCapabilityDeps,
-) -> EngineResult<()> {
-    for (id, method, description, request_schema, response_schema) in [
-        (
-            "agent::prompt_apply",
-            "agent::prompt_apply",
-            "apply a queued agent prompt command",
-            agent_prompt_apply_request_schema(),
-            agent_prompt_response_schema(),
-        ),
-        (
-            "agent::run_turn",
-            "agent::run_turn",
-            "start one accepted agent turn behind the engine runtime boundary",
-            agent_prompt_apply_request_schema(),
-            agent_prompt_response_schema(),
-        ),
-        (
-            "agent::prompt_queue_drain",
-            "agent::prompt_queue_drain",
-            "drain the next queued prompt after a run completes",
-            agent_prompt_queue_drain_request_schema(),
-            agent_prompt_queue_drain_response_schema(),
-        ),
-    ] {
-        let mut definition = FunctionDefinition::new(
-            FunctionId::new(id)?,
-            catalog::worker_id("agent")?,
-            description,
-            VisibilityScope::Internal,
-            EffectClass::ExternalSideEffect,
-        )
-        .with_risk(RiskLevel::High)
-        .with_required_authority(AuthorityRequirement::scope("agent.write"))
-        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-        .with_compensation(CompensationContract::new(
-            CompensationKind::ExternalIrreversible,
-            "hidden prompt apply functions start or drain live agent runtime work; rollback is manual and event-store history remains authoritative",
-        ))
-        .with_provenance(Provenance::system())
-        .with_request_schema(request_schema)
-        .with_response_schema(response_schema);
-        definition.metadata = serde_json::json!({
-            "internal": true,
-            "canonicalCapability": id,
-            "hiddenPromptRuntimeFunction": true,
-        });
-        handle.register_function_for_setup(
-            definition,
-            Some(std::sync::Arc::new(
-                crate::server::domains::CanonicalFunctionHandler {
-                    method,
-                    deps: deps.clone(),
-                    handler: crate::server::domains::handler_for_method(method).map_err(
-                        crate::server::shared::error_mapping::capability_error_to_engine,
-                    )?,
-                },
-            )),
-            false,
-        )?;
-    }
-    Ok(())
-}
-
-fn agent_prompt_apply_request_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["runId", "sessionId", "prompt"],
-        "additionalProperties": false,
-        "properties": {
-            "runId": {"type": "string"},
-            "sessionId": {"type": "string"},
-            "prompt": {"type": "string"},
-            "reasoningLevel": {"type": "string"},
-            "images": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
-            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
-            "source": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn agent_prompt_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["acknowledged", "runId"],
-        "additionalProperties": false,
-        "properties": {
-            "acknowledged": {"type": "boolean"},
-            "runId": {"type": "string"}
-        }
-    })
-}
-
-fn agent_prompt_queue_drain_request_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["sessionId", "completedRunId"],
-        "additionalProperties": false,
-        "properties": {
-            "sessionId": {"type": "string"},
-            "completedRunId": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn agent_prompt_queue_drain_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["drained", "count"],
-        "additionalProperties": false,
-        "properties": {
-            "drained": {"type": "boolean"},
-            "count": {"type": "integer"},
-            "runId": {"type": ["string", "null"]},
-            "reason": {"type": ["string", "null"]}
-        }
-    })
-}
-
-fn register_hidden_job_apply_functions(
-    handle: &EngineHostHandle,
-    deps: &crate::server::domains::EngineCapabilityDeps,
-) -> EngineResult<()> {
-    for (id, method, public_method, description) in [
-        (
-            "job::background_apply",
-            "job::background_apply",
-            "job::background",
-            "apply a queued background-job command",
-        ),
-        (
-            "job::cancel_apply",
-            "job::cancel_apply",
-            "job::cancel",
-            "apply a queued job-cancel command",
-        ),
-    ] {
-        let mut definition = FunctionDefinition::new(
-            FunctionId::new(id)?,
-            catalog::worker_id("job")?,
-            description,
-            VisibilityScope::Internal,
-            EffectClass::ReversibleSideEffect,
-        )
-        .with_risk(RiskLevel::High)
-        .with_required_authority(AuthorityRequirement::scope("job.write"))
-        .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-        .with_compensation(CompensationContract::new(
-            CompensationKind::ManualOnly,
-            "hidden job apply functions delegate to the process manager; queue/idempotency records prevent duplicate starts or cancellations",
-        ))
-        .with_provenance(Provenance::system());
-        if let Some(schema) =
-            crate::server::domains::schemas::request_schema_for_method(public_method)
-        {
-            definition = definition.with_request_schema(schema);
-        }
-        if let Some(schema) =
-            crate::server::domains::schemas::response_schema_for_method(public_method)
-        {
-            definition = definition.with_response_schema(schema);
-        }
-        definition.metadata = serde_json::json!({
-            "internal": true,
-            "canonicalCapability": id,
-            "hiddenApplyFunction": true,
-        });
-        handle.register_function_for_setup(
-            definition,
-            Some(std::sync::Arc::new(
-                crate::server::domains::CanonicalFunctionHandler {
-                    method,
-                    deps: deps.clone(),
-                    handler: crate::server::domains::handler_for_method(method).map_err(
-                        crate::server::shared::error_mapping::capability_error_to_engine,
-                    )?,
-                },
-            )),
-            false,
-        )?;
-    }
-    Ok(())
-}
-
-fn register_hidden_cron_schedule_function(
-    handle: &EngineHostHandle,
-    deps: &crate::server::domains::EngineCapabilityDeps,
-) -> EngineResult<()> {
-    let mut definition = FunctionDefinition::new(
-        FunctionId::new("cron::scheduled_fire")?,
-        catalog::worker_id("cron")?,
-        "apply one cron schedule fire through the engine trigger runtime",
-        VisibilityScope::Internal,
-        EffectClass::ExternalSideEffect,
-    )
-    .with_risk(RiskLevel::High)
-    .with_required_authority(AuthorityRequirement::scope("cron.write"))
-    .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-    .with_compensation(CompensationContract::new(
-        CompensationKind::ManualOnly,
-        "cron scheduled fires execute existing cron payload boundaries and are audited through cron run history",
-    ))
-    .with_provenance(Provenance::system())
-    .with_request_schema(json!({
-        "type": "object",
-        "required": ["jobId", "scheduledAt"],
-        "additionalProperties": false,
-        "properties": {
-            "jobId": {"type": "string"},
-            "scheduledAt": {"type": ["string", "integer"]}
-        }
-    }))
-    .with_response_schema(json!({
-        "type": "object",
-        "required": ["started", "skipped", "jobId", "scheduledAt"],
-        "additionalProperties": false,
-        "properties": {
-            "started": {"type": "boolean"},
-            "skipped": {"type": "boolean"},
-            "reason": {"type": "string"},
-            "jobId": {"type": "string"},
-            "scheduledAt": {"type": "string"},
-            "nextRunAt": {"type": ["string", "null"]}
-        }
-    }));
-    definition.metadata = serde_json::json!({
-        "internal": true,
-        "canonicalCapability": "cron::scheduled_fire",
-        "hiddenCronScheduleFunction": true,
-    });
-    handle.register_function_for_setup(
-        definition,
-        Some(std::sync::Arc::new(
-            crate::server::domains::CanonicalFunctionHandler {
-                method: "cron::scheduled_fire",
-                deps: deps.clone(),
-                handler: crate::server::domains::handler_for_method("cron::scheduled_fire")
-                    .map_err(crate::server::shared::error_mapping::capability_error_to_engine)?,
-            },
-        )),
-        false,
-    )?;
-    Ok(())
 }

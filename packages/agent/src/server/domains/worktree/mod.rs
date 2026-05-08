@@ -5,6 +5,7 @@
 //! domain services for the engine-owned function module, not transport-owned
 //! dispatch branches.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 pub(crate) mod git_workflow;
@@ -19,13 +20,25 @@ use crate::server::shared::errors::CapabilityError;
 use crate::server::shared::params::{opt_bool, opt_string, require_bool, require_string_param};
 use crate::worktree::types::CommitOptions;
 
-use super::EngineCapabilityDeps;
+use super::*;
 use crate::engine::Invocation;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let params = Some(invocation.payload.clone());
     let ctx = deps.capability_context.as_ref();

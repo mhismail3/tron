@@ -283,6 +283,25 @@ fn server_package_uses_domain_owned_engine_layout() {
         domains_root.is_dir(),
         "server domains directory must exist as the canonical worker surface"
     );
+    for entry in std::fs::read_dir(&domains_root).expect("failed to read domains directory") {
+        let entry = entry.expect("failed to read domain entry");
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if !path.join("mod.rs").is_file() {
+            continue;
+        }
+        let domain_name = path.file_name().unwrap().to_string_lossy();
+        assert!(
+            path.join("contract.rs").is_file(),
+            "domain worker module `{domain_name}` must own a contract.rs file"
+        );
+        assert!(
+            path.join("spec.rs").is_file(),
+            "domain worker module `{domain_name}` must own a spec.rs file"
+        );
+    }
     for required in [
         "agent", "auth", "cron", "session", "settings", "tools", "worktree",
     ] {
@@ -292,10 +311,22 @@ fn server_package_uses_domain_owned_engine_layout() {
             "domain worker module `{required}` must own its vertical slice"
         );
         assert!(
+            domain_root.join("contract.rs").is_file(),
+            "domain worker module `{required}` must own its capability contracts"
+        );
+        assert!(
             domain_root.join("spec.rs").is_file(),
             "domain worker module `{required}` must own its canonical function inventory"
         );
     }
+    assert!(
+        !domains_root.join("schemas").exists(),
+        "domain schemas must live in domain-owned contract modules, not a shared schemas bucket"
+    );
+    assert!(
+        !domains_root.join("catalog/contracts.rs").exists(),
+        "catalog must aggregate contracts, not own domain contract policy"
+    );
 
     let domains_mod = std::fs::read_to_string(domains_root.join("mod.rs"))
         .expect("failed to read server/domains/mod.rs");
@@ -304,8 +335,8 @@ fn server_package_uses_domain_owned_engine_layout() {
         "canonical functions must carry concrete domain handlers instead of executing through a central dispatcher"
     );
     assert!(
-        domains_mod.contains("handler_for_method"),
-        "registration-time handler selection should stay explicit and auditable"
+        !domains_mod.contains("handler_for_method"),
+        "domain handlers must be registered by domain worker modules, not a central method match"
     );
     let catalog = std::fs::read_to_string(domains_root.join("catalog.rs"))
         .expect("failed to read server/domains/catalog.rs");

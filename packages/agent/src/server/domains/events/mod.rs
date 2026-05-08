@@ -1,18 +1,33 @@
 //! events domain worker.
 //!
 //! This module owns canonical function execution for the events namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    engine_host: crate::engine::EngineHostHandle,
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            engine_host: deps.engine_host.clone(),
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
 
 use crate::server::shared::events as event_wire;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -30,7 +45,7 @@ pub(super) async fn handle(
 async fn events_subscribe_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let subscription_id = format!("events.session:{session_id}");
@@ -50,7 +65,7 @@ async fn events_subscribe_value(
 
 async fn events_unsubscribe_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let subscription_id = format!("events.session:{session_id}");
@@ -64,7 +79,7 @@ async fn events_unsubscribe_value(
 
 async fn events_get_history_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     deps.event_store
@@ -124,7 +139,7 @@ async fn events_get_history_value(
 
 async fn events_get_since_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let after_sequence = if let Some(event_id) = opt_string(params, "afterEventId") {
@@ -162,7 +177,7 @@ async fn events_get_since_value(
 async fn events_append_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_type_str = require_string_param(params, "type")?;

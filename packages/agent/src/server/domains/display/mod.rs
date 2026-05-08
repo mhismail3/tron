@@ -1,18 +1,31 @@
 //! display domain worker.
 //!
 //! This module owns canonical function execution for the display namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            process_manager: deps.process_manager.clone(),
+        }
+    }
+}
 
 use crate::server::shared::params::require_string_param;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "display::stop_stream" => stop_stream(&invocation.payload, deps).await,
@@ -22,10 +35,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn stop_stream(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn stop_stream(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let stream_id = require_string_param(Some(payload), "streamId")?;
     let session_id = payload
         .get("sessionId")

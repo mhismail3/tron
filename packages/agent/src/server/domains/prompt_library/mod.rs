@@ -1,18 +1,31 @@
 //! prompt library domain worker.
 //!
 //! This module owns canonical function execution for the prompt library namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
 
 const MAX_SEARCH_QUERY_LEN: usize = 200;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -32,7 +45,7 @@ pub(super) async fn handle(
 
 async fn prompt_history_list_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let limit_raw = opt_u64(params, "limit", store::DEFAULT_LIST_LIMIT as u64);
     if limit_raw > store::MAX_LIST_LIMIT as u64 {
@@ -60,26 +73,26 @@ async fn prompt_history_list_value(
 
 async fn prompt_history_delete_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let id = require_string_param(params, "id")?;
     let deleted = store::delete_history(deps.event_store.pool(), &id).map_err(map_store_err)?;
     Ok(json!({ "deleted": deleted }))
 }
 
-async fn prompt_history_clear_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn prompt_history_clear_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let deleted_count = store::clear_history(deps.event_store.pool()).map_err(map_store_err)?;
     Ok(json!({ "deletedCount": deleted_count }))
 }
 
-async fn prompt_snippet_list_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn prompt_snippet_list_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let items = store::list_snippets(deps.event_store.pool()).map_err(map_store_err)?;
     Ok(json!({ "items": to_json_value(&items)? }))
 }
 
 async fn prompt_snippet_get_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let id = require_string_param(params, "id")?;
     let snippet = store::get_snippet(deps.event_store.pool(), &id)
@@ -93,7 +106,7 @@ async fn prompt_snippet_get_value(
 
 async fn prompt_snippet_create_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let name = require_string_param(params, "name")?;
     let text = require_string_param(params, "text")?;
@@ -110,7 +123,7 @@ async fn prompt_snippet_create_value(
 
 async fn prompt_snippet_update_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let id = require_string_param(params, "id")?;
     let name = opt_string(params, "name");
@@ -140,7 +153,7 @@ async fn prompt_snippet_update_value(
 
 async fn prompt_snippet_delete_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let id = require_string_param(params, "id")?;
     let deleted = store::delete_snippet(deps.event_store.pool(), &id).map_err(map_store_err)?;

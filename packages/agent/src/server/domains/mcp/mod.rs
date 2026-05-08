@@ -1,14 +1,29 @@
 //! mcp domain worker.
 //!
 //! This module owns canonical function execution for the mcp namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    engine_host: crate::engine::EngineHostHandle,
+    mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            engine_host: deps.engine_host.clone(),
+            mcp_router: deps.mcp_router.clone(),
+        }
+    }
+}
 
 use crate::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, AuthorityRequirement, EffectClass,
@@ -22,7 +37,7 @@ use crate::mcp::types::McpServerConfig;
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -41,14 +56,14 @@ pub(super) async fn handle(
 }
 
 fn require_router(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<&Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>, CapabilityError> {
     deps.mcp_router.as_ref().ok_or(CapabilityError::Internal {
         message: "MCP is not configured on this server".into(),
     })
 }
 
-async fn mcp_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn mcp_status_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?;
     let guard = router.read().await;
     let status = guard.status();
@@ -60,7 +75,7 @@ async fn mcp_status_value(deps: &EngineCapabilityDeps) -> Result<Value, Capabili
 async fn mcp_add_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
@@ -120,7 +135,7 @@ async fn mcp_add_server_value(
 async fn mcp_remove_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
@@ -141,7 +156,7 @@ async fn mcp_remove_server_value(
 async fn mcp_enable_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
@@ -164,7 +179,7 @@ async fn mcp_enable_server_value(
 async fn mcp_disable_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
@@ -187,7 +202,7 @@ async fn mcp_disable_server_value(
 async fn mcp_restart_server_value(
     params: Option<&Value>,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
     let name = require_string_param(params, "name")?;
@@ -210,10 +225,7 @@ async fn mcp_restart_server_value(
     }))
 }
 
-async fn mcp_reload_value(
-    invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn mcp_reload_value(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?.clone();
 
     let mut guard = router.write().await;
@@ -234,7 +246,7 @@ async fn mcp_reload_value(
 
 async fn mcp_list_tools_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let router = require_router(deps)?;
     let server_filter = opt_string(params, "server");
@@ -249,15 +261,16 @@ async fn mcp_list_tools_value(
     })
 }
 
-async fn publish_mcp_status_changed(invocation: &Invocation, deps: &EngineCapabilityDeps) {
+async fn publish_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
     let Ok(status) = mcp_status_value(deps).await else {
         return;
     };
     let event = ServerEventPayload::new("mcp.status_changed", None, Some(status));
-    super::publish_engine_stream_event(deps, "mcp", "mcp", event, Some(invocation)).await;
+    super::publish_engine_stream_event(&deps.engine_host, "mcp", "mcp", event, Some(invocation))
+        .await;
 }
 
-async fn refresh_mcp_tool_catalog(deps: &EngineCapabilityDeps) {
+async fn refresh_mcp_tool_catalog(deps: &Deps) {
     let Some(router) = deps.mcp_router.as_ref() else {
         return;
     };
@@ -516,7 +529,7 @@ fn sanitize_id_part(value: &str) -> String {
 struct McpToolFunctionHandler {
     server: String,
     tool: String,
-    deps: EngineCapabilityDeps,
+    deps: Deps,
 }
 
 #[async_trait]

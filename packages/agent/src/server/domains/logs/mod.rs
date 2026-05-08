@@ -1,18 +1,31 @@
 //! logs domain worker.
 //!
 //! This module owns canonical function execution for the logs namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
 
 pub(crate) mod client_logs;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -58,10 +71,7 @@ struct RecentLogEntry {
     error_message: Option<String>,
 }
 
-async fn ingest_logs_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn ingest_logs_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let entries_value = params
         .and_then(|value| value.get("entries"))
         .ok_or_else(|| CapabilityError::InvalidParams {
@@ -86,10 +96,7 @@ async fn ingest_logs_value(
     to_json_value(&result)
 }
 
-async fn recent_logs_value(
-    params: Option<Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn recent_logs_value(params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let params: RecentLogsParams = match params {
         Some(value) => {
             serde_json::from_value(value).map_err(|error| CapabilityError::InvalidParams {

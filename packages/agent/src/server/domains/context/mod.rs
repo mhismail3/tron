@@ -1,11 +1,24 @@
 //! context domain worker.
 //!
 //! This module owns canonical function execution for the context namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 pub(crate) mod commands;
 pub(crate) mod queries;
@@ -14,14 +27,14 @@ pub(crate) mod service;
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
         "context::get_snapshot" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             crate::server::domains::context::queries::ContextQueryService::get_snapshot(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
             )
             .await
@@ -29,7 +42,7 @@ pub(super) async fn handle(
         "context::get_detailed_snapshot" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             crate::server::domains::context::queries::ContextQueryService::get_detailed_snapshot(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
             )
             .await
@@ -45,7 +58,7 @@ pub(super) async fn handle(
                     message: "turn must fit in u32".into(),
                 })?;
             crate::server::domains::context::queries::ContextQueryService::get_audit_trace(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
                 turn,
             )
@@ -54,7 +67,7 @@ pub(super) async fn handle(
         "context::should_compact" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             crate::server::domains::context::queries::ContextQueryService::should_compact(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
             )
             .await
@@ -62,7 +75,7 @@ pub(super) async fn handle(
         "context::preview_compaction" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             crate::server::domains::context::queries::ContextQueryService::preview_compaction(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
             )
             .await
@@ -70,7 +83,7 @@ pub(super) async fn handle(
         "context::can_accept_turn" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             crate::server::domains::context::queries::ContextQueryService::can_accept_turn(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
             )
             .await
@@ -79,7 +92,7 @@ pub(super) async fn handle(
             let session_id = require_string_param(Some(payload), "sessionId")?;
             let edited_summary = opt_string(Some(payload), "editedSummary");
             crate::server::domains::context::commands::ContextCommandService::confirm_compaction(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
                 edited_summary,
             )
@@ -88,7 +101,7 @@ pub(super) async fn handle(
         "context::clear" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             crate::server::domains::context::commands::ContextCommandService::clear(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
             )
             .await
@@ -96,7 +109,7 @@ pub(super) async fn handle(
         "context::compact" => {
             let session_id = require_string_param(Some(payload), "sessionId")?;
             crate::server::domains::context::commands::ContextCommandService::compact(
-                &session::capability_context_view(deps),
+                deps.capability_context.as_ref(),
                 session_id,
             )
             .await

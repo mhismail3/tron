@@ -1,11 +1,55 @@
 //! session domain worker.
 //!
 //! This module owns canonical function execution for the session namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    auth_path: PathBuf,
+    codex_app_server: Option<Arc<CodexAppServerManager>>,
+    engine_host: crate::engine::EngineHostHandle,
+    event_store: Arc<EventStore>,
+    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
+    mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
+    onboarded_marker_path: PathBuf,
+    orchestrator: Arc<Orchestrator>,
+    output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
+    profile_runtime: Arc<ProfileRuntime>,
+    server_start_time: Instant,
+    session_manager: Arc<SessionManager>,
+    settings_path: PathBuf,
+    skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
+    ws_port: Arc<AtomicU16>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            auth_path: deps.auth_path.clone(),
+            codex_app_server: deps.codex_app_server.clone(),
+            engine_host: deps.engine_host.clone(),
+            event_store: deps.event_store.clone(),
+            job_manager: deps.job_manager.clone(),
+            mcp_router: deps.mcp_router.clone(),
+            onboarded_marker_path: deps.onboarded_marker_path.clone(),
+            orchestrator: deps.orchestrator.clone(),
+            output_buffer_registry: deps.output_buffer_registry.clone(),
+            process_manager: deps.process_manager.clone(),
+            profile_runtime: deps.profile_runtime.clone(),
+            server_start_time: deps.server_start_time,
+            session_manager: deps.session_manager.clone(),
+            settings_path: deps.settings_path.clone(),
+            skill_registry: deps.skill_registry.clone(),
+            ws_port: deps.ws_port.clone(),
+        }
+    }
+}
 
 pub(crate) mod commands;
 pub mod context;
@@ -15,7 +59,7 @@ pub(crate) mod reconstruct;
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -42,7 +86,7 @@ pub(super) async fn handle(
 
 async fn session_resume_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::resume(
@@ -54,7 +98,7 @@ async fn session_resume_value(
 
 async fn session_create_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let working_directory = require_string_param(params, "workingDirectory")?;
     let model =
@@ -77,10 +121,7 @@ async fn session_create_value(
     .await
 }
 
-async fn session_list_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn session_list_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let include_archived = opt_bool(params, "includeArchived").unwrap_or(false);
     let limit = params
         .and_then(|p| p.get("limit"))
@@ -96,7 +137,7 @@ async fn session_list_value(
 
 async fn session_get_head_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::get_head(
@@ -108,7 +149,7 @@ async fn session_get_head_value(
 
 async fn session_delete_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::commands::SessionCommandService::delete(
@@ -118,10 +159,7 @@ async fn session_delete_value(
     .await
 }
 
-async fn session_fork_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn session_fork_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let from_event_id = opt_string(params, "fromEventId");
     let title = opt_string(params, "title");
@@ -136,7 +174,7 @@ async fn session_fork_value(
 
 async fn session_get_state_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::get_state(
@@ -148,7 +186,7 @@ async fn session_get_state_value(
 
 async fn session_get_history_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let limit = params
@@ -167,7 +205,7 @@ async fn session_get_history_value(
 
 async fn session_reconstruct_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let limit = params
@@ -188,7 +226,7 @@ async fn session_reconstruct_value(
 
 async fn session_archive_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::commands::SessionCommandService::archive(
@@ -200,7 +238,7 @@ async fn session_archive_value(
 
 async fn session_unarchive_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::commands::SessionCommandService::unarchive(
@@ -212,7 +250,7 @@ async fn session_unarchive_value(
 
 async fn session_archive_older_than_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let days_raw = params
         .and_then(|p| p.get("days"))
@@ -230,7 +268,7 @@ async fn session_archive_older_than_value(
 
 async fn session_export_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::export(
@@ -240,7 +278,7 @@ async fn session_export_value(
     .await
 }
 
-pub(super) fn capability_context_view(deps: &EngineCapabilityDeps) -> ServerCapabilityContext {
+pub(super) fn capability_context_view(deps: &Deps) -> ServerCapabilityContext {
     ServerCapabilityContext {
         orchestrator: Arc::clone(&deps.orchestrator),
         session_manager: Arc::clone(&deps.session_manager),

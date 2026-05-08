@@ -15,7 +15,7 @@
 //!
 //! | Module        | Purpose                                                                            |
 //! |---------------|------------------------------------------------------------------------------------|
-//! | `domains`     | Domain-owned workers, canonical functions, schemas, services, and tests             |
+//! | `domains`     | Domain-owned workers, contracts, canonical functions, services, and tests           |
 //! | `config`      | `ServerConfig` (host/port + heartbeat/buffer tuning)                               |
 //! | `disk`        | Disk-space probes for health diagnostics                                           |
 //! | `health`      | `/health` JSON producer (DB ok, transport count, version)                          |
@@ -35,7 +35,7 @@
 pub mod config;
 #[path = "ops/disk.rs"]
 pub mod disk;
-/// Domain-owned engine worker modules and public engine transport catalog.
+/// Domain-owned engine worker modules and aggregated discovery/diagnostics catalog.
 pub mod domains;
 #[path = "ops/health.rs"]
 pub mod health;

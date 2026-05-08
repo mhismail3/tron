@@ -1,14 +1,31 @@
 //! auth domain worker.
 //!
 //! This module owns canonical function execution for the auth namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    auth_path: PathBuf,
+    capability_context: Arc<ServerCapabilityContext>,
+    engine_host: crate::engine::EngineHostHandle,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            auth_path: deps.auth_path.clone(),
+            capability_context: deps.capability_context.clone(),
+            engine_host: deps.engine_host.clone(),
+        }
+    }
+}
 
 pub(crate) mod flows;
 
@@ -31,7 +48,7 @@ const OAUTH_FLOW_TTL_SECS: u64 = 600;
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "auth::get" => auth_get(deps).await,
@@ -49,7 +66,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn auth_get(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn auth_get(deps: &Deps) -> Result<Value, CapabilityError> {
     let auth_path = deps.auth_path.clone();
     deps.capability_context
         .run_blocking("auth::get", move || {
@@ -58,10 +75,7 @@ async fn auth_get(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError>
         .await
 }
 
-async fn auth_update(
-    invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn auth_update(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
     let service = opt_string(Some(payload), "service");
@@ -105,10 +119,7 @@ async fn auth_update(
     Ok(masked_state)
 }
 
-async fn auth_clear(
-    invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn auth_clear(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
     let service = opt_string(Some(payload), "service");
@@ -142,10 +153,7 @@ async fn auth_clear(
     Ok(masked_state)
 }
 
-async fn auth_oauth_begin(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn auth_oauth_begin(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let provider = require_string_param(Some(payload), "provider")?;
 
     let (auth_url, verifier_or_state) = match provider.as_str() {
@@ -226,7 +234,7 @@ async fn auth_oauth_begin(
 
 async fn auth_oauth_complete(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let flow_id = require_string_param(Some(payload), "flowId")?;
@@ -322,7 +330,7 @@ async fn auth_oauth_complete(
 
 async fn auth_rename_account(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
@@ -336,10 +344,7 @@ async fn auth_rename_account(
     .await
 }
 
-async fn auth_set_active(
-    invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn auth_set_active(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let cred_val = payload
@@ -366,7 +371,7 @@ async fn auth_set_active(
 
 async fn auth_remove_account(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
@@ -380,7 +385,7 @@ async fn auth_remove_account(
 
 async fn auth_remove_api_key(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
@@ -393,7 +398,7 @@ async fn auth_remove_api_key(
 }
 
 async fn write_auth_and_broadcast<F>(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     invocation: &Invocation,
     task_name: &'static str,
     mutate: F,
@@ -755,11 +760,8 @@ fn mask_key(key: &str) -> String {
     format!("{}...{}", &key[..prefix_end], &key[suffix_start..])
 }
 
-async fn broadcast_auth_updated(
-    deps: &EngineCapabilityDeps,
-    invocation: &Invocation,
-    masked_state: &Value,
-) {
+async fn broadcast_auth_updated(deps: &Deps, invocation: &Invocation, masked_state: &Value) {
     let event = ServerEventPayload::new("auth.updated", None, Some(masked_state.clone()));
-    super::publish_engine_stream_event(deps, "auth", "auth", event, Some(invocation)).await;
+    super::publish_engine_stream_event(&deps.engine_host, "auth", "auth", event, Some(invocation))
+        .await;
 }

@@ -1,18 +1,31 @@
 //! repo domain worker.
 //!
 //! This module owns canonical function execution for the repo namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use serde_json::{Value, json};
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "repo::list_sessions" => list_sessions(&invocation.payload, deps).await,
@@ -24,7 +37,7 @@ pub(super) async fn handle(
 }
 
 fn require_coordinator(
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<&crate::worktree::WorktreeCoordinator, CapabilityError> {
     deps.capability_context
         .worktree_coordinator
@@ -34,10 +47,7 @@ fn require_coordinator(
         })
 }
 
-async fn list_sessions(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn list_sessions(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let coord = require_coordinator(deps)?;
     let caller_info = coord
@@ -80,10 +90,7 @@ async fn list_sessions(
     Ok(json!({ "sessions": futures::future::join_all(futs).await }))
 }
 
-async fn get_divergence(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn get_divergence(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let coord = require_coordinator(deps)?;
     let info = coord

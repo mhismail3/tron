@@ -1,18 +1,33 @@
 //! blob domain worker.
 //!
 //! This module owns canonical function execution for the blob namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use base64::Engine;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "blob::get" => blob_get_value(&invocation.payload, deps).await,
@@ -22,10 +37,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn blob_get_value(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn blob_get_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let blob_id = payload
         .get("blobId")
         .and_then(Value::as_str)

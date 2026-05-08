@@ -1,8 +1,9 @@
 //! import domain worker.
 //!
 //! This module owns canonical function execution for the import namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use std::path::PathBuf;
@@ -10,12 +11,27 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
+
 use crate::server::shared::error_mapping::map_import_error;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "import::list_sources" => list_sources(deps).await,
@@ -28,7 +44,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn list_sources(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn list_sources(deps: &Deps) -> Result<Value, CapabilityError> {
     deps.capability_context
         .run_blocking("import::list_sources", move || {
             let claude_projects =
@@ -52,10 +68,7 @@ async fn list_sources(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityEr
         .await
 }
 
-async fn list_sessions(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn list_sessions(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let encoded_dir = require_string_param(Some(payload), "encodedDir")?;
     let event_store = deps.event_store.clone();
     deps.capability_context
@@ -92,10 +105,7 @@ async fn list_sessions(
         .await
 }
 
-async fn preview_session(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn preview_session(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_path = require_string_param(Some(payload), "sessionPath")?;
     deps.capability_context
         .run_blocking("import::preview_session", move || {
@@ -177,10 +187,7 @@ async fn preview_session(
         .await
 }
 
-async fn execute_import(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn execute_import(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_path = require_string_param(Some(payload), "sessionPath")?;
     let tags: Vec<String> = payload
         .get("tags")

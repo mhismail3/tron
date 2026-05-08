@@ -1,13 +1,38 @@
 //! system domain worker.
 //!
 //! This module owns canonical function execution for the system namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use std::collections::BTreeMap;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+    onboarded_marker_path: PathBuf,
+    orchestrator: Arc<Orchestrator>,
+    profile_runtime: Arc<ProfileRuntime>,
+    server_start_time: Instant,
+    updater_state_path: PathBuf,
+    ws_port: Arc<AtomicU16>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+            onboarded_marker_path: deps.onboarded_marker_path.clone(),
+            orchestrator: deps.orchestrator.clone(),
+            profile_runtime: deps.profile_runtime.clone(),
+            server_start_time: deps.server_start_time,
+            updater_state_path: deps.updater_state_path.clone(),
+            ws_port: deps.ws_port.clone(),
+        }
+    }
+}
 
 use crate::server::shared::protocol as engine_transport_protocol;
 use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
@@ -15,7 +40,7 @@ use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, rea
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     allow_capability_context: bool,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
@@ -32,7 +57,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn system_shutdown_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn system_shutdown_value(deps: &Deps) -> Result<Value, CapabilityError> {
     deps.orchestrator
         .shutdown()
         .await
@@ -42,9 +67,7 @@ async fn system_shutdown_value(deps: &EngineCapabilityDeps) -> Result<Value, Cap
     Ok(json!({ "acknowledged": true }))
 }
 
-async fn system_check_for_updates_value(
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn system_check_for_updates_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let settings = deps.profile_runtime.current().settings.clone();
     let update_cfg = &settings.server.update;
 
@@ -94,7 +117,7 @@ async fn system_check_for_updates_value(
     }))
 }
 
-fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+fn system_diagnostics_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let uptime = deps.server_start_time.elapsed().as_secs();
     let active_sessions = deps.orchestrator.active_session_count();
     let active_runs = deps.orchestrator.active_run_count();
@@ -141,7 +164,7 @@ fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, Capabi
     }))
 }
 
-async fn system_update_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn system_update_status_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let settings = deps.profile_runtime.current().settings.clone();
     let state_path = deps.updater_state_path.clone();
     let state = deps
@@ -221,11 +244,7 @@ fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
     }))
 }
 
-fn system_info_value(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-    allow_capability_context: bool,
-) -> Value {
+fn system_info_value(payload: &Value, deps: &Deps, allow_capability_context: bool) -> Value {
     let marker_path = allow_capability_context
         .then(|| {
             payload

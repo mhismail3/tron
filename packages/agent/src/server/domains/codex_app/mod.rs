@@ -1,16 +1,29 @@
 //! codex app domain worker.
 //!
 //! This module owns canonical function execution for the codex app namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    codex_app_server: Option<Arc<CodexAppServerManager>>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            codex_app_server: deps.codex_app_server.clone(),
+        }
+    }
+}
 
 pub(super) async fn handle(
     method: &str,
     _invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "codex_app::status" => codex_app_status_value(deps).await,
@@ -20,7 +33,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn codex_app_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn codex_app_status_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let Some(manager) = &deps.codex_app_server else {
         return Ok(json!({
             "enabled": false,

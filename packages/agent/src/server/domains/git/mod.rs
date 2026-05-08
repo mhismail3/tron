@@ -5,6 +5,7 @@
 //! behind engine policy, idempotency, leases, and compensation
 //! metadata.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 pub(crate) mod service;
@@ -18,15 +19,27 @@ use crate::server::shared::context::ServerCapabilityContext;
 use crate::server::shared::errors::{self, CapabilityError};
 use crate::server::shared::params::require_string_param;
 
-use super::EngineCapabilityDeps;
+use super::*;
 use crate::engine::Invocation;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+        }
+    }
+}
 
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "git::clone" => {

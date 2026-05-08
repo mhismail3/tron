@@ -1,18 +1,27 @@
 //! filesystem domain worker.
 //!
 //! This module owns canonical function execution for the filesystem namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps;
+
+impl Deps {
+    pub(crate) fn from_engine(_deps: &EngineCapabilityDeps) -> Self {
+        Self
+    }
+}
 
 pub(crate) mod service;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -28,7 +37,7 @@ pub(super) async fn handle(
 
 async fn filesystem_list_dir_value(
     params: Option<&Value>,
-    _deps: &EngineCapabilityDeps,
+    _deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let home = crate::core::paths::home_dir();
     let path = opt_string(params, "path").unwrap_or(home);
@@ -39,7 +48,7 @@ async fn filesystem_list_dir_value(
     .await
 }
 
-async fn filesystem_get_home_value(_deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn filesystem_get_home_value(_deps: &Deps) -> Result<Value, CapabilityError> {
     let home = crate::core::paths::home_dir();
     run_blocking_task("filesystem::get_home", move || {
         Ok(filesystem_service::get_home(&home))
@@ -47,10 +56,7 @@ async fn filesystem_get_home_value(_deps: &EngineCapabilityDeps) -> Result<Value
     .await
 }
 
-async fn file_read_value(
-    params: Option<&Value>,
-    _deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn file_read_value(params: Option<&Value>, _deps: &Deps) -> Result<Value, CapabilityError> {
     let path = require_string_param(params, "path")?;
     run_blocking_task("filesystem::read_file", move || {
         filesystem_service::read_file(&path)
@@ -60,7 +66,7 @@ async fn file_read_value(
 
 async fn filesystem_create_dir_value(
     params: Option<&Value>,
-    _deps: &EngineCapabilityDeps,
+    _deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let path = require_string_param(params, "path")?;
     run_blocking_task("filesystem::create_dir", move || {

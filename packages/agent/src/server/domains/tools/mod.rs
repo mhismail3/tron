@@ -1,18 +1,31 @@
 //! tools domain worker.
 //!
 //! This module owns canonical function execution for the tools namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    orchestrator: Arc<Orchestrator>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            orchestrator: deps.orchestrator.clone(),
+        }
+    }
+}
 
 pub(crate) mod interactive_enrichment;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "tool::result" => tool_result_value(&invocation.payload, deps).await,
@@ -22,10 +35,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn tool_result_value(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn tool_result_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let _session_id = require_string_param(Some(payload), "sessionId")?;
     let tool_use_id = require_string_param(Some(payload), "toolUseId")?;
     let result = require_param(Some(payload), "result")?;

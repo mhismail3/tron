@@ -1,18 +1,31 @@
 //! notifications domain worker.
 //!
 //! This module owns canonical function execution for the notifications namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
 
 pub(crate) mod inbox;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -29,7 +42,7 @@ pub(super) async fn handle(
 
 async fn notifications_list_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let limit = opt_u64(params, "limit", 50).min(100);
     let pool = deps.event_store.pool().clone();
@@ -45,7 +58,7 @@ async fn notifications_list_value(
 
 async fn notifications_mark_read_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let event_id = require_string_param(params, "eventId")?;
     let pool = deps.event_store.pool().clone();
@@ -61,7 +74,7 @@ async fn notifications_mark_read_value(
 
 async fn notifications_mark_all_read_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = opt_string(params, "sessionId");
     let pool = deps.event_store.pool().clone();

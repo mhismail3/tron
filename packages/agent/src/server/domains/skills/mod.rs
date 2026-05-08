@@ -1,18 +1,35 @@
 //! skills domain worker.
 //!
 //! This module owns canonical function execution for the skills namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    event_store: Arc<EventStore>,
+    session_manager: Arc<SessionManager>,
+    skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            event_store: deps.event_store.clone(),
+            session_manager: deps.session_manager.clone(),
+            skill_registry: deps.skill_registry.clone(),
+        }
+    }
+}
 
 pub(crate) mod state;
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
     match method {
@@ -28,7 +45,7 @@ pub(super) async fn handle(
     }
 }
 
-fn skill_list_value(params: Option<&Value>, deps: &EngineCapabilityDeps) -> Value {
+fn skill_list_value(params: Option<&Value>, deps: &Deps) -> Value {
     let working_dir = resolve_skill_working_dir(params, deps);
     let mut registry = deps.skill_registry.write();
     let _ = registry.refresh_if_stale(&working_dir);
@@ -36,10 +53,7 @@ fn skill_list_value(params: Option<&Value>, deps: &EngineCapabilityDeps) -> Valu
     json!({ "skills": skills })
 }
 
-fn skill_get_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+fn skill_get_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let name = require_string_param(params, "name")?;
     let working_dir = resolve_skill_working_dir(params, deps);
 
@@ -61,7 +75,7 @@ fn skill_get_value(
 
 async fn skill_refresh_value(
     params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let working_dir = resolve_skill_working_dir(params, deps);
     let skill_registry = Arc::clone(&deps.skill_registry);
@@ -74,10 +88,7 @@ async fn skill_refresh_value(
     Ok(json!({ "success": true, "skillCount": count }))
 }
 
-fn skill_activate_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+fn skill_activate_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let skill_name = require_string_param(params, "skillName")?;
 
@@ -149,10 +160,7 @@ fn skill_activate_value(
     }))
 }
 
-fn skill_deactivate_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+fn skill_deactivate_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let skill_name = require_string_param(params, "skillName")?;
 
@@ -197,10 +205,7 @@ fn skill_deactivate_value(
     }))
 }
 
-fn skill_active_value(
-    params: Option<&Value>,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+fn skill_active_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     deps.session_manager
         .get_session(&session_id)
@@ -261,7 +266,7 @@ fn skill_to_wire(skill: &crate::skills::types::SkillMetadata) -> Value {
     value
 }
 
-fn resolve_skill_working_dir(params: Option<&Value>, deps: &EngineCapabilityDeps) -> String {
+fn resolve_skill_working_dir(params: Option<&Value>, deps: &Deps) -> String {
     if let Some(wd) = params
         .and_then(|value| value.get("workingDirectory"))
         .and_then(Value::as_str)

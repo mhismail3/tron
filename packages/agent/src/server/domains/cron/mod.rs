@@ -1,21 +1,38 @@
 //! cron domain worker.
 //!
 //! This module owns canonical function execution for the cron namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use chrono::Utc;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::*;
-use crate::engine::Result as EngineResult;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+    engine_host: crate::engine::EngineHostHandle,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+            engine_host: deps.engine_host.clone(),
+        }
+    }
+}
+
+use crate::engine::{
+    AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, FunctionDefinition,
+    FunctionId, IdempotencyContract, Provenance, Result as EngineResult, RiskLevel,
+};
 
 pub mod callbacks;
 
-fn scheduler(
-    deps: &EngineCapabilityDeps,
-) -> Result<&std::sync::Arc<crate::cron::CronScheduler>, CapabilityError> {
+fn scheduler(deps: &Deps) -> Result<&std::sync::Arc<crate::cron::CronScheduler>, CapabilityError> {
     deps.capability_context
         .cron_scheduler
         .as_ref()
@@ -26,7 +43,7 @@ fn scheduler(
 
 pub(crate) fn project_all_cron_triggers_for_setup(
     handle: &crate::engine::EngineHostHandle,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> EngineResult<()> {
     let Some(scheduler) = deps.capability_context.cron_scheduler.as_ref() else {
         return Ok(());
@@ -56,7 +73,7 @@ async fn project_cron_trigger(
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "cron::list" => cron_list_value(&invocation.payload, deps).await,
@@ -76,10 +93,62 @@ pub(super) async fn handle(
     }
 }
 
-async fn cron_list_value(
-    payload: &Value,
+pub(crate) fn hidden_function_registrations(
     deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+) -> EngineResult<Vec<DomainFunctionRegistration>> {
+    let mut definition = FunctionDefinition::new(
+        FunctionId::new("cron::scheduled_fire")?,
+        catalog::worker_id("cron")?,
+        "apply one cron schedule fire through the engine trigger runtime",
+        VisibilityScope::Internal,
+        EffectClass::ExternalSideEffect,
+    )
+    .with_risk(RiskLevel::High)
+    .with_required_authority(AuthorityRequirement::scope("cron.write"))
+    .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "cron scheduled fires execute existing cron payload boundaries and are audited through cron run history",
+    ))
+    .with_provenance(Provenance::system())
+    .with_request_schema(json!({
+        "type": "object",
+        "required": ["jobId", "scheduledAt"],
+        "additionalProperties": false,
+        "properties": {
+            "jobId": {"type": "string"},
+            "scheduledAt": {"type": ["string", "integer"]}
+        }
+    }))
+    .with_response_schema(json!({
+        "type": "object",
+        "required": ["started", "skipped", "jobId", "scheduledAt"],
+        "additionalProperties": false,
+        "properties": {
+            "started": {"type": "boolean"},
+            "skipped": {"type": "boolean"},
+            "reason": {"type": "string"},
+            "jobId": {"type": "string"},
+            "scheduledAt": {"type": "string"},
+            "nextRunAt": {"type": ["string", "null"]}
+        }
+    }));
+    definition.metadata = json!({
+        "internal": true,
+        "canonicalCapability": "cron::scheduled_fire",
+        "hiddenCronScheduleFunction": true,
+    });
+    Ok(vec![DomainFunctionRegistration {
+        definition,
+        handler: Arc::new(DomainFunctionHandler {
+            method: "cron::scheduled_fire",
+            deps: deps.clone(),
+            handler: super::cron_handler,
+        }),
+    }])
+}
+
+async fn cron_list_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let enabled_filter = opt_bool(Some(payload), "enabled");
     let tag_filter = opt_array(Some(payload), "tags").map(|arr| {
@@ -133,10 +202,7 @@ async fn cron_list_value(
     }))
 }
 
-async fn cron_get_value(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn cron_get_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let job = sched
@@ -165,7 +231,7 @@ async fn cron_get_value(
 async fn cron_create_value(
     payload: &Value,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_param = require_param(Some(payload), "job")?;
@@ -305,7 +371,7 @@ async fn cron_create_value(
 async fn cron_update_value(
     payload: &Value,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
@@ -430,7 +496,7 @@ async fn cron_update_value(
 async fn cron_delete_value(
     payload: &Value,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
@@ -458,7 +524,7 @@ async fn cron_delete_value(
 async fn cron_run_value(
     payload: &Value,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
@@ -492,7 +558,7 @@ async fn cron_run_value(
 async fn cron_scheduled_fire_value(
     payload: &Value,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
@@ -557,7 +623,7 @@ async fn cron_scheduled_fire_value(
     }
 }
 
-async fn cron_status_value(deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn cron_status_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     Ok(json!({
         "running": true,
@@ -568,10 +634,7 @@ async fn cron_status_value(deps: &EngineCapabilityDeps) -> Result<Value, Capabil
     }))
 }
 
-async fn cron_get_runs_value(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn cron_get_runs_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let limit = opt_u64(Some(payload), "limit", 20) as u32;
@@ -588,7 +651,7 @@ async fn cron_get_runs_value(
 
 async fn publish_cron_stream(
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
     kind: &str,
     job_id: &str,
     scheduled_at: Option<String>,

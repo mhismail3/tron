@@ -1,18 +1,31 @@
 //! tree domain worker.
 //!
 //! This module owns canonical function execution for the tree namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use serde_json::{Value, json};
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
 
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "tree::get_visualization" => get_visualization(&invocation.payload, deps).await,
@@ -26,10 +39,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn get_visualization(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn get_visualization(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let session = deps
         .event_store
@@ -68,10 +78,7 @@ async fn get_visualization(
     }))
 }
 
-async fn get_branches(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn get_branches(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let branches = deps
         .event_store
@@ -99,10 +106,7 @@ async fn get_branches(
     }))
 }
 
-async fn get_subtree(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn get_subtree(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let event_id = require_string_param(Some(payload), "eventId")?;
     let descendants = deps
         .event_store
@@ -125,10 +129,7 @@ async fn get_subtree(
     }))
 }
 
-async fn get_ancestors(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn get_ancestors(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let event_id = require_string_param(Some(payload), "eventId")?;
     let ancestors = deps
         .event_store

@@ -1,11 +1,26 @@
 //! device domain worker.
 //!
 //! This module owns canonical function execution for the device namespace and keeps
-//! domain services, schemas, and tests beside the worker that uses them.
+//! domain contracts, services, and tests beside the worker that uses them.
 
+pub(crate) mod contract;
 pub(crate) mod spec;
 
 use super::*;
+#[derive(Clone)]
+pub(crate) struct Deps {
+    capability_context: Arc<ServerCapabilityContext>,
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
+        Self {
+            capability_context: deps.capability_context.clone(),
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
 
 use crate::server::shared::error_mapping::map_event_store_error;
 use crate::server::shared::params::{opt_string, require_string_param};
@@ -20,7 +35,7 @@ use crate::server::shared::params::{opt_string, require_string_param};
 pub(super) async fn handle(
     method: &str,
     invocation: &Invocation,
-    deps: &EngineCapabilityDeps,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
         "device::register" => register_token(&invocation.payload, deps).await,
@@ -32,10 +47,7 @@ pub(super) async fn handle(
     }
 }
 
-async fn register_token(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn register_token(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let device_token = require_string_param(Some(payload), "deviceToken")?;
     if device_token.len() != 64 || !device_token.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(CapabilityError::InvalidParams {
@@ -76,10 +88,7 @@ async fn register_token(
         .await
 }
 
-async fn unregister_token(
-    payload: &Value,
-    deps: &EngineCapabilityDeps,
-) -> Result<Value, CapabilityError> {
+async fn unregister_token(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let device_token = require_string_param(Some(payload), "deviceToken")?;
     let event_store = Arc::clone(&deps.event_store);
     deps.capability_context
@@ -92,7 +101,7 @@ async fn unregister_token(
         .await
 }
 
-async fn respond(payload: &Value, deps: &EngineCapabilityDeps) -> Result<Value, CapabilityError> {
+async fn respond(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let request_id = require_string_param(Some(payload), "requestId")?;
     let result = payload.get("result").cloned().unwrap_or(Value::Null);
     if let Some(ref broker) = deps.capability_context.device_request_broker {
