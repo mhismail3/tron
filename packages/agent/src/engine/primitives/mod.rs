@@ -130,6 +130,17 @@ impl StreamStoreBackend {
             Self::Sqlite(store) => store.poll(subscription_id, after, limit, actor),
         }
     }
+
+    pub(in crate::engine) fn list_by_trace(
+        &self,
+        trace_id: &str,
+        limit: usize,
+    ) -> Result<Vec<super::streams::EngineStreamEvent>> {
+        match self {
+            Self::InMemory(store) => store.list_by_trace(trace_id, limit),
+            Self::Sqlite(store) => store.list_by_trace(trace_id, limit),
+        }
+    }
 }
 
 pub(in crate::engine) enum StateStoreBackend {
@@ -381,6 +392,17 @@ impl ResourceLeaseStoreBackend {
         match self {
             Self::InMemory(store) => store.get(lease_id),
             Self::Sqlite(store) => store.get(lease_id),
+        }
+    }
+
+    pub(in crate::engine) fn list_by_trace(
+        &self,
+        trace_id: &str,
+        limit: usize,
+    ) -> Result<Vec<EngineResourceLease>> {
+        match self {
+            Self::InMemory(store) => store.list_by_trace(trace_id, limit),
+            Self::Sqlite(store) => store.list_by_trace(trace_id, limit),
         }
     }
 }

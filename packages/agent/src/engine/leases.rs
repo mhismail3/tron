@@ -171,6 +171,19 @@ impl InMemoryEngineResourceLeaseStore {
     pub fn get(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
         Ok(self.leases.get(lease_id).cloned())
     }
+
+    /// List leases carrying one trace id.
+    pub fn list_by_trace(&self, trace_id: &str, limit: usize) -> Result<Vec<EngineResourceLease>> {
+        let mut leases = self
+            .leases
+            .values()
+            .filter(|lease| lease.trace_id.as_str() == trace_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        leases.sort_by_key(|lease| lease.acquired_at);
+        leases.truncate(limit.min(500));
+        Ok(leases)
+    }
 }
 
 /// SQLite-backed resource lease store.
@@ -209,6 +222,8 @@ CREATE TABLE IF NOT EXISTS engine_resource_leases (
 );
 CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_resource
   ON engine_resource_leases(resource_kind, resource_id, status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_trace
+  ON engine_resource_leases(trace_id, acquired_at);
 "#,
             )
             .map_err(|err| sqlite_err("lease.init", err))
@@ -257,6 +272,27 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_resource
             )
             .optional()
             .map_err(|err| sqlite_err("lease.get", err))
+    }
+
+    /// List leases carrying one trace id.
+    pub fn list_by_trace(&self, trace_id: &str, limit: usize) -> Result<Vec<EngineResourceLease>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM engine_resource_leases
+                 WHERE trace_id = ?1
+                 ORDER BY acquired_at ASC
+                 LIMIT ?2",
+            )
+            .map_err(|err| sqlite_err("lease.list_by_trace.prepare", err))?;
+        let rows = stmt
+            .query_map(params![trace_id, limit.min(500) as i64], row_to_lease)
+            .map_err(|err| sqlite_err("lease.list_by_trace.query", err))?;
+        let mut leases = Vec::new();
+        for row in rows {
+            leases.push(row.map_err(|err| sqlite_err("lease.list_by_trace.row", err))?);
+        }
+        Ok(leases)
     }
 
     fn active_for_resource(

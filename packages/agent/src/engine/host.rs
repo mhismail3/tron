@@ -1987,9 +1987,9 @@ impl EngineHost {
             "traceId": trace_id,
             "invocations": invocations,
             "catalogChanges": catalog_changes,
-            "streams": [],
+            "streams": self.list_stream_records_for_trace(trace_id)?,
             "approvals": approvals,
-            "leases": [],
+            "leases": self.list_resource_leases_for_trace(trace_id)?,
             "compensation": self.list_compensation_records_for_trace(trace_id)?,
         }))
     }
@@ -2091,6 +2091,23 @@ impl EngineHost {
                     .filter(|record| record.trace_id.as_str() == trace_id)
                     .collect()
             })
+    }
+
+    fn list_stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {
+        self.primitives
+            .streams
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .list_by_trace(trace_id, 500)
+            .map(|events| events.into_iter().map(|event| json!(event)).collect())
+    }
+
+    fn list_resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>> {
+        self.primitives
+            .leases
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+            .list_by_trace(trace_id, 500)
     }
 
     fn list_compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {

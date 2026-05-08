@@ -2180,6 +2180,37 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
             .any(|worker| worker["id"] == "observability")
     );
 
+    let trace_id = trace("primitive-trace");
+    let parent_invocation_id = InvocationId::generate();
+    let lease = handle
+        .acquire_resource_lease(AcquireResourceLease {
+            resource_kind: "test-resource".to_owned(),
+            resource_id: "primitive-trace-resource".to_owned(),
+            holder_invocation_id: parent_invocation_id.clone(),
+            function_id: fid("test::write"),
+            actor_id: actor("system"),
+            authority_grant_id: grant("system-grant"),
+            trace_id: trace_id.clone(),
+            parent_invocation_id: Some(parent_invocation_id.clone()),
+            idempotency_key: Some("primitive-trace-lease".to_owned()),
+            ttl_ms: 30_000,
+        })
+        .await
+        .unwrap();
+    let stream_cursor = handle
+        .publish_stream_event(super::PublishStreamEvent {
+            topic: "test.observability".to_owned(),
+            payload: json!({"ok": true}),
+            visibility: VisibilityScope::System,
+            session_id: None,
+            workspace_id: None,
+            producer: "test".to_owned(),
+            trace_id: Some(trace_id),
+            parent_invocation_id: Some(parent_invocation_id),
+        })
+        .await
+        .unwrap();
+
     let trace_get = handle
         .invoke(host_invocation(
             "observability::trace_get",
@@ -2195,6 +2226,20 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
         invocations
             .iter()
             .any(|record| record["functionId"] == "catalog::list")
+    );
+    assert!(
+        trace_get.value.as_ref().unwrap()["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["cursor"] == stream_cursor.0)
+    );
+    assert!(
+        trace_get.value.as_ref().unwrap()["leases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|record| record["leaseId"] == lease.lease_id)
     );
 
     let spans = handle

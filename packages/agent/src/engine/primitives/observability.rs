@@ -1,4 +1,8 @@
 //! Observability primitive contracts.
+//!
+//! The observability worker reads the engine ledger and primitive stores as
+//! local truth. `observability::trace_get` correlates invocation, catalog,
+//! stream, approval, resource lease, and compensation records for one trace.
 
 use serde_json::{Value, json};
 
