@@ -125,12 +125,15 @@ impl CronScheduler {
         }
     }
 
-    /// Set the WebSocket broadcaster (must be called before `start()`).
+    /// Set the engine event publisher (must be called before `start()`).
     ///
-    /// The broadcaster comes from `TronServer`, which is created after the
+    /// The event_publisher comes from `TronServer`, which is created after the
     /// scheduler. Uses `OnceLock` internally — calling twice is a no-op.
-    pub fn set_broadcaster(&self, broadcaster: Arc<dyn crate::cron::executor::EventBroadcaster>) {
-        let _ = self.deps.broadcaster.set(broadcaster);
+    pub fn set_event_publisher(
+        &self,
+        event_publisher: Arc<dyn crate::cron::executor::EventPublisher>,
+    ) {
+        let _ = self.deps.event_publisher.set(event_publisher);
     }
 
     /// Attach the engine host used for scheduled trigger dispatch.
@@ -326,17 +329,17 @@ impl CronScheduler {
                     );
                 }
 
-                // Broadcast config error event if broadcaster is available
-                if let Some(broadcaster) = self.deps.broadcaster.get() {
+                // Publish config error event if the engine event publisher is available.
+                if let Some(event_publisher) = self.deps.event_publisher.get() {
                     let payload = serde_json::json!({
                         "error": e.to_string(),
                         "recoveredFromSqlite": !jobs.is_empty(),
                         "jobCount": jobs.len(),
                     });
-                    let broadcaster = broadcaster.clone();
+                    let event_publisher = event_publisher.clone();
                     drop(tokio::spawn(async move {
-                        broadcaster
-                            .broadcast_cron_event("cron.configError", payload)
+                        event_publisher
+                            .publish_cron_event("cron.configError", payload)
                             .await;
                     }));
                 }
@@ -951,10 +954,10 @@ async fn execute_job(
                 tracing::error!(job_id = %job.id, error = %e, "failed to send auto-disable notification");
             }
         }
-        // Broadcast event for WebSocket clients
-        if let Some(broadcaster) = deps.broadcaster.get() {
-            broadcaster
-                .broadcast_cron_event(
+        // Publish event for engine stream subscribers.
+        if let Some(event_publisher) = deps.event_publisher.get() {
+            event_publisher
+                .publish_cron_event(
                     "cron.jobAutoDisabled",
                     serde_json::json!({
                         "jobId": job.id,
@@ -1006,7 +1009,7 @@ mod tests {
     fn make_deps(pool: &ConnectionPool) -> ExecutorDeps {
         ExecutorDeps {
             agent_executor: None,
-            broadcaster: std::sync::OnceLock::new(),
+            event_publisher: std::sync::OnceLock::new(),
             push_notifier: None,
             event_injector: None,
             http_client: reqwest::Client::new(),
@@ -1813,12 +1816,12 @@ mod tests {
         }
     }
 
-    /// Mock event broadcaster that records calls.
-    struct MockEventBroadcaster {
+    /// Mock engine event publisher that records calls.
+    struct MockEventPublisher {
         events: parking_lot::Mutex<Vec<(String, serde_json::Value)>>,
     }
 
-    impl MockEventBroadcaster {
+    impl MockEventPublisher {
         fn new() -> Self {
             Self {
                 events: parking_lot::Mutex::new(vec![]),
@@ -1827,9 +1830,9 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl executor::EventBroadcaster for MockEventBroadcaster {
-        async fn broadcast_cron_result(&self, _job: &CronJob, _run: &crate::cron::types::CronRun) {}
-        async fn broadcast_cron_event(&self, event_type: &str, payload: serde_json::Value) {
+    impl executor::EventPublisher for MockEventPublisher {
+        async fn publish_cron_result(&self, _job: &CronJob, _run: &crate::cron::types::CronRun) {}
+        async fn publish_cron_event(&self, event_type: &str, payload: serde_json::Value) {
             self.events.lock().push((event_type.to_owned(), payload));
         }
     }
@@ -1867,13 +1870,13 @@ mod tests {
     async fn auto_disable_sends_push_notification() {
         let (pool, clock, _, _, _, _dir) = setup();
         let notifier = Arc::new(MockPushNotifier::new());
-        let broadcaster = Arc::new(MockEventBroadcaster::new());
+        let event_publisher = Arc::new(MockEventPublisher::new());
 
         let deps = ExecutorDeps {
             agent_executor: None,
-            broadcaster: {
+            event_publisher: {
                 let lock = std::sync::OnceLock::new();
-                let _ = lock.set(broadcaster.clone() as Arc<dyn executor::EventBroadcaster>);
+                let _ = lock.set(event_publisher.clone() as Arc<dyn executor::EventPublisher>);
                 lock
             },
             push_notifier: Some(notifier.clone()),
@@ -1926,15 +1929,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auto_disable_broadcasts_event() {
+    async fn auto_disable_publishes_event() {
         let (pool, clock, _, _, _, _dir) = setup();
-        let broadcaster = Arc::new(MockEventBroadcaster::new());
+        let event_publisher = Arc::new(MockEventPublisher::new());
 
         let deps = ExecutorDeps {
             agent_executor: None,
-            broadcaster: {
+            event_publisher: {
                 let lock = std::sync::OnceLock::new();
-                let _ = lock.set(broadcaster.clone() as Arc<dyn executor::EventBroadcaster>);
+                let _ = lock.set(event_publisher.clone() as Arc<dyn executor::EventPublisher>);
                 lock
             },
             push_notifier: None,
@@ -1968,9 +1971,9 @@ mod tests {
         )
         .await;
 
-        // Verify broadcast event
-        let events = broadcaster.events.lock();
-        assert_eq!(events.len(), 1, "should have broadcast exactly 1 event");
+        // Verify published event.
+        let events = event_publisher.events.lock();
+        assert_eq!(events.len(), 1, "should have published exactly 1 event");
         assert_eq!(events[0].0, "cron.jobAutoDisabled");
         assert_eq!(events[0].1["jobName"], "FailJob");
         assert_eq!(events[0].1["jobId"], "cron_fail");
@@ -1980,7 +1983,7 @@ mod tests {
     async fn auto_disable_works_without_notifier() {
         let (pool, clock, _, _, _, _dir) = setup();
 
-        let deps = make_deps(&pool); // No notifier, no broadcaster
+        let deps = make_deps(&pool); // No notifier, no event_publisher
 
         let job = make_failing_job(1);
         store::upsert_job(&pool, &job).unwrap();
@@ -1997,7 +2000,7 @@ mod tests {
             },
         );
 
-        // Should not panic even without notifier or broadcaster
+        // Should not panic even without notifier or event_publisher
         execute_job(
             &job,
             &deps,

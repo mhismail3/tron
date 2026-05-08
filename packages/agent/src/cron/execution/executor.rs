@@ -43,13 +43,13 @@ pub struct AgentTurnResult {
     pub output_truncated: bool,
 }
 
-/// Broadcast events to WebSocket clients.
+/// Publish cron events to engine streams.
 #[async_trait]
-pub trait EventBroadcaster: Send + Sync {
-    /// Broadcast a cron run result.
-    async fn broadcast_cron_result(&self, job: &CronJob, run: &CronRun);
-    /// Broadcast a generic cron event.
-    async fn broadcast_cron_event(&self, event_type: &str, payload: serde_json::Value);
+pub trait EventPublisher: Send + Sync {
+    /// Publish a cron run result.
+    async fn publish_cron_result(&self, job: &CronJob, run: &CronRun);
+    /// Publish a generic cron event.
+    async fn publish_cron_event(&self, event_type: &str, payload: serde_json::Value);
 }
 
 /// Send push notifications via APNS.
@@ -74,7 +74,7 @@ pub struct ExecutorDeps {
     pub agent_executor: Option<Arc<dyn AgentTurnExecutor>>,
     /// Cron event publisher. Uses `OnceLock` because it's set after server
     /// creation, but before the scheduler starts.
-    pub broadcaster: std::sync::OnceLock<Arc<dyn EventBroadcaster>>,
+    pub event_publisher: std::sync::OnceLock<Arc<dyn EventPublisher>>,
     /// Push notification sender.
     pub push_notifier: Option<Arc<dyn PushNotifier>>,
     /// System event injector.
@@ -562,7 +562,7 @@ mod tests {
         }
         ExecutorDeps {
             agent_executor: None,
-            broadcaster: std::sync::OnceLock::new(),
+            event_publisher: std::sync::OnceLock::new(),
             push_notifier: None,
             event_injector: None,
             http_client: reqwest::Client::new(),

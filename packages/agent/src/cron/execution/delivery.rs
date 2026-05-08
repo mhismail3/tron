@@ -1,4 +1,4 @@
-//! Result delivery: WebSocket broadcast, APNS push, webhook POST.
+//! Result delivery: engine-stream publication, APNS push, webhook POST.
 //!
 //! Delivery is post-execution — failures are logged and recorded on the
 //! run but never cause the run itself to be retried.
@@ -18,7 +18,7 @@ pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
     for mode in &delivery_modes {
         let result = match mode {
             Delivery::Silent => Ok(()),
-            Delivery::WebSocket => deliver_ws(job, run, deps).await,
+            Delivery::EngineStream => deliver_engine_stream(job, run, deps).await,
             Delivery::Apns { title } => deliver_apns(job, run, title.as_deref(), deps).await,
             Delivery::Webhook { url, headers } => {
                 deliver_webhook(job, run, url, headers.as_ref(), deps).await
@@ -97,16 +97,16 @@ async fn persist_delivery_status_with_retry(
     }
 }
 
-async fn deliver_ws(
+async fn deliver_engine_stream(
     job: &CronJob,
     run: &CronRun,
     deps: &ExecutorDeps,
 ) -> Result<(), crate::cron::errors::CronError> {
-    let broadcaster = deps
-        .broadcaster
+    let event_publisher = deps
+        .event_publisher
         .get()
-        .ok_or_else(|| crate::cron::errors::CronError::Execution("no broadcaster".into()))?;
-    broadcaster.broadcast_cron_result(job, run).await;
+        .ok_or_else(|| crate::cron::errors::CronError::Execution("no event publisher".into()))?;
+    event_publisher.publish_cron_result(job, run).await;
     Ok(())
 }
 
@@ -235,7 +235,7 @@ mod tests {
         }
         ExecutorDeps {
             agent_executor: None,
-            broadcaster: std::sync::OnceLock::new(),
+            event_publisher: std::sync::OnceLock::new(),
             push_notifier: Some(notifier),
             event_injector: None,
             http_client: reqwest::Client::new(),
@@ -300,7 +300,7 @@ mod tests {
         }
         ExecutorDeps {
             agent_executor: None,
-            broadcaster: std::sync::OnceLock::new(),
+            event_publisher: std::sync::OnceLock::new(),
             push_notifier: None,
             event_injector: None,
             http_client: reqwest::Client::new(),
@@ -318,11 +318,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deliver_multiple_modes_with_no_broadcaster() {
+    async fn deliver_multiple_modes_with_no_event_publisher() {
         let mut job = make_job();
-        job.delivery = vec![Delivery::Silent, Delivery::WebSocket];
+        job.delivery = vec![Delivery::Silent, Delivery::EngineStream];
         let deps = make_deps();
-        // WebSocket delivery fails (no broadcaster), but Silent succeeds
+        // Engine-stream delivery fails (no event publisher), but Silent succeeds.
         deliver(&job, &make_run(), &deps).await;
         // delivery_status should be Partial (if we check the DB)
     }
@@ -450,9 +450,9 @@ mod tests {
 
     #[tokio::test]
     async fn delivery_partial_status_when_one_mode_fails() {
-        // Silent succeeds, WebSocket fails (no broadcaster) → Partial
+        // Silent succeeds, engine-stream publication fails (no event publisher) → Partial
         let mut job = make_job();
-        job.delivery = vec![Delivery::Silent, Delivery::WebSocket];
+        job.delivery = vec![Delivery::Silent, Delivery::EngineStream];
         let deps = make_deps();
         deliver(&job, &make_run(), &deps).await;
         // Can't easily check DB in test without real pool, but at minimum

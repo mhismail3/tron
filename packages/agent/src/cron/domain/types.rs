@@ -2,7 +2,7 @@
 //!
 //! - [`Schedule`]: When to run (cron expression, fixed interval, or one-shot)
 //! - [`Payload`]: What to run (agent turn, shell command, webhook, system event)
-//! - [`Delivery`]: Where to send results (silent, WebSocket, APNS, webhook)
+//! - [`Delivery`]: Where to send results (silent, engine stream, APNS, webhook)
 //! - [`CronJob`]: Complete job definition (schedule + payload + delivery + policies)
 //! - [`CronRun`]: Execution record for a single job run
 
@@ -148,9 +148,9 @@ pub enum Delivery {
     /// Log only, no notification.
     #[serde(rename = "silent")]
     Silent,
-    /// Broadcast via WebSocket to connected clients.
-    #[serde(rename = "websocket")]
-    WebSocket,
+    /// Publish to the engine stream for subscribed clients.
+    #[serde(rename = "engineStream")]
+    EngineStream,
     /// Send push notification via APNS.
     #[serde(rename = "apns")]
     Apns {
@@ -595,7 +595,7 @@ mod tests {
     fn delivery_all_variants_serde() {
         let variants = vec![
             Delivery::Silent,
-            Delivery::WebSocket,
+            Delivery::EngineStream,
             Delivery::Apns {
                 title: Some("Test".into()),
             },

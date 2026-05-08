@@ -743,7 +743,7 @@ fn init_cron(
     });
     let deps = tron::cron::ExecutorDeps {
         agent_executor,
-        broadcaster: std::sync::OnceLock::new(), // set after TronServer creation
+        event_publisher: std::sync::OnceLock::new(), // set after engine startup
         push_notifier: {
             #[cfg(feature = "apns")]
             {
@@ -1063,9 +1063,9 @@ async fn main() -> Result<()> {
     let stream_pump_handle = tokio::spawn(pump.run());
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
-    // Wire cron broadcaster and shutdown forwarding
-    cron.scheduler.set_broadcaster(Arc::new(
-        tron::server::cron_callbacks::CronEventBroadcaster::new(
+    // Wire cron engine event publication and shutdown forwarding.
+    cron.scheduler.set_event_publisher(Arc::new(
+        tron::server::cron_callbacks::CronEventPublisher::new(
             server.capability_context().engine_host.clone(),
         ),
     ));

@@ -9,7 +9,7 @@
 //! - **Engine projection**: enabled jobs register live `cron_schedule` trigger definitions
 //! - **Scheduler**: Timer-based loop that dispatches due jobs through `EngineTriggerRuntime`
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
-//! - **Delivery**: Result notification (silent, WebSocket, APNS, webhook)
+//! - **Delivery**: Result notification (silent, engine stream, APNS, webhook)
 //!
 //! Canonical `cron::*` functions are invoked through the engine. Schedule fires
 //! target hidden `cron::scheduled_fire`, which preserves the existing overlap,

@@ -102,11 +102,11 @@ impl crate::cron::executor::PushNotifier for CronPushNotifier {
 }
 
 /// Publishes cron lifecycle events to engine streams.
-pub struct CronEventBroadcaster {
+pub struct CronEventPublisher {
     engine_host: EngineHostHandle,
 }
 
-impl CronEventBroadcaster {
+impl CronEventPublisher {
     /// Create a new stream-backed cron event publisher.
     pub fn new(engine_host: EngineHostHandle) -> Self {
         Self { engine_host }
@@ -136,8 +136,8 @@ impl CronEventBroadcaster {
 }
 
 #[async_trait]
-impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
-    async fn broadcast_cron_result(&self, job: &CronJob, run: &CronRun) {
+impl crate::cron::executor::EventPublisher for CronEventPublisher {
+    async fn publish_cron_result(&self, job: &CronJob, run: &CronRun) {
         let event = ServerEventPayload {
             event_type: "cron.runComplete".to_owned(),
             session_id: None,
@@ -162,7 +162,7 @@ impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
         self.publish(event).await;
     }
 
-    async fn broadcast_cron_event(&self, event_type: &str, payload: serde_json::Value) {
+    async fn publish_cron_event(&self, event_type: &str, payload: serde_json::Value) {
         let event = ServerEventPayload {
             event_type: event_type.to_owned(),
             session_id: None,
