@@ -4,7 +4,9 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 //! Lifecycle, history, reconstruction, archive/delete, and export operation
 //! bodies live in `operations/`; command/query/reconstruct services remain
-//! nearby and take the narrowed `SessionDeps` bundle.
+//! nearby and take the narrowed `SessionDeps` bundle. `commands/` is split by
+//! lifecycle action, and `context/` owns session-context artifact caching,
+//! dynamic rule tracking, rule loading, and DTOs used by agent/context domains.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

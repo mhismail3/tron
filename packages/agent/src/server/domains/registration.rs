@@ -29,19 +29,24 @@ use crate::engine::{EngineError, Result as EngineResult};
 use crate::server::shared::context::ServerRuntimeContext;
 
 use crate::server::domains::catalog;
-use crate::server::domains::{DomainFunctionRegistration, DomainWorkerModule};
+use crate::server::domains::{
+    DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule, agent, auth, blob,
+    browser, codex_app, context, cron, device, display, events, filesystem, git, import, job, logs,
+    mcp, memory, message, model, notifications, plan, prompt_library, repo, sandbox, session,
+    settings, skills, system, tools, transcription, tree, voice_notes, worktree,
+};
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
 pub fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     register_domain_workers(ctx)?;
-    let deps = crate::server::domains::DomainRegistrationContext::from_context(ctx);
-    crate::server::domains::tools::register_builtin_tools_for_setup(&deps)?;
+    let deps = DomainRegistrationContext::from_context(ctx);
+    tools::register_builtin_tools_for_setup(&deps)?;
     Ok(())
 }
 
 fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
-    for module in crate::server::domains::all_worker_modules(ctx)? {
+    for module in domain_worker_modules(ctx)? {
         validate_domain_stream_topics(&module)?;
         handle.register_worker_for_setup(module.worker, false)?;
         for function in module.functions {
@@ -53,10 +58,50 @@ fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
         }
     }
     handle.register_trigger_type_for_setup(catalog::cron_schedule_trigger_type()?, false)?;
-    let deps = crate::server::domains::DomainRegistrationContext::from_context(ctx);
-    let cron_deps = crate::server::domains::cron::Deps::from_engine(&deps);
-    crate::server::domains::cron::project_all_cron_triggers_for_setup(handle, &cron_deps)?;
+    let deps = DomainRegistrationContext::from_context(ctx);
+    let cron_deps = cron::Deps::from_engine(&deps);
+    cron::project_all_cron_triggers_for_setup(handle, &cron_deps)?;
     Ok(())
+}
+
+fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainWorkerModule>> {
+    let deps = DomainRegistrationContext::from_context(ctx);
+    let mut modules = vec![
+        system::worker_module(&deps)?,
+        codex_app::worker_module(&deps)?,
+        blob::worker_module(&deps)?,
+        tools::worker_module(&deps)?,
+        message::worker_module(&deps)?,
+        cron::worker_module(&deps)?,
+        settings::worker_module(&deps)?,
+        auth::worker_module(&deps)?,
+        skills::worker_module(&deps)?,
+        agent::worker_module(&deps)?,
+        mcp::worker_module(&deps)?,
+        logs::worker_module(&deps)?,
+        memory::worker_module(&deps)?,
+        events::worker_module(&deps)?,
+        filesystem::worker_module(&deps)?,
+        session::worker_module(&deps)?,
+        context::worker_module(&deps)?,
+        job::worker_module(&deps)?,
+        notifications::worker_module(&deps)?,
+        plan::worker_module(&deps)?,
+        prompt_library::worker_module(&deps)?,
+        tree::worker_module(&deps)?,
+        repo::worker_module(&deps)?,
+        import::worker_module(&deps)?,
+        browser::worker_module(&deps)?,
+        display::worker_module(&deps)?,
+        device::worker_module(&deps)?,
+        transcription::worker_module(&deps)?,
+        voice_notes::worker_module(&deps)?,
+        sandbox::worker_module(&deps)?,
+        git::worker_module(&deps)?,
+        worktree::worker_module(&deps)?,
+    ];
+    modules.extend(model::worker_modules(&deps)?);
+    Ok(modules)
 }
 
 fn validate_domain_stream_topics(module: &DomainWorkerModule) -> EngineResult<()> {

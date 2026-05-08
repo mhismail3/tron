@@ -14,7 +14,7 @@ fn tron_events_project_to_neutral_server_payloads() {
     assert_eq!(projected.server_event.event_type, "agent.text_delta");
     assert_eq!(projected.server_event.session_id.as_deref(), Some("s1"));
     assert_eq!(projected.server_event.data.unwrap()["delta"], "hello world");
-    assert_eq!(projected.scope, BroadcastScope::Session("s1".to_owned()));
+    assert_eq!(projected.scope, StreamScope::Session("s1".to_owned()));
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn all_session_events_project_to_system_visible_stream_scope() {
     let projected = tron_event_to_projected(&event);
 
     assert_eq!(projected.server_event.event_type, "session.created");
-    assert_eq!(projected.scope, BroadcastScope::All);
+    assert_eq!(projected.scope, StreamScope::All);
     assert_eq!(stream_scope_payload(&projected.scope)["kind"], "all");
 }
 

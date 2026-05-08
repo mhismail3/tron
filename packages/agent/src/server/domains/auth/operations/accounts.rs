@@ -50,7 +50,7 @@ pub(crate) async fn auth_update(
     })
     .await?;
 
-    broadcast_auth_updated(deps, invocation, &masked_state).await;
+    publish_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
 
@@ -85,6 +85,6 @@ pub(crate) async fn auth_clear(
     })
     .await?;
 
-    broadcast_auth_updated(deps, invocation, &masked_state).await;
+    publish_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }

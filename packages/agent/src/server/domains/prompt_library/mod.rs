@@ -25,6 +25,19 @@ pub(crate) fn worker_module(
 
 const MAX_SEARCH_QUERY_LEN: usize = 200;
 
+fn map_store_err(e: crate::events::EventStoreError) -> CapabilityError {
+    match e {
+        crate::events::EventStoreError::InvalidOperation(message) => {
+            CapabilityError::InvalidParams { message }
+        }
+        crate::events::EventStoreError::Sqlite(err) => CapabilityError::Internal {
+            message: format!("Database error: {err}"),
+        },
+        crate::events::EventStoreError::Internal(msg) => CapabilityError::Internal { message: msg },
+        other => crate::server::shared::error_mapping::map_event_store_error(other),
+    }
+}
+
 async fn prompt_history_list_value(
     params: Option<&Value>,
     deps: &Deps,

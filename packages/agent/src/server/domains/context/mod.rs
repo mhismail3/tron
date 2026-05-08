@@ -4,6 +4,9 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 //! Snapshot, audit, compaction, and clear operation bindings live in
 //! `operations/`; query/command services take the narrowed context deps.
+//! `queries/` is split into snapshot rendering, audit trace loading, payload
+//! preview redaction, and context-manager preparation so read paths can be
+//! followed without a central query blob.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

@@ -173,7 +173,7 @@ pub(crate) async fn auth_oauth_complete(
     })
     .await?;
 
-    broadcast_auth_updated(deps, invocation, &masked_state).await;
+    publish_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
 

@@ -20,7 +20,7 @@ where
         build_masked_state(&auth_path).map_err(map_auth_error)
     })
     .await?;
-    broadcast_auth_updated(deps, invocation, &masked_state).await;
+    publish_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
 
@@ -367,7 +367,7 @@ pub(crate) fn mask_key(key: &str) -> String {
     format!("{}...{}", &key[..prefix_end], &key[suffix_start..])
 }
 
-pub(crate) async fn broadcast_auth_updated(
+pub(crate) async fn publish_auth_updated(
     deps: &Deps,
     invocation: &Invocation,
     masked_state: &Value,

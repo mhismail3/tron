@@ -387,6 +387,17 @@ fn server_package_uses_domain_owned_engine_layout() {
 
     let domains_mod = std::fs::read_to_string(domains_root.join("mod.rs"))
         .expect("failed to read server/domains/mod.rs");
+    for removed in [
+        "pub(crate) struct DomainRegistrationContext",
+        "pub(crate) struct DomainFunctionRegistration",
+        "pub(crate) struct DomainWorkerModule",
+        "pub(crate) fn domain_worker_module",
+    ] {
+        assert!(
+            !domains_mod.contains(removed),
+            "root domains module must expose worker types from worker.rs instead of defining `{removed}`"
+        );
+    }
     assert!(
         !domains_mod.contains("async fn capability_function_value"),
         "canonical functions must carry concrete domain handlers instead of executing through a central dispatcher"
@@ -416,6 +427,69 @@ fn server_package_uses_domain_owned_engine_layout() {
         assert!(
             !domains_mod.contains(removed),
             "root domains module must not retain central execution plumbing `{removed}`"
+        );
+    }
+
+    for required in [
+        "worker.rs",
+        "agent/runtime/service/request.rs",
+        "agent/runtime/service/deps.rs",
+        "agent/runtime/service/plan.rs",
+        "agent/runtime/service/spawn.rs",
+        "agent/runtime/service/execute.rs",
+        "agent/runtime/service/queue.rs",
+        "agent/runtime/service/events.rs",
+        "agent/runtime/runtime/user_event.rs",
+        "agent/runtime/runtime/bootstrap.rs",
+        "agent/runtime/runtime/pending.rs",
+        "agent/runtime/runtime/session_update.rs",
+        "agent/runtime/runtime/skills.rs",
+        "session/commands/create.rs",
+        "session/commands/archive.rs",
+        "session/commands/delete.rs",
+        "session/commands/fork.rs",
+        "session/commands/preload.rs",
+        "session/context/cache.rs",
+        "session/context/dynamic.rs",
+        "session/context/rules.rs",
+        "session/context/types.rs",
+        "context/queries/audit.rs",
+        "context/queries/payload_preview.rs",
+        "context/queries/prepare.rs",
+        "context/queries/snapshot.rs",
+        "tools/interactive_enrichment/confirmation.rs",
+        "tools/interactive_enrichment/payload.rs",
+        "tools/interactive_enrichment/questions.rs",
+        "tools/interactive_enrichment/subagent.rs",
+        "memory/retain/auto_retain/decision.rs",
+        "memory/retain/auto_retain/state.rs",
+        "memory/retain/auto_retain/fire.rs",
+        "worktree/git_workflow/branches.rs",
+        "worktree/git_workflow/conflicts.rs",
+        "worktree/git_workflow/finalize.rs",
+        "worktree/git_workflow/merge.rs",
+        "worktree/git_workflow/rebase.rs",
+        "worktree/git_workflow/remote.rs",
+        "worktree/git_workflow/shared.rs",
+        "worktree/git_workflow/subagent.rs",
+    ] {
+        assert!(
+            domains_root.join(required).is_file(),
+            "domain readability split must keep `{required}` as an owned workflow module"
+        );
+    }
+
+    for required in [
+        "session/agent.rs",
+        "session/lifecycle.rs",
+        "session/worktree.rs",
+    ] {
+        assert!(
+            crate_root
+                .join("src/server/runtime/streams")
+                .join(required)
+                .is_file(),
+            "runtime stream projection must keep `{required}` split by event family"
         );
     }
     let catalog = std::fs::read_to_string(domains_root.join("catalog.rs"))
@@ -478,7 +552,8 @@ fn server_package_uses_domain_owned_engine_layout() {
             );
         }
         let allowed_setup_boundary = rel == Path::new("src/server/domains/mod.rs")
-            || rel == Path::new("src/server/domains/registration.rs");
+            || rel == Path::new("src/server/domains/registration.rs")
+            || rel == Path::new("src/server/domains/worker.rs");
         if !allowed_setup_boundary {
             assert!(
                 !production_content.contains("&ServerRuntimeContext"),

@@ -2,11 +2,12 @@
 //!
 //! This module owns canonical function execution for the settings namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
+//! Settings changes that force MCP router reloads publish MCP health through
+//! the MCP domain stream publisher, so the stream topic owner remains explicit.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
-pub(crate) mod stream;
 pub(crate) use deps::Deps;
 
 use super::*;
@@ -83,7 +84,7 @@ async fn settings_update_value(
             });
         }
         drop(router_guard);
-        broadcast_mcp_status_changed(invocation, deps).await;
+        publish_mcp_status_changed(invocation, deps).await;
         refresh_codex_app_server_if_needed(
             deps,
             &codex_updates,
@@ -260,14 +261,14 @@ async fn refresh_codex_app_server_if_needed(
     Ok(())
 }
 
-async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
+async fn publish_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
     let Some(ref router_arc) = deps.mcp_router else {
         return;
     };
 
     let router = router_arc.read().await;
     let status = router.status();
-    crate::server::domains::settings::stream::SettingsStreamPublisher::new(&deps.engine_host)
-        .mcp_status_changed(invocation, serde_json::to_value(status).unwrap_or_default())
+    crate::server::domains::mcp::stream::McpStreamPublisher::new(&deps.engine_host)
+        .status_changed(invocation, serde_json::to_value(status).unwrap_or_default())
         .await;
 }

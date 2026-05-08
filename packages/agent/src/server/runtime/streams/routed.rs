@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum BroadcastScope {
+pub(super) enum StreamScope {
     All,
     Session(String),
 }
@@ -12,7 +12,7 @@ pub(super) enum BroadcastScope {
 #[derive(Debug, Clone)]
 pub(super) struct ProjectedEvent {
     pub(super) server_event: ServerEventPayload,
-    pub(super) scope: BroadcastScope,
+    pub(super) scope: StreamScope,
 }
 
 #[allow(clippy::ref_option)]
@@ -42,11 +42,11 @@ pub(super) fn make_server_event(
     payload
 }
 
-pub(super) fn session_scope(session_id: &str) -> BroadcastScope {
+pub(super) fn session_scope(session_id: &str) -> StreamScope {
     if session_id.is_empty() {
-        BroadcastScope::All
+        StreamScope::All
     } else {
-        BroadcastScope::Session(session_id.to_string())
+        StreamScope::Session(session_id.to_string())
     }
 }
 
@@ -54,7 +54,7 @@ pub(super) fn with_scope(
     event: &TronEvent,
     wire_type: &str,
     data: Option<Value>,
-    scope: BroadcastScope,
+    scope: StreamScope,
 ) -> ProjectedEvent {
     ProjectedEvent {
         server_event: make_server_event(event, wire_type, data),
@@ -71,5 +71,5 @@ pub(super) fn session_scoped(
 }
 
 pub(super) fn global(event: &TronEvent, wire_type: &str, data: Option<Value>) -> ProjectedEvent {
-    with_scope(event, wire_type, data, BroadcastScope::All)
+    with_scope(event, wire_type, data, StreamScope::All)
 }

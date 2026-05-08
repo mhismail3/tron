@@ -4,6 +4,9 @@
 //! Runtime event classes publish to the engine stream primitive
 //! (`events.session`). `/engine` clients subscribe, poll, and ack those stream
 //! records directly; there is no separate broadcast transport.
+//! Event projection is split by source family under `session/` so the pump stays
+//! a runtime primitive: it owns delivery policy and stream records, while domain
+//! folders own capability behavior.
 
 use std::sync::Arc;
 
@@ -14,7 +17,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use routed::BroadcastScope;
+use routed::StreamScope;
 use tron::tron_event_to_projected;
 
 mod hook;
@@ -80,7 +83,7 @@ impl EngineStreamEventPump {
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 tracing::debug!(lagged = n, "stream projection lagged");
-                metrics::counter!("broadcast_lagged_events_total", "source" => "engine_stream_event_pump")
+                metrics::counter!("stream_projection_lagged_events_total", "source" => "engine_stream_event_pump")
                     .increment(n);
                 true
             }
@@ -98,8 +101,8 @@ impl EngineStreamEventPump {
         tracing::debug!(event_type, "projecting event to engine stream");
         let projected = tron_event_to_projected(event);
         let (visibility, session_id) = match &projected.scope {
-            BroadcastScope::All => (VisibilityScope::System, None),
-            BroadcastScope::Session(session_id) => {
+            StreamScope::All => (VisibilityScope::System, None),
+            StreamScope::Session(session_id) => {
                 (VisibilityScope::Session, Some(session_id.clone()))
             }
         };
@@ -131,10 +134,10 @@ impl EngineStreamEventPump {
     }
 }
 
-fn stream_scope_payload(scope: &BroadcastScope) -> serde_json::Value {
+fn stream_scope_payload(scope: &StreamScope) -> serde_json::Value {
     match scope {
-        BroadcastScope::All => json!({ "kind": "all" }),
-        BroadcastScope::Session(session_id) => {
+        StreamScope::All => json!({ "kind": "all" }),
+        StreamScope::Session(session_id) => {
             json!({ "kind": "session", "sessionId": session_id })
         }
     }
