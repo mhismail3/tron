@@ -2,89 +2,91 @@
 
 use super::operations::*;
 use super::*;
+use crate::server::domains::bindings::operation_bindings;
+use crate::server::domains::worktree::git_workflow::{
+    AbortMergeOperation, ContinueMergeOperation, FinalizeSessionOperation, ListConflictsOperation,
+    RebaseOnMainOperation, ResolveConflictOperation, ResolveConflictsWithSubagentOperation,
+    StartMergeOperation,
+};
 
-pub(crate) fn function_registrations(
-    specs: Vec<crate::server::domains::catalog::CapabilitySpec>,
-    deps: Deps,
-) -> crate::engine::Result<Vec<crate::server::domains::DomainFunctionRegistration>> {
-    specs
-        .into_iter()
-        .map(|spec| function_registration(spec, deps.clone()))
-        .collect()
-}
-
-pub(crate) fn function_registration(
-    spec: crate::server::domains::catalog::CapabilitySpec,
-    deps: Deps,
-) -> crate::engine::Result<crate::server::domains::DomainFunctionRegistration> {
-    Ok(crate::server::domains::DomainFunctionRegistration {
-        definition: crate::server::domains::catalog::function_definition_for_capability(&spec),
-        handler: handler_for_operation(spec.operation_key, deps),
-    })
-}
-
-pub(crate) fn handler_for_operation(
-    operation_key: impl Into<String>,
-    deps: Deps,
-) -> std::sync::Arc<dyn crate::engine::InProcessFunctionHandler> {
-    std::sync::Arc::new(FunctionHandler {
-        operation_key: operation_key.into(),
-        deps,
-    })
-}
-
-struct FunctionHandler {
-    operation_key: String,
-    deps: Deps,
-}
-
-#[async_trait::async_trait]
-impl crate::engine::InProcessFunctionHandler for FunctionHandler {
-    async fn invoke(
-        &self,
-        invocation: crate::engine::Invocation,
-    ) -> Result<serde_json::Value, crate::engine::EngineError> {
-        handle(&self.operation_key, &invocation, &self.deps)
-            .await
-            .map_err(crate::server::shared::error_mapping::capability_error_to_engine)
-    }
-}
-
-pub(crate) async fn handle(
-    operation_key: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let params = Some(invocation.payload.clone());
-    match operation_key {
-        "get_status" => GetStatusOperation.run(params, deps).await,
-        "is_git_repo" => IsGitRepoOperation.run(params, deps).await,
-        "commit" => CommitOperation.run(params, deps).await,
-        "merge" => MergeOperation.run(params, deps).await,
-        "list" => ListOperation.run(params, deps).await,
-        "get_diff" => GetDiffOperation.run(params, deps).await,
-        "acquire" => AcquireOperation.run(params, deps).await,
-        "release" => ReleaseOperation.run(params, deps).await,
-        "list_session_branches" => ListSessionBranchesOperation.run(params, deps).await,
-        "get_committed_diff" => GetCommittedDiffOperation.run(params, deps).await,
-        "delete_branch" => DeleteBranchOperation.run(params, deps).await,
-        "prune_branches" => PruneBranchesOperation.run(params, deps).await,
-        "stage_files" => StageFilesOperation.run(params, deps).await,
-        "unstage_files" => UnstageFilesOperation.run(params, deps).await,
-        "discard_files" => DiscardFilesOperation.run(params, deps).await,
-        "finalize_session"
-        | "rebase_on_main"
-        | "start_merge"
-        | "list_conflicts"
-        | "resolve_conflict"
-        | "continue_merge"
-        | "abort_merge"
-        | "resolve_conflicts_with_subagent" => {
-            crate::server::domains::worktree::git_workflow::handle(operation_key, invocation, deps)
+operation_bindings! {
+    deps = Deps;
+    hidden = [];
+    bindings = [
+        "get_status" => |invocation, deps| {
+            GetStatusOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "is_git_repo" => |invocation, deps| {
+            IsGitRepoOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "commit" => |invocation, deps| {
+            CommitOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "merge" => |invocation, deps| {
+            MergeOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "list" => |invocation, deps| {
+            ListOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "get_diff" => |invocation, deps| {
+            GetDiffOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "acquire" => |invocation, deps| {
+            AcquireOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "release" => |invocation, deps| {
+            ReleaseOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "list_session_branches" => |invocation, deps| {
+            ListSessionBranchesOperation
+                .run(Some(invocation.payload.clone()), deps)
                 .await
-        }
-        _ => Err(CapabilityError::Internal {
-            message: format!("operation {operation_key} is not worktree-owned"),
-        }),
-    }
+        },
+        "get_committed_diff" => |invocation, deps| {
+            GetCommittedDiffOperation
+                .run(Some(invocation.payload.clone()), deps)
+                .await
+        },
+        "delete_branch" => |invocation, deps| {
+            DeleteBranchOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "prune_branches" => |invocation, deps| {
+            PruneBranchesOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "stage_files" => |invocation, deps| {
+            StageFilesOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "unstage_files" => |invocation, deps| {
+            UnstageFilesOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "discard_files" => |invocation, deps| {
+            DiscardFilesOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "finalize_session" => |invocation, deps| {
+            FinalizeSessionOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "rebase_on_main" => |invocation, deps| {
+            RebaseOnMainOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "start_merge" => |invocation, deps| {
+            StartMergeOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "list_conflicts" => |invocation, deps| {
+            ListConflictsOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "resolve_conflict" => |invocation, deps| {
+            ResolveConflictOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "continue_merge" => |invocation, deps| {
+            ContinueMergeOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "abort_merge" => |invocation, deps| {
+            AbortMergeOperation.run(Some(invocation.payload.clone()), deps).await
+        },
+        "resolve_conflicts_with_subagent" => |invocation, deps| {
+            ResolveConflictsWithSubagentOperation
+                .run(Some(invocation.payload.clone()), deps)
+                .await
+        },
+    ];
 }

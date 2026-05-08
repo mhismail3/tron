@@ -31,36 +31,6 @@ use crate::worktree::{ConflictedFile, WorktreeCoordinator, WorktreeError};
 use std::path::PathBuf;
 
 use super::Deps;
-use crate::engine::Invocation;
-
-pub(crate) async fn handle(
-    operation_key: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let params = Some(invocation.payload.clone());
-    match operation_key {
-        "sync_main" => SyncMainOperation.run(params, deps).await,
-        "push" => PushOperation.run(params, deps).await,
-        "list_local_branches" => ListLocalBranchesOperation.run(params, deps).await,
-        "list_remote_branches" => ListRemoteBranchesOperation.run(params, deps).await,
-        "finalize_session" => FinalizeSessionOperation.run(params, deps).await,
-        "rebase_on_main" => RebaseOnMainOperation.run(params, deps).await,
-        "start_merge" => StartMergeOperation.run(params, deps).await,
-        "list_conflicts" => ListConflictsOperation.run(params, deps).await,
-        "resolve_conflict" => ResolveConflictOperation.run(params, deps).await,
-        "continue_merge" => ContinueMergeOperation.run(params, deps).await,
-        "abort_merge" => AbortMergeOperation.run(params, deps).await,
-        "resolve_conflicts_with_subagent" => {
-            ResolveConflictsWithSubagentOperation
-                .run(params, deps)
-                .await
-        }
-        _ => Err(CapabilityError::Internal {
-            message: format!("operation {operation_key} is not git workflow-owned"),
-        }),
-    }
-}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -210,7 +180,11 @@ pub struct SyncMainOperation;
 
 impl SyncMainOperation {
     #[instrument(skip(self, deps), fields(method = "git::sync_main"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target = opt_string(params.as_ref(), "targetBranch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
@@ -243,7 +217,11 @@ pub struct PushOperation;
 
 impl PushOperation {
     #[instrument(skip(self, deps), fields(method = "git::push"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let branch = opt_string(params.as_ref(), "branch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
@@ -300,7 +278,11 @@ pub struct ListLocalBranchesOperation;
 
 impl ListLocalBranchesOperation {
     #[instrument(skip(self, deps), fields(method = "git::list_local_branches"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(deps)?;
         let session_dir_hint = session_working_dir(deps, &session_id);
@@ -339,7 +321,11 @@ pub struct ListRemoteBranchesOperation;
 
 impl ListRemoteBranchesOperation {
     #[instrument(skip(self, deps), fields(method = "git::list_remote_branches"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let remote = opt_string(params.as_ref(), "remote");
         let coord = require_coordinator(deps)?;
@@ -362,7 +348,11 @@ pub struct FinalizeSessionOperation;
 
 impl FinalizeSessionOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::finalize_session"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(deps)?;
 
@@ -430,7 +420,11 @@ pub struct RebaseOnMainOperation;
 
 impl RebaseOnMainOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::rebase_on_main"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Parse strategy BEFORE touching the coordinator so "squash" is
         // rejected at the engine transport boundary (plan requirement).
@@ -478,7 +472,11 @@ pub struct StartMergeOperation;
 
 impl StartMergeOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::start_merge"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let source = require_string_param(params.as_ref(), "sourceBranch")?;
         let target = require_string_param(params.as_ref(), "targetBranch")?;
@@ -513,7 +511,11 @@ pub struct ListConflictsOperation;
 
 impl ListConflictsOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::list_conflicts"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(deps)?;
         let conflicts = coord
@@ -533,7 +535,11 @@ pub struct ResolveConflictOperation;
 
 impl ResolveConflictOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::resolve_conflict"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let path = require_string_param(params.as_ref(), "path")?;
         let resolution_str = require_string_param(params.as_ref(), "resolution")?;
@@ -563,7 +569,11 @@ pub struct ContinueMergeOperation;
 
 impl ContinueMergeOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::continue_merge"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = opt_string(params.as_ref(), "message");
         let coord = require_coordinator(deps)?;
@@ -582,7 +592,11 @@ pub struct AbortMergeOperation;
 
 impl AbortMergeOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::abort_merge"))]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let reason = opt_string(params.as_ref(), "reason").unwrap_or_else(|| "user".into());
         let coord = require_coordinator(deps)?;
@@ -610,7 +624,11 @@ impl ResolveConflictsWithSubagentOperation {
         skip(self, deps),
         fields(method = "worktree::resolve_conflicts_with_subagent")
     )]
-    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
+    pub(crate) async fn run(
+        &self,
+        params: Option<Value>,
+        deps: &Deps,
+    ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Must have a live coordinator to resolve worktree + merge state.
         let coord = deps

@@ -20,6 +20,8 @@ use crate::engine::{
 use crate::server::shared::context::AgentDeps;
 use crate::server::shared::errors::CapabilityError;
 
+use super::cleanup::{PromptRunCleanup, ShutdownCancelForwarder};
+use super::predicates::{retain_eligible, should_acquire_worktree_for_source};
 use super::runtime::{
     PromptBootstrapData, PromptContextArtifacts, build_user_content_override,
     build_user_event_payload, collect_pending_skill_payloads, load_prompt_bootstrap,
@@ -144,70 +146,6 @@ struct PromptRunPlan {
     model: String,
     working_dir: String,
     request: PromptRequest,
-}
-
-struct PromptRunCleanup {
-    session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
-    session_id: String,
-    started_run: Option<StartedRun>,
-}
-
-impl PromptRunCleanup {
-    fn new(
-        started_run: StartedRun,
-        session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
-        session_id: String,
-    ) -> Self {
-        Self {
-            session_manager,
-            session_id,
-            started_run: Some(started_run),
-        }
-    }
-
-    fn cancel_token(&self) -> tokio_util::sync::CancellationToken {
-        self.started_run
-            .as_ref()
-            .expect("started run must exist while prompt is active")
-            .cancel_token()
-    }
-
-    fn release(&mut self) {
-        self.session_manager.clear_processing(&self.session_id);
-        self.session_manager.invalidate_session(&self.session_id);
-        let _ = self.started_run.take();
-    }
-}
-
-impl Drop for PromptRunCleanup {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
-struct ShutdownCancelForwarder(Option<tokio::task::JoinHandle<()>>);
-
-impl ShutdownCancelForwarder {
-    fn new(
-        shutdown_token: Option<tokio_util::sync::CancellationToken>,
-        run_cancel: tokio_util::sync::CancellationToken,
-    ) -> Self {
-        let handle = shutdown_token.map(|shutdown_token| {
-            tokio::spawn(async move {
-                shutdown_token.cancelled().await;
-                run_cancel.cancel();
-            })
-        });
-        Self(handle)
-    }
-}
-
-impl Drop for ShutdownCancelForwarder {
-    fn drop(&mut self) {
-        if let Some(handle) = self.0.take() {
-            handle.abort();
-        }
-    }
 }
 
 pub fn spawn_prompt_run(
@@ -1363,105 +1301,4 @@ async fn publish_prompt_runtime_stream(
             payload,
         )
         .await;
-}
-
-/// Returns true if a new prompt run for this session should attempt worktree
-/// acquisition. Chat sessions (`source == Some("chat")`) are conversational and
-/// never get worktrees regardless of global isolation mode or per-session
-/// `useWorktree` override — the server is authoritative on this invariant, so
-/// callers don't need to pass `useWorktree: false` explicitly.
-fn should_acquire_worktree_for_source(source: Option<&str>) -> bool {
-    source != Some("chat")
-}
-
-/// Whether a finished agent run's stop reason represents a coherent
-/// conclusion that auto-retain can safely summarize.
-///
-/// - `EndTurn`, `NoToolCalls`, `MaxTurns` — agent produced real work.
-/// - `ToolStop` — interactive tool paused the turn awaiting user input;
-///   summarizing mid-dialog produces incoherent output.
-/// - `Error`, `Interrupted` — already filtered by caller, included here
-///   as defense in depth.
-fn retain_eligible(stop_reason: &crate::runtime::errors::StopReason) -> bool {
-    use crate::runtime::errors::StopReason;
-    matches!(
-        stop_reason,
-        StopReason::EndTurn | StopReason::NoToolCalls | StopReason::MaxTurns
-    )
-}
-
-#[cfg(test)]
-mod retain_eligible_tests {
-    use super::retain_eligible;
-    use crate::runtime::errors::StopReason;
-
-    #[test]
-    fn end_turn_is_eligible() {
-        assert!(retain_eligible(&StopReason::EndTurn));
-    }
-
-    #[test]
-    fn no_tool_calls_is_eligible() {
-        assert!(retain_eligible(&StopReason::NoToolCalls));
-    }
-
-    #[test]
-    fn max_turns_is_eligible() {
-        assert!(retain_eligible(&StopReason::MaxTurns));
-    }
-
-    #[test]
-    fn tool_stop_is_not_eligible() {
-        assert!(!retain_eligible(&StopReason::ToolStop));
-    }
-
-    #[test]
-    fn interrupted_is_not_eligible() {
-        assert!(!retain_eligible(&StopReason::Interrupted));
-    }
-
-    #[test]
-    fn error_is_not_eligible() {
-        assert!(!retain_eligible(&StopReason::Error));
-    }
-}
-
-#[cfg(test)]
-mod should_acquire_worktree_tests {
-    use super::should_acquire_worktree_for_source;
-
-    #[test]
-    fn chat_source_never_acquires_worktree() {
-        assert!(!should_acquire_worktree_for_source(Some("chat")));
-    }
-
-    #[test]
-    fn project_source_may_acquire_worktree() {
-        assert!(should_acquire_worktree_for_source(Some("project")));
-    }
-
-    #[test]
-    fn missing_source_may_acquire_worktree() {
-        // Rows without an explicit source default to non-chat behavior.
-        assert!(should_acquire_worktree_for_source(None));
-    }
-
-    #[test]
-    fn unknown_source_may_acquire_worktree() {
-        // Forward compat: unknown sources get default (non-chat) behavior.
-        assert!(should_acquire_worktree_for_source(Some("future_source")));
-    }
-
-    #[test]
-    fn empty_string_source_may_acquire_worktree() {
-        // Edge case: empty string is not "chat".
-        assert!(should_acquire_worktree_for_source(Some("")));
-    }
-
-    #[test]
-    fn uppercase_chat_does_not_match() {
-        // Case-sensitive match — only exact "chat" skips.
-        assert!(should_acquire_worktree_for_source(Some("Chat")));
-        assert!(should_acquire_worktree_for_source(Some("CHAT")));
-    }
 }

@@ -1,73 +1,38 @@
 //! Operation binding for the context worker.
 
-use super::operations;
 use super::*;
+use crate::server::domains::bindings::operation_bindings;
 
-pub(crate) fn function_registrations(
-    specs: Vec<crate::server::domains::catalog::CapabilitySpec>,
-    deps: Deps,
-) -> crate::engine::Result<Vec<crate::server::domains::DomainFunctionRegistration>> {
-    specs
-        .into_iter()
-        .map(|spec| function_registration(spec, deps.clone()))
-        .collect()
-}
-
-pub(crate) fn function_registration(
-    spec: crate::server::domains::catalog::CapabilitySpec,
-    deps: Deps,
-) -> crate::engine::Result<crate::server::domains::DomainFunctionRegistration> {
-    Ok(crate::server::domains::DomainFunctionRegistration {
-        definition: crate::server::domains::catalog::function_definition_for_capability(&spec),
-        handler: handler_for_operation(spec.operation_key, deps),
-    })
-}
-
-pub(crate) fn handler_for_operation(
-    operation_key: impl Into<String>,
-    deps: Deps,
-) -> std::sync::Arc<dyn crate::engine::InProcessFunctionHandler> {
-    std::sync::Arc::new(FunctionHandler {
-        operation_key: operation_key.into(),
-        deps,
-    })
-}
-
-struct FunctionHandler {
-    operation_key: String,
-    deps: Deps,
-}
-
-#[async_trait::async_trait]
-impl crate::engine::InProcessFunctionHandler for FunctionHandler {
-    async fn invoke(
-        &self,
-        invocation: crate::engine::Invocation,
-    ) -> Result<serde_json::Value, crate::engine::EngineError> {
-        handle(&self.operation_key, &invocation, &self.deps)
-            .await
-            .map_err(crate::server::shared::error_mapping::capability_error_to_engine)
-    }
-}
-
-pub(crate) async fn handle(
-    operation_key: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match operation_key {
-        "get_snapshot" => operations::get_snapshot(payload, deps).await,
-        "get_detailed_snapshot" => operations::get_detailed_snapshot(payload, deps).await,
-        "get_audit_trace" => operations::get_audit_trace(payload, deps).await,
-        "should_compact" => operations::should_compact(payload, deps).await,
-        "preview_compaction" => operations::preview_compaction(payload, deps).await,
-        "can_accept_turn" => operations::can_accept_turn(payload, deps).await,
-        "confirm_compaction" => operations::confirm_compaction(payload, deps).await,
-        "clear" => operations::clear(payload, deps).await,
-        "compact" => operations::compact(payload, deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("context method {operation_key} is not engine-owned"),
-        }),
-    }
+operation_bindings! {
+    deps = Deps;
+    hidden = [];
+    bindings = [
+        "get_snapshot" => |invocation, deps| {
+            operations::get_snapshot(&invocation.payload, deps).await
+        },
+        "get_detailed_snapshot" => |invocation, deps| {
+            operations::get_detailed_snapshot(&invocation.payload, deps).await
+        },
+        "get_audit_trace" => |invocation, deps| {
+            operations::get_audit_trace(&invocation.payload, deps).await
+        },
+        "should_compact" => |invocation, deps| {
+            operations::should_compact(&invocation.payload, deps).await
+        },
+        "preview_compaction" => |invocation, deps| {
+            operations::preview_compaction(&invocation.payload, deps).await
+        },
+        "can_accept_turn" => |invocation, deps| {
+            operations::can_accept_turn(&invocation.payload, deps).await
+        },
+        "confirm_compaction" => |invocation, deps| {
+            operations::confirm_compaction(&invocation.payload, deps).await
+        },
+        "clear" => |invocation, deps| {
+            operations::clear(&invocation.payload, deps).await
+        },
+        "compact" => |invocation, deps| {
+            operations::compact(&invocation.payload, deps).await
+        },
+    ];
 }

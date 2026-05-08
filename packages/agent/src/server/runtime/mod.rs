@@ -13,15 +13,15 @@
 
 use std::time::Duration;
 
-use crate::engine::{EngineHostHandle, EngineQueueDrainer};
 use crate::server::server::TronServer;
-use tokio_util::sync::CancellationToken;
+use queue_drainer::EngineQueueDrainerService;
+use worker_heartbeat::ExternalWorkerHeartbeatService;
 
 pub mod external_workers;
+mod queue_drainer;
 pub mod streams;
+mod worker_heartbeat;
 
-const QUEUE_DRAIN_INTERVAL: Duration = Duration::from_millis(100);
-const EXTERNAL_WORKER_HEARTBEAT_SCAN_INTERVAL: Duration = Duration::from_secs(10);
 const EXTERNAL_WORKER_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Runtime-owned engine services.
@@ -48,93 +48,5 @@ impl EngineRuntimeServices {
             EXTERNAL_WORKER_HEARTBEAT_TIMEOUT,
         );
         shutdown.register_task(tokio::spawn(heartbeat.run()));
-    }
-}
-
-struct EngineQueueDrainerService {
-    host: EngineHostHandle,
-    queue: String,
-    lease_owner: String,
-    cancel: CancellationToken,
-}
-
-struct ExternalWorkerHeartbeatService {
-    runtime: crate::server::runtime::external_workers::SharedExternalWorkerRuntime,
-    cancel: CancellationToken,
-    timeout: Duration,
-}
-
-impl ExternalWorkerHeartbeatService {
-    fn new(
-        runtime: crate::server::runtime::external_workers::SharedExternalWorkerRuntime,
-        cancel: CancellationToken,
-        timeout: Duration,
-    ) -> Self {
-        Self {
-            runtime,
-            cancel,
-            timeout,
-        }
-    }
-
-    async fn run(self) {
-        loop {
-            tokio::select! {
-                () = self.cancel.cancelled() => break,
-                () = tokio::time::sleep(EXTERNAL_WORKER_HEARTBEAT_SCAN_INTERVAL) => {
-                    let result = self
-                        .runtime
-                        .lock()
-                        .await
-                        .disconnect_timed_out(self.timeout)
-                        .await;
-                    match result {
-                        Ok(expired) if !expired.is_empty() => {
-                            tracing::warn!(count = expired.len(), "external engine workers timed out");
-                        }
-                        Ok(_) => {}
-                        Err(error) => tracing::warn!(error = %error, "external worker heartbeat cleanup failed"),
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl EngineQueueDrainerService {
-    fn new(
-        host: EngineHostHandle,
-        queue: String,
-        lease_owner: String,
-        cancel: CancellationToken,
-    ) -> Self {
-        Self {
-            host,
-            queue,
-            lease_owner,
-            cancel,
-        }
-    }
-
-    async fn run(self) {
-        loop {
-            tokio::select! {
-                () = self.cancel.cancelled() => break,
-                () = async {
-                    match EngineQueueDrainer::drain_once(&self.host, &self.queue, &self.lease_owner).await {
-                        Ok(Some(result)) => {
-                            if let Some(error) = result.error {
-                                tracing::warn!(queue = %self.queue, error = %error, "engine queue item failed");
-                            }
-                        }
-                        Ok(None) => tokio::time::sleep(QUEUE_DRAIN_INTERVAL).await,
-                        Err(error) => {
-                            tracing::warn!(queue = %self.queue, error = %error, "engine queue drainer failed");
-                            tokio::time::sleep(QUEUE_DRAIN_INTERVAL).await;
-                        }
-                    }
-                } => {}
-            }
-        }
     }
 }

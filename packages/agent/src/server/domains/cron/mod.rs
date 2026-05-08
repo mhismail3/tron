@@ -14,7 +14,7 @@ pub(crate) mod operations;
 pub(crate) mod stream;
 pub(crate) use deps::Deps;
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::*;
 
@@ -127,6 +127,6 @@ pub(crate) fn hidden_function_registrations(
     });
     Ok(vec![DomainFunctionRegistration {
         definition,
-        handler: handlers::handler_for_operation("scheduled_fire", domain_deps),
+        handler: handlers::handler_for_operation("scheduled_fire", domain_deps)?,
     }])
 }

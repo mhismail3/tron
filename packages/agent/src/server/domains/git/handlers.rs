@@ -1,71 +1,37 @@
 //! Operation binding for the git worker.
 
 use super::*;
+use crate::server::domains::bindings::operation_bindings;
+use crate::server::domains::worktree::git_workflow::{
+    ListLocalBranchesOperation, ListRemoteBranchesOperation, PushOperation, SyncMainOperation,
+};
 
-pub(crate) fn function_registrations(
-    specs: Vec<crate::server::domains::catalog::CapabilitySpec>,
-    deps: Deps,
-) -> crate::engine::Result<Vec<crate::server::domains::DomainFunctionRegistration>> {
-    specs
-        .into_iter()
-        .map(|spec| function_registration(spec, deps.clone()))
-        .collect()
-}
-
-pub(crate) fn function_registration(
-    spec: crate::server::domains::catalog::CapabilitySpec,
-    deps: Deps,
-) -> crate::engine::Result<crate::server::domains::DomainFunctionRegistration> {
-    Ok(crate::server::domains::DomainFunctionRegistration {
-        definition: crate::server::domains::catalog::function_definition_for_capability(&spec),
-        handler: handler_for_operation(spec.operation_key, deps),
-    })
-}
-
-pub(crate) fn handler_for_operation(
-    operation_key: impl Into<String>,
-    deps: Deps,
-) -> std::sync::Arc<dyn crate::engine::InProcessFunctionHandler> {
-    std::sync::Arc::new(FunctionHandler {
-        operation_key: operation_key.into(),
-        deps,
-    })
-}
-
-struct FunctionHandler {
-    operation_key: String,
-    deps: Deps,
-}
-
-#[async_trait::async_trait]
-impl crate::engine::InProcessFunctionHandler for FunctionHandler {
-    async fn invoke(
-        &self,
-        invocation: crate::engine::Invocation,
-    ) -> Result<serde_json::Value, crate::engine::EngineError> {
-        handle(&self.operation_key, &invocation, &self.deps)
-            .await
-            .map_err(crate::server::shared::error_mapping::capability_error_to_engine)
-    }
-}
-
-pub(crate) async fn handle(
-    operation_key: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match operation_key {
-        "clone" => CloneOperation.run(Some(invocation.payload.clone())).await,
-        "sync_main" | "push" | "list_local_branches" | "list_remote_branches" => {
-            crate::server::domains::worktree::git_workflow::handle(
-                operation_key,
-                invocation,
-                &deps.worktree_deps,
-            )
-            .await
-        }
-        _ => Err(CapabilityError::Internal {
-            message: format!("operation {operation_key} is not git-owned"),
-        }),
-    }
+operation_bindings! {
+    deps = Deps;
+    hidden = [];
+    bindings = [
+        "clone" => |invocation, _deps| {
+            CloneOperation.run(Some(invocation.payload.clone())).await
+        },
+        "sync_main" => |invocation, deps| {
+            SyncMainOperation
+                .run(Some(invocation.payload.clone()), &deps.worktree_deps)
+                .await
+        },
+        "push" => |invocation, deps| {
+            PushOperation
+                .run(Some(invocation.payload.clone()), &deps.worktree_deps)
+                .await
+        },
+        "list_local_branches" => |invocation, deps| {
+            ListLocalBranchesOperation
+                .run(Some(invocation.payload.clone()), &deps.worktree_deps)
+                .await
+        },
+        "list_remote_branches" => |invocation, deps| {
+            ListRemoteBranchesOperation
+                .run(Some(invocation.payload.clone()), &deps.worktree_deps)
+                .await
+        },
+    ];
 }

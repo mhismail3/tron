@@ -144,7 +144,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   +-- runtime          Agent loop, context, hooks, orchestrator, tasks
   |
   +-- server           Axum HTTP/WS, pure engine transport, domains, runtime, APNS
-  |                    +-- domains         Domain-owned workers: contract/deps/handlers/operations/services
+  |                    +-- domains         Domain-owned workers: contract/deps/bindings/operations/services
   |                    +-- runtime         Queue drainers, stream projection, external workers
   |                    +-- transport       /engine protocol parsing + EngineTransportRequest
   |                    +-- platform        Codex App Server, APNS, device broker
@@ -172,7 +172,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
 | `server` | HTTP/WS + pure engine protocol | `TronServer`, `ServerRuntimeContext`, `EngineStreamEventPump` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
-| `server::domains` | Domain-owned worker/function surface | `all_worker_modules()`, `DomainWorkerModule`, per-domain `contract.rs`, `deps.rs`, `handlers.rs`, `operations/`, typed stream publishers |
+| `server::domains` | Domain-owned worker/function surface | `all_worker_modules()`, `DomainWorkerModule`, per-domain `contract.rs`, `deps.rs`, declarative `handlers.rs` binding tables, `operations/`, typed stream publishers |
 | `server::runtime` | Engine runtime services | `EngineRuntimeServices`, `EngineStreamEventPump`, external worker runtime |
 | `server::platform::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
 | `server::shared` | Transport-neutral server helpers | `ServerRuntimeContext`, `CapabilityError`, `ServerEventPayload` |

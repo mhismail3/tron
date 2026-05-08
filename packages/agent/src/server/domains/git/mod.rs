@@ -21,7 +21,6 @@ use crate::server::shared::errors::{self, CapabilityError};
 use crate::server::shared::params::require_string_param;
 
 use super::*;
-use crate::engine::Invocation;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,

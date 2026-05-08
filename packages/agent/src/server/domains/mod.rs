@@ -17,12 +17,14 @@
 //! Each domain `contract.rs` is the local source of truth for that worker's
 //! function ids, schemas, authority, risk, idempotency, leases, compensation,
 //! stream topics, and operation keys. Each domain `deps.rs` narrows setup
-//! context into the service handles that worker actually needs; `handlers.rs`
-//! binds operation keys to local handler structs; flow-critical domains keep
-//! executable bodies in `operations/`; and event-emitting domains publish
-//! through typed `stream.rs` publishers for their declared topics. The catalog
-//! only aggregates those records; it does not derive domain policy from central
-//! method tables.
+//! context into the service handles that worker actually needs. `handlers.rs`
+//! is a declarative operation-key binding table backed by the shared
+//! method-agnostic `bindings` helper, so completeness failures happen during
+//! worker construction instead of as late runtime branches. Flow-critical
+//! domains keep executable bodies in `operations/`; event-emitting domains
+//! publish through typed `stream.rs` publishers for their declared topics. The
+//! catalog only aggregates those records; it does not derive domain policy from
+//! central method tables.
 //!
 //! The intended execution flow is:
 //! `/engine frame -> EngineTransportRequest -> EngineTriggerRuntime -> domain
@@ -69,6 +71,7 @@ use crate::skills::registry::SkillRegistry;
 
 pub(crate) mod agent;
 pub(crate) mod auth;
+pub(crate) mod bindings;
 pub(crate) mod blob;
 pub(crate) mod browser;
 pub(crate) mod catalog;

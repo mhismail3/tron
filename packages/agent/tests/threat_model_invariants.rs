@@ -511,6 +511,23 @@ fn server_package_uses_domain_owned_engine_layout() {
         }
         if rel.ends_with("handlers.rs") {
             assert!(
+                production_content.contains("operation_bindings!"),
+                "{} must use a declarative local operation binding table",
+                rel.display()
+            );
+            for removed in [
+                "match operation_key",
+                "match key",
+                "struct FunctionHandler",
+                "impl InProcessFunctionHandler",
+            ] {
+                assert!(
+                    !production_content.contains(removed),
+                    "{} must not reintroduce handler-owned dispatch shape `{removed}`",
+                    rel.display()
+                );
+            }
+            assert!(
                 !production_content.contains("\"agent::prompt\" =>")
                     && !production_content.contains("\"auth::get\" =>")
                     && !production_content.contains("\"worktree::get_status\" =>")
@@ -578,6 +595,43 @@ fn domains_and_runtime_do_not_import_client_transport_modules() {
                 "{} must not import client transport modules",
                 rel.display()
             );
+        }
+    }
+}
+
+#[test]
+fn domains_do_not_import_other_domains_private_operations() {
+    let crate_root = crate_root();
+    let domains_root = crate_root.join("src/server/domains");
+    for path in rust_files_under(&domains_root) {
+        let rel = path.strip_prefix(&crate_root).unwrap();
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+
+        let Some(domain_name) = rel
+            .components()
+            .nth(3)
+            .and_then(|component| component.as_os_str().to_str())
+        else {
+            continue;
+        };
+
+        for needle in [
+            "crate::server::domains::",
+            "super::super::",
+            "server::domains::",
+        ] {
+            for line in content.lines().filter(|line| line.contains(needle)) {
+                if !line.contains("::operations") {
+                    continue;
+                }
+                assert!(
+                    line.contains(&format!("domains::{domain_name}::operations"))
+                        || line.contains("super::super::operations"),
+                    "{} must not import another domain's private operations: {line}",
+                    rel.display()
+                );
+            }
         }
     }
 }

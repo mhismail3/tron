@@ -31,12 +31,12 @@ pub(crate) fn worker_modules(
         super::domain_worker_module(
             "model",
             contract::STREAM_TOPICS,
-            handlers::function_registrations(model_specs, domain_deps.clone())?,
+            handlers::model::function_registrations(model_specs, domain_deps.clone())?,
         )?,
         super::domain_worker_module(
             "config",
             contract::STREAM_TOPICS,
-            handlers::function_registrations(config_specs, domain_deps)?,
+            handlers::config::function_registrations(config_specs, domain_deps)?,
         )?,
     ])
 }

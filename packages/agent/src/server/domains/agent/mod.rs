@@ -106,7 +106,7 @@ pub(crate) fn hidden_function_registrations(
                 handler: handlers::handler_for_operation(
                     id.rsplit_once("::").map(|(_, key)| key).unwrap_or(id),
                     domain_deps.clone(),
-                ),
+                )?,
             })
         })
         .collect()
