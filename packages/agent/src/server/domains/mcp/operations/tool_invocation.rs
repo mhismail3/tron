@@ -1,5 +1,9 @@
 //! MCP workflow operations.
-use super::*;
+use super::{InProcessFunctionHandler, async_trait, mcp_result_to_tron_result};
+use crate::engine::Invocation;
+use crate::server::domains::mcp::Deps;
+use serde_json::Value;
+use serde_json::json;
 
 pub(crate) struct McpToolFunctionHandler {
     pub(crate) server: String,
@@ -39,7 +43,8 @@ impl InProcessFunctionHandler for McpToolFunctionHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::engine::{EffectClass, RiskLevel};
+    use crate::server::domains::mcp::operations::classify_mcp_tool;
 
     #[test]
     fn classifier_marks_obvious_reads_as_low_risk_pure_reads() {

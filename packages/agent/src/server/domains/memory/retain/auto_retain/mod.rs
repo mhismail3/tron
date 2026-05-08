@@ -11,12 +11,7 @@
 //! - [`gather_state`] — sync state read from the event store.
 //! - [`maybe_fire`] — async entry point called from `agent_prompt_service`.
 
-use tracing::{debug, warn};
-
-use crate::events::EventStore;
-use crate::server::shared::context::run_blocking_task;
-use crate::server::shared::error_mapping::map_event_store_error;
-use crate::server::shared::errors::{CapabilityError, SESSION_NOT_FOUND};
+use crate::server::shared::errors::SESSION_NOT_FOUND;
 
 use super::RetainDeps;
 

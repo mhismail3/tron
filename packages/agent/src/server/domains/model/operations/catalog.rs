@@ -3,7 +3,7 @@
 //! Model catalog reads, model switching, and reasoning-level mutation live here
 //! behind canonical `model::*` and `config::*` functions.
 
-use super::*;
+use crate::server::domains::model::Deps;
 use crate::server::domains::model::catalog as model_catalog;
 use crate::server::shared::errors::CapabilityError;
 use serde_json::{Value, json};

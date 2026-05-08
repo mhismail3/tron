@@ -1,6 +1,6 @@
 //! Operation binding for the repo worker.
 
-use super::*;
+use super::{Deps, get_divergence, list_sessions};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

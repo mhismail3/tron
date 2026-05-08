@@ -3,7 +3,6 @@
 //! Queue-backed job commands, hidden apply functions, and job subscription
 //! helpers live here behind canonical `job::*` functions.
 
-use super::*;
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::queue::publish_queue_lifecycle_event;
 use crate::engine::{
@@ -11,8 +10,6 @@ use crate::engine::{
     EnqueueInvocation, FunctionDefinition, FunctionId, IdempotencyContract, Invocation, Provenance,
     RiskLevel,
 };
-use crate::server::shared::errors::CapabilityError;
-use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 static ACTIVE_SUBSCRIPTIONS: std::sync::LazyLock<dashmap::DashMap<String, CancellationToken>> =

@@ -1,6 +1,6 @@
 //! Operation binding for the Codex App Server status worker.
 
-use super::*;
+use super::{Deps, codex_app_status_value};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

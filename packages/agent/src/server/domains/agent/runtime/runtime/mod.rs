@@ -7,25 +7,17 @@
 //! owns user-message payload persistence.
 
 use std::collections::HashSet;
-use std::fmt::Write;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::events::types::payloads::skill::{SkillsClearedMode, SkillsClearedPayload};
-use crate::events::{ActivitySummaryLine, EventStore, EventType, MessagePreview};
+use crate::events::{ActivitySummaryLine, EventType, MessagePreview};
 use crate::runtime::orchestrator::event_persister::EventPersister;
-use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::orchestrator::session_reconstructor::ReconstructedState;
 use crate::skills::registry::SkillRegistry;
 use crate::skills::types::SkillMetadata;
 use parking_lot::RwLock;
-use serde_json::Value;
 
-use crate::server::domains::session::context::{
-    ContextArtifactsService, collect_dynamic_rule_paths,
-};
-use crate::server::shared::context::run_blocking_task;
-use crate::server::shared::errors::CapabilityError;
+use crate::server::domains::session::context::collect_dynamic_rule_paths;
 mod bootstrap;
 mod pending;
 mod session_update;

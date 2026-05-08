@@ -1,6 +1,10 @@
 //! Operation binding for the prompt library worker.
 
-use super::*;
+use super::{
+    Deps, prompt_history_clear_value, prompt_history_delete_value, prompt_history_list_value,
+    prompt_snippet_create_value, prompt_snippet_delete_value, prompt_snippet_get_value,
+    prompt_snippet_list_value, prompt_snippet_update_value,
+};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

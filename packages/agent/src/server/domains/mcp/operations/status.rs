@@ -1,5 +1,8 @@
 //! MCP workflow operations.
-use super::*;
+use crate::server::domains::mcp::Deps;
+use crate::server::shared::errors::CapabilityError;
+use serde_json::Value;
+use std::sync::Arc;
 
 pub(crate) fn require_router(
     deps: &Deps,

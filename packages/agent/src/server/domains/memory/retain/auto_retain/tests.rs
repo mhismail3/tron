@@ -1,7 +1,7 @@
+use super::SESSION_NOT_FOUND;
 use super::decision::{AutoRetainDecision, AutoRetainInput, SkipReason, should_auto_retain};
 use super::fire::maybe_fire_with_interval;
 use super::state::gather_state;
-use super::*;
 
 fn input(interval: u32, user_msgs: i64, is_subagent: bool) -> AutoRetainInput {
     AutoRetainInput {

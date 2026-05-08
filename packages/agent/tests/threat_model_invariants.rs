@@ -388,6 +388,19 @@ fn server_package_uses_domain_owned_engine_layout() {
     let domains_mod = std::fs::read_to_string(domains_root.join("mod.rs"))
         .expect("failed to read server/domains/mod.rs");
     for removed in [
+        "use std::",
+        "use serde",
+        "use serde_json",
+        "use crate::",
+        "pub(crate) use worker::",
+        "pub use worker::",
+    ] {
+        assert!(
+            !domains_mod.contains(removed),
+            "root domains module must stay docs/module declarations only and not retain `{removed}`"
+        );
+    }
+    for removed in [
         "pub(crate) struct DomainRegistrationContext",
         "pub(crate) struct DomainFunctionRegistration",
         "pub(crate) struct DomainWorkerModule",
@@ -439,6 +452,11 @@ fn server_package_uses_domain_owned_engine_layout() {
         "agent/runtime/service/execute.rs",
         "agent/runtime/service/queue.rs",
         "agent/runtime/service/events.rs",
+        "agent/runtime/service/agent_build.rs",
+        "agent/runtime/service/completion.rs",
+        "agent/runtime/service/context.rs",
+        "agent/runtime/service/hooks.rs",
+        "agent/runtime/service/worktree.rs",
         "agent/runtime/runtime/user_event.rs",
         "agent/runtime/runtime/bootstrap.rs",
         "agent/runtime/runtime/pending.rs",
@@ -478,6 +496,15 @@ fn server_package_uses_domain_owned_engine_layout() {
             "domain readability split must keep `{required}` as an owned workflow module"
         );
     }
+    let execute_lines =
+        std::fs::read_to_string(domains_root.join("agent/runtime/service/execute.rs"))
+            .expect("failed to read agent runtime execute spine")
+            .lines()
+            .count();
+    assert!(
+        execute_lines <= 400,
+        "agent runtime execute.rs must stay a lifecycle spine, not a mixed-purpose body ({execute_lines} lines)"
+    );
 
     for required in [
         "session/agent.rs",
@@ -544,6 +571,19 @@ fn server_package_uses_domain_owned_engine_layout() {
             .split("#[cfg(test)]")
             .next()
             .unwrap_or(content.as_str());
+        let is_test_only_file = rel.file_name().is_some_and(|name| name == "tests.rs");
+        if rel.starts_with("src/server/domains") && !is_test_only_file {
+            assert!(
+                !production_content.contains("use super::*;"),
+                "{} must import explicit local/shared symbols instead of parent wildcard exports",
+                rel.display()
+            );
+            assert!(
+                !production_content.contains("use crate::server::domains::*;"),
+                "{} must not replace parent wildcard imports with the root domain prelude",
+                rel.display()
+            );
+        }
         if rel.ends_with("deps.rs") {
             assert!(
                 !production_content.contains("ServerRuntimeContext"),
@@ -697,13 +737,18 @@ fn domains_do_not_import_other_domains_private_operations() {
             "server::domains::",
         ] {
             for line in content.lines().filter(|line| line.contains(needle)) {
-                if !line.contains("::operations") {
+                if !line.contains("::operations")
+                    && !line.contains("::runtime::")
+                    && !line.contains("::service")
+                {
                     continue;
                 }
                 assert!(
                     line.contains(&format!("domains::{domain_name}::operations"))
+                        || line.contains(&format!("domains::{domain_name}::runtime::"))
+                        || line.contains(&format!("domains::{domain_name}::service"))
                         || line.contains("super::super::operations"),
-                    "{} must not import another domain's private operations: {line}",
+                    "{} must not import another domain's private operations, runtime workflows, or services: {line}",
                     rel.display()
                 );
             }

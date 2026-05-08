@@ -1,4 +1,6 @@
-use super::*;
+use super::HashSet;
+use crate::events::EventStore;
+use serde_json::Value;
 
 pub(crate) fn collect_dynamic_rule_paths(
     event_store: &EventStore,

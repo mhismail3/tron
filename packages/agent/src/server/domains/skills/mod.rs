@@ -3,19 +3,27 @@
 //! This module owns canonical function execution for the skills namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
 
+use crate::server::shared::errors;
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
 
-use super::*;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::domains::worker::DomainWorkerModule;
+use crate::server::shared::context::run_blocking_task;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
+use serde_json::json;
+use std::sync::Arc;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        super::domain_worker_module(
+        crate::server::domains::worker::domain_worker_module(
             "skills",
             contract::STREAM_TOPICS,
             handlers::function_registrations(contract::capabilities()?, domain_deps)?,

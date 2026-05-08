@@ -1,6 +1,6 @@
 //! Operation binding for the voice notes worker.
 
-use super::*;
+use super::{Deps, delete, list, save};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

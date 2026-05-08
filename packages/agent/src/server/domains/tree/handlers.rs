@@ -1,6 +1,6 @@
 //! Operation binding for the tree worker.
 
-use super::*;
+use super::{Deps, compare_branches, get_ancestors, get_branches, get_subtree, get_visualization};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

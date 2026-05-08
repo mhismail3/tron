@@ -11,8 +11,8 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 
 use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
-use crate::server::domains::DomainFunctionRegistration;
 use crate::server::domains::catalog::{CapabilitySpec, function_definition_for_capability};
+use crate::server::domains::worker::DomainFunctionRegistration;
 use crate::server::shared::error_mapping::capability_error_to_engine;
 use crate::server::shared::errors::CapabilityError;
 
@@ -172,7 +172,7 @@ macro_rules! operation_bindings {
         pub(crate) fn function_registrations(
             specs: Vec<$crate::server::domains::catalog::CapabilitySpec>,
             deps: Deps,
-        ) -> $crate::engine::Result<Vec<$crate::server::domains::DomainFunctionRegistration>> {
+        ) -> $crate::engine::Result<Vec<$crate::server::domains::worker::DomainFunctionRegistration>> {
             $crate::server::domains::bindings::function_registrations(
                 specs,
                 deps,
@@ -207,7 +207,7 @@ macro_rules! operation_bindings {
         pub(crate) fn function_registrations(
             specs: Vec<$crate::server::domains::catalog::CapabilitySpec>,
             deps: Deps,
-        ) -> $crate::engine::Result<Vec<$crate::server::domains::DomainFunctionRegistration>> {
+        ) -> $crate::engine::Result<Vec<$crate::server::domains::worker::DomainFunctionRegistration>> {
             $crate::server::domains::bindings::function_registrations(
                 specs,
                 deps,

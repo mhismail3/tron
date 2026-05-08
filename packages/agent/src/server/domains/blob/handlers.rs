@@ -1,6 +1,6 @@
 //! Operation binding for the blob worker.
 
-use super::*;
+use super::{Deps, blob_get_value};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

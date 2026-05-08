@@ -1,6 +1,8 @@
 //! Domain-specific dependency bundle for the codex_app worker.
 
-use super::*;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::platform::codex_app::CodexAppServerManager;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

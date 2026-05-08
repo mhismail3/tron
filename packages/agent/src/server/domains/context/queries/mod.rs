@@ -5,13 +5,11 @@
 //! redaction, and blocking context-manager preparation.
 
 use std::path::Path;
-use std::sync::Arc;
 
-use crate::skills::registry::SkillRegistry;
 use crate::skills::tracker::SkillTracker;
 use crate::skills::types::{SkillAddMethod, SkillSource};
 use parking_lot::RwLock;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::params;
 use serde_json::{Value, json};
 
 use crate::server::domains::context::Deps;

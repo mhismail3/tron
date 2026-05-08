@@ -1,6 +1,9 @@
 //! Operation binding for the skills worker.
 
-use super::*;
+use super::{
+    Deps, skill_activate_value, skill_active_value, skill_deactivate_value, skill_get_value,
+    skill_list_value, skill_refresh_value,
+};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

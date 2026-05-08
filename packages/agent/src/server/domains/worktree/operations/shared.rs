@@ -1,6 +1,7 @@
 //! Worktree workflow operations.
-use super::*;
 
+use crate::server::domains::worktree::Deps;
+use crate::server::shared::errors::CapabilityError;
 pub(crate) fn require_coordinator(
     deps: &Deps,
 ) -> Result<&crate::worktree::WorktreeCoordinator, CapabilityError> {

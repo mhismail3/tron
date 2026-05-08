@@ -1,5 +1,10 @@
 //! Worktree workflow operations.
-use super::*;
+use super::resolve_diff_dir;
+use super::{count_diff_stats, instrument, split_diff_by_file};
+use crate::server::domains::worktree::Deps;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
 
 // ── GetDiff ─────────────────────────────────────────────────────────
 

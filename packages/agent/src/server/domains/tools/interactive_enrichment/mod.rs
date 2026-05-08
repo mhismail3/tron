@@ -46,7 +46,7 @@
 //! confirmation/answer prefix format, update this module in lockstep. Tests
 //! below pin the exact formats.
 
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 const CONFIRMATION_MARKER: &str = "[Confirmation response]";
 const ANSWERS_MARKER: &str = "[Answers to your questions]";

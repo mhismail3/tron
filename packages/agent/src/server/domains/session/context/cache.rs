@@ -2,7 +2,11 @@ use super::rules::{
     RULES_AGENT_DIRS, discover_rules_state, load_rules, rules_index_from_discovery,
 };
 use super::types::{LoadedRules, ResolvedContextArtifacts, SessionContextArtifacts};
-use super::*;
+use super::{Condvar, HashMap, Path, RulesDiscoveryResult, SystemTime};
+use crate::events::EventStore;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct ContextArtifactsKey {

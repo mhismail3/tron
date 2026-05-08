@@ -1,6 +1,8 @@
 //! Domain-specific dependency bundle for the auth worker.
 
-use super::*;
+use crate::server::domains::worker::DomainRegistrationContext;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

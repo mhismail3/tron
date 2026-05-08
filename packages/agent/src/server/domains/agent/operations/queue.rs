@@ -1,5 +1,11 @@
 //! Agent workflow operations.
-use super::*;
+use super::{AgentCommandService, PromptQueueService, PromptRequest, errors, spawn_prompt_run};
+use crate::engine::Invocation;
+use crate::server::domains::agent::Deps;
+use crate::server::shared::context::run_blocking_task;
+use crate::server::shared::errors::CapabilityError;
+use serde_json::Value;
+use serde_json::json;
 
 pub(crate) async fn start_or_queue_prompt(
     deps: &Deps,

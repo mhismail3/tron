@@ -1,4 +1,8 @@
-use super::*;
+use super::{Deps, instrument};
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
+use serde_json::json;
 
 // ── worktree::resolve_conflicts_with_subagent ────────────────────────────
 

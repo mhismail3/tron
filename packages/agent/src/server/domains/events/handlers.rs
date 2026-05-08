@@ -1,6 +1,9 @@
 //! Operation binding for the events worker.
 
-use super::*;
+use super::{
+    Deps, events_append_value, events_get_history_value, events_get_since_value,
+    events_subscribe_value, events_unsubscribe_value,
+};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

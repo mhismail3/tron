@@ -1,5 +1,8 @@
 use super::decision::{RETAINED_TYPE, USER_MESSAGE_TYPE};
-use super::*;
+use super::{AutoRetainInput, SESSION_NOT_FOUND};
+use crate::events::EventStore;
+use crate::server::shared::error_mapping::map_event_store_error;
+use crate::server::shared::errors::CapabilityError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State gathering (sync, testable)

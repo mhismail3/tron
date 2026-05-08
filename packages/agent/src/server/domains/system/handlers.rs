@@ -1,6 +1,9 @@
 //! Operation binding for the system worker.
 
-use super::*;
+use super::{
+    Deps, ping_value, system_check_for_updates_value, system_diagnostics_value, system_info_value,
+    system_shutdown_value, system_update_status_value,
+};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

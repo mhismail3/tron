@@ -1,6 +1,12 @@
 //! Domain-specific dependency bundle for the agent worker.
 
-use super::*;
+use crate::events::EventStore;
+use crate::runtime::orchestrator::orchestrator::Orchestrator;
+use crate::runtime::orchestrator::session_manager::SessionManager;
+use crate::runtime::profile_runtime::ProfileRuntime;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::skills::registry::SkillRegistry;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

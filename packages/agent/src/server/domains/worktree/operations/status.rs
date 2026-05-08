@@ -1,5 +1,10 @@
 //! Worktree workflow operations.
-use super::*;
+use super::{GetStatusOperation, require_coordinator, require_session_working_dir};
+use super::{instrument, map_worktree_error};
+use crate::server::domains::worktree::Deps;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
 
 impl GetStatusOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::get_status"))]

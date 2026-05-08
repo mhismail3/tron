@@ -1,6 +1,6 @@
 //! Operation binding for the import worker.
 
-use super::*;
+use super::{Deps, execute_import, list_sessions, list_sources, preview_session};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

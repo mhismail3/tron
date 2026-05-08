@@ -1,6 +1,6 @@
 //! Operation binding for the device worker.
 
-use super::*;
+use super::{Deps, register_token, respond, unregister_token};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

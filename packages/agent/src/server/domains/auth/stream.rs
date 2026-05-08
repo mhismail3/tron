@@ -3,9 +3,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::{EngineHostHandle, Invocation, PublishStreamEvent, VisibilityScope};
+use crate::server::domains::auth::contract;
 use crate::server::shared::events::ServerEventPayload;
-
-use super::contract;
 
 /// Typed publisher for auth account/credential changes.
 pub(crate) struct AuthStreamPublisher<'a> {

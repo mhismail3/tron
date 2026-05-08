@@ -3,10 +3,16 @@ use super::parsing::*;
 use super::summarizer::*;
 use super::transcript::*;
 use super::writer::*;
-use super::*;
+use super::{
+    RetainDeps, RetainSource, emit_auto_retain_triggered, serialize_for_memory,
+    trigger_manual_retain, trigger_retain,
+};
 use crate::events::AppendOptions;
 use crate::events::types::EventType;
 use crate::events::types::state::Message;
+use serde_json::Value;
+use serde_json::json;
+use std::sync::Arc;
 
 // ── Path tests ──────────────────────────────────────────────────────
 
@@ -342,7 +348,7 @@ async fn handler_requires_session_id() {
     let err = trigger_manual_retain(
         Some(&serde_json::json!({})),
         &crate::server::domains::memory::Deps::from_engine(
-            &crate::server::domains::DomainRegistrationContext::from_context(&ctx),
+            &crate::server::domains::worker::DomainRegistrationContext::from_context(&ctx),
         ),
     )
     .await

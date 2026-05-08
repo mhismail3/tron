@@ -1,6 +1,11 @@
 //! Domain-specific dependency bundle for the model worker.
 
-use super::*;
+use crate::events::EventStore;
+use crate::runtime::orchestrator::orchestrator::Orchestrator;
+use crate::runtime::orchestrator::session_manager::SessionManager;
+use crate::server::domains::worker::DomainRegistrationContext;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

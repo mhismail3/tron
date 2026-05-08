@@ -4,7 +4,7 @@
 //! operation key. The session root module owns registration only; handlers bind
 //! operation keys to these functions.
 
-use super::*;
+use crate::server::domains::session::Deps;
 use crate::server::shared::errors::CapabilityError;
 use crate::server::shared::params::{opt_bool, opt_string, require_string_param};
 use serde_json::Value;

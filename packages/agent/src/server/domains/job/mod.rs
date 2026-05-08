@@ -13,14 +13,15 @@ pub(crate) mod stream;
 pub(crate) use deps::Deps;
 pub(crate) use operations::hidden_function_registrations;
 
-use super::*;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::domains::worker::DomainWorkerModule;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let mut module = {
         let domain_deps = Deps::from_engine(deps);
-        super::domain_worker_module(
+        crate::server::domains::worker::domain_worker_module(
             "job",
             contract::STREAM_TOPICS,
             handlers::function_registrations(contract::capabilities()?, domain_deps)?,

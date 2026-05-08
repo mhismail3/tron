@@ -1,4 +1,4 @@
-use super::*;
+use super::{Deps, SessionCommandService};
 use std::sync::Arc;
 use tempfile::tempdir;
 

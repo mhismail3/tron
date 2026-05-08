@@ -1,6 +1,10 @@
 //! Domain-specific dependency bundle for the skills worker.
 
-use super::*;
+use crate::events::EventStore;
+use crate::runtime::orchestrator::session_manager::SessionManager;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::skills::registry::SkillRegistry;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

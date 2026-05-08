@@ -1,6 +1,6 @@
 //! Domain-specific dependency bundle for the filesystem worker.
 
-use super::*;
+use crate::server::domains::worker::DomainRegistrationContext;
 
 #[derive(Clone)]
 pub(crate) struct Deps;

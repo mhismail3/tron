@@ -3,20 +3,31 @@
 //! This module owns canonical function execution for the events namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
 
+use crate::server::shared::errors;
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod stream;
 pub(crate) use deps::Deps;
 
-use super::*;
+use crate::engine::Invocation;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::domains::worker::DomainWorkerModule;
+use crate::server::shared::error_mapping::map_event_store_error;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::opt_array;
+use crate::server::shared::params::opt_string;
+use crate::server::shared::params::require_param;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
+use serde_json::json;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        super::domain_worker_module(
+        crate::server::domains::worker::domain_worker_module(
             "events",
             contract::STREAM_TOPICS,
             handlers::function_registrations(contract::capabilities()?, domain_deps)?,

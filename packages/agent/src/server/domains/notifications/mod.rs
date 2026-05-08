@@ -8,14 +8,23 @@ pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
 
-use super::*;
+use crate::server::domains::notifications::inbox::NotificationInboxService;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::domains::worker::DomainWorkerModule;
+use crate::server::shared::context::run_blocking_task;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::errors::to_json_value;
+use crate::server::shared::params::opt_string;
+use crate::server::shared::params::opt_u64;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        super::domain_worker_module(
+        crate::server::domains::worker::domain_worker_module(
             "notifications",
             contract::STREAM_TOPICS,
             handlers::function_registrations(contract::capabilities()?, domain_deps)?,

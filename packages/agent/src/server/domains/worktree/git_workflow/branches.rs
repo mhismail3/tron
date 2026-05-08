@@ -1,5 +1,10 @@
 use super::shared::*;
-use super::*;
+use super::{Deps, instrument, map_worktree_error};
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::opt_string;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
+use serde_json::json;
 
 // ── git.listLocalBranches ────────────────────────────────────────────
 

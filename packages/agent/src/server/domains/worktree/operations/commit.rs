@@ -1,5 +1,12 @@
 //! Worktree workflow operations.
-use super::*;
+use super::{CommitOperation, require_coordinator};
+use super::{CommitOptions, instrument, map_worktree_error, require_bool};
+use crate::server::domains::worktree::Deps;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::opt_bool;
+use crate::server::shared::params::opt_string;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
 
 impl CommitOperation {
     #[instrument(skip(self, deps), fields(method = "worktree::commit"))]

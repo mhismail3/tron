@@ -1,6 +1,6 @@
 //! Operation binding for the sandbox worker.
 
-use super::*;
+use super::{Deps, list_containers, remove_container, run_container_command};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

@@ -1,7 +1,7 @@
 //! Operation binding for the agent worker.
 
+use super::Deps;
 use super::operations::*;
-use super::*;
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

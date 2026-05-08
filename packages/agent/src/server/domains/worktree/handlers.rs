@@ -1,7 +1,7 @@
 //! Operation binding for the worktree worker.
 
+use super::Deps;
 use super::operations::*;
-use super::*;
 use crate::server::domains::bindings::operation_bindings;
 use crate::server::domains::worktree::git_workflow::{
     AbortMergeOperation, ContinueMergeOperation, FinalizeSessionOperation, ListConflictsOperation,

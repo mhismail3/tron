@@ -1,5 +1,7 @@
 use super::payload::inject_into_payload;
-use super::*;
+use super::{Map, SUBAGENT_RESULTS_MARKER};
+use serde_json::Value;
+use serde_json::json;
 
 /// Back-fill `messageKind` into `message.user` events whose content starts
 /// with the subagent results marker. Skips events that already have a

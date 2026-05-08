@@ -5,7 +5,7 @@
 //! this module; query/command services keep the actual domain service logic
 //! narrow and testable.
 
-use super::*;
+use crate::server::domains::context::Deps;
 use crate::server::domains::context::commands::ContextCommandService;
 use crate::server::domains::context::queries::ContextQueryService;
 use crate::server::shared::errors::CapabilityError;

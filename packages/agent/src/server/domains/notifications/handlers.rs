@@ -1,6 +1,9 @@
 //! Operation binding for the notifications worker.
 
-use super::*;
+use super::{
+    Deps, notifications_list_value, notifications_mark_all_read_value,
+    notifications_mark_read_value,
+};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

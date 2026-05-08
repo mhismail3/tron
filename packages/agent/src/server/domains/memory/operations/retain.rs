@@ -4,7 +4,7 @@
 //! the retain runtime keeps summarization, persistence, and event emission in a
 //! narrow domain service.
 
-use super::*;
+use crate::server::domains::memory::Deps;
 use crate::server::domains::memory::retain as memory_retain;
 use crate::server::shared::errors::CapabilityError;
 use serde_json::Value;

@@ -1,5 +1,10 @@
 //! Worktree workflow operations.
-use super::*;
+use super::instrument;
+use super::resolve_diff_dir;
+use crate::server::domains::worktree::Deps;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::require_string_param;
+use serde_json::Value;
 
 pub(crate) fn require_session_and_paths(
     params: Option<&Value>,

@@ -11,7 +11,8 @@ pub(crate) mod handlers;
 pub(crate) mod operations;
 pub(crate) use deps::Deps;
 
-use super::*;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::domains::worker::DomainWorkerModule;
 
 pub(crate) fn worker_modules(
     deps: &DomainRegistrationContext,
@@ -28,12 +29,12 @@ pub(crate) fn worker_modules(
         .collect::<Vec<_>>();
     let domain_deps = Deps::from_engine(deps);
     Ok(vec![
-        super::domain_worker_module(
+        crate::server::domains::worker::domain_worker_module(
             "model",
             contract::STREAM_TOPICS,
             handlers::model::function_registrations(model_specs, domain_deps.clone())?,
         )?,
-        super::domain_worker_module(
+        crate::server::domains::worker::domain_worker_module(
             "config",
             contract::STREAM_TOPICS,
             handlers::config::function_registrations(config_specs, domain_deps)?,

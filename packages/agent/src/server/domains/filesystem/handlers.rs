@@ -1,6 +1,9 @@
 //! Operation binding for the filesystem worker.
 
-use super::*;
+use super::{
+    Deps, file_read_value, filesystem_create_dir_value, filesystem_get_home_value,
+    filesystem_list_dir_value,
+};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

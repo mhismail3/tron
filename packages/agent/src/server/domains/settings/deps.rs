@@ -1,6 +1,10 @@
 //! Domain-specific dependency bundle for the settings worker.
 
-use super::*;
+use crate::runtime::profile_runtime::ProfileRuntime;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::platform::codex_app::CodexAppServerManager;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

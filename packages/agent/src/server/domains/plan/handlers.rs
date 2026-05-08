@@ -1,6 +1,6 @@
 //! Operation binding for the plan worker.
 
-use super::*;
+use super::{Deps, plan_get_state_value, plan_set_value};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

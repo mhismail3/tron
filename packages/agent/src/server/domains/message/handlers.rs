@@ -1,6 +1,6 @@
 //! Operation binding for the message worker.
 
-use super::*;
+use super::{Deps, message_delete_value};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

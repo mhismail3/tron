@@ -1,16 +1,12 @@
 //! Shared command-side services for session capabilities.
 
-use std::time::Instant;
-
 use crate::core::events::{BaseEvent, TronEvent};
 use crate::runtime::agent::event_emitter::EventEmitter;
 use metrics::{counter, histogram};
-use serde_json::{Value, json};
 
 use crate::server::domains::session::Deps;
 use crate::server::domains::session::context::{ContextArtifactsService, RuleFileLevel};
-use crate::server::shared::context::run_blocking_task;
-use crate::server::shared::errors::{self, CapabilityError};
+use crate::server::shared::errors::CapabilityError;
 
 pub(super) fn resolve_session_profile(
     deps: &Deps,

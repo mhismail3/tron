@@ -1,7 +1,8 @@
 //! Operation binding for the context worker.
 
-use super::*;
+use super::Deps;
 use crate::server::domains::bindings::operation_bindings;
+use crate::server::domains::context::operations;
 
 operation_bindings! {
     deps = Deps;

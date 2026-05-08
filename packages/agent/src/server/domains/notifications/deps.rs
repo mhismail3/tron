@@ -1,6 +1,8 @@
 //! Domain-specific dependency bundle for the notifications worker.
 
-use super::*;
+use crate::events::EventStore;
+use crate::server::domains::worker::DomainRegistrationContext;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

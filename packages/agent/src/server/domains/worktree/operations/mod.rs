@@ -4,13 +4,10 @@
 //! destructive worktree operations live here behind canonical `worktree::*`
 //! functions.
 
-use super::*;
 use crate::server::shared::error_mapping::map_worktree_error;
-use crate::server::shared::errors::CapabilityError;
-use crate::server::shared::params::{opt_bool, opt_string, require_bool, require_string_param};
+use crate::server::shared::params::require_bool;
 use crate::worktree::types::CommitOptions;
 use crate::worktree::{count_diff_stats, split_diff_by_file};
-use serde_json::Value;
 use tracing::instrument;
 
 // ── Helpers ─────────────────────────────────────────────────────────

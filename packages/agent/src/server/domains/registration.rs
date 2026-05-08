@@ -29,11 +29,13 @@ use crate::engine::{EngineError, Result as EngineResult};
 use crate::server::shared::context::ServerRuntimeContext;
 
 use crate::server::domains::catalog;
+use crate::server::domains::worker::{
+    DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
+};
 use crate::server::domains::{
-    DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule, agent, auth, blob,
-    browser, codex_app, context, cron, device, display, events, filesystem, git, import, job, logs,
-    mcp, memory, message, model, notifications, plan, prompt_library, repo, sandbox, session,
-    settings, skills, system, tools, transcription, tree, voice_notes, worktree,
+    agent, auth, blob, browser, codex_app, context, cron, device, display, events, filesystem, git,
+    import, job, logs, mcp, memory, message, model, notifications, plan, prompt_library, repo,
+    sandbox, session, settings, skills, system, tools, transcription, tree, voice_notes, worktree,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.

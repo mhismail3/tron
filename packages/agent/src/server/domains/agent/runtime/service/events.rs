@@ -1,4 +1,4 @@
-use super::*;
+use super::PromptEngineCausality;
 
 pub(crate) async fn publish_prompt_runtime_stream(
     engine_host: &crate::engine::EngineHostHandle,

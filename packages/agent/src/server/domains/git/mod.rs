@@ -20,13 +20,15 @@ use crate::server::domains::git::service as git_service;
 use crate::server::shared::errors::{self, CapabilityError};
 use crate::server::shared::params::require_string_param;
 
-use super::*;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::domains::worker::DomainWorkerModule;
+use crate::server::shared::context::run_blocking_task;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let git_deps = Deps::from_engine(deps);
-    super::domain_worker_module(
+    crate::server::domains::worker::domain_worker_module(
         "git",
         contract::STREAM_TOPICS,
         handlers::function_registrations(contract::capabilities()?, git_deps)?,

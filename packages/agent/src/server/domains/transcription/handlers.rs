@@ -1,6 +1,6 @@
 //! Operation binding for the transcription worker.
 
-use super::*;
+use super::{Deps, download_model_value, list_models_value, transcribe_audio_value};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

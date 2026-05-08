@@ -5,8 +5,7 @@ use serde_json::{Value, json};
 use crate::engine::{
     EngineHostHandle, Invocation, InvocationId, PublishStreamEvent, TraceId, VisibilityScope,
 };
-
-use super::contract;
+use crate::server::domains::agent::contract;
 
 /// Typed publisher for agent runtime and queue topics.
 pub(crate) struct AgentStreamPublisher<'a> {

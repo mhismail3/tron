@@ -1,6 +1,6 @@
 //! Operation binding for the git worker.
 
-use super::*;
+use super::{CloneOperation, Deps};
 use crate::server::domains::bindings::operation_bindings;
 use crate::server::domains::worktree::git_workflow::{
     ListLocalBranchesOperation, ListRemoteBranchesOperation, PushOperation, SyncMainOperation,

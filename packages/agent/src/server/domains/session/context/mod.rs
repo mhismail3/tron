@@ -6,14 +6,11 @@
 //! with agent/context domains.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::path::Path;
+use std::sync::Condvar;
 use std::time::SystemTime;
 
-use serde_json::Value;
-
-use crate::events::EventStore;
-use crate::runtime::context::loader::{self, ContextLevel, ContextLoader, ContextLoaderConfig};
+use crate::runtime::context::loader::{ContextLevel, ContextLoader, ContextLoaderConfig};
 use crate::runtime::context::rules_discovery::{
     RulesDiscoveryConfig, RulesDiscoveryResult, discover_rules_files_with_state,
 };

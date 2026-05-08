@@ -1,10 +1,11 @@
 //! Operation binding for the model/config workers.
 
-use super::*;
+use super::Deps;
 use crate::server::domains::bindings::operation_bindings;
 
 pub(crate) mod model {
-    use super::*;
+    use super::{Deps, operation_bindings};
+    use crate::server::domains::model::operations;
 
     operation_bindings! {
         deps = Deps;
@@ -25,7 +26,8 @@ pub(crate) mod model {
 }
 
 pub(crate) mod config {
-    use super::*;
+    use super::{Deps, operation_bindings};
+    use crate::server::domains::model::operations;
 
     operation_bindings! {
         deps = Deps;

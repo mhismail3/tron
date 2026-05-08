@@ -1,6 +1,6 @@
 //! Operation binding for the display worker.
 
-use super::*;
+use super::{Deps, stop_stream};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

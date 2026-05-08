@@ -24,12 +24,9 @@ pub use rebase::RebaseOnMainOperation;
 pub use remote::{PushOperation, SyncMainOperation};
 pub use subagent::ResolveConflictsWithSubagentOperation;
 
-use serde_json::{Value, json};
 use tracing::instrument;
 
 use crate::server::shared::error_mapping::map_worktree_error;
-use crate::server::shared::errors::CapabilityError;
-use crate::server::shared::params::{opt_bool, opt_string, opt_u64, require_string_param};
 use crate::worktree::WorktreeError;
 use crate::worktree::types::RebaseOnMainResult;
 

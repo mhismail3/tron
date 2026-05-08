@@ -1,6 +1,6 @@
 //! Operation binding for the logs worker.
 
-use super::*;
+use super::{Deps, ingest_logs_value, recent_logs_value};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {

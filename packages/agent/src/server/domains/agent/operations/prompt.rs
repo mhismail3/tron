@@ -1,5 +1,20 @@
 //! Agent workflow operations.
-use super::*;
+use super::{
+    AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, EngineQueueDrainer, EnqueueInvocation,
+    FunctionId, PromptEngineCausality, PromptRequest, drain_prompt_queue, errors,
+    publish_queue_lifecycle_event,
+};
+use crate::engine::Invocation;
+use crate::server::domains::agent::Deps;
+use crate::server::domains::agent::runtime::service::spawn_prompt_run;
+use crate::server::shared::context::run_blocking_task;
+use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::params::opt_array;
+use crate::server::shared::params::opt_string;
+use crate::server::shared::params::require_string_param;
+use crate::server::shared::validation;
+use serde_json::Value;
+use serde_json::json;
 
 pub(crate) struct PromptSubmission {
     session_id: String,

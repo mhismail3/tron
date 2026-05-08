@@ -1,4 +1,6 @@
-use super::*;
+use super::HashSet;
+use serde_json::Value;
+use std::fmt::Write;
 
 /// Parse a pending-results event row's payload into an `(id, value)` pair.
 ///

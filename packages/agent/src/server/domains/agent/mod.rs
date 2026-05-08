@@ -23,14 +23,20 @@ pub(crate) mod handlers;
 pub(crate) mod operations;
 pub(crate) use deps::Deps;
 
-use super::*;
+use crate::engine::VisibilityScope;
+use crate::server::domains::catalog;
+use crate::server::domains::worker::DomainFunctionRegistration;
+use crate::server::domains::worker::DomainRegistrationContext;
+use crate::server::domains::worker::DomainWorkerModule;
+use serde_json::Value;
+use serde_json::json;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let mut module = {
         let domain_deps = Deps::from_engine(deps);
-        super::domain_worker_module(
+        crate::server::domains::worker::domain_worker_module(
             "agent",
             contract::STREAM_TOPICS,
             handlers::function_registrations(contract::capabilities()?, domain_deps)?,

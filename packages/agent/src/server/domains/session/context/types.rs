@@ -1,4 +1,5 @@
-use super::*;
+use super::RulesIndex;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RuleFileLevel {

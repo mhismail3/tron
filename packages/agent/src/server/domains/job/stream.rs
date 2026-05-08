@@ -3,8 +3,7 @@
 use serde_json::json;
 
 use crate::engine::{EngineHostHandle, Invocation, PublishStreamEvent, VisibilityScope};
-
-use super::contract;
+use crate::server::domains::job::contract;
 
 /// Typed publisher for job status events.
 pub(crate) struct JobStreamPublisher<'a> {

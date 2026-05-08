@@ -1,6 +1,9 @@
 //! Domain-specific dependency bundle for the worktree worker.
 
-use super::*;
+use crate::runtime::orchestrator::orchestrator::Orchestrator;
+use crate::runtime::orchestrator::session_manager::SessionManager;
+use crate::server::domains::worker::DomainRegistrationContext;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
