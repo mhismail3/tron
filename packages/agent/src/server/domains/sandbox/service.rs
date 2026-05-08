@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+use tokio::process::Child;
+use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{debug, warn};
 
@@ -9,6 +11,25 @@ use crate::server::shared::errors::CapabilityError;
 
 const CONTAINER_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 const CONTAINER_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// In-memory process ownership for sandbox-created workers.
+#[derive(Default)]
+pub(crate) struct SandboxWorkerProcessStore {
+    children: Mutex<HashMap<String, Child>>,
+}
+
+impl SandboxWorkerProcessStore {
+    pub(crate) async fn insert(&self, worker_id: String, child: Child) {
+        let _ = self.children.lock().await.insert(worker_id, child);
+    }
+
+    pub(crate) async fn kill(&self, worker_id: &str) {
+        if let Some(mut child) = self.children.lock().await.remove(worker_id) {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+    }
+}
 
 pub(crate) fn containers_json_path() -> PathBuf {
     crate::core::paths::containers_path()
@@ -174,6 +195,18 @@ pub(crate) async fn remove_container_runtime_best_effort(name: &str) {
     .await;
 }
 
+pub(crate) fn worker_endpoint_from_origin(origin: &str) -> String {
+    let origin = origin.trim_end_matches('/');
+    let websocket_origin = if let Some(rest) = origin.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = origin.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        origin.to_owned()
+    };
+    format!("{websocket_origin}/engine/workers")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +230,17 @@ mod tests {
         let containers = load_containers(&path).unwrap();
 
         assert!(containers.is_empty());
+    }
+
+    #[test]
+    fn worker_endpoint_from_origin_uses_engine_workers_path() {
+        assert_eq!(
+            worker_endpoint_from_origin("http://127.0.0.1:49134"),
+            "ws://127.0.0.1:49134/engine/workers"
+        );
+        assert_eq!(
+            worker_endpoint_from_origin("https://tron.local/"),
+            "wss://tron.local/engine/workers"
+        );
     }
 }

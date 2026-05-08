@@ -24,9 +24,9 @@
 //! - canonical domain functions such as `events::append`,
 //!   `filesystem::create_dir`, and `skills::activate` are the only executable
 //!   domain surface;
-//! - stream, state, and queue workers are registered as first-class primitive
-//!   workers with in-memory and SQLite-backed stores scoped outside the
-//!   production event-store migration;
+//! - stream, state, queue, approval, catalog, worker, and observability workers
+//!   are registered as first-class primitive workers with in-memory and
+//!   SQLite-backed stores scoped outside the production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution;
 //! - resource leases and compensation contracts are first-class primitives for
@@ -36,9 +36,11 @@
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
-//! - the local external-worker runtime speaks the loopback protocol, registers
-//!   session-visible volatile functions/triggers, and unregisters them on
-//!   disconnect; sandbox execution and remote workers remain deferred.
+//! - the local external-worker runtime speaks the `/engine/workers` loopback
+//!   protocol, registers scoped functions/triggers, publishes streams only
+//!   through `stream::publish`, cleans volatile workers on disconnect, marks
+//!   durable disconnected workers unhealthy, and supplies the sandbox-created
+//!   worker path used by `sandbox::spawn_worker`.
 //!
 //! # INVARIANT: one production execution shape
 //!
@@ -69,6 +71,7 @@ pub mod invocation;
 pub mod leases;
 pub mod ledger;
 pub mod policy;
+pub mod primitives;
 pub mod protocol;
 pub mod queue;
 pub mod registry;
@@ -111,9 +114,10 @@ pub use ledger::{
     SqliteEngineLedgerStore, StoredEngineError, StoredInvocationOutcome,
 };
 pub use protocol::{
-    CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION,
-    WorkerCatalogChange, WorkerDisconnect, WorkerHeartbeat, WorkerHello, WorkerInvocationResult,
-    WorkerInvoke, WorkerProtocolMessage,
+    CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,
+    WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
+    WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerProtocolMessage,
+    WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
 pub use queue::{
     EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime, EnqueueInvocation,

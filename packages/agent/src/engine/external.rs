@@ -1,12 +1,12 @@
-//! Local external-worker runtime foundation.
+//! Local external-worker runtime.
 //!
-//! This is deliberately loopback-only and protocol-bound. It gives tests and
-//! future local worker processes a small runtime for registering volatile
-//! session-scoped functions/triggers, receiving catalog snapshots, heartbeat
-//! liveness, timeout-driven cleanup, and disconnect cleanup without opening
-//! remote execution or sandboxing yet. Volatile registrations disappear on
-//! disconnect or missed heartbeats so agents never discover stale local
-//! capabilities as runnable.
+//! This is deliberately loopback-only and protocol-bound. Local workers register
+//! scoped functions/triggers, receive catalog snapshots, publish stream events
+//! through the engine stream primitive, and are cleaned up by heartbeat and
+//! disconnect policy. Volatile registrations disappear on disconnect or missed
+//! heartbeat. Durable local registrations stay in the catalog but are marked
+//! unhealthy until the worker reconnects and re-registers, so agents never
+//! discover stale capabilities as runnable.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -19,14 +19,16 @@ use serde_json::Value;
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::host::EngineHostHandle;
-use super::ids::{ActorId, InvocationId, WorkerId};
-use super::invocation::{InProcessFunctionHandler, Invocation};
+use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, WorkerId};
+use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation};
+use super::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use super::protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION,
-    WorkerCatalogChange, WorkerDisconnect, WorkerHeartbeat, WorkerHello, WorkerInvocationResult,
-    WorkerInvoke, WorkerProtocolMessage,
+    WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
+    WorkerInvocationResult, WorkerInvoke, WorkerProtocolMessage, WorkerRegistrationMode,
+    WorkerStreamPublish, WorkerVisibility,
 };
-use super::types::VisibilityScope;
+use super::types::{DeliveryMode, FunctionHealth, WorkerLifecycleState};
 
 /// Transport client used to invoke a connected local external worker.
 #[async_trait]
@@ -48,6 +50,16 @@ pub struct ExternalWorkerConnection {
     pub last_heartbeat_at: DateTime<Utc>,
     /// Protocol is loopback/local only.
     pub loopback_only: bool,
+    /// Registration durability.
+    pub registration_mode: WorkerRegistrationMode,
+    /// Default visibility for registered entries.
+    pub default_visibility: WorkerVisibility,
+    /// Optional session scope.
+    pub session_id: Option<String>,
+    /// Optional workspace scope.
+    pub workspace_id: Option<String>,
+    /// Current runtime health.
+    pub health: WorkerHealth,
     /// Registered function ids.
     pub functions: BTreeSet<String>,
     /// Registered trigger ids.
@@ -89,8 +101,8 @@ impl EngineExternalWorkerRuntime {
     }
 
     /// Accept a worker hello and return a catalog snapshot visible to the
-    /// worker. Non-loopback workers are rejected until the sandbox/runtime
-    /// security model exists.
+    /// worker. Non-loopback workers are rejected until the remote-worker
+    /// identity and authorization model is complete.
     pub async fn hello(&mut self, hello: WorkerHello) -> Result<CatalogSnapshot> {
         if hello.protocol_version != WORKER_PROTOCOL_VERSION {
             return Err(EngineError::PolicyViolation(format!(
@@ -104,8 +116,25 @@ impl EngineExternalWorkerRuntime {
             ));
         }
         let worker_id = hello.worker.id.clone();
+        if hello.identity.worker_id != worker_id {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker identity {} does not match definition {}",
+                hello.identity.worker_id, worker_id
+            )));
+        }
+        if hello.registration_mode == WorkerRegistrationMode::Durable && !hello.loopback_only {
+            return Err(EngineError::PolicyViolation(
+                "durable workers must be authenticated local workers".to_owned(),
+            ));
+        }
+        if hello.default_visibility == WorkerVisibility::Workspace && hello.workspace_id.is_none() {
+            return Err(EngineError::PolicyViolation(
+                "workspace-visible workers require workspaceId".to_owned(),
+            ));
+        }
         let owner_actor = hello.worker.owner_actor.clone();
-        self.host.register_worker(hello.worker, true).await?;
+        let volatile = hello.registration_mode == WorkerRegistrationMode::Volatile;
+        self.host.register_worker(hello.worker, volatile).await?;
         self.connections.insert(
             worker_id.clone(),
             ExternalWorkerConnection {
@@ -114,6 +143,11 @@ impl EngineExternalWorkerRuntime {
                 heartbeat_sequence: 0,
                 last_heartbeat_at: Utc::now(),
                 loopback_only: true,
+                registration_mode: hello.registration_mode,
+                default_visibility: hello.default_visibility,
+                session_id: hello.session_id,
+                workspace_id: hello.workspace_id,
+                health: WorkerHealth::Healthy,
                 functions: BTreeSet::new(),
                 triggers: BTreeSet::new(),
             },
@@ -132,12 +166,16 @@ impl EngineExternalWorkerRuntime {
                 Ok(Some(WorkerProtocolMessage::CatalogSnapshot(snapshot)))
             }
             WorkerProtocolMessage::RegisterFunction(message) => {
-                self.register_function(*message).await?;
-                Ok(None)
+                let change = self.register_function(*message).await?;
+                Ok(Some(WorkerProtocolMessage::CatalogChange(change)))
             }
             WorkerProtocolMessage::RegisterTrigger(message) => {
-                self.register_trigger(message).await?;
-                Ok(None)
+                let change = self.register_trigger(message).await?;
+                Ok(Some(WorkerProtocolMessage::CatalogChange(change)))
+            }
+            WorkerProtocolMessage::PublishStream(message) => {
+                let change = self.publish_stream(message).await?;
+                Ok(Some(WorkerProtocolMessage::CatalogChange(change)))
             }
             WorkerProtocolMessage::Heartbeat(message) => {
                 self.heartbeat(message)?;
@@ -167,21 +205,39 @@ impl EngineExternalWorkerRuntime {
                 id: worker_id.to_string(),
             });
         }
-        if message.default_visibility != VisibilityScope::Session
-            || message.definition.visibility != VisibilityScope::Session
+        let connection = self.connection_mut(&worker_id)?.clone();
+        let expected_visibility = connection.default_visibility.as_visibility_scope();
+        if message.default_visibility != expected_visibility
+            || message.definition.visibility != expected_visibility
         {
             return Err(EngineError::PolicyViolation(
-                "external worker functions must start session-visible".to_owned(),
+                "external worker function visibility must match the worker default visibility"
+                    .to_owned(),
             ));
         }
         let id = message.definition.id.to_string();
+        let mut definition = message.definition;
+        definition.health = match connection.health {
+            WorkerHealth::Healthy => FunctionHealth::Healthy,
+            WorkerHealth::Unhealthy | WorkerHealth::Disconnected => FunctionHealth::Unhealthy,
+        };
+        if let Some(session_id) = connection.session_id.clone() {
+            definition.provenance.session_id = Some(session_id);
+        }
+        if let Some(workspace_id) = connection.workspace_id.clone() {
+            definition.provenance.workspace_id = Some(workspace_id);
+        }
         let handler = self.invokers.get(&worker_id).map(|invoker| {
             Arc::new(ExternalFunctionProxyHandler {
                 invoker: invoker.clone(),
             }) as Arc<dyn InProcessFunctionHandler>
         });
         self.host
-            .register_function(message.definition, handler, true)
+            .register_function(
+                definition,
+                handler,
+                connection.registration_mode == WorkerRegistrationMode::Volatile,
+            )
             .await?;
         self.connection_mut(&worker_id)?
             .functions
@@ -190,6 +246,7 @@ impl EngineExternalWorkerRuntime {
             subject_id: id,
             owner_worker: worker_id,
             kind: "function_registered".to_owned(),
+            catalog_revision: self.host.catalog_revision().await.0,
         })
     }
 
@@ -199,25 +256,103 @@ impl EngineExternalWorkerRuntime {
         message: RegisterTrigger,
     ) -> Result<WorkerCatalogChange> {
         let worker_id = message.definition.owner_worker.clone();
-        if !self.connections.contains_key(&worker_id) {
-            return Err(EngineError::NotFound {
-                kind: "external worker connection",
-                id: worker_id.to_string(),
-            });
-        }
+        let connection = self.connection_mut(&worker_id)?.clone();
         let id = message.definition.id.to_string();
-        self.host.register_trigger(message.definition, true).await?;
+        self.host
+            .register_trigger(
+                message.definition,
+                connection.registration_mode == WorkerRegistrationMode::Volatile,
+            )
+            .await?;
         self.connection_mut(&worker_id)?.triggers.insert(id.clone());
         Ok(WorkerCatalogChange {
             subject_id: id,
             owner_worker: worker_id,
             kind: "trigger_registered".to_owned(),
+            catalog_revision: self.host.catalog_revision().await.0,
+        })
+    }
+
+    /// Publish a worker-owned stream event through the engine stream primitive.
+    pub async fn publish_stream(
+        &mut self,
+        message: WorkerStreamPublish,
+    ) -> Result<WorkerCatalogChange> {
+        let connection = self.connection_mut(&message.worker_id)?.clone();
+        if connection.health != WorkerHealth::Healthy {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {} is not healthy",
+                message.worker_id
+            )));
+        }
+        let mut context = CausalContext::new(
+            ActorId::new(format!("worker:{}", message.worker_id))?,
+            ActorKind::Worker,
+            super::ids::AuthorityGrantId::new(format!("worker-grant:{}", message.worker_id))?,
+            message
+                .trace_id
+                .clone()
+                .unwrap_or_else(super::ids::TraceId::generate),
+        )
+        .with_scope("stream.write")
+        .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+        .with_idempotency_key(message.idempotency_key.clone());
+        if let Some(parent) = message.parent_invocation_id.clone() {
+            context = context.with_parent_invocation(parent);
+        }
+        if let Some(session_id) = message.session_id.clone().or(connection.session_id.clone()) {
+            context = context.with_session_id(session_id);
+        }
+        if let Some(workspace_id) = message
+            .workspace_id
+            .clone()
+            .or(connection.workspace_id.clone())
+        {
+            context = context.with_workspace_id(workspace_id);
+        }
+        let mut payload = serde_json::json!({
+            "topic": message.topic,
+            "payload": message.payload,
+            "visibility": message.visibility.as_str(),
+            "producer": message.worker_id.to_string(),
+        });
+        if let Some(session_id) = message.session_id {
+            payload["sessionId"] = serde_json::Value::String(session_id);
+        }
+        if let Some(workspace_id) = message.workspace_id {
+            payload["workspaceId"] = serde_json::Value::String(workspace_id);
+        }
+        let result = self
+            .host
+            .invoke(
+                Invocation::new_sync(
+                    super::ids::FunctionId::new("stream::publish")?,
+                    payload,
+                    context,
+                )
+                .with_delivery_mode(DeliveryMode::Sync),
+            )
+            .await;
+        if let Some(error) = result.error {
+            return Err(error);
+        }
+        Ok(WorkerCatalogChange {
+            subject_id: message.worker_id.to_string(),
+            owner_worker: message.worker_id,
+            kind: "stream_published".to_owned(),
+            catalog_revision: result.catalog_revision.0,
         })
     }
 
     /// Record worker heartbeat.
     pub fn heartbeat(&mut self, heartbeat: WorkerHeartbeat) -> Result<()> {
         let connection = self.connection_mut(&heartbeat.worker_id)?;
+        if connection.health == WorkerHealth::Disconnected {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {} is disconnected",
+                heartbeat.worker_id
+            )));
+        }
         if heartbeat.sequence <= connection.heartbeat_sequence {
             return Err(EngineError::PolicyViolation(format!(
                 "stale heartbeat {} for worker {}",
@@ -260,9 +395,13 @@ impl EngineExternalWorkerRuntime {
             return Ok(());
         };
         self.invokers.remove(&disconnect.worker_id);
-        self.host
-            .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())
-            .await?;
+        if connection.registration_mode == WorkerRegistrationMode::Volatile {
+            self.host
+                .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())
+                .await?;
+        } else {
+            self.mark_durable_worker_disconnected(&connection).await?;
+        }
         Ok(())
     }
 
@@ -325,6 +464,27 @@ impl EngineExternalWorkerRuntime {
                 id: worker_id.to_string(),
             })
     }
+
+    async fn mark_durable_worker_disconnected(
+        &self,
+        connection: &ExternalWorkerConnection,
+    ) -> Result<()> {
+        let admin_actor = ActorContext::new(
+            ActorId::new("worker-runtime")?,
+            ActorKind::System,
+            AuthorityGrantId::new("worker-runtime")?,
+        );
+        for function_id in &connection.functions {
+            let id = FunctionId::new(function_id.clone())?;
+            let mut definition = self.host.inspect_function(&id, Some(&admin_actor)).await?;
+            definition.health = FunctionHealth::Unhealthy;
+            self.host.register_function(definition, None, false).await?;
+        }
+        let mut worker = self.host.inspect_worker(&connection.worker_id).await?;
+        worker.lifecycle = WorkerLifecycleState::Stopped;
+        self.host.register_worker(worker, false).await?;
+        Ok(())
+    }
 }
 
 struct ExternalFunctionProxyHandler {
@@ -341,8 +501,16 @@ impl InProcessFunctionHandler for ExternalFunctionProxyHandler {
                 function_id: invocation.function_id.clone(),
                 payload: invocation.payload.clone(),
                 actor_kind: invocation.causal_context.actor_kind.clone(),
+                authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+                authority_scopes: invocation.causal_context.authority_scopes.clone(),
                 trace_id: invocation.causal_context.trace_id.clone(),
+                parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
                 trigger_id: invocation.causal_context.trigger_id.clone(),
+                expected_function_revision: invocation.expected_function_revision,
+                idempotency_key: invocation.causal_context.idempotency_key.clone(),
+                session_id: invocation.causal_context.session_id.clone(),
+                workspace_id: invocation.causal_context.workspace_id.clone(),
+                timeout_ms: 30_000,
             })
             .await?;
         if let Some(error) = result.error {

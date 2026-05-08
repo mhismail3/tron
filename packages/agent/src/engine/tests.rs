@@ -2136,6 +2136,100 @@ async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
 }
 
 #[tokio::test]
+async fn primitive_catalog_worker_and_observability_functions_share_engine_path() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let system_context = |trace_id: &str, scope: &str| {
+        CausalContext::new(
+            actor("system"),
+            ActorKind::System,
+            grant("system-grant"),
+            trace(trace_id),
+        )
+        .with_scope(scope)
+    };
+
+    let catalog = handle
+        .invoke(host_invocation(
+            "catalog::list",
+            json!({"includeInternal": true}),
+            system_context("primitive-trace", "catalog.read"),
+        ))
+        .await;
+    assert_eq!(catalog.error, None);
+    assert!(
+        catalog.value.as_ref().unwrap()["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|function| function["id"] == "observability::trace_get")
+    );
+
+    let workers = handle
+        .invoke(host_invocation(
+            "worker::list",
+            json!({}),
+            system_context("primitive-trace", "worker.read"),
+        ))
+        .await;
+    assert_eq!(workers.error, None);
+    assert!(
+        workers.value.as_ref().unwrap()["workers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|worker| worker["id"] == "observability")
+    );
+
+    let trace_get = handle
+        .invoke(host_invocation(
+            "observability::trace_get",
+            json!({"traceId": "primitive-trace"}),
+            system_context("observability-query", "observability.read"),
+        ))
+        .await;
+    assert_eq!(trace_get.error, None);
+    let invocations = trace_get.value.as_ref().unwrap()["invocations"]
+        .as_array()
+        .unwrap();
+    assert!(
+        invocations
+            .iter()
+            .any(|record| record["functionId"] == "catalog::list")
+    );
+
+    let spans = handle
+        .invoke(host_invocation(
+            "observability::span_list",
+            json!({"traceId": "primitive-trace"}),
+            system_context("observability-query", "observability.read"),
+        ))
+        .await;
+    assert_eq!(spans.error, None);
+    assert!(
+        spans.value.as_ref().unwrap()["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|span| span["functionId"] == "worker::list")
+    );
+
+    let metrics = handle
+        .invoke(host_invocation(
+            "observability::metrics_snapshot",
+            json!({}),
+            system_context("observability-query", "observability.read"),
+        ))
+        .await;
+    assert_eq!(metrics.error, None);
+    assert!(
+        metrics.value.as_ref().unwrap()["metrics"]["workers"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+}
+
+#[tokio::test]
 async fn engine_watch_filters_catalog_changes_without_leaking_hidden_scopes() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()
@@ -3588,11 +3682,7 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
         grant("external-grant"),
     )
     .with_namespace_claim("local");
-    let hello = super::WorkerProtocolMessage::Hello(super::WorkerHello {
-        protocol_version: super::WORKER_PROTOCOL_VERSION,
-        worker: worker.clone(),
-        loopback_only: true,
-    });
+    let hello = super::WorkerProtocolMessage::Hello(super::WorkerHello::loopback(worker.clone()));
     let function = FunctionDefinition::new(
         fid("local::echo"),
         wid("local-worker"),
@@ -3624,8 +3714,16 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
         function_id: fid("local::echo"),
         payload: json!({"hello": "worker"}),
         actor_kind: ActorKind::Agent,
+        authority_grant_id: grant("agent-grant"),
+        authority_scopes: vec!["local.read".to_owned()],
         trace_id: trace("worker-trace"),
+        parent_invocation_id: None,
         trigger_id: Some(TriggerId::new("manual:local.echo").unwrap()),
+        expected_function_revision: None,
+        idempotency_key: None,
+        session_id: Some("session-a".to_owned()),
+        workspace_id: None,
+        timeout_ms: 30_000,
     });
     for message in [hello, register, trigger, invoke] {
         let json = serde_json::to_string(&message).unwrap();
@@ -3906,11 +4004,7 @@ async fn local_external_worker_runtime_registers_session_functions_and_disconnec
     )
     .with_namespace_claim("local");
     let snapshot = runtime
-        .hello(super::WorkerHello {
-            protocol_version: super::WORKER_PROTOCOL_VERSION,
-            worker,
-            loopback_only: true,
-        })
+        .hello(super::WorkerHello::loopback(worker))
         .await
         .unwrap();
     assert_eq!(runtime.connections(), vec![wid("local-worker")]);
@@ -3984,18 +4078,15 @@ async fn local_external_worker_runtime_registers_executable_proxy_handler() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
     let worker_id = wid("local-exec-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("local_exec");
     runtime
-        .hello(super::WorkerHello {
-            protocol_version: super::WORKER_PROTOCOL_VERSION,
-            worker: WorkerDefinition::new(
-                worker_id.clone(),
-                WorkerKind::External,
-                actor("owner"),
-                grant("external-grant"),
-            )
-            .with_namespace_claim("local_exec"),
-            loopback_only: true,
-        })
+        .hello(super::WorkerHello::loopback(worker))
         .await
         .unwrap();
     runtime
@@ -4033,22 +4124,172 @@ async fn local_external_worker_runtime_registers_executable_proxy_handler() {
 }
 
 #[tokio::test]
+async fn local_external_worker_hello_rejects_identity_mismatch() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker = WorkerDefinition::new(
+        wid("local-identity-worker"),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("identity_local");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.identity.worker_id = wid("different-worker");
+
+    let error = runtime.hello(hello).await.unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message) if message.contains("does not match definition")
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_durable_disconnect_marks_functions_unhealthy() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("local-durable-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("durable_local");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.registration_mode = super::WorkerRegistrationMode::Durable;
+    hello.session_id = Some("session-a".to_owned());
+    runtime.hello(hello).await.unwrap();
+    runtime
+        .attach_invoker(worker_id.clone(), Arc::new(EchoExternalInvoker))
+        .unwrap();
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: FunctionDefinition::new(
+                fid("durable_local::echo"),
+                worker_id.clone(),
+                "durable external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            ),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+
+    runtime
+        .disconnect(super::WorkerDisconnect {
+            worker_id: worker_id.clone(),
+            reason: "connection closed".to_owned(),
+        })
+        .await
+        .unwrap();
+
+    let admin = ActorContext::new(actor("admin"), ActorKind::System, grant("admin-grant"));
+    let function = handle
+        .inspect_function(&fid("durable_local::echo"), Some(&admin))
+        .await
+        .unwrap();
+    assert_eq!(function.health, FunctionHealth::Unhealthy);
+    assert_eq!(
+        handle.inspect_worker(&worker_id).await.unwrap().lifecycle,
+        super::WorkerLifecycleState::Stopped
+    );
+    let result = handle
+        .invoke(Invocation::new_sync(
+            fid("durable_local::echo"),
+            json!({}),
+            causal()
+                .with_scope("durable_local.read")
+                .with_session_id("session-a"),
+        ))
+        .await;
+    assert!(matches!(
+        result.error,
+        Some(EngineError::NotRoutable { .. })
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_publish_stream_routes_through_stream_primitive() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let subscribe = handle
+        .invoke(host_invocation(
+            "stream::subscribe",
+            json!({
+                "subscriptionId": "worker-sub-a",
+                "topic": "worker.events",
+                "sessionId": "session-a"
+            }),
+            mutating_causal("worker-stream-subscribe").with_scope("stream.write"),
+        ))
+        .await;
+    assert_eq!(subscribe.error, None);
+
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("local-stream-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("stream_local");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.session_id = Some("session-a".to_owned());
+    runtime.hello(hello).await.unwrap();
+    let response = runtime
+        .handle_message(super::WorkerProtocolMessage::PublishStream(
+            super::WorkerStreamPublish {
+                worker_id: worker_id.clone(),
+                topic: "worker.events".to_owned(),
+                payload: json!({"from": "worker"}),
+                visibility: VisibilityScope::Session,
+                session_id: Some("session-a".to_owned()),
+                workspace_id: None,
+                trace_id: Some(trace("worker-stream-trace")),
+                parent_invocation_id: Some(InvocationId::generate()),
+                idempotency_key: "worker-stream-event-1".to_owned(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert!(matches!(
+        response,
+        Some(super::WorkerProtocolMessage::CatalogChange(change))
+            if change.kind == "stream_published" && change.owner_worker == worker_id
+    ));
+
+    let poll = handle
+        .invoke(host_invocation(
+            "stream::poll",
+            json!({"subscriptionId": "worker-sub-a", "limit": 10}),
+            causal()
+                .with_scope("stream.read")
+                .with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(poll.error, None);
+    let events = poll.value.as_ref().unwrap()["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["payload"], json!({"from": "worker"}));
+    assert_eq!(events[0]["producer"], "local-stream-worker");
+}
+
+#[tokio::test]
 async fn local_external_worker_heartbeat_timeout_unregisters_volatile_capabilities() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
     let worker_id = wid("local-timeout-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("timeout_local");
     runtime
-        .hello(super::WorkerHello {
-            protocol_version: super::WORKER_PROTOCOL_VERSION,
-            worker: WorkerDefinition::new(
-                worker_id.clone(),
-                WorkerKind::External,
-                actor("owner"),
-                grant("external-grant"),
-            )
-            .with_namespace_claim("timeout_local"),
-            loopback_only: true,
-        })
+        .hello(super::WorkerHello::loopback(worker))
         .await
         .unwrap();
     runtime

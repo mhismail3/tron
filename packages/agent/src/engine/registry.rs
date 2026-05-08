@@ -466,6 +466,15 @@ impl LiveCatalog {
             })
     }
 
+    /// List trigger types in deterministic order.
+    #[must_use]
+    pub fn trigger_types(&self) -> Vec<TriggerTypeDefinition> {
+        self.trigger_types
+            .values()
+            .map(|entry| entry.definition.clone())
+            .collect()
+    }
+
     /// Register or update a trigger.
     pub fn register_trigger(
         &mut self,

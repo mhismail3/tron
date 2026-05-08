@@ -8,54 +8,45 @@
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::approval::{
     ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
-    InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
 };
-use super::compensation::{
-    EngineCompensationRecord, InMemoryEngineCompensationStore, SqliteEngineCompensationStore,
-    compensation_record,
-};
+use super::compensation::{EngineCompensationRecord, compensation_record};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TriggerId, TriggerTypeId, WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
-use super::leases::{
-    AcquireResourceLease, EngineResourceLease, InMemoryEngineResourceLeaseStore,
-    SqliteEngineResourceLeaseStore,
-};
+use super::leases::{AcquireResourceLease, EngineResourceLease};
 use super::ledger::{
     EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
-use super::queue::{
-    EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore, SqliteEngineQueueStore,
+use super::primitives;
+use super::primitives::{
+    APPROVAL_REQUEST_FUNCTION, APPROVAL_RESOLVE_FUNCTION, PrimitiveStores,
+    approval_request_from_invocation, primitive_function_definitions, primitive_workers,
 };
+use super::queue::{EngineQueueItem, EnqueueInvocation};
 use super::registry::{
     InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocation,
     PreparedSyncInvocationDecision,
 };
-use super::state::{
-    EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
-};
 use super::streams::{
-    EngineStreamPage, EngineStreamSubscription, InMemoryEngineStreamStore, PublishStreamEvent,
-    SqliteEngineStreamStore, StreamActorScope, StreamCursor,
+    EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,
 };
 use super::types::{
-    AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
-    CompensationContract, CompensationKind, DeliveryMode, EffectClass, FunctionDefinition,
-    FunctionHealth, FunctionRevision, IdempotencyContract, Provenance,
-    ResourceLeaseFailureBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition,
-    TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind, WorkerRevision,
+    CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CompensationContract,
+    DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
+    IdempotencyContract, Provenance, ResourceLeaseFailureBehavior, ResourceLeaseRequirement,
+    RiskLevel, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
+    WorkerKind, WorkerRevision,
 };
 use super::{policy, schema};
 
@@ -72,16 +63,6 @@ const PROMOTE_FUNCTION: &str = "engine::promote";
 const WATCH_DEFAULT_LIMIT: usize = 100;
 const WATCH_MAX_LIMIT: usize = 500;
 
-const STREAM_WORKER_ID: &str = "stream";
-const STATE_WORKER_ID: &str = "state";
-const QUEUE_WORKER_ID: &str = "queue";
-const APPROVAL_WORKER_ID: &str = "approval";
-
-const APPROVAL_REQUEST_FUNCTION: &str = "approval::request";
-const APPROVAL_RESOLVE_FUNCTION: &str = "approval::resolve";
-const APPROVAL_GET_FUNCTION: &str = "approval::get";
-const APPROVAL_LIST_FUNCTION: &str = "approval::list";
-
 struct PreparedDelegatedInvocation {
     meta_invocation: Invocation,
     meta_function: FunctionDefinition,
@@ -91,382 +72,6 @@ struct PreparedDelegatedInvocation {
 enum PreparedDelegatedInvocationDecision {
     Execute(Box<PreparedDelegatedInvocation>),
     Finished(Box<InvocationResult>),
-}
-
-enum StreamStoreBackend {
-    InMemory(InMemoryEngineStreamStore),
-    Sqlite(SqliteEngineStreamStore),
-}
-
-impl StreamStoreBackend {
-    fn publish(&mut self, event: PublishStreamEvent) -> Result<StreamCursor> {
-        match self {
-            Self::InMemory(store) => store.publish(event),
-            Self::Sqlite(store) => store.publish(event),
-        }
-    }
-
-    fn subscribe(
-        &mut self,
-        subscription_id: String,
-        topic: String,
-        cursor: StreamCursor,
-        visibility: VisibilityScope,
-        session_id: Option<String>,
-        workspace_id: Option<String>,
-    ) -> Result<EngineStreamSubscription> {
-        match self {
-            Self::InMemory(store) => store.subscribe(
-                subscription_id,
-                topic,
-                cursor,
-                visibility,
-                session_id,
-                workspace_id,
-            ),
-            Self::Sqlite(store) => store.subscribe(
-                subscription_id,
-                topic,
-                cursor,
-                visibility,
-                session_id,
-                workspace_id,
-            ),
-        }
-    }
-
-    fn unsubscribe(&mut self, subscription_id: &str) -> Result<bool> {
-        match self {
-            Self::InMemory(store) => store.unsubscribe(subscription_id),
-            Self::Sqlite(store) => store.unsubscribe(subscription_id),
-        }
-    }
-
-    fn poll(
-        &self,
-        subscription_id: &str,
-        after: Option<StreamCursor>,
-        limit: usize,
-        actor: &StreamActorScope,
-    ) -> Result<EngineStreamPage> {
-        match self {
-            Self::InMemory(store) => store.poll(subscription_id, after, limit, actor),
-            Self::Sqlite(store) => store.poll(subscription_id, after, limit, actor),
-        }
-    }
-}
-
-enum StateStoreBackend {
-    InMemory(InMemoryEngineStateStore),
-    Sqlite(SqliteEngineStateStore),
-}
-
-impl StateStoreBackend {
-    fn get(
-        &self,
-        scope: EngineStateScope,
-        namespace: &str,
-        key: &str,
-    ) -> Result<Option<EngineStateEntry>> {
-        match self {
-            Self::InMemory(store) => store.get(scope, namespace, key),
-            Self::Sqlite(store) => store.get(scope, namespace, key),
-        }
-    }
-
-    fn set(
-        &mut self,
-        scope: EngineStateScope,
-        namespace: String,
-        key: String,
-        value: Value,
-    ) -> Result<EngineStateEntry> {
-        match self {
-            Self::InMemory(store) => store.set(scope, namespace, key, value),
-            Self::Sqlite(store) => store.set(scope, namespace, key, value),
-        }
-    }
-
-    fn compare_and_set(
-        &mut self,
-        scope: EngineStateScope,
-        namespace: String,
-        key: String,
-        expected_revision: Option<u64>,
-        value: Value,
-    ) -> Result<EngineStateEntry> {
-        match self {
-            Self::InMemory(store) => {
-                store.compare_and_set(scope, namespace, key, expected_revision, value)
-            }
-            Self::Sqlite(store) => {
-                store.compare_and_set(scope, namespace, key, expected_revision, value)
-            }
-        }
-    }
-
-    fn delete(&mut self, scope: EngineStateScope, namespace: &str, key: &str) -> Result<bool> {
-        match self {
-            Self::InMemory(store) => store.delete(scope, namespace, key),
-            Self::Sqlite(store) => store.delete(scope, namespace, key),
-        }
-    }
-
-    fn list(
-        &self,
-        scope: EngineStateScope,
-        namespace: &str,
-        key_prefix: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<EngineStateEntry>> {
-        match self {
-            Self::InMemory(store) => store.list(scope, namespace, key_prefix, limit),
-            Self::Sqlite(store) => store.list(scope, namespace, key_prefix, limit),
-        }
-    }
-}
-
-enum QueueStoreBackend {
-    InMemory(InMemoryEngineQueueStore),
-    Sqlite(SqliteEngineQueueStore),
-}
-
-impl QueueStoreBackend {
-    fn enqueue(&mut self, request: EnqueueInvocation) -> Result<EngineQueueItem> {
-        match self {
-            Self::InMemory(store) => store.enqueue(request),
-            Self::Sqlite(store) => store.enqueue(request),
-        }
-    }
-
-    fn claim(
-        &mut self,
-        queue: &str,
-        lease_owner: &str,
-        lease_ms: i64,
-    ) -> Result<Option<EngineQueueItem>> {
-        match self {
-            Self::InMemory(store) => store.claim(queue, lease_owner, lease_ms),
-            Self::Sqlite(store) => store.claim(queue, lease_owner, lease_ms),
-        }
-    }
-
-    fn claim_by_receipt(
-        &mut self,
-        receipt_id: &str,
-        lease_owner: &str,
-        lease_ms: i64,
-    ) -> Result<Option<EngineQueueItem>> {
-        match self {
-            Self::InMemory(store) => store.claim_by_receipt(receipt_id, lease_owner, lease_ms),
-            Self::Sqlite(store) => store.claim_by_receipt(receipt_id, lease_owner, lease_ms),
-        }
-    }
-
-    fn complete(&mut self, receipt_id: &str) -> Result<bool> {
-        match self {
-            Self::InMemory(store) => store.complete(receipt_id),
-            Self::Sqlite(store) => store.complete(receipt_id),
-        }
-    }
-
-    fn fail(&mut self, receipt_id: &str, max_attempts: u32, backoff_ms: i64) -> Result<bool> {
-        match self {
-            Self::InMemory(store) => store.fail(receipt_id, max_attempts, backoff_ms),
-            Self::Sqlite(store) => store.fail(receipt_id, max_attempts, backoff_ms),
-        }
-    }
-
-    fn cancel(&mut self, receipt_id: &str) -> Result<bool> {
-        match self {
-            Self::InMemory(store) => store.cancel(receipt_id),
-            Self::Sqlite(store) => store.cancel(receipt_id),
-        }
-    }
-
-    fn get(&self, receipt_id: &str) -> Result<Option<EngineQueueItem>> {
-        match self {
-            Self::InMemory(store) => store.get(receipt_id),
-            Self::Sqlite(store) => store.get(receipt_id),
-        }
-    }
-
-    fn list(&self, queue: &str, limit: usize) -> Result<Vec<EngineQueueItem>> {
-        match self {
-            Self::InMemory(store) => store.list(queue, limit),
-            Self::Sqlite(store) => store.list(queue, limit),
-        }
-    }
-}
-
-enum ApprovalStoreBackend {
-    InMemory(InMemoryEngineApprovalStore),
-    Sqlite(SqliteEngineApprovalStore),
-}
-
-impl ApprovalStoreBackend {
-    fn request(&mut self, request: EngineApprovalRequest) -> Result<EngineApprovalRecord> {
-        match self {
-            Self::InMemory(store) => store.request(request),
-            Self::Sqlite(store) => store.request(request),
-        }
-    }
-
-    fn get(&self, approval_id: &str) -> Result<Option<EngineApprovalRecord>> {
-        match self {
-            Self::InMemory(store) => store.get(approval_id),
-            Self::Sqlite(store) => store.get(approval_id),
-        }
-    }
-
-    fn list(
-        &self,
-        status: Option<ApprovalStatus>,
-        session_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<EngineApprovalRecord>> {
-        match self {
-            Self::InMemory(store) => store.list(status, session_id, limit),
-            Self::Sqlite(store) => store.list(status, session_id, limit),
-        }
-    }
-
-    fn resolve(
-        &mut self,
-        approval_id: &str,
-        decision: ApprovalDecision,
-        actor_id: ActorId,
-    ) -> Result<EngineApprovalRecord> {
-        match self {
-            Self::InMemory(store) => store.resolve(approval_id, decision, actor_id),
-            Self::Sqlite(store) => store.resolve(approval_id, decision, actor_id),
-        }
-    }
-
-    fn complete(
-        &mut self,
-        approval_id: &str,
-        result: &InvocationResult,
-    ) -> Result<EngineApprovalRecord> {
-        match self {
-            Self::InMemory(store) => store.complete(approval_id, result),
-            Self::Sqlite(store) => store.complete(approval_id, result),
-        }
-    }
-}
-
-enum ResourceLeaseStoreBackend {
-    InMemory(InMemoryEngineResourceLeaseStore),
-    Sqlite(SqliteEngineResourceLeaseStore),
-}
-
-impl ResourceLeaseStoreBackend {
-    fn acquire(&mut self, request: AcquireResourceLease) -> Result<EngineResourceLease> {
-        match self {
-            Self::InMemory(store) => store.acquire(request),
-            Self::Sqlite(store) => store.acquire(request),
-        }
-    }
-
-    fn release(&mut self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
-        match self {
-            Self::InMemory(store) => store.release(lease_id),
-            Self::Sqlite(store) => store.release(lease_id),
-        }
-    }
-
-    fn get(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
-        match self {
-            Self::InMemory(store) => store.get(lease_id),
-            Self::Sqlite(store) => store.get(lease_id),
-        }
-    }
-}
-
-enum CompensationStoreBackend {
-    InMemory(InMemoryEngineCompensationStore),
-    Sqlite(SqliteEngineCompensationStore),
-}
-
-impl CompensationStoreBackend {
-    fn record(&mut self, record: EngineCompensationRecord) -> Result<EngineCompensationRecord> {
-        match self {
-            Self::InMemory(store) => store.record(record),
-            Self::Sqlite(store) => store.record(record),
-        }
-    }
-
-    fn get(&self, compensation_id: &str) -> Result<Option<EngineCompensationRecord>> {
-        match self {
-            Self::InMemory(store) => store.get(compensation_id),
-            Self::Sqlite(store) => store.get(compensation_id),
-        }
-    }
-
-    fn list(&self) -> Result<Vec<EngineCompensationRecord>> {
-        match self {
-            Self::InMemory(store) => store.list(),
-            Self::Sqlite(store) => store.list(),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct PrimitiveStores {
-    streams: Arc<StdMutex<StreamStoreBackend>>,
-    state: Arc<StdMutex<StateStoreBackend>>,
-    queue: Arc<StdMutex<QueueStoreBackend>>,
-    approvals: Arc<StdMutex<ApprovalStoreBackend>>,
-    leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
-    compensation: Arc<StdMutex<CompensationStoreBackend>>,
-}
-
-impl PrimitiveStores {
-    fn in_memory() -> Self {
-        Self {
-            streams: Arc::new(StdMutex::new(StreamStoreBackend::InMemory(
-                InMemoryEngineStreamStore::new(),
-            ))),
-            state: Arc::new(StdMutex::new(StateStoreBackend::InMemory(
-                InMemoryEngineStateStore::new(),
-            ))),
-            queue: Arc::new(StdMutex::new(QueueStoreBackend::InMemory(
-                InMemoryEngineQueueStore::new(),
-            ))),
-            approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::InMemory(
-                InMemoryEngineApprovalStore::new(),
-            ))),
-            leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::InMemory(
-                InMemoryEngineResourceLeaseStore::new(),
-            ))),
-            compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
-                InMemoryEngineCompensationStore::new(),
-            ))),
-        }
-    }
-
-    fn sqlite(path: &Path) -> Result<Self> {
-        Ok(Self {
-            streams: Arc::new(StdMutex::new(StreamStoreBackend::Sqlite(
-                SqliteEngineStreamStore::open(path)?,
-            ))),
-            state: Arc::new(StdMutex::new(StateStoreBackend::Sqlite(
-                SqliteEngineStateStore::open(path)?,
-            ))),
-            queue: Arc::new(StdMutex::new(QueueStoreBackend::Sqlite(
-                SqliteEngineQueueStore::open(path)?,
-            ))),
-            approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::Sqlite(
-                SqliteEngineApprovalStore::open(path)?,
-            ))),
-            leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::Sqlite(
-                SqliteEngineResourceLeaseStore::open(path)?,
-            ))),
-            compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
-                SqliteEngineCompensationStore::open(path)?,
-            ))),
-        })
-    }
 }
 
 /// Host for the in-process live capability engine.
@@ -728,6 +333,9 @@ impl EngineHostHandle {
             return self.invoke_approval_resolve_unlocked(invocation).await;
         }
         if invocation.function_id.namespace() == ENGINE_WORKER_ID {
+            return self.inner.lock().await.invoke(invocation).await;
+        }
+        if is_host_dispatched_primitive_namespace(invocation.function_id.namespace()) {
             return self.inner.lock().await.invoke(invocation).await;
         }
 
@@ -1747,7 +1355,9 @@ impl EngineHost {
             }
         }
 
-        for (definition, handler) in primitive_function_definitions(&self.primitives)? {
+        for registration in primitive_function_definitions(&self.primitives)? {
+            let definition = registration.definition;
+            let handler = registration.handler;
             match self.catalog.function(&definition.id) {
                 Some(existing) if existing.owner_worker == definition.owner_worker => {
                     if existing.description != definition.description
@@ -1756,8 +1366,7 @@ impl EngineHost {
                         || existing.required_authority != definition.required_authority
                         || existing.idempotency != definition.idempotency
                     {
-                        self.catalog
-                            .register_function(definition, Some(handler), false)?;
+                        self.catalog.register_function(definition, handler, false)?;
                     }
                 }
                 Some(existing) => {
@@ -1769,8 +1378,7 @@ impl EngineHost {
                     });
                 }
                 None => {
-                    self.catalog
-                        .register_function(definition, Some(handler), false)?;
+                    self.catalog.register_function(definition, handler, false)?;
                 }
             }
         }
@@ -1780,6 +1388,9 @@ impl EngineHost {
     /// Invoke a function through the host.
     pub async fn invoke(&mut self, invocation: Invocation) -> InvocationResult {
         if invocation.function_id.namespace() != ENGINE_WORKER_ID {
+            if is_host_dispatched_primitive_namespace(invocation.function_id.namespace()) {
+                return self.invoke_sync_host_dispatched_primitive(invocation);
+            }
             return self.catalog.invoke_sync(invocation).await;
         }
 
@@ -1790,6 +1401,32 @@ impl EngineHost {
             INVOKE_FUNCTION => self.invoke_delegated(invocation).await,
             _ => self.catalog.invoke_sync(invocation).await,
         }
+    }
+
+    fn invoke_sync_host_dispatched_primitive(
+        &mut self,
+        mut invocation: Invocation,
+    ) -> InvocationResult {
+        let function = match self.prepare_meta_invocation(&mut invocation) {
+            Ok(function) => function,
+            Err(err) => return self.meta_error(&invocation, err),
+        };
+
+        let idempotency = match self
+            .catalog
+            .begin_invocation_idempotency(&function, &invocation)
+        {
+            InvocationIdempotencyDecision::None => None,
+            InvocationIdempotencyDecision::Reserved(reservation) => Some(reservation),
+            InvocationIdempotencyDecision::Finished { result, scope } => {
+                return self
+                    .catalog
+                    .record_invocation_result(&invocation, result, scope);
+            }
+        };
+
+        let value = self.dispatch_host_dispatched_primitive(&invocation);
+        self.finish_meta_invocation(invocation, function, value, idempotency)
     }
 
     fn invoke_sync_meta(&mut self, mut invocation: Invocation) -> InvocationResult {
@@ -2159,6 +1796,362 @@ impl EngineHost {
             "catalogRevision": self.catalog.revision().0,
         }))
     }
+
+    fn dispatch_host_dispatched_primitive(&mut self, invocation: &Invocation) -> Result<Value> {
+        match invocation.function_id.as_str() {
+            primitives::catalog::LIST_FUNCTION => self.primitive_catalog_list(invocation),
+            primitives::catalog::INSPECT_FUNCTION => self.primitive_catalog_inspect(invocation),
+            primitives::catalog::WATCH_SNAPSHOT_FUNCTION => {
+                self.primitive_catalog_watch_snapshot(invocation)
+            }
+            primitives::worker::LIST_FUNCTION => self.primitive_worker_list(invocation),
+            primitives::worker::GET_FUNCTION => self.primitive_worker_get(invocation),
+            primitives::worker::HEALTH_FUNCTION => self.primitive_worker_health(invocation),
+            primitives::worker::DISCONNECT_FUNCTION => self.primitive_worker_disconnect(invocation),
+            primitives::observability::TRACE_GET_FUNCTION => self.primitive_trace_get(invocation),
+            primitives::observability::TRACE_LIST_FUNCTION => self.primitive_trace_list(invocation),
+            primitives::observability::SPAN_LIST_FUNCTION => self.primitive_span_list(invocation),
+            primitives::observability::LOG_QUERY_FUNCTION => self.primitive_log_query(invocation),
+            primitives::observability::METRICS_SNAPSHOT_FUNCTION => {
+                self.primitive_metrics_snapshot()
+            }
+            _ => Err(EngineError::NotFound {
+                kind: "function",
+                id: invocation.function_id.to_string(),
+            }),
+        }
+    }
+
+    fn primitive_catalog_list(&self, invocation: &Invocation) -> Result<Value> {
+        let actor = actor_context(&invocation.causal_context);
+        let query = FunctionQuery {
+            actor: Some(actor.clone()),
+            visibility: optional_visibility(invocation.payload.get("visibility"))?,
+            namespace_prefix: optional_string(invocation.payload.get("namespacePrefix"))?,
+            text: None,
+            effect_class: None,
+            max_risk: None,
+            health: None,
+            include_internal: invocation
+                .payload
+                .get("includeInternal")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
+        Ok(json!({
+            "catalogRevision": self.catalog.revision().0,
+            "functions": self.catalog.discover_functions(&query),
+            "workers": self.visible_workers(&actor),
+            "triggers": self.visible_triggers(&actor),
+            "triggerTypes": self.visible_trigger_types(&actor),
+        }))
+    }
+
+    fn primitive_catalog_inspect(&self, invocation: &Invocation) -> Result<Value> {
+        self.meta_inspect(invocation)
+    }
+
+    fn primitive_catalog_watch_snapshot(&self, invocation: &Invocation) -> Result<Value> {
+        let response = self.meta_watch(invocation)?;
+        let actor = actor_context(&invocation.causal_context);
+        let query = FunctionQuery {
+            actor: Some(actor.clone()),
+            visibility: None,
+            namespace_prefix: None,
+            text: None,
+            effect_class: None,
+            max_risk: None,
+            health: None,
+            include_internal: false,
+        };
+        Ok(json!({
+            "changes": response.get("changes").cloned().unwrap_or_else(|| json!([])),
+            "snapshot": {
+                "functions": self.catalog.discover_functions(&query),
+                "workers": self.visible_workers(&actor),
+                "triggers": self.visible_triggers(&actor),
+                "triggerTypes": self.visible_trigger_types(&actor),
+            },
+            "currentRevision": response.get("currentRevision").cloned().unwrap_or(Value::Null),
+            "nextRevision": response.get("nextRevision").cloned().unwrap_or(Value::Null),
+            "hasMore": response.get("hasMore").cloned().unwrap_or(Value::Bool(false)),
+        }))
+    }
+
+    fn primitive_worker_list(&self, invocation: &Invocation) -> Result<Value> {
+        let actor = actor_context(&invocation.causal_context);
+        Ok(json!({
+            "catalogRevision": self.catalog.revision().0,
+            "workers": self.visible_workers(&actor),
+        }))
+    }
+
+    fn primitive_worker_get(&self, invocation: &Invocation) -> Result<Value> {
+        let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
+        let actor = actor_context(&invocation.causal_context);
+        let worker = self.catalog.inspect_worker(&id)?;
+        if !is_visibility_visible(
+            &worker.visibility,
+            worker.provenance.session_id.as_deref(),
+            worker.provenance.workspace_id.as_deref(),
+            &actor,
+        ) {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {id} is not visible"
+            )));
+        }
+        Ok(json!({ "worker": worker }))
+    }
+
+    fn primitive_worker_health(&self, invocation: &Invocation) -> Result<Value> {
+        let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
+        let worker = self.catalog.inspect_worker(&id)?;
+        let functions = self
+            .catalog
+            .discover_functions(&FunctionQuery {
+                actor: Some(actor_context(&invocation.causal_context)),
+                visibility: None,
+                namespace_prefix: None,
+                text: None,
+                effect_class: None,
+                max_risk: None,
+                health: None,
+                include_internal: true,
+            })
+            .into_iter()
+            .filter(|function| function.owner_worker == id)
+            .collect::<Vec<_>>();
+        let triggers = self
+            .catalog
+            .triggers()
+            .into_iter()
+            .filter(|trigger| trigger.owner_worker == id)
+            .collect::<Vec<_>>();
+        let health = if functions
+            .iter()
+            .any(|function| !function.health.is_routable())
+        {
+            "unhealthy"
+        } else {
+            "healthy"
+        };
+        Ok(json!({
+            "worker": worker,
+            "functions": functions,
+            "triggers": triggers,
+            "health": health,
+        }))
+    }
+
+    fn primitive_worker_disconnect(&mut self, invocation: &Invocation) -> Result<Value> {
+        let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
+        if self.catalog.worker_is_volatile(&id) != Some(true) {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker::disconnect can only disconnect volatile workers ({id})"
+            )));
+        }
+        let owner_actor = self
+            .catalog
+            .worker(&id)
+            .map(|worker| worker.owner_actor.to_string())
+            .ok_or_else(|| EngineError::NotFound {
+                kind: "worker",
+                id: id.to_string(),
+            })?;
+        self.catalog.unregister_worker(&id, &owner_actor)?;
+        Ok(json!({ "disconnected": true }))
+    }
+
+    fn primitive_trace_get(&self, invocation: &Invocation) -> Result<Value> {
+        let trace_id = required_str(&invocation.payload, "traceId")?;
+        let invocations = self
+            .catalog
+            .invocations()
+            .iter()
+            .filter(|record| record.trace_id.as_str() == trace_id)
+            .map(invocation_record_value)
+            .collect::<Vec<_>>();
+        let catalog_changes = self
+            .catalog
+            .ledger_catalog_changes()?
+            .into_iter()
+            .filter(|change| change.id.contains(trace_id) || change.subject_id.as_str() == trace_id)
+            .map(|change| catalog_change_value(&change))
+            .collect::<Vec<_>>();
+        let approvals = self
+            .list_approval_records_for_trace(trace_id)?
+            .into_iter()
+            .map(|record| json!(record))
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "traceId": trace_id,
+            "invocations": invocations,
+            "catalogChanges": catalog_changes,
+            "streams": [],
+            "approvals": approvals,
+            "leases": [],
+            "compensation": self.list_compensation_records_for_trace(trace_id)?,
+        }))
+    }
+
+    fn primitive_trace_list(&self, invocation: &Invocation) -> Result<Value> {
+        let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
+        let mut traces = std::collections::BTreeMap::<String, usize>::new();
+        for record in self.catalog.invocations() {
+            *traces.entry(record.trace_id.to_string()).or_insert(0) += 1;
+        }
+        let traces = traces
+            .into_iter()
+            .rev()
+            .take(limit.min(500))
+            .map(|(trace_id, invocation_count)| {
+                json!({
+                    "traceId": trace_id,
+                    "invocationCount": invocation_count,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({ "traces": traces }))
+    }
+
+    fn primitive_span_list(&self, invocation: &Invocation) -> Result<Value> {
+        let trace_id = required_str(&invocation.payload, "traceId")?;
+        let spans = self
+            .catalog
+            .invocations()
+            .iter()
+            .filter(|record| record.trace_id.as_str() == trace_id)
+            .map(|record| {
+                json!({
+                    "spanId": record.invocation_id.as_str(),
+                    "parentSpanId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
+                    "functionId": record.function_id.as_str(),
+                    "workerId": record.worker_id.as_str(),
+                    "triggerId": record.trigger_id.as_ref().map(TriggerId::as_str),
+                    "succeeded": record.succeeded,
+                    "timestamp": record.timestamp.to_rfc3339(),
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({ "traceId": trace_id, "spans": spans }))
+    }
+
+    fn primitive_log_query(&self, invocation: &Invocation) -> Result<Value> {
+        let trace_id = optional_string(invocation.payload.get("traceId"))?;
+        let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
+        let logs = self
+            .catalog
+            .invocations()
+            .iter()
+            .filter(|record| {
+                trace_id
+                    .as_ref()
+                    .map(|trace_id| record.trace_id.as_str() == trace_id)
+                    .unwrap_or(true)
+            })
+            .take(limit.min(500))
+            .map(|record| {
+                json!({
+                    "timestamp": record.timestamp.to_rfc3339(),
+                    "traceId": record.trace_id.as_str(),
+                    "invocationId": record.invocation_id.as_str(),
+                    "functionId": record.function_id.as_str(),
+                    "level": if record.succeeded { "info" } else { "error" },
+                    "message": if record.succeeded { "engine invocation succeeded" } else { "engine invocation failed" },
+                    "error": record.error.as_ref().map(error_value),
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({ "logs": logs }))
+    }
+
+    fn primitive_metrics_snapshot(&self) -> Result<Value> {
+        Ok(json!({
+            "metrics": {
+                "catalogRevision": self.catalog.revision().0,
+                "workers": self.catalog.workers().len(),
+                "functions": self.catalog.discover_functions(&FunctionQuery::default()).len(),
+                "triggers": self.catalog.triggers().len(),
+                "triggerTypes": self.catalog.trigger_types().len(),
+                "invocations": self.catalog.invocations().len(),
+                "catalogChanges": self.catalog.changes().len(),
+            }
+        }))
+    }
+
+    fn list_approval_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineApprovalRecord>> {
+        self.primitives
+            .approvals
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
+            .list(None, None, 500)
+            .map(|records| {
+                records
+                    .into_iter()
+                    .filter(|record| record.trace_id.as_str() == trace_id)
+                    .collect()
+            })
+    }
+
+    fn list_compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {
+        self.primitives
+            .compensation
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))?
+            .list()
+            .map(|records| {
+                records
+                    .into_iter()
+                    .filter(|record| record.trace_id.as_str() == trace_id)
+                    .map(|record| json!(record))
+                    .collect()
+            })
+    }
+
+    fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition> {
+        self.catalog
+            .workers()
+            .into_iter()
+            .filter(|worker| {
+                is_visibility_visible(
+                    &worker.visibility,
+                    worker.provenance.session_id.as_deref(),
+                    worker.provenance.workspace_id.as_deref(),
+                    actor,
+                )
+            })
+            .collect()
+    }
+
+    fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition> {
+        self.catalog
+            .triggers()
+            .into_iter()
+            .filter(|trigger| {
+                is_visibility_visible(
+                    &trigger.visibility,
+                    trigger.provenance.session_id.as_deref(),
+                    trigger.provenance.workspace_id.as_deref(),
+                    actor,
+                )
+            })
+            .collect()
+    }
+
+    fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition> {
+        self.catalog
+            .trigger_types()
+            .into_iter()
+            .filter(|trigger_type| {
+                is_visibility_visible(
+                    &trigger_type.visibility,
+                    trigger_type.provenance.session_id.as_deref(),
+                    trigger_type.provenance.workspace_id.as_deref(),
+                    actor,
+                )
+            })
+            .collect()
+    }
 }
 
 fn engine_worker() -> WorkerDefinition {
@@ -2320,1032 +2313,6 @@ fn promote_schema() -> Value {
     })
 }
 
-fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
-    Ok(vec![
-        WorkerDefinition::new(
-            worker_id(STREAM_WORKER_ID)?,
-            WorkerKind::Stream,
-            actor_id(ENGINE_OWNER_ACTOR)?,
-            grant_id(ENGINE_AUTHORITY_GRANT)?,
-        )
-        .with_namespace_claim(STREAM_WORKER_ID),
-        WorkerDefinition::new(
-            worker_id(STATE_WORKER_ID)?,
-            WorkerKind::State,
-            actor_id(ENGINE_OWNER_ACTOR)?,
-            grant_id(ENGINE_AUTHORITY_GRANT)?,
-        )
-        .with_namespace_claim(STATE_WORKER_ID),
-        WorkerDefinition::new(
-            worker_id(QUEUE_WORKER_ID)?,
-            WorkerKind::Queue,
-            actor_id(ENGINE_OWNER_ACTOR)?,
-            grant_id(ENGINE_AUTHORITY_GRANT)?,
-        )
-        .with_namespace_claim(QUEUE_WORKER_ID),
-        WorkerDefinition::new(
-            worker_id(APPROVAL_WORKER_ID)?,
-            WorkerKind::System,
-            actor_id(ENGINE_OWNER_ACTOR)?,
-            grant_id(ENGINE_AUTHORITY_GRANT)?,
-        )
-        .with_namespace_claim(APPROVAL_WORKER_ID),
-    ])
-}
-
-fn primitive_function_definitions(
-    stores: &PrimitiveStores,
-) -> Result<Vec<(FunctionDefinition, Arc<dyn InProcessFunctionHandler>)>> {
-    let stream_handler = Arc::new(StreamPrimitiveHandler {
-        store: stores.streams.clone(),
-    });
-    let state_handler = Arc::new(StatePrimitiveHandler {
-        store: stores.state.clone(),
-    });
-    let queue_handler = Arc::new(QueuePrimitiveHandler {
-        store: stores.queue.clone(),
-    });
-    let approval_handler = Arc::new(ApprovalPrimitiveHandler {
-        store: stores.approvals.clone(),
-    });
-
-    Ok(vec![
-        (
-            primitive_function(
-                "stream::subscribe",
-                STREAM_WORKER_ID,
-                "subscribe to a cursor-pull stream",
-                EffectClass::IdempotentWrite,
-                "stream.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_request_schema(stream_subscribe_schema())
-            .with_response_schema(stream_subscribe_response_schema()),
-            stream_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "stream::poll",
-                STREAM_WORKER_ID,
-                "poll a stream subscription",
-                EffectClass::PureRead,
-                "stream.read",
-            )
-            .with_request_schema(stream_poll_schema())
-            .with_response_schema(stream_poll_response_schema()),
-            stream_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "stream::unsubscribe",
-                STREAM_WORKER_ID,
-                "unsubscribe from a stream",
-                EffectClass::IdempotentWrite,
-                "stream.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_request_schema(stream_unsubscribe_schema())
-            .with_response_schema(boolean_response_schema("unsubscribed")),
-            stream_handler.clone(),
-        ),
-        (
-            FunctionDefinition::new(
-                function_id("stream::publish")?,
-                worker_id(STREAM_WORKER_ID)?,
-                "publish an internal stream event",
-                VisibilityScope::Internal,
-                EffectClass::AppendOnlyEvent,
-            )
-            .with_required_authority(AuthorityRequirement::scope("stream.write"))
-            .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .with_request_schema(stream_publish_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["cursor"],
-                "additionalProperties": false,
-                "properties": {"cursor": {"type": "integer"}}
-            })),
-            stream_handler,
-        ),
-        (
-            primitive_function(
-                "state::get",
-                STATE_WORKER_ID,
-                "read scoped engine state",
-                EffectClass::PureRead,
-                "state.read",
-            )
-            .with_request_schema(state_key_schema())
-            .with_response_schema(state_entry_response_schema(true)),
-            state_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "state::set",
-                STATE_WORKER_ID,
-                "write scoped engine state",
-                EffectClass::IdempotentWrite,
-                "state.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_request_schema(state_set_schema())
-            .with_response_schema(state_entry_response_schema(false)),
-            state_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "state::delete",
-                STATE_WORKER_ID,
-                "delete scoped engine state",
-                EffectClass::IdempotentWrite,
-                "state.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_request_schema(state_key_schema())
-            .with_response_schema(boolean_response_schema("deleted")),
-            state_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "state::compare_and_set",
-                STATE_WORKER_ID,
-                "conditionally update scoped engine state",
-                EffectClass::IdempotentWrite,
-                "state.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_request_schema(state_compare_and_set_schema())
-            .with_response_schema(state_entry_response_schema(false)),
-            state_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "state::list",
-                STATE_WORKER_ID,
-                "list scoped engine state",
-                EffectClass::PureRead,
-                "state.read",
-            )
-            .with_request_schema(state_list_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["entries"],
-                "additionalProperties": false,
-                "properties": {"entries": {"type": "array"}}
-            })),
-            state_handler,
-        ),
-        (
-            primitive_function(
-                "queue::enqueue",
-                QUEUE_WORKER_ID,
-                "enqueue a durable engine invocation",
-                EffectClass::IdempotentWrite,
-                "queue.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_request_schema(queue_enqueue_schema())
-            .with_response_schema(queue_item_response_schema()),
-            queue_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "queue::claim",
-                QUEUE_WORKER_ID,
-                "claim a queued invocation",
-                EffectClass::IdempotentWrite,
-                "queue.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .with_request_schema(queue_claim_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["item"],
-                "additionalProperties": false,
-                "properties": {"item": {}}
-            })),
-            queue_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "queue::complete",
-                QUEUE_WORKER_ID,
-                "complete a queued invocation",
-                EffectClass::IdempotentWrite,
-                "queue.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .with_request_schema(queue_receipt_schema())
-            .with_response_schema(boolean_response_schema("completed")),
-            queue_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "queue::fail",
-                QUEUE_WORKER_ID,
-                "fail or retry a queued invocation",
-                EffectClass::IdempotentWrite,
-                "queue.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .with_request_schema(queue_fail_schema())
-            .with_response_schema(boolean_response_schema("failed")),
-            queue_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "queue::cancel",
-                QUEUE_WORKER_ID,
-                "cancel a queued invocation",
-                EffectClass::IdempotentWrite,
-                "queue.write",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_request_schema(queue_receipt_schema())
-            .with_response_schema(boolean_response_schema("cancelled")),
-            queue_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "queue::get",
-                QUEUE_WORKER_ID,
-                "inspect a queued invocation",
-                EffectClass::PureRead,
-                "queue.read",
-            )
-            .with_request_schema(queue_receipt_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["item"],
-                "additionalProperties": false,
-                "properties": {"item": {}}
-            })),
-            queue_handler.clone(),
-        ),
-        (
-            primitive_function(
-                "queue::list",
-                QUEUE_WORKER_ID,
-                "list queued invocations",
-                EffectClass::PureRead,
-                "queue.read",
-            )
-            .with_request_schema(queue_list_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["items"],
-                "additionalProperties": false,
-                "properties": {"items": {"type": "array"}}
-            })),
-            queue_handler,
-        ),
-        (
-            primitive_function(
-                APPROVAL_REQUEST_FUNCTION,
-                APPROVAL_WORKER_ID,
-                "request approval for a high-risk invocation",
-                EffectClass::IdempotentWrite,
-                "approval.request",
-            )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .with_risk(RiskLevel::Medium)
-            .with_request_schema(approval_request_schema())
-            .with_response_schema(approval_record_response_schema()),
-            approval_handler.clone(),
-        ),
-        (
-            {
-                let mut definition = primitive_function(
-                    APPROVAL_RESOLVE_FUNCTION,
-                    APPROVAL_WORKER_ID,
-                    "resolve and optionally resume an approval",
-                    EffectClass::IdempotentWrite,
-                    "approval.resolve",
-                )
-                .with_required_authority(
-                    AuthorityRequirement::scope("approval.resolve").with_approval_required(),
-                )
-                .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-                .with_risk(RiskLevel::High)
-                .with_compensation(CompensationContract::new(
-                    CompensationKind::EventSourced,
-                    "approval resolution is event-sourced in the approval ledger; denied approvals are terminal and approved invocations keep their own compensation records",
-                ))
-                .with_request_schema(approval_resolve_schema())
-                .with_response_schema(json!({
-                    "type": "object",
-                    "required": ["approval", "child"],
-                    "additionalProperties": false,
-                    "properties": {
-                        "approval": {"type": "object"},
-                        "child": {}
-                    }
-                }));
-                definition.visibility = VisibilityScope::System;
-                definition
-            },
-            approval_handler.clone(),
-        ),
-        (
-            {
-                let mut definition = primitive_function(
-                    APPROVAL_GET_FUNCTION,
-                    APPROVAL_WORKER_ID,
-                    "get one approval record",
-                    EffectClass::PureRead,
-                    "approval.read",
-                )
-                .with_request_schema(approval_get_schema())
-                .with_response_schema(approval_nullable_response_schema());
-                definition.visibility = VisibilityScope::System;
-                definition
-            },
-            approval_handler.clone(),
-        ),
-        (
-            {
-                let mut definition = primitive_function(
-                    APPROVAL_LIST_FUNCTION,
-                    APPROVAL_WORKER_ID,
-                    "list approval records",
-                    EffectClass::PureRead,
-                    "approval.read",
-                )
-                .with_request_schema(approval_list_schema())
-                .with_response_schema(json!({
-                    "type": "object",
-                    "required": ["approvals"],
-                    "additionalProperties": false,
-                    "properties": {"approvals": {"type": "array"}}
-                }));
-                definition.visibility = VisibilityScope::System;
-                definition
-            },
-            approval_handler,
-        ),
-    ])
-}
-
-fn primitive_function(
-    id: &str,
-    worker: &str,
-    description: &str,
-    effect: EffectClass,
-    authority_scope: &str,
-) -> FunctionDefinition {
-    FunctionDefinition::new(
-        function_id(id).expect("valid static primitive function id"),
-        worker_id(worker).expect("valid static primitive worker id"),
-        description,
-        VisibilityScope::Agent,
-        effect,
-    )
-    .with_required_authority(AuthorityRequirement::scope(authority_scope))
-    .with_risk(if effect.is_mutating() {
-        RiskLevel::Medium
-    } else {
-        RiskLevel::Low
-    })
-}
-
-struct StreamPrimitiveHandler {
-    store: Arc<StdMutex<StreamStoreBackend>>,
-}
-
-#[async_trait]
-impl InProcessFunctionHandler for StreamPrimitiveHandler {
-    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?;
-        match invocation.function_id.as_str() {
-            "stream::subscribe" => {
-                let topic = required_string_owned(&invocation.payload, "topic")?;
-                let subscription_id = optional_string(invocation.payload.get("subscriptionId"))?
-                    .unwrap_or_else(|| InvocationId::generate().to_string());
-                let cursor = StreamCursor(
-                    optional_u64(invocation.payload.get("afterCursor"))?.unwrap_or_default(),
-                );
-                let visibility = optional_visibility(invocation.payload.get("visibility"))?
-                    .unwrap_or(VisibilityScope::Session);
-                let session_id = optional_string(invocation.payload.get("sessionId"))?
-                    .or(invocation.causal_context.session_id.clone());
-                let workspace_id = optional_string(invocation.payload.get("workspaceId"))?
-                    .or(invocation.causal_context.workspace_id.clone());
-                let subscription = store.subscribe(
-                    subscription_id,
-                    topic,
-                    cursor,
-                    visibility,
-                    session_id,
-                    workspace_id,
-                )?;
-                Ok(json!({
-                    "subscriptionId": subscription.subscription_id,
-                    "topic": subscription.topic,
-                    "cursor": subscription.cursor.0,
-                    "active": subscription.active,
-                }))
-            }
-            "stream::poll" => {
-                let subscription_id = required_str(&invocation.payload, "subscriptionId")?;
-                let after = optional_u64(invocation.payload.get("afterCursor"))?.map(StreamCursor);
-                let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-                let actor = StreamActorScope {
-                    session_id: invocation.causal_context.session_id.clone(),
-                    workspace_id: invocation.causal_context.workspace_id.clone(),
-                    admin: invocation.causal_context.actor_kind.is_admin_like(),
-                };
-                let page = store.poll(subscription_id, after, limit, &actor)?;
-                Ok(json!({
-                    "events": page.events,
-                    "nextCursor": page.next_cursor.0,
-                    "hasMore": page.has_more,
-                }))
-            }
-            "stream::unsubscribe" => {
-                let subscription_id = required_str(&invocation.payload, "subscriptionId")?;
-                let unsubscribed = store.unsubscribe(subscription_id)?;
-                Ok(json!({ "unsubscribed": unsubscribed }))
-            }
-            "stream::publish" => {
-                let topic = required_string_owned(&invocation.payload, "topic")?;
-                let payload = invocation
-                    .payload
-                    .get("payload")
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                let visibility = optional_visibility(invocation.payload.get("visibility"))?
-                    .unwrap_or(VisibilityScope::Session);
-                let session_id = optional_string(invocation.payload.get("sessionId"))?
-                    .or(invocation.causal_context.session_id.clone());
-                let workspace_id = optional_string(invocation.payload.get("workspaceId"))?
-                    .or(invocation.causal_context.workspace_id.clone());
-                let cursor = store.publish(PublishStreamEvent {
-                    topic,
-                    payload,
-                    visibility,
-                    session_id,
-                    workspace_id,
-                    producer: invocation.function_id.to_string(),
-                    trace_id: Some(invocation.causal_context.trace_id.clone()),
-                    parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
-                })?;
-                Ok(json!({ "cursor": cursor.0 }))
-            }
-            _ => Err(EngineError::NotFound {
-                kind: "function",
-                id: invocation.function_id.to_string(),
-            }),
-        }
-    }
-}
-
-struct StatePrimitiveHandler {
-    store: Arc<StdMutex<StateStoreBackend>>,
-}
-
-#[async_trait]
-impl InProcessFunctionHandler for StatePrimitiveHandler {
-    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("state store lock poisoned".to_owned()))?;
-        match invocation.function_id.as_str() {
-            "state::get" => {
-                let scope = state_scope_from_payload(&invocation)?;
-                let namespace = required_str(&invocation.payload, "namespace")?;
-                let key = required_str(&invocation.payload, "key")?;
-                Ok(json!({ "entry": store.get(scope, namespace, key)? }))
-            }
-            "state::set" => {
-                let scope = state_scope_from_payload(&invocation)?;
-                let namespace = required_string_owned(&invocation.payload, "namespace")?;
-                let key = required_string_owned(&invocation.payload, "key")?;
-                let value = invocation
-                    .payload
-                    .get("value")
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                Ok(json!({ "entry": store.set(scope, namespace, key, value)? }))
-            }
-            "state::delete" => {
-                let scope = state_scope_from_payload(&invocation)?;
-                let namespace = required_str(&invocation.payload, "namespace")?;
-                let key = required_str(&invocation.payload, "key")?;
-                Ok(json!({ "deleted": store.delete(scope, namespace, key)? }))
-            }
-            "state::compare_and_set" => {
-                let scope = state_scope_from_payload(&invocation)?;
-                let namespace = required_string_owned(&invocation.payload, "namespace")?;
-                let key = required_string_owned(&invocation.payload, "key")?;
-                let expected_revision = optional_u64(invocation.payload.get("expectedRevision"))?;
-                let value = invocation
-                    .payload
-                    .get("value")
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                Ok(json!({
-                    "entry": store.compare_and_set(scope, namespace, key, expected_revision, value)?
-                }))
-            }
-            "state::list" => {
-                let scope = state_scope_from_payload(&invocation)?;
-                let namespace = required_str(&invocation.payload, "namespace")?;
-                let key_prefix = optional_string(invocation.payload.get("keyPrefix"))?;
-                let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-                Ok(json!({
-                    "entries": store.list(scope, namespace, key_prefix.as_deref(), limit)?
-                }))
-            }
-            _ => Err(EngineError::NotFound {
-                kind: "function",
-                id: invocation.function_id.to_string(),
-            }),
-        }
-    }
-}
-
-struct QueuePrimitiveHandler {
-    store: Arc<StdMutex<QueueStoreBackend>>,
-}
-
-#[async_trait]
-impl InProcessFunctionHandler for QueuePrimitiveHandler {
-    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?;
-        match invocation.function_id.as_str() {
-            "queue::enqueue" => {
-                let queue = required_string_owned(&invocation.payload, "queue")?;
-                let function_id = function_id(required_str(&invocation.payload, "functionId")?)?;
-                let payload = invocation
-                    .payload
-                    .get("payload")
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                let item = store.enqueue(EnqueueInvocation {
-                    queue,
-                    function_id,
-                    target_revision: optional_u64(invocation.payload.get("targetRevision"))?
-                        .map(FunctionRevision),
-                    payload,
-                    actor_id: invocation.causal_context.actor_id.clone(),
-                    actor_kind: invocation.causal_context.actor_kind.clone(),
-                    authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
-                    authority_scopes: invocation.causal_context.authority_scopes.clone(),
-                    trace_id: invocation.causal_context.trace_id.clone(),
-                    parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
-                    trigger_id: invocation.causal_context.trigger_id.clone(),
-                    session_id: invocation.causal_context.session_id.clone(),
-                    workspace_id: invocation.causal_context.workspace_id.clone(),
-                    idempotency_key: invocation.causal_context.idempotency_key.clone(),
-                })?;
-                Ok(json!({ "item": item }))
-            }
-            "queue::claim" => {
-                let queue = required_str(&invocation.payload, "queue")?;
-                let lease_owner = required_str(&invocation.payload, "leaseOwner")?;
-                let lease_ms =
-                    optional_u64(invocation.payload.get("leaseMs"))?.unwrap_or(30_000) as i64;
-                Ok(json!({ "item": store.claim(queue, lease_owner, lease_ms)? }))
-            }
-            "queue::complete" => {
-                let receipt_id = required_str(&invocation.payload, "receiptId")?;
-                Ok(json!({ "completed": store.complete(receipt_id)? }))
-            }
-            "queue::fail" => {
-                let receipt_id = required_str(&invocation.payload, "receiptId")?;
-                let max_attempts =
-                    optional_u64(invocation.payload.get("maxAttempts"))?.unwrap_or(3) as u32;
-                let backoff_ms =
-                    optional_u64(invocation.payload.get("backoffMs"))?.unwrap_or(0) as i64;
-                Ok(json!({ "failed": store.fail(receipt_id, max_attempts, backoff_ms)? }))
-            }
-            "queue::cancel" => {
-                let receipt_id = required_str(&invocation.payload, "receiptId")?;
-                Ok(json!({ "cancelled": store.cancel(receipt_id)? }))
-            }
-            "queue::get" => {
-                let receipt_id = required_str(&invocation.payload, "receiptId")?;
-                Ok(json!({ "item": store.get(receipt_id)? }))
-            }
-            "queue::list" => {
-                let queue = required_str(&invocation.payload, "queue")?;
-                let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-                Ok(json!({ "items": store.list(queue, limit)? }))
-            }
-            _ => Err(EngineError::NotFound {
-                kind: "function",
-                id: invocation.function_id.to_string(),
-            }),
-        }
-    }
-}
-
-struct ApprovalPrimitiveHandler {
-    store: Arc<StdMutex<ApprovalStoreBackend>>,
-}
-
-#[async_trait]
-impl InProcessFunctionHandler for ApprovalPrimitiveHandler {
-    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?;
-        match invocation.function_id.as_str() {
-            APPROVAL_REQUEST_FUNCTION => {
-                let record = store.request(approval_request_from_invocation(&invocation)?)?;
-                Ok(json!({ "approval": record }))
-            }
-            APPROVAL_GET_FUNCTION => {
-                let approval_id = required_str(&invocation.payload, "approvalId")?;
-                Ok(json!({ "approval": store.get(approval_id)? }))
-            }
-            APPROVAL_LIST_FUNCTION => {
-                let status = optional_string(invocation.payload.get("status"))?
-                    .map(|value| parse_approval_status(&value))
-                    .transpose()?;
-                let session_id = optional_string(invocation.payload.get("sessionId"))?;
-                let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-                Ok(json!({
-                    "approvals": store.list(status, session_id.as_deref(), limit)?
-                }))
-            }
-            APPROVAL_RESOLVE_FUNCTION => Err(EngineError::PolicyViolation(
-                "approval::resolve must execute through EngineHostHandle so the target invocation can resume".to_owned(),
-            )),
-            _ => Err(EngineError::NotFound {
-                kind: "function",
-                id: invocation.function_id.to_string(),
-            }),
-        }
-    }
-}
-
-fn approval_request_from_invocation(invocation: &Invocation) -> Result<EngineApprovalRequest> {
-    let function_id = function_id(required_str(&invocation.payload, "functionId")?)?;
-    let payload = invocation
-        .payload
-        .get("payload")
-        .cloned()
-        .unwrap_or(Value::Null);
-    Ok(EngineApprovalRequest {
-        function_id,
-        payload,
-        causal_context: invocation.causal_context.clone(),
-        delivery_mode: invocation.delivery_mode,
-    })
-}
-
-fn state_scope_from_payload(invocation: &Invocation) -> Result<EngineStateScope> {
-    match optional_string(invocation.payload.get("scope"))?
-        .unwrap_or_else(|| "session".to_owned())
-        .as_str()
-    {
-        "system" => Ok(EngineStateScope::System),
-        "workspace" => {
-            let workspace_id = optional_string(invocation.payload.get("workspaceId"))?
-                .or(invocation.causal_context.workspace_id.clone())
-                .ok_or_else(|| {
-                    EngineError::PolicyViolation(
-                        "workspace-scoped state requires workspaceId".to_owned(),
-                    )
-                })?;
-            Ok(EngineStateScope::Workspace(workspace_id))
-        }
-        "session" => {
-            let session_id = optional_string(invocation.payload.get("sessionId"))?
-                .or(invocation.causal_context.session_id.clone())
-                .ok_or_else(|| {
-                    EngineError::PolicyViolation(
-                        "session-scoped state requires sessionId".to_owned(),
-                    )
-                })?;
-            Ok(EngineStateScope::Session(session_id))
-        }
-        other => Err(EngineError::PolicyViolation(format!(
-            "unsupported state scope {other}"
-        ))),
-    }
-}
-
-fn required_string_owned(payload: &Value, field: &str) -> Result<String> {
-    Ok(required_str(payload, field)?.to_owned())
-}
-
-fn boolean_response_schema(field: &str) -> Value {
-    let mut properties = serde_json::Map::new();
-    properties.insert(field.to_owned(), json!({"type": "boolean"}));
-    json!({
-        "type": "object",
-        "required": [field],
-        "additionalProperties": false,
-        "properties": properties
-    })
-}
-
-fn stream_subscribe_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["topic"],
-        "additionalProperties": false,
-        "properties": {
-            "topic": {"type": "string"},
-            "subscriptionId": {"type": "string"},
-            "afterCursor": {"type": "integer"},
-            "visibility": {"type": "string"},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn stream_subscribe_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["subscriptionId", "topic", "cursor", "active"],
-        "additionalProperties": false,
-        "properties": {
-            "subscriptionId": {"type": "string"},
-            "topic": {"type": "string"},
-            "cursor": {"type": "integer"},
-            "active": {"type": "boolean"}
-        }
-    })
-}
-
-fn stream_poll_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["subscriptionId"],
-        "additionalProperties": false,
-        "properties": {
-            "subscriptionId": {"type": "string"},
-            "afterCursor": {"type": "integer"},
-            "limit": {"type": "integer"}
-        }
-    })
-}
-
-fn stream_poll_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["events", "nextCursor", "hasMore"],
-        "additionalProperties": false,
-        "properties": {
-            "events": {"type": "array"},
-            "nextCursor": {"type": "integer"},
-            "hasMore": {"type": "boolean"}
-        }
-    })
-}
-
-fn stream_unsubscribe_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["subscriptionId"],
-        "additionalProperties": false,
-        "properties": {"subscriptionId": {"type": "string"}}
-    })
-}
-
-fn stream_publish_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["topic", "payload"],
-        "additionalProperties": false,
-        "properties": {
-            "topic": {"type": "string"},
-            "payload": {},
-            "visibility": {"type": "string"},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn state_scope_properties() -> Value {
-    json!({
-        "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-        "sessionId": {"type": "string"},
-        "workspaceId": {"type": "string"},
-        "namespace": {"type": "string"},
-        "key": {"type": "string"}
-    })
-}
-
-fn state_key_schema() -> Value {
-    let mut properties = state_scope_properties();
-    if let Some(object) = properties.as_object_mut() {
-        object.insert("additionalProperties".to_owned(), json!(false));
-    }
-    json!({
-        "type": "object",
-        "required": ["namespace", "key"],
-        "additionalProperties": false,
-        "properties": state_scope_properties()
-    })
-}
-
-fn state_set_schema() -> Value {
-    let mut properties = state_scope_properties();
-    properties["value"] = json!({});
-    json!({
-        "type": "object",
-        "required": ["namespace", "key", "value"],
-        "additionalProperties": false,
-        "properties": properties
-    })
-}
-
-fn state_compare_and_set_schema() -> Value {
-    let mut properties = state_scope_properties();
-    properties["value"] = json!({});
-    properties["expectedRevision"] = json!({"type": "integer"});
-    json!({
-        "type": "object",
-        "required": ["namespace", "key", "value"],
-        "additionalProperties": false,
-        "properties": properties
-    })
-}
-
-fn state_list_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["namespace"],
-        "additionalProperties": false,
-        "properties": {
-            "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"},
-            "namespace": {"type": "string"},
-            "keyPrefix": {"type": "string"},
-            "limit": {"type": "integer"}
-        }
-    })
-}
-
-fn state_entry_response_schema(nullable: bool) -> Value {
-    let entry_schema = if nullable {
-        json!({})
-    } else {
-        json!({"type": "object"})
-    };
-    json!({
-        "type": "object",
-        "required": ["entry"],
-        "additionalProperties": false,
-        "properties": {"entry": entry_schema}
-    })
-}
-
-fn queue_enqueue_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["queue", "functionId", "payload"],
-        "additionalProperties": false,
-        "properties": {
-            "queue": {"type": "string"},
-            "functionId": {"type": "string"},
-            "targetRevision": {"type": "integer"},
-            "payload": {}
-        }
-    })
-}
-
-fn queue_claim_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["queue", "leaseOwner"],
-        "additionalProperties": false,
-        "properties": {
-            "queue": {"type": "string"},
-            "leaseOwner": {"type": "string"},
-            "leaseMs": {"type": "integer"}
-        }
-    })
-}
-
-fn queue_receipt_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["receiptId"],
-        "additionalProperties": false,
-        "properties": {"receiptId": {"type": "string"}}
-    })
-}
-
-fn queue_fail_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["receiptId"],
-        "additionalProperties": false,
-        "properties": {
-            "receiptId": {"type": "string"},
-            "maxAttempts": {"type": "integer"},
-            "backoffMs": {"type": "integer"}
-        }
-    })
-}
-
-fn queue_list_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["queue"],
-        "additionalProperties": false,
-        "properties": {
-            "queue": {"type": "string"},
-            "limit": {"type": "integer"}
-        }
-    })
-}
-
-fn queue_item_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["item"],
-        "additionalProperties": false,
-        "properties": {"item": {"type": "object"}}
-    })
-}
-
-fn approval_request_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["functionId"],
-        "additionalProperties": false,
-        "properties": {
-            "functionId": {"type": "string"},
-            "payload": {}
-        }
-    })
-}
-
-fn approval_resolve_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["approvalId", "decision"],
-        "additionalProperties": false,
-        "properties": {
-            "approvalId": {"type": "string"},
-            "decision": {"type": "string", "enum": ["approve", "deny"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn approval_get_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["approvalId"],
-        "additionalProperties": false,
-        "properties": {
-            "approvalId": {"type": "string"},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn approval_list_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "status": {"type": "string"},
-            "sessionId": {"type": "string"},
-            "limit": {"type": "integer"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn approval_record_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["approval"],
-        "additionalProperties": false,
-        "properties": {"approval": {"type": "object"}}
-    })
-}
-
-fn approval_nullable_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["approval"],
-        "additionalProperties": false,
-        "properties": {"approval": {}}
-    })
-}
-
 fn actor_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
@@ -3427,6 +2394,35 @@ fn invocation_result_value(result: &InvocationResult) -> Value {
     })
 }
 
+fn invocation_record_value(record: &super::invocation::InvocationRecord) -> Value {
+    json!({
+        "invocationId": record.invocation_id.as_str(),
+        "functionId": record.function_id.as_str(),
+        "workerId": record.worker_id.as_str(),
+        "functionRevision": record.function_revision.0,
+        "catalogRevision": record.catalog_revision.0,
+        "actorId": record.actor_id.as_str(),
+        "actorKind": &record.actor_kind,
+        "authorityGrantId": record.authority_grant_id.as_str(),
+        "authorityScopes": &record.authority_scopes,
+        "traceId": record.trace_id.as_str(),
+        "parentInvocationId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
+        "triggerId": record.trigger_id.as_ref().map(TriggerId::as_str),
+        "deliveryMode": record.delivery_mode.as_str(),
+        "idempotencyKey": record.idempotency_key.as_deref(),
+        "idempotencyScope": record.idempotency_scope.as_ref().map(|scope| {
+            json!({"kind": scope.kind.as_str(), "value": scope.value.as_str()})
+        }),
+        "resourceLeaseIds": &record.resource_lease_ids,
+        "compensationStatus": record.compensation_status.as_deref(),
+        "replayedFrom": record.replayed_from.as_ref().map(InvocationId::as_str),
+        "succeeded": record.succeeded,
+        "result": record.result_value.as_ref(),
+        "error": record.error.as_ref().map(error_value),
+        "timestamp": record.timestamp.to_rfc3339(),
+    })
+}
+
 fn delegated_invoke_value(
     catalog_revision: CatalogRevision,
     child_result: &InvocationResult,
@@ -3491,19 +2487,6 @@ fn parse_approval_decision(value: &str) -> Result<ApprovalDecision> {
         "deny" => Ok(ApprovalDecision::Deny),
         other => Err(EngineError::PolicyViolation(format!(
             "unsupported approval decision {other}"
-        ))),
-    }
-}
-
-fn parse_approval_status(value: &str) -> Result<ApprovalStatus> {
-    match value {
-        "pending" => Ok(ApprovalStatus::Pending),
-        "approved" => Ok(ApprovalStatus::Approved),
-        "denied" => Ok(ApprovalStatus::Denied),
-        "executed" => Ok(ApprovalStatus::Executed),
-        "failed" => Ok(ApprovalStatus::Failed),
-        other => Err(EngineError::PolicyViolation(format!(
-            "unsupported approval status {other}"
         ))),
     }
 }
@@ -3791,4 +2774,8 @@ fn actor_id(value: &str) -> Result<ActorId> {
 
 fn grant_id(value: &str) -> Result<AuthorityGrantId> {
     AuthorityGrantId::new(value)
+}
+
+fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
+    matches!(namespace, "catalog" | "worker" | "observability")
 }

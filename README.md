@@ -165,7 +165,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `llm` | LLM abstraction + model registry | `Provider` trait, `ProviderFactory`, `ProviderStreamOptions` |
 | `mcp` | Model Context Protocol integration | MCP client/server types |
 | `tools` | Tool implementation bodies used by canonical `tool::*` capabilities | `TronTool` trait, per-tool structs |
-| `engine` | Live capability catalog foundation | `LiveCatalog`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
+| `engine` | Live capability fabric, primitive workers, local worker protocol | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
 | `cron` | Automation scheduler | Cron job runner, schedule parser |
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
@@ -173,7 +173,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `server` | HTTP/WS + pure engine protocol | `TronServer`, `ServerRuntimeContext`, `EngineStreamEventPump` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
 | `server::domains` | Domain-owned worker/function surface | `registration::register_domain_workers_for_context()`, `worker::DomainWorkerModule`, per-domain `contract.rs`, `deps.rs`, declarative `handlers.rs` binding tables, operation workflow modules, typed stream publishers |
-| `server::runtime` | Engine runtime services | `EngineRuntimeServices`, `EngineStreamEventPump`, external worker runtime |
+| `server::runtime` | Engine runtime services | `EngineRuntimeServices`, `EngineStreamEventPump`, queue drainers |
 | `server::platform::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
 | `server::shared` | Transport-neutral server helpers | `ServerRuntimeContext`, `CapabilityError`, `ServerEventPayload` |
 | `server::transport` | `/engine` client protocol, worker auth, transport envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
@@ -384,6 +384,33 @@ The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
 translates into an internal `EngineTransportRequest`, carrying actor,
 authority, trace, scope, payload, expected revision, and explicit idempotency.
 Correlation ids are never command ids or idempotency keys.
+
+`/engine/workers` is the local-first worker protocol. A worker performs a
+versioned hello with `WorkerIdentity`, auth policy, registration mode, visibility
+scope, heartbeat interval, and supported capability labels; then it registers
+canonical function and trigger definitions with the same schema, authority,
+effect/risk, idempotency, approval, lease, compensation, visibility, and
+provenance metadata as in-process domain workers. Volatile worker entries are
+removed on disconnect or missed heartbeat. Durable local worker entries stay in
+the catalog but are marked unhealthy when the worker disconnects, so invocation
+fails closed until the worker reconnects and re-registers. Workers publish
+events by asking the engine to invoke `stream::publish`; there is no direct
+socket event bypass.
+
+Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
+`queue::*`, and `approval::*` preserve the runtime semantics for delivery,
+state, queued handoff, and human approval. `catalog::*`, `worker::*`, and
+`observability::*` expose live catalog snapshots, worker health/lifecycle, trace
+spans/logs, and metrics through the same canonical invocation path.
+
+Sandbox-created capabilities enter through the high-risk
+`sandbox::spawn_worker` capability. It requires explicit idempotency,
+`sandbox.write` authority, approval for autonomous actors, a worker resource
+lease, and compensation notes. The capability starts a local worker process with
+scoped `/engine/workers` environment, waits for the expected registration, and
+returns the worker id, registered functions, catalog revision, visibility, and
+process metadata. Session visibility is the default; workspace/system promotion
+is still only `engine::promote`.
 
 ---
 
@@ -665,7 +692,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
-The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, and compensation audit records; live catalog definitions are still in memory.
+The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, and compensation audit records; live catalog definitions are still in memory. The observability worker reads this ledger as local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`.
 
 ### Tables
 

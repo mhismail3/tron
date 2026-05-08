@@ -21,8 +21,9 @@
 //!
 //! The tools domain owns built-in `tool::*` capability contracts. Provider-facing
 //! schemas come from the live engine catalog at every model-call boundary, so
-//! built-ins, dynamic MCP capabilities, and future external workers can appear
-//! or disappear from the model-visible tool surface without restarting a run.
+//! built-ins, dynamic MCP capabilities, and local external-worker capabilities
+//! can appear or disappear from the model-visible tool surface without
+//! restarting a run.
 
 #![deny(unsafe_code)]
 // The TronTool trait returns `&str` from `fn name()` — clippy's `unnecessary_literal_bound`

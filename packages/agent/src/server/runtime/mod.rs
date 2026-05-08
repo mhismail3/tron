@@ -4,10 +4,10 @@
 //! source of truth for delayed work. Client event delivery is handled directly
 //! by `/engine` subscriptions over the stream primitive.
 //! The `agent` queue drains hidden prompt apply/drain functions so startup and
-//! queued follow-up prompts run through canonical engine functions. The stream projection service owns the migrated
-//! broadcast topics for approvals, auth/settings/MCP/device/cron/update/memory
-//! status, jobs, agent queue, session events, sandbox/display lifecycle, and
-//! catalog changes. The heartbeat service unregisters stale volatile local
+//! queued follow-up prompts run through canonical engine functions. Runtime
+//! stream projection writes approvals, auth/settings/MCP/device/cron/update/
+//! memory status, jobs, agent queue, session events, sandbox/display lifecycle,
+//! and catalog changes into engine streams. The heartbeat service cleans local
 //! external-worker capabilities so the live catalog reflects what can actually
 //! run.
 

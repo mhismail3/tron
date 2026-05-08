@@ -1,9 +1,11 @@
 //! Loopback WebSocket endpoint for local engine workers.
 //!
-//! External workers are volatile, session-scoped participants in the live
-//! capability catalog. This endpoint only accepts authenticated loopback
-//! connections and speaks the engine worker protocol; sandboxing and remote
-//! worker hosting remain deferred.
+//! External workers are local participants in the live capability catalog. This
+//! endpoint accepts authenticated loopback connections, speaks the engine worker
+//! protocol, and delegates lifecycle policy to [`EngineExternalWorkerRuntime`]:
+//! volatile registrations are removed on disconnect/heartbeat timeout, durable
+//! local registrations are marked unhealthy, and worker stream publication goes
+//! through `stream::publish`.
 
 use std::sync::Arc;
 use std::time::Duration;

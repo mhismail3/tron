@@ -325,6 +325,96 @@ fn tool_registry_authority_stays_deleted() {
 }
 
 #[test]
+fn primitive_workers_are_owned_outside_host_bucket() {
+    let crate_root = crate_root();
+    let primitives_root = crate_root.join("src/engine/primitives");
+    for primitive in [
+        "stream.rs",
+        "state.rs",
+        "queue.rs",
+        "approval.rs",
+        "catalog.rs",
+        "worker.rs",
+        "observability.rs",
+    ] {
+        assert!(
+            primitives_root.join(primitive).is_file(),
+            "engine primitive worker contracts must live in src/engine/primitives/{primitive}"
+        );
+    }
+
+    let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
+        .expect("failed to read engine host");
+    for removed in [
+        "struct StreamPrimitiveHandler",
+        "struct StatePrimitiveHandler",
+        "struct QueuePrimitiveHandler",
+        "struct ApprovalPrimitiveHandler",
+        "fn stream_publish_schema",
+        "fn state_set_schema",
+        "fn queue_enqueue_schema",
+        "fn approval_request_schema",
+        "fn primitive_function(",
+    ] {
+        assert!(
+            !host.contains(removed),
+            "EngineHost must coordinate primitive execution without owning primitive contract/handler bucket `{removed}`"
+        );
+    }
+}
+
+#[test]
+fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
+    let crate_root = crate_root();
+    let protocol = std::fs::read_to_string(crate_root.join("src/engine/protocol.rs"))
+        .expect("failed to read worker protocol");
+    for required in [
+        "WorkerIdentity",
+        "WorkerAuthPolicy",
+        "WorkerRegistrationMode",
+        "WorkerVisibility",
+        "WorkerHealth",
+        "WorkerStreamPublish",
+        "PublishStream",
+    ] {
+        assert!(
+            protocol.contains(required),
+            "worker protocol must expose `{required}` for local-first worker lifecycle and stream publication"
+        );
+    }
+
+    let external = std::fs::read_to_string(crate_root.join("src/engine/external.rs"))
+        .expect("failed to read external worker runtime");
+    for required in [
+        "register_function",
+        "register_trigger",
+        "publish_stream",
+        "disconnect_timed_out",
+        "mark_durable_worker_disconnected",
+    ] {
+        assert!(
+            external.contains(required),
+            "external worker runtime must keep `{required}` in the engine-owned worker lifecycle"
+        );
+    }
+
+    let sandbox_contract =
+        std::fs::read_to_string(crate_root.join("src/server/domains/sandbox/contract.rs"))
+            .expect("failed to read sandbox contract");
+    for required in [
+        "sandbox::spawn_worker",
+        "sandbox-worker",
+        "approvalRequiredForAgentVisibility",
+        "worker:{workerId}",
+    ] {
+        assert!(
+            sandbox_contract.contains(required),
+            "sandbox::spawn_worker must stay a high-risk domain-owned capability with complete engine metadata; missing `{required}`"
+        );
+    }
+}
+
+#[test]
 fn agent_runtime_stays_engine_native() {
     let crate_root = crate_root();
     let agent_root = crate_root.join("src/server/domains/agent");
