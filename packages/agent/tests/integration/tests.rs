@@ -811,7 +811,7 @@ async fn wait_for_detailed_snapshot_rules(
 }
 
 #[tokio::test]
-async fn e2e_stream_pump_delivers_to_bound_client() {
+async fn e2e_stream_event_pump_delivers_to_bound_client() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
 
@@ -828,7 +828,7 @@ async fn e2e_stream_pump_delivers_to_bound_client() {
 }
 
 #[tokio::test]
-async fn e2e_stream_pump_multiple_clients() {
+async fn e2e_stream_event_pump_multiple_clients() {
     let (url, server) = boot_server().await;
 
     let mut ws1 = connect(&url).await;
@@ -863,7 +863,7 @@ async fn e2e_stream_pump_multiple_clients() {
 }
 
 #[tokio::test]
-async fn e2e_stream_pump_session_isolation() {
+async fn e2e_stream_event_pump_session_isolation() {
     let (url, server) = boot_server().await;
 
     // Two connections, each bound to a different session

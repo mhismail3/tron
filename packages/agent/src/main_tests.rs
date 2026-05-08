@@ -1,7 +1,7 @@
 use super::tool_factory::create_tool_registry;
 use super::*;
 use clap::Parser;
-use tron::server::stream_pump::EngineStreamEventPump;
+use tron::server::runtime::streams::EngineStreamEventPump;
 use tron::settings::TronSettings;
 use tron::settings::db_path_policy::{
     PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
@@ -463,7 +463,7 @@ async fn server_boots_and_responds() {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::services::session_context::ContextArtifactsService::new(),
+            tron::server::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -484,7 +484,7 @@ async fn server_boots_and_responds() {
         .build_recorder()
         .handle();
     let server = TronServer::new(config, capability_context, metrics_handle);
-    tron::server::transport::setup::register_engine_protocol_for_context(
+    tron::server::transport::setup::register_server_domains_for_context(
         server.capability_context(),
     )
     .unwrap();
@@ -495,7 +495,7 @@ async fn server_boots_and_responds() {
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
-    let _stream_pump = tokio::spawn(pump.run());
+    let _stream_event_pump = tokio::spawn(pump.run());
 
     let (addr, handle) = server.listen().await.unwrap();
 
@@ -803,7 +803,7 @@ async fn server_graceful_shutdown() {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::services::session_context::ContextArtifactsService::new(),
+            tron::server::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -823,7 +823,7 @@ async fn server_graceful_shutdown() {
         .build_recorder()
         .handle();
     let server = TronServer::new(ServerConfig::default(), capability_context, metrics_handle);
-    tron::server::transport::setup::register_engine_protocol_for_context(
+    tron::server::transport::setup::register_server_domains_for_context(
         server.capability_context(),
     )
     .unwrap();

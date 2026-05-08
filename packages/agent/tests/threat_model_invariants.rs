@@ -30,11 +30,11 @@ use std::path::{Path, PathBuf};
 /// `"INVARIANT"` and the required substring (lowercased comparison).
 const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
     // C1 — filesystem services accept arbitrary paths
-    ("src/server/services/filesystem_service.rs", "trusted-local"),
+    ("src/server/domains/filesystem/service.rs", "trusted-local"),
     // C2 — server binds 0.0.0.0 by default
     ("src/main.rs", "trusted-local"),
     // L8 — client-supplied bundleId trusted at register time
-    ("src/server/capabilities/device.rs", "trusted-local"),
+    ("src/server/domains/device/mod.rs", "trusted-local"),
     // L14 — `is_path_within` is lexical, no symlink resolution
     ("src/runtime/guardrails/rules/path.rs", "trusted-local"),
 ];
@@ -159,7 +159,7 @@ fn readme_does_not_advertise_removed_or_fictional_contracts() {
     for removed in [
         concat!("server.", "auth.", "enforced"),
         concat!("Bearer", "Auth"),
-        concat!("rpc/", "adapters.rs"),
+        concat!("rpc/", "ad", "apters.rs"),
         concat!(
             "Full-text",
             " search (",
@@ -182,20 +182,24 @@ fn readme_does_not_advertise_removed_or_fictional_contracts() {
 #[test]
 fn server_blocking_work_uses_the_supervisor_entrypoint() {
     let crate_root = crate_root();
-    let services_root = crate_root.join("src/server/services");
-    for path in rust_files_under(&services_root) {
-        let rel = path.strip_prefix(&crate_root).unwrap();
-        if rel == Path::new("src/server/services/context.rs") {
-            continue;
+    for root in [
+        crate_root.join("src/server/domains"),
+        crate_root.join("src/server/shared"),
+    ] {
+        for path in rust_files_under(&root) {
+            let rel = path.strip_prefix(&crate_root).unwrap();
+            if rel == Path::new("src/server/shared/context.rs") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            assert!(
+                !content.contains("tokio::task::spawn_blocking")
+                    && !content.contains("spawn_blocking("),
+                "{} must route blocking work through ServerCapabilityContext::run_blocking or run_blocking_task",
+                rel.display()
+            );
         }
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
-        assert!(
-            !content.contains("tokio::task::spawn_blocking")
-                && !content.contains("spawn_blocking("),
-            "{} must route blocking work through ServerCapabilityContext::run_blocking or run_blocking_task",
-            rel.display()
-        );
     }
 }
 
@@ -205,7 +209,7 @@ fn removed_server_owned_settings_store_stays_deleted() {
     let file_name = ["settings", "_service.rs"].concat();
     assert!(
         !crate_root
-            .join("src/server/services")
+            .join("src/server/domains/settings")
             .join(file_name)
             .exists(),
         "settings persistence belongs to settings::SettingsStore, not server transport code"
@@ -213,14 +217,14 @@ fn removed_server_owned_settings_store_stays_deleted() {
 }
 
 #[test]
-fn tron_server_transport_has_no_rpc_compatibility_surface() {
+fn tron_server_transport_has_no_removed_rpc_surface() {
     let repo_root = repo_root();
     let crate_root = crate_root();
 
     for removed in [
         "src/server/rpc",
         concat!("src/server/transport/json", "_", "rpc"),
-        "src/server/engine_bridge",
+        concat!("src/server/engine_", "br", "idge"),
     ] {
         assert!(
             !crate_root.join(removed).exists(),
@@ -256,10 +260,82 @@ fn tron_server_transport_has_no_rpc_compatibility_surface() {
             for needle in forbidden {
                 assert!(
                     !content.contains(needle),
-                    "{} contains removed transport compatibility marker `{needle}`",
+                    "{} contains removed transport marker `{needle}`",
                     path.strip_prefix(&repo_root).unwrap_or(&path).display()
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn server_package_uses_domain_owned_engine_layout() {
+    let crate_root = crate_root();
+    for removed in ["src/server/capabilities", "src/server/services"] {
+        assert!(
+            !crate_root.join(removed).exists(),
+            "{removed} must stay deleted; server behavior is owned by domain workers"
+        );
+    }
+
+    let domains_root = crate_root.join("src/server/domains");
+    assert!(
+        domains_root.is_dir(),
+        "server domains directory must exist as the canonical worker surface"
+    );
+    for required in [
+        "agent", "auth", "cron", "session", "settings", "tools", "worktree",
+    ] {
+        let domain_root = domains_root.join(required);
+        assert!(
+            domain_root.is_dir(),
+            "domain worker module `{required}` must own its vertical slice"
+        );
+        assert!(
+            domain_root.join("spec.rs").is_file(),
+            "domain worker module `{required}` must own its canonical function inventory"
+        );
+    }
+
+    let domains_mod = std::fs::read_to_string(domains_root.join("mod.rs"))
+        .expect("failed to read server/domains/mod.rs");
+    assert!(
+        !domains_mod.contains("async fn capability_function_value"),
+        "canonical functions must carry concrete domain handlers instead of executing through a central dispatcher"
+    );
+    assert!(
+        domains_mod.contains("handler_for_method"),
+        "registration-time handler selection should stay explicit and auditable"
+    );
+    let catalog = std::fs::read_to_string(domains_root.join("catalog.rs"))
+        .expect("failed to read server/domains/catalog.rs");
+    assert!(
+        !catalog.contains("CAPABILITY_SEEDS") && !catalog.contains("capability_seed!"),
+        "canonical function inventories must live with domain workers, not a central seed table"
+    );
+}
+
+#[test]
+fn domains_and_runtime_do_not_import_client_transport_modules() {
+    let crate_root = crate_root();
+    for root in [
+        crate_root.join("src/server/domains"),
+        crate_root.join("src/server/runtime"),
+        crate_root.join("src/server/shared"),
+    ] {
+        for path in rust_files_under(&root) {
+            let rel = path.strip_prefix(&crate_root).unwrap();
+            if rel == Path::new("src/server/shared/test_support.rs") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            assert!(
+                !content.contains("server::transport")
+                    && !content.contains("crate::server::transport"),
+                "{} must not import client transport modules",
+                rel.display()
+            );
         }
     }
 }

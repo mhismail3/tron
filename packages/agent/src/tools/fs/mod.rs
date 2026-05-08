@@ -26,7 +26,7 @@
 //! - Every handler canonicalises via `tools::utils::path::normalise` before
 //!   reaching the backend, so `../` traversal outside the working directory
 //!   is documented by the trusted-local INVARIANT on
-//!   [`crate::server::services::filesystem_service`] and NOT re-checked here.
+//!   [`crate::server::domains::filesystem::service`] and NOT re-checked here.
 
 pub mod edit;
 pub mod find;

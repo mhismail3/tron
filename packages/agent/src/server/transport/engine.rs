@@ -13,10 +13,10 @@ use crate::engine::{
     ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, InvocationId, TraceId,
     TriggerDispatchRequest, TriggerId,
 };
-use crate::server::capabilities::catalog::{self, TransportIdempotencyMode};
-use crate::server::capabilities::error_mapping::engine_error_to_capability_error;
-use crate::server::capabilities::errors::CapabilityError;
-use crate::server::services::context::ServerCapabilityContext;
+use crate::server::domains::catalog::{self, TransportIdempotencyMode};
+use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::error_mapping::engine_error_to_capability_error;
+use crate::server::shared::errors::CapabilityError;
 
 /// Optional context supplied by a transport message.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -160,7 +160,7 @@ pub async fn dispatch_engine_transport_request(
     dispatch.idempotency_key = idempotency_key;
 
     let result = EngineTriggerRuntime::dispatch(&ctx.engine_host, dispatch).await;
-    crate::server::capabilities::error_mapping::result_to_capability_value(result)
+    crate::server::shared::error_mapping::result_to_capability_value(result)
 }
 
 fn transport_causal_context_for_method(

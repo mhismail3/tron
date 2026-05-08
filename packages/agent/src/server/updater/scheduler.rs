@@ -47,7 +47,7 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::engine::{EngineHostHandle, PublishStreamEvent, VisibilityScope};
-use crate::server::services::events_wire::ServerEventPayload;
+use crate::server::shared::events::ServerEventPayload;
 
 use super::{
     CheckOutcome, ReleaseFetcher, UpdateDecision, UpdaterState, check_for_update, is_paused,

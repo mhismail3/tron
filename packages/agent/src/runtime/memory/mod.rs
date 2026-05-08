@@ -23,8 +23,8 @@
 //! ## Module position
 //!
 //! Sibling to `runtime/context/` and `runtime/agent/`. Depends on
-//! `core::paths`. Depended on by `server::services::context_queries` and
-//! `server::services::agent_runtime::runtime` which inject the loaded
+//! `core::paths`. Depended on by `server::domains::context::queries` and
+//! `server::domains::agent::runtime` which inject the loaded
 //! content into the LLM-bound `Context`.
 
 #![deny(unsafe_code)]

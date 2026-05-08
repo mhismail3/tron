@@ -143,10 +143,12 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |
   +-- runtime          Agent loop, context, hooks, orchestrator, tasks
   |
-  +-- server           Axum HTTP/WS, engine transport, services, stream pump, APNS
-  |                    +-- onboarding      Bearer token + `.onboarded` sentinel lifecycle
-  |                    +-- codex_app       Managed `codex app-server` child lifecycle
-  |                    +-- websocket       WS upgrade handler + mandatory bearer-auth middleware
+  +-- server           Axum HTTP/WS, pure engine transport, domains, runtime, APNS
+  |                    +-- domains         Domain-owned workers, functions, schemas, services
+  |                    +-- runtime         Queue drainers, stream projection, external workers
+  |                    +-- transport       /engine protocol parsing + EngineTransportRequest
+  |                    +-- platform        Codex App Server, APNS, device broker
+  |                    +-- shared          Transport-neutral context, errors, events, validation
   |                    +-- updater         GitHub Releases poller + notify-only update state
   |
   +-- main.rs          Binary entry point: DB policy, CLI subcommands, startup
@@ -168,9 +170,12 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
-| `server` | HTTP/WS + engine protocol | `TronServer`, `ServerCapabilityContext`, `EngineStreamEventPump` |
+| `server` | HTTP/WS + pure engine protocol | `TronServer`, `ServerCapabilityContext`, `EngineStreamEventPump` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
-| `server::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
+| `server::domains` | Domain-owned worker/function surface | `register_domain_workers_for_context()`, `CanonicalFunctionHandler`, per-domain modules |
+| `server::runtime` | Engine runtime services | `EngineRuntimeServices`, `EngineStreamEventPump`, external worker runtime |
+| `server::platform::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
+| `server::shared` | Transport-neutral server helpers | `ServerCapabilityContext`, `CapabilityError`, `ServerEventPayload` |
 | `server::transport` | `/engine` client protocol, worker auth, transport envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `server::updater` | GitHub Releases checks + update notifications | `SchedulerDeps`, `UpdaterState`, `UpdateDecision` |
 

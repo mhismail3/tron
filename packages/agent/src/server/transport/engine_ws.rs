@@ -18,13 +18,13 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::{StreamActorScope, StreamCursor, VisibilityScope};
-use crate::server::capabilities::error_mapping::engine_error_to_capability_error;
-use crate::server::capabilities::errors::{CapabilityError, INVALID_PARAMS};
-use crate::server::capabilities::validation::{
+use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::error_mapping::engine_error_to_capability_error;
+use crate::server::shared::errors::{CapabilityError, INVALID_PARAMS};
+use crate::server::shared::events::ServerEventPayload;
+use crate::server::shared::validation::{
     MAX_JSON_DEPTH, sanitize_error_message, validate_json_depth,
 };
-use crate::server::services::context::ServerCapabilityContext;
-use crate::server::services::events_wire::ServerEventPayload;
 use crate::server::transport::engine::{
     EngineTransportBuildRequest, EngineTransportContext, build_engine_transport_request,
     dispatch_engine_transport_request,
@@ -1119,7 +1119,7 @@ fn now_timestamp() -> String {
 mod tests {
     use super::*;
     use crate::engine::{PublishStreamEvent, VisibilityScope};
-    use crate::server::services::test_support::make_test_context;
+    use crate::server::shared::test_support::make_test_context;
     use serde_json::json;
 
     fn test_session() -> (EngineWsSession, mpsc::Receiver<String>) {

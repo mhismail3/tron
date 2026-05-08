@@ -29,9 +29,9 @@ use tron::llm::provider::{
 use tron::runtime::orchestrator::orchestrator::Orchestrator;
 use tron::runtime::orchestrator::session_manager::SessionManager;
 use tron::server::config::ServerConfig;
+use tron::server::runtime::streams::EngineStreamEventPump;
 use tron::server::server::TronServer;
-use tron::server::services::context::{AgentDeps, ServerCapabilityContext};
-use tron::server::stream_pump::EngineStreamEventPump;
+use tron::server::shared::context::{AgentDeps, ServerCapabilityContext};
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
 
@@ -120,7 +120,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::services::session_context::ContextArtifactsService::new(),
+            tron::server::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -141,11 +141,11 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         .build_recorder()
         .handle();
     let server = Arc::new(TronServer::new(config, capability_context, metrics_handle));
-    tron::server::transport::setup::register_engine_protocol_for_context(
+    tron::server::transport::setup::register_server_domains_for_context(
         server.capability_context(),
     )
     .expect("integration engine protocol should register");
-    tron::server::engine_runtime::EngineRuntimeServices::start(&server);
+    tron::server::runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
@@ -153,7 +153,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
-    let _stream_pump_handle = tokio::spawn(pump.run());
+    let _stream_event_pump_handle = tokio::spawn(pump.run());
 
     let (addr, _handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/engine");
@@ -410,7 +410,7 @@ async fn boot_server_with_provider_and_handles(
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::services::session_context::ContextArtifactsService::new(),
+            tron::server::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -431,11 +431,11 @@ async fn boot_server_with_provider_and_handles(
         .build_recorder()
         .handle();
     let server = Arc::new(TronServer::new(config, capability_context, metrics_handle));
-    tron::server::transport::setup::register_engine_protocol_for_context(
+    tron::server::transport::setup::register_server_domains_for_context(
         server.capability_context(),
     )
     .expect("integration engine protocol should register");
-    tron::server::engine_runtime::EngineRuntimeServices::start(&server);
+    tron::server::runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
@@ -443,13 +443,17 @@ async fn boot_server_with_provider_and_handles(
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
-    let stream_pump_handle = tokio::spawn(pump.run());
+    let stream_event_pump_handle = tokio::spawn(pump.run());
 
     let (addr, server_handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/engine");
     register_server_auth_path(&ws_url, &server.capability_context().auth_path);
 
-    (ws_url, server, vec![stream_pump_handle, server_handle])
+    (
+        ws_url,
+        server,
+        vec![stream_event_pump_handle, server_handle],
+    )
 }
 
 /// Connect to the `/engine` protocol.

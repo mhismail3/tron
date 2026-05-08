@@ -54,11 +54,11 @@ use tron::runtime::orchestrator::orchestrator::Orchestrator;
 use tron::runtime::orchestrator::session_manager::SessionManager;
 use tron::runtime::orchestrator::subagent_manager::SubagentManager;
 use tron::server::config::ServerConfig;
+use tron::server::runtime::streams::EngineStreamEventPump;
 use tron::server::server::TronServer;
-use tron::server::services::context::{
+use tron::server::shared::context::{
     AgentDeps, ServerCapabilityContext, register_blocking_supervisor_shutdown,
 };
-use tron::server::stream_pump::EngineStreamEventPump;
 use tron::settings::db_path_policy::resolve_production_db_path;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
@@ -467,7 +467,7 @@ struct ServiceState {
     job_manager: Arc<dyn tron::tools::traits::JobManagerOps>,
     output_buffer_registry: Arc<tron::runtime::orchestrator::output_buffer::OutputBufferRegistry>,
     transcription_engine: Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>>,
-    codex_app_server: Arc<tron::server::codex_app::CodexAppServerManager>,
+    codex_app_server: Arc<tron::server::platform::codex_app::CodexAppServerManager>,
 }
 
 /// Build core services: orchestrator, session manager, providers, tools, subagent manager.
@@ -576,7 +576,7 @@ async fn init_services(
 
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
     let codex_app_server = Arc::new(
-        tron::server::codex_app::CodexAppServerManager::new(
+        tron::server::platform::codex_app::CodexAppServerManager::new(
             settings.server.codex_app_server.clone(),
         )
         .context("Failed to initialize Codex App Server lifecycle manager")?,
@@ -748,10 +748,12 @@ fn init_cron(
             #[cfg(feature = "apns")]
             {
                 services.tool_config.push_service.as_ref().map(|ps| {
-                    Arc::new(tron::server::cron_callbacks::CronPushNotifier::new(
-                        ps.as_sender(),
-                        services.event_store.pool().clone(),
-                    )) as _
+                    Arc::new(
+                        tron::server::domains::cron::callbacks::CronPushNotifier::new(
+                            ps.as_sender(),
+                            services.event_store.pool().clone(),
+                        ),
+                    ) as _
                 })
             }
             #[cfg(not(feature = "apns"))]
@@ -845,7 +847,7 @@ fn build_capability_context(
         worktree_coordinator,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::services::session_context::ContextArtifactsService::new(),
+            tron::server::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: auth_path(),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -995,7 +997,7 @@ async fn main() -> Result<()> {
     let cron = init_cron(&services, &origin, profile_runtime.clone());
     let worktree_coordinator = init_worktree(&services, &settings).await;
     let session_manager_for_startup = services.session_manager.clone();
-    let orchestrator_for_stream_pump = services.orchestrator.clone();
+    let orchestrator_for_stream_events = services.orchestrator.clone();
     let process_manager_for_shutdown = services.process_manager.clone();
     let profile_runtime_for_watcher = profile_runtime.clone();
     let capability_context = build_capability_context(
@@ -1014,10 +1016,10 @@ async fn main() -> Result<()> {
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = tron::server::metrics::install_recorder();
     let server = TronServer::new(config, capability_context, metrics_handle);
-    tron::server::transport::setup::register_engine_protocol_for_context(
+    tron::server::transport::setup::register_server_domains_for_context(
         server.capability_context(),
     )
-    .context("Failed to register engine protocol capabilities")?;
+    .context("Failed to register server domain workers")?;
     cron.scheduler
         .set_engine_host(server.capability_context().engine_host.clone());
     register_blocking_supervisor_shutdown(server.shutdown());
@@ -1055,17 +1057,17 @@ async fn main() -> Result<()> {
 
     // Stream pump: orchestrator events -> engine streams.
     let pump = EngineStreamEventPump::new(
-        orchestrator_for_stream_pump.subscribe(),
+        orchestrator_for_stream_events.subscribe(),
         server.capability_context().engine_host.clone(),
         server.shutdown().token(),
-        orchestrator_for_stream_pump.turn_accumulators().clone(),
+        orchestrator_for_stream_events.turn_accumulators().clone(),
     );
-    let stream_pump_handle = tokio::spawn(pump.run());
-    tron::server::engine_runtime::EngineRuntimeServices::start(&server);
+    let stream_event_pump_handle = tokio::spawn(pump.run());
+    tron::server::runtime::EngineRuntimeServices::start(&server);
 
     // Wire cron engine event publication and shutdown forwarding.
     cron.scheduler.set_event_publisher(Arc::new(
-        tron::server::cron_callbacks::CronEventPublisher::new(
+        tron::server::domains::cron::callbacks::CronEventPublisher::new(
             server.capability_context().engine_host.clone(),
         ),
     ));
@@ -1126,7 +1128,7 @@ async fn main() -> Result<()> {
     tracing::info!(signal = shutdown_signal, "Shutting down...");
     let mut shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![
         server_handle,
-        stream_pump_handle,
+        stream_event_pump_handle,
         cron_sched_handle,
         cron_watcher_handle,
     ];

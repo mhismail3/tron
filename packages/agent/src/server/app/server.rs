@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::server::services::context::ServerCapabilityContext;
+use crate::server::shared::context::ServerCapabilityContext;
 use axum::Router;
 use axum::extract::ConnectInfo;
 use axum::extract::Request as AxumRequest;
@@ -28,8 +28,10 @@ use tracing::{info, instrument};
 use metrics_exporter_prometheus::PrometheusHandle;
 
 use crate::server::config::ServerConfig;
-use crate::server::external_workers::{SharedExternalWorkerRuntime, run_external_worker_socket};
 use crate::server::health::{self, HealthResponse};
+use crate::server::runtime::external_workers::{
+    SharedExternalWorkerRuntime, run_external_worker_socket,
+};
 use crate::server::shutdown::ShutdownCoordinator;
 use crate::server::transport::auth::{BearerTokenStore, verify_bearer_header};
 use crate::server::transport::engine_ws::{EngineClientRegistry, run_engine_ws_session};
@@ -91,11 +93,12 @@ impl TronServer {
         // Inject shutdown coordinator into context so handlers can register tasks
         capability_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
         // Inject device request broker (publishes device.request events to engine streams)
-        capability_context.device_request_broker =
-            Some(Arc::new(crate::server::device::DeviceRequestBroker::new(
+        capability_context.device_request_broker = Some(Arc::new(
+            crate::server::platform::device_broker::DeviceRequestBroker::new(
                 capability_context.engine_host.clone(),
                 shutdown.token(),
-            )));
+            ),
+        ));
         capability_context.set_ws_port(config.port);
         let auth_store = Arc::new(BearerTokenStore::new(capability_context.auth_path.clone()));
         let external_workers = Arc::new(tokio::sync::Mutex::new(
@@ -305,7 +308,7 @@ async fn ws_auth_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::services::test_support::make_test_context;
+    use crate::server::shared::test_support::make_test_context;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
