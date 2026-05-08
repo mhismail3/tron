@@ -9,7 +9,8 @@
 //! Three layers, each independently testable:
 //! - [`should_auto_retain`] — pure policy decision, no I/O.
 //! - [`gather_state`] — sync state read from the event store.
-//! - [`maybe_fire`] — async entry point called from `agent_prompt_service`.
+//! - [`maybe_fire`] — async entry point used by the hidden
+//!   `memory::auto_retain_fire` engine function.
 
 use crate::server::shared::errors::SESSION_NOT_FOUND;
 

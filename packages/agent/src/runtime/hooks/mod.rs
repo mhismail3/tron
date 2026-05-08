@@ -70,7 +70,7 @@
 //!
 //! # Hot Reload
 //!
-//! Hooks are discovered fresh each session in [`agent_prompt_service`].
+//! Hooks are discovered fresh by the agent domain run-turn bootstrap.
 //! Adding, removing, or editing hook files takes effect on the next session
 //! without server restart.
 //!

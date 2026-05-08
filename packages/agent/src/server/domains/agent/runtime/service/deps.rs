@@ -1,4 +1,4 @@
-use super::{CausalContext, InvocationId, RwLock};
+use super::{CausalContext, FunctionId, FunctionRevision, InvocationId, RwLock};
 use crate::engine::Invocation;
 use crate::skills::registry::SkillRegistry;
 use serde::Serialize;
@@ -31,6 +31,10 @@ pub struct PromptRuntimeDeps {
 pub struct PromptEngineCausality {
     pub(super) context: CausalContext,
     pub(super) parent_invocation_id: Option<InvocationId>,
+    pub(super) invocation_id: InvocationId,
+    pub(super) function_id: FunctionId,
+    pub(super) expected_function_revision: Option<FunctionRevision>,
+    pub(super) idempotency_key: Option<String>,
 }
 
 impl PromptEngineCausality {
@@ -39,6 +43,10 @@ impl PromptEngineCausality {
         Self {
             context: invocation.causal_context.clone(),
             parent_invocation_id: Some(invocation.id.clone()),
+            invocation_id: invocation.id.clone(),
+            function_id: invocation.function_id.clone(),
+            expected_function_revision: invocation.expected_function_revision,
+            idempotency_key: invocation.causal_context.idempotency_key.clone(),
         }
     }
 }

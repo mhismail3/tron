@@ -4,10 +4,9 @@ use super::{
     FunctionId, PromptEngineCausality, PromptRequest, drain_prompt_queue, errors,
     publish_queue_lifecycle_event,
 };
-use crate::engine::Invocation;
+use crate::engine::{ActorContext, FunctionRevision, Invocation};
 use crate::server::domains::agent::Deps;
 use crate::server::domains::agent::runtime::service::spawn_prompt_run;
-use crate::server::shared::context::run_blocking_task;
 use crate::server::shared::errors::CapabilityError;
 use crate::server::shared::params::opt_array;
 use crate::server::shared::params::opt_string;
@@ -43,7 +42,7 @@ pub(crate) async fn prompt_value(
         deps,
         &submission.session_id,
         "accepted",
-        json!({}),
+        json!({"runId": run_id}),
     )
     .await;
     enqueue_and_sync_drain_agent_function(
@@ -101,7 +100,14 @@ pub(crate) async fn run_turn_value(
             details: None,
         })?;
 
-    record_prompt_history(deps, &submission.prompt, submission.source.as_deref());
+    record_prompt_history_through_engine(
+        invocation,
+        deps,
+        &submission.session_id,
+        &run_id,
+        &submission.prompt,
+        submission.source.as_deref(),
+    );
     publish_prompt_stream(
         invocation,
         deps,
@@ -283,8 +289,13 @@ pub(crate) async fn enqueue_and_sync_drain_agent_function(
         .engine_host
         .enqueue_invocation(EnqueueInvocation {
             queue: "agent".to_owned(),
+            target_revision: target_revision_for_enqueue(
+                &deps.engine_host,
+                &function_id,
+                invocation,
+            )
+            .await?,
             function_id,
-            target_revision: None,
             payload,
             actor_id: invocation.causal_context.actor_id.clone(),
             actor_kind: invocation.causal_context.actor_kind.clone(),
@@ -349,45 +360,48 @@ pub(crate) async fn enqueue_and_sync_drain_agent_function(
     crate::server::shared::error_mapping::result_to_capability_value(result)
 }
 
-pub(crate) fn record_prompt_history(deps: &Deps, prompt: &str, source: Option<&str>) {
-    let is_cron = source
-        .map(|source| source.starts_with("cron"))
-        .unwrap_or(false);
-    let prompt_library_settings = crate::settings::get_settings().prompt_library.clone();
-    if is_cron || !prompt_library_settings.history_enabled {
-        return;
-    }
-    let pool = deps.event_store.pool().clone();
-    let text_for_history = prompt.to_owned();
-    let auto_prune = prompt_library_settings.history_auto_prune;
-    let max_entries = auto_prune
-        .then_some(prompt_library_settings.history_max_entries)
-        .filter(|n| *n > 0);
-    let max_age_days = auto_prune
-        .then_some(prompt_library_settings.history_max_age_days)
-        .filter(|n| *n > 0);
+pub(crate) fn record_prompt_history_through_engine(
+    invocation: &Invocation,
+    deps: &Deps,
+    session_id: &str,
+    run_id: &str,
+    prompt: &str,
+    source: Option<&str>,
+) {
+    let function_id = match FunctionId::new("prompt_library::history_record") {
+        Ok(id) => id,
+        Err(error) => {
+            tracing::warn!(session_id, run_id, error = %error, "invalid prompt history function id");
+            return;
+        }
+    };
+    let mut context = invocation.causal_context.clone();
+    context.parent_invocation_id = Some(invocation.id.clone());
+    context.session_id = Some(session_id.to_owned());
+    add_scope_once(&mut context.authority_scopes, ENGINE_INTERNAL_INVOKE_SCOPE);
+    add_scope_once(&mut context.authority_scopes, "prompt_library.write");
+    context.idempotency_key = Some(format!(
+        "prompt_library.history_record:{session_id}:{run_id}:{}",
+        invocation.id
+    ));
+    let payload = json!({
+        "sessionId": session_id,
+        "prompt": prompt,
+        "source": source,
+        "workspaceId": invocation.causal_context.workspace_id.clone(),
+    });
+    let host = deps.engine_host.clone();
     let shutdown = deps.shutdown_coordinator.clone();
     let handle = tokio::spawn(async move {
-        if let Err(error) = run_blocking_task("agent.prompt.history", move || {
-            match crate::prompt_library::store::record_prompt_and_prune(
-                &pool,
-                &text_for_history,
-                max_entries,
-                max_age_days,
-            ) {
-                Ok(outcome) => {
-                    let char_count = text_for_history.chars().count();
-                    tracing::debug!(char_count, ?outcome, "recorded prompt history");
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to record prompt history");
-                }
-            }
-            Ok(())
-        })
-        .await
-        {
-            tracing::warn!(error = %error, "detached prompt history task failed");
+        let result = host
+            .invoke(Invocation::new_sync(function_id.clone(), payload, context))
+            .await;
+        if let Some(error) = result.error {
+            tracing::warn!(
+                function_id = %function_id,
+                error = %error,
+                "prompt history record engine invocation failed"
+            );
         }
     });
     if let Some(shutdown) = shutdown {
@@ -405,4 +419,31 @@ pub(crate) async fn publish_prompt_stream(
     crate::server::domains::agent::stream::AgentStreamPublisher::new(&deps.engine_host)
         .prompt(invocation, session_id, action, payload)
         .await;
+}
+
+async fn target_revision_for_enqueue(
+    engine_host: &crate::engine::EngineHostHandle,
+    function_id: &FunctionId,
+    invocation: &Invocation,
+) -> Result<Option<FunctionRevision>, CapabilityError> {
+    let mut actor = ActorContext::new(
+        invocation.causal_context.actor_id.clone(),
+        invocation.causal_context.actor_kind.clone(),
+        invocation.causal_context.authority_grant_id.clone(),
+    );
+    actor.authority_scopes = invocation.causal_context.authority_scopes.clone();
+    add_scope_once(&mut actor.authority_scopes, ENGINE_INTERNAL_INVOKE_SCOPE);
+    actor.session_id = invocation.causal_context.session_id.clone();
+    actor.workspace_id = invocation.causal_context.workspace_id.clone();
+    let function = engine_host
+        .inspect_function(function_id, Some(&actor))
+        .await
+        .map_err(crate::server::shared::error_mapping::engine_error_to_capability_error)?;
+    Ok(Some(function.revision))
+}
+
+fn add_scope_once(scopes: &mut Vec<String>, scope: &str) {
+    if !scopes.iter().any(|existing| existing == scope) {
+        scopes.push(scope.to_owned());
+    }
 }

@@ -57,6 +57,8 @@ pub(super) struct ToolPhaseParams<'a> {
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
     /// Stable run id used for runtime tool-call idempotency.
     pub run_id: Option<&'a str>,
+    pub trace_id: Option<&'a crate::engine::TraceId>,
+    pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
 }
 
 #[derive(Default)]
@@ -88,10 +90,14 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     params.session_id,
                     EventType::ToolCall,
                     json!({
-                        "toolCallId": tool_call.id,
-                        "name": tool_call.name,
+                            "toolCallId": tool_call.id,
+                            "name": tool_call.name,
                         "arguments": tool_call.arguments,
                         "turn": params.turn,
+                        "runId": params.run_id,
+                        "traceId": params.trace_id.map(|id| id.as_str()),
+                        "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
+                        "toolCatalogRevision": params.tool_surface.catalog_revision.0,
                     }),
                     seq,
                 )
@@ -158,6 +164,8 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     tool_abort_registry: params.tool_abort_registry,
                     engine_host: params.engine_host,
                     run_id: params.run_id,
+                    trace_id: params.trace_id,
+                    parent_invocation_id: params.parent_invocation_id,
                 };
                 async move {
                     let result = tool_executor::execute_tool(
@@ -199,6 +207,10 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                                     "isError": is_error,
                                     "duration": result.duration_ms,
                                     "details": result.result.details,
+                                    "runId": params.run_id,
+                                    "traceId": params.trace_id.map(|id| id.as_str()),
+                                    "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
+                                    "toolCatalogRevision": params.tool_surface.catalog_revision.0,
                                 }),
                                 seq,
                             )

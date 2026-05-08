@@ -6,7 +6,7 @@ use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {
     deps = Deps;
-    hidden = ["prompt_apply", "run_turn", "prompt_queue_drain"];
+    hidden = [];
     bindings = [
         "prompt" => |invocation, deps| {
             prompt_value(invocation, deps).await

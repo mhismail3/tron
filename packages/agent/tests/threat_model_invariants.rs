@@ -325,6 +325,77 @@ fn tool_registry_authority_stays_deleted() {
 }
 
 #[test]
+fn agent_runtime_stays_engine_native() {
+    let crate_root = crate_root();
+    let agent_root = crate_root.join("src/server/domains/agent");
+    let agent_mod =
+        std::fs::read_to_string(agent_root.join("mod.rs")).expect("failed to read agent/mod.rs");
+    for removed in [
+        "hidden_function_registrations",
+        "FunctionDefinition::new",
+        "agent_prompt_apply_request_schema",
+        "agent_prompt_queue_drain_request_schema",
+    ] {
+        assert!(
+            !agent_mod.contains(removed),
+            "agent/mod.rs must stay docs/exports only; hidden contracts belong in contract.rs, found `{removed}`"
+        );
+    }
+
+    let agent_contract = std::fs::read_to_string(agent_root.join("contract.rs"))
+        .expect("failed to read agent/contract.rs");
+    for required in [
+        "agent::prompt_apply",
+        "agent::run_turn",
+        "agent::prompt_queue_drain",
+        ".visibility(VisibilityScope::Internal)",
+    ] {
+        assert!(
+            agent_contract.contains(required),
+            "agent hidden runtime capability contracts must live in agent/contract.rs with internal visibility; missing `{required}`"
+        );
+    }
+
+    for path in rust_files_under(&agent_root) {
+        let rel = path.strip_prefix(&crate_root).unwrap();
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        let production_content = content
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(content.as_str());
+        for removed in [
+            "crate::server::domains::memory::retain",
+            "crate::prompt_library::store",
+            "record_prompt_and_prune(",
+        ] {
+            assert!(
+                !production_content.contains(removed),
+                "{} must route cross-domain side effects through engine/domain capabilities, not `{removed}`",
+                rel.display()
+            );
+        }
+        assert!(
+            !production_content.contains("target_revision: None"),
+            "{} must pin hidden queue handoffs to the current function revision",
+            rel.display()
+        );
+    }
+
+    let tool_executor =
+        std::fs::read_to_string(crate_root.join("src/runtime/agent/tool_executor.rs"))
+            .expect("failed to read tool_executor.rs");
+    assert!(
+        !tool_executor.contains("TraceId::new(format!(\"tool:"),
+        "model tool child invocations must inherit the agent run trace instead of minting detached tool traces"
+    );
+    assert!(
+        tool_executor.contains("with_parent_invocation"),
+        "model tool child invocations must carry the agent run-turn invocation as parent"
+    );
+}
+
+#[test]
 fn server_package_uses_domain_owned_engine_layout() {
     let crate_root = crate_root();
     for removed in ["src/server/capabilities", "src/server/services"] {

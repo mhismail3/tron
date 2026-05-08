@@ -14,8 +14,8 @@ use parking_lot::RwLock;
 
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineQueueDrainer, EnqueueInvocation,
-    FunctionId, InvocationId, TraceId,
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineQueueDrainer,
+    EnqueueInvocation, FunctionId, FunctionRevision, InvocationId, TraceId,
 };
 use crate::server::shared::context::AgentDeps;
 

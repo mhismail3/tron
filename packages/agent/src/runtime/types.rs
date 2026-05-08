@@ -221,6 +221,15 @@ pub struct RunContext {
     /// context snapshots.
     #[serde(skip)]
     pub run_id: Option<String>,
+    /// Engine trace inherited from the hidden `agent::run_turn` invocation.
+    #[serde(skip)]
+    pub engine_trace_id: Option<crate::engine::TraceId>,
+    /// Parent engine invocation id for child tool/function invocations.
+    #[serde(skip)]
+    pub parent_invocation_id: Option<crate::engine::InvocationId>,
+    /// Catalog revision captured by the hidden `agent::run_turn` invocation.
+    #[serde(skip)]
+    pub engine_catalog_revision: Option<crate::engine::CatalogRevision>,
     /// Lightweight skill index context (auto-generated from registry).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_index_context: Option<String>,

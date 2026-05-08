@@ -374,7 +374,10 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 `agent::prompt`, or `settings::get`. Mutating calls must include an explicit
 idempotency key. Message ids are correlation ids only.
 
-Hidden apply functions remain in the engine catalog for queue/cron/runtime execution, but normal discovery excludes them and the public transport cannot invoke them directly.
+Hidden functions remain in the engine catalog for queue, cron, runtime, and
+domain side effects such as agent apply/run-turn, prompt-history capture, and
+auto-retain. Normal discovery excludes them and the public transport cannot
+invoke them directly.
 
 The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
 `promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`. Every request

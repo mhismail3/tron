@@ -114,6 +114,12 @@ impl CapabilityContract {
         self
     }
 
+    /// Set engine visibility.
+    pub(crate) fn visibility(mut self, visibility: VisibilityScope) -> Self {
+        self.visibility = visibility;
+        self
+    }
+
     /// Set domain module provenance.
     pub(crate) fn domain_module(mut self, module: &'static str) -> Self {
         self.domain_module = module;

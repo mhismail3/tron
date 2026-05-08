@@ -11,8 +11,8 @@ use serde_json::Value;
 use crate::core::messages::Provider;
 use crate::core::tools::{Tool, ToolParameterSchema};
 use crate::engine::{
-    ActorContext, ActorId, ActorKind, AuthorityGrantId, EngineHostHandle, FunctionDefinition,
-    FunctionHealth, FunctionId, FunctionQuery,
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, CatalogRevision, EngineHostHandle,
+    FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
 };
 use crate::runtime::context::local_policy::ContextPolicy;
 use crate::tools::traits::ExecutionMode;
@@ -96,6 +96,7 @@ impl ToolSurfacePolicy {
 /// Tool surface resolved once for a provider request.
 #[derive(Clone, Debug)]
 pub struct ResolvedToolSurface {
+    pub catalog_revision: CatalogRevision,
     pub tools: Vec<Tool>,
     pub targets_by_name: BTreeMap<String, EngineToolTarget>,
     pub all_tool_names: Vec<String>,
@@ -144,7 +145,9 @@ pub(crate) async fn resolve_provider_tools(
         tool_count = tools.len(),
         "resolved provider tool surface from engine catalog"
     );
+    let catalog_revision = host.catalog_revision().await;
     Ok(ResolvedToolSurface {
+        catalog_revision,
         tools,
         targets_by_name,
         all_tool_names,

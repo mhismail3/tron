@@ -19,8 +19,8 @@
 //!   `/engine` `invoke`, acquires a session resource lease, builds a
 //!   narrow memory deps into [`RetainDeps`], and calls [`trigger_retain`] with
 //!   [`RetainSource::Manual`].
-//! - [`auto_retain::maybe_fire`] — called from `agent_prompt_service` after
-//!   each successful agent run. Evaluates the auto-retain policy against the
+//! - `memory::auto_retain_fire` hidden engine function — invoked after a
+//!   successful agent run. It evaluates the auto-retain policy against the
 //!   session's turn history and fires [`trigger_retain`] with
 //!   [`RetainSource::Auto`] when the `memory.autoRetainInterval` threshold is
 //!   crossed. See the [`auto_retain`] submodule for the policy details.
@@ -92,11 +92,9 @@ pub(crate) enum RetainSource {
 
 /// The narrow set of dependencies the retain pipeline needs.
 ///
-/// Exists so the pipeline can be driven from two different call sites without
-/// requiring the full server context: the manual engine function constructs one
-/// via [`RetainDeps::from_memory_deps`], while the auto-retain path in
-/// `agent_prompt_service::execute_prompt_run` builds it directly from the
-/// fields it already holds.
+/// Exists so the pipeline can be driven from engine functions without requiring
+/// the full server context. Manual retain and hidden auto-retain both construct
+/// it via [`RetainDeps::from_memory_deps`].
 #[derive(Clone)]
 pub(crate) struct RetainDeps {
     pub orchestrator: Arc<crate::runtime::orchestrator::orchestrator::Orchestrator>,

@@ -8,7 +8,8 @@ use crate::core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
 use crate::core::messages::Provider;
 use crate::core::messages::ToolCall;
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
+    InvocationId, TraceId,
 };
 use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::{EvaluationContext, GuardrailEngine};
@@ -95,6 +96,10 @@ pub struct ToolExecutionContext<'a> {
     pub engine_host: Option<&'a EngineHostHandle>,
     /// Stable run id used for model tool-call idempotency.
     pub run_id: Option<&'a str>,
+    /// Trace inherited from the owning agent run-turn invocation.
+    pub trace_id: Option<&'a TraceId>,
+    /// Parent invocation inherited from the owning agent run-turn invocation.
+    pub parent_invocation_id: Option<&'a InvocationId>,
 }
 
 /// Execute a single tool call through the full pipeline.
@@ -368,6 +373,8 @@ pub async fn execute_tool(
             ctx.workspace_id,
             ctx.turn,
             ctx.run_id,
+            ctx.trace_id,
+            ctx.parent_invocation_id,
             effective_args,
             tool_ctx.clone(),
         )
@@ -517,6 +524,8 @@ async fn execute_tool_via_engine(
     workspace_id: Option<&str>,
     turn: i64,
     run_id: Option<&str>,
+    inherited_trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
     tool_ctx: ToolContext,
 ) -> crate::core::tools::TronToolResult {
@@ -541,10 +550,9 @@ async fn execute_tool_via_engine(
         Ok(id) => id,
         Err(error) => return crate::core::tools::error_result(error.to_string()),
     };
-    let trace_id = match TraceId::new(format!("tool:{fingerprint}")) {
-        Ok(id) => id,
-        Err(error) => return crate::core::tools::error_result(error.to_string()),
-    };
+    let trace_id = inherited_trace_id
+        .cloned()
+        .unwrap_or_else(TraceId::generate);
     let mut causal_context = CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
         .with_scope("tool.read")
         .with_scope("tool.write")
@@ -553,6 +561,9 @@ async fn execute_tool_via_engine(
         .with_idempotency_key(idempotency_key);
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
+    }
+    if let Some(parent) = parent_invocation_id {
+        causal_context = causal_context.with_parent_invocation(parent.clone());
     }
     for scope in &target.function.required_authority.scopes {
         if !causal_context.has_scope(scope) {
@@ -630,13 +641,15 @@ mod tests {
     use crate::core::tools::ToolResultBody;
     use crate::engine::{
         AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel,
-        VisibilityScope, WorkerId,
+        VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
     };
     use crate::runtime::agent::event_emitter::EventEmitter;
     use crate::tools::capability_surface::{
         EngineToolTarget, ResolvedToolSurface, ToolSurfacePolicy, resolve_provider_tools,
     };
     use crate::tools::traits::ExecutionMode;
+    use async_trait::async_trait;
+    use parking_lot::Mutex;
     use std::collections::{BTreeMap, HashSet};
 
     fn default_execution_spec() -> crate::core::profile::AgentExecutionSpec {
@@ -652,6 +665,7 @@ mod tests {
 
     fn empty_surface() -> ResolvedToolSurface {
         ResolvedToolSurface {
+            catalog_revision: crate::engine::CatalogRevision(0),
             tools: Vec::new(),
             targets_by_name: BTreeMap::new(),
             all_tool_names: Vec::new(),
@@ -681,6 +695,7 @@ mod tests {
         let mut targets_by_name = BTreeMap::new();
         let _ = targets_by_name.insert("Echo".to_owned(), target);
         ResolvedToolSurface {
+            catalog_revision: crate::engine::CatalogRevision(0),
             tools: Vec::new(),
             targets_by_name,
             all_tool_names: vec!["Echo".to_owned()],
@@ -714,6 +729,8 @@ mod tests {
             tool_abort_registry: None,
             engine_host: None,
             run_id: Some("run-1"),
+            trace_id: None,
+            parent_invocation_id: None,
         }
     }
 
@@ -798,6 +815,123 @@ mod tests {
                 assert!(rendered.contains("hello from engine"));
             }
         }
+    }
+
+    #[derive(Clone)]
+    struct CapturingToolHandler {
+        captured: Arc<Mutex<Option<Invocation>>>,
+    }
+
+    #[async_trait]
+    impl crate::engine::InProcessFunctionHandler for CapturingToolHandler {
+        async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
+            *self.captured.lock() = Some(invocation);
+            Ok(json!({"content": "ok"}))
+        }
+    }
+
+    #[tokio::test]
+    async fn model_tool_call_inherits_agent_trace_parent_and_idempotency() {
+        let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+        engine_host
+            .register_worker(
+                WorkerDefinition::new(
+                    WorkerId::new("tool").expect("worker id"),
+                    WorkerKind::InProcess,
+                    ActorId::new("tool-owner").expect("actor id"),
+                    AuthorityGrantId::new("tool-grant").expect("grant id"),
+                )
+                .with_namespace_claim("tool"),
+                false,
+            )
+            .await
+            .expect("register worker");
+
+        let captured = Arc::new(Mutex::new(None));
+        let function_id = FunctionId::new("tool::capture").expect("function id");
+        let function = FunctionDefinition::new(
+            function_id.clone(),
+            WorkerId::new("tool").expect("worker id"),
+            "Capture tool invocation".to_owned(),
+            VisibilityScope::System,
+            EffectClass::IdempotentWrite,
+        )
+        .with_risk(RiskLevel::Medium)
+        .with_required_authority(AuthorityRequirement::scope("tool.write"))
+        .with_idempotency(crate::engine::IdempotencyContract::caller_session_engine_ledger());
+        engine_host
+            .register_function(
+                function.clone(),
+                Some(Arc::new(CapturingToolHandler {
+                    captured: Arc::clone(&captured),
+                })),
+                false,
+            )
+            .await
+            .expect("register function");
+
+        let mut targets_by_name = BTreeMap::new();
+        let _ = targets_by_name.insert(
+            "Capture".to_owned(),
+            EngineToolTarget {
+                model_tool_name: "Capture".to_owned(),
+                function_id,
+                function,
+                stops_turn: false,
+                is_interactive: false,
+                execution_mode: ExecutionMode::Parallel,
+            },
+        );
+        let surface = ResolvedToolSurface {
+            catalog_revision: crate::engine::CatalogRevision(42),
+            tools: Vec::new(),
+            targets_by_name,
+            all_tool_names: vec!["Capture".to_owned()],
+            turn_stopping_tools: HashSet::new(),
+        };
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let spec = default_execution_spec();
+        let mut ctx = tool_exec_ctx(&surface, &emitter, &cancel, &spec);
+        let trace_id = TraceId::new("agent-trace").expect("trace id");
+        let parent_invocation_id = InvocationId::new("agent-run-turn").expect("invocation id");
+        ctx.engine_host = Some(&engine_host);
+        ctx.trace_id = Some(&trace_id);
+        ctx.parent_invocation_id = Some(&parent_invocation_id);
+
+        let mut args = serde_json::Map::new();
+        args.insert("value".to_owned(), Value::String("hello".to_owned()));
+        let call = ToolCall::new("tool-call-1", "Capture", args);
+        let result = execute_tool(&call, "session-1", "/tmp/worktree", &ctx).await;
+
+        assert_eq!(result.result.is_error, None);
+        let invocation = captured
+            .lock()
+            .clone()
+            .expect("tool invocation should be captured");
+        assert_eq!(invocation.causal_context.trace_id, trace_id);
+        assert_eq!(
+            invocation.causal_context.parent_invocation_id,
+            Some(parent_invocation_id)
+        );
+        let expected_material = stable_tool_call_material(
+            Some("run-1"),
+            "session-1",
+            1,
+            "tool-call-1",
+            "Capture",
+            "/tmp/worktree",
+            None,
+            &json!({"value": "hello"}),
+        );
+        let expected_key = format!(
+            "model-tool-call:v1:{}",
+            sha256_hex(expected_material.as_bytes())
+        );
+        assert_eq!(
+            invocation.causal_context.idempotency_key.as_deref(),
+            Some(expected_key.as_str())
+        );
     }
 
     #[test]

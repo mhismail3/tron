@@ -2,8 +2,8 @@
 
 use super::{
     Deps, prompt_history_clear_value, prompt_history_delete_value, prompt_history_list_value,
-    prompt_snippet_create_value, prompt_snippet_delete_value, prompt_snippet_get_value,
-    prompt_snippet_list_value, prompt_snippet_update_value,
+    prompt_history_record_value, prompt_snippet_create_value, prompt_snippet_delete_value,
+    prompt_snippet_get_value, prompt_snippet_list_value, prompt_snippet_update_value,
 };
 use crate::server::domains::bindings::operation_bindings;
 
@@ -11,6 +11,9 @@ operation_bindings! {
     deps = Deps;
     hidden = [];
     bindings = [
+        "history_record" => |invocation, deps| {
+            prompt_history_record_value(Some(&invocation.payload), deps).await
+        },
         "history_list" => |invocation, deps| {
             prompt_history_list_value(Some(&invocation.payload), deps).await
         },

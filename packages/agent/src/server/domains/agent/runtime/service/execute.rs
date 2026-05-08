@@ -211,13 +211,35 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         let registry = skill_registry.read();
         collect_pending_skill_payloads(&event_store, &session_id, Some(&*registry))
     };
-    let user_event_payload = build_user_event_payload(
+    let mut user_event_payload = build_user_event_payload(
         &prompt,
         images.as_deref(),
         attachments.as_deref(),
         message_metadata.as_ref(),
         skills_payload.as_ref(),
     );
+    if let Some(object) = user_event_payload.as_object_mut() {
+        object.insert("runId".to_owned(), serde_json::json!(run_id.clone()));
+        if let Some(causality) = engine_causality.as_ref() {
+            object.insert(
+                "traceId".to_owned(),
+                serde_json::json!(causality.context.trace_id.as_str()),
+            );
+            object.insert(
+                "parentInvocationId".to_owned(),
+                serde_json::json!(
+                    causality
+                        .parent_invocation_id
+                        .as_ref()
+                        .map(|id| id.as_str())
+                ),
+            );
+            object.insert(
+                "catalogRevision".to_owned(),
+                serde_json::json!(causality.context.catalog_revision.0),
+            );
+        }
+    }
     if let Err(error) =
         persist_user_message_event(event_store.clone(), session_id.clone(), user_event_payload)
             .await
@@ -283,6 +305,15 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         user_content_override,
         volatile_tokens,
         run_id: Some(run_id.clone()),
+        engine_trace_id: engine_causality
+            .as_ref()
+            .map(|causality| causality.context.trace_id.clone()),
+        parent_invocation_id: engine_causality
+            .as_ref()
+            .and_then(|causality| causality.parent_invocation_id.clone()),
+        engine_catalog_revision: engine_causality
+            .as_ref()
+            .map(|causality| causality.context.catalog_revision),
         ..Default::default()
     };
 
@@ -314,11 +345,9 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         result,
         persister,
         run_cleanup: &mut run_cleanup,
-        orchestrator,
         session_manager,
         event_store,
         broadcast,
-        subagent_manager,
         engine_host,
         engine_causality,
         session_id,

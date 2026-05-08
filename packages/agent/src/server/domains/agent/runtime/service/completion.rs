@@ -8,17 +8,18 @@ use super::{
     PromptEngineCausality, PromptRunCleanup, enqueue_prompt_queue_drain, load_session_update_data,
     publish_prompt_runtime_stream, retain_eligible,
 };
+use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
+};
 
 pub(super) struct PromptRunCompletion<'a> {
     pub(super) result: crate::runtime::types::RunResult,
     pub(super) persister: Arc<crate::runtime::orchestrator::event_persister::EventPersister>,
     pub(super) run_cleanup: &'a mut PromptRunCleanup,
-    pub(super) orchestrator: Arc<crate::runtime::orchestrator::orchestrator::Orchestrator>,
     pub(super) session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
     pub(super) event_store: Arc<crate::events::EventStore>,
     pub(super) broadcast: Arc<crate::runtime::EventEmitter>,
-    pub(super) subagent_manager:
-        Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) engine_causality: Option<PromptEngineCausality>,
     pub(super) session_id: String,
@@ -32,11 +33,9 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         result,
         persister,
         run_cleanup,
-        orchestrator,
         session_manager,
         event_store,
         broadcast,
-        subagent_manager,
         engine_host,
         engine_causality,
         session_id,
@@ -56,10 +55,10 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     );
     maybe_fire_auto_retain(
         &result,
-        orchestrator,
-        event_store.clone(),
-        subagent_manager,
+        &engine_host,
+        engine_causality.as_ref(),
         &session_id,
+        &run_id,
     );
 
     run_cleanup.release();
@@ -155,26 +154,57 @@ fn emit_run_error_if_needed(
 
 fn maybe_fire_auto_retain(
     result: &crate::runtime::types::RunResult,
-    orchestrator: Arc<crate::runtime::orchestrator::orchestrator::Orchestrator>,
-    event_store: Arc<crate::events::EventStore>,
-    subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    engine_host: &crate::engine::EngineHostHandle,
+    engine_causality: Option<&PromptEngineCausality>,
     session_id: &str,
+    run_id: &str,
 ) {
     if result.error.is_some() || result.interrupted || !retain_eligible(&result.stop_reason) {
         return;
     }
-    let deps = crate::server::domains::memory::retain::RetainDeps {
-        orchestrator,
-        event_store,
-        subagent_manager,
+    let function_id = match FunctionId::new("memory::auto_retain_fire") {
+        Ok(function_id) => function_id,
+        Err(error) => {
+            warn!(session_id, run_id, error = %error, "invalid auto-retain function id");
+            return;
+        }
     };
-    let auto_retain_session_id = session_id.to_owned();
+    let mut context = engine_causality
+        .map(|causality| causality.context.clone())
+        .unwrap_or_else(|| {
+            CausalContext::new(
+                ActorId::new("system").expect("valid static actor id"),
+                ActorKind::System,
+                AuthorityGrantId::new("agent-runtime").expect("valid static grant id"),
+                TraceId::generate(),
+            )
+        });
+    for scope in ["memory.write", ENGINE_INTERNAL_INVOKE_SCOPE] {
+        if !context
+            .authority_scopes
+            .iter()
+            .any(|existing| existing == scope)
+        {
+            context.authority_scopes.push(scope.to_owned());
+        }
+    }
+    context.session_id = Some(session_id.to_owned());
+    context.parent_invocation_id =
+        engine_causality.and_then(|causality| causality.parent_invocation_id.clone());
+    context.idempotency_key = Some(format!("memory.auto_retain:{session_id}:{run_id}"));
+    let host = engine_host.clone();
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "runId": run_id,
+        "workspaceId": context.workspace_id.clone(),
+    });
     drop(tokio::spawn(async move {
-        crate::server::domains::memory::retain::auto_retain::maybe_fire(
-            &deps,
-            &auto_retain_session_id,
-        )
-        .await;
+        let result = host
+            .invoke(Invocation::new_sync(function_id.clone(), payload, context))
+            .await;
+        if let Some(error) = result.error {
+            warn!(function_id = %function_id, error = %error, "auto-retain engine invocation failed");
+        }
     }));
 }
 

@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel,
+    Result as EngineResult, RiskLevel, VisibilityScope,
 };
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
@@ -15,6 +15,13 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["prompt_library.changes"];
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
+        CapabilityContract::new("prompt_library::history_record", "prompt_library", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("prompt_library.write"))
+            .visibility(VisibilityScope::Internal)
+            .request_schema(json!({"additionalProperties":false,"properties":{"prompt":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":["string","null"]},"workspaceId":{"type":["string","null"]}},"required":["prompt"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"recorded":{"type":"boolean"},"reason":{"type":["string","null"]}},"required":["recorded"],"type":"object"}))
+            .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .compensation(CompensationContract::new(CompensationKind::None, "prompt history record is idempotent metadata capture; skipped records are represented explicitly"))
+            .build()?,
         CapabilityContract::new("prompt_library::history_list", "prompt_library", EffectClass::PureRead, RiskLevel::Low, Some("prompt_library.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"cursor":{"type":"string"},"limit":{"type":"integer"},"query":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"items":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"nextCursor":{"type":["string","null"]}},"required":["items","nextCursor"],"type":"object"}))

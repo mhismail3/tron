@@ -1,7 +1,10 @@
 //! prompt library domain worker.
 //!
-//! This module owns canonical function execution for the prompt library namespace and keeps
-//! domain contracts, services, and tests beside the worker that uses them.
+//! This module owns canonical function execution for the prompt library
+//! namespace and keeps domain contracts, services, and tests beside the worker
+//! that uses them. Agent prompt completion records prompt history through the
+//! hidden `prompt_library::history_record` engine function, so even product
+//! side effects stay visible to the engine ledger.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -74,6 +77,47 @@ async fn prompt_history_list_value(
         "items": to_json_value(&page.items)?,
         "nextCursor": page.next_cursor,
     }))
+}
+
+async fn prompt_history_record_value(
+    params: Option<&Value>,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let prompt = require_string_param(params, "prompt")?;
+    validate_string_param(
+        &prompt,
+        "prompt",
+        crate::server::shared::validation::MAX_PROMPT_LENGTH,
+    )?;
+    let source = opt_string(params, "source");
+    let is_cron = source
+        .as_deref()
+        .map(|source| source.starts_with("cron"))
+        .unwrap_or(false);
+    let settings = crate::settings::get_settings().prompt_library.clone();
+    if is_cron {
+        return Ok(json!({"recorded": false, "reason": "cron_source"}));
+    }
+    if !settings.history_enabled {
+        return Ok(json!({"recorded": false, "reason": "history_disabled"}));
+    }
+
+    let char_count = prompt.chars().count();
+    let outcome = store::record_prompt_and_prune(
+        deps.event_store.pool(),
+        &prompt,
+        settings
+            .history_auto_prune
+            .then_some(settings.history_max_entries)
+            .filter(|n| *n > 0),
+        settings
+            .history_auto_prune
+            .then_some(settings.history_max_age_days)
+            .filter(|n| *n > 0),
+    )
+    .map_err(map_store_err)?;
+    tracing::debug!(char_count, ?outcome, "recorded prompt history");
+    Ok(json!({"recorded": true, "reason": null}))
 }
 
 async fn prompt_history_delete_value(

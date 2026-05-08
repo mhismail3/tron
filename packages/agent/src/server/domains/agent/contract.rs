@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel,
+    Result as EngineResult, RiskLevel, VisibilityScope,
 };
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
@@ -14,7 +14,7 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["agent.runtime", "agent.queue"];
 
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
-    Ok(vec![
+    let mut specs = vec![
         CapabilityContract::new("agent::prompt", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
             .approval_required(true)
             .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"images":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
@@ -79,5 +79,123 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?
+    ];
+    specs.extend(hidden_capabilities()?);
+    Ok(specs)
+}
+
+fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+    Ok(vec![
+        CapabilityContract::new("agent::prompt_apply", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
+            .visibility(VisibilityScope::Internal)
+            .request_schema(agent_prompt_apply_request_schema())
+            .response_schema(agent_prompt_response_schema())
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .compensation(CompensationContract::new(
+                CompensationKind::ExternalIrreversible,
+                "hidden prompt apply starts queued runtime work; event-store history remains authoritative and replay is ledger/idempotency controlled",
+            ))
+            .high_risk_contract(json!({
+                "internal": true,
+                "hiddenPromptRuntimeFunction": true,
+                "rollbackOrCompensation": "hidden prompt apply starts queued runtime work; event-store history remains authoritative and replay is ledger/idempotency controlled",
+                "streamTopics": STREAM_TOPICS,
+                "version": 1
+            }))
+            .stream_topics(STREAM_TOPICS.to_vec())
+            .build()?,
+        CapabilityContract::new("agent::run_turn", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
+            .visibility(VisibilityScope::Internal)
+            .request_schema(agent_prompt_apply_request_schema())
+            .response_schema(agent_prompt_response_schema())
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .compensation(CompensationContract::new(
+                CompensationKind::ExternalIrreversible,
+                "hidden run-turn starts live provider/tool work; event-store history remains authoritative and replay is ledger/idempotency controlled",
+            ))
+            .high_risk_contract(json!({
+                "internal": true,
+                "hiddenPromptRuntimeFunction": true,
+                "rollbackOrCompensation": "hidden run-turn starts live provider/tool work; event-store history remains authoritative and replay is ledger/idempotency controlled",
+                "streamTopics": STREAM_TOPICS,
+                "version": 1
+            }))
+            .stream_topics(STREAM_TOPICS.to_vec())
+            .build()?,
+        CapabilityContract::new("agent::prompt_queue_drain", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
+            .visibility(VisibilityScope::Internal)
+            .request_schema(agent_prompt_queue_drain_request_schema())
+            .response_schema(agent_prompt_queue_drain_response_schema())
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .compensation(CompensationContract::new(
+                CompensationKind::ExternalIrreversible,
+                "hidden prompt queue drain starts queued runtime work after a prior run completes; replay is ledger/idempotency controlled",
+            ))
+            .high_risk_contract(json!({
+                "internal": true,
+                "hiddenPromptRuntimeFunction": true,
+                "rollbackOrCompensation": "hidden prompt queue drain starts queued runtime work after a prior run completes; replay is ledger/idempotency controlled",
+                "streamTopics": STREAM_TOPICS,
+                "version": 1
+            }))
+            .stream_topics(STREAM_TOPICS.to_vec())
+            .build()?,
     ])
+}
+
+fn agent_prompt_apply_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["runId", "sessionId", "prompt"],
+        "additionalProperties": false,
+        "properties": {
+            "runId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "prompt": {"type": "string"},
+            "reasoningLevel": {"type": "string"},
+            "images": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "source": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_response_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["acknowledged", "runId"],
+        "additionalProperties": false,
+        "properties": {
+            "acknowledged": {"type": "boolean"},
+            "runId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_queue_drain_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["sessionId", "completedRunId"],
+        "additionalProperties": false,
+        "properties": {
+            "sessionId": {"type": "string"},
+            "completedRunId": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
+fn agent_prompt_queue_drain_response_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["drained", "count"],
+        "additionalProperties": false,
+        "properties": {
+            "drained": {"type": "boolean"},
+            "count": {"type": "integer"},
+            "runId": {"type": ["string", "null"]},
+            "reason": {"type": ["string", "null"]}
+        }
+    })
 }

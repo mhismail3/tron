@@ -32,6 +32,15 @@ impl<'a> AgentStreamPublisher<'a> {
                     "type": format!("agent.prompt.{action}"),
                     "action": action,
                     "sessionId": session_id,
+                    "traceId": invocation.causal_context.trace_id.as_str(),
+                    "invocationId": invocation.id.as_str(),
+                    "parentInvocationId": invocation
+                        .causal_context
+                        .parent_invocation_id
+                        .as_ref()
+                        .map(|id| id.as_str()),
+                    "catalogRevision": invocation.causal_context.catalog_revision.0,
+                    "idempotencyKey": invocation.causal_context.idempotency_key.clone(),
                     "payload": payload,
                 }),
                 visibility: VisibilityScope::Session,
@@ -58,6 +67,15 @@ impl<'a> AgentStreamPublisher<'a> {
                 payload: json!({
                     "action": action,
                     "sessionId": session_id,
+                    "traceId": invocation.causal_context.trace_id.as_str(),
+                    "invocationId": invocation.id.as_str(),
+                    "parentInvocationId": invocation
+                        .causal_context
+                        .parent_invocation_id
+                        .as_ref()
+                        .map(|id| id.as_str()),
+                    "catalogRevision": invocation.causal_context.catalog_revision.0,
+                    "idempotencyKey": invocation.causal_context.idempotency_key.clone(),
                     "payload": payload,
                 }),
                 visibility: VisibilityScope::Session,

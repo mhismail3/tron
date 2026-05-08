@@ -244,6 +244,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         let metadata = serde_json::json!({
             "messageCount": context.messages.len(),
             "toolCount": context.tools.as_ref().map_or(0, Vec::len),
+            "toolCatalogRevision": tool_surface.catalog_revision.0,
             "streamOptions": &stream_options,
             "providerSurface": "preAdapter",
                 "profileChain": resolved_profile.profile_chain.clone(),
@@ -659,6 +660,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         tool_abort_registry,
         engine_host,
         run_id: run_context.run_id.as_deref(),
+        trace_id: run_context.engine_trace_id.as_ref(),
+        parent_invocation_id: run_context.parent_invocation_id.as_ref(),
     })
     .await;
 
@@ -885,6 +888,7 @@ async fn resolve_provider_tool_surface(
             tool_policy,
         );
         return Ok(ResolvedToolSurface {
+            catalog_revision: crate::engine::CatalogRevision(0),
             tools: Vec::new(),
             targets_by_name: Default::default(),
             all_tool_names: Vec::new(),
@@ -964,6 +968,7 @@ mod tests {
         }
         let all_tool_names = targets_by_name.keys().cloned().collect();
         ResolvedToolSurface {
+            catalog_revision: crate::engine::CatalogRevision(0),
             tools: Vec::new(),
             targets_by_name,
             all_tool_names,

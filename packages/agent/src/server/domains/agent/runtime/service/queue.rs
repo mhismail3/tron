@@ -1,7 +1,7 @@
 use super::{
-    ActorId, ActorKind, AuthorityGrantId, ENGINE_INTERNAL_INVOKE_SCOPE, EngineQueueDrainer,
-    EnqueueInvocation, FunctionId, PromptDrainOutcome, PromptEngineCausality, PromptRequest,
-    PromptRunPlan, RwLock, TraceId, execute_prompt_run,
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, ENGINE_INTERNAL_INVOKE_SCOPE,
+    EngineQueueDrainer, EnqueueInvocation, FunctionId, FunctionRevision, PromptDrainOutcome,
+    PromptEngineCausality, PromptRequest, PromptRunPlan, RwLock, TraceId, execute_prompt_run,
 };
 use crate::engine::queue::publish_queue_lifecycle_event;
 use crate::server::shared::errors::CapabilityError;
@@ -203,11 +203,20 @@ pub(crate) async fn enqueue_prompt_queue_drain(
             authority_scopes.push(scope.to_owned());
         }
     }
+    let Some(target_revision) = target_revision_for_queue_drain(engine_host, causality).await
+    else {
+        warn!(
+            session_id,
+            completed_run_id,
+            "failed to resolve prompt queue drain revision; skipping auto-drain enqueue"
+        );
+        return;
+    };
     let item = engine_host
         .enqueue_invocation(EnqueueInvocation {
             queue: "agent".to_owned(),
             function_id,
-            target_revision: None,
+            target_revision: Some(target_revision),
             payload: serde_json::json!({
                 "sessionId": session_id,
                 "completedRunId": completed_run_id,
@@ -250,4 +259,48 @@ pub(crate) async fn enqueue_prompt_queue_drain(
     drop(tokio::spawn(async move {
         let _ = EngineQueueDrainer::drain_receipt(&host, &receipt, "agent-prompt-auto-drain").await;
     }));
+}
+
+async fn target_revision_for_queue_drain(
+    engine_host: &crate::engine::EngineHostHandle,
+    causality: Option<&PromptEngineCausality>,
+) -> Option<FunctionRevision> {
+    let function_id = FunctionId::new("agent::prompt_queue_drain").ok()?;
+    let mut actor = ActorContext::new(
+        causality
+            .map(|causality| causality.context.actor_id.clone())
+            .unwrap_or_else(|| ActorId::new("system").expect("valid static actor id")),
+        causality
+            .map(|causality| causality.context.actor_kind.clone())
+            .unwrap_or(ActorKind::System),
+        causality
+            .map(|causality| causality.context.authority_grant_id.clone())
+            .unwrap_or_else(|| {
+                AuthorityGrantId::new("prompt-runtime").expect("valid static grant id")
+            }),
+    );
+    actor.authority_scopes = causality
+        .map(|causality| causality.context.authority_scopes.clone())
+        .unwrap_or_else(|| vec!["agent.write".to_owned()]);
+    for scope in ["agent.write", ENGINE_INTERNAL_INVOKE_SCOPE] {
+        if !actor
+            .authority_scopes
+            .iter()
+            .any(|existing| existing == scope)
+        {
+            actor.authority_scopes.push(scope.to_owned());
+        }
+    }
+    actor.session_id = causality.and_then(|causality| causality.context.session_id.clone());
+    actor.workspace_id = causality.and_then(|causality| causality.context.workspace_id.clone());
+    match engine_host
+        .inspect_function(&function_id, Some(&actor))
+        .await
+    {
+        Ok(function) => Some(function.revision),
+        Err(error) => {
+            warn!(error = %error, "failed to inspect prompt queue drain revision");
+            None
+        }
+    }
 }

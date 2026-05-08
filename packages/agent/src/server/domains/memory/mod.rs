@@ -2,8 +2,9 @@
 //!
 //! This module owns canonical function execution for the memory namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
-//! The `memory::retain` operation body lives in `operations/`; summarization,
-//! persistence, and auto-retain policy remain in the `retain` service tree.
+//! The `memory::retain` and hidden `memory::auto_retain_fire` operation bodies
+//! live in `operations/`; summarization, persistence, and auto-retain policy
+//! remain in the `retain` service tree.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
