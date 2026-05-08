@@ -10,12 +10,11 @@ pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_modules(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Vec<DomainWorkerModule>> {
     let contracts = contract::capabilities()?;
     let model_specs = contracts
@@ -27,20 +26,17 @@ pub(crate) fn worker_modules(
         .into_iter()
         .filter(|spec| spec.owner_worker.as_str() == "config")
         .collect::<Vec<_>>();
+    let domain_deps = Deps::from_engine(deps);
     Ok(vec![
         super::domain_worker_module(
             "model",
             contract::STREAM_TOPICS,
-            model_specs,
-            Deps::from_engine(deps),
-            super::model_handler,
+            handlers::function_registrations(model_specs, domain_deps.clone())?,
         )?,
         super::domain_worker_module(
             "config",
             contract::STREAM_TOPICS,
-            config_specs,
-            Deps::from_engine(deps),
-            super::model_handler,
+            handlers::function_registrations(config_specs, domain_deps)?,
         )?,
     ])
 }

@@ -6,21 +6,22 @@
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
+pub(crate) mod stream;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    super::domain_worker_module(
-        "events",
-        contract::STREAM_TOPICS,
-        contract::capabilities()?,
-        Deps::from_engine(deps),
-        super::events_handler,
-    )
+    {
+        let domain_deps = Deps::from_engine(deps);
+        super::domain_worker_module(
+            "events",
+            contract::STREAM_TOPICS,
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+        )
+    }
 }
 
 use crate::server::shared::events as event_wire;
@@ -188,22 +189,8 @@ async fn events_append_value(
         .get_session(&session_id)
         .map_err(map_event_store_error)?
         .and_then(|session| session.head_event_id);
-    let _ = deps
-        .engine_host
-        .publish_stream_event(crate::engine::PublishStreamEvent {
-            topic: "events.session".to_owned(),
-            payload: json!({
-                "serverEvent": event_wire::event_row_to_server_payload(&event),
-                "sourceEventType": event.event_type.clone(),
-                "sourceSequence": event.sequence,
-            }),
-            visibility: crate::engine::VisibilityScope::Session,
-            session_id: Some(session_id.clone()),
-            workspace_id: invocation_workspace(params),
-            producer: "events::append".to_owned(),
-            trace_id: Some(invocation.causal_context.trace_id.clone()),
-            parent_invocation_id: Some(invocation.id.clone()),
-        })
+    crate::server::domains::events::stream::EventsStreamPublisher::new(&deps.engine_host)
+        .session_event(invocation, &event, invocation_workspace(params))
         .await;
 
     Ok(json!({

@@ -543,7 +543,7 @@ mod tests {
     use crate::server::shared::test_support::make_test_context;
 
     fn deps_from_ctx(
-        ctx: &crate::server::shared::context::ServerCapabilityContext,
+        ctx: &crate::server::shared::context::ServerRuntimeContext,
     ) -> crate::server::domains::memory::retain::RetainDeps {
         crate::server::domains::memory::retain::RetainDeps::from_test_context(ctx)
     }

@@ -44,7 +44,7 @@ impl TransportIdempotencyMode {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapabilitySpec {
     /// Stable canonical operation key used by the domain dispatcher.
-    pub method: &'static str,
+    pub operation_key: String,
     /// Stable engine function id.
     pub function_id: FunctionId,
     /// Owner worker id.
@@ -98,7 +98,7 @@ pub struct CanonicalCapabilitySpec {
     /// Domain authority scope required for direct invocation.
     pub authority_scope: Option<&'static str>,
     /// Canonical operation key routed to the domain implementation.
-    pub method: &'static str,
+    pub operation_key: String,
 }
 
 /// Domain worker ownership view used by guard tests.
@@ -163,7 +163,7 @@ pub fn canonical_capability_specs() -> EngineResult<Vec<CanonicalCapabilitySpec>
                 effect_class: spec.effect_class,
                 risk_level: spec.risk_level,
                 authority_scope: spec.authority_scope,
-                method: spec.method,
+                operation_key: spec.operation_key,
             })
         })
         .collect()
@@ -204,10 +204,10 @@ pub(crate) fn domain_worker_modules() -> EngineResult<Vec<DomainWorkerModule>> {
 fn validate_seed_uniqueness() -> EngineResult<()> {
     let mut seen = BTreeSet::new();
     for spec in canonical_capability_contracts()? {
-        if !seen.insert(spec.method) {
+        if !seen.insert(spec.function_id.as_str().to_owned()) {
             return Err(EngineError::PolicyViolation(format!(
                 "duplicate canonical capability spec for {}",
-                spec.method
+                spec.function_id.as_str()
             )));
         }
     }

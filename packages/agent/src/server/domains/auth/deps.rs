@@ -17,7 +17,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             auth_path: deps.auth_path.clone(),
             engine_host: deps.engine_host.clone(),

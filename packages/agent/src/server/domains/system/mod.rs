@@ -7,22 +7,22 @@ pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 use std::collections::BTreeMap;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    super::domain_worker_module(
-        "system",
-        contract::STREAM_TOPICS,
-        contract::capabilities()?,
-        Deps::from_engine(deps),
-        super::system_handler,
-    )
+    {
+        let domain_deps = Deps::from_engine(deps);
+        super::domain_worker_module(
+            "system",
+            contract::STREAM_TOPICS,
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+        )
+    }
 }
 
 use crate::server::shared::protocol as engine_transport_protocol;
@@ -53,7 +53,7 @@ async fn system_check_for_updates_value(deps: &Deps) -> Result<Value, Capability
 
     let Some(fetcher) = deps.release_fetcher.as_ref() else {
         tracing::warn!(
-            "system.checkForUpdates called but ServerCapabilityContext::release_fetcher is None; \
+            "system.checkForUpdates called but ServerRuntimeContext::release_fetcher is None; \
              responding as if no release was found"
         );
         return Ok(json!({

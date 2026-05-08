@@ -9,7 +9,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             engine_host: deps.engine_host.clone(),
             mcp_router: deps.mcp_router.clone(),

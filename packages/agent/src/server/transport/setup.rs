@@ -5,10 +5,10 @@
 //! functions, or tool worker internals.
 
 use crate::engine::Result as EngineResult;
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::context::ServerRuntimeContext;
 
 /// Register server-owned domain workers, canonical functions, and trigger types.
-pub fn register_server_domains_for_context(ctx: &ServerCapabilityContext) -> EngineResult<()> {
+pub fn register_server_domains_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     crate::server::domains::registration::register_domain_workers_for_context(ctx)?;
     crate::server::transport::contracts::register_engine_transport_triggers_for_context(ctx)
 }

@@ -170,12 +170,12 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
-| `server` | HTTP/WS + pure engine protocol | `TronServer`, `ServerCapabilityContext`, `EngineStreamEventPump` |
+| `server` | HTTP/WS + pure engine protocol | `TronServer`, `ServerRuntimeContext`, `EngineStreamEventPump` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
-| `server::domains` | Domain-owned worker/function surface | `all_worker_modules()`, typed `DomainFunctionHandler`, per-domain `contract.rs`, `deps.rs`, `handlers.rs`, `operations/` |
+| `server::domains` | Domain-owned worker/function surface | `all_worker_modules()`, `DomainWorkerModule`, per-domain `contract.rs`, `deps.rs`, `handlers.rs`, `operations/`, typed stream publishers |
 | `server::runtime` | Engine runtime services | `EngineRuntimeServices`, `EngineStreamEventPump`, external worker runtime |
 | `server::platform::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
-| `server::shared` | Transport-neutral server helpers | `ServerCapabilityContext`, `CapabilityError`, `ServerEventPayload` |
+| `server::shared` | Transport-neutral server helpers | `ServerRuntimeContext`, `CapabilityError`, `ServerEventPayload` |
 | `server::transport` | `/engine` client protocol, worker auth, transport envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `server::updater` | GitHub Releases checks + update notifications | `SchedulerDeps`, `UpdaterState`, `UpdateDecision` |
 
@@ -183,10 +183,11 @@ The server package is intentionally vertical by domain. A domain root is only
 docs, exports, and worker registration. `contract.rs` owns the canonical
 function ids, schemas, authority, idempotency, risk, leases, compensation, and
 declared stream topics; `deps.rs` narrows setup into the handles that domain
-uses; `handlers.rs` binds operation keys; and `operations/` contains executable
-operation bodies. Cross-domain access goes through explicit domain services or
-shared DTOs, so an engineer can follow a capability by reading one domain folder
-instead of a central dispatch table.
+uses; `handlers.rs` binds operation keys to local handler structs; `operations/`
+contains executable operation bodies; and `stream.rs` publishes only that
+domain's declared topics. Cross-domain access goes through explicit domain
+services or shared DTOs, so an engineer can follow a capability by reading one
+domain folder instead of a central dispatch table.
 
 ---
 

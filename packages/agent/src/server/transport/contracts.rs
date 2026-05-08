@@ -14,7 +14,7 @@ use crate::server::domains::catalog::{
     CapabilitySpec, SYSTEM_AUTHORITY_GRANT, TransportIdempotencyMode, grant_id, worker_id,
 };
 use crate::server::domains::contract::CapabilityContract;
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::context::ServerRuntimeContext;
 
 const PUBLIC_ENGINE_TRANSPORT_METHODS: &[&str] =
     &["discover", "inspect", "watch", "invoke", "promote"];
@@ -71,19 +71,19 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
         {
             return Err(EngineError::PolicyViolation(format!(
                 "agent-visible public engine transport method {} lacks idempotency",
-                spec.method
+                spec.operation_key.as_str()
             )));
         }
         if spec.request_schema.is_none() || spec.response_schema.is_none() {
             return Err(EngineError::PolicyViolation(format!(
                 "public engine transport method {} must declare strict request/response schemas",
-                spec.method
+                spec.operation_key.as_str()
             )));
         }
         if spec.effect_class.is_mutating() && spec.authority_scope.is_none() {
             return Err(EngineError::PolicyViolation(format!(
                 "mutating public engine transport method {} must require an authority scope",
-                spec.method
+                spec.operation_key.as_str()
             )));
         }
     }
@@ -97,7 +97,7 @@ pub(crate) fn public_engine_transport_spec_for_method(
     public_engine_transport_specs().map(|specs| {
         specs
             .into_iter()
-            .find(|candidate| candidate.method == method)
+            .find(|candidate| candidate.operation_key.as_str() == method)
     })
 }
 
@@ -138,14 +138,14 @@ pub(crate) fn engine_ws_trigger_for_spec(
     spec: &CapabilitySpec,
 ) -> EngineResult<Option<TriggerDefinition>> {
     let mut trigger = TriggerDefinition::new(
-        engine_ws_trigger_id_for_method(spec.method)?,
+        engine_ws_trigger_id_for_method(spec.operation_key.as_str())?,
         worker_id("engine")?,
         TriggerTypeId::new("engine_ws")?,
         spec.function_id.clone(),
         grant_id(SYSTEM_AUTHORITY_GRANT)?,
     )
     .with_delivery_mode(DeliveryMode::Sync);
-    trigger.config = json!({ "messageType": spec.method });
+    trigger.config = json!({ "messageType": spec.operation_key.as_str() });
     trigger.idempotency_key_strategy = if spec.effect_class.is_mutating() {
         Some(IdempotencyKeySource::TriggerDerived)
     } else {
@@ -162,7 +162,7 @@ pub(crate) fn engine_ws_trigger_id_for_method(method: &str) -> EngineResult<Trig
 
 /// Register engine client protocol trigger types and message triggers.
 pub(crate) fn register_engine_transport_triggers_for_context(
-    ctx: &ServerCapabilityContext,
+    ctx: &ServerRuntimeContext,
 ) -> EngineResult<()> {
     let handle = &ctx.engine_host;
     handle.register_trigger_type_for_setup(engine_ws_trigger_type()?, false)?;

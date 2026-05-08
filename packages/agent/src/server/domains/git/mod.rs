@@ -9,7 +9,6 @@ pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 pub(crate) mod service;
 
@@ -25,34 +24,14 @@ use super::*;
 use crate::engine::Invocation;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let git_deps = Deps::from_engine(deps);
-    let worktree_deps = crate::server::domains::worktree::Deps::from_engine(deps);
-    let mut module = super::domain_worker_module(
+    super::domain_worker_module(
         "git",
         contract::STREAM_TOPICS,
-        Vec::new(),
-        git_deps.clone(),
-        super::git_handler,
-    )?;
-    module.functions.extend(
-        contract::capabilities()?
-            .into_iter()
-            .map(|spec| {
-                if spec.method == "git::clone" {
-                    super::domain_function_registration(spec, git_deps.clone(), super::git_handler)
-                } else {
-                    super::domain_function_registration(
-                        spec,
-                        worktree_deps.clone(),
-                        super::git_workflow_handler,
-                    )
-                }
-            })
-            .collect::<crate::engine::Result<Vec<_>>>()?,
-    );
-    Ok(module)
+        handlers::function_registrations(contract::capabilities()?, git_deps)?,
+    )
 }
 
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);

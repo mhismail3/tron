@@ -1,6 +1,6 @@
 //! Shared test fixtures for server capability tests.
 //!
-//! Mock providers, factory wrappers, and an in-memory `ServerCapabilityContext` builder
+//! Mock providers, factory wrappers, and an in-memory `ServerRuntimeContext` builder
 //! are used by engine and service tests via
 //! `crate::server::shared::test_support::*`. Keeping the helpers in
 //! their own file (instead of an inline `#[cfg(test)] mod` in `mod.rs`)
@@ -23,7 +23,7 @@ use crate::runtime::memory::MemoryRegistry;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::server::domains::session::context::ContextArtifactsService;
-use crate::server::shared::context::{AgentDeps, ServerCapabilityContext};
+use crate::server::shared::context::{AgentDeps, ServerRuntimeContext};
 use crate::skills::registry::SkillRegistry;
 use crate::tools::registry::ToolRegistry;
 
@@ -143,8 +143,8 @@ pub fn make_test_agent_deps() -> AgentDeps {
     }
 }
 
-/// Build an `ServerCapabilityContext` backed by an in-memory event store.
-pub fn make_test_context() -> ServerCapabilityContext {
+/// Build an `ServerRuntimeContext` backed by an in-memory event store.
+pub fn make_test_context() -> ServerRuntimeContext {
     let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
@@ -157,7 +157,7 @@ pub fn make_test_context() -> ServerCapabilityContext {
     let settings_path = test_user_profile_path(&home);
     let auth_path = test_auth_path(&home);
     let profile_runtime = test_profile_runtime(&home);
-    let ctx = ServerCapabilityContext {
+    let ctx = ServerRuntimeContext {
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,

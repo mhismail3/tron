@@ -440,7 +440,7 @@ async fn server_boots_and_responds() {
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
-    let capability_context = ServerCapabilityContext {
+    let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
@@ -483,15 +483,13 @@ async fn server_boots_and_responds() {
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = TronServer::new(config, capability_context, metrics_handle);
-    tron::server::transport::setup::register_server_domains_for_context(
-        server.capability_context(),
-    )
-    .unwrap();
+    let server = TronServer::new(config, runtime_context, metrics_handle);
+    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+        .unwrap();
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
-        server.capability_context().engine_host.clone(),
+        server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
@@ -780,7 +778,7 @@ async fn server_graceful_shutdown() {
     let home = test_tron_home(&dir);
     let settings_path = test_settings_path(&home);
 
-    let capability_context = ServerCapabilityContext {
+    let runtime_context = ServerRuntimeContext {
         orchestrator,
         session_manager,
         event_store,
@@ -822,11 +820,9 @@ async fn server_graceful_shutdown() {
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = TronServer::new(ServerConfig::default(), capability_context, metrics_handle);
-    tron::server::transport::setup::register_server_domains_for_context(
-        server.capability_context(),
-    )
-    .unwrap();
+    let server = TronServer::new(ServerConfig::default(), runtime_context, metrics_handle);
+    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+        .unwrap();
     let (_, handle) = server.listen().await.unwrap();
 
     server.shutdown().shutdown();

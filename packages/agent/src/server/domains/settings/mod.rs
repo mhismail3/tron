@@ -6,22 +6,22 @@
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
+pub(crate) mod stream;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 use super::*;
-use crate::engine::{PublishStreamEvent, VisibilityScope};
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    super::domain_worker_module(
-        "settings",
-        contract::STREAM_TOPICS,
-        contract::capabilities()?,
-        Deps::from_engine(deps),
-        super::settings_handler,
-    )
+    {
+        let domain_deps = Deps::from_engine(deps);
+        super::domain_worker_module(
+            "settings",
+            contract::STREAM_TOPICS,
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+        )
+    }
 }
 
 fn settings_error(error: crate::settings::SettingsError) -> CapabilityError {
@@ -267,30 +267,7 @@ async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
 
     let router = router_arc.read().await;
     let status = router.status();
-    let event = ServerEventPayload::new(
-        "mcp.status_changed",
-        None,
-        Some(serde_json::to_value(status).unwrap_or_default()),
-    );
-    let topic = contract::STREAM_TOPICS[0];
-    if let Err(error) = deps
-        .engine_host
-        .publish_stream_event(PublishStreamEvent {
-            topic: topic.to_owned(),
-            payload: json!({
-                "serverEvent": event,
-                "__broadcastScope": { "kind": "all" },
-                "sourceEventType": "mcp.status_changed",
-            }),
-            visibility: VisibilityScope::System,
-            session_id: invocation.causal_context.session_id.clone(),
-            workspace_id: invocation.causal_context.workspace_id.clone(),
-            producer: "settings".to_owned(),
-            trace_id: Some(invocation.causal_context.trace_id.clone()),
-            parent_invocation_id: Some(invocation.id.clone()),
-        })
-        .await
-    {
-        tracing::warn!(topic, error = %error, "settings stream publication failed");
-    }
+    crate::server::domains::settings::stream::SettingsStreamPublisher::new(&deps.engine_host)
+        .mcp_status_changed(invocation, serde_json::to_value(status).unwrap_or_default())
+        .await;
 }

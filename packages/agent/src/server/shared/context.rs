@@ -1,4 +1,4 @@
-//! Server capability dependency-injection context.
+//! Server runtime setup context and shared domain support.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
@@ -182,9 +182,13 @@ pub struct AgentDeps {
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
 }
 
-/// Shared context passed to every canonical capability function.
+/// Broad server runtime context used at app setup and domain registration.
+///
+/// Runtime domain handlers should not store this type directly. Each domain
+/// narrows it into a local `Deps` bundle while building its worker module, then
+/// operation handlers keep only those domain-specific handles.
 #[derive(Clone)]
-pub struct ServerCapabilityContext {
+pub struct ServerRuntimeContext {
     /// Multi-session orchestrator.
     pub orchestrator: Arc<Orchestrator>,
     /// Session lifecycle manager.
@@ -280,7 +284,7 @@ pub struct ServerCapabilityContext {
     pub updater_state_path: PathBuf,
 }
 
-impl ServerCapabilityContext {
+impl ServerRuntimeContext {
     /// Run blocking work on the dedicated blocking pool used by async capabilities.
     pub async fn run_blocking<T, F>(
         &self,

@@ -10,7 +10,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             device_request_broker: deps.device_request_broker.clone(),
             event_store: deps.event_store.clone(),

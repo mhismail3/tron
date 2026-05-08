@@ -17,7 +17,7 @@ use crate::engine::{
 /// Fully-owned contract record supplied by one domain worker.
 pub(crate) struct CapabilityContract {
     /// Stable operation key used by the owning domain handler.
-    pub(crate) method: &'static str,
+    pub(crate) operation_key: String,
     /// Stable canonical function id.
     pub(crate) function_id: &'static str,
     /// Worker that owns the registered function.
@@ -63,8 +63,13 @@ impl CapabilityContract {
         risk_level: RiskLevel,
         authority_scope: Option<&'static str>,
     ) -> Self {
+        let operation_key = method
+            .rsplit_once("::")
+            .map(|(_, key)| key)
+            .unwrap_or(method)
+            .to_string();
         Self {
-            method,
+            operation_key,
             function_id: method,
             owner_worker,
             domain_worker: owner_worker,
@@ -160,7 +165,7 @@ impl CapabilityContract {
     /// Convert the local domain record to the aggregate catalog shape.
     pub(crate) fn build(self) -> EngineResult<CapabilitySpec> {
         Ok(CapabilitySpec {
-            method: self.method,
+            operation_key: self.operation_key,
             function_id: FunctionId::new(self.function_id)?,
             owner_worker: WorkerId::new(self.owner_worker)?,
             domain_worker: WorkerId::new(self.domain_worker)?,
@@ -187,7 +192,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     let mut definition = FunctionDefinition::new(
         spec.function_id.clone(),
         spec.owner_worker.clone(),
-        format!("Canonical domain capability {}", spec.method),
+        format!("Canonical domain capability {}", spec.function_id.as_str()),
         spec.visibility.clone(),
         spec.effect_class,
     )
@@ -216,7 +221,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         definition = definition.with_response_schema(schema.clone());
     }
     definition.metadata = json!({
-        "operationKey": spec.method,
+        "operationKey": spec.operation_key.as_str(),
         "domainWorker": spec.domain_worker.as_str(),
         "canonicalCapability": spec.function_id.as_str(),
         "domainAuthorityScope": spec.authority_scope,

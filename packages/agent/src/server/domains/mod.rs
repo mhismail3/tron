@@ -18,9 +18,11 @@
 //! function ids, schemas, authority, risk, idempotency, leases, compensation,
 //! stream topics, and operation keys. Each domain `deps.rs` narrows setup
 //! context into the service handles that worker actually needs; `handlers.rs`
-//! binds operation keys to domain operations; and flow-critical domains keep
-//! executable bodies in `operations/`. The catalog only aggregates those
-//! records; it does not derive domain policy from central method tables.
+//! binds operation keys to local handler structs; flow-critical domains keep
+//! executable bodies in `operations/`; and event-emitting domains publish
+//! through typed `stream.rs` publishers for their declared topics. The catalog
+//! only aggregates those records; it does not derive domain policy from central
+//! method tables.
 //!
 //! The intended execution flow is:
 //! `/engine frame -> EngineTransportRequest -> EngineTriggerRuntime -> domain
@@ -38,14 +40,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Instant;
 
-use async_trait::async_trait;
-use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::engine::{
-    ActorKind, EngineError, FunctionDefinition, InProcessFunctionHandler, Invocation,
-    VisibilityScope, WorkerDefinition, WorkerKind,
+    FunctionDefinition, InProcessFunctionHandler, Invocation, VisibilityScope, WorkerDefinition,
+    WorkerKind,
 };
 use crate::events::EventStore;
 use crate::prompt_library::store;
@@ -56,19 +56,16 @@ use crate::server::domains::filesystem::service as filesystem_service;
 use crate::server::domains::logs::client_logs::{ClientLogEntry, ClientLogsService};
 use crate::server::domains::notifications::inbox::NotificationInboxService;
 use crate::server::platform::codex_app::CodexAppServerManager;
-use crate::server::shared::context::{AgentDeps, ServerCapabilityContext, run_blocking_task};
+use crate::server::shared::context::{AgentDeps, ServerRuntimeContext, run_blocking_task};
 use crate::server::shared::error_mapping::{map_cron_error, map_event_store_error};
 use crate::server::shared::errors;
 use crate::server::shared::errors::{CLIENT_VERSION_UNSUPPORTED, CapabilityError, to_json_value};
-use crate::server::shared::events::ServerEventPayload;
 use crate::server::shared::params::{
     opt_array, opt_bool, opt_string, opt_u64, require_param, require_string_param,
 };
 use crate::server::shared::validation::validate_string_param;
 use crate::server::shutdown::ShutdownCoordinator;
 use crate::skills::registry::SkillRegistry;
-
-use crate::server::shared::error_mapping::capability_error_to_engine;
 
 pub(crate) mod agent;
 pub(crate) mod auth;
@@ -110,7 +107,7 @@ pub(crate) mod voice_notes;
 pub(crate) mod worktree;
 
 #[derive(Clone)]
-pub(crate) struct DomainSetupContext {
+pub(crate) struct DomainRegistrationContext {
     orchestrator: Arc<Orchestrator>,
     session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
@@ -152,8 +149,8 @@ pub(crate) struct DomainSetupContext {
         Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
-impl DomainSetupContext {
-    pub(crate) fn from_context(ctx: &ServerCapabilityContext) -> Self {
+impl DomainRegistrationContext {
+    pub(crate) fn from_context(ctx: &ServerRuntimeContext) -> Self {
         Self {
             orchestrator: Arc::clone(&ctx.orchestrator),
             session_manager: Arc::clone(&ctx.session_manager),
@@ -203,34 +200,10 @@ pub(crate) struct DomainWorkerModule {
     pub(crate) stream_topics: &'static [&'static str],
 }
 
-pub(crate) struct DomainFunctionHandler<D> {
-    pub(crate) method: &'static str,
-    pub(crate) deps: D,
-    pub(crate) handler: DomainHandlerFn<D>,
-}
-
-#[async_trait]
-impl<D> InProcessFunctionHandler for DomainFunctionHandler<D>
-where
-    D: Send + Sync + 'static,
-{
-    async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
-        (self.handler)(self.method, &invocation, &self.deps)
-            .await
-            .map_err(capability_error_to_engine)
-    }
-}
-
-pub(crate) type DomainHandlerFn<D> = for<'a> fn(
-    &'static str,
-    &'a Invocation,
-    &'a D,
-) -> BoxFuture<'a, Result<Value, CapabilityError>>;
-
 pub(crate) fn all_worker_modules(
-    ctx: &ServerCapabilityContext,
+    ctx: &ServerRuntimeContext,
 ) -> crate::engine::Result<Vec<DomainWorkerModule>> {
-    let deps = DomainSetupContext::from_context(ctx);
+    let deps = DomainRegistrationContext::from_context(ctx);
     let mut modules = vec![
         system::worker_module(&deps)?,
         codex_app::worker_module(&deps)?,
@@ -269,16 +242,11 @@ pub(crate) fn all_worker_modules(
     Ok(modules)
 }
 
-fn domain_worker_module<D>(
+fn domain_worker_module(
     namespace: &'static str,
     stream_topics: &'static [&'static str],
-    specs: Vec<catalog::CapabilitySpec>,
-    deps: D,
-    handler: DomainHandlerFn<D>,
-) -> crate::engine::Result<DomainWorkerModule>
-where
-    D: Clone + Send + Sync + 'static,
-{
+    functions: Vec<DomainFunctionRegistration>,
+) -> crate::engine::Result<DomainWorkerModule> {
     let worker = WorkerDefinition::new(
         catalog::worker_id(namespace)?,
         WorkerKind::InProcess,
@@ -286,116 +254,12 @@ where
         catalog::grant_id(catalog::SYSTEM_AUTHORITY_GRANT)?,
     )
     .with_namespace_claim(namespace);
-    let functions = specs
-        .into_iter()
-        .map(|spec| domain_function_registration(spec, deps.clone(), handler))
-        .collect::<crate::engine::Result<Vec<_>>>()?;
     Ok(DomainWorkerModule {
         worker,
         functions,
         stream_topics,
     })
 }
-
-fn domain_function_registration<D>(
-    spec: catalog::CapabilitySpec,
-    deps: D,
-    handler: DomainHandlerFn<D>,
-) -> crate::engine::Result<DomainFunctionRegistration>
-where
-    D: Clone + Send + Sync + 'static,
-{
-    Ok(DomainFunctionRegistration {
-        definition: catalog::function_definition_for_capability(&spec),
-        handler: Arc::new(DomainFunctionHandler {
-            method: spec.method,
-            deps: deps.clone(),
-            handler,
-        }),
-    })
-}
-
-macro_rules! domain_handler {
-    ($fn_name:ident, $module:ident) => {
-        fn $fn_name<'a>(
-            method: &'static str,
-            invocation: &'a Invocation,
-            deps: &'a $module::Deps,
-        ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-            Box::pin(async move { $module::handle(method, invocation, deps).await })
-        }
-    };
-}
-
-fn system_handler<'a>(
-    method: &'static str,
-    invocation: &'a Invocation,
-    deps: &'a system::Deps,
-) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-    Box::pin(async move {
-        let allow_server_context =
-            matches!(invocation.causal_context.actor_kind, ActorKind::Client);
-        system::handle(method, invocation, deps, allow_server_context).await
-    })
-}
-
-fn model_handler<'a>(
-    method: &'static str,
-    invocation: &'a Invocation,
-    deps: &'a model::Deps,
-) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-    Box::pin(async move {
-        let allow_server_context =
-            matches!(invocation.causal_context.actor_kind, ActorKind::Client);
-        model::handle(method, invocation, deps, allow_server_context).await
-    })
-}
-
-fn browser_handler<'a>(
-    method: &'static str,
-    _invocation: &'a Invocation,
-    deps: &'a browser::Deps,
-) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-    Box::pin(async move { browser::handle(method, deps).await })
-}
-
-domain_handler!(agent_handler, agent);
-domain_handler!(auth_handler, auth);
-domain_handler!(blob_handler, blob);
-domain_handler!(codex_app_handler, codex_app);
-domain_handler!(context_handler, context);
-domain_handler!(cron_handler, cron);
-domain_handler!(device_handler, device);
-domain_handler!(display_handler, display);
-domain_handler!(events_handler, events);
-domain_handler!(filesystem_handler, filesystem);
-domain_handler!(git_handler, git);
-fn git_workflow_handler<'a>(
-    method: &'static str,
-    invocation: &'a Invocation,
-    deps: &'a worktree::Deps,
-) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-    Box::pin(async move { worktree::git_workflow::handle(method, invocation, deps).await })
-}
-domain_handler!(import_handler, import);
-domain_handler!(job_handler, job);
-domain_handler!(logs_handler, logs);
-domain_handler!(mcp_handler, mcp);
-domain_handler!(memory_handler, memory);
-domain_handler!(message_handler, message);
-domain_handler!(notifications_handler, notifications);
-domain_handler!(plan_handler, plan);
-domain_handler!(prompt_library_handler, prompt_library);
-domain_handler!(repo_handler, repo);
-domain_handler!(sandbox_handler, sandbox);
-domain_handler!(session_handler, session);
-domain_handler!(settings_handler, settings);
-domain_handler!(skills_handler, skills);
-domain_handler!(tool_handler, tools);
-domain_handler!(transcription_handler, transcription);
-domain_handler!(tree_handler, tree);
-domain_handler!(voice_notes_handler, voice_notes);
-domain_handler!(worktree_handler, worktree);
 
 fn map_store_err(e: crate::events::EventStoreError) -> CapabilityError {
     match e {

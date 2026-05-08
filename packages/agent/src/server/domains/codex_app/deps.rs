@@ -8,7 +8,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             codex_app_server: deps.codex_app_server.clone(),
         }

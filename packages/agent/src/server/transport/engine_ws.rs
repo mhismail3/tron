@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::{StreamActorScope, StreamCursor, VisibilityScope};
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::context::ServerRuntimeContext;
 use crate::server::shared::error_mapping::engine_error_to_capability_error;
 use crate::server::shared::errors::{CapabilityError, INVALID_PARAMS};
 use crate::server::shared::events::ServerEventPayload;
@@ -71,7 +71,7 @@ impl EngineClientRegistry {
 pub async fn run_engine_ws_session(
     ws: WebSocket,
     client_id: String,
-    ctx: Arc<ServerCapabilityContext>,
+    ctx: Arc<ServerRuntimeContext>,
     clients: Arc<EngineClientRegistry>,
 ) {
     clients.add();
@@ -120,7 +120,7 @@ pub async fn run_engine_ws_session(
 
 struct EngineWsSession {
     client_id: String,
-    ctx: Arc<ServerCapabilityContext>,
+    ctx: Arc<ServerRuntimeContext>,
     out_tx: mpsc::Sender<String>,
     subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
     cancel: CancellationToken,
@@ -144,7 +144,7 @@ struct SubscriptionState {
 impl EngineWsSession {
     fn new(
         client_id: String,
-        ctx: Arc<ServerCapabilityContext>,
+        ctx: Arc<ServerRuntimeContext>,
         out_tx: mpsc::Sender<String>,
         subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
         cancel: CancellationToken,
@@ -728,7 +728,7 @@ impl EngineWsSession {
 }
 
 async fn push_subscription_events(
-    ctx: Arc<ServerCapabilityContext>,
+    ctx: Arc<ServerRuntimeContext>,
     out_tx: mpsc::Sender<String>,
     subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
     cancel: CancellationToken,

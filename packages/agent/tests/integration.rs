@@ -31,7 +31,7 @@ use tron::runtime::orchestrator::session_manager::SessionManager;
 use tron::server::config::ServerConfig;
 use tron::server::runtime::streams::EngineStreamEventPump;
 use tron::server::server::TronServer;
-use tron::server::shared::context::{AgentDeps, ServerCapabilityContext};
+use tron::server::shared::context::{AgentDeps, ServerRuntimeContext};
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
 
@@ -97,7 +97,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let settings_path = unique_settings_path();
     tron::settings::reload_settings_from_path(&settings_path).unwrap();
 
-    let capability_context = ServerCapabilityContext {
+    let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
@@ -140,16 +140,14 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = Arc::new(TronServer::new(config, capability_context, metrics_handle));
-    tron::server::transport::setup::register_server_domains_for_context(
-        server.capability_context(),
-    )
-    .expect("integration engine protocol should register");
+    let server = Arc::new(TronServer::new(config, runtime_context, metrics_handle));
+    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+        .expect("integration engine protocol should register");
     tron::server::runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
-        server.capability_context().engine_host.clone(),
+        server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
@@ -157,7 +155,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
 
     let (addr, _handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/engine");
-    register_server_auth_path(&ws_url, &server.capability_context().auth_path);
+    register_server_auth_path(&ws_url, &server.runtime_context().auth_path);
 
     (ws_url, server)
 }
@@ -383,7 +381,7 @@ async fn boot_server_with_provider_and_handles(
     let settings_path = unique_settings_path();
     tron::settings::reload_settings_from_path(&settings_path).unwrap();
 
-    let capability_context = ServerCapabilityContext {
+    let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
@@ -430,16 +428,14 @@ async fn boot_server_with_provider_and_handles(
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = Arc::new(TronServer::new(config, capability_context, metrics_handle));
-    tron::server::transport::setup::register_server_domains_for_context(
-        server.capability_context(),
-    )
-    .expect("integration engine protocol should register");
+    let server = Arc::new(TronServer::new(config, runtime_context, metrics_handle));
+    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+        .expect("integration engine protocol should register");
     tron::server::runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
-        server.capability_context().engine_host.clone(),
+        server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
@@ -447,7 +443,7 @@ async fn boot_server_with_provider_and_handles(
 
     let (addr, server_handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/engine");
-    register_server_auth_path(&ws_url, &server.capability_context().auth_path);
+    register_server_auth_path(&ws_url, &server.runtime_context().auth_path);
 
     (
         ws_url,
@@ -638,7 +634,7 @@ async fn publish_engine_session_event(
         "data": data,
     });
     server
-        .capability_context()
+        .runtime_context()
         .engine_host
         .publish_stream_event(tron::engine::PublishStreamEvent {
             topic: "events.session".to_owned(),

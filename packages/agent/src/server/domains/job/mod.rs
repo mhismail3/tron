@@ -9,22 +9,23 @@ pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
+pub(crate) mod stream;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 pub(crate) use operations::hidden_function_registrations;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    let mut module = super::domain_worker_module(
-        "job",
-        contract::STREAM_TOPICS,
-        contract::capabilities()?,
-        Deps::from_engine(deps),
-        super::job_handler,
-    )?;
+    let mut module = {
+        let domain_deps = Deps::from_engine(deps);
+        super::domain_worker_module(
+            "job",
+            contract::STREAM_TOPICS,
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+        )
+    }?;
     module
         .functions
         .extend(hidden_function_registrations(deps)?);

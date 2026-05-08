@@ -15,7 +15,7 @@ use crate::engine::{
 };
 use crate::server::domains::catalog;
 use crate::server::domains::catalog::TransportIdempotencyMode;
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::context::ServerRuntimeContext;
 use crate::server::shared::error_mapping::engine_error_to_capability_error;
 use crate::server::shared::errors::CapabilityError;
 use crate::server::transport::contracts;
@@ -76,23 +76,26 @@ pub fn build_engine_transport_request(
     let Some(spec) = spec else {
         return Ok(None);
     };
-    reject_noncanonical_target(spec.method, &input.params_payload)?;
+    reject_noncanonical_target(spec.operation_key.as_str(), &input.params_payload)?;
     let domain_authority_scope = spec
         .authority_scope
         .ok_or_else(|| CapabilityError::Internal {
             message: format!(
                 "engine transport method {} is missing an authority scope",
-                spec.method
+                spec.operation_key.as_str()
             ),
         })?;
-    let mut causal_context =
-        transport_causal_context_for_method(spec.method, domain_authority_scope, &input.context)?;
-    if spec.method == "promote" {
+    let mut causal_context = transport_causal_context_for_method(
+        spec.operation_key.as_str(),
+        domain_authority_scope,
+        &input.context,
+    )?;
+    if spec.operation_key.as_str() == "promote" {
         causal_context = causal_context
             .with_scope("engine.promote.workspace")
             .with_scope("engine.promote.system");
     }
-    if spec.method == "invoke" {
+    if spec.operation_key.as_str() == "invoke" {
         for scope in target_authority_scopes_for_engine_invoke(&input.params_payload) {
             causal_context = causal_context.with_scope(scope);
         }
@@ -110,7 +113,7 @@ pub fn build_engine_transport_request(
                         CapabilityError::InvalidParams {
                             message: format!(
                                 "{} requires non-empty explicit idempotencyKey",
-                                spec.method
+                                spec.operation_key.as_str()
                             ),
                         }
                     })?;
@@ -118,7 +121,7 @@ pub fn build_engine_transport_request(
                     return Err(CapabilityError::InvalidParams {
                         message: format!(
                             "{} requires non-empty explicit idempotencyKey",
-                            spec.method
+                            spec.operation_key.as_str()
                         ),
                     });
                 }
@@ -127,14 +130,14 @@ pub fn build_engine_transport_request(
             TransportIdempotencyMode::NotRequired => {}
         }
     }
-    let payload = strip_transport_only_fields(spec.method, input.params_payload);
+    let payload = strip_transport_only_fields(spec.operation_key.as_str(), input.params_payload);
 
     Ok(Some(EngineTransportRequest {
         correlation_id: input.correlation_id,
         transport: "engine_ws".to_owned(),
         public_method: input.public_method,
         function_id: spec.function_id,
-        trigger_id: contracts::engine_ws_trigger_id_for_method(spec.method)
+        trigger_id: contracts::engine_ws_trigger_id_for_method(spec.operation_key.as_str())
             .map_err(engine_error_to_capability_error)?,
         payload,
         causal_context,
@@ -143,7 +146,7 @@ pub fn build_engine_transport_request(
 
 /// Dispatch one protocol-neutral transport envelope through the trigger runtime.
 pub async fn dispatch_engine_transport_request(
-    ctx: &ServerCapabilityContext,
+    ctx: &ServerRuntimeContext,
     envelope: EngineTransportRequest,
 ) -> Result<Value, CapabilityError> {
     let actor_id = envelope.causal_context.actor_id.clone();

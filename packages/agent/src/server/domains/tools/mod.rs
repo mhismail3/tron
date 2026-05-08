@@ -11,21 +11,21 @@ pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 pub(crate) use operations::register_builtin_tools_for_setup;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    super::domain_worker_module(
-        "tool",
-        contract::STREAM_TOPICS,
-        contract::capabilities()?,
-        Deps::from_engine(deps),
-        super::tool_handler,
-    )
+    {
+        let domain_deps = Deps::from_engine(deps);
+        super::domain_worker_module(
+            "tool",
+            contract::STREAM_TOPICS,
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+        )
+    }
 }
 
 pub(crate) mod interactive_enrichment;

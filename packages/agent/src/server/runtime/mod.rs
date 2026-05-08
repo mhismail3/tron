@@ -30,7 +30,7 @@ pub struct EngineRuntimeServices;
 impl EngineRuntimeServices {
     /// Start engine services and register them with server shutdown.
     pub fn start(server: &TronServer) {
-        let host = server.capability_context().engine_host.clone();
+        let host = server.runtime_context().engine_host.clone();
         let shutdown = server.shutdown().clone();
         for queue in ["default", "jobs", "agent"] {
             let service = EngineQueueDrainerService::new(

@@ -15,7 +15,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             context_artifacts: deps.context_artifacts.clone(),
             event_store: deps.event_store.clone(),
@@ -29,8 +29,8 @@ impl Deps {
 
     #[cfg(test)]
     pub(crate) fn from_test_context(
-        ctx: &crate::server::shared::context::ServerCapabilityContext,
+        ctx: &crate::server::shared::context::ServerRuntimeContext,
     ) -> Self {
-        Self::from_engine(&DomainSetupContext::from_context(ctx))
+        Self::from_engine(&DomainRegistrationContext::from_context(ctx))
     }
 }

@@ -7,20 +7,20 @@ pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    super::domain_worker_module(
-        "transcription",
-        contract::STREAM_TOPICS,
-        contract::capabilities()?,
-        Deps::from_engine(deps),
-        super::transcription_handler,
-    )
+    {
+        let domain_deps = Deps::from_engine(deps);
+        super::domain_worker_module(
+            "transcription",
+            contract::STREAM_TOPICS,
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+        )
+    }
 }
 
 use base64::Engine;

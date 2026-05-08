@@ -15,7 +15,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             onboarded_marker_path: deps.onboarded_marker_path.clone(),
             orchestrator: deps.orchestrator.clone(),

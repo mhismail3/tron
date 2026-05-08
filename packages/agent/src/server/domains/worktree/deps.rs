@@ -12,7 +12,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             orchestrator: deps.orchestrator.clone(),
             session_manager: deps.session_manager.clone(),

@@ -196,7 +196,7 @@ fn server_blocking_work_uses_the_supervisor_entrypoint() {
             assert!(
                 !content.contains("tokio::task::spawn_blocking")
                     && !content.contains("spawn_blocking("),
-                "{} must route blocking work through ServerCapabilityContext::run_blocking or run_blocking_task",
+                "{} must route blocking work through ServerRuntimeContext::run_blocking or run_blocking_task",
                 rel.display()
             );
         }
@@ -348,11 +348,32 @@ fn server_package_uses_domain_owned_engine_layout() {
         let operations_content = std::fs::read_to_string(&operations_mod)
             .unwrap_or_else(|e| panic!("failed to read {operations_mod:?}: {e}"));
         assert!(
-            operations_content.contains("pub(super) async fn")
-                || operations_content.contains("pub(super) fn")
-                || operations_content.contains("impl ")
-                || operations_content.contains("InProcessFunctionHandler"),
-            "flow-critical domain worker `{required}` must keep executable operation code in operations/mod.rs, not placeholder docs"
+            !operations_content.contains("pub(crate) async fn")
+                && !operations_content.contains("pub(super) async fn")
+                && !operations_content.contains("impl InProcessFunctionHandler"),
+            "flow-critical domain worker `{required}` operations/mod.rs must stay an export map, not a mixed-purpose executable file"
+        );
+        let operation_files = std::fs::read_dir(domain_root.join("operations"))
+            .unwrap_or_else(|e| panic!("failed to read operations dir for {required}: {e}"))
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+            .filter(|path| path.file_name().is_some_and(|name| name != "mod.rs"))
+            .collect::<Vec<_>>();
+        assert!(
+            !operation_files.is_empty(),
+            "flow-critical domain worker `{required}` must split executable operations into workflow files"
+        );
+        assert!(
+            operation_files.iter().any(|path| {
+                let content = std::fs::read_to_string(path)
+                    .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+                content.contains("pub(crate) async fn")
+                    || content.contains("pub(crate) fn")
+                    || content.contains("impl ")
+                    || content.contains("InProcessFunctionHandler")
+            }),
+            "flow-critical domain worker `{required}` operation files must contain executable operation code"
         );
     }
     assert!(
@@ -386,6 +407,17 @@ fn server_package_uses_domain_owned_engine_layout() {
         !domains_mod.contains("publish_engine_stream_event"),
         "domain stream publication must be owned by domain-local publishers, not a shared catch-all helper"
     );
+    for removed in [
+        "DomainFunctionHandler",
+        "DomainHandlerFn",
+        "domain_handler!",
+        "domain_function_registration",
+    ] {
+        assert!(
+            !domains_mod.contains(removed),
+            "root domains module must not retain central execution plumbing `{removed}`"
+        );
+    }
     let catalog = std::fs::read_to_string(domains_root.join("catalog.rs"))
         .expect("failed to read server/domains/catalog.rs");
     for removed in [
@@ -440,8 +472,8 @@ fn server_package_uses_domain_owned_engine_layout() {
             .unwrap_or(content.as_str());
         if rel.ends_with("deps.rs") {
             assert!(
-                !production_content.contains("ServerCapabilityContext"),
-                "{} must not store or construct deps from the full ServerCapabilityContext",
+                !production_content.contains("ServerRuntimeContext"),
+                "{} must not store or construct deps from the full ServerRuntimeContext",
                 rel.display()
             );
         }
@@ -449,8 +481,8 @@ fn server_package_uses_domain_owned_engine_layout() {
             || rel == Path::new("src/server/domains/registration.rs");
         if !allowed_setup_boundary {
             assert!(
-                !production_content.contains("&ServerCapabilityContext"),
-                "{} production domain operations must take narrow deps, not &ServerCapabilityContext",
+                !production_content.contains("&ServerRuntimeContext"),
+                "{} production domain operations must take narrow deps, not &ServerRuntimeContext",
                 rel.display()
             );
         }
@@ -461,10 +493,37 @@ fn server_package_uses_domain_owned_engine_layout() {
             rel.display()
         );
         assert!(
-            !content.contains("server_context: Arc<ServerCapabilityContext>"),
-            "{} must expose narrow deps instead of storing the full ServerCapabilityContext",
+            !content.contains("server_context: Arc<ServerRuntimeContext>"),
+            "{} must expose narrow deps instead of storing the full ServerRuntimeContext",
             rel.display()
         );
+        let is_stream_publisher = rel
+            .file_name()
+            .is_some_and(|name| name == "stream.rs" || name == "callbacks.rs");
+        let is_runtime_primitive = rel.starts_with("src/server/domains/cron/callbacks.rs");
+        if rel.starts_with("src/server/domains") && !is_stream_publisher && !is_runtime_primitive {
+            assert!(
+                !production_content.contains("publish_stream_event(")
+                    && !production_content.contains("PublishStreamEvent"),
+                "{} must publish domain events through typed domain stream publishers",
+                rel.display()
+            );
+        }
+        if rel.ends_with("handlers.rs") {
+            assert!(
+                !production_content.contains("\"agent::prompt\" =>")
+                    && !production_content.contains("\"auth::get\" =>")
+                    && !production_content.contains("\"worktree::get_status\" =>")
+                    && !production_content.contains("\"git::clone\" =>")
+                    && !production_content.contains("\"cron::list\" =>")
+                    && !production_content.contains("\"mcp::status\" =>")
+                    && !production_content.contains("\"job::background\" =>")
+                    && !production_content.contains("\"tool::result\" =>")
+                    && !production_content.contains("\"session::create\" =>"),
+                "{} must bind by domain operation key, not canonical function id",
+                rel.display()
+            );
+        }
     }
 }
 

@@ -933,11 +933,7 @@ async fn e2e_events_have_type_field() {
     ];
 
     for evt in events {
-        let _ = server
-            .capability_context()
-            .orchestrator
-            .broadcast()
-            .emit(evt);
+        let _ = server.runtime_context().orchestrator.broadcast().emit(evt);
     }
 
     // Read all 3 events
@@ -994,15 +990,14 @@ async fn e2e_event_ordering_preserved() {
 
     // Emit 20 sequential events
     for i in 0..20 {
-        let _ =
-            server
-                .capability_context()
-                .orchestrator
-                .broadcast()
-                .emit(TronEvent::MessageUpdate {
-                    base: BaseEvent::now(&sid),
-                    content: format!("msg_{i}"),
-                });
+        let _ = server
+            .runtime_context()
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::MessageUpdate {
+                base: BaseEvent::now(&sid),
+                content: format!("msg_{i}"),
+            });
     }
 
     // Collect events and verify order
@@ -1678,7 +1673,7 @@ async fn wait_until_not_busy(ws: &mut WsStream, sid: &str, id_start: u64) {
 async fn wait_until_active_run(server: &Arc<TronServer>, sid: &str) {
     tokio::time::timeout(PROMPT_STATE_TIMEOUT, async {
         loop {
-            if server.capability_context().orchestrator.has_active_run(sid) {
+            if server.runtime_context().orchestrator.has_active_run(sid) {
                 break;
             }
             tokio::time::sleep(PROMPT_STATE_POLL).await;
@@ -1726,11 +1721,8 @@ async fn wait_until_run_cleared(server: &Arc<TronServer>, sid: &str) {
     // success is fast while giving heavily loaded CI enough scheduler headroom.
     tokio::time::timeout(PROMPT_STATE_TIMEOUT, async {
         loop {
-            if !server.capability_context().orchestrator.has_active_run(sid)
-                && !server
-                    .capability_context()
-                    .orchestrator
-                    .is_session_busy(sid)
+            if !server.runtime_context().orchestrator.has_active_run(sid)
+                && !server.runtime_context().orchestrator.is_session_busy(sid)
             {
                 break;
             }
@@ -2040,18 +2032,8 @@ async fn e2e_graceful_shutdown_cleans_up_active_prompt_run() {
         .await;
 
     assert!(server.shutdown().is_shutting_down());
-    assert!(
-        !server
-            .capability_context()
-            .orchestrator
-            .has_active_run(&sid)
-    );
-    assert!(
-        !server
-            .capability_context()
-            .orchestrator
-            .is_session_busy(&sid)
-    );
+    assert!(!server.runtime_context().orchestrator.has_active_run(&sid));
+    assert!(!server.runtime_context().orchestrator.is_session_busy(&sid));
     assert_eq!(server.shutdown().tracked_task_count(), 0);
 
     let close_result = timeout(Duration::from_secs(2), async {

@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::context::ServerRuntimeContext;
 use axum::Router;
 use axum::extract::ConnectInfo;
 use axum::extract::Request as AxumRequest;
@@ -56,8 +56,8 @@ pub struct AppState {
     pub shutdown: Arc<ShutdownCoordinator>,
     /// When the server started.
     pub start_time: Instant,
-    /// Capability context shared across domain functions.
-    pub capability_context: Arc<ServerCapabilityContext>,
+    /// Runtime setup context used by transport and domain registration.
+    pub runtime_context: Arc<ServerRuntimeContext>,
     /// Server configuration.
     pub config: ServerConfig,
     /// Prometheus metrics handle for rendering.
@@ -74,7 +74,7 @@ pub struct AppState {
 pub struct TronServer {
     config: ServerConfig,
     shutdown: Arc<ShutdownCoordinator>,
-    capability_context: Arc<ServerCapabilityContext>,
+    runtime_context: Arc<ServerRuntimeContext>,
     metrics_handle: Arc<PrometheusHandle>,
     auth_store: Arc<BearerTokenStore>,
     external_workers: SharedExternalWorkerRuntime,
@@ -86,29 +86,29 @@ impl TronServer {
     /// Create a new server.
     pub fn new(
         config: ServerConfig,
-        mut capability_context: ServerCapabilityContext,
+        mut runtime_context: ServerRuntimeContext,
         metrics_handle: PrometheusHandle,
     ) -> Self {
         let shutdown = Arc::new(ShutdownCoordinator::new());
         // Inject shutdown coordinator into context so handlers can register tasks
-        capability_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
+        runtime_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
         // Inject device request broker (publishes device.request events to engine streams)
-        capability_context.device_request_broker = Some(Arc::new(
+        runtime_context.device_request_broker = Some(Arc::new(
             crate::server::platform::device_broker::DeviceRequestBroker::new(
-                capability_context.engine_host.clone(),
+                runtime_context.engine_host.clone(),
                 shutdown.token(),
             ),
         ));
-        capability_context.set_ws_port(config.port);
-        let auth_store = Arc::new(BearerTokenStore::new(capability_context.auth_path.clone()));
+        runtime_context.set_ws_port(config.port);
+        let auth_store = Arc::new(BearerTokenStore::new(runtime_context.auth_path.clone()));
         let external_workers = Arc::new(tokio::sync::Mutex::new(
-            crate::engine::EngineExternalWorkerRuntime::new(capability_context.engine_host.clone()),
+            crate::engine::EngineExternalWorkerRuntime::new(runtime_context.engine_host.clone()),
         ));
         let engine_clients = Arc::new(EngineClientRegistry::new());
         Self {
             config,
             shutdown,
-            capability_context: Arc::new(capability_context),
+            runtime_context: Arc::new(runtime_context),
             metrics_handle: Arc::new(metrics_handle),
             auth_store,
             external_workers,
@@ -122,7 +122,7 @@ impl TronServer {
         let state = AppState {
             shutdown: self.shutdown.clone(),
             start_time: self.start_time,
-            capability_context: self.capability_context.clone(),
+            runtime_context: self.runtime_context.clone(),
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
             auth_store: self.auth_store.clone(),
@@ -166,7 +166,7 @@ impl TronServer {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         let bound_addr = listener.local_addr()?;
-        self.capability_context.set_ws_port(bound_addr.port());
+        self.runtime_context.set_ws_port(bound_addr.port());
 
         info!(addr = %bound_addr, "engine server started");
 
@@ -199,9 +199,9 @@ impl TronServer {
         &self.config
     }
 
-    /// Get the capability context.
-    pub fn capability_context(&self) -> &Arc<ServerCapabilityContext> {
-        &self.capability_context
+    /// Get the runtime context.
+    pub fn runtime_context(&self) -> &Arc<ServerRuntimeContext> {
+        &self.runtime_context
     }
 
     /// Get the local external-worker runtime.
@@ -221,7 +221,7 @@ async fn engine_upgrade_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let client_id = uuid::Uuid::now_v7().to_string();
-    let ctx = state.capability_context;
+    let ctx = state.runtime_context;
     let clients = state.engine_clients;
     let max_message_size = state.config.max_message_size;
     Ok(ws
@@ -250,7 +250,7 @@ async fn engine_worker_upgrade_handler(
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let connections = state.engine_clients.connection_count();
-    let sessions = state.capability_context.orchestrator.active_session_count();
+    let sessions = state.runtime_context.orchestrator.active_session_count();
     let resp = health::health_check(state.start_time, connections, sessions);
     Json(resp)
 }
@@ -258,11 +258,11 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
 /// GET /health/deep — Deep health check with per-subsystem results.
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.engine_clients.connection_count();
-    let sessions = state.capability_context.orchestrator.active_session_count();
-    let pool = state.capability_context.event_store.pool().clone();
+    let sessions = state.runtime_context.orchestrator.active_session_count();
+    let pool = state.runtime_context.event_store.pool().clone();
     let tron_home = crate::settings::tron_home_dir();
     let response = state
-        .capability_context
+        .runtime_context
         .run_blocking("http.health.deep", move || {
             Ok(health::deep_health_check(
                 state.start_time,
@@ -372,9 +372,9 @@ mod tests {
     }
 
     #[test]
-    fn capability_context_accessible() {
+    fn runtime_context_accessible() {
         let server = make_server();
-        let ctx = server.capability_context();
+        let ctx = server.runtime_context();
         assert!(ctx.orchestrator.can_accept_session());
     }
 
@@ -402,7 +402,7 @@ mod tests {
     #[tokio::test]
     async fn engine_endpoint_requires_upgrade() {
         let (server, _dir, token) = make_server_with_auth();
-        let marker = server.capability_context().onboarded_marker_path.clone();
+        let marker = server.runtime_context().onboarded_marker_path.clone();
         let app = server.router();
 
         // GET /engine without WebSocket upgrade headers → should return an error
@@ -588,7 +588,7 @@ mod tests {
         let (addr, handle) = server.listen().await.unwrap();
 
         assert_ne!(addr.port(), 0); // auto-assigned
-        assert_eq!(server.capability_context().ws_port(), addr.port());
+        assert_eq!(server.runtime_context().ws_port(), addr.port());
         assert_eq!(addr.ip().to_string(), "0.0.0.0");
 
         // Shutdown

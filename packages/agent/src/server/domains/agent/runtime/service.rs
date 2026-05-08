@@ -15,7 +15,7 @@ use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::queue::publish_queue_lifecycle_event;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineQueueDrainer, EnqueueInvocation,
-    FunctionId, Invocation, InvocationId, PublishStreamEvent, TraceId, VisibilityScope,
+    FunctionId, Invocation, InvocationId, TraceId,
 };
 use crate::server::shared::context::AgentDeps;
 use crate::server::shared::errors::CapabilityError;
@@ -1353,23 +1353,15 @@ async fn publish_prompt_runtime_stream(
     action: &str,
     payload: serde_json::Value,
 ) {
-    let _ = engine_host
-        .publish_stream_event(PublishStreamEvent {
-            topic: crate::server::domains::agent::contract::STREAM_TOPICS[0].to_owned(),
-            payload: serde_json::json!({
-                "type": format!("agent.prompt.{action}"),
-                "action": action,
-                "sessionId": session_id,
-                "payload": payload,
-            }),
-            visibility: VisibilityScope::Session,
-            session_id: Some(session_id.to_owned()),
-            workspace_id: causality.and_then(|causality| causality.context.workspace_id.clone()),
-            producer: "agent::prompt_apply".to_owned(),
-            trace_id: causality.map(|causality| causality.context.trace_id.clone()),
-            parent_invocation_id: causality
-                .and_then(|causality| causality.parent_invocation_id.clone()),
-        })
+    crate::server::domains::agent::stream::AgentStreamPublisher::new(engine_host)
+        .prompt_runtime(
+            causality.and_then(|causality| causality.context.workspace_id.clone()),
+            causality.map(|causality| causality.context.trace_id.clone()),
+            causality.and_then(|causality| causality.parent_invocation_id.clone()),
+            session_id,
+            action,
+            payload,
+        )
         .await;
 }
 

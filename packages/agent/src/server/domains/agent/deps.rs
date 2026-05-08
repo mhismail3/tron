@@ -30,7 +30,7 @@ pub(crate) struct Deps {
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             agent_deps: deps.agent_deps.clone(),
             context_artifacts: deps.context_artifacts.clone(),

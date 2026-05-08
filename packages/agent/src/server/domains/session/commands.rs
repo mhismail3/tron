@@ -459,7 +459,7 @@ mod tests {
 
     use crate::events::EventStore;
     use crate::runtime::Orchestrator;
-    use crate::server::shared::context::ServerCapabilityContext;
+    use crate::server::shared::context::ServerRuntimeContext;
     use crate::server::shared::test_support::make_test_context;
     use crate::skills::registry::SkillRegistry;
     use crate::worktree::{AcquireResult, WorktreeConfig, WorktreeCoordinator};
@@ -491,7 +491,7 @@ mod tests {
     /// Build a test context with a worktree coordinator wired up.
     fn make_context_with_worktree(
         store: Arc<EventStore>,
-    ) -> (ServerCapabilityContext, Arc<WorktreeCoordinator>) {
+    ) -> (ServerRuntimeContext, Arc<WorktreeCoordinator>) {
         let mgr = Arc::new(
             crate::runtime::orchestrator::session_manager::SessionManager::new(store.clone()),
         );
@@ -505,7 +505,7 @@ mod tests {
         let profile_runtime = crate::server::shared::test_support::test_profile_runtime(&home);
         let auth_path = crate::server::shared::test_support::test_auth_path(&home);
 
-        let ctx = ServerCapabilityContext {
+        let ctx = ServerRuntimeContext {
             orchestrator: orch,
             session_manager: mgr,
             event_store: store,

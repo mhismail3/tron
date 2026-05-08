@@ -4,29 +4,31 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 //! Scheduler projection and hidden scheduled-fire registration stay at setup
 //! time here; automation reads/writes, explicit runs, scheduled-fire apply, and
-//! cron run stream publication live in `operations/`.
+//! cron run stream publication live in `operations/` and the typed `stream.rs`
+//! publisher.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
+pub(crate) mod stream;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 use serde_json::{Value, json};
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    let mut module = super::domain_worker_module(
-        "cron",
-        contract::STREAM_TOPICS,
-        contract::capabilities()?,
-        Deps::from_engine(deps),
-        super::cron_handler,
-    )?;
+    let mut module = {
+        let domain_deps = Deps::from_engine(deps);
+        super::domain_worker_module(
+            "cron",
+            contract::STREAM_TOPICS,
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+        )
+    }?;
     module
         .functions
         .extend(hidden_function_registrations(deps)?);
@@ -78,7 +80,7 @@ async fn project_cron_trigger(
 }
 
 pub(crate) fn hidden_function_registrations(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> EngineResult<Vec<DomainFunctionRegistration>> {
     let domain_deps = Deps::from_engine(deps);
     let mut definition = FunctionDefinition::new(
@@ -125,10 +127,6 @@ pub(crate) fn hidden_function_registrations(
     });
     Ok(vec![DomainFunctionRegistration {
         definition,
-        handler: Arc::new(DomainFunctionHandler {
-            method: "cron::scheduled_fire",
-            deps: domain_deps,
-            handler: super::cron_handler,
-        }),
+        handler: handlers::handler_for_operation("scheduled_fire", domain_deps),
     }])
 }

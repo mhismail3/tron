@@ -57,7 +57,7 @@ use tron::server::config::ServerConfig;
 use tron::server::runtime::streams::EngineStreamEventPump;
 use tron::server::server::TronServer;
 use tron::server::shared::context::{
-    AgentDeps, ServerCapabilityContext, register_blocking_supervisor_shutdown,
+    AgentDeps, ServerRuntimeContext, register_blocking_supervisor_shutdown,
 };
 use tron::settings::db_path_policy::resolve_production_db_path;
 use tron::skills::registry::SkillRegistry;
@@ -815,8 +815,8 @@ async fn init_worktree(
     Some(coord)
 }
 
-/// Build the capability context that holds shared state for domain functions.
-fn build_capability_context(
+/// Build the runtime context that holds shared state for domain functions.
+fn build_server_runtime_context(
     services: ServiceState,
     engine_host: tron::engine::EngineHostHandle,
     settings_path: PathBuf,
@@ -825,8 +825,8 @@ fn build_capability_context(
     cron: &CronState,
     worktree_coordinator: Option<Arc<tron::worktree::WorktreeCoordinator>>,
     mcp_router: Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>,
-) -> ServerCapabilityContext {
-    ServerCapabilityContext {
+) -> ServerRuntimeContext {
+    ServerRuntimeContext {
         orchestrator: services.orchestrator.clone(),
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
@@ -864,7 +864,7 @@ fn build_capability_context(
         onboarded_marker_path: tron::server::onboarding::onboarded_marker_path(),
         // User-mode updater wiring (Plan §H.2). Production uses the live
         // GitHub Releases fetcher; `main_tests.rs` and `tests/integration.rs`
-        // construct their own `ServerCapabilityContext` directly and leave this `None`,
+        // construct their own `ServerRuntimeContext` directly and leave this `None`,
         // which short-circuits `system.checkForUpdates` + skips the
         // scheduler arm below. The state path is stable regardless so the
         // `system.getUpdateStatus` handler can still render defaults.
@@ -993,14 +993,14 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    // Phase 4: Cron, worktree, capability context
+    // Phase 4: Cron, worktree, runtime context
     let cron = init_cron(&services, &origin, profile_runtime.clone());
     let worktree_coordinator = init_worktree(&services, &settings).await;
     let session_manager_for_startup = services.session_manager.clone();
     let orchestrator_for_stream_events = services.orchestrator.clone();
     let process_manager_for_shutdown = services.process_manager.clone();
     let profile_runtime_for_watcher = profile_runtime.clone();
-    let capability_context = build_capability_context(
+    let runtime_context = build_server_runtime_context(
         services,
         engine_host,
         settings_path,
@@ -1015,15 +1015,13 @@ async fn main() -> Result<()> {
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = tron::server::metrics::install_recorder();
-    let server = TronServer::new(config, capability_context, metrics_handle);
-    tron::server::transport::setup::register_server_domains_for_context(
-        server.capability_context(),
-    )
-    .context("Failed to register server domain workers")?;
+    let server = TronServer::new(config, runtime_context, metrics_handle);
+    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+        .context("Failed to register server domain workers")?;
     cron.scheduler
-        .set_engine_host(server.capability_context().engine_host.clone());
+        .set_engine_host(server.runtime_context().engine_host.clone());
     register_blocking_supervisor_shutdown(server.shutdown());
-    if let Some(codex_app_server) = server.capability_context().codex_app_server.clone() {
+    if let Some(codex_app_server) = server.runtime_context().codex_app_server.clone() {
         if let Err(error) = codex_app_server.start().await {
             tracing::warn!(
                 error = %error,
@@ -1041,7 +1039,7 @@ async fn main() -> Result<()> {
     register_transcription_sidecar(
         settings.server.transcription.enabled,
         server.shutdown(),
-        server.capability_context().transcription_engine.clone(),
+        server.runtime_context().transcription_engine.clone(),
     );
 
     // Register MCP shutdown as an ordered phase hook. Replaces the earlier
@@ -1058,7 +1056,7 @@ async fn main() -> Result<()> {
     // Stream pump: orchestrator events -> engine streams.
     let pump = EngineStreamEventPump::new(
         orchestrator_for_stream_events.subscribe(),
-        server.capability_context().engine_host.clone(),
+        server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator_for_stream_events.turn_accumulators().clone(),
     );
@@ -1068,7 +1066,7 @@ async fn main() -> Result<()> {
     // Wire cron engine event publication and shutdown forwarding.
     cron.scheduler.set_event_publisher(Arc::new(
         tron::server::domains::cron::callbacks::CronEventPublisher::new(
-            server.capability_context().engine_host.clone(),
+            server.runtime_context().engine_host.clone(),
         ),
     ));
     {
@@ -1094,26 +1092,22 @@ async fn main() -> Result<()> {
     // the fetcher is `None` (embedded / test paths) the scheduler
     // silently no-ops because `perform_tick` bails on `enabled = false`
     // and tests never set enabled.
-    let updater_scheduler_handle = if let Some(fetcher) = server
-        .capability_context()
-        .release_fetcher
-        .as_ref()
-        .cloned()
-    {
-        let deps = tron::server::updater::SchedulerDeps {
-            fetcher,
-            engine_host: server.capability_context().engine_host.clone(),
-            state_path: server.capability_context().updater_state_path.clone(),
-            pause_path: tron::server::updater::pause_sentinel_path(),
-            current_version: env!("CARGO_PKG_VERSION").to_string(),
+    let updater_scheduler_handle =
+        if let Some(fetcher) = server.runtime_context().release_fetcher.as_ref().cloned() {
+            let deps = tron::server::updater::SchedulerDeps {
+                fetcher,
+                engine_host: server.runtime_context().engine_host.clone(),
+                state_path: server.runtime_context().updater_state_path.clone(),
+                pause_path: tron::server::updater::pause_sentinel_path(),
+                current_version: env!("CARGO_PKG_VERSION").to_string(),
+            };
+            Some(tron::server::updater::scheduler::spawn(
+                deps,
+                server.shutdown().token(),
+            ))
+        } else {
+            None
         };
-        Some(tron::server::updater::scheduler::spawn(
-            deps,
-            server.shutdown().token(),
-        ))
-    } else {
-        None
-    };
 
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
     tracing::info!("{}", format_listening_log(&addr, &bind_host_label));

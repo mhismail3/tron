@@ -101,7 +101,7 @@ impl RetainDeps {
     }
 
     #[cfg(test)]
-    fn from_test_context(ctx: &crate::server::shared::context::ServerCapabilityContext) -> Self {
+    fn from_test_context(ctx: &crate::server::shared::context::ServerRuntimeContext) -> Self {
         Self {
             orchestrator: Arc::clone(&ctx.orchestrator),
             event_store: Arc::clone(&ctx.event_store),
@@ -1561,7 +1561,7 @@ mod tests {
         let err = trigger_manual_retain(
             Some(&serde_json::json!({})),
             &crate::server::domains::memory::Deps::from_engine(
-                &crate::server::domains::DomainSetupContext::from_context(&ctx),
+                &crate::server::domains::DomainRegistrationContext::from_context(&ctx),
             ),
         )
         .await

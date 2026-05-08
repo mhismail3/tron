@@ -26,20 +26,20 @@
 use std::collections::BTreeSet;
 
 use crate::engine::{EngineError, Result as EngineResult};
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::context::ServerRuntimeContext;
 
 use crate::server::domains::catalog;
 use crate::server::domains::{DomainFunctionRegistration, DomainWorkerModule};
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
-pub fn register_domain_workers_for_context(ctx: &ServerCapabilityContext) -> EngineResult<()> {
+pub fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     register_domain_workers(ctx)?;
-    let deps = crate::server::domains::DomainSetupContext::from_context(ctx);
+    let deps = crate::server::domains::DomainRegistrationContext::from_context(ctx);
     crate::server::domains::tools::register_builtin_tools_for_setup(&deps)?;
     Ok(())
 }
 
-fn register_domain_workers(ctx: &ServerCapabilityContext) -> EngineResult<()> {
+fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
     for module in crate::server::domains::all_worker_modules(ctx)? {
         validate_domain_stream_topics(&module)?;
@@ -53,7 +53,7 @@ fn register_domain_workers(ctx: &ServerCapabilityContext) -> EngineResult<()> {
         }
     }
     handle.register_trigger_type_for_setup(catalog::cron_schedule_trigger_type()?, false)?;
-    let deps = crate::server::domains::DomainSetupContext::from_context(ctx);
+    let deps = crate::server::domains::DomainRegistrationContext::from_context(ctx);
     let cron_deps = crate::server::domains::cron::Deps::from_engine(&deps);
     crate::server::domains::cron::project_all_cron_triggers_for_setup(handle, &cron_deps)?;
     Ok(())

@@ -10,45 +10,18 @@ pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
 pub(crate) use deps::Deps;
-pub(super) use handlers::handle;
 
 pub(crate) mod git_workflow;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &DomainSetupContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let worktree_deps = Deps::from_engine(deps);
-    let mut module = super::domain_worker_module(
+    super::domain_worker_module(
         "worktree",
         contract::STREAM_TOPICS,
-        Vec::new(),
-        worktree_deps.clone(),
-        super::worktree_handler,
-    )?;
-    module.functions.extend(
-        contract::capabilities()?
-            .into_iter()
-            .map(|spec| {
-                let handler = if matches!(
-                    spec.method,
-                    "worktree::finalize_session"
-                        | "worktree::rebase_on_main"
-                        | "worktree::start_merge"
-                        | "worktree::list_conflicts"
-                        | "worktree::resolve_conflict"
-                        | "worktree::continue_merge"
-                        | "worktree::abort_merge"
-                        | "worktree::resolve_conflicts_with_subagent"
-                ) {
-                    super::git_workflow_handler
-                } else {
-                    super::worktree_handler
-                };
-                super::domain_function_registration(spec, worktree_deps.clone(), handler)
-            })
-            .collect::<crate::engine::Result<Vec<_>>>()?,
-    );
-    Ok(module)
+        handlers::function_registrations(contract::capabilities()?, worktree_deps)?,
+    )
 }

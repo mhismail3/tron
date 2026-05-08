@@ -34,30 +34,30 @@ use super::Deps;
 use crate::engine::Invocation;
 
 pub(crate) async fn handle(
-    method: &str,
+    operation_key: &str,
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let params = Some(invocation.payload.clone());
-    match method {
-        "git::sync_main" => SyncMainOperation.run(params, deps).await,
-        "git::push" => PushOperation.run(params, deps).await,
-        "git::list_local_branches" => ListLocalBranchesOperation.run(params, deps).await,
-        "git::list_remote_branches" => ListRemoteBranchesOperation.run(params, deps).await,
-        "worktree::finalize_session" => FinalizeSessionOperation.run(params, deps).await,
-        "worktree::rebase_on_main" => RebaseOnMainOperation.run(params, deps).await,
-        "worktree::start_merge" => StartMergeOperation.run(params, deps).await,
-        "worktree::list_conflicts" => ListConflictsOperation.run(params, deps).await,
-        "worktree::resolve_conflict" => ResolveConflictOperation.run(params, deps).await,
-        "worktree::continue_merge" => ContinueMergeOperation.run(params, deps).await,
-        "worktree::abort_merge" => AbortMergeOperation.run(params, deps).await,
-        "worktree::resolve_conflicts_with_subagent" => {
+    match operation_key {
+        "sync_main" => SyncMainOperation.run(params, deps).await,
+        "push" => PushOperation.run(params, deps).await,
+        "list_local_branches" => ListLocalBranchesOperation.run(params, deps).await,
+        "list_remote_branches" => ListRemoteBranchesOperation.run(params, deps).await,
+        "finalize_session" => FinalizeSessionOperation.run(params, deps).await,
+        "rebase_on_main" => RebaseOnMainOperation.run(params, deps).await,
+        "start_merge" => StartMergeOperation.run(params, deps).await,
+        "list_conflicts" => ListConflictsOperation.run(params, deps).await,
+        "resolve_conflict" => ResolveConflictOperation.run(params, deps).await,
+        "continue_merge" => ContinueMergeOperation.run(params, deps).await,
+        "abort_merge" => AbortMergeOperation.run(params, deps).await,
+        "resolve_conflicts_with_subagent" => {
             ResolveConflictsWithSubagentOperation
                 .run(params, deps)
                 .await
         }
         _ => Err(CapabilityError::Internal {
-            message: format!("operation {method} is not git workflow-owned"),
+            message: format!("operation {operation_key} is not git workflow-owned"),
         }),
     }
 }

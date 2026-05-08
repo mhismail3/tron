@@ -6,7 +6,7 @@ use super::*;
 pub(crate) struct Deps;
 
 impl Deps {
-    pub(crate) fn from_engine(_deps: &DomainSetupContext) -> Self {
+    pub(crate) fn from_engine(_deps: &DomainRegistrationContext) -> Self {
         Self
     }
 }
