@@ -18,14 +18,20 @@
 //!    transport never owns agent behavior.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let mut module = super::domain_worker_module(
         "agent",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::agent_handler,
@@ -34,40 +40,6 @@ pub(crate) fn worker_module(
         .functions
         .extend(hidden_function_registrations(deps)?);
     Ok(module)
-}
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    agent_deps: Option<crate::server::shared::context::AgentDeps>,
-    capability_context: Arc<ServerCapabilityContext>,
-    engine_host: crate::engine::EngineHostHandle,
-    event_store: Arc<EventStore>,
-    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
-    orchestrator: Arc<Orchestrator>,
-    output_buffer_registry:
-        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
-    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
-    profile_runtime: Arc<ProfileRuntime>,
-    session_manager: Arc<SessionManager>,
-    skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            agent_deps: deps.agent_deps.clone(),
-            capability_context: deps.capability_context.clone(),
-            engine_host: deps.engine_host.clone(),
-            event_store: deps.event_store.clone(),
-            job_manager: deps.job_manager.clone(),
-            orchestrator: deps.orchestrator.clone(),
-            output_buffer_registry: deps.output_buffer_registry.clone(),
-            process_manager: deps.process_manager.clone(),
-            profile_runtime: deps.profile_runtime.clone(),
-            session_manager: deps.session_manager.clone(),
-            skill_registry: deps.skill_registry.clone(),
-        }
-    }
 }
 
 pub(crate) mod commands;
@@ -94,38 +66,8 @@ use crate::server::shared::errors;
 use crate::server::shared::validation;
 use serde::Deserialize;
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "agent::prompt" => prompt_value(invocation, deps).await,
-        "agent::prompt_apply" => prompt_apply_value(Some(payload), invocation, deps).await,
-        "agent::run_turn" => run_turn_value(Some(payload), invocation, deps).await,
-        "agent::prompt_queue_drain" => {
-            prompt_queue_drain_value(Some(payload), invocation, deps).await
-        }
-        "agent::status" => status_value(Some(payload), deps).await,
-        "agent::abort" => abort_value(Some(payload), deps).await,
-        "agent::abort_tool" => abort_tool_value(Some(payload), deps).await,
-        "agent::queue_prompt" => queue_prompt_value(Some(payload), invocation, deps).await,
-        "agent::dequeue_prompt" => dequeue_prompt_value(Some(payload), invocation, deps).await,
-        "agent::clear_queue" => clear_queue_value(Some(payload), invocation, deps).await,
-        "agent::deliver_subagent_results" => {
-            deliver_subagent_results_value(Some(payload), deps).await
-        }
-        "agent::submit_confirmation" => submit_confirmation_value(Some(payload), deps).await,
-        "agent::submit_answers" => submit_answers_value(Some(payload), deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("agent method {method} is not engine-owned"),
-        }),
-    }
-}
-
 pub(crate) fn hidden_function_registrations(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
     let domain_deps = Deps::from_engine(deps);
     let hidden = [
@@ -339,7 +281,7 @@ async fn run_turn_value(
     )
     .await;
     spawn_prompt_run(
-        &deps.capability_context,
+        &deps.server_context,
         &agent_deps,
         &session,
         started_run,
@@ -368,7 +310,7 @@ async fn prompt_queue_drain_value(
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let session =
-        AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
+        AgentCommandService::load_prompt_session(&deps.server_context, &session_id).await?;
     let agent_deps = deps
         .agent_deps
         .as_ref()
@@ -386,22 +328,22 @@ async fn prompt_queue_drain_value(
         agent_deps.provider_factory.clone(),
         agent_deps.tool_factory.clone(),
         agent_deps.guardrails.clone(),
-        deps.capability_context.health_tracker.clone(),
-        deps.capability_context.context_artifacts.clone(),
+        deps.server_context.health_tracker.clone(),
+        deps.server_context.context_artifacts.clone(),
         deps.skill_registry.clone(),
-        deps.capability_context.memory_registry.clone(),
+        deps.server_context.memory_registry.clone(),
         deps.profile_runtime.clone(),
-        deps.capability_context.subagent_manager.clone(),
-        deps.capability_context
+        deps.server_context.subagent_manager.clone(),
+        deps.server_context
             .shutdown_coordinator
             .as_ref()
             .map(|coord| coord.token()),
-        deps.capability_context.worktree_coordinator.clone(),
+        deps.server_context.worktree_coordinator.clone(),
         deps.process_manager.clone(),
         deps.job_manager.clone(),
         deps.output_buffer_registry.clone(),
-        deps.capability_context.hook_abort_tracker.clone(),
-        deps.capability_context.origin.clone(),
+        deps.server_context.hook_abort_tracker.clone(),
+        deps.server_context.origin.clone(),
         deps.engine_host.clone(),
         Some(PromptEngineCausality::from_invocation(invocation)),
     )?;
@@ -445,7 +387,7 @@ async fn validate_prompt_submission(
     }
 
     let session =
-        AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
+        AgentCommandService::load_prompt_session(&deps.server_context, &session_id).await?;
     let agent_deps =
         deps.agent_deps
             .as_ref()
@@ -593,7 +535,7 @@ fn record_prompt_history(deps: &Deps, prompt: &str, source: Option<&str>) {
     let max_age_days = auto_prune
         .then_some(prompt_library_settings.history_max_age_days)
         .filter(|n| *n > 0);
-    deps.capability_context
+    deps.server_context
         .spawn_blocking_detached("agent.prompt.history", move || {
             match crate::prompt_library::store::record_prompt_and_prune(
                 &pool,
@@ -623,7 +565,7 @@ async fn publish_prompt_stream(
     let _ = deps
         .engine_host
         .publish_stream_event(crate::engine::PublishStreamEvent {
-            topic: "agent.queue".to_owned(),
+            topic: contract::STREAM_TOPICS[0].to_owned(),
             payload: json!({
                 "type": format!("agent.prompt.{action}"),
                 "action": action,
@@ -709,13 +651,13 @@ async fn status_value(params: Option<&Value>, deps: &Deps) -> Result<Value, Capa
 
 async fn abort_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
-    AgentCommandService::abort(&deps.capability_context, &session_id)
+    AgentCommandService::abort(&deps.server_context, &session_id)
 }
 
 async fn abort_tool_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let tool_call_id = require_string_param(params, "toolCallId")?;
-    AgentCommandService::abort_tool(&deps.capability_context, &session_id, &tool_call_id)
+    AgentCommandService::abort_tool(&deps.server_context, &session_id, &tool_call_id)
 }
 
 async fn queue_prompt_value(
@@ -998,7 +940,7 @@ async fn start_or_queue_prompt(
     require_agent_deps: bool,
 ) -> Result<Value, CapabilityError> {
     let session =
-        AgentCommandService::load_prompt_session(&deps.capability_context, &session_id).await?;
+        AgentCommandService::load_prompt_session(&deps.server_context, &session_id).await?;
     start_or_queue_prompt_with_loaded_session(
         deps,
         session,
@@ -1026,7 +968,7 @@ async fn start_or_queue_prompt_with_loaded_session(
     if let Some(agent_deps) = deps.agent_deps.as_ref() {
         if let Ok(started_run) = deps.orchestrator.begin_run(&session_id, &run_id) {
             spawn_prompt_run(
-                &deps.capability_context,
+                &deps.server_context,
                 agent_deps,
                 &session,
                 started_run,
@@ -1115,7 +1057,7 @@ async fn publish_agent_queue_stream(
     let _ = deps
         .engine_host
         .publish_stream_event(crate::engine::PublishStreamEvent {
-            topic: "agent.queue".to_owned(),
+            topic: contract::STREAM_TOPICS[1].to_owned(),
             payload: json!({
                 "action": action,
                 "sessionId": session_id,

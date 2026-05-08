@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["logs.ingest"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![

@@ -4,32 +4,23 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "device",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::device_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-    event_store: Arc<EventStore>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-            event_store: deps.event_store.clone(),
-        }
-    }
 }
 
 use crate::server::shared::error_mapping::map_event_store_error;
@@ -41,21 +32,6 @@ use crate::server::shared::params::{opt_string, require_string_param};
 // not as proof of device identity. If Tron exposes this capability beyond
 // trusted-local callers, registration must bind bundleId to an authenticated
 // app/device attestation claim before writing it to the event store.
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "device::register" => register_token(&invocation.payload, deps).await,
-        "device::unregister" => unregister_token(&invocation.payload, deps).await,
-        "device::respond" => respond(&invocation.payload, deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("device method {method} is not engine-owned"),
-        }),
-    }
-}
 
 async fn register_token(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let device_token = require_string_param(Some(payload), "deviceToken")?;
@@ -79,42 +55,40 @@ async fn register_token(payload: &Value, deps: &Deps) -> Result<Value, Capabilit
     }
 
     let event_store = Arc::clone(&deps.event_store);
-    deps.capability_context
-        .run_blocking("device::register", move || {
-            let result = event_store
-                .register_device_token(
-                    &device_token,
-                    session_id.as_deref(),
-                    workspace_id.as_deref(),
-                    environment.as_deref().unwrap_or("production"),
-                    &bundle_id,
-                )
-                .map_err(map_event_store_error)?;
-            Ok(json!({
-                "id": result.id,
-                "created": result.created,
-            }))
-        })
-        .await
+    run_blocking_task("device::register", move || {
+        let result = event_store
+            .register_device_token(
+                &device_token,
+                session_id.as_deref(),
+                workspace_id.as_deref(),
+                environment.as_deref().unwrap_or("production"),
+                &bundle_id,
+            )
+            .map_err(map_event_store_error)?;
+        Ok(json!({
+            "id": result.id,
+            "created": result.created,
+        }))
+    })
+    .await
 }
 
 async fn unregister_token(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let device_token = require_string_param(Some(payload), "deviceToken")?;
     let event_store = Arc::clone(&deps.event_store);
-    deps.capability_context
-        .run_blocking("device::unregister", move || {
-            let success = event_store
-                .unregister_device_token(&device_token)
-                .map_err(map_event_store_error)?;
-            Ok(json!({ "success": success }))
-        })
-        .await
+    run_blocking_task("device::unregister", move || {
+        let success = event_store
+            .unregister_device_token(&device_token)
+            .map_err(map_event_store_error)?;
+        Ok(json!({ "success": success }))
+    })
+    .await
 }
 
 async fn respond(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let request_id = require_string_param(Some(payload), "requestId")?;
     let result = payload.get("result").cloned().unwrap_or(Value::Null);
-    if let Some(ref broker) = deps.capability_context.device_request_broker {
+    if let Some(ref broker) = deps.device_request_broker {
         let resolved = broker.resolve(&request_id, result);
         Ok(json!({ "resolved": resolved }))
     } else {

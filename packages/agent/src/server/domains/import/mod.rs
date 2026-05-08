@@ -4,6 +4,10 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use std::path::PathBuf;
 
@@ -12,51 +16,21 @@ use serde_json::{Value, json};
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "import",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::import_handler,
     )
 }
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-    event_store: Arc<EventStore>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-            event_store: deps.event_store.clone(),
-        }
-    }
-}
 
 use crate::server::shared::error_mapping::map_import_error;
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "import::list_sources" => list_sources(deps).await,
-        "import::list_sessions" => list_sessions(&invocation.payload, deps).await,
-        "import::preview_session" => preview_session(&invocation.payload, deps).await,
-        "import::execute" => execute_import(&invocation.payload, deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("import method {method} is not engine-owned"),
-        }),
-    }
-}
-
-async fn list_sources(deps: &Deps) -> Result<Value, CapabilityError> {
-    deps.capability_context
-        .run_blocking("import::list_sources", move || {
+async fn list_sources(_deps: &Deps) -> Result<Value, CapabilityError> {
+    run_blocking_task("import::list_sources", move || {
             let claude_projects =
                 PathBuf::from(crate::core::paths::home_dir()).join(".claude").join("projects");
             let Ok(projects) = crate::import::discover_projects(&claude_projects) else {
@@ -81,44 +55,41 @@ async fn list_sources(deps: &Deps) -> Result<Value, CapabilityError> {
 async fn list_sessions(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let encoded_dir = require_string_param(Some(payload), "encodedDir")?;
     let event_store = deps.event_store.clone();
-    deps.capability_context
-        .run_blocking("import::list_sessions", move || {
-            let claude_projects = PathBuf::from(crate::core::paths::home_dir())
-                .join(".claude")
-                .join("projects");
-            let project_dir = claude_projects.join(&encoded_dir);
-            let sessions =
-                crate::import::discover_sessions(&project_dir).map_err(map_import_error)?;
-            let result: Vec<Value> = sessions
-                .into_iter()
-                .map(|session| {
-                    let (imported, existing_id) =
-                        check_already_imported(&event_store, &session.session_uuid)
-                            .unwrap_or((false, None));
-                    Ok(json!({
-                        "sessionPath": session.file_path,
-                        "title": session.title,
-                        "slug": session.slug,
-                        "createdAt": session.first_timestamp,
-                        "lastActivityAt": session.last_timestamp,
-                        "messageCount": session.message_count,
-                        "model": session.model,
-                        "inputTokens": session.input_tokens,
-                        "outputTokens": session.output_tokens,
-                        "alreadyImported": imported,
-                        "existingTronSessionId": existing_id,
-                    }))
-                })
-                .collect::<Result<Vec<_>, CapabilityError>>()?;
-            Ok(json!({ "sessions": result }))
-        })
-        .await
+    run_blocking_task("import::list_sessions", move || {
+        let claude_projects = PathBuf::from(crate::core::paths::home_dir())
+            .join(".claude")
+            .join("projects");
+        let project_dir = claude_projects.join(&encoded_dir);
+        let sessions = crate::import::discover_sessions(&project_dir).map_err(map_import_error)?;
+        let result: Vec<Value> = sessions
+            .into_iter()
+            .map(|session| {
+                let (imported, existing_id) =
+                    check_already_imported(&event_store, &session.session_uuid)
+                        .unwrap_or((false, None));
+                Ok(json!({
+                    "sessionPath": session.file_path,
+                    "title": session.title,
+                    "slug": session.slug,
+                    "createdAt": session.first_timestamp,
+                    "lastActivityAt": session.last_timestamp,
+                    "messageCount": session.message_count,
+                    "model": session.model,
+                    "inputTokens": session.input_tokens,
+                    "outputTokens": session.output_tokens,
+                    "alreadyImported": imported,
+                    "existingTronSessionId": existing_id,
+                }))
+            })
+            .collect::<Result<Vec<_>, CapabilityError>>()?;
+        Ok(json!({ "sessions": result }))
+    })
+    .await
 }
 
-async fn preview_session(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+async fn preview_session(payload: &Value, _deps: &Deps) -> Result<Value, CapabilityError> {
     let session_path = require_string_param(Some(payload), "sessionPath")?;
-    deps.capability_context
-        .run_blocking("import::preview_session", move || {
+    run_blocking_task("import::preview_session", move || {
             let path = PathBuf::from(&session_path);
             let records = crate::import::parser::parse_session(&path).map_err(map_import_error)?;
             let linear = crate::import::tree::linearize(records);
@@ -210,11 +181,10 @@ async fn execute_import(payload: &Value, deps: &Deps) -> Result<Value, Capabilit
         .unwrap_or_default();
     let working_directory = opt_string(Some(payload), "workingDirectory").unwrap_or_default();
     let event_store = deps.event_store.clone();
-    let origin = deps.capability_context.origin.clone();
+    let origin = deps.origin.clone();
     let session_path = session_path.to_owned();
 
-    deps.capability_context
-        .run_blocking("import::execute", move || {
+    run_blocking_task("import::execute", move || {
             let path = PathBuf::from(&session_path);
             let wd = if working_directory.is_empty() {
                 path.parent()

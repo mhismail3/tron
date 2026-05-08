@@ -4,14 +4,20 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let mut module = super::domain_worker_module(
         "job",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::job_handler,
@@ -20,30 +26,6 @@ pub(crate) fn worker_module(
         .functions
         .extend(hidden_function_registrations(deps)?);
     Ok(module)
-}
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    engine_host: crate::engine::EngineHostHandle,
-    event_store: Arc<EventStore>,
-    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
-    orchestrator: Arc<Orchestrator>,
-    output_buffer_registry:
-        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
-    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-            event_store: deps.event_store.clone(),
-            job_manager: deps.job_manager.clone(),
-            orchestrator: deps.orchestrator.clone(),
-            output_buffer_registry: deps.output_buffer_registry.clone(),
-            process_manager: deps.process_manager.clone(),
-        }
-    }
 }
 
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
@@ -57,46 +39,8 @@ use tokio_util::sync::CancellationToken;
 static ACTIVE_SUBSCRIPTIONS: std::sync::LazyLock<dashmap::DashMap<String, CancellationToken>> =
     std::sync::LazyLock::new(dashmap::DashMap::new);
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "job::background" => {
-            enqueue_and_sync_drain_job_apply(
-                "job::background_apply",
-                "job::background_apply",
-                invocation,
-                deps,
-            )
-            .await
-        }
-        "job::cancel" => {
-            enqueue_and_sync_drain_job_apply(
-                "job::cancel_apply",
-                "job::cancel_apply",
-                invocation,
-                deps,
-            )
-            .await
-        }
-        "job::background_apply" => {
-            job_background_apply_value(Some(payload), invocation, deps).await
-        }
-        "job::cancel_apply" => job_cancel_apply_value(Some(payload), invocation, deps).await,
-        "job::list" => job_list_value(Some(payload), deps),
-        "job::subscribe" => job_subscribe_value(Some(payload), deps).await,
-        "job::unsubscribe" => job_unsubscribe_value(Some(payload)),
-        _ => Err(CapabilityError::Internal {
-            message: format!("job method {method} is not engine-owned"),
-        }),
-    }
-}
-
 pub(crate) fn hidden_function_registrations(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
     let domain_deps = Deps::from_engine(deps);
     [
@@ -351,7 +295,7 @@ async fn publish_job_stream(
     let _ = deps
         .engine_host
         .publish_stream_event(crate::engine::PublishStreamEvent {
-            topic: "jobs".to_owned(),
+            topic: contract::STREAM_TOPICS[0].to_owned(),
             payload: json!({
                 "sessionId": session_id,
                 "jobId": job_id,

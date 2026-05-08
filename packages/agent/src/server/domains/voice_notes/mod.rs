@@ -4,30 +4,23 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "voice_notes",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::voice_notes_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-        }
-    }
 }
 
 pub(crate) mod service;
@@ -38,30 +31,14 @@ use uuid::Uuid;
 use crate::server::domains::voice_notes::service as voice_notes_service;
 use crate::server::shared::params::{opt_string, opt_u64, require_string_param};
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "voice_notes::list" => list(&invocation.payload, deps).await,
-        "voice_notes::save" => save(&invocation.payload, deps).await,
-        "voice_notes::delete" => delete(&invocation.payload, deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("voice notes method {method} is not engine-owned"),
-        }),
-    }
-}
-
-async fn list(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+async fn list(payload: &Value, _deps: &Deps) -> Result<Value, CapabilityError> {
     let limit = usize::try_from(opt_u64(Some(payload), "limit", 50)).unwrap_or(usize::MAX);
     let offset = usize::try_from(opt_u64(Some(payload), "offset", 0)).unwrap_or(0);
     let dir = voice_notes_service::notes_dir();
-    deps.capability_context
-        .run_blocking("voice_notes::list", move || {
-            Ok(voice_notes_service::list_notes(&dir, limit, offset))
-        })
-        .await
+    run_blocking_task("voice_notes::list", move || {
+        Ok(voice_notes_service::list_notes(&dir, limit, offset))
+    })
+    .await
 }
 
 async fn save(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
@@ -70,11 +47,10 @@ async fn save(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let mime_type = mime_type_owned.as_deref().unwrap_or("audio/wav");
     let dir = voice_notes_service::notes_dir();
     let create_dir = dir.clone();
-    deps.capability_context
-        .run_blocking("voiceNotes.mkdir", move || {
-            voice_notes_service::ensure_notes_dir(&create_dir)
-        })
-        .await?;
+    run_blocking_task("voiceNotes.mkdir", move || {
+        voice_notes_service::ensure_notes_dir(&create_dir)
+    })
+    .await?;
 
     let now = chrono::Utc::now();
     let filename = build_voice_note_filename(now);
@@ -86,7 +62,7 @@ async fn save(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
             message: format!("Invalid base64 audio data: {error}"),
         })?;
     let result =
-        super::transcription::transcribe_audio(&deps.capability_context, &audio_bytes, mime_type)
+        super::transcription::transcribe_audio(&deps.transcription_engine, &audio_bytes, mime_type)
             .await;
 
     let content = format!(
@@ -97,11 +73,10 @@ async fn save(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
         result.text,
     );
     let write_path = filepath.clone();
-    deps.capability_context
-        .run_blocking("voiceNotes.write", move || {
-            voice_notes_service::write_note(&write_path, &content)
-        })
-        .await?;
+    run_blocking_task("voiceNotes.write", move || {
+        voice_notes_service::write_note(&write_path, &content)
+    })
+    .await?;
 
     Ok(json!({
         "success": true,
@@ -115,18 +90,17 @@ async fn save(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     }))
 }
 
-async fn delete(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+async fn delete(payload: &Value, _deps: &Deps) -> Result<Value, CapabilityError> {
     let filename = require_string_param(Some(payload), "filename")?;
     let filepath = format!("{}/{filename}", voice_notes_service::notes_dir());
     let filename_for_response = filename.clone();
-    deps.capability_context
-        .run_blocking("voice_notes::delete", move || {
-            Ok(voice_notes_service::delete_note(
-                &filepath,
-                &filename_for_response,
-            ))
-        })
-        .await
+    run_blocking_task("voice_notes::delete", move || {
+        Ok(voice_notes_service::delete_note(
+            &filepath,
+            &filename_for_response,
+        ))
+    })
+    .await
 }
 
 fn build_voice_note_filename(now: chrono::DateTime<chrono::Utc>) -> String {

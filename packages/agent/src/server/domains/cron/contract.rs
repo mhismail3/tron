@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["cron.runs"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -27,8 +29,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("cron::update", "cron", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("cron.write"))
             .approval_required(true)
@@ -36,8 +38,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("cron::delete", "cron", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("cron.write"))
             .approval_required(true)
@@ -45,8 +47,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":false,"properties":{"deleted":{"type":"boolean"}},"required":["deleted"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("cron::run", "cron", EffectClass::ExternalSideEffect, RiskLevel::High, Some("cron.write"))
             .approval_required(true)
@@ -54,8 +56,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":false,"properties":{"jobId":{"type":"string"},"triggered":{"type":"boolean"}},"required":["triggered","jobId"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("cron::status", "cron", EffectClass::PureRead, RiskLevel::Low, Some("cron.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))

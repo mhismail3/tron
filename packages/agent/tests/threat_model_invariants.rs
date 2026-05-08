@@ -298,6 +298,14 @@ fn server_package_uses_domain_owned_engine_layout() {
             "domain worker module `{domain_name}` must own a contract.rs file"
         );
         assert!(
+            path.join("deps.rs").is_file(),
+            "domain worker module `{domain_name}` must own a deps.rs file"
+        );
+        assert!(
+            path.join("handlers.rs").is_file(),
+            "domain worker module `{domain_name}` must own a handlers.rs operation binding file"
+        );
+        assert!(
             !path.join("spec.rs").exists(),
             "domain worker module `{domain_name}` must not split contract truth into spec.rs"
         );
@@ -315,8 +323,25 @@ fn server_package_uses_domain_owned_engine_layout() {
             "domain worker module `{required}` must own its capability contracts"
         );
         assert!(
+            domain_root.join("deps.rs").is_file(),
+            "domain worker module `{required}` must own its narrow dependency bundle"
+        );
+        assert!(
+            domain_root.join("handlers.rs").is_file(),
+            "domain worker module `{required}` must own operation bindings"
+        );
+        assert!(
             !domain_root.join("spec.rs").exists(),
             "domain worker module `{required}` must keep its canonical function inventory in contract.rs"
+        );
+    }
+    for required in [
+        "agent", "auth", "cron", "job", "mcp", "session", "tools", "worktree",
+    ] {
+        let domain_root = domains_root.join(required);
+        assert!(
+            domain_root.join("operations").join("mod.rs").is_file(),
+            "flow-critical domain worker `{required}` must expose an operations/ boundary"
         );
     }
     assert!(
@@ -337,6 +362,14 @@ fn server_package_uses_domain_owned_engine_layout() {
     assert!(
         !domains_mod.contains("handler_for_method"),
         "domain handlers must be registered by domain worker modules, not a central method match"
+    );
+    assert!(
+        !domains_mod.contains("EngineCapabilityDeps"),
+        "domain setup must not reintroduce the broad EngineCapabilityDeps shape"
+    );
+    assert!(
+        !domains_mod.contains("_stream_topics"),
+        "domain registration must validate stream topics instead of ignoring them"
     );
     let catalog = std::fs::read_to_string(domains_root.join("catalog.rs"))
         .expect("failed to read server/domains/catalog.rs");
@@ -370,6 +403,43 @@ fn server_package_uses_domain_owned_engine_layout() {
             !shared_contract.contains(removed),
             "shared contract builder must stay method-agnostic and not retain `{removed}`"
         );
+    }
+
+    for path in rust_files_under(&domains_root) {
+        let rel = path.strip_prefix(&crate_root).unwrap();
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        assert!(
+            !content.contains("capability_context"),
+            "{} must not use the old broad capability_context field name",
+            rel.display()
+        );
+        assert!(
+            !content.contains("EngineCapabilityDeps"),
+            "{} must not reintroduce EngineCapabilityDeps",
+            rel.display()
+        );
+        assert!(
+            !content.contains(".stream_topics(vec![\"resource.leases\", \"catalog.changes\"])")
+                && !content.contains("\"streamTopics\":[\"resource.leases\",\"catalog.changes\"]"),
+            "{} must not copy engine-global stream topics into domain contracts",
+            rel.display()
+        );
+        if content.contains("server_context: Arc<ServerCapabilityContext>") {
+            let allowed_full_context_holders = [
+                Path::new("src/server/domains/mod.rs"),
+                Path::new("src/server/domains/agent/deps.rs"),
+                Path::new("src/server/domains/context/deps.rs"),
+                Path::new("src/server/domains/memory/deps.rs"),
+                Path::new("src/server/domains/model/deps.rs"),
+                Path::new("src/server/domains/worktree/deps.rs"),
+            ];
+            assert!(
+                allowed_full_context_holders.contains(&rel),
+                "{} must expose narrow deps instead of storing the full ServerCapabilityContext",
+                rel.display()
+            );
+        }
     }
 }
 

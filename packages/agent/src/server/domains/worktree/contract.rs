@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["worktree.lifecycle", "worktree.git"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -28,8 +30,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "git revert/reset is a manual recovery path after commit creation"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes high-risk branch/workflow mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"git revert/reset is a manual recovery path after commit creation","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes high-risk branch/workflow mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"git revert/reset is a manual recovery path after commit creation","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::merge", "worktree", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -38,8 +40,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "merge abort or manual conflict recovery is available while merge state exists"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes high-risk branch/workflow mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"merge abort or manual conflict recovery is available while merge state exists","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes high-risk branch/workflow mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"merge abort or manual conflict recovery is available while merge state exists","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::list", "worktree", EffectClass::PureRead, RiskLevel::Low, Some("worktree.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
@@ -79,8 +81,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "finalize uses all-or-none branch publication; manual branch cleanup may be required"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes high-risk branch/workflow mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"finalize uses all-or-none branch publication; manual branch cleanup may be required","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes high-risk branch/workflow mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"finalize uses all-or-none branch publication; manual branch cleanup may be required","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::delete_branch", "worktree", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -89,8 +91,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "deleted local branches require reflog/remote recovery if still available"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes destructive branch/index mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"deleted local branches require reflog/remote recovery if still available","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes destructive branch/index mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"deleted local branches require reflog/remote recovery if still available","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::prune_branches", "worktree", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -99,8 +101,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "pruned branches require manual branch restoration if needed"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes destructive branch/index mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"pruned branches require manual branch restoration if needed","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes destructive branch/index mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"pruned branches require manual branch restoration if needed","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::stage_files", "worktree", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("worktree.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"paths":{"items":{"type":"string"},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","paths"],"type":"object"}))
@@ -123,8 +125,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:index", 300000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "discarded working-tree changes are externally irreversible"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes destructive branch/index mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"discarded working-tree changes are externally irreversible","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes destructive branch/index mutations for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"discarded working-tree changes are externally irreversible","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::rebase_on_main", "worktree", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -134,8 +136,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "rebase abort/manual reset is the recovery path while state exists"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"rebase abort/manual reset is the recovery path while state exists","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"rebase abort/manual reset is the recovery path while state exists","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::start_merge", "worktree", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -145,8 +147,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "worktree.abortMerge is the inverse command while merge is active"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"worktree.abortMerge is the inverse command while merge is active","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"worktree.abortMerge is the inverse command while merge is active","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::list_conflicts", "worktree", EffectClass::PureRead, RiskLevel::Low, Some("worktree.read"))
             .domain_module("worktree::git_workflow")
@@ -161,8 +163,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "conflict files can be manually edited before continueMerge"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"conflict files can be manually edited before continueMerge","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"conflict files can be manually edited before continueMerge","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::continue_merge", "worktree", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -172,8 +174,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "manual reset/revert is required after merge completion"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"manual reset/revert is required after merge completion","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"manual reset/revert is required after merge completion","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::abort_merge", "worktree", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -183,8 +185,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "startMerge can recreate the merge attempt if inputs still exist"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"startMerge can recreate the merge attempt if inputs still exist","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"startMerge can recreate the merge attempt if inputs still exist","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("worktree::resolve_conflicts_with_subagent", "worktree", EffectClass::ExternalSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -194,8 +196,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:workflow", 900000))
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "subagent conflict resolution writes files; manual review/reset remains the recovery path"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"subagent conflict resolution writes files; manual review/reset remains the recovery path","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:workflow","kind":"worktree","reason":"serializes merge/rebase conflict workflows for a session worktree","required":true,"ttlMs":900000},"rollbackOrCompensation":"subagent conflict resolution writes files; manual review/reset remains the recovery path","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])
 }

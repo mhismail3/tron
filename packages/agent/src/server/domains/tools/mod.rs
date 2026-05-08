@@ -4,6 +4,11 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
@@ -18,42 +23,18 @@ use crate::tools::traits::{ToolContext, TronTool};
 use async_trait::async_trait;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "tool",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::tool_handler,
     )
 }
-#[derive(Clone)]
-pub(crate) struct Deps {
-    orchestrator: Arc<Orchestrator>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            orchestrator: deps.orchestrator.clone(),
-        }
-    }
-}
 
 pub(crate) mod interactive_enrichment;
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "tool::result" => tool_result_value(&invocation.payload, deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("tool method {method} is not engine-owned"),
-        }),
-    }
-}
 
 async fn tool_result_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let _session_id = require_string_param(Some(payload), "sessionId")?;

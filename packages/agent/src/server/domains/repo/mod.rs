@@ -4,53 +4,31 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use serde_json::{Value, json};
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "repo",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::repo_handler,
     )
 }
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-        }
-    }
-}
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "repo::list_sessions" => list_sessions(&invocation.payload, deps).await,
-        "repo::get_divergence" => get_divergence(&invocation.payload, deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("repo method {method} is not engine-owned"),
-        }),
-    }
-}
 
 fn require_coordinator(
     deps: &Deps,
 ) -> Result<&crate::worktree::WorktreeCoordinator, CapabilityError> {
-    deps.capability_context
-        .worktree_coordinator
+    deps.worktree_coordinator
         .as_deref()
         .ok_or_else(|| CapabilityError::Internal {
             message: "Worktree isolation is not enabled".into(),

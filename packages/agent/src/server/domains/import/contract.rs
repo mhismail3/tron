@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["import.sessions"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -32,8 +34,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("import", "import:{sessionPath}", 300000))
             .compensation(CompensationContract::new(CompensationKind::EventSourced, "import is append-only and duplicate sources return alreadyImported; full rollback is deferred"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"import:{canonicalSessionPath}","kind":"import","reason":"serializes session import for one source transcript path","required":true,"ttlMs":300000},"rollbackOrCompensation":"import is append-only and duplicate sources return alreadyImported; full rollback is deferred","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"import:{canonicalSessionPath}","kind":"import","reason":"serializes session import for one source transcript path","required":true,"ttlMs":300000},"rollbackOrCompensation":"import is append-only and duplicate sources return alreadyImported; full rollback is deferred","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])
 }

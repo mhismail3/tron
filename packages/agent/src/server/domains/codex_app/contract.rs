@@ -7,6 +7,8 @@ use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["codex_app.status"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![

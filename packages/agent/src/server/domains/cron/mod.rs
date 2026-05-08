@@ -4,6 +4,11 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -11,10 +16,11 @@ use serde_json::{Value, json};
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let mut module = super::domain_worker_module(
         "cron",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::cron_handler,
@@ -25,21 +31,6 @@ pub(crate) fn worker_module(
     Ok(module)
 }
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-    engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-            engine_host: deps.engine_host.clone(),
-        }
-    }
-}
-
 use crate::engine::{
     AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, FunctionDefinition,
     FunctionId, IdempotencyContract, Provenance, Result as EngineResult, RiskLevel,
@@ -48,8 +39,7 @@ use crate::engine::{
 pub mod callbacks;
 
 fn scheduler(deps: &Deps) -> Result<&std::sync::Arc<crate::cron::CronScheduler>, CapabilityError> {
-    deps.capability_context
-        .cron_scheduler
+    deps.cron_scheduler
         .as_ref()
         .ok_or(CapabilityError::NotAvailable {
             message: "Cron scheduler not available".into(),
@@ -60,7 +50,7 @@ pub(crate) fn project_all_cron_triggers_for_setup(
     handle: &crate::engine::EngineHostHandle,
     deps: &Deps,
 ) -> EngineResult<()> {
-    let Some(scheduler) = deps.capability_context.cron_scheduler.as_ref() else {
+    let Some(scheduler) = deps.cron_scheduler.as_ref() else {
         return Ok(());
     };
     for job in scheduler.jobs().values() {
@@ -85,31 +75,8 @@ async fn project_cron_trigger(
     Ok(())
 }
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "cron::list" => cron_list_value(&invocation.payload, deps).await,
-        "cron::get" => cron_get_value(&invocation.payload, deps).await,
-        "cron::create" => cron_create_value(&invocation.payload, invocation, deps).await,
-        "cron::update" => cron_update_value(&invocation.payload, invocation, deps).await,
-        "cron::delete" => cron_delete_value(&invocation.payload, invocation, deps).await,
-        "cron::run" => cron_run_value(&invocation.payload, invocation, deps).await,
-        "cron::status" => cron_status_value(deps).await,
-        "cron::get_runs" => cron_get_runs_value(&invocation.payload, deps).await,
-        "cron::scheduled_fire" => {
-            cron_scheduled_fire_value(&invocation.payload, invocation, deps).await
-        }
-        _ => Err(CapabilityError::Internal {
-            message: format!("cron method {method} is not engine-owned"),
-        }),
-    }
-}
-
 pub(crate) fn hidden_function_registrations(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> EngineResult<Vec<DomainFunctionRegistration>> {
     let domain_deps = Deps::from_engine(deps);
     let mut definition = FunctionDefinition::new(
@@ -675,7 +642,7 @@ async fn publish_cron_stream(
     let _ = deps
         .engine_host
         .publish_stream_event(crate::engine::PublishStreamEvent {
-            topic: "cron".to_owned(),
+            topic: contract::STREAM_TOPICS[0].to_owned(),
             payload: json!({
                 "kind": kind,
                 "jobId": job_id,

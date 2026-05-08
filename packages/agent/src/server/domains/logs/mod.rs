@@ -4,48 +4,26 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "logs",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::logs_handler,
     )
 }
-#[derive(Clone)]
-pub(crate) struct Deps {
-    event_store: Arc<EventStore>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            event_store: deps.event_store.clone(),
-        }
-    }
-}
 
 pub(crate) mod client_logs;
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "logs::ingest" => ingest_logs_value(Some(payload), deps).await,
-        "logs::recent" => recent_logs_value(Some(payload.clone()), deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("logs method {method} is not engine-owned"),
-        }),
-    }
-}
 
 const DEFAULT_RECENT_LIMIT: u32 = 200;
 const MAX_RECENT_LIMIT: u32 = 1_000;

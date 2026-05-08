@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["sandbox.lifecycle"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -24,8 +26,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "inverse container lifecycle command can be run manually if the runtime is still available"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"inverse container lifecycle command can be run manually if the runtime is still available","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"inverse container lifecycle command can be run manually if the runtime is still available","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("sandbox::stop_container", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("sandbox.write"))
             .approval_required(true)
@@ -34,8 +36,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "inverse container lifecycle command can be run manually if the runtime is still available"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"inverse container lifecycle command can be run manually if the runtime is still available","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"inverse container lifecycle command can be run manually if the runtime is still available","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("sandbox::kill_container", "sandbox", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("sandbox.write"))
             .approval_required(true)
@@ -44,8 +46,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "sandbox kill/remove is external and may require manual container recreation"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"sandbox kill/remove is external and may require manual container recreation","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"sandbox kill/remove is external and may require manual container recreation","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("sandbox::remove_container", "sandbox", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("sandbox.write"))
             .approval_required(true)
@@ -54,8 +56,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "sandbox kill/remove is external and may require manual container recreation"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"sandbox kill/remove is external and may require manual container recreation","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"sandbox kill/remove is external and may require manual container recreation","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])
 }

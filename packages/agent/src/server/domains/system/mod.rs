@@ -4,68 +4,29 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use std::collections::BTreeMap;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "system",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::system_handler,
     )
 }
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-    onboarded_marker_path: PathBuf,
-    orchestrator: Arc<Orchestrator>,
-    profile_runtime: Arc<ProfileRuntime>,
-    server_start_time: Instant,
-    updater_state_path: PathBuf,
-    ws_port: Arc<AtomicU16>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-            onboarded_marker_path: deps.onboarded_marker_path.clone(),
-            orchestrator: deps.orchestrator.clone(),
-            profile_runtime: deps.profile_runtime.clone(),
-            server_start_time: deps.server_start_time,
-            updater_state_path: deps.updater_state_path.clone(),
-            ws_port: deps.ws_port.clone(),
-        }
-    }
-}
 
 use crate::server::shared::protocol as engine_transport_protocol;
 use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-    allow_capability_context: bool,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "system::ping" => ping_value(Some(payload)),
-        "system::get_info" => Ok(system_info_value(payload, deps, allow_capability_context)),
-        "system::get_diagnostics" => system_diagnostics_value(deps),
-        "system::get_update_status" => system_update_status_value(deps).await,
-        "system::check_for_updates" => system_check_for_updates_value(deps).await,
-        "system::shutdown" => system_shutdown_value(deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("system method {method} is not engine-owned"),
-        }),
-    }
-}
 
 async fn system_shutdown_value(deps: &Deps) -> Result<Value, CapabilityError> {
     deps.orchestrator
@@ -90,7 +51,7 @@ async fn system_check_for_updates_value(deps: &Deps) -> Result<Value, Capability
         }));
     }
 
-    let Some(fetcher) = deps.capability_context.release_fetcher.as_ref() else {
+    let Some(fetcher) = deps.release_fetcher.as_ref() else {
         tracing::warn!(
             "system.checkForUpdates called but ServerCapabilityContext::release_fetcher is None; \
              responding as if no release was found"
@@ -162,7 +123,7 @@ fn system_diagnostics_value(deps: &Deps) -> Result<Value, CapabilityError> {
             "arch": std::env::consts::ARCH,
             "pid": std::process::id(),
             "uptimeSeconds": uptime,
-            "origin": deps.capability_context.origin.clone(),
+            "origin": deps.origin.clone(),
         },
         "sessions": {
             "active": active_sessions,
@@ -184,14 +145,12 @@ fn system_diagnostics_value(deps: &Deps) -> Result<Value, CapabilityError> {
 async fn system_update_status_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let settings = deps.profile_runtime.current().settings.clone();
     let state_path = deps.updater_state_path.clone();
-    let state = deps
-        .capability_context
-        .run_blocking("system.getUpdateStatus.read_state", move || {
-            read_update_state(&state_path).map_err(|error| CapabilityError::Internal {
-                message: format!("read updater state: {error}"),
-            })
+    let state = run_blocking_task("system.getUpdateStatus.read_state", move || {
+        read_update_state(&state_path).map_err(|error| CapabilityError::Internal {
+            message: format!("read updater state: {error}"),
         })
-        .await?;
+    })
+    .await?;
     Ok(build_status_value(
         env!("CARGO_PKG_VERSION"),
         &settings.server.update,
@@ -261,8 +220,8 @@ fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
     }))
 }
 
-fn system_info_value(payload: &Value, deps: &Deps, allow_capability_context: bool) -> Value {
-    let marker_path = allow_capability_context
+fn system_info_value(payload: &Value, deps: &Deps, allow_server_context: bool) -> Value {
+    let marker_path = allow_server_context
         .then(|| {
             payload
                 .pointer("/__capabilityContext/onboardedMarkerPath")

@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["model.config"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -24,8 +26,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("session", "session:{sessionId}:model", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "previousModel is returned and persisted in config.model_switch for manual reversal"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:model","kind":"session","reason":"serializes model selection and session cache invalidation","required":true,"ttlMs":60000},"rollbackOrCompensation":"previousModel is returned and persisted in config.model_switch for manual reversal","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:model","kind":"session","reason":"serializes model selection and session cache invalidation","required":true,"ttlMs":60000},"rollbackOrCompensation":"previousModel is returned and persisted in config.model_switch for manual reversal","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("config::set_reasoning_level", "config", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("config.write"))
             .approval_required(true)
@@ -35,8 +37,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("session", "session:{sessionId}:reasoning", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "previousLevel is returned and persisted in config.reasoning_level for manual reversal"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:reasoning","kind":"session","reason":"serializes reasoning-level event writes and session cache invalidation","required":true,"ttlMs":60000},"rollbackOrCompensation":"previousLevel is returned and persisted in config.reasoning_level for manual reversal","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"session:{sessionId}:reasoning","kind":"session","reason":"serializes reasoning-level event writes and session cache invalidation","required":true,"ttlMs":60000},"rollbackOrCompensation":"previousLevel is returned and persisted in config.reasoning_level for manual reversal","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])
 }

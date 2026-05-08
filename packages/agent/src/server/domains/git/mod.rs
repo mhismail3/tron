@@ -6,6 +6,10 @@
 //! metadata.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 pub(crate) mod service;
 
@@ -14,7 +18,6 @@ use tokio::time::{Duration, timeout};
 use tracing::instrument;
 
 use crate::server::domains::git::service as git_service;
-use crate::server::shared::context::ServerCapabilityContext;
 use crate::server::shared::errors::{self, CapabilityError};
 use crate::server::shared::params::require_string_param;
 
@@ -22,12 +25,17 @@ use super::*;
 use crate::engine::Invocation;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let git_deps = Deps::from_engine(deps);
     let worktree_deps = crate::server::domains::worktree::Deps::from_engine(deps);
-    let mut module =
-        super::domain_worker_module("git", Vec::new(), git_deps.clone(), super::git_handler)?;
+    let mut module = super::domain_worker_module(
+        "git",
+        contract::STREAM_TOPICS,
+        Vec::new(),
+        git_deps.clone(),
+        super::git_handler,
+    )?;
     module.functions.extend(
         contract::capabilities()?
             .into_iter()
@@ -47,59 +55,21 @@ pub(crate) fn worker_module(
     Ok(module)
 }
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-        }
-    }
-}
-
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "git::clone" => {
-            CloneOperation
-                .run(
-                    Some(invocation.payload.clone()),
-                    deps.capability_context.as_ref(),
-                )
-                .await
-        }
-        _ => Err(CapabilityError::Internal {
-            message: format!("operation {method} is not git-owned"),
-        }),
-    }
-}
 
 /// Clone a git repository.
 pub struct CloneOperation;
 
 impl CloneOperation {
-    #[instrument(skip(self, ctx), fields(method = "git::clone"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self), fields(method = "git::clone"))]
+    async fn run(&self, params: Option<Value>) -> Result<Value, CapabilityError> {
         let url = require_string_param(params.as_ref(), "url")?;
         let target_path = require_string_param(params.as_ref(), "targetPath")?;
         let url_for_clone = url.clone();
-        let clone_request = ctx
-            .run_blocking("git.clone.prepare", move || {
-                git_service::prepare_clone(&url, &target_path)
-            })
-            .await?;
+        let clone_request = run_blocking_task("git.clone.prepare", move || {
+            git_service::prepare_clone(&url, &target_path)
+        })
+        .await?;
 
         // Execute git clone with timeout
         let output = timeout(

@@ -4,30 +4,23 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "transcription",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::transcription_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-        }
-    }
 }
 
 use base64::Engine;
@@ -52,23 +45,8 @@ struct TranscribeResponse {
     cleanup_mode: String,
 }
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "transcription::audio" => transcribe_audio_value(&invocation.payload, deps).await,
-        "transcription::list_models" => list_models_value(deps),
-        "transcription::download_model" => download_model_value(deps),
-        _ => Err(CapabilityError::Internal {
-            message: format!("transcription method {method} is not engine-owned"),
-        }),
-    }
-}
-
 fn list_models_value(deps: &Deps) -> Result<Value, CapabilityError> {
-    let engine_loaded = deps.capability_context.transcription_engine.get().is_some();
+    let engine_loaded = deps.transcription_engine.get().is_some();
     let enabled = crate::settings::get_settings().server.transcription.enabled;
     Ok(json!({
         "models": [
@@ -115,14 +93,15 @@ async fn transcribe_audio_value(payload: &Value, deps: &Deps) -> Result<Value, C
         mime_type, "transcribe.audio received payload"
     );
 
-    let response = transcribe_audio_full(&deps.capability_context, &audio_bytes, mime_type).await?;
+    let response =
+        transcribe_audio_full(&deps.transcription_engine, &audio_bytes, mime_type).await?;
     serde_json::to_value(&response).map_err(|error| CapabilityError::Internal {
         message: format!("serialize response: {error}"),
     })
 }
 
 fn download_model_value(deps: &Deps) -> Result<Value, CapabilityError> {
-    let engine_loaded = deps.capability_context.transcription_engine.get().is_some();
+    let engine_loaded = deps.transcription_engine.get().is_some();
     let enabled = crate::settings::get_settings().server.transcription.enabled;
 
     if !enabled {
@@ -155,11 +134,12 @@ pub(super) fn normalize_base64(input: &str) -> &str {
 }
 
 pub(super) async fn transcribe_audio(
-    ctx: &crate::server::shared::context::ServerCapabilityContext,
+    transcription_engine: &Arc<std::sync::OnceLock<Arc<crate::transcription::MlxEngine>>>,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> TranscriptionResult {
-    if let Ok(response) = transcribe_audio_full(ctx, audio_bytes, mime_type).await {
+    if let Ok(response) = transcribe_audio_full(transcription_engine, audio_bytes, mime_type).await
+    {
         TranscriptionResult {
             text: response.text,
             language: response.language,
@@ -177,7 +157,7 @@ pub(super) async fn transcribe_audio(
 }
 
 async fn transcribe_audio_full(
-    ctx: &crate::server::shared::context::ServerCapabilityContext,
+    transcription_engine: &Arc<std::sync::OnceLock<Arc<crate::transcription::MlxEngine>>>,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> Result<TranscribeResponse, CapabilityError> {
@@ -189,8 +169,7 @@ async fn transcribe_audio_full(
         });
     }
 
-    let engine = ctx
-        .transcription_engine
+    let engine = transcription_engine
         .get()
         .ok_or(CapabilityError::NotAvailable {
             message: "Transcription engine not loaded".into(),

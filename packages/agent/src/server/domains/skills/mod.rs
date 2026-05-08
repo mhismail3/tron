@@ -4,56 +4,26 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "skills",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::skills_handler,
     )
 }
-#[derive(Clone)]
-pub(crate) struct Deps {
-    event_store: Arc<EventStore>,
-    session_manager: Arc<SessionManager>,
-    skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            event_store: deps.event_store.clone(),
-            session_manager: deps.session_manager.clone(),
-            skill_registry: deps.skill_registry.clone(),
-        }
-    }
-}
 
 pub(crate) mod state;
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "skills::list" => Ok(skill_list_value(Some(payload), deps)),
-        "skills::get" => skill_get_value(Some(payload), deps),
-        "skills::refresh" => skill_refresh_value(Some(payload), deps).await,
-        "skills::activate" => skill_activate_value(Some(payload), deps),
-        "skills::deactivate" => skill_deactivate_value(Some(payload), deps),
-        "skills::active" => skill_active_value(Some(payload), deps),
-        _ => Err(CapabilityError::Internal {
-            message: format!("skills method {method} is not engine-owned"),
-        }),
-    }
-}
 
 fn skill_list_value(params: Option<&Value>, deps: &Deps) -> Value {
     let working_dir = resolve_skill_working_dir(params, deps);

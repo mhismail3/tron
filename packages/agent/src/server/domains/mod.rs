@@ -16,7 +16,11 @@
 //!
 //! Each domain `contract.rs` is the local source of truth for that worker's
 //! function ids, schemas, authority, risk, idempotency, leases, compensation,
-//! and stream topics. The catalog only aggregates those records; it does not
+//! stream topics, and operation keys. Each domain `deps.rs` narrows setup
+//! context into the service handles that worker actually needs; `handlers.rs`
+//! binds operation keys to domain operations; and flow-critical domains expose
+//! an `operations/` boundary for splitting large workflows without rebuilding a
+//! central dispatcher. The catalog only aggregates those records; it does not
 //! derive domain policy from central method tables.
 //!
 //! # INVARIANT: no transport-owned behavior
@@ -101,8 +105,8 @@ pub(crate) mod voice_notes;
 pub(crate) mod worktree;
 
 #[derive(Clone)]
-pub(crate) struct EngineCapabilityDeps {
-    capability_context: Arc<ServerCapabilityContext>,
+pub(crate) struct DomainSetupContext {
+    server_context: Arc<ServerCapabilityContext>,
     orchestrator: Arc<Orchestrator>,
     session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
@@ -124,10 +128,10 @@ pub(crate) struct EngineCapabilityDeps {
         Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
-impl EngineCapabilityDeps {
+impl DomainSetupContext {
     pub(crate) fn from_context(ctx: &ServerCapabilityContext) -> Self {
         Self {
-            capability_context: Arc::new(ctx.clone()),
+            server_context: Arc::new(ctx.clone()),
             orchestrator: Arc::clone(&ctx.orchestrator),
             session_manager: Arc::clone(&ctx.session_manager),
             event_store: Arc::clone(&ctx.event_store),
@@ -190,7 +194,7 @@ pub(crate) type DomainHandlerFn<D> = for<'a> fn(
 pub(crate) fn all_worker_modules(
     ctx: &ServerCapabilityContext,
 ) -> crate::engine::Result<Vec<DomainWorkerModule>> {
-    let deps = EngineCapabilityDeps::from_context(ctx);
+    let deps = DomainSetupContext::from_context(ctx);
     let mut modules = vec![
         system::worker_module(&deps)?,
         codex_app::worker_module(&deps)?,
@@ -231,6 +235,7 @@ pub(crate) fn all_worker_modules(
 
 fn domain_worker_module<D>(
     namespace: &'static str,
+    stream_topics: &'static [&'static str],
     specs: Vec<catalog::CapabilitySpec>,
     deps: D,
     handler: DomainHandlerFn<D>,
@@ -252,7 +257,7 @@ where
     Ok(DomainWorkerModule {
         worker,
         functions,
-        stream_topics: &[],
+        stream_topics,
     })
 }
 
@@ -292,9 +297,9 @@ fn system_handler<'a>(
     deps: &'a system::Deps,
 ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
     Box::pin(async move {
-        let allow_capability_context =
+        let allow_server_context =
             matches!(invocation.causal_context.actor_kind, ActorKind::Client);
-        system::handle(method, invocation, deps, allow_capability_context).await
+        system::handle(method, invocation, deps, allow_server_context).await
     })
 }
 
@@ -304,9 +309,9 @@ fn model_handler<'a>(
     deps: &'a model::Deps,
 ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
     Box::pin(async move {
-        let allow_capability_context =
+        let allow_server_context =
             matches!(invocation.causal_context.actor_kind, ActorKind::Client);
-        model::handle(method, invocation, deps, allow_capability_context).await
+        model::handle(method, invocation, deps, allow_server_context).await
     })
 }
 

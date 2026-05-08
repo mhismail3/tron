@@ -1328,7 +1328,7 @@ async fn publish_prompt_runtime_stream(
 ) {
     let _ = engine_host
         .publish_stream_event(PublishStreamEvent {
-            topic: "agent.queue".to_owned(),
+            topic: crate::server::domains::agent::contract::STREAM_TOPICS[0].to_owned(),
             payload: serde_json::json!({
                 "type": format!("agent.prompt.{action}"),
                 "action": action,

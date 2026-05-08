@@ -6,6 +6,11 @@
 //! dispatch branches.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 pub(crate) mod git_workflow;
 
@@ -23,11 +28,12 @@ use super::*;
 use crate::engine::Invocation;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let worktree_deps = Deps::from_engine(deps);
     let mut module = super::domain_worker_module(
         "worktree",
+        contract::STREAM_TOPICS,
         Vec::new(),
         worktree_deps.clone(),
         super::worktree_handler,
@@ -56,48 +62,6 @@ pub(crate) fn worker_module(
             .collect::<crate::engine::Result<Vec<_>>>()?,
     );
     Ok(module)
-}
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    capability_context: Arc<ServerCapabilityContext>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            capability_context: deps.capability_context.clone(),
-        }
-    }
-}
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let params = Some(invocation.payload.clone());
-    let ctx = deps.capability_context.as_ref();
-    match method {
-        "worktree::get_status" => GetStatusOperation.run(params, ctx).await,
-        "worktree::is_git_repo" => IsGitRepoOperation.run(params, ctx).await,
-        "worktree::commit" => CommitOperation.run(params, ctx).await,
-        "worktree::merge" => MergeOperation.run(params, ctx).await,
-        "worktree::list" => ListOperation.run(params, ctx).await,
-        "worktree::get_diff" => GetDiffOperation.run(params, ctx).await,
-        "worktree::acquire" => AcquireOperation.run(params, ctx).await,
-        "worktree::release" => ReleaseOperation.run(params, ctx).await,
-        "worktree::list_session_branches" => ListSessionBranchesOperation.run(params, ctx).await,
-        "worktree::get_committed_diff" => GetCommittedDiffOperation.run(params, ctx).await,
-        "worktree::delete_branch" => DeleteBranchOperation.run(params, ctx).await,
-        "worktree::prune_branches" => PruneBranchesOperation.run(params, ctx).await,
-        "worktree::stage_files" => StageFilesOperation.run(params, ctx).await,
-        "worktree::unstage_files" => UnstageFilesOperation.run(params, ctx).await,
-        "worktree::discard_files" => DiscardFilesOperation.run(params, ctx).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("operation {method} is not worktree-owned"),
-        }),
-    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

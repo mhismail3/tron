@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["system.status"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -32,8 +34,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("system", "system:shutdown", 60000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "shutdown is irreversible for the current process; restart Tron manually"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"system:shutdown","kind":"system","reason":"serializes the graceful server shutdown command","required":true,"ttlMs":60000},"rollbackOrCompensation":"shutdown is irreversible for the current process; restart Tron manually","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"system:shutdown","kind":"system","reason":"serializes the graceful server shutdown command","required":true,"ttlMs":60000},"rollbackOrCompensation":"shutdown is irreversible for the current process; restart Tron manually","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("system::check_for_updates", "system", EffectClass::PureRead, RiskLevel::Low, Some("system.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))

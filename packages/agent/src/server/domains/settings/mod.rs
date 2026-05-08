@@ -4,60 +4,23 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "settings",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::settings_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps {
-    codex_app_server: Option<Arc<CodexAppServerManager>>,
-    engine_host: crate::engine::EngineHostHandle,
-    mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
-    profile_runtime: Arc<ProfileRuntime>,
-    settings_path: PathBuf,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            codex_app_server: deps.codex_app_server.clone(),
-            engine_host: deps.engine_host.clone(),
-            mcp_router: deps.mcp_router.clone(),
-            profile_runtime: deps.profile_runtime.clone(),
-            settings_path: deps.settings_path.clone(),
-        }
-    }
-}
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "settings::get" => {
-            serde_json::to_value(&deps.profile_runtime.current().settings).map_err(|error| {
-                CapabilityError::Internal {
-                    message: error.to_string(),
-                }
-            })
-        }
-        "settings::update" => settings_update_value(Some(payload), invocation, deps).await,
-        "settings::reset_to_defaults" => settings_reset_to_defaults_value(deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("settings method {method} is not engine-owned"),
-        }),
-    }
 }
 
 fn settings_error(error: crate::settings::SettingsError) -> CapabilityError {
@@ -310,7 +273,7 @@ async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
     );
     super::publish_engine_stream_event(
         &deps.engine_host,
-        "mcp",
+        contract::STREAM_TOPICS[0],
         "settings",
         event,
         Some(invocation),

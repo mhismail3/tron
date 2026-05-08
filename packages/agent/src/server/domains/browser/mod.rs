@@ -4,36 +4,21 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "browser",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::browser_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps;
-
-impl Deps {
-    pub(crate) fn from_engine(_deps: &EngineCapabilityDeps) -> Self {
-        Self
-    }
-}
-
-pub(super) async fn handle(method: &str, _deps: &Deps) -> Result<Value, CapabilityError> {
-    match method {
-        "browser::get_status" => Ok(json!({
-            "hasBrowser": false,
-            "isStreaming": false,
-        })),
-        _ => Err(CapabilityError::Internal {
-            message: format!("browser method {method} is not engine-owned"),
-        }),
-    }
 }

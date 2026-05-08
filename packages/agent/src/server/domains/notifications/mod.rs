@@ -4,51 +4,26 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "notifications",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::notifications_handler,
     )
 }
-#[derive(Clone)]
-pub(crate) struct Deps {
-    event_store: Arc<EventStore>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            event_store: deps.event_store.clone(),
-        }
-    }
-}
 
 pub(crate) mod inbox;
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "notifications::list" => notifications_list_value(Some(payload), deps).await,
-        "notifications::mark_read" => notifications_mark_read_value(Some(payload), deps).await,
-        "notifications::mark_all_read" => {
-            notifications_mark_all_read_value(Some(payload), deps).await
-        }
-        _ => Err(CapabilityError::Internal {
-            message: format!("notifications method {method} is not engine-owned"),
-        }),
-    }
-}
 
 async fn notifications_list_value(
     params: Option<&Value>,

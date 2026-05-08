@@ -40,7 +40,7 @@ pub(crate) async fn handle(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let params = Some(invocation.payload.clone());
-    let ctx = deps.capability_context.as_ref();
+    let ctx = deps.server_context.as_ref();
     match method {
         "git::sync_main" => SyncMainOperation.run(params, ctx).await,
         "git::push" => PushOperation.run(params, ctx).await,

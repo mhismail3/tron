@@ -4,11 +4,15 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_modules(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<Vec<DomainWorkerModule>> {
     let contracts = contract::capabilities()?;
     let model_specs = contracts
@@ -23,12 +27,14 @@ pub(crate) fn worker_modules(
     Ok(vec![
         super::domain_worker_module(
             "model",
+            contract::STREAM_TOPICS,
             model_specs,
             Deps::from_engine(deps),
             super::model_handler,
         )?,
         super::domain_worker_module(
             "config",
+            contract::STREAM_TOPICS,
             config_specs,
             Deps::from_engine(deps),
             super::model_handler,
@@ -36,53 +42,15 @@ pub(crate) fn worker_modules(
     ])
 }
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    auth_path: PathBuf,
-    capability_context: Arc<ServerCapabilityContext>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            auth_path: deps.auth_path.clone(),
-            capability_context: deps.capability_context.clone(),
-        }
-    }
-}
-
 pub(crate) mod catalog;
 use crate::server::domains::model::catalog as model_catalog;
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-    allow_capability_context: bool,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "model::list" => {
-            model_list_value(&invocation.payload, deps, allow_capability_context).await
-        }
-        "model::switch" => {
-            model_catalog::switch_model(Some(&invocation.payload), &deps.capability_context).await
-        }
-        "config::set_reasoning_level" => {
-            model_catalog::set_reasoning_level(Some(&invocation.payload), &deps.capability_context)
-                .await
-        }
-        _ => Err(CapabilityError::Internal {
-            message: format!("model method {method} is not engine-owned"),
-        }),
-    }
-}
 
 async fn model_list_value(
     payload: &Value,
     deps: &Deps,
-    allow_capability_context: bool,
+    allow_server_context: bool,
 ) -> Result<Value, CapabilityError> {
-    let auth_json_path = allow_capability_context
+    let auth_json_path = allow_server_context
         .then(|| {
             payload
                 .pointer("/__capabilityContext/authPath")

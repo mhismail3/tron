@@ -287,4 +287,53 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn domain_contract_stream_topics_are_domain_owned() {
+        let specs = canonical_capability_contracts().expect("canonical specs");
+        let engine_owned_topics = [
+            "catalog.changes",
+            "queue.lifecycle",
+            "resource.leases",
+            "approval.pending",
+            "approval.resolved",
+            "compensation.records",
+        ];
+
+        for spec in specs {
+            for topic in &spec.stream_topics {
+                assert!(
+                    !engine_owned_topics.contains(topic),
+                    "{} must not claim engine-owned stream topic {topic}",
+                    spec.function_id.as_str()
+                );
+                assert!(
+                    topic.contains('.'),
+                    "{} stream topic {topic} must use domain-scoped dotted form",
+                    spec.function_id.as_str()
+                );
+            }
+
+            if let Some(contract) = &spec.high_risk_contract {
+                let metadata_topics = contract
+                    .get("streamTopics")
+                    .and_then(serde_json::Value::as_array)
+                    .expect("high-risk contract streamTopics must be an array");
+                let metadata_topics = metadata_topics
+                    .iter()
+                    .map(|topic| {
+                        topic
+                            .as_str()
+                            .expect("high-risk contract streamTopics must contain strings")
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    metadata_topics,
+                    spec.stream_topics,
+                    "{} high-risk metadata must mirror its domain-owned stream topics",
+                    spec.function_id.as_str()
+                );
+            }
+        }
+    }
 }

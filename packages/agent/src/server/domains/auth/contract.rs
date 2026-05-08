@@ -10,6 +10,8 @@ use crate::engine::{
 use crate::server::domains::catalog::CapabilitySpec;
 use crate::server::domains::contract::CapabilityContract;
 
+pub(crate) const STREAM_TOPICS: &[&str] = &["auth.accounts"];
+
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -24,8 +26,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("auth::clear", "auth", EffectClass::IdempotentWrite, RiskLevel::High, Some("auth.write"))
             .approval_required(true)
@@ -34,8 +36,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("auth::oauth_begin", "auth", EffectClass::IdempotentWrite, RiskLevel::High, Some("auth.write"))
             .approval_required(true)
@@ -44,8 +46,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("auth::oauth_complete", "auth", EffectClass::IdempotentWrite, RiskLevel::High, Some("auth.write"))
             .approval_required(true)
@@ -54,8 +56,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"auth changes are masked in responses; manual auth.json recovery or inverse credential commands are available","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("auth::rename_account", "auth", EffectClass::IdempotentWrite, RiskLevel::High, Some("auth.write"))
             .approval_required(true)
@@ -64,8 +66,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "account/key changes can be manually restored through auth update or OAuth login"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("auth::set_active", "auth", EffectClass::IdempotentWrite, RiskLevel::High, Some("auth.write"))
             .approval_required(true)
@@ -74,8 +76,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "account/key changes can be manually restored through auth update or OAuth login"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("auth::remove_account", "auth", EffectClass::IdempotentWrite, RiskLevel::High, Some("auth.write"))
             .approval_required(true)
@@ -84,8 +86,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "account/key changes can be manually restored through auth update or OAuth login"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("auth::remove_api_key", "auth", EffectClass::IdempotentWrite, RiskLevel::High, Some("auth.write"))
             .approval_required(true)
@@ -94,8 +96,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("auth", "auth:auth-json", 60000))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "account/key changes can be manually restored through auth update or OAuth login"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics":["resource.leases","catalog.changes"],"version":1}))
-            .stream_topics(vec!["resource.leases", "catalog.changes"])
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"auth:auth-json","kind":"auth","reason":"serializes credential-file mutation, OAuth flow mutation, and auth broadcasts","required":true,"ttlMs":60000},"rollbackOrCompensation":"account/key changes can be manually restored through auth update or OAuth login","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])
 }

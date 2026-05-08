@@ -4,6 +4,11 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -11,30 +16,15 @@ use std::path::Path;
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "auth",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::auth_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps {
-    auth_path: PathBuf,
-    capability_context: Arc<ServerCapabilityContext>,
-    engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            auth_path: deps.auth_path.clone(),
-            capability_context: deps.capability_context.clone(),
-            engine_host: deps.engine_host.clone(),
-        }
-    }
 }
 
 pub(crate) mod flows;
@@ -55,34 +45,12 @@ const KNOWN_SERVICES: &[&str] = &["brave", "exa"];
 const OAUTH_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "google"];
 const OAUTH_FLOW_TTL_SECS: u64 = 600;
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    match method {
-        "auth::get" => auth_get(deps).await,
-        "auth::update" => auth_update(invocation, deps).await,
-        "auth::clear" => auth_clear(invocation, deps).await,
-        "auth::oauth_begin" => auth_oauth_begin(&invocation.payload, deps).await,
-        "auth::oauth_complete" => auth_oauth_complete(invocation, deps).await,
-        "auth::rename_account" => auth_rename_account(invocation, deps).await,
-        "auth::set_active" => auth_set_active(invocation, deps).await,
-        "auth::remove_account" => auth_remove_account(invocation, deps).await,
-        "auth::remove_api_key" => auth_remove_api_key(invocation, deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("auth method {method} is not engine-owned"),
-        }),
-    }
-}
-
 async fn auth_get(deps: &Deps) -> Result<Value, CapabilityError> {
     let auth_path = deps.auth_path.clone();
-    deps.capability_context
-        .run_blocking("auth::get", move || {
-            build_masked_state(&auth_path).map_err(map_auth_error)
-        })
-        .await
+    run_blocking_task("auth::get", move || {
+        build_masked_state(&auth_path).map_err(map_auth_error)
+    })
+    .await
 }
 
 async fn auth_update(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
@@ -98,32 +66,30 @@ async fn auth_update(invocation: &Invocation, deps: &Deps) -> Result<Value, Capa
 
     let auth_path = deps.auth_path.clone();
     let payload = payload.clone();
-    let masked_state = deps
-        .capability_context
-        .run_blocking("auth::update", move || {
-            let _lock =
-                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
-                    message: format!("Failed to acquire auth lock: {error}"),
-                })?;
+    let masked_state = run_blocking_task("auth::update", move || {
+        let _lock =
+            acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                message: format!("Failed to acquire auth lock: {error}"),
+            })?;
 
-            if let Some(ref provider) = provider {
-                if !KNOWN_PROVIDERS.contains(&provider.as_str()) {
-                    return Err(CapabilityError::InvalidParams {
-                        message: format!("Unknown provider: {provider}"),
-                    });
-                }
-                if provider == "google" {
-                    update_google_provider(&auth_path, Some(&payload))?;
-                } else {
-                    update_standard_provider(&auth_path, provider, Some(&payload))?;
-                }
-            } else if let Some(ref service) = service {
-                update_service(&auth_path, service, Some(&payload))?;
+        if let Some(ref provider) = provider {
+            if !KNOWN_PROVIDERS.contains(&provider.as_str()) {
+                return Err(CapabilityError::InvalidParams {
+                    message: format!("Unknown provider: {provider}"),
+                });
             }
+            if provider == "google" {
+                update_google_provider(&auth_path, Some(&payload))?;
+            } else {
+                update_standard_provider(&auth_path, provider, Some(&payload))?;
+            }
+        } else if let Some(ref service) = service {
+            update_service(&auth_path, service, Some(&payload))?;
+        }
 
-            build_masked_state(&auth_path).map_err(map_auth_error)
-        })
-        .await?;
+        build_masked_state(&auth_path).map_err(map_auth_error)
+    })
+    .await?;
 
     broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
@@ -141,23 +107,21 @@ async fn auth_clear(invocation: &Invocation, deps: &Deps) -> Result<Value, Capab
     }
 
     let auth_path = deps.auth_path.clone();
-    let masked_state = deps
-        .capability_context
-        .run_blocking("auth::clear", move || {
-            let _lock =
-                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
-                    message: format!("Failed to acquire auth lock: {error}"),
-                })?;
+    let masked_state = run_blocking_task("auth::clear", move || {
+        let _lock =
+            acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                message: format!("Failed to acquire auth lock: {error}"),
+            })?;
 
-            if let Some(ref provider) = provider {
-                clear_provider_auth(&auth_path, provider).map_err(map_auth_error)?;
-            } else if let Some(ref service) = service {
-                clear_service_auth(&auth_path, service).map_err(map_auth_error)?;
-            }
+        if let Some(ref provider) = provider {
+            clear_provider_auth(&auth_path, provider).map_err(map_auth_error)?;
+        } else if let Some(ref service) = service {
+            clear_service_auth(&auth_path, service).map_err(map_auth_error)?;
+        }
 
-            build_masked_state(&auth_path).map_err(map_auth_error)
-        })
-        .await?;
+        build_masked_state(&auth_path).map_err(map_auth_error)
+    })
+    .await?;
 
     broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
@@ -223,7 +187,7 @@ async fn auth_oauth_begin(payload: &Value, deps: &Deps) -> Result<Value, Capabil
     };
 
     let flow_id = uuid::Uuid::now_v7().to_string();
-    let mut flows = deps.capability_context.oauth_flows.lock().await;
+    let mut flows = deps.oauth_flows.lock().await;
     flows.retain(|_, flow| {
         flow.created_at.elapsed() < std::time::Duration::from_secs(OAUTH_FLOW_TTL_SECS)
     });
@@ -252,7 +216,7 @@ async fn auth_oauth_complete(
     let label = require_string_param(Some(payload), "label")?;
 
     let flow = {
-        let mut flows = deps.capability_context.oauth_flows.lock().await;
+        let mut flows = deps.oauth_flows.lock().await;
         flows.remove(&flow_id)
     }
     .ok_or_else(|| CapabilityError::InvalidParams {
@@ -314,25 +278,23 @@ async fn auth_oauth_complete(
 
     let auth_path = deps.auth_path.clone();
     let provider_key = flow.provider;
-    let masked_state = deps
-        .capability_context
-        .run_blocking("auth::oauth_complete", move || {
-            let _lock =
-                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
-                    message: format!("Failed to acquire auth lock: {error}"),
-                })?;
+    let masked_state = run_blocking_task("auth::oauth_complete", move || {
+        let _lock =
+            acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                message: format!("Failed to acquire auth lock: {error}"),
+            })?;
 
-            crate::llm::auth::storage::save_account_oauth_tokens(
-                &auth_path,
-                &provider_key,
-                &label,
-                &tokens,
-            )
-            .map_err(map_auth_error)?;
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &auth_path,
+            &provider_key,
+            &label,
+            &tokens,
+        )
+        .map_err(map_auth_error)?;
 
-            build_masked_state(&auth_path).map_err(map_auth_error)
-        })
-        .await?;
+        build_masked_state(&auth_path).map_err(map_auth_error)
+    })
+    .await?;
 
     broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
@@ -417,17 +379,15 @@ where
     F: FnOnce(&Path) -> Result<(), CapabilityError> + Send + 'static,
 {
     let auth_path = deps.auth_path.clone();
-    let masked_state = deps
-        .capability_context
-        .run_blocking(task_name, move || {
-            let _lock =
-                acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
-                    message: format!("Failed to acquire auth lock: {error}"),
-                })?;
-            mutate(&auth_path)?;
-            build_masked_state(&auth_path).map_err(map_auth_error)
-        })
-        .await?;
+    let masked_state = run_blocking_task(task_name, move || {
+        let _lock =
+            acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
+                message: format!("Failed to acquire auth lock: {error}"),
+            })?;
+        mutate(&auth_path)?;
+        build_masked_state(&auth_path).map_err(map_auth_error)
+    })
+    .await?;
     broadcast_auth_updated(deps, invocation, &masked_state).await;
     Ok(masked_state)
 }
@@ -772,6 +732,12 @@ fn mask_key(key: &str) -> String {
 
 async fn broadcast_auth_updated(deps: &Deps, invocation: &Invocation, masked_state: &Value) {
     let event = ServerEventPayload::new("auth.updated", None, Some(masked_state.clone()));
-    super::publish_engine_stream_event(&deps.engine_host, "auth", "auth", event, Some(invocation))
-        .await;
+    super::publish_engine_stream_event(
+        &deps.engine_host,
+        contract::STREAM_TOPICS[0],
+        "auth",
+        event,
+        Some(invocation),
+    )
+    .await;
 }

@@ -4,61 +4,24 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "session",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::session_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps {
-    auth_path: PathBuf,
-    codex_app_server: Option<Arc<CodexAppServerManager>>,
-    engine_host: crate::engine::EngineHostHandle,
-    event_store: Arc<EventStore>,
-    job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
-    mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
-    onboarded_marker_path: PathBuf,
-    orchestrator: Arc<Orchestrator>,
-    output_buffer_registry:
-        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
-    process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
-    profile_runtime: Arc<ProfileRuntime>,
-    server_start_time: Instant,
-    session_manager: Arc<SessionManager>,
-    settings_path: PathBuf,
-    skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
-    ws_port: Arc<AtomicU16>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            auth_path: deps.auth_path.clone(),
-            codex_app_server: deps.codex_app_server.clone(),
-            engine_host: deps.engine_host.clone(),
-            event_store: deps.event_store.clone(),
-            job_manager: deps.job_manager.clone(),
-            mcp_router: deps.mcp_router.clone(),
-            onboarded_marker_path: deps.onboarded_marker_path.clone(),
-            orchestrator: deps.orchestrator.clone(),
-            output_buffer_registry: deps.output_buffer_registry.clone(),
-            process_manager: deps.process_manager.clone(),
-            profile_runtime: deps.profile_runtime.clone(),
-            server_start_time: deps.server_start_time,
-            session_manager: deps.session_manager.clone(),
-            settings_path: deps.settings_path.clone(),
-            skill_registry: deps.skill_registry.clone(),
-            ws_port: deps.ws_port.clone(),
-        }
-    }
 }
 
 pub(crate) mod commands;
@@ -66,41 +29,13 @@ pub mod context;
 pub(crate) mod queries;
 pub(crate) mod reconstruct;
 
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "session::create" => session_create_value(Some(payload), deps).await,
-        "session::resume" => session_resume_value(Some(payload), deps).await,
-        "session::list" => session_list_value(Some(payload), deps).await,
-        "session::delete" => session_delete_value(Some(payload), deps).await,
-        "session::fork" => session_fork_value(Some(payload), deps).await,
-        "session::get_head" => session_get_head_value(Some(payload), deps).await,
-        "session::get_state" => session_get_state_value(Some(payload), deps).await,
-        "session::get_history" => session_get_history_value(Some(payload), deps).await,
-        "session::reconstruct" => session_reconstruct_value(Some(payload), deps).await,
-        "session::archive" => session_archive_value(Some(payload), deps).await,
-        "session::unarchive" => session_unarchive_value(Some(payload), deps).await,
-        "session::archive_older_than" => {
-            session_archive_older_than_value(Some(payload), deps).await
-        }
-        "session::export" => session_export_value(Some(payload), deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("session method {method} is not engine-owned"),
-        }),
-    }
-}
-
 async fn session_resume_value(
     params: Option<&Value>,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::resume(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
     )
     .await
@@ -118,7 +53,7 @@ async fn session_create_value(
     let profile = opt_string(params, "profile");
     let use_worktree = opt_bool(params, "useWorktree");
     crate::server::domains::session::commands::SessionCommandService::create(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         crate::server::domains::session::commands::CreateSessionRequest {
             working_directory,
             model,
@@ -138,7 +73,7 @@ async fn session_list_value(params: Option<&Value>, deps: &Deps) -> Result<Value
         .and_then(Value::as_u64)
         .map(|value| value as usize);
     crate::server::domains::session::queries::SessionQueryService::list(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         include_archived,
         limit,
     )
@@ -151,7 +86,7 @@ async fn session_get_head_value(
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::get_head(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
     )
     .await
@@ -163,7 +98,7 @@ async fn session_delete_value(
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::commands::SessionCommandService::delete(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
     )
     .await
@@ -174,7 +109,7 @@ async fn session_fork_value(params: Option<&Value>, deps: &Deps) -> Result<Value
     let from_event_id = opt_string(params, "fromEventId");
     let title = opt_string(params, "title");
     crate::server::domains::session::commands::SessionCommandService::fork(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
         from_event_id,
         title,
@@ -188,7 +123,7 @@ async fn session_get_state_value(
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::get_state(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
     )
     .await
@@ -205,7 +140,7 @@ async fn session_get_history_value(
         .map(|value| value as usize);
     let before_id = opt_string(params, "beforeId");
     crate::server::domains::session::queries::SessionQueryService::get_history(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
         limit,
         before_id,
@@ -226,7 +161,7 @@ async fn session_reconstruct_value(
         .and_then(|p| p.get("beforeSequence"))
         .and_then(Value::as_i64);
     crate::server::domains::session::reconstruct::SessionReconstructService::reconstruct(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
         limit,
         before_sequence,
@@ -240,7 +175,7 @@ async fn session_archive_value(
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::commands::SessionCommandService::archive(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
     )
     .await
@@ -252,7 +187,7 @@ async fn session_unarchive_value(
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::commands::SessionCommandService::unarchive(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
     )
     .await
@@ -270,7 +205,7 @@ async fn session_archive_older_than_value(
         })?;
     let days = u32::try_from(days_raw).unwrap_or(u32::MAX);
     crate::server::domains::session::commands::SessionCommandService::archive_older_than(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         days,
     )
     .await
@@ -282,13 +217,13 @@ async fn session_export_value(
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     crate::server::domains::session::queries::SessionQueryService::export(
-        &capability_context_view(deps),
+        &server_context_view(deps),
         session_id,
     )
     .await
 }
 
-pub(super) fn capability_context_view(deps: &Deps) -> ServerCapabilityContext {
+pub(super) fn server_context_view(deps: &Deps) -> ServerCapabilityContext {
     ServerCapabilityContext {
         orchestrator: Arc::clone(&deps.orchestrator),
         session_manager: Arc::clone(&deps.session_manager),

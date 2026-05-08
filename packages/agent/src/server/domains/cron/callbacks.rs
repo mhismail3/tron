@@ -116,7 +116,7 @@ impl CronEventPublisher {
         if let Err(error) = self
             .engine_host
             .publish_stream_event(PublishStreamEvent {
-                topic: "cron".to_owned(),
+                topic: crate::server::domains::cron::contract::STREAM_TOPICS[0].to_owned(),
                 payload: json!({
                     "serverEvent": event.clone(),
                     "sourceEventType": event.event_type.clone(),

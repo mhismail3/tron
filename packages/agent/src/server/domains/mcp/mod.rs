@@ -4,6 +4,11 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+pub(crate) mod operations;
+pub(crate) use deps::Deps;
+pub(super) use handlers::handle;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -11,28 +16,15 @@ use serde_json::{Value, json};
 use super::*;
 
 pub(crate) fn worker_module(
-    deps: &EngineCapabilityDeps,
+    deps: &DomainSetupContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     super::domain_worker_module(
         "mcp",
+        contract::STREAM_TOPICS,
         contract::capabilities()?,
         Deps::from_engine(deps),
         super::mcp_handler,
     )
-}
-#[derive(Clone)]
-pub(crate) struct Deps {
-    engine_host: crate::engine::EngineHostHandle,
-    mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &EngineCapabilityDeps) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-            mcp_router: deps.mcp_router.clone(),
-        }
-    }
 }
 
 use crate::engine::{
@@ -43,27 +35,6 @@ use crate::engine::{
 use crate::mcp::tool_index::ParamSummary;
 use crate::mcp::tool_projection::mcp_result_to_tron_result;
 use crate::mcp::types::McpServerConfig;
-
-pub(super) async fn handle(
-    method: &str,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let payload = &invocation.payload;
-    match method {
-        "mcp::status" => mcp_status_value(deps).await,
-        "mcp::add_server" => mcp_add_server_value(Some(payload), invocation, deps).await,
-        "mcp::remove_server" => mcp_remove_server_value(Some(payload), invocation, deps).await,
-        "mcp::enable_server" => mcp_enable_server_value(Some(payload), invocation, deps).await,
-        "mcp::disable_server" => mcp_disable_server_value(Some(payload), invocation, deps).await,
-        "mcp::restart_server" => mcp_restart_server_value(Some(payload), invocation, deps).await,
-        "mcp::reload" => mcp_reload_value(invocation, deps).await,
-        "mcp::list_tools" => mcp_list_tools_value(Some(payload), deps).await,
-        _ => Err(CapabilityError::Internal {
-            message: format!("mcp method {method} is not engine-owned"),
-        }),
-    }
-}
 
 fn require_router(
     deps: &Deps,
@@ -276,8 +247,14 @@ async fn publish_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
         return;
     };
     let event = ServerEventPayload::new("mcp.status_changed", None, Some(status));
-    super::publish_engine_stream_event(&deps.engine_host, "mcp", "mcp", event, Some(invocation))
-        .await;
+    super::publish_engine_stream_event(
+        &deps.engine_host,
+        contract::STREAM_TOPICS[0],
+        "mcp",
+        event,
+        Some(invocation),
+    )
+    .await;
 }
 
 async fn refresh_mcp_tool_catalog(deps: &Deps) {
