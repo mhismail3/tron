@@ -4,9 +4,38 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use super::*;
+
+pub(crate) fn worker_modules(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<Vec<DomainWorkerModule>> {
+    let contracts = contract::capabilities()?;
+    let model_specs = contracts
+        .iter()
+        .filter(|spec| spec.owner_worker.as_str() == "model")
+        .cloned()
+        .collect::<Vec<_>>();
+    let config_specs = contracts
+        .into_iter()
+        .filter(|spec| spec.owner_worker.as_str() == "config")
+        .collect::<Vec<_>>();
+    Ok(vec![
+        super::domain_worker_module(
+            "model",
+            model_specs,
+            Deps::from_engine(deps),
+            super::model_handler,
+        )?,
+        super::domain_worker_module(
+            "config",
+            config_specs,
+            Deps::from_engine(deps),
+            super::model_handler,
+        )?,
+    ])
+}
+
 #[derive(Clone)]
 pub(crate) struct Deps {
     auth_path: PathBuf,

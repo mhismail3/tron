@@ -18,9 +18,24 @@
 //!    transport never owns agent behavior.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use super::*;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    let mut module = super::domain_worker_module(
+        "agent",
+        contract::capabilities()?,
+        Deps::from_engine(deps),
+        super::agent_handler,
+    )?;
+    module
+        .functions
+        .extend(hidden_function_registrations(deps)?);
+    Ok(module)
+}
+
 #[derive(Clone)]
 pub(crate) struct Deps {
     agent_deps: Option<crate::server::shared::context::AgentDeps>,
@@ -112,6 +127,7 @@ pub(super) async fn handle(
 pub(crate) fn hidden_function_registrations(
     deps: &EngineCapabilityDeps,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    let domain_deps = Deps::from_engine(deps);
     let hidden = [
         (
             "agent::prompt_apply",
@@ -161,7 +177,7 @@ pub(crate) fn hidden_function_registrations(
                 definition,
                 handler: Arc::new(DomainFunctionHandler {
                     method: id,
-                    deps: deps.clone(),
+                    deps: domain_deps.clone(),
                     handler: super::agent_handler,
                 }),
             })

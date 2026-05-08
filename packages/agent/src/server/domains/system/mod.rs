@@ -4,11 +4,21 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use std::collections::BTreeMap;
 
 use super::*;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    super::domain_worker_module(
+        "system",
+        contract::capabilities()?,
+        Deps::from_engine(deps),
+        super::system_handler,
+    )
+}
 #[derive(Clone)]
 pub(crate) struct Deps {
     capability_context: Arc<ServerCapabilityContext>,
@@ -121,7 +131,8 @@ fn system_diagnostics_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let uptime = deps.server_start_time.elapsed().as_secs();
     let active_sessions = deps.orchestrator.active_session_count();
     let active_runs = deps.orchestrator.active_run_count();
-    let transport_messages = super::catalog::public_engine_transport_methods()
+    let transport_messages = ["discover", "inspect", "watch", "invoke", "promote"]
+        .into_iter()
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
     let total_messages = transport_messages.len();
@@ -133,8 +144,14 @@ fn system_diagnostics_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let canonical_functions = super::catalog::canonical_capability_specs()
         .map(|specs| specs.len())
         .unwrap_or_default();
-    let domain_workers = super::catalog::domain_workers()
-        .map(|workers| workers.len())
+    let domain_workers = super::catalog::canonical_capability_specs()
+        .map(|specs| {
+            specs
+                .into_iter()
+                .map(|spec| spec.owner_worker.as_str().to_owned())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        })
         .unwrap_or_default();
     Ok(json!({
         "server": {

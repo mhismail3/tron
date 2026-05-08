@@ -4,12 +4,27 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use chrono::Utc;
 use serde_json::{Value, json};
 
 use super::*;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    let mut module = super::domain_worker_module(
+        "cron",
+        contract::capabilities()?,
+        Deps::from_engine(deps),
+        super::cron_handler,
+    )?;
+    module
+        .functions
+        .extend(hidden_function_registrations(deps)?);
+    Ok(module)
+}
+
 #[derive(Clone)]
 pub(crate) struct Deps {
     capability_context: Arc<ServerCapabilityContext>,
@@ -96,6 +111,7 @@ pub(super) async fn handle(
 pub(crate) fn hidden_function_registrations(
     deps: &EngineCapabilityDeps,
 ) -> EngineResult<Vec<DomainFunctionRegistration>> {
+    let domain_deps = Deps::from_engine(deps);
     let mut definition = FunctionDefinition::new(
         FunctionId::new("cron::scheduled_fire")?,
         catalog::worker_id("cron")?,
@@ -142,7 +158,7 @@ pub(crate) fn hidden_function_registrations(
         definition,
         handler: Arc::new(DomainFunctionHandler {
             method: "cron::scheduled_fire",
-            deps: deps.clone(),
+            deps: domain_deps,
             handler: super::cron_handler,
         }),
     }])

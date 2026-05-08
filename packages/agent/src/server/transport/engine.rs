@@ -13,10 +13,12 @@ use crate::engine::{
     ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, InvocationId, TraceId,
     TriggerDispatchRequest, TriggerId,
 };
-use crate::server::domains::catalog::{self, TransportIdempotencyMode};
+use crate::server::domains::catalog;
+use crate::server::domains::catalog::TransportIdempotencyMode;
 use crate::server::shared::context::ServerCapabilityContext;
 use crate::server::shared::error_mapping::engine_error_to_capability_error;
 use crate::server::shared::errors::CapabilityError;
+use crate::server::transport::contracts;
 
 /// Optional context supplied by a transport message.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -69,7 +71,7 @@ pub struct EngineTransportRequest {
 pub fn build_engine_transport_request(
     input: EngineTransportBuildRequest,
 ) -> Result<Option<EngineTransportRequest>, CapabilityError> {
-    let spec = catalog::public_engine_transport_spec_for_method(&input.public_method)
+    let spec = contracts::public_engine_transport_spec_for_method(&input.public_method)
         .map_err(engine_error_to_capability_error)?;
     let Some(spec) = spec else {
         return Ok(None);
@@ -132,7 +134,7 @@ pub fn build_engine_transport_request(
         transport: "engine_ws".to_owned(),
         public_method: input.public_method,
         function_id: spec.function_id,
-        trigger_id: catalog::engine_ws_trigger_id_for_method(spec.method)
+        trigger_id: contracts::engine_ws_trigger_id_for_method(spec.method)
             .map_err(engine_error_to_capability_error)?,
         payload,
         causal_context,

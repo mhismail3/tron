@@ -168,7 +168,7 @@ impl TronTool for DisplayTool {
              - **image**: Show an image from a file path (e.g., ComputerUse screenshot path) \
              or inline base64 data\n\
              - **images**: Show multiple images in a gallery\n\
-             - **stream**: Open a live-updating view (for browser streams, log tails, etc.)\n\
+             - **stream**: Open a live-updating view (for log tails, generated previews, etc.)\n\
              - **webview**: Show a web page in an embedded browser (generated UIs, dashboards, etc.)\n\n\
              To stop an active stream, call with type=\"stream\", action=\"stop\", and the streamId.",
         )

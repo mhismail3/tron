@@ -4,9 +4,24 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use super::*;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    let mut module = super::domain_worker_module(
+        "job",
+        contract::capabilities()?,
+        Deps::from_engine(deps),
+        super::job_handler,
+    )?;
+    module
+        .functions
+        .extend(hidden_function_registrations(deps)?);
+    Ok(module)
+}
+
 #[derive(Clone)]
 pub(crate) struct Deps {
     engine_host: crate::engine::EngineHostHandle,
@@ -83,6 +98,7 @@ pub(super) async fn handle(
 pub(crate) fn hidden_function_registrations(
     deps: &EngineCapabilityDeps,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    let domain_deps = Deps::from_engine(deps);
     [
         (
             "job::background_apply",
@@ -112,11 +128,16 @@ pub(crate) fn hidden_function_registrations(
             "hidden job apply functions delegate to the process manager; queue/idempotency records prevent duplicate starts or cancellations",
         ))
         .with_provenance(Provenance::system());
-        if let Some(schema) = crate::server::domains::contract::request_schema_for_method(public_method) {
-            definition = definition.with_request_schema(schema);
-        }
-        if let Some(schema) = crate::server::domains::contract::response_schema_for_method(public_method) {
-            definition = definition.with_response_schema(schema);
+        if let Some(public_contract) = contract::capabilities()?
+            .into_iter()
+            .find(|spec| spec.method == public_method)
+        {
+            if let Some(schema) = public_contract.request_schema {
+                definition = definition.with_request_schema(schema);
+            }
+            if let Some(schema) = public_contract.response_schema {
+                definition = definition.with_response_schema(schema);
+            }
         }
         definition.metadata = json!({
             "internal": true,
@@ -127,7 +148,7 @@ pub(crate) fn hidden_function_registrations(
             definition,
             handler: Arc::new(DomainFunctionHandler {
                 method: id,
-                deps: deps.clone(),
+                deps: domain_deps.clone(),
                 handler: super::job_handler,
             }),
         })

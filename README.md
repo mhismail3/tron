@@ -172,7 +172,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
 | `server` | HTTP/WS + pure engine protocol | `TronServer`, `ServerCapabilityContext`, `EngineStreamEventPump` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
-| `server::domains` | Domain-owned worker/function surface | `all_worker_modules()`, `DomainFunctionHandler`, per-domain `contract.rs` + `spec.rs` modules |
+| `server::domains` | Domain-owned worker/function surface | `all_worker_modules()`, typed `DomainFunctionHandler`, per-domain `contract.rs` modules |
 | `server::runtime` | Engine runtime services | `EngineRuntimeServices`, `EngineStreamEventPump`, external worker runtime |
 | `server::platform::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
 | `server::shared` | Transport-neutral server helpers | `ServerCapabilityContext`, `CapabilityError`, `ServerEventPayload` |

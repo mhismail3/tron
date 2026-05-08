@@ -1,9 +1,18 @@
 //! Capability contracts owned by the browser domain worker.
 
-use crate::engine::Result as EngineResult;
+#[allow(unused_imports)]
+use serde_json::json;
+
+use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
 use crate::server::domains::catalog::CapabilitySpec;
+use crate::server::domains::contract::CapabilityContract;
 
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
-    crate::server::domains::contract::capability_specs_for_methods(super::spec::FUNCTIONS)
+    Ok(vec![
+        CapabilityContract::new("browser::get_status", "browser", EffectClass::PureRead, RiskLevel::Low, Some("browser.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"hasBrowser":{"type":"boolean"},"isStreaming":{"type":"boolean"}},"required":["hasBrowser","isStreaming"],"type":"object"}))
+            .build()?
+    ])
 }

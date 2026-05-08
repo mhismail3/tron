@@ -107,12 +107,12 @@ packages/ios-app/
 │   │   └── TronMobileApp.swift     # App entry point
 │   ├── Models/
 │   │   ├── AnyCodable.swift        # Dynamic JSON handling
+│   │   ├── EngineProtocol/         # /engine protocol frames and payloads
 │   │   ├── Events.swift            # Server event types
-│   │   ├── Message.swift           # Chat message models
-│   │   └── RPCTypes.swift          # JSON-RPC types
+│   │   └── Message.swift           # Chat message models
 │   ├── Services/
-│   │   ├── RPCClient.swift         # High-level RPC client
-│   │   └── WebSocketService.swift  # WebSocket connection
+│   │   ├── Network/                # Engine client, connection, and domain clients
+│   │   └── CodexApp/               # Direct Codex App Server product protocol
 │   ├── ViewModels/
 │   │   └── ChatViewModel.swift     # Chat state management
 │   ├── Views/

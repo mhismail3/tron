@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for media-related engine capabilities.
-/// Handles transcription, voice notes, and browser streaming.
+/// Handles transcription, voice notes, and browser status.
 final class MediaClient: EngineDomainClient {
 
     // MARK: - Transcription Methods
@@ -80,43 +80,6 @@ final class MediaClient: EngineDomainClient {
     }
 
     // MARK: - Browser Methods
-
-    /// Start browser frame streaming for a session
-    /// - Parameters:
-    ///   - sessionId: The session to stream from
-    ///   - quality: JPEG quality (0-100, default 60)
-    ///   - maxWidth: Max frame width (default 1280)
-    ///   - maxHeight: Max frame height (default 960)
-    ///   - everyNthFrame: Skip frames for battery savings (default 1 = ~10 FPS)
-    func startBrowserStream(
-        sessionId: String,
-        quality: Int = 60,
-        maxWidth: Int = 1280,
-        maxHeight: Int = 960,
-        everyNthFrame: Int = 1,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> BrowserStartStreamResult {
-        _ = try requireTransport().requireConnection()
-
-        let params = BrowserStartStreamParams(
-            sessionId: sessionId,
-            quality: quality,
-            maxWidth: maxWidth,
-            maxHeight: maxHeight,
-            format: "jpeg",
-            everyNthFrame: everyNthFrame
-        )
-
-        return try await invokeWrite("browser::start_stream", params, idempotencyKey: idempotencyKey)
-    }
-
-    /// Stop browser frame streaming for a session
-    func stopBrowserStream(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws -> BrowserStopStreamResult {
-        _ = try requireTransport().requireConnection()
-
-        let params = BrowserStopStreamParams(sessionId: sessionId)
-        return try await invokeWrite("browser::stop_stream", params, idempotencyKey: idempotencyKey)
-    }
 
     /// Get browser status for a session
     func getBrowserStatus(sessionId: String) async throws -> BrowserGetStatusResult {

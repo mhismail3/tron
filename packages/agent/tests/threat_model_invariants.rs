@@ -298,8 +298,8 @@ fn server_package_uses_domain_owned_engine_layout() {
             "domain worker module `{domain_name}` must own a contract.rs file"
         );
         assert!(
-            path.join("spec.rs").is_file(),
-            "domain worker module `{domain_name}` must own a spec.rs file"
+            !path.join("spec.rs").exists(),
+            "domain worker module `{domain_name}` must not split contract truth into spec.rs"
         );
     }
     for required in [
@@ -315,8 +315,8 @@ fn server_package_uses_domain_owned_engine_layout() {
             "domain worker module `{required}` must own its capability contracts"
         );
         assert!(
-            domain_root.join("spec.rs").is_file(),
-            "domain worker module `{required}` must own its canonical function inventory"
+            !domain_root.join("spec.rs").exists(),
+            "domain worker module `{required}` must keep its canonical function inventory in contract.rs"
         );
     }
     assert!(
@@ -340,10 +340,67 @@ fn server_package_uses_domain_owned_engine_layout() {
     );
     let catalog = std::fs::read_to_string(domains_root.join("catalog.rs"))
         .expect("failed to read server/domains/catalog.rs");
-    assert!(
-        !catalog.contains("CAPABILITY_SEEDS") && !catalog.contains("capability_seed!"),
-        "canonical function inventories must live with domain workers, not a central seed table"
-    );
+    for removed in [
+        "CAPABILITY_SEEDS",
+        "capability_seed!",
+        "canonical_parts_for_method",
+        "domain_worker_for_method",
+        "domain_authority_scope_for_method",
+        "capability_spec_for_method",
+        "capability_specs_for_methods",
+        "request_schema_for_method",
+        "response_schema_for_method",
+    ] {
+        assert!(
+            !catalog.contains(removed),
+            "catalog must aggregate domain-owned contracts, not retain central `{removed}` logic"
+        );
+    }
+    let shared_contract = std::fs::read_to_string(domains_root.join("contract.rs"))
+        .expect("failed to read server/domains/contract.rs");
+    for removed in [
+        "match method",
+        "capability_specs_for_methods",
+        "capability_spec_for_method",
+        "request_schema_for_method",
+        "response_schema_for_method",
+        "domain_authority_scope_for_method",
+    ] {
+        assert!(
+            !shared_contract.contains(removed),
+            "shared contract builder must stay method-agnostic and not retain `{removed}`"
+        );
+    }
+}
+
+#[test]
+fn retired_browser_stream_capabilities_stay_deleted() {
+    let repo_root = repo_root();
+    for root in [
+        crate_root().join("src/server"),
+        repo_root.join("packages/ios-app/Sources"),
+        repo_root.join("packages/ios-app/Tests"),
+        repo_root.join("README.md"),
+    ] {
+        for path in files_to_scan(&root) {
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            for removed in [
+                "browser::start_stream",
+                "browser::stop_stream",
+                "BrowserStartStream",
+                "BrowserStopStream",
+                "startBrowserStream",
+                "stopBrowserStream",
+            ] {
+                assert!(
+                    !content.contains(removed),
+                    "{} contains retired browser stream capability `{removed}`",
+                    path.strip_prefix(&repo_root).unwrap_or(&path).display()
+                );
+            }
+        }
+    }
 }
 
 #[test]

@@ -4,11 +4,21 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use base64::Engine;
 
 use super::*;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    super::domain_worker_module(
+        "blob",
+        contract::capabilities()?,
+        Deps::from_engine(deps),
+        super::blob_handler,
+    )
+}
 #[derive(Clone)]
 pub(crate) struct Deps {
     capability_context: Arc<ServerCapabilityContext>,

@@ -6,7 +6,6 @@
 //! metadata.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 pub(crate) mod service;
 
@@ -21,6 +20,33 @@ use crate::server::shared::params::require_string_param;
 
 use super::*;
 use crate::engine::Invocation;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    let git_deps = Deps::from_engine(deps);
+    let worktree_deps = crate::server::domains::worktree::Deps::from_engine(deps);
+    let mut module =
+        super::domain_worker_module("git", Vec::new(), git_deps.clone(), super::git_handler)?;
+    module.functions.extend(
+        contract::capabilities()?
+            .into_iter()
+            .map(|spec| {
+                if spec.method == "git::clone" {
+                    super::domain_function_registration(spec, git_deps.clone(), super::git_handler)
+                } else {
+                    super::domain_function_registration(
+                        spec,
+                        worktree_deps.clone(),
+                        super::git_workflow_handler,
+                    )
+                }
+            })
+            .collect::<crate::engine::Result<Vec<_>>>()?,
+    );
+    Ok(module)
+}
+
 #[derive(Clone)]
 pub(crate) struct Deps {
     capability_context: Arc<ServerCapabilityContext>,

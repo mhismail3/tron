@@ -9,10 +9,15 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `catalog` | Aggregated discovery, diagnostics, and guardrail view over per-domain contract modules |
-//! | `contract` | Shared engine-definition builder used by domain-owned `contract.rs` modules |
-//! | `registration` | Domain worker/function/trigger registration entry point |
+//! | `catalog` | Aggregated discovery, diagnostics, and guardrail view over domain-owned contracts |
+//! | `contract` | Method-agnostic builders for domain-owned `contract.rs` records |
+//! | `registration` | Startup loop that registers worker modules returned by domains |
 //! | domain modules | Engine-owned behavior for agent, settings, tools, MCP, git/worktree, session, cron, and the rest of Tron |
+//!
+//! Each domain `contract.rs` is the local source of truth for that worker's
+//! function ids, schemas, authority, risk, idempotency, leases, compensation,
+//! and stream topics. The catalog only aggregates those records; it does not
+//! derive domain policy from central method tables.
 //!
 //! # INVARIANT: no transport-owned behavior
 //!
@@ -154,19 +159,21 @@ pub(crate) struct DomainFunctionRegistration {
 #[derive(Clone)]
 pub(crate) struct DomainWorkerModule {
     pub(crate) worker: WorkerDefinition,
-    pub(crate) namespace: &'static str,
     pub(crate) functions: Vec<DomainFunctionRegistration>,
     pub(crate) stream_topics: &'static [&'static str],
 }
 
-pub(crate) struct DomainFunctionHandler {
+pub(crate) struct DomainFunctionHandler<D> {
     pub(crate) method: &'static str,
-    pub(crate) deps: EngineCapabilityDeps,
-    pub(crate) handler: DomainHandlerFn,
+    pub(crate) deps: D,
+    pub(crate) handler: DomainHandlerFn<D>,
 }
 
 #[async_trait]
-impl InProcessFunctionHandler for DomainFunctionHandler {
+impl<D> InProcessFunctionHandler for DomainFunctionHandler<D>
+where
+    D: Send + Sync + 'static,
+{
     async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
         (self.handler)(self.method, &invocation, &self.deps)
             .await
@@ -174,235 +181,63 @@ impl InProcessFunctionHandler for DomainFunctionHandler {
     }
 }
 
-pub(crate) type DomainHandlerFn = for<'a> fn(
+pub(crate) type DomainHandlerFn<D> = for<'a> fn(
     &'static str,
     &'a Invocation,
-    &'a EngineCapabilityDeps,
+    &'a D,
 ) -> BoxFuture<'a, Result<Value, CapabilityError>>;
 
 pub(crate) fn all_worker_modules(
     ctx: &ServerCapabilityContext,
 ) -> crate::engine::Result<Vec<DomainWorkerModule>> {
     let deps = EngineCapabilityDeps::from_context(ctx);
-    let model_contracts = model::contract::capabilities()?;
-    let model_specs = model_contracts
-        .iter()
-        .filter(|spec| spec.owner_worker.as_str() == "model")
-        .cloned()
-        .collect::<Vec<_>>();
-    let config_specs = model_contracts
-        .into_iter()
-        .filter(|spec| spec.owner_worker.as_str() == "config")
-        .collect::<Vec<_>>();
     let mut modules = vec![
-        domain_worker_module(
-            "system",
-            system::contract::capabilities()?,
-            &deps,
-            system_handler,
-        )?,
-        domain_worker_module(
-            "codex_app",
-            codex_app::contract::capabilities()?,
-            &deps,
-            codex_app_handler,
-        )?,
-        domain_worker_module("blob", blob::contract::capabilities()?, &deps, blob_handler)?,
-        domain_worker_module(
-            "tool",
-            tools::contract::capabilities()?,
-            &deps,
-            tool_handler,
-        )?,
-        domain_worker_module(
-            "message",
-            message::contract::capabilities()?,
-            &deps,
-            message_handler,
-        )?,
-        domain_worker_module("cron", cron::contract::capabilities()?, &deps, cron_handler)?,
-        domain_worker_module(
-            "settings",
-            settings::contract::capabilities()?,
-            &deps,
-            settings_handler,
-        )?,
-        domain_worker_module("auth", auth::contract::capabilities()?, &deps, auth_handler)?,
-        domain_worker_module("model", model_specs, &deps, model_handler)?,
-        domain_worker_module("config", config_specs, &deps, model_handler)?,
-        domain_worker_module(
-            "skills",
-            skills::contract::capabilities()?,
-            &deps,
-            skills_handler,
-        )?,
-        domain_worker_module(
-            "agent",
-            agent::contract::capabilities()?,
-            &deps,
-            agent_handler,
-        )?,
-        domain_worker_module("mcp", mcp::contract::capabilities()?, &deps, mcp_handler)?,
-        domain_worker_module("logs", logs::contract::capabilities()?, &deps, logs_handler)?,
-        domain_worker_module(
-            "memory",
-            memory::contract::capabilities()?,
-            &deps,
-            memory_handler,
-        )?,
-        domain_worker_module(
-            "events",
-            events::contract::capabilities()?,
-            &deps,
-            events_handler,
-        )?,
-        domain_worker_module(
-            "filesystem",
-            filesystem::contract::capabilities()?,
-            &deps,
-            filesystem_handler,
-        )?,
-        domain_worker_module(
-            "session",
-            session::contract::capabilities()?,
-            &deps,
-            session_handler,
-        )?,
-        domain_worker_module(
-            "context",
-            context::contract::capabilities()?,
-            &deps,
-            context_handler,
-        )?,
-        domain_worker_module("job", job::contract::capabilities()?, &deps, job_handler)?,
-        domain_worker_module(
-            "notifications",
-            notifications::contract::capabilities()?,
-            &deps,
-            notifications_handler,
-        )?,
-        domain_worker_module("plan", plan::contract::capabilities()?, &deps, plan_handler)?,
-        domain_worker_module(
-            "prompt_library",
-            prompt_library::contract::capabilities()?,
-            &deps,
-            prompt_library_handler,
-        )?,
-        domain_worker_module("tree", tree::contract::capabilities()?, &deps, tree_handler)?,
-        domain_worker_module("repo", repo::contract::capabilities()?, &deps, repo_handler)?,
-        domain_worker_module(
-            "import",
-            import::contract::capabilities()?,
-            &deps,
-            import_handler,
-        )?,
-        domain_worker_module(
-            "browser",
-            browser::contract::capabilities()?,
-            &deps,
-            browser_handler,
-        )?,
-        domain_worker_module(
-            "display",
-            display::contract::capabilities()?,
-            &deps,
-            display_handler,
-        )?,
-        domain_worker_module(
-            "device",
-            device::contract::capabilities()?,
-            &deps,
-            device_handler,
-        )?,
-        domain_worker_module(
-            "transcription",
-            transcription::contract::capabilities()?,
-            &deps,
-            transcription_handler,
-        )?,
-        domain_worker_module(
-            "voice_notes",
-            voice_notes::contract::capabilities()?,
-            &deps,
-            voice_notes_handler,
-        )?,
-        domain_worker_module(
-            "sandbox",
-            sandbox::contract::capabilities()?,
-            &deps,
-            sandbox_handler,
-        )?,
-        domain_worker_module("git", Vec::new(), &deps, git_handler)?,
-        domain_worker_module("worktree", Vec::new(), &deps, worktree_handler)?,
+        system::worker_module(&deps)?,
+        codex_app::worker_module(&deps)?,
+        blob::worker_module(&deps)?,
+        tools::worker_module(&deps)?,
+        message::worker_module(&deps)?,
+        cron::worker_module(&deps)?,
+        settings::worker_module(&deps)?,
+        auth::worker_module(&deps)?,
+        skills::worker_module(&deps)?,
+        agent::worker_module(&deps)?,
+        mcp::worker_module(&deps)?,
+        logs::worker_module(&deps)?,
+        memory::worker_module(&deps)?,
+        events::worker_module(&deps)?,
+        filesystem::worker_module(&deps)?,
+        session::worker_module(&deps)?,
+        context::worker_module(&deps)?,
+        job::worker_module(&deps)?,
+        notifications::worker_module(&deps)?,
+        plan::worker_module(&deps)?,
+        prompt_library::worker_module(&deps)?,
+        tree::worker_module(&deps)?,
+        repo::worker_module(&deps)?,
+        import::worker_module(&deps)?,
+        browser::worker_module(&deps)?,
+        display::worker_module(&deps)?,
+        device::worker_module(&deps)?,
+        transcription::worker_module(&deps)?,
+        voice_notes::worker_module(&deps)?,
+        sandbox::worker_module(&deps)?,
+        git::worker_module(&deps)?,
+        worktree::worker_module(&deps)?,
     ];
-
-    let git_index = modules.len() - 2;
-    modules[git_index].functions.extend(
-        git::contract::capabilities()?
-            .into_iter()
-            .map(|spec| {
-                let handler = if spec.method == "git::clone" {
-                    git_handler
-                } else {
-                    git_workflow_handler
-                };
-                domain_function_registration(spec, &deps, handler)
-            })
-            .collect::<crate::engine::Result<Vec<_>>>()?,
-    );
-    let worktree_index = modules.len() - 1;
-    modules[worktree_index].functions.extend(
-        worktree::contract::capabilities()?
-            .into_iter()
-            .map(|spec| {
-                let handler = if matches!(
-                    spec.method,
-                    "worktree::finalize_session"
-                        | "worktree::rebase_on_main"
-                        | "worktree::start_merge"
-                        | "worktree::list_conflicts"
-                        | "worktree::resolve_conflict"
-                        | "worktree::continue_merge"
-                        | "worktree::abort_merge"
-                        | "worktree::resolve_conflicts_with_subagent"
-                ) {
-                    git_workflow_handler
-                } else {
-                    worktree_handler
-                };
-                domain_function_registration(spec, &deps, handler)
-            })
-            .collect::<crate::engine::Result<Vec<_>>>()?,
-    );
-
-    if let Some(agent_module) = modules
-        .iter_mut()
-        .find(|module| module.namespace == "agent")
-    {
-        agent_module
-            .functions
-            .extend(agent::hidden_function_registrations(&deps)?);
-    }
-    if let Some(job_module) = modules.iter_mut().find(|module| module.namespace == "job") {
-        job_module
-            .functions
-            .extend(job::hidden_function_registrations(&deps)?);
-    }
-    if let Some(cron_module) = modules.iter_mut().find(|module| module.namespace == "cron") {
-        cron_module
-            .functions
-            .extend(cron::hidden_function_registrations(&deps)?);
-    }
-
+    modules.extend(model::worker_modules(&deps)?);
     Ok(modules)
 }
 
-fn domain_worker_module(
+fn domain_worker_module<D>(
     namespace: &'static str,
     specs: Vec<catalog::CapabilitySpec>,
-    deps: &EngineCapabilityDeps,
-    handler: DomainHandlerFn,
-) -> crate::engine::Result<DomainWorkerModule> {
+    deps: D,
+    handler: DomainHandlerFn<D>,
+) -> crate::engine::Result<DomainWorkerModule>
+where
+    D: Clone + Send + Sync + 'static,
+{
     let worker = WorkerDefinition::new(
         catalog::worker_id(namespace)?,
         WorkerKind::InProcess,
@@ -412,21 +247,23 @@ fn domain_worker_module(
     .with_namespace_claim(namespace);
     let functions = specs
         .into_iter()
-        .map(|spec| domain_function_registration(spec, deps, handler))
+        .map(|spec| domain_function_registration(spec, deps.clone(), handler))
         .collect::<crate::engine::Result<Vec<_>>>()?;
     Ok(DomainWorkerModule {
         worker,
-        namespace,
         functions,
         stream_topics: &[],
     })
 }
 
-fn domain_function_registration(
+fn domain_function_registration<D>(
     spec: catalog::CapabilitySpec,
-    deps: &EngineCapabilityDeps,
-    handler: DomainHandlerFn,
-) -> crate::engine::Result<DomainFunctionRegistration> {
+    deps: D,
+    handler: DomainHandlerFn<D>,
+) -> crate::engine::Result<DomainFunctionRegistration>
+where
+    D: Clone + Send + Sync + 'static,
+{
     Ok(DomainFunctionRegistration {
         definition: catalog::function_definition_for_capability(&spec),
         handler: Arc::new(DomainFunctionHandler {
@@ -442,12 +279,9 @@ macro_rules! domain_handler {
         fn $fn_name<'a>(
             method: &'static str,
             invocation: &'a Invocation,
-            deps: &'a EngineCapabilityDeps,
+            deps: &'a $module::Deps,
         ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-            Box::pin(async move {
-                let deps = $module::Deps::from_engine(deps);
-                $module::handle(method, invocation, &deps).await
-            })
+            Box::pin(async move { $module::handle(method, invocation, deps).await })
         }
     };
 }
@@ -455,38 +289,33 @@ macro_rules! domain_handler {
 fn system_handler<'a>(
     method: &'static str,
     invocation: &'a Invocation,
-    deps: &'a EngineCapabilityDeps,
+    deps: &'a system::Deps,
 ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
     Box::pin(async move {
         let allow_capability_context =
             matches!(invocation.causal_context.actor_kind, ActorKind::Client);
-        let deps = system::Deps::from_engine(deps);
-        system::handle(method, invocation, &deps, allow_capability_context).await
+        system::handle(method, invocation, deps, allow_capability_context).await
     })
 }
 
 fn model_handler<'a>(
     method: &'static str,
     invocation: &'a Invocation,
-    deps: &'a EngineCapabilityDeps,
+    deps: &'a model::Deps,
 ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
     Box::pin(async move {
         let allow_capability_context =
             matches!(invocation.causal_context.actor_kind, ActorKind::Client);
-        let deps = model::Deps::from_engine(deps);
-        model::handle(method, invocation, &deps, allow_capability_context).await
+        model::handle(method, invocation, deps, allow_capability_context).await
     })
 }
 
 fn browser_handler<'a>(
     method: &'static str,
     _invocation: &'a Invocation,
-    deps: &'a EngineCapabilityDeps,
+    deps: &'a browser::Deps,
 ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-    Box::pin(async move {
-        let deps = browser::Deps::from_engine(deps);
-        browser::handle(method, &deps).await
-    })
+    Box::pin(async move { browser::handle(method, deps).await })
 }
 
 domain_handler!(agent_handler, agent);
@@ -503,12 +332,9 @@ domain_handler!(git_handler, git);
 fn git_workflow_handler<'a>(
     method: &'static str,
     invocation: &'a Invocation,
-    deps: &'a EngineCapabilityDeps,
+    deps: &'a worktree::Deps,
 ) -> BoxFuture<'a, Result<Value, CapabilityError>> {
-    Box::pin(async move {
-        let deps = worktree::Deps::from_engine(deps);
-        worktree::git_workflow::handle(method, invocation, &deps).await
-    })
+    Box::pin(async move { worktree::git_workflow::handle(method, invocation, deps).await })
 }
 domain_handler!(import_handler, import);
 domain_handler!(job_handler, job);

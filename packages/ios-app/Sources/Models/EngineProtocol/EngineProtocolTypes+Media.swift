@@ -2,47 +2,6 @@ import Foundation
 
 // MARK: - Browser Methods
 
-/// Start browser stream for a session
-struct BrowserStartStreamParams: Encodable {
-    let sessionId: String
-    let quality: Int?
-    let maxWidth: Int?
-    let maxHeight: Int?
-    let format: String?
-    let everyNthFrame: Int?
-
-    init(
-        sessionId: String,
-        quality: Int? = 60,
-        maxWidth: Int? = 1280,
-        maxHeight: Int? = 960,
-        format: String? = "jpeg",
-        everyNthFrame: Int? = 1
-    ) {
-        self.sessionId = sessionId
-        self.quality = quality
-        self.maxWidth = maxWidth
-        self.maxHeight = maxHeight
-        self.format = format
-        self.everyNthFrame = everyNthFrame
-    }
-}
-
-struct BrowserStartStreamResult: Decodable {
-    let success: Bool
-    let error: String?
-}
-
-/// Stop browser stream for a session
-struct BrowserStopStreamParams: Encodable {
-    let sessionId: String
-}
-
-struct BrowserStopStreamResult: Decodable {
-    let success: Bool
-    let error: String?
-}
-
 /// Get browser status for a session
 struct BrowserGetStatusParams: Encodable {
     let sessionId: String
@@ -151,4 +110,3 @@ struct TranscribeAudioResult: Decodable {
     let computeType: String
     let cleanupMode: String
 }
-

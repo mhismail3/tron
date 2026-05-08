@@ -4,9 +4,19 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use super::*;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    super::domain_worker_module(
+        "session",
+        contract::capabilities()?,
+        Deps::from_engine(deps),
+        super::session_handler,
+    )
+}
 #[derive(Clone)]
 pub(crate) struct Deps {
     auth_path: PathBuf,

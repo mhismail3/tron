@@ -4,9 +4,19 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 
 pub(crate) mod contract;
-pub(crate) mod spec;
 
 use super::*;
+
+pub(crate) fn worker_module(
+    deps: &EngineCapabilityDeps,
+) -> crate::engine::Result<DomainWorkerModule> {
+    super::domain_worker_module(
+        "browser",
+        contract::capabilities()?,
+        Deps::from_engine(deps),
+        super::browser_handler,
+    )
+}
 #[derive(Clone)]
 pub(crate) struct Deps;
 
@@ -22,10 +32,6 @@ pub(super) async fn handle(method: &str, _deps: &Deps) -> Result<Value, Capabili
             "hasBrowser": false,
             "isStreaming": false,
         })),
-        "browser::start_stream" => Err(CapabilityError::NotAvailable {
-            message: "Browser streaming has been removed".into(),
-        }),
-        "browser::stop_stream" => Ok(json!({ "success": true })),
         _ => Err(CapabilityError::Internal {
             message: format!("browser method {method} is not engine-owned"),
         }),
