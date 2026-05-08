@@ -1,20 +1,20 @@
 import Foundation
 
-/// Client for notification inbox RPC methods.
-final class NotificationClient: RPCDomainClient {
+/// Client for notification inbox engine capabilities.
+final class NotificationClient: EngineDomainClient {
 
     /// List recent notifications with read state.
     func listNotifications(limit: Int = 50) async throws -> NotificationListResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
         let params = NotificationListParams(limit: limit)
-        return try await ws.send(method: "notifications.list", params: params)
+        return try await invokeRead("notifications::list", params)
     }
 
     /// Mark a single notification as read.
-    func markRead(eventId: String) async throws -> NotificationMarkReadResult {
-        let ws = try requireTransport().requireConnection()
+    func markRead(eventId: String, idempotencyKey: EngineIdempotencyKey) async throws -> NotificationMarkReadResult {
+        _ = try requireTransport().requireConnection()
         let params = NotificationMarkReadParams(eventId: eventId)
-        return try await ws.send(method: "notifications.markRead", params: params)
+        return try await invokeWrite("notifications::mark_read", params, idempotencyKey: idempotencyKey)
     }
 
     /// Mark unread notifications as read.
@@ -23,13 +23,16 @@ final class NotificationClient: RPCDomainClient {
     /// on session-open from the sidebar / deep link). Pass `nil` (the
     /// default) to mark every session's notifications read — used by the
     /// notification-inbox "mark all read" affordance.
-    func markAllRead(sessionId: String? = nil) async throws -> NotificationMarkAllReadResult {
-        let ws = try requireTransport().requireConnection()
+    func markAllRead(
+        sessionId: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> NotificationMarkAllReadResult {
+        _ = try requireTransport().requireConnection()
         if let sessionId {
             let params = NotificationMarkAllReadParams(sessionId: sessionId)
-            return try await ws.send(method: "notifications.markAllRead", params: params)
+            return try await invokeWrite("notifications::mark_all_read", params, idempotencyKey: idempotencyKey)
         }
-        return try await ws.send(method: "notifications.markAllRead", params: EmptyParams())
+        return try await invokeWrite("notifications::mark_all_read", EmptyParams(), idempotencyKey: idempotencyKey)
     }
 }
 

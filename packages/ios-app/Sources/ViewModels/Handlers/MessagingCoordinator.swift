@@ -35,17 +35,18 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?
+        reasoningLevel: String?,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws
 
     /// Activate a skill in the current session (server-owned state)
-    func activateSkillOnServer(_ skillName: String) async throws
+    func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws
 
     /// Deactivate a skill from the current session
-    func deactivateSkillOnServer(_ skillName: String) async throws
+    func deactivateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws
 
     /// Abort the agent on the server
-    func abortAgentOnServer() async throws
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws
 
     /// Append a message to the chat
     func appendMessage(_ message: ChatMessage)
@@ -102,7 +103,7 @@ final class MessagingCoordinator {
 
     /// Send a message to the agent.
     ///
-    /// Skills are managed via separate RPCs (skill.activate), not sent with the prompt.
+    /// Skills are managed via separate engine protocols (skills::activate), not sent with the prompt.
     /// The server reads active skills from session state.
     ///
     /// - Parameters:
@@ -123,7 +124,7 @@ final class MessagingCoordinator {
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
 
         // Confirmation/answer submissions and subagent results are delivered via
-        // dedicated RPCs, not through sendMessage. Any regular user message sent here
+        // dedicated engine protocols, not through sendMessage. Any regular user message sent here
         // supersedes pending interactive tools and dismisses subagent notifications.
         context.markPendingQuestionsAsSuperseded()
         context.markPendingConfirmationsAsSuperseded()
@@ -171,7 +172,8 @@ final class MessagingCoordinator {
             try await context.sendPromptToServer(
                 text: text,
                 attachments: fileAttachments.isEmpty ? nil : fileAttachments,
-                reasoningLevel: reasoningLevel
+                reasoningLevel: reasoningLevel,
+                idempotencyKey: .userAction("agent.prompt")
             )
             context.logInfo("Prompt sent successfully")
         } catch {
@@ -186,7 +188,7 @@ final class MessagingCoordinator {
     ///
     /// Staged skills are purely local draft state until the user hits send —
     /// at that moment we promote them to server-side activation via
-    /// `skill.activate` before the prompt flows. If ANY activation fails, we
+    /// `skills::activate` before the prompt flows. If ANY activation fails, we
     /// surface the error to the user and abort the send: the user selected
     /// those skills deliberately, and silently dropping them would change the
     /// agent's behavior in a way they did not consent to. The input draft is
@@ -209,7 +211,10 @@ final class MessagingCoordinator {
     ) async {
         for skill in skills {
             do {
-                try await context.activateSkillOnServer(skill.name)
+                try await context.activateSkillOnServer(
+                    skill.name,
+                    idempotencyKey: .userAction("skills.activate")
+                )
             } catch {
                 context.logError("Failed to activate skill '\(skill.name)': \(error.localizedDescription)")
                 context.showError("Could not activate skill “\(skill.displayName)”: \(error.localizedDescription)")
@@ -233,7 +238,7 @@ final class MessagingCoordinator {
         context.logInfo("Aborting agent...")
 
         do {
-            try await context.abortAgentOnServer()
+            try await context.abortAgentOnServer(idempotencyKey: .userAction("agent.abort"))
             context.isProcessing = false
             context.isPostProcessing = false
             context.setSessionProcessing(false)
@@ -278,7 +283,7 @@ final class MessagingCoordinator {
     /// on the server. Server activation is deferred to `sendMessage`, which is
     /// the only point at which a skill genuinely enters the agent's running
     /// context. Eagerly activating here would produce misleading
-    /// `skill.deactivated` notifications if the user removes the chip without
+    /// `skills::deactivated` notifications if the user removes the chip without
     /// ever sending.
     ///
     /// Idempotent: adding a skill that is already staged is a no-op.

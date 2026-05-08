@@ -1,9 +1,9 @@
 import Foundation
 @testable import TronMobile
 
-/// Mock RPC Client for testing workspace validation
+/// Mock Engine Client for testing workspace validation
 @MainActor
-class MockRPCClient {
+class MockEngineClient {
     var connectionState: ConnectionState = .connected
     var listDirectoryCallCount = 0
     var listDirectoryError: Error?
@@ -21,14 +21,14 @@ class MockRPCClient {
     }
 
     /// Validate if a workspace path exists.
-    /// Returns `true` if path exists, `false` if confirmed deleted (RPCError),
+    /// Returns `true` if path exists, `false` if confirmed deleted (EngineProtocolError),
     /// or `nil` if indeterminate (connection/transport error).
     func validateWorkspacePath(_ path: String) async -> Bool? {
         guard !path.isEmpty else { return false }
         do {
             _ = try await listDirectory(path: path, showHidden: false)
             return true
-        } catch is RPCError {
+        } catch is EngineProtocolError {
             return false
         } catch {
             return nil
@@ -36,8 +36,8 @@ class MockRPCClient {
     }
 }
 
-/// RPC errors for testing
-enum MockRPCError: Error, LocalizedError {
+/// engine protocol errors for testing
+enum MockEngineProtocolError: Error, LocalizedError {
     case filesystemError(String)
     case connectionNotEstablished
 

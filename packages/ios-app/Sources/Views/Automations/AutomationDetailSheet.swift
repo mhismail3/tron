@@ -4,7 +4,7 @@ import SwiftUI
 /// Owns its own state and refreshes after actions for real-time updates.
 @available(iOS 26.0, *)
 struct AutomationDetailSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onTrigger: () -> Void
     let onDelete: () -> Void
     let onToggleEnabled: () -> Void
@@ -18,14 +18,14 @@ struct AutomationDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     init(
-        rpcClient: RPCClient,
+        engineClient: EngineClient,
         job: CronJobDTO,
         initialRuntimeState: CronRuntimeStateDTO?,
         onTrigger: @escaping () -> Void,
         onDelete: @escaping () -> Void,
         onToggleEnabled: @escaping () -> Void
     ) {
-        self.rpcClient = rpcClient
+        self.engineClient = engineClient
         self._currentJob = State(initialValue: job)
         self._currentRuntimeState = State(initialValue: initialRuntimeState)
         self.onTrigger = onTrigger
@@ -422,7 +422,7 @@ struct AutomationDetailSheet: View {
 
     private func refreshJob() async {
         do {
-            let result = try await rpcClient.cron.getJob(jobId: currentJob.id)
+            let result = try await engineClient.cron.getJob(jobId: currentJob.id)
             currentJob = result.job
             currentRuntimeState = result.runtimeState
             recentRuns = result.recentRuns

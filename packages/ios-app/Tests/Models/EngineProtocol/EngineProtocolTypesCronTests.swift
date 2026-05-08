@@ -288,11 +288,11 @@ struct CronDeliveryDTOTests {
         #expect(delivery == reDecoded)
     }
 
-    @Test("webSocket round trip")
-    func webSocket() throws {
+    @Test("engineConnection round trip")
+    func engineConnection() throws {
         let json = #"{"type":"websocket"}"#
         let delivery = try JSONDecoder().decode(CronDeliveryDTO.self, from: json.data(using: .utf8)!)
-        if case .webSocket = delivery {} else { Issue.record("Expected .webSocket") }
+        if case .engineConnection = delivery {} else { Issue.record("Expected .engineConnection") }
     }
 
     @Test("apns with title")

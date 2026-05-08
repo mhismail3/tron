@@ -27,7 +27,11 @@ final class MockModelClientForRepository {
         return listResultToReturn
     }
 
-    func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult {
+    func switchModel(
+        _ sessionId: String,
+        model: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ModelSwitchResult {
         switchModelCallCount += 1
         lastSwitchModelSessionId = sessionId
         lastSwitchModelModelId = model
@@ -74,8 +78,12 @@ final class MockModelRepository: ModelRepository {
         return models
     }
 
-    func switchModel(sessionId: String, to modelId: String) async throws -> ModelSwitchResult {
-        try await mockClient.switchModel(sessionId, model: modelId)
+    func switchModel(
+        sessionId: String,
+        to modelId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ModelSwitchResult {
+        try await mockClient.switchModel(sessionId, model: modelId, idempotencyKey: idempotencyKey)
     }
 
     func invalidateCache() {
@@ -172,7 +180,11 @@ final class DefaultModelRepositoryTests: XCTestCase {
 
     func test_switchModel_callsClient() async throws {
         // When
-        let result = try await repository.switchModel(sessionId: "session-123", to: "model-456")
+        let result = try await repository.switchModel(
+            sessionId: "session-123",
+            to: "model-456",
+            idempotencyKey: .userAction("model.switch.repository.test")
+        )
 
         // Then
         XCTAssertEqual(mockClient.switchModelCallCount, 1)
@@ -187,7 +199,11 @@ final class DefaultModelRepositoryTests: XCTestCase {
 
         // When/Then
         do {
-            _ = try await repository.switchModel(sessionId: "session-123", to: "model-456")
+            _ = try await repository.switchModel(
+                sessionId: "session-123",
+                to: "model-456",
+                idempotencyKey: .userAction("model.switch.repository.test")
+            )
             XCTFail("Expected error to be thrown")
         } catch {
             XCTAssertEqual(mockClient.switchModelCallCount, 1)

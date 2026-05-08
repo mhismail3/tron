@@ -7,7 +7,7 @@ final class SessionSynchronizer {
 
     // MARK: - Dependencies
 
-    private var rpcClient: RPCClient
+    private var engineClient: EngineClient
     private let eventDB: EventDatabase
 
     // MARK: - Types
@@ -19,14 +19,14 @@ final class SessionSynchronizer {
 
     // MARK: - Initialization
 
-    init(rpcClient: RPCClient, eventDB: EventDatabase) {
-        self.rpcClient = rpcClient
+    init(engineClient: EngineClient, eventDB: EventDatabase) {
+        self.engineClient = engineClient
         self.eventDB = eventDB
     }
 
-    /// Update the RPC client reference when server settings change.
-    func updateRPCClient(_ client: RPCClient) {
-        rpcClient = client
+    /// Update the engine client reference when server settings change.
+    func updateEngineClient(_ client: EngineClient) {
+        engineClient = client
     }
 
     // MARK: - Sync Operations
@@ -41,7 +41,7 @@ final class SessionSynchronizer {
         let afterEventId = syncState?.lastSyncedEventId
 
         // Fetch events since cursor from server
-        let result = try await rpcClient.eventSync.getSince(
+        let result = try await engineClient.eventSync.getSince(
             sessionId: sessionId,
             afterEventId: afterEventId,
             limit: 500
@@ -91,7 +91,7 @@ final class SessionSynchronizer {
         try await eventDB.sync.update(emptySyncState)
 
         // Fetch all events
-        let events = try await rpcClient.eventSync.getAll(sessionId: sessionId)
+        let events = try await engineClient.eventSync.getAll(sessionId: sessionId)
         let sessionEvents = events.map { rawEventToSessionEvent($0) }
 
         // Log the first event to verify parent_id
@@ -106,7 +106,7 @@ final class SessionSynchronizer {
             logger.info("[FULL-SYNC] Session appears forked, fetching ancestor events from \(parentId.prefix(12))", category: .session)
 
             do {
-                let ancestorEvents = try await rpcClient.eventSync.getAncestors(parentId)
+                let ancestorEvents = try await engineClient.eventSync.getAncestors(parentId)
                 let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
                 let insertedCount = try await eventDB.events.insertIgnoringDuplicates(ancestorSessionEvents)
                 logger.info("[FULL-SYNC] Inserted \(insertedCount) ancestor events", category: .session)
@@ -123,7 +123,7 @@ final class SessionSynchronizer {
 
     /// Fetch sessions from server for a given origin.
     func fetchServerSessions() async throws -> [SessionInfo] {
-        let result = try await rpcClient.session.list()
+        let result = try await engineClient.session.list()
         return result.sessions
     }
 
@@ -145,7 +145,7 @@ final class SessionSynchronizer {
                 if !parentExists && !parentInNewEvents {
                     logger.info("[SYNC] Event references missing parent \(parentId.prefix(12)), fetching ancestors", category: .session)
                     do {
-                        let ancestorEvents = try await rpcClient.eventSync.getAncestors(parentId)
+                        let ancestorEvents = try await engineClient.eventSync.getAncestors(parentId)
                         let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
                         let insertedCount = try await eventDB.events.insertIgnoringDuplicates(ancestorSessionEvents)
                         logger.info("[SYNC] Inserted \(insertedCount) ancestor events", category: .session)

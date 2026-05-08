@@ -8,26 +8,28 @@ extension ChatViewModel: MessagingContext {
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?
+        reasoningLevel: String?,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws {
-        try await rpcClient.agent.sendPrompt(
+        try await engineClient.agent.sendPrompt(
             text,
             images: nil,  // Images sent via attachments instead
             attachments: attachments,
-            reasoningLevel: reasoningLevel
+            reasoningLevel: reasoningLevel,
+            idempotencyKey: idempotencyKey
         )
     }
 
-    func activateSkillOnServer(_ skillName: String) async throws {
-        _ = try await rpcClient.agent.activateSkill(skillName)
+    func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try await engineClient.agent.activateSkill(skillName, idempotencyKey: idempotencyKey)
     }
 
-    func deactivateSkillOnServer(_ skillName: String) async throws {
-        _ = try await rpcClient.agent.deactivateSkill(skillName)
+    func deactivateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try await engineClient.agent.deactivateSkill(skillName, idempotencyKey: idempotencyKey)
     }
 
-    func abortAgentOnServer() async throws {
-        try await rpcClient.agent.abort()
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
+        try await engineClient.agent.abort(idempotencyKey: idempotencyKey)
     }
 
     func appendInterruptedMessage() {
@@ -133,7 +135,7 @@ extension ChatViewModel {
     func reactivateSkillWithUserErrorHandling(_ skillName: String) {
         Task {
             do {
-                try await activateSkillOnServer(skillName)
+                try await activateSkillOnServer(skillName, idempotencyKey: .userAction("skills.activate"))
             } catch {
                 logError("Failed to re-activate skill '\(skillName)': \(error.localizedDescription)")
                 showError("Could not re-activate skill: \(error.localizedDescription)")
@@ -154,10 +156,10 @@ extension ChatViewModel {
     /// Cooperatively abort a single in-flight tool call without stopping the turn.
     /// The server cancels the per-tool CancellationToken so the tool can observe
     /// cancellation and return an error result; the agent loop continues.
-    func abortTool(toolCallId: String) {
+    func abortTool(toolCallId: String, idempotencyKey: EngineIdempotencyKey) {
         Task {
             do {
-                _ = try await rpcClient.agent.abortTool(toolCallId: toolCallId)
+                _ = try await engineClient.agent.abortTool(toolCallId: toolCallId, idempotencyKey: idempotencyKey)
             } catch {
                 logError("Failed to abort tool \(toolCallId): \(error.localizedDescription)")
             }
@@ -169,7 +171,7 @@ extension ChatViewModel {
         Task {
             await messagingCoordinator.abortAgent(context: self)
             do {
-                try await rpcClient.agent.clearQueue()
+                try await engineClient.agent.clearQueue(idempotencyKey: .userAction("agent.clearQueue"))
             } catch {
                 logError("Failed to clear queue: \(error.localizedDescription)")
             }
@@ -192,7 +194,7 @@ extension ChatViewModel {
     /// Semantics:
     /// - Walks `messages` in reverse looking for the newest `role == .user`
     ///   message with `.text(…)` content.
-    /// - If found, calls `rpcClient.agent.sendPrompt` with that text and
+    /// - If found, calls `engineClient.agent.sendPrompt` with that text and
     ///   the message's original attachments; the server emits a fresh
     ///   `message.user` event and starts a new turn.
     /// - If not found (empty history, or last user message is an image-only
@@ -231,7 +233,8 @@ extension ChatViewModel {
                 try await sendPromptToServer(
                     text: prompt,
                     attachments: fileAttachments,
-                    reasoningLevel: nil
+                    reasoningLevel: nil,
+                    idempotencyKey: .userAction("agent.prompt.retry")
                 )
             } catch {
                 logError("Retry failed: \(error.localizedDescription)")
@@ -245,7 +248,7 @@ extension ChatViewModel {
     ///
     /// Internal rather than private so unit tests (C7) can directly verify
     /// the traversal order, skip semantics, and "no text prompt" fallback
-    /// without needing to wire a mock RPC client.
+    /// without needing to wire a mock engine client.
     func findLastUserTextMessage() -> ChatMessage? {
         for message in messages.reversed() where message.role == .user {
             if case .text = message.content {
@@ -266,7 +269,7 @@ extension ChatViewModel {
         inputBarState.text = ""
         Task {
             do {
-                _ = try await rpcClient.agent.queuePrompt(text)
+                _ = try await engineClient.agent.queuePrompt(text, idempotencyKey: .userAction("agent.queuePrompt"))
                 logInfo("Queued message on server: \"\(text.prefix(50))...\"")
             } catch {
                 logError("Failed to queue message: \(error.localizedDescription)")

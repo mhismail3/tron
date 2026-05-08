@@ -377,7 +377,7 @@ enum CronPayloadDTO: Codable, Hashable {
 
 enum CronDeliveryDTO: Codable, Hashable {
     case silent
-    case webSocket
+    case engineConnection
     case apns(title: String?)
     case webhook(url: String, headers: [String: String]?)
 
@@ -390,7 +390,7 @@ enum CronDeliveryDTO: Codable, Hashable {
         let type = try container.decode(String.self, forKey: .type)
         switch type {
         case "silent": self = .silent
-        case "websocket": self = .webSocket
+        case "websocket": self = .engineConnection
         case "apns":
             self = .apns(title: try container.decodeIfPresent(String.self, forKey: .title))
         case "webhook":
@@ -408,7 +408,7 @@ enum CronDeliveryDTO: Codable, Hashable {
         switch self {
         case .silent:
             try container.encode("silent", forKey: .type)
-        case .webSocket:
+        case .engineConnection:
             try container.encode("websocket", forKey: .type)
         case .apns(let title):
             try container.encode("apns", forKey: .type)
@@ -421,7 +421,7 @@ enum CronDeliveryDTO: Codable, Hashable {
     }
 }
 
-// MARK: - RPC Params & Results
+// MARK: - Engine Params & Results
 
 struct CronListParams: Encodable {
     let enabled: Bool?

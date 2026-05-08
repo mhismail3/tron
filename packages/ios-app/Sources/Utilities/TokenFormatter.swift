@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Token Formatter
 
 /// Unified token count formatting.
-/// Consolidates duplicate formatting logic from AgentControlView, EventTypes, and RPCTypes.
+/// Consolidates duplicate formatting logic from AgentControlView, EventTypes, and EngineProtocolTypes.
 enum TokenFormatter {
 
     /// Output format for token counts

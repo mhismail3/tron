@@ -6,7 +6,7 @@ import SwiftUI
 struct ChatSheetModifier: ViewModifier {
     let sheetCoordinator: SheetCoordinator
     let viewModel: ChatViewModel
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let skillStore: SkillStore?
     let workspaceDeleted: Bool
@@ -17,7 +17,7 @@ struct ChatSheetModifier: ViewModifier {
                 ChatSheetContent(
                     sheet: sheet,
                     viewModel: viewModel,
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     sessionId: sessionId,
                     skillStore: skillStore,
                     workspaceDeleted: workspaceDeleted,
@@ -76,7 +76,7 @@ extension View {
     func chatSheets(
         coordinator: SheetCoordinator,
         viewModel: ChatViewModel,
-        rpcClient: RPCClient,
+        engineClient: EngineClient,
         sessionId: String,
         skillStore: SkillStore?,
         workspaceDeleted: Bool
@@ -84,7 +84,7 @@ extension View {
         modifier(ChatSheetModifier(
             sheetCoordinator: coordinator,
             viewModel: viewModel,
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             sessionId: sessionId,
             skillStore: skillStore,
             workspaceDeleted: workspaceDeleted

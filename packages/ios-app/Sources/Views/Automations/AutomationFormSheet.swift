@@ -3,7 +3,7 @@ import SwiftUI
 /// Form sheet for creating a new cron job.
 @available(iOS 26.0, *)
 struct AutomationFormSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onSaved: () -> Void
     let onCancel: () -> Void
 
@@ -358,7 +358,10 @@ struct AutomationFormSheet: View {
 
         Task {
             do {
-                _ = try await rpcClient.cron.createJob(jobParams)
+                _ = try await engineClient.cron.createJob(
+                    jobParams,
+                    idempotencyKey: .userAction("cron.create")
+                )
                 await MainActor.run {
                     isSaving = false
                     onSaved()

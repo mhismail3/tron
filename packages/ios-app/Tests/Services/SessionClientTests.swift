@@ -48,7 +48,11 @@ struct SessionClientTests {
         var forkNewSessionId = "forked-session"
         var forkShouldThrow = false
 
-        func create(workingDirectory: String, model: String?) async throws -> SessionCreateResult {
+        func create(
+            workingDirectory: String,
+            model: String?,
+            idempotencyKey: EngineIdempotencyKey
+        ) async throws -> SessionCreateResult {
             createCallCount += 1
             createWorkingDirectory = workingDirectory
             createModel = model
@@ -77,19 +81,19 @@ struct SessionClientTests {
             return SessionListResult(sessions: listResult, totalCount: listResult.count, hasMore: false)
         }
 
-        func resume(sessionId: String) async throws {
+        func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
             resumeCallCount += 1
             resumeSessionId = sessionId
             if resumeShouldThrow { throw TestError.mockError }
         }
 
-        func archive(_ sessionId: String) async throws {
+        func archive(_ sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
             archiveCallCount += 1
             archiveSessionId = sessionId
             if archiveShouldThrow { throw TestError.mockError }
         }
 
-        func unarchive(_ sessionId: String) async throws {
+        func unarchive(_ sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
             unarchiveCallCount += 1
             unarchiveSessionId = sessionId
             if unarchiveShouldThrow { throw TestError.mockError }
@@ -102,7 +106,11 @@ struct SessionClientTests {
             return getHistoryResult
         }
 
-        func fork(_ sessionId: String, fromEventId: String?) async throws -> SessionForkResult {
+        func fork(
+            _ sessionId: String,
+            fromEventId: String?,
+            idempotencyKey: EngineIdempotencyKey
+        ) async throws -> SessionForkResult {
             forkCallCount += 1
             forkSessionId = sessionId
             forkFromEventId = fromEventId
@@ -132,7 +140,7 @@ struct SessionClientTests {
     func testCreate_withDefaultModel() async throws {
         let mock = MockSessionClient()
 
-        _ = try await mock.create(workingDirectory: "/test/path")
+        _ = try await mock.create(workingDirectory: "/test/path", idempotencyKey: .userAction("session.create.test"))
 
         #expect(mock.createCallCount == 1)
         #expect(mock.createWorkingDirectory == "/test/path")
@@ -143,7 +151,11 @@ struct SessionClientTests {
     func testCreate_withSpecificModel() async throws {
         let mock = MockSessionClient()
 
-        let result = try await mock.create(workingDirectory: "/test/path", model: "claude-sonnet-4-20250514")
+        let result = try await mock.create(
+            workingDirectory: "/test/path",
+            model: "claude-sonnet-4-20250514",
+            idempotencyKey: .userAction("session.create.test")
+        )
 
         #expect(mock.createCallCount == 1)
         #expect(mock.createModel == "claude-sonnet-4-20250514")
@@ -156,7 +168,7 @@ struct SessionClientTests {
         mock.createShouldThrow = true
 
         await #expect(throws: MockSessionClient.TestError.self) {
-            _ = try await mock.create(workingDirectory: "/test/path")
+            _ = try await mock.create(workingDirectory: "/test/path", idempotencyKey: .userAction("session.create.test"))
         }
     }
 
@@ -193,7 +205,7 @@ struct SessionClientTests {
     func testResume_callsWithCorrectId() async throws {
         let mock = MockSessionClient()
 
-        try await mock.resume(sessionId: "session-123")
+        try await mock.resume(sessionId: "session-123", idempotencyKey: .userAction("session.resume.test"))
 
         #expect(mock.resumeCallCount == 1)
         #expect(mock.resumeSessionId == "session-123")
@@ -205,7 +217,7 @@ struct SessionClientTests {
         mock.resumeShouldThrow = true
 
         await #expect(throws: MockSessionClient.TestError.self) {
-            try await mock.resume(sessionId: "session-123")
+            try await mock.resume(sessionId: "session-123", idempotencyKey: .userAction("session.resume.test"))
         }
     }
 
@@ -215,7 +227,11 @@ struct SessionClientTests {
     func testFork_fromHead() async throws {
         let mock = MockSessionClient()
 
-        let result = try await mock.fork("session-123")
+        let result = try await mock.fork(
+            "session-123",
+            fromEventId: nil,
+            idempotencyKey: .userAction("session.fork.test")
+        )
 
         #expect(mock.forkCallCount == 1)
         #expect(mock.forkSessionId == "session-123")
@@ -227,7 +243,11 @@ struct SessionClientTests {
     func testFork_fromSpecificEvent() async throws {
         let mock = MockSessionClient()
 
-        let result = try await mock.fork("session-123", fromEventId: "event-456")
+        let result = try await mock.fork(
+            "session-123",
+            fromEventId: "event-456",
+            idempotencyKey: .userAction("session.fork.test")
+        )
 
         #expect(mock.forkFromEventId == "event-456")
         #expect(result.forkedFromEventId == "event-456")
@@ -239,7 +259,11 @@ struct SessionClientTests {
         mock.forkShouldThrow = true
 
         await #expect(throws: MockSessionClient.TestError.self) {
-            _ = try await mock.fork("session-123")
+            _ = try await mock.fork(
+                "session-123",
+                fromEventId: nil,
+                idempotencyKey: .userAction("session.fork.test")
+            )
         }
     }
 
@@ -270,7 +294,7 @@ struct SessionClientTests {
     func testArchive_calls() async throws {
         let mock = MockSessionClient()
 
-        try await mock.archive("session-123")
+        try await mock.archive("session-123", idempotencyKey: .userAction("session.archive.test"))
 
         #expect(mock.archiveCallCount == 1)
         #expect(mock.archiveSessionId == "session-123")
@@ -282,7 +306,7 @@ struct SessionClientTests {
         mock.archiveShouldThrow = true
 
         await #expect(throws: MockSessionClient.TestError.self) {
-            try await mock.archive("session-123")
+            try await mock.archive("session-123", idempotencyKey: .userAction("session.archive.test"))
         }
     }
 
@@ -292,7 +316,7 @@ struct SessionClientTests {
     func testUnarchive_calls() async throws {
         let mock = MockSessionClient()
 
-        try await mock.unarchive("session-123")
+        try await mock.unarchive("session-123", idempotencyKey: .userAction("session.unarchive.test"))
 
         #expect(mock.unarchiveCallCount == 1)
         #expect(mock.unarchiveSessionId == "session-123")

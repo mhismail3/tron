@@ -6,7 +6,7 @@ use crate::server::services::context_queries::prepare_session_context;
 use crate::server::services::context_service::build_summarizer;
 
 // NOTE: Event appends in this module use `let _ =` because they are supplementary
-// audit-trail emissions. The RPC response has already been determined; a failed
+// audit-trail emissions. The capability response has already been determined; a failed
 // append should not change the client-visible result.
 pub(crate) struct ContextCommandService;
 

@@ -13,10 +13,10 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     private var viewModel: ChatViewModel!
 
     override func setUp() async throws {
-        // Create minimal RPC client for testing
-        let rpcClient = RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!)
+        // Create minimal engine client for testing
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
         viewModel = ChatViewModel(
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             sessionId: "test-session-\(UUID().uuidString)",
             eventStoreManager: nil
         )

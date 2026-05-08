@@ -46,9 +46,9 @@ final class DependencyContainerTests: XCTestCase {
 
     // MARK: - Container Lifecycle Tests (use shared container)
 
-    func test_container_providesRPCClient() async throws {
-        XCTAssertNotNil(Self.sharedContainer.rpcClient)
-        XCTAssert(Self.sharedContainer.rpcClient is RPCClient)
+    func test_container_providesEngineClient() async throws {
+        XCTAssertNotNil(Self.sharedContainer.engineClient)
+        XCTAssert(Self.sharedContainer.engineClient is EngineClient)
     }
 
     func test_container_providesEventDatabase() async throws {
@@ -83,11 +83,11 @@ final class DependencyContainerTests: XCTestCase {
 
     // MARK: - Singleton Behavior Tests (use shared container)
 
-    func test_rpcClient_returnsSameInstance() async throws {
-        let client1 = Self.sharedContainer.rpcClient
-        let client2 = Self.sharedContainer.rpcClient
+    func test_engineClient_returnsSameInstance() async throws {
+        let client1 = Self.sharedContainer.engineClient
+        let client2 = Self.sharedContainer.engineClient
 
-        XCTAssert(client1 === client2, "RPCClient should return same instance")
+        XCTAssert(client1 === client2, "EngineClient should return same instance")
     }
 
     func test_eventDatabase_returnsSameInstance() async throws {
@@ -141,15 +141,15 @@ final class DependencyContainerTests: XCTestCase {
 
     // MARK: - Active Server Update Tests
 
-    func test_selectPairedServer_recreatesRPCClient() async throws {
+    func test_selectPairedServer_recreatesEngineClient() async throws {
         let (container, first) = pairedContainer(host: "first.example.com", port: 19000)
-        let originalClient = container.rpcClient
+        let originalClient = container.engineClient
         let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19001)
         container.replacePairedServers([first, second], activeServer: first)
 
         container.selectPairedServer(second, connectAfterSwitch: false)
 
-        XCTAssert(originalClient !== container.rpcClient, "RPC client should be recreated after settings change")
+        XCTAssert(originalClient !== container.engineClient, "engine client should be recreated after settings change")
     }
 
     func test_selectPairedServer_preservesEventDatabase() async throws {

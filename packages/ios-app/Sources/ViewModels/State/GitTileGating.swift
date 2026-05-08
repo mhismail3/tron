@@ -16,7 +16,7 @@ enum GitTile: Equatable, Sendable {
 /// Pure value-type that captures whether each git workflow tile in the
 /// Source Control sheet should be enabled given the current
 /// worktree/divergence/lock state. Mirrors the server-side preconditions
-/// for each `git.*` / `worktree.*` RPC so we fail fast (greyed-out tile)
+/// for each `git.*` / `worktree.*` engine protocol so we fail fast (greyed-out tile)
 /// instead of round-tripping just to surface an error popup.
 ///
 /// Construct with the relevant signals; read the booleans. The struct

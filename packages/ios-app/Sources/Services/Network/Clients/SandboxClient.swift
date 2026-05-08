@@ -1,56 +1,60 @@
 import Foundation
 
-/// Client for sandbox container management RPC methods.
+/// Client for sandbox container management engine capabilities.
 /// Handles listing, starting, stopping, killing, and removing containers.
-final class SandboxClient: RPCDomainClient {
+final class SandboxClient: EngineDomainClient {
 
     /// List all tracked containers with live status
     func listContainers() async throws -> SandboxListResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "sandbox.listContainers",
-            params: EmptyParams()
+        return try await invokeRead(
+            "sandbox::list_containers",
+            EmptyParams()
         )
     }
 
     /// Stop a running container
-    func stopContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try requireTransport().requireConnection()
+    func stopContainer(name: String, idempotencyKey: EngineIdempotencyKey) async throws -> ContainerActionResult {
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "sandbox.stopContainer",
-            params: ContainerActionParams(name: name)
+        return try await invokeWrite(
+            "sandbox::stop_container",
+            ContainerActionParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 
     /// Start a stopped container
-    func startContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try requireTransport().requireConnection()
+    func startContainer(name: String, idempotencyKey: EngineIdempotencyKey) async throws -> ContainerActionResult {
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "sandbox.startContainer",
-            params: ContainerActionParams(name: name)
+        return try await invokeWrite(
+            "sandbox::start_container",
+            ContainerActionParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 
     /// Kill a container (SIGKILL)
-    func killContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try requireTransport().requireConnection()
+    func killContainer(name: String, idempotencyKey: EngineIdempotencyKey) async throws -> ContainerActionResult {
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "sandbox.killContainer",
-            params: ContainerActionParams(name: name)
+        return try await invokeWrite(
+            "sandbox::kill_container",
+            ContainerActionParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 
     /// Remove a container and delete its metadata
-    func removeContainer(name: String) async throws -> ContainerActionResult {
-        let ws = try requireTransport().requireConnection()
+    func removeContainer(name: String, idempotencyKey: EngineIdempotencyKey) async throws -> ContainerActionResult {
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "sandbox.removeContainer",
-            params: ContainerActionParams(name: name)
+        return try await invokeWrite(
+            "sandbox::remove_container",
+            ContainerActionParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 }

@@ -6,7 +6,8 @@ import Foundation
 protocol SessionClientProtocol {
     func create(
         workingDirectory: String,
-        model: String?
+        model: String?,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> SessionCreateResult
 
     func list(
@@ -16,15 +17,19 @@ protocol SessionClientProtocol {
         includeArchived: Bool
     ) async throws -> SessionListResult
 
-    func resume(sessionId: String) async throws
+    func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws
 
-    func archive(_ sessionId: String) async throws
+    func archive(_ sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws
 
-    func unarchive(_ sessionId: String) async throws
+    func unarchive(_ sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws
 
     func getHistory(limit: Int) async throws -> [HistoryMessage]
 
-    func fork(_ sessionId: String, fromEventId: String?) async throws -> SessionForkResult
+    func fork(
+        _ sessionId: String,
+        fromEventId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionForkResult
 }
 
 // MARK: - Default Parameter Extensions
@@ -32,9 +37,10 @@ protocol SessionClientProtocol {
 extension SessionClientProtocol {
     func create(
         workingDirectory: String,
-        model: String? = nil
+        model: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> SessionCreateResult {
-        try await create(workingDirectory: workingDirectory, model: model)
+        try await create(workingDirectory: workingDirectory, model: model, idempotencyKey: idempotencyKey)
     }
 
     func list(
@@ -50,8 +56,12 @@ extension SessionClientProtocol {
         try await getHistory(limit: limit)
     }
 
-    func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
-        try await fork(sessionId, fromEventId: fromEventId)
+    func fork(
+        _ sessionId: String,
+        fromEventId: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionForkResult {
+        try await fork(sessionId, fromEventId: fromEventId, idempotencyKey: idempotencyKey)
     }
 }
 

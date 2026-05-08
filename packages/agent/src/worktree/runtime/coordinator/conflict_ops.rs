@@ -11,7 +11,7 @@
 //!
 //! Every conflict scenario — `Finalize` (session→main), `RebaseOnMain`
 //! (main→session), and `StashPop` (post-rebase stash carry-over) — flows
-//! through the same `pending_merges` entry + the same RPC surface:
+//! through the same `pending_merges` entry + the same capability surface:
 //! `listConflicts` / `resolveConflict` / `continueMerge` / `abortMerge`.
 //! Origin drives only the continue/abort side effects:
 //!
@@ -469,7 +469,7 @@ impl WorktreeCoordinator {
         }
     }
 
-    /// Inspect tracked pending merges (for RPC / crash recovery).
+    /// Inspect tracked pending merges (for engine invocation / crash recovery).
     pub fn pending_merge(&self, session_id: &str) -> Option<PendingMergeState> {
         self.state.lock().pending_merges.get(session_id).cloned()
     }

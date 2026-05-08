@@ -11,7 +11,7 @@ import Foundation
 /// The single source of truth for transforming server events into ChatMessages.
 ///
 /// This transformer handles BOTH:
-/// 1. Persisted events (from `events.getHistory` RPC / SQLite)
+/// 1. Persisted events (from `events::get_history` engine protocol / SQLite)
 /// 2. Streaming events (from WebSocket during live agent execution)
 ///
 /// ## Architecture Principle
@@ -48,7 +48,7 @@ struct UnifiedEventTransformer {
     /// Transform an array of persisted events to ChatMessages.
     ///
     /// This generic implementation works with any `EventTransformable` type,
-    /// including `RawEvent` (from server RPC) and `SessionEvent` (from SQLite).
+    /// including `RawEvent` (from server engine protocol) and `SessionEvent` (from SQLite).
     ///
     /// Events are sorted by sequence number, then turn number within each turn
     /// (text before tools) to preserve the logical order of Claude's responses.

@@ -11,7 +11,7 @@ struct ToolCallPayload {
     let turn: Int
     /// Full payload dict preserved so transformers can access
     /// server-enriched fields (e.g. interactive tool status from
-    /// `session.reconstruct` enrichment: `toolStatus`,
+    /// `session::reconstruct` enrichment: `toolStatus`,
     /// `confirmationDecision`, `confirmationNote`, `parsedAnswers`).
     let rawPayload: [String: AnyCodable]
 

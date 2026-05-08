@@ -15,7 +15,7 @@ pub const MAX_PARAM_LENGTH: usize = 8_192;
 /// `serde_json` already enforces a 128-deep recursion limit during parse,
 /// so a client cannot land a 10000-level-deep structure in our
 /// [`serde_json::Value`] at all — parse would fail first with an opaque
-/// parser error. We re-apply the cap at the RPC boundary so that:
+/// parser error. We re-apply the cap at the engine transport boundary so that:
 ///
 /// 1. **Stable error surface.** Depth-rejected requests produce a
 ///    structured [`CapabilityError::InvalidParams`] with a clear message, not a
@@ -267,7 +267,7 @@ mod tests {
         assert!(validate_json_depth(&serde_json::json!(true), MAX_JSON_DEPTH).is_ok());
     }
 
-    /// Regression guard for L2: the explicit RPC depth cap must fire at
+    /// Regression guard for L2: the explicit engine invocation depth cap must fire at
     /// the same threshold as `serde_json`'s parser recursion limit so
     /// clients always see the same error surface regardless of which
     /// layer rejects first. If `serde_json` ever changes its default,

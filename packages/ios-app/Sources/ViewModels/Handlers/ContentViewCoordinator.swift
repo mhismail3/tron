@@ -7,7 +7,7 @@ import Foundation
 final class ContentViewCoordinator {
     private let dependencies: DependencyContainer
 
-    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var engineClient: EngineClient { dependencies.engineClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
 
     // MARK: - State
@@ -112,12 +112,13 @@ final class ContentViewCoordinator {
                 // edit-driven. The server enforces the "no worktree" invariant
                 // for chat sessions regardless of what we pass here; omitting
                 // `useWorktree` keeps the per-session override column NULL.
-                let result = try await rpcClient.session.create(
+                let result = try await engineClient.session.create(
                     workingDirectory: workspace,
                     model: dependencies.defaultModel,
                     title: "Chat",
                     source: "chat",
-                    profile: "chat"
+                    profile: "chat",
+                    idempotencyKey: .userAction("session.create")
                 )
 
                 try await eventStoreManager.cacheNewSession(

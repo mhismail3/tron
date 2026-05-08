@@ -237,7 +237,7 @@ struct PairingValidationTests {
         #expect(classified == .unreachable("h"))
     }
 
-    @Test("Classify a thrown WebSocketError.unauthorized as .unauthorized")
+    @Test("Classify a thrown EngineConnectionError.unauthorized as .unauthorized")
     func classifyUnauthorized() {
         let err = PairingStepConnectError.unauthorized
         let classified = PairingStepValidator.classify(error: err, hostHint: "h")

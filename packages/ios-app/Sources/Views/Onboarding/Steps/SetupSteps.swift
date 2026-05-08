@@ -53,7 +53,7 @@ struct WorkspaceSetupOnboardingPage: View {
         }
         .sheet(isPresented: $showWorkspaceSelector, onDismiss: saveWorkspace) {
             WorkspaceSelector(
-                rpcClient: dependencies.rpcClient,
+                engineClient: dependencies.engineClient,
                 selectedPath: $selectedPath
             )
         }
@@ -80,7 +80,10 @@ struct WorkspaceSetupOnboardingPage: View {
                 let update = ServerSettingsUpdate(
                     server: ServerSettingsUpdate.ServerUpdate(defaultWorkspace: trimmed)
                 )
-                try await dependencies.rpcClient.settings.update(update)
+                try await dependencies.engineClient.settings.update(
+                    update,
+                    idempotencyKey: .userAction("settings.update")
+                )
                 dependencies.quickSessionWorkspace = trimmed
                 status = "Workspace saved."
             } catch {
@@ -168,10 +171,11 @@ struct ProviderSetupOnboardingPage: View {
         status = nil
         Task {
             do {
-                let authState = try await dependencies.rpcClient.auth.addNamedApiKey(
+                let authState = try await dependencies.engineClient.auth.addNamedApiKey(
                     provider: provider.id,
                     label: label,
-                    key: key
+                    key: key,
+                    idempotencyKey: .userAction("auth.addNamedApiKey")
                 )
                 state.refreshSetupAuth(authState)
                 apiKey = ""
@@ -204,10 +208,11 @@ struct RemainingProvidersOnboardingPage: View {
                         placeholder: "\(provider.displayName) API key",
                         existingSummary: state.setupSnapshot.providerSummary(for: provider.id),
                         save: { key in
-                            try await dependencies.rpcClient.auth.addNamedApiKey(
+                            try await dependencies.engineClient.auth.addNamedApiKey(
                                 provider: provider.id,
                                 label: OnboardingSetupSnapshot.defaultApiKeyLabel,
-                                key: key
+                                key: key,
+                                idempotencyKey: .userAction("auth.addNamedApiKey")
                             )
                         },
                         onSaved: { authState in state.refreshSetupAuth(authState) }
@@ -234,8 +239,9 @@ struct ServicesSetupOnboardingPage: View {
                         placeholder: "\(service.displayName) API key",
                         existingSummary: state.setupSnapshot.serviceSummary(for: service.id),
                         save: { key in
-                            try await dependencies.rpcClient.auth.update(
-                                AuthUpdateParams(service: service.id, apiKey: .value(key))
+                            try await dependencies.engineClient.auth.update(
+                                AuthUpdateParams(service: service.id, apiKey: .value(key)),
+                                idempotencyKey: .userAction("auth.update")
                             )
                         },
                         onSaved: { authState in state.refreshSetupAuth(authState) }
@@ -330,8 +336,8 @@ struct ModelSetupOnboardingPage: View {
         guard models.isEmpty else { return }
         isLoading = true
         do {
-            await dependencies.rpcClient.connect()
-            models = try await dependencies.rpcClient.model.list()
+            await dependencies.engineClient.connect()
+            models = try await dependencies.engineClient.model.list()
             let hydratedModel = state.setupSnapshot.defaultModel
             selectedModel = hydratedModel.isEmpty
                 ? (dependencies.defaultModel.isEmpty
@@ -365,9 +371,12 @@ struct ModelSetupOnboardingPage: View {
                     server: ServerSettingsUpdate.ServerUpdate(defaultModel: model),
                     memory: ServerSettingsUpdate.MemoryUpdate(retainModel: model)
                 )
-                try await dependencies.rpcClient.settings.update(update)
+                try await dependencies.engineClient.settings.update(
+                    update,
+                    idempotencyKey: .userAction("settings.update")
+                )
                 dependencies.defaultModel = model
-                dependencies.rpcClient.model.invalidateCache()
+                dependencies.engineClient.model.invalidateCache()
                 onComplete()
             } catch {
                 status = "Could not save model: \(error.localizedDescription)"

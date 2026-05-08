@@ -3,7 +3,7 @@ import Foundation
 /// A lightweight counting semaphore for async/await.
 ///
 /// Use to cap concurrency of awaitable work (e.g. a bounded queue of parallel
-/// RPCs). Each `wait()` consumes a permit or suspends until `signal()` releases
+/// engine protocols). Each `wait()` consumes a permit or suspends until `signal()` releases
 /// one. Cancelling a suspended waiter throws `CancellationError` and removes
 /// it from the FIFO queue without consuming a permit.
 actor AsyncSemaphore {

@@ -6,13 +6,13 @@ import Foundation
 @Suite("MiscClient Tests")
 struct MiscClientTests {
 
-    @Test("getSystemInfo throws when webSocket is nil")
+    @Test("getSystemInfo throws when engineConnection is nil")
     func getSystemInfoNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MiscClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.getSystemInfo()
         }
     }
@@ -58,12 +58,15 @@ struct MiscClientTests {
 
     @Test("registerDeviceToken throws when not connected")
     func registerDeviceTokenNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MiscClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
-            try await client.registerDeviceToken(String(repeating: "a", count: 64))
+        await #expect(throws: EngineClientError.self) {
+            try await client.registerDeviceToken(
+                String(repeating: "a", count: 64),
+                idempotencyKey: .userAction("device.register.test")
+            )
         }
     }
 }

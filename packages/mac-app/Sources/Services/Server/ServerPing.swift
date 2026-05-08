@@ -1,7 +1,7 @@
 import Foundation
 import ServiceManagement
 
-/// Result of a single `system.ping` probe. The four non-success cases
+/// Result of a single `system::ping` engine probe. The four non-success cases
 /// drive distinct UI affordances in the menu bar / wizard so the user
 /// gets the right action ("re-pair" vs "wait for boot" vs "check
 /// network"). Replaces the old `ServerInfo?` return which conflated
@@ -26,16 +26,17 @@ enum ServerPingResult: Sendable, Equatable {
     }
 }
 
-/// One-shot `system.ping` over WebSocket. Used by the install step's
+/// One-shot `system::ping` over the engine WebSocket protocol. Used by the install step's
 /// "wait for server" loop AND by the menu bar's status poller.
 enum ServerPing {
     static let requestID = "mac-system-ping"
+    static let helloID = "mac-engine-hello"
 
     /// Performs a single ping with a default 3 s timeout. Classifies
     /// failures so the caller can render the right state without
     /// guessing.
     static func ping(host: String, port: Int, token: String?, timeout: TimeInterval = 3) async -> ServerPingResult {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/ws")?.url else {
+        guard let url = URLComponents(string: "ws://\(host):\(port)/engine")?.url else {
             return .unreachable
         }
 
@@ -58,20 +59,31 @@ enum ServerPing {
         task.resume()
         defer { task.cancel(with: .goingAway, reason: nil) }
 
+        let hello: [String: Any] = [
+            "type": "hello",
+            "id": helloID,
+            "protocolVersion": 1,
+            "clientName": "tron-mac",
+            "clientVersion": "tron-mac-wrapper",
+        ]
         let payload: [String: Any] = [
+            "type": "invoke",
             "id": requestID,
-            "method": "system.ping",
-            "params": [
+            "functionId": "system::ping",
+            "payload": [
                 "protocolVersion": 1,
                 "clientVersion": "tron-mac-wrapper",
             ]
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+        guard let helloData = try? JSONSerialization.data(withJSONObject: hello, options: []),
+              let helloString = String(data: helloData, encoding: .utf8),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let str = String(data: data, encoding: .utf8) else {
             return .malformedResponse
         }
 
         do {
+            try await task.send(.string(helloString))
             try await task.send(.string(str))
 
             var sawServerFrame = false
@@ -81,7 +93,7 @@ enum ServerPing {
                     return .malformedResponse
                 }
 
-                switch decodeFrame(data: raw) {
+                switch decodeFrame(data: raw, defaultPort: port) {
                 case .result(let info):
                     return .success(info)
                 case .ignore:
@@ -134,31 +146,37 @@ enum ServerPing {
         case malformed
     }
 
-    static func decodeFrame(data: Data, expectedID: String = requestID) -> ResponseFrame {
+    static func decodeFrame(
+        data: Data,
+        expectedID: String = requestID,
+        defaultPort: Int = TronPaths.defaultServerPort
+    ) -> ResponseFrame {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
             return .malformed
         }
         guard responseID(json["id"], matches: expectedID) else {
             return .ignore
         }
-        if json["error"] != nil || json["success"] as? Bool == false {
+        if json["error"] != nil || json["ok"] as? Bool == false {
             return .error
         }
-        guard let info = decode(data: data) else {
+        guard let info = decode(data: data, defaultPort: defaultPort) else {
             return .malformed
         }
         return .result(info)
     }
 
-    static func decode(data: Data) -> ServerInfo? {
+    static func decode(data: Data, defaultPort: Int = TronPaths.defaultServerPort) -> ServerInfo? {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-              let result = json["result"] as? [String: Any] else {
+              let result = json["result"] as? [String: Any],
+              let child = result["child"] as? [String: Any],
+              let value = child["value"] as? [String: Any] else {
             return nil
         }
-        let serverVersion = result["serverVersion"] as? String ?? ""
-        let port = result["port"] as? Int ?? TronPaths.defaultServerPort
-        let tailscaleIp = result["tailscaleIp"] as? String
-        let paired = result["paired"] as? Bool ?? false
+        let serverVersion = value["serverVersion"] as? String ?? ""
+        let port = value["port"] as? Int ?? defaultPort
+        let tailscaleIp = value["tailscaleIp"] as? String
+        let paired = value["paired"] as? Bool ?? false
         return ServerInfo(version: serverVersion, port: port, tailscaleIp: tailscaleIp, paired: paired)
     }
 

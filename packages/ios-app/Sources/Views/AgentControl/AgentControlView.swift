@@ -4,7 +4,7 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct AgentControlView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     var skillStore: SkillStore?
     var readOnly: Bool = false
@@ -122,7 +122,7 @@ struct AgentControlView: View {
             .sheet(isPresented: $showContextDetail) {
                 if let snapshot = detailedSnapshot {
                     ContextDetailView(
-                        rpcClient: rpcClient,
+                        engineClient: engineClient,
                         sessionId: sessionId,
                         snapshot: snapshot,
                         skillStore: skillStore,
@@ -141,7 +141,7 @@ struct AgentControlView: View {
             }
             .sheet(isPresented: $showSourceControl) {
                 SourceControlSheet(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     sessionId: sessionId,
                     initialDiffResult: diffResult,
                     initialWorktreeStatus: worktreeStatus,
@@ -276,7 +276,7 @@ struct AgentControlView: View {
 
     private func loadContext() async {
         do {
-            detailedSnapshot = try await rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
+            detailedSnapshot = try await engineClient.context.getDetailedSnapshot(sessionId: sessionId)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -284,7 +284,7 @@ struct AgentControlView: View {
 
     private func reloadContextInBackground() async {
         do {
-            detailedSnapshot = try await rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
+            detailedSnapshot = try await engineClient.context.getDetailedSnapshot(sessionId: sessionId)
             pendingSkillDeletions.removeAll()
         } catch {
             errorMessage = error.localizedDescription
@@ -293,8 +293,8 @@ struct AgentControlView: View {
 
     private func loadChanges() async {
         do {
-            async let diff = rpcClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
-            async let status: WorktreeGetStatusResult? = { try? await rpcClient.worktree.getStatus(sessionId: sessionId) }()
+            async let diff = engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
+            async let status: WorktreeGetStatusResult? = { try? await engineClient.worktree.getStatus(sessionId: sessionId) }()
             diffResult = try await diff
             worktreeStatus = await status
         } catch {
@@ -331,7 +331,7 @@ struct AgentControlView: View {
     }
 
     private func loadBranches() async {
-        branches = (try? await rpcClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
+        branches = (try? await engineClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
     }
 
     // MARK: - Retain Button
@@ -375,7 +375,7 @@ struct AgentControlView: View {
     private func retainMemory() async {
         isRetaining = true
         do {
-            _ = try await rpcClient.misc.retainMemory(sessionId: sessionId)
+            _ = try await engineClient.misc.retainMemory(sessionId: sessionId, idempotencyKey: .userAction("memory.retain"))
         } catch {
             errorMessage = "Failed to retain memory: \(error.localizedDescription)"
         }
@@ -390,7 +390,7 @@ struct AgentControlView: View {
         }
 
         do {
-            let result = try await rpcClient.skill.remove(sessionId: sessionId, skillName: skillName)
+            let result = try await engineClient.skill.remove(sessionId: sessionId, skillName: skillName, idempotencyKey: .userAction("skills.deactivate"))
             if result.success {
                 await reloadContextInBackground()
             } else {

@@ -148,7 +148,7 @@ final class ErrorHandler {
     /// Classify an error into a dedup key for toast suppression. Connection-class errors
     /// all collapse to a single key so storms don't flood the banner stack.
     static func classifyDedupKey(for error: Error) -> String? {
-        if case .unauthorized = error as? WebSocketError {
+        if case .unauthorized = error as? EngineConnectionError {
             // Re-pair is a single, distinct CTA — keep it on its own key so the toast doesn't
             // collapse into the transient connection bucket and lose its specific copy.
             return "connection.unauthorized"

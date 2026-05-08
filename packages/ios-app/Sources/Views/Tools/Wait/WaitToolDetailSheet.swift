@@ -9,7 +9,7 @@ import SwiftUI
 struct WaitToolDetailSheet: View {
     let data: CommandToolChipData
     let viewModel: ChatViewModel
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dependencies) private var dependencies
@@ -397,7 +397,7 @@ struct WaitToolDetailSheet: View {
         }()
 
         if let bashData {
-            BashToolDetailSheet(data: bashData, rpcClient: rpcClient, sessionId: sessionId)
+            BashToolDetailSheet(data: bashData, engineClient: engineClient, sessionId: sessionId)
         } else {
             ProcessJobFallbackSheet(toolCallId: toolCallId)
         }
@@ -410,7 +410,7 @@ struct WaitToolDetailSheet: View {
                 data: agentData,
                 subagentState: viewModel.subagentState,
                 eventStoreManager: dependencies.eventStoreManager,
-                rpcClient: rpcClient
+                engineClient: engineClient
             )
             .adaptivePresentationDetents([.medium, .large])
         } else {

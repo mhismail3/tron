@@ -1,85 +1,91 @@
 import Foundation
 
-/// Client for mcp.* RPC methods.
+/// Client for MCP engine capabilities.
 /// Manages MCP server lifecycle: status, add, remove, enable, disable, restart, reload.
-final class MCPClient: RPCDomainClient {
+final class MCPClient: EngineDomainClient {
 
     // MARK: - Status
 
     func status() async throws -> [MCPServerStatus] {
-        let ws = try requireTransport().requireConnection()
-        let result: [MCPServerStatus] = try await ws.send(
-            method: "mcp.status",
-            params: EmptyParams()
+        _ = try requireTransport().requireConnection()
+        let result: [MCPServerStatus] = try await invokeRead(
+            "mcp::status",
+            EmptyParams()
         )
         return result
     }
 
     // MARK: - Server Management
 
-    func addServer(_ params: MCPAddServerParams) async throws -> MCPAddServerResult {
-        let ws = try requireTransport().requireConnection()
-        return try await ws.send(
-            method: "mcp.addServer",
-            params: params
+    func addServer(_ params: MCPAddServerParams, idempotencyKey: EngineIdempotencyKey) async throws -> MCPAddServerResult {
+        _ = try requireTransport().requireConnection()
+        return try await invokeWrite(
+            "mcp::add_server",
+            params,
+            idempotencyKey: idempotencyKey
         )
     }
 
-    func removeServer(name: String) async throws {
-        let ws = try requireTransport().requireConnection()
-        let _: MCPSuccessResult = try await ws.send(
-            method: "mcp.removeServer",
-            params: MCPServerNameParams(name: name)
+    func removeServer(name: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
+        let _: MCPSuccessResult = try await invokeWrite(
+            "mcp::remove_server",
+            MCPServerNameParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 
-    func enableServer(name: String) async throws {
-        let ws = try requireTransport().requireConnection()
-        let _: MCPSuccessResult = try await ws.send(
-            method: "mcp.enableServer",
-            params: MCPServerNameParams(name: name)
+    func enableServer(name: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
+        let _: MCPSuccessResult = try await invokeWrite(
+            "mcp::enable_server",
+            MCPServerNameParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 
-    func disableServer(name: String) async throws {
-        let ws = try requireTransport().requireConnection()
-        let _: MCPSuccessResult = try await ws.send(
-            method: "mcp.disableServer",
-            params: MCPServerNameParams(name: name)
+    func disableServer(name: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
+        let _: MCPSuccessResult = try await invokeWrite(
+            "mcp::disable_server",
+            MCPServerNameParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 
-    func restartServer(name: String) async throws -> MCPRestartServerResult {
-        let ws = try requireTransport().requireConnection()
-        return try await ws.send(
-            method: "mcp.restartServer",
-            params: MCPServerNameParams(name: name)
+    func restartServer(name: String, idempotencyKey: EngineIdempotencyKey) async throws -> MCPRestartServerResult {
+        _ = try requireTransport().requireConnection()
+        return try await invokeWrite(
+            "mcp::restart_server",
+            MCPServerNameParams(name: name),
+            idempotencyKey: idempotencyKey
         )
     }
 
     // MARK: - Tool Listing
 
     func listTools(server: String? = nil) async throws -> [MCPToolInfo] {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         struct ListToolsParams: Encodable {
             let server: String?
         }
 
-        let result: [MCPToolInfo] = try await ws.send(
-            method: "mcp.listTools",
-            params: ListToolsParams(server: server)
+        let result: [MCPToolInfo] = try await invokeRead(
+            "mcp::list_tools",
+            ListToolsParams(server: server)
         )
         return result
     }
 
     // MARK: - Reload
 
-    func reload() async throws -> MCPReloadResult {
-        let ws = try requireTransport().requireConnection()
-        return try await ws.send(
-            method: "mcp.reload",
-            params: EmptyParams()
+    func reload(idempotencyKey: EngineIdempotencyKey) async throws -> MCPReloadResult {
+        _ = try requireTransport().requireConnection()
+        return try await invokeWrite(
+            "mcp::reload",
+            EmptyParams(),
+            idempotencyKey: idempotencyKey
         )
     }
 }

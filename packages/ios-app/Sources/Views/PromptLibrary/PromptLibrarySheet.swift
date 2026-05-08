@@ -5,7 +5,7 @@ import SwiftUI
 /// that into the composer text field (see `InputBar`).
 @available(iOS 26.0, *)
 struct PromptLibrarySheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onSelect: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -33,7 +33,7 @@ struct PromptLibrarySheet: View {
                     case .history:
                         PromptHistoryListView(
                             state: state,
-                            rpcClient: rpcClient,
+                            engineClient: engineClient,
                             onSelect: { text in
                                 onSelect(text)
                                 dismiss()
@@ -43,7 +43,7 @@ struct PromptLibrarySheet: View {
                     case .snippets:
                         PromptSnippetListView(
                             state: state,
-                            rpcClient: rpcClient,
+                            engineClient: engineClient,
                             onSelect: { text in
                                 onSelect(text)
                                 dismiss()
@@ -58,7 +58,7 @@ struct PromptLibrarySheet: View {
                     TronSearchBar(
                         text: Binding(
                             get: { state.historySearch },
-                            set: { state.setSearch($0, rpc: rpcClient) }
+                            set: { state.setSearch($0, rpc: engineClient) }
                         ),
                         prompt: "Search prompts"
                     )
@@ -99,9 +99,9 @@ struct PromptLibrarySheet: View {
                         Task {
                             switch state.activeTab {
                             case .history:
-                                await state.loadHistory(rpc: rpcClient, reset: true)
+                                await state.loadHistory(rpc: engineClient, reset: true)
                             case .snippets:
-                                await state.loadSnippets(rpc: rpcClient)
+                                await state.loadSnippets(rpc: engineClient)
                             }
                         }
                     } label: {
@@ -119,7 +119,7 @@ struct PromptLibrarySheet: View {
             .alert("Clear all history?", isPresented: $showClearHistoryAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Clear", role: .destructive) {
-                    Task { await state.clearHistory(rpc: rpcClient) }
+                    Task { await state.clearHistory(rpc: engineClient) }
                 }
             } message: {
                 Text("This permanently removes every entry in your prompt history.")
@@ -132,7 +132,7 @@ struct PromptLibrarySheet: View {
             SnippetEditorSheet(
                 initialSnippet: nil,
                 onSave: { name, text in
-                    await state.createSnippet(name: name, text: text, rpc: rpcClient) != nil
+                    await state.createSnippet(name: name, text: text, rpc: engineClient) != nil
                 }
             )
         }
@@ -140,7 +140,7 @@ struct PromptLibrarySheet: View {
             SnippetEditorSheet(
                 initialSnippet: snippet,
                 onSave: { name, text in
-                    await state.updateSnippet(id: snippet.id, name: name, text: text, rpc: rpcClient)
+                    await state.updateSnippet(id: snippet.id, name: name, text: text, rpc: engineClient)
                 }
             )
         }
@@ -152,8 +152,8 @@ struct PromptLibrarySheet: View {
             }
         }
         .task {
-            await state.loadSnippets(rpc: rpcClient)
-            await state.loadHistory(rpc: rpcClient, reset: true)
+            await state.loadSnippets(rpc: engineClient)
+            await state.loadHistory(rpc: engineClient, reset: true)
         }
     }
 }

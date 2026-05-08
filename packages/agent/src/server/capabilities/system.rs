@@ -222,7 +222,7 @@ fn system_info_value(
     let marker_path = allow_capability_context
         .then(|| {
             payload
-                .pointer("/__rpcContext/onboardedMarkerPath")
+                .pointer("/__capabilityContext/onboardedMarkerPath")
                 .and_then(Value::as_str)
                 .map(PathBuf::from)
         })

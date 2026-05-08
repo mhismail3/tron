@@ -65,10 +65,10 @@ readyContent()
             └─ PairingStep
                  ├─ scan QR / optionally reveal manual entry
                  ├─ validate host / port / token / server name
-                 ├─ probe ws://host:port/ws with Authorization: Bearer token
-                 ├─ send system.ping
+                 ├─ probe ws://host:port/engine with Authorization: Bearer token
+                 ├─ send system::ping
                  ├─ persist Keychain bearer + local paired-server store
-                 ├─ rebuild RPC client for the paired server
+                 ├─ rebuild engine client for the paired server
                  ├─ load settings.get from the paired server
                  ├─ best-effort load auth.get for masked credential status
                  └─ advance to setup pages
@@ -122,7 +122,7 @@ PairingPersistor.plan(payload, existing)
 side effects:
   1. pairedServerTokenStore.setToken(...)
   2. PairedServerStore.replace(..., activeId:)
-  3. rebuild RPC client for the active paired server
+  3. rebuild engine client for the active paired server
   4. connect and load settings.get from the paired server
   5. best-effort load auth.get for masked credential status
   6. advance to the workspace/settings setup pages
@@ -174,7 +174,7 @@ the current page swaps from empty entry state to a saved credential card with
 the masked label/hint before the user moves forward. The OAuth sheet also
 reports its returned `AuthState` to callers; Settings uses the same callback so
 the model providers page refreshes even if the server event arrives later.
-Settings provider forms keep their local input until the auth RPC returns an
+Settings provider forms keep their local input until the auth engine protocol returns an
 updated `AuthState`; failed saves leave labels, API keys, and Google Cloud
 fields visible for correction or retry.
 The Providers settings sheet starts with a dynamic summary card computed from
@@ -193,7 +193,7 @@ small red X icon button. The Services group uses a stronger spaced header than
 individual provider rows so the sheet reads as two clear sections: model
 providers first, then search services.
 
-Provider credentials are written through `auth.*` RPCs, so secrets land in
+Provider credentials are written through `auth.*` engine invocations, so secrets land in
 `auth.json`, not profile settings.
 
 Server settings and app settings are intentionally separate. Server-backed
@@ -265,14 +265,14 @@ destructive server action and therefore lives in the main Settings destructive
 grid row before Archive All Sessions and Reset All Settings.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
-pairing bearer token and sends `system.ping`. The server emits a
+pairing bearer token and sends `system::ping`. The server emits a
 `connection.established` event immediately after upgrade, so the probe
-matches the `system.ping` response by request id and ignores unrelated
+matches the `system::ping` response by request id and ignores unrelated
 event frames before classifying:
 
 - `.ok` when the server replies successfully.
 - `.unauthorized` when the WebSocket upgrade gets HTTP 401.
-- `.incompatible` when `system.ping` returns
+- `.incompatible` when `system::ping` returns
   `CLIENT_VERSION_UNSUPPORTED`.
 - `.unreachable` for DNS, timeout, refused connection, and malformed
   responses.
@@ -363,7 +363,7 @@ pairing an iPad must not silently mark an iPhone as paired.
 
 Every `PairedServer.id` has a Keychain slot at
 `com.tron.mobile.bearer.<serverId>`. The onboarding sheet writes or refreshes
-the token; `WebSocketService` reads it when building the
+the token; `EngineConnection` reads it when building the
 `Authorization: Bearer …` upgrade header.
 
 Keychain accessibility is `accessibleAfterFirstUnlock` so background

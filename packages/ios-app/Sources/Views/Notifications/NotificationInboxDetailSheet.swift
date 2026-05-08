@@ -142,7 +142,7 @@ struct NotificationInboxDetailSheet: View {
     // MARK: - Actions
 
     private func markRead() async {
-        let success = await notificationStore.markRead(eventId: notification.eventId)
+        let success = await notificationStore.markRead(eventId: notification.eventId, idempotencyKey: .userAction("notifications.markRead"))
         if success {
             hasMarkedRead = true
         }

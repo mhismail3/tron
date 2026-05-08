@@ -8,7 +8,7 @@ struct VoiceNotesRecordingSheet: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onComplete: (String) -> Void  // Receives filename
     let onCancel: () -> Void
 
@@ -205,8 +205,9 @@ struct VoiceNotesRecordingSheet: View {
                     try Data(contentsOf: url)
                 }.value
 
-                let result = try await rpcClient.media.saveVoiceNote(
-                    audioData: data
+                let result = try await engineClient.media.saveVoiceNote(
+                    audioData: data,
+                    idempotencyKey: .userAction("voiceNotes.save")
                 )
 
                 onComplete(result.filename)

@@ -71,7 +71,7 @@ final class OnboardingState {
     /// Unlocks the setup pages that follow the Mac connection page.
     ///
     /// The sheet is swipeable, but setup pages depend on a live paired
-    /// server for settings/auth RPCs. Keep this transient: onboarding
+    /// server for settings/auth engine protocols. Keep this transient: onboarding
     /// completion is only persisted after the final setup page.
     var hasPairedMac = false
 
@@ -91,7 +91,7 @@ final class OnboardingState {
     /// Inline failure for the Connect button. `nil` clears the label.
     var pairingError: PairingStepValidator.Failure?
 
-    /// True while a `system.ping` round-trip is in flight; the View disables
+    /// True while a `system::ping` round-trip is in flight; the View disables
     /// the form and shows a progress indicator.
     var isConnecting: Bool = false
 
@@ -214,7 +214,7 @@ final class OnboardingState {
     ///
     /// A completed onboarding run can leave `hasPairedMac` true in memory.
     /// Starting a new pairing must relock server-backed setup pages until the
-    /// new active server connects and fresh `settings.get` values arrive.
+    /// new active server connects and fresh `settings::get` values arrive.
     func beginPairingEntry() {
         currentStep = .connect
         hasPairedMac = false

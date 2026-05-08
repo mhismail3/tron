@@ -8,16 +8,22 @@ protocol AgentClientProtocol {
         _ prompt: String,
         images: [ImageAttachment]?,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?
+        reasoningLevel: String?,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws
 
-    func abort() async throws
+    func abort(idempotencyKey: EngineIdempotencyKey) async throws
 
-    func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws
+    func sendToolResult(
+        sessionId: String,
+        toolCallId: String,
+        result: AskUserQuestionResult,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws
 
     // Session-scoped skill methods
-    func activateSkill(_ skillName: String) async throws -> SkillActivateResult
-    func deactivateSkill(_ skillName: String) async throws -> SkillDeactivateResult
+    func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult
+    func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult
     func activeSkills() async throws -> SkillActiveResult
 }
 
@@ -28,13 +34,15 @@ extension AgentClientProtocol {
         _ prompt: String,
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
-        reasoningLevel: String? = nil
+        reasoningLevel: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws {
         try await sendPrompt(
             prompt,
             images: images,
             attachments: attachments,
-            reasoningLevel: reasoningLevel
+            reasoningLevel: reasoningLevel,
+            idempotencyKey: idempotencyKey
         )
     }
 }

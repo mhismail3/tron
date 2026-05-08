@@ -20,21 +20,33 @@ final class DefaultAgentRepository: AgentRepository {
         _ prompt: String,
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
-        reasoningLevel: String? = nil
+        reasoningLevel: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws {
         try await agentClient.sendPrompt(
             prompt,
             images: images,
             attachments: attachments,
-            reasoningLevel: reasoningLevel
+            reasoningLevel: reasoningLevel,
+            idempotencyKey: idempotencyKey
         )
     }
 
-    func abort() async throws {
-        try await agentClient.abort()
+    func abort(idempotencyKey: EngineIdempotencyKey) async throws {
+        try await agentClient.abort(idempotencyKey: idempotencyKey)
     }
 
-    func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
-        try await agentClient.sendToolResult(sessionId: sessionId, toolCallId: toolCallId, result: result)
+    func sendToolResult(
+        sessionId: String,
+        toolCallId: String,
+        result: AskUserQuestionResult,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws {
+        try await agentClient.sendToolResult(
+            sessionId: sessionId,
+            toolCallId: toolCallId,
+            result: result,
+            idempotencyKey: idempotencyKey
+        )
     }
 }

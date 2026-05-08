@@ -3,7 +3,7 @@ import Testing
 
 @testable import TronMobile
 
-/// Behavioral tests for `WebSocketService`'s bearer-token integration —
+/// Behavioral tests for `EngineConnection`'s bearer-token integration —
 /// Pairing bearer auth on the WS upgrade
 /// request, plus the new `.unauthorized` state machine path).
 ///
@@ -12,7 +12,7 @@ import Testing
 /// real server" is verified by the Rust integration test that rejects
 /// missing or stale bearer tokens and by the iOS `.unauthorized` state
 /// transition tests below.
-@Suite("WebSocketService bearer auth")
+@Suite("EngineConnection bearer auth")
 @MainActor
 struct WebSocketAuthTests {
 
@@ -25,7 +25,7 @@ struct WebSocketAuthTests {
     @Test("upgrade request includes Bearer header when provider returns a token")
     func upgradeRequestHasBearerHeader() {
         let token = "test-bearer-token-43-chars-base64-padding-eq"
-        let ws = WebSocketService(serverURL: makeURL()) { token }
+        let ws = EngineConnection(serverURL: makeURL()) { token }
 
         let request = ws.makeUpgradeRequest()
 
@@ -38,7 +38,7 @@ struct WebSocketAuthTests {
         // in Keychain. The header must not be sent so the server's 401
         // response triggers `.unauthorized` rather than the request being
         // silently rejected with the wrong token.
-        let ws = WebSocketService(serverURL: makeURL()) { nil }
+        let ws = EngineConnection(serverURL: makeURL()) { nil }
 
         let request = ws.makeUpgradeRequest()
 
@@ -49,7 +49,7 @@ struct WebSocketAuthTests {
     func upgradeRequestOmitsHeaderWithoutProvider() {
         // Call sites without a paired-server token send no header; the server
         // responds 401 and the UI moves into the re-pair flow.
-        let ws = WebSocketService(serverURL: makeURL())
+        let ws = EngineConnection(serverURL: makeURL())
 
         let request = ws.makeUpgradeRequest()
 
@@ -63,7 +63,7 @@ struct WebSocketAuthTests {
         // The provider closure must re-read on every connect so the next
         // attempt picks up the rotated token.
         nonisolated(unsafe) var current = "old-token"
-        let ws = WebSocketService(serverURL: makeURL()) { current }
+        let ws = EngineConnection(serverURL: makeURL()) { current }
 
         #expect(ws.makeUpgradeRequest().value(forHTTPHeaderField: "Authorization") == "Bearer old-token")
 
@@ -74,7 +74,7 @@ struct WebSocketAuthTests {
 
     @Test("upgrade request preserves the configured timeout")
     func upgradeRequestKeepsTimeout() {
-        let ws = WebSocketService(serverURL: makeURL()) { "tok" }
+        let ws = EngineConnection(serverURL: makeURL()) { "tok" }
 
         let request = ws.makeUpgradeRequest()
 
@@ -85,7 +85,7 @@ struct WebSocketAuthTests {
 
     @Test("markUnauthorized parks state in .unauthorized with the supplied reason")
     func markUnauthorizedTransitionsState() {
-        let ws = WebSocketService(serverURL: makeURL())
+        let ws = EngineConnection(serverURL: makeURL())
         #expect(ws.connectionState == .disconnected)
 
         ws.markUnauthorized(reason: "Server rejected authentication")
@@ -129,7 +129,7 @@ struct WebSocketAuthTests {
         // state should advance toward .connecting (and then likely fail
         // with .reconnecting since the URL is bogus — that's OK; the assert
         // is that we left .unauthorized).
-        let ws = WebSocketService(serverURL: makeURL())
+        let ws = EngineConnection(serverURL: makeURL())
         ws.markUnauthorized(reason: "Server rejected authentication")
         #expect(ws.connectionState == .unauthorized(reason: "Server rejected authentication"))
 
@@ -148,7 +148,7 @@ struct WebSocketAuthTests {
         // with no Authorization header. The integration with URLSessionDelegate
         // (Phase 3.5) marks the resulting 401 as `.unauthorized`. The unit
         // test simulates the second half via direct `markUnauthorized`.
-        let ws = WebSocketService(serverURL: makeURL()) { nil }
+        let ws = EngineConnection(serverURL: makeURL()) { nil }
 
         let request = ws.makeUpgradeRequest()
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)

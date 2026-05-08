@@ -185,7 +185,7 @@ assistant content, streaming replay-only, or intentionally no-state.
 
 ### Reconstruction Pagination
 
-The `session.reconstruct` RPC supports cursor-based pagination:
+The `session::reconstruct` engine protocol supports cursor-based pagination:
 
 | Field | Type | Purpose |
 |-------|------|---------|

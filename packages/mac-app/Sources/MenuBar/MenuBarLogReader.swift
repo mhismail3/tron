@@ -2,15 +2,15 @@ import Foundation
 
 enum MenuBarLogReadError: Error, Equatable {
     case serverUnavailable
-    case rpcFailed(String)
+    case engineProtocolFailed(String)
     case unreadableOutput(String)
 
     var message: String {
         switch self {
         case .serverUnavailable:
             return "The Tron server is not reachable."
-        case .rpcFailed(let detail):
-            return detail.isEmpty ? "logs.recent failed." : detail
+        case .engineProtocolFailed(let detail):
+            return detail.isEmpty ? "logs::recent failed." : detail
         case .unreadableOutput(let detail):
             return detail
         }
@@ -20,6 +20,7 @@ enum MenuBarLogReadError: Error, Equatable {
 enum MenuBarLogReader {
     static let defaultLimit = 200
     static let requestID = "mac-logs-recent"
+    static let helloID = "mac-engine-hello"
 
     static func fetchRecentLogs(
         host: String = "127.0.0.1",
@@ -28,7 +29,7 @@ enum MenuBarLogReader {
         limit: Int = defaultLimit,
         timeout: TimeInterval = 5
     ) async -> Result<String, MenuBarLogReadError> {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/ws")?.url else {
+        guard let url = URLComponents(string: "ws://\(host):\(port)/engine")?.url else {
             return .failure(.serverUnavailable)
         }
 
@@ -44,23 +45,34 @@ enum MenuBarLogReader {
         task.resume()
         defer { task.cancel(with: .goingAway, reason: nil) }
 
-        let payload: [String: Any] = [
-            "id": requestID,
-            "method": "logs.recent",
-            "params": ["limit": limit],
+        let hello: [String: Any] = [
+            "type": "hello",
+            "id": helloID,
+            "protocolVersion": 1,
+            "clientName": "tron-mac",
+            "clientVersion": "tron-mac-wrapper",
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+        let payload: [String: Any] = [
+            "type": "invoke",
+            "id": requestID,
+            "functionId": "logs::recent",
+            "payload": ["limit": limit],
+        ]
+        guard let helloData = try? JSONSerialization.data(withJSONObject: hello, options: []),
+              let helloString = String(data: helloData, encoding: .utf8),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let str = String(data: data, encoding: .utf8) else {
-            return .failure(.unreadableOutput("Could not encode logs.recent request."))
+            return .failure(.unreadableOutput("Could not encode logs::recent request."))
         }
 
         do {
+            try await task.send(.string(helloString))
             try await task.send(.string(str))
 
             for _ in 0..<8 {
                 let message = try await task.receive()
                 guard let raw = messageData(from: message) else {
-                    return .failure(.unreadableOutput("Could not read logs.recent response."))
+                    return .failure(.unreadableOutput("Could not read logs::recent response."))
                 }
 
                 switch decodeFrame(data: raw) {
@@ -69,9 +81,9 @@ enum MenuBarLogReader {
                 case .ignore:
                     continue
                 case .error(let message):
-                    return .failure(.rpcFailed(message))
+                    return .failure(.engineProtocolFailed(message))
                 case .malformed:
-                    return .failure(.unreadableOutput("Unexpected logs.recent response."))
+                    return .failure(.unreadableOutput("Unexpected logs::recent response."))
                 }
             }
 
@@ -96,12 +108,13 @@ enum MenuBarLogReader {
             return .ignore
         }
         if let error = json["error"] as? [String: Any] {
-            return .error(error["message"] as? String ?? "logs.recent failed")
+            return .error(error["message"] as? String ?? "logs::recent failed")
         }
-        guard json["success"] as? Bool != false else {
-            return .error("logs.recent failed")
+        guard json["ok"] as? Bool != false else {
+            return .error("logs::recent failed")
         }
-        guard let result = try? JSONDecoder().decode(RPCEnvelope.self, from: data).result else {
+        guard let envelope = try? JSONDecoder().decode(EngineInvokeResponseEnvelope<RecentLogsResult>.self, from: data),
+              let result = envelope.result.child.value else {
             return .malformed
         }
         return .result(result)
@@ -131,8 +144,16 @@ enum MenuBarLogReader {
     }
 }
 
-struct RPCEnvelope: Decodable, Equatable {
-    var result: RecentLogsResult
+private struct EngineInvokeResponseEnvelope<Result: Decodable & Equatable>: Decodable, Equatable {
+    var result: EngineInvokeResult<Result>
+}
+
+private struct EngineInvokeResult<Result: Decodable & Equatable>: Decodable, Equatable {
+    var child: EngineInvokeChild<Result>
+}
+
+private struct EngineInvokeChild<Result: Decodable & Equatable>: Decodable, Equatable {
+    var value: Result?
 }
 
 struct RecentLogsResult: Decodable, Equatable {

@@ -11,7 +11,11 @@ protocol NetworkSessionRepository: AnyObject {
     ///   - workingDirectory: The working directory for the session
     ///   - model: Optional model to use for the session
     /// - Returns: Result of session creation
-    func create(workingDirectory: String, model: String?) async throws -> SessionCreateResult
+    func create(
+        workingDirectory: String,
+        model: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionCreateResult
 
     /// List available sessions.
     /// - Parameters:
@@ -24,22 +28,26 @@ protocol NetworkSessionRepository: AnyObject {
 
     /// Resume an existing session.
     /// - Parameter sessionId: The session ID to resume
-    func resume(sessionId: String) async throws
+    func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws
 
     /// Archive a session.
     /// - Parameter sessionId: The session ID to archive
-    func archive(sessionId: String) async throws
+    func archive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws
 
     /// Unarchive a session.
     /// - Parameter sessionId: The session ID to unarchive
-    func unarchive(sessionId: String) async throws
+    func unarchive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws
 
     /// Fork a session from a specific point.
     /// - Parameters:
     ///   - sessionId: The session to fork
     ///   - fromEventId: Optional event ID to fork from
     /// - Returns: Result of the fork operation
-    func fork(sessionId: String, fromEventId: String?) async throws -> SessionForkResult
+    func fork(
+        sessionId: String,
+        fromEventId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionForkResult
 
     /// Get session history.
     /// - Parameter limit: Maximum number of messages to return

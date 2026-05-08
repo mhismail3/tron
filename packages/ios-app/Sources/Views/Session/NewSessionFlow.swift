@@ -228,7 +228,7 @@ enum NewSessionMode: String, Identifiable, Sendable {
 
 @available(iOS 26.0, *)
 struct NewSessionFlow: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let defaultModel: String
     let eventStoreManager: EventStoreManager
     let selectedSessionId: String?
@@ -417,7 +417,7 @@ struct NewSessionFlow: View {
             }
             .sheet(isPresented: $showWorkspaceSelector) {
                 WorkspaceSelector(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     selectedPath: $workingDirectory
                 )
             }
@@ -437,7 +437,7 @@ struct NewSessionFlow: View {
             }
             .sheet(isPresented: $showImportFlow) {
                 ImportSessionFlow(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     onImported: { sessionId, workingDirectory, model in
                         onSessionCreated(NewSessionCreated(
                             sessionId: sessionId,
@@ -452,7 +452,7 @@ struct NewSessionFlow: View {
             }
             .sheet(isPresented: $showCloneSheet) {
                 CloneRepoSheet(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     initialDestinationPath: cloneDestinationWorkspace,
                     onCloned: { clonedPath in
                         workingDirectory = clonedPath
@@ -464,7 +464,7 @@ struct NewSessionFlow: View {
                 await loadModels()
                 await loadGlobalIsolationMode()
             }
-            .onChange(of: rpcClient.connectionState) { oldState, newState in
+            .onChange(of: engineClient.connectionState) { oldState, newState in
                 if newState.isConnected && !oldState.isConnected {
                     _ = Task {
                         await loadModels()
@@ -489,7 +489,7 @@ struct NewSessionFlow: View {
                 }
                 guard !trimmedPath.isEmpty else { return }
                 gitRepoCheckTask = Task {
-                    let result = (try? await rpcClient.worktree.isGitRepo(trimmedPath)) ?? false
+                    let result = (try? await engineClient.worktree.isGitRepo(trimmedPath)) ?? false
                     if !Task.isCancelled {
                         await MainActor.run {
                             withAnimation(.smooth(duration: 0.22)) {
@@ -731,13 +731,13 @@ struct NewSessionFlow: View {
         isLoadingModels = true
 
         // Ensure connection is established.
-        await rpcClient.connect()
-        if !rpcClient.isConnected {
+        await engineClient.connect()
+        if !engineClient.isConnected {
             try? await Task.sleep(for: .milliseconds(100))
         }
 
         do {
-            let models = try await rpcClient.model.list()
+            let models = try await engineClient.model.list()
             await MainActor.run {
                 availableModels = models
 
@@ -760,7 +760,7 @@ struct NewSessionFlow: View {
     }
 
     private func loadGlobalIsolationMode() async {
-        guard let settings = try? await rpcClient.settings.get() else { return }
+        guard let settings = try? await engineClient.settings.get() else { return }
         await MainActor.run {
             globalIsolationMode = settings.isolationMode
         }
@@ -772,18 +772,23 @@ struct NewSessionFlow: View {
 
         Task {
             do {
-                let result = try await rpcClient.session.create(
+                let result = try await engineClient.session.create(
                     workingDirectory: intent.workingDirectory,
                     model: intent.model,
                     title: intent.title,
                     source: intent.source,
                     profile: intent.profile,
-                    useWorktree: intent.useWorktree
+                    useWorktree: intent.useWorktree,
+                    idempotencyKey: .userAction("session.create")
                 )
 
                 // Persist non-default reasoning level to the new session.
                 if selectedReasoningLevel != "medium" {
-                    _ = try? await rpcClient.model.setReasoningLevel(result.sessionId, level: selectedReasoningLevel)
+                    _ = try? await engineClient.model.setReasoningLevel(
+                        result.sessionId,
+                        level: selectedReasoningLevel,
+                        idempotencyKey: .userAction("config.setReasoningLevel")
+                    )
                 }
 
                 await MainActor.run {

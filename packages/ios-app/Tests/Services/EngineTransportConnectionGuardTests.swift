@@ -3,20 +3,20 @@ import Foundation
 
 @testable import TronMobile
 
-@Suite("RPCTransport.requireConnection() connection-state guard")
+@Suite("EngineTransport.requireConnection() connection-state guard")
 @MainActor
-struct RPCTransportConnectionGuardTests {
+struct EngineTransportConnectionGuardTests {
 
     // MARK: - Helpers
 
-    private func makeTransport(webSocketURL: URL = URL(string: "ws://localhost:8082")!,
+    private func makeTransport(engineConnectionURL: URL = URL(string: "ws://localhost:8082")!,
                                includeWebSocket: Bool = true,
-                               state: ConnectionState = .connected) -> MockRPCTransport {
-        let transport = MockRPCTransport()
+                               state: ConnectionState = .connected) -> MockEngineTransport {
+        let transport = MockEngineTransport()
         if includeWebSocket {
-            transport.webSocket = WebSocketService(serverURL: webSocketURL)
+            transport.engineConnection = EngineConnection(serverURL: engineConnectionURL)
         } else {
-            transport.webSocket = nil
+            transport.engineConnection = nil
         }
         transport.connectionState = state
         return transport
@@ -24,13 +24,13 @@ struct RPCTransportConnectionGuardTests {
 
     // MARK: - Tests
 
-    @Test("throws connectionNotEstablished when webSocket is nil")
+    @Test("throws connectionNotEstablished when engineConnection is nil")
     func throwsWhenWebSocketNil() {
         let transport = makeTransport(includeWebSocket: false, state: .connected)
         do {
             _ = try transport.requireConnection()
             Issue.record("expected throw")
-        } catch let error as RPCClientError {
+        } catch let error as EngineClientError {
             #expect(error == .connectionNotEstablished)
         } catch {
             Issue.record("unexpected error type: \(error)")
@@ -49,18 +49,18 @@ struct RPCTransportConnectionGuardTests {
         do {
             _ = try transport.requireConnection()
             Issue.record("expected throw for state \(state)")
-        } catch let error as WebSocketError {
-            #expect(error == WebSocketError.notConnected)
+        } catch let error as EngineConnectionError {
+            #expect(error == EngineConnectionError.notConnected)
         } catch {
             Issue.record("unexpected error type: \(error) for state \(state)")
         }
     }
 
-    @Test("returns webSocket when state is .connected")
+    @Test("returns engineConnection when state is .connected")
     func returnsWebSocketWhenConnected() throws {
         let transport = makeTransport(state: .connected)
         let ws = try transport.requireConnection()
-        #expect(ws === transport.webSocket)
+        #expect(ws === transport.engineConnection)
     }
 
     @Test("requireSession also respects connection state")
@@ -73,9 +73,9 @@ struct RPCTransportConnectionGuardTests {
         } catch {
             // Either notConnected (preferred) or noActiveSession; both indicate the call is
             // correctly blocked. Validate at least one of the two:
-            if let ws = error as? WebSocketError {
+            if let ws = error as? EngineConnectionError {
                 #expect(ws == .notConnected)
-            } else if let rpc = error as? RPCClientError {
+            } else if let rpc = error as? EngineClientError {
                 #expect(rpc == .noActiveSession || rpc == .connectionNotEstablished)
             } else {
                 Issue.record("unexpected error type: \(error)")

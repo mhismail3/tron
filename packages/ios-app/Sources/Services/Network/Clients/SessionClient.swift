@@ -1,8 +1,8 @@
 import Foundation
 
-/// Client for session-related RPC methods.
+/// Client for session-related engine capabilities.
 /// Handles session creation, listing, resumption, deletion, and forking.
-final class SessionClient: RPCDomainClient {
+final class SessionClient: EngineDomainClient {
 
     // MARK: - Session Methods
 
@@ -12,9 +12,10 @@ final class SessionClient: RPCDomainClient {
         title: String? = nil,
         source: String? = nil,
         profile: String? = nil,
-        useWorktree: Bool? = nil
+        useWorktree: Bool? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> SessionCreateResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = SessionCreateParams(
             workingDirectory: workingDirectory,
@@ -26,9 +27,10 @@ final class SessionClient: RPCDomainClient {
             useWorktree: useWorktree
         )
 
-        let result: SessionCreateResult = try await ws.send(
-            method: "session.create",
-            params: params
+        let result: SessionCreateResult = try await invokeWrite(
+            "session::create",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         currentTransport?.setCurrentSessionId(result.sessionId)
@@ -44,7 +46,7 @@ final class SessionClient: RPCDomainClient {
         offset: Int = 0,
         includeArchived: Bool = false
     ) async throws -> SessionListResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = SessionListParams(
             workingDirectory: workingDirectory,
@@ -53,21 +55,22 @@ final class SessionClient: RPCDomainClient {
             includeArchived: includeArchived
         )
 
-        let result: SessionListResult = try await ws.send(
-            method: "session.list",
-            params: params
+        let result: SessionListResult = try await invokeRead(
+            "session::list",
+            params
         )
 
         return result
     }
 
-    func resume(sessionId: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         let params = SessionResumeParams(sessionId: sessionId)
-        let result: SessionResumeResult = try await ws.send(
-            method: "session.resume",
-            params: params
+        let result: SessionResumeResult = try await invokeWrite(
+            "session::resume",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         currentTransport?.setCurrentSessionId(result.sessionId)
@@ -75,11 +78,11 @@ final class SessionClient: RPCDomainClient {
         logger.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
     }
 
-    func archive(_ sessionId: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func archive(_ sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         let params = SessionArchiveParams(sessionId: sessionId)
-        let _: EmptyParams = try await ws.send(method: "session.archive", params: params)
+        let _: EmptyParams = try await invokeWrite("session::archive", params, idempotencyKey: idempotencyKey)
 
         if currentTransport?.currentSessionId == sessionId {
             currentTransport?.setCurrentSessionId(nil)
@@ -87,17 +90,17 @@ final class SessionClient: RPCDomainClient {
         logger.info("Archived session: \(sessionId)", category: .session)
     }
 
-    func unarchive(_ sessionId: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func unarchive(_ sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         let params = SessionUnarchiveParams(sessionId: sessionId)
-        let _: EmptyParams = try await ws.send(method: "session.unarchive", params: params)
+        let _: EmptyParams = try await invokeWrite("session::unarchive", params, idempotencyKey: idempotencyKey)
 
         logger.info("Unarchived session: \(sessionId)", category: .session)
     }
 
     func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {
-        let (ws, sessionId) = try requireTransport().requireSession()
+        let (_, sessionId) = try requireTransport().requireSession()
 
         let params = SessionHistoryParams(
             sessionId: sessionId,
@@ -105,9 +108,9 @@ final class SessionClient: RPCDomainClient {
             beforeId: nil
         )
 
-        let result: SessionHistoryResult = try await ws.send(
-            method: "session.getHistory",
-            params: params
+        let result: SessionHistoryResult = try await invokeRead(
+            "session::get_history",
+            params
         )
 
         return result.messages
@@ -124,7 +127,7 @@ final class SessionClient: RPCDomainClient {
         limit: Int? = nil,
         beforeSequence: Int64? = nil
     ) async throws -> SessionReconstructResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = SessionReconstructParams(
             sessionId: sessionId,
@@ -132,9 +135,9 @@ final class SessionClient: RPCDomainClient {
             beforeSequence: beforeSequence
         )
 
-        let result: SessionReconstructResult = try await ws.send(
-            method: "session.reconstruct",
-            params: params
+        let result: SessionReconstructResult = try await invokeRead(
+            "session::reconstruct",
+            params
         )
 
         logger.info("Reconstructed session \(sessionId): \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence)", category: .session)
@@ -143,15 +146,20 @@ final class SessionClient: RPCDomainClient {
 
     // MARK: - Fork
 
-    func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
-        let ws = try requireTransport().requireConnection()
+    func fork(
+        _ sessionId: String,
+        fromEventId: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionForkResult {
+        _ = try requireTransport().requireConnection()
 
         let params = SessionForkParams(sessionId: sessionId, fromEventId: fromEventId)
         logger.info("[FORK] Sending fork request: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)
 
-        let result: SessionForkResult = try await ws.send(
-            method: "session.fork",
-            params: params
+        let result: SessionForkResult = try await invokeWrite(
+            "session::fork",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         logger.info("[FORK] Fork succeeded: newSessionId=\(result.newSessionId), forkedFromEventId=\(result.forkedFromEventId ?? "unknown"), rootEventId=\(result.rootEventId ?? "unknown")", category: .session)

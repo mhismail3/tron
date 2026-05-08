@@ -6,10 +6,10 @@ import Testing
 /// `PairingURLParser.PairingPayload` and the existing local `[PairedServer]`
 /// list to a `Plan` describing exactly what side effects the caller must
 /// perform to switch the active server: Keychain write, local store update,
-/// and RPC-client rebuild.
+/// and engine protocol-client rebuild.
 ///
 /// **Why pure**: keeps the commit decision testable end-to-end without
-/// SwiftUI, dependency-container, RPC, or Keychain plumbing. The view
+/// SwiftUI, dependency-container, engine protocol, or Keychain plumbing. The view
 /// then runs `apply(plan:to:via:)` (or the equivalent) to persist.
 @Suite("PairingPersistor")
 struct PairingPersistorTests {

@@ -1,8 +1,8 @@
 import Foundation
 
-// MARK: - RPC Client Errors
+// MARK: - Engine Client Errors
 
-enum RPCClientError: Error, LocalizedError {
+enum EngineClientError: Error, LocalizedError {
     case noActiveSession
     case invalidURL
     case connectionNotEstablished
@@ -16,7 +16,7 @@ enum RPCClientError: Error, LocalizedError {
     }
 }
 
-enum RPCClientConnectionPolicy {
+enum EngineClientConnectionPolicy {
     static func shouldSkipConnect(state: ConnectionState) -> Bool {
         switch state {
         case .connected, .connecting, .reconnecting, .deployRestarting:
@@ -31,16 +31,19 @@ enum RPCClientConnectionPolicy {
     }
 }
 
-// MARK: - RPC Client
+// MARK: - Engine Client
 
 @Observable
 @MainActor
-final class RPCClient: RPCTransport {
-    private(set) var webSocket: WebSocketService?
+final class EngineClient: EngineTransport {
+    private(set) var engineConnection: EngineConnection?
 
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var currentSessionId: String?
     private(set) var currentModel: String = ""
+    private let streamCursorStore: EngineStreamCursorStore
+    private var streamSubscriptions: [EngineStreamCursorKey: EngineSubscription] = [:]
+    private var streamSubscriptionKeysById: [String: EngineStreamCursorKey] = [:]
 
     // MARK: - Domain Clients
 
@@ -145,7 +148,7 @@ final class RPCClient: RPCTransport {
     // Plugin-based event system replaces 30+ individual callbacks.
     // Consumers subscribe via async stream:
     //
-    //   for await event in rpcClient.events(for: mySessionId) {
+    //   for await event in engineClient.events(for: mySessionId) {
     //       switch event.eventType { ... }
     //   }
     //
@@ -154,10 +157,10 @@ final class RPCClient: RPCTransport {
 
     private let serverURL: URL
 
-    /// Bearer-token resolver passed through to the underlying `WebSocketService`
+    /// Bearer-token resolver passed through to the underlying `EngineConnection`
     /// on every `connect()`. Re-evaluated at upgrade time, so token rotations
     /// (e.g. user re-pairs after `.unauthorized`) flow through without
-    /// recreating the RPCClient.
+    /// recreating the EngineClient.
     @ObservationIgnored
     private let bearerTokenProvider: BearerTokenProvider?
 
@@ -168,9 +171,14 @@ final class RPCClient: RPCTransport {
         return "\(host):\(port)"
     }
 
-    init(serverURL: URL, bearerTokenProvider: BearerTokenProvider? = nil) {
+    init(
+        serverURL: URL,
+        bearerTokenProvider: BearerTokenProvider? = nil,
+        streamCursorStore: EngineStreamCursorStore = EngineStreamCursorStore()
+    ) {
         self.serverURL = serverURL
         self.bearerTokenProvider = bearerTokenProvider
+        self.streamCursorStore = streamCursorStore
     }
 
     deinit {
@@ -199,20 +207,20 @@ final class RPCClient: RPCTransport {
     func connect() async {
         // Also check connection state to prevent races during state transitions.
         // If we're already connecting or reconnecting, don't start another connection.
-        if RPCClientConnectionPolicy.shouldSkipConnect(state: connectionState) {
-            logger.debug("Connection already in progress (\(connectionState)), skipping", category: .rpc)
+        if EngineClientConnectionPolicy.shouldSkipConnect(state: connectionState) {
+            logger.debug("Connection already in progress (\(connectionState)), skipping", category: .engine)
             return
         }
 
-        if RPCClientConnectionPolicy.shouldDiscardExistingTransport(
-            hasTransport: webSocket != nil,
+        if EngineClientConnectionPolicy.shouldDiscardExistingTransport(
+            hasTransport: engineConnection != nil,
             state: connectionState
         ) {
-            logger.debug("Discarding stale WebSocket before connect (state: \(connectionState))", category: .rpc)
+            logger.debug("Discarding stale WebSocket before connect (state: \(connectionState))", category: .engine)
             observationTask?.cancel()
             observationTask = nil
-            webSocket?.disconnect()
-            webSocket = nil
+            engineConnection?.disconnect()
+            engineConnection = nil
         }
 
         // Set connecting state BEFORE creating WebSocket to prevent concurrent attempts.
@@ -220,23 +228,28 @@ final class RPCClient: RPCTransport {
         // it will see .connecting state and bail out.
         connectionState = .connecting
 
-        logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .rpc)
+        logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .engine)
 
-        let ws = installWebSocket()
+        let ws = installEngineConnection()
         await ws.connect()
 
         // Sync state immediately — the observation task may not have run yet,
         // so it can miss the .connecting → .connected transition.
         connectionState = ws.connectionState
+        if connectionState.isConnected, let currentSessionId {
+            await subscribeToSessionEvents(sessionId: currentSessionId, workspaceId: nil)
+        }
     }
 
     func disconnect() async {
-        logger.info("Disconnecting from server", category: .rpc)
+        logger.info("Disconnecting from server", category: .engine)
         observationTask?.cancel()
         observationTask = nil
         currentSessionId = nil
-        webSocket?.disconnect()
-        webSocket = nil
+        streamSubscriptions.removeAll()
+        streamSubscriptionKeysById.removeAll()
+        engineConnection?.disconnect()
+        engineConnection = nil
         // Explicitly reset state to allow future connections.
         connectionState = .disconnected
     }
@@ -244,7 +257,7 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     private var observationTask: Task<Void, Never>?
 
-    /// Continuation-based observation loop that mirrors WebSocketService.connectionState.
+    /// Continuation-based observation loop that mirrors EngineConnection.connectionState.
     /// Cancelled in disconnect() — no recursive re-registration needed.
     /// Syncs state at the TOP of each iteration so the initial state is never missed.
     private func startConnectionStateObservation() {
@@ -254,7 +267,7 @@ final class RPCClient: RPCTransport {
                 // Sync current state FIRST, then register for next change.
                 // This prevents missing the initial .connecting → .connected transition
                 // when ws.connect() completes before this Task starts executing.
-                guard !Task.isCancelled, let self, let ws = self.webSocket else { return }
+                guard !Task.isCancelled, let self, let ws = self.engineConnection else { return }
                 self.connectionState = ws.connectionState
 
                 await withCheckedContinuation { cont in
@@ -268,19 +281,17 @@ final class RPCClient: RPCTransport {
         }
     }
 
-    private func installWebSocket() -> WebSocketService {
-        let ws = WebSocketService(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
-        self.webSocket = ws
+    private func installEngineConnection() -> EngineConnection {
+        let ws = EngineConnection(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
+        self.engineConnection = ws
 
         // Observe connection state via @Observable property.
         startConnectionStateObservation()
 
-        // Set event handler callback — receives pre-extracted type and sessionId.
-        ws.onEvent = { [weak self] data, eventType, _ in
-            if let eventType {
-                self?.handleEventData(data, preExtractedType: eventType)
-            }
-            // RPC responses (eventType == nil) already handled by WebSocketService via pendingRequests.
+        // Set event handler callback — receives the neutral server event plus stream cursor metadata.
+        ws.onEvent = { [weak self] delivery in
+            self?.handleEventDelivery(delivery)
+            // Engine responses are handled by EngineConnection via pendingRequests.
         }
 
         return ws
@@ -292,35 +303,35 @@ final class RPCClient: RPCTransport {
         await connect()
     }
 
-    /// Forward background state to WebSocketService to pause heartbeats and save battery
+    /// Forward background state to EngineConnection to pause heartbeats and save battery
     func setBackgroundState(_ inBackground: Bool) {
-        webSocket?.setBackgroundState(inBackground)
+        engineConnection?.setBackgroundState(inBackground)
     }
 
-    /// Verify connection is alive (proxy to WebSocketService).
+    /// Verify connection is alive (proxy to EngineConnection).
     /// Returns true if connection responds to ping, false if dead.
     func verifyConnection() async -> Bool {
-        guard let ws = webSocket else { return false }
+        guard let ws = engineConnection else { return false }
         return await ws.verifyConnection()
     }
 
     /// Manual retry triggered from UI — runs one short connection probe immediately.
     /// Use this when user taps the reconnection pill.
     func manualRetry() async {
-        logger.info("Manual retry triggered from UI", category: .rpc)
+        logger.info("Manual retry triggered from UI", category: .engine)
 
-        let ws = webSocket ?? installWebSocket()
+        let ws = engineConnection ?? installEngineConnection()
         await ws.manualRetry()
         connectionState = ws.connectionState
     }
 
     // MARK: - Event Handling
 
-    private func handleEventData(_ data: Data, preExtractedType: String) {
-        let eventType = preExtractedType
+    private func handleEventDelivery(_ delivery: EngineEventDelivery) {
+        let eventType = delivery.event.type
 
         // Parse event using plugin system (no re-parsing of JSON for type extraction)
-        guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: data) else {
+        guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: delivery.eventData) else {
             logger.warning("Failed to parse event: \(eventType)", category: .events)
             return
         }
@@ -328,15 +339,15 @@ final class RPCClient: RPCTransport {
         // Log connection events
         if eventType == ConnectedPlugin.eventType,
            let result = eventV2.getResult() as? ConnectedPlugin.Result {
-            logger.info("Server version: \(result.version ?? "unknown")", category: .rpc)
+            logger.info("Server version: \(result.version ?? "unknown")", category: .engine)
         }
 
         // Handle server restart notification at the transport level
         // (sets deploy-aware reconnection before any ChatViewModel sees the event)
         if eventType == ServerRestartingPlugin.eventType,
            let result = eventV2.getResult() as? ServerRestartingPlugin.Result {
-            logger.info("Server restarting: reason=\(result.reason), commit=\(result.commit), expectedMs=\(result.restartExpectedMs)", category: .rpc)
-            webSocket?.setDeployRestarting(expectedMs: result.restartExpectedMs)
+            logger.info("Server restarting: reason=\(result.reason), commit=\(result.commit), expectedMs=\(result.restartExpectedMs)", category: .engine)
+            engineConnection?.setDeployRestarting(expectedMs: result.restartExpectedMs)
         }
 
         // Handle auth updated — notify observers so Providers page refreshes
@@ -351,9 +362,11 @@ final class RPCClient: RPCTransport {
 
         // Publish event to async stream
         _eventStream.send(eventV2)
+
+        recordAndAck(delivery)
     }
 
-    // extractEventType removed — type is now pre-extracted by WebSocketService.handleMessage
+    // extractEventType removed — type is now pre-extracted by EngineConnection.handleMessage
 
     // MARK: - State Accessors
 
@@ -365,13 +378,103 @@ final class RPCClient: RPCTransport {
         currentSessionId != nil
     }
 
-    // MARK: - RPCTransport Setters
+    // MARK: - EngineTransport Setters
+
+    func invokeRead<P: Encodable, R: Decodable>(
+        functionId: EngineFunctionId,
+        payload: P,
+        options: EngineInvocationOptions = EngineInvocationOptions()
+    ) async throws -> R {
+        let ws = try requireConnection()
+        return try await ws.invokeRead(functionId: functionId, payload: payload, options: options)
+    }
+
+    func invokeWrite<P: Encodable, R: Decodable>(
+        functionId: EngineFunctionId,
+        payload: P,
+        idempotencyKey: EngineIdempotencyKey,
+        options: EngineInvocationOptions = EngineInvocationOptions()
+    ) async throws -> R {
+        let ws = try requireConnection()
+        return try await ws.invokeWrite(
+            functionId: functionId,
+            payload: payload,
+            idempotencyKey: idempotencyKey,
+            options: options
+        )
+    }
 
     func setCurrentSessionId(_ id: String?) {
         currentSessionId = id
+        guard connectionState.isConnected, let id else { return }
+        Task { @MainActor [weak self] in
+            await self?.subscribeToSessionEvents(sessionId: id, workspaceId: nil)
+        }
     }
 
     func setCurrentModel(_ model: String) {
         currentModel = model
+    }
+
+    private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async {
+        guard let ws = engineConnection, connectionState.isConnected else { return }
+        let key = streamKey(
+            topic: "events.session",
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            filterHash: "none"
+        )
+        guard streamSubscriptions[key] == nil else { return }
+        do {
+            let cursor = streamCursorStore.cursor(for: key)
+            let subscription = try await ws.subscribe(
+                topic: key.topic,
+                cursor: cursor,
+                context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
+            )
+            streamSubscriptions[key] = subscription
+            streamSubscriptionKeysById[subscription.subscriptionId] = key
+            logger.info(
+                "Subscribed to \(key.topic) for session \(sessionId) from cursor \(cursor?.rawValue.description ?? "start")",
+                category: .events
+            )
+        } catch {
+            logger.warning("Failed to subscribe to session events: \(error.localizedDescription)", category: .events)
+        }
+    }
+
+    private func recordAndAck(_ delivery: EngineEventDelivery) {
+        guard let topic = delivery.topic, let cursor = delivery.cursor else { return }
+        let key = delivery.subscriptionId.flatMap { streamSubscriptionKeysById[$0] }
+            ?? streamKey(
+                topic: topic,
+                sessionId: delivery.event.sessionId,
+                workspaceId: delivery.event.workspaceId,
+                filterHash: "none"
+            )
+        streamCursorStore.save(cursor, for: key)
+        guard let subscriptionId = delivery.subscriptionId else { return }
+        Task { @MainActor [weak self] in
+            do {
+                try await self?.engineConnection?.ack(subscriptionId: subscriptionId, cursor: cursor)
+            } catch {
+                logger.debug("Engine stream ack failed for \(subscriptionId)@\(cursor.rawValue): \(error.localizedDescription)", category: .events)
+            }
+        }
+    }
+
+    private func streamKey(
+        topic: String,
+        sessionId: String?,
+        workspaceId: String?,
+        filterHash: String
+    ) -> EngineStreamCursorKey {
+        EngineStreamCursorKey(
+            serverOrigin: serverOrigin,
+            topic: topic,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            filterHash: filterHash
+        )
     }
 }

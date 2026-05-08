@@ -12,7 +12,7 @@
 //! Images are stored in blob storage. The result details contain a `blobId`
 //! (NOT raw image data) to keep event payloads small and avoid exceeding
 //! the WebSocket message limit. The iOS app fetches blob content via
-//! the `blob.get` RPC when rendering.
+//! the `blob::get capability when rendering.
 
 use std::path::Path;
 use std::sync::Arc;

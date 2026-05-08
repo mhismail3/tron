@@ -27,7 +27,7 @@ enum ContextLayout {
 
 @available(iOS 26.0, *)
 struct ContextDetailView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let snapshot: DetailedContextSnapshotResult
     var skillStore: SkillStore?
@@ -167,7 +167,7 @@ struct ContextDetailView: View {
                             RulesSection(
                                 rules: globalRules,
                                 onFetchContent: { path in
-                                    try await rpcClient.filesystem.readFile(path: path)
+                                    try await engineClient.filesystem.readFile(path: path)
                                 }
                             )
                         }
@@ -192,7 +192,7 @@ struct ContextDetailView: View {
                             RulesSection(
                                 rules: projectRules,
                                 onFetchContent: { path in
-                                    try await rpcClient.filesystem.readFile(path: path)
+                                    try await engineClient.filesystem.readFile(path: path)
                                 }
                             )
                         }
@@ -365,7 +365,7 @@ struct ContextDetailView: View {
     private func clearContext() async {
         isClearing = true
         do {
-            _ = try await rpcClient.context.clear(sessionId: sessionId)
+            _ = try await engineClient.context.clear(sessionId: sessionId, idempotencyKey: .userAction("context.clear"))
         } catch {
             errorMessage = "Failed to clear context: \(error.localizedDescription)"
         }
@@ -375,7 +375,7 @@ struct ContextDetailView: View {
     private func compactContext() async {
         isCompacting = true
         do {
-            _ = try await rpcClient.context.compact(sessionId: sessionId)
+            _ = try await engineClient.context.compact(sessionId: sessionId, idempotencyKey: .userAction("context.compact"))
             isCompacting = false
             dismiss()
         } catch {

@@ -50,17 +50,17 @@ struct ConnectionErrorClassifierTests {
 
     @Test("request timeout is transient but does not prove the socket needs recovery")
     func timeoutIsTransientOnly() {
-        #expect(ConnectionErrorClassifier.isTransientTransport(WebSocketError.timeout))
-        #expect(ConnectionErrorClassifier.requiresConnectionRecovery(WebSocketError.timeout) == false)
+        #expect(ConnectionErrorClassifier.isTransientTransport(EngineConnectionError.timeout))
+        #expect(ConnectionErrorClassifier.requiresConnectionRecovery(EngineConnectionError.timeout) == false)
     }
 
     @Test("protocol and application errors are not transient transport errors")
     func nonTransportErrors() {
         let generic = NSError(domain: "test", code: 1, userInfo: nil)
 
-        #expect(ConnectionErrorClassifier.isTransientTransport(WebSocketError.invalidResponse) == false)
-        #expect(ConnectionErrorClassifier.isTransientTransport(WebSocketError.decodingError("bad")) == false)
-        #expect(ConnectionErrorClassifier.isTransientTransport(RPCClientError.invalidURL) == false)
+        #expect(ConnectionErrorClassifier.isTransientTransport(EngineConnectionError.invalidResponse) == false)
+        #expect(ConnectionErrorClassifier.isTransientTransport(EngineConnectionError.decodingError("bad")) == false)
+        #expect(ConnectionErrorClassifier.isTransientTransport(EngineClientError.invalidURL) == false)
         #expect(ConnectionErrorClassifier.isTransientTransport(generic) == false)
     }
 }

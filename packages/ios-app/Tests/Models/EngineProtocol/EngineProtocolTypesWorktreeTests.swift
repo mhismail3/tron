@@ -344,7 +344,7 @@ struct WorktreeCommitResultTests {
     @Test("decodes nothing-to-commit response")
     func decodesNothingToCommit() {
         // Server returns commitHash=null when the tree was clean and no
-        // amend was requested. Failures throw a typed RPCError instead.
+        // amend was requested. Failures throw a typed EngineProtocolError instead.
         let json = #"""
         {"commitHash": null, "message": "nothing to commit"}
         """#

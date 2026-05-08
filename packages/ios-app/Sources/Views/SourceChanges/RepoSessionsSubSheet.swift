@@ -13,7 +13,7 @@ import SwiftUI
 /// `gitWorkflowState.divergenceRefreshTick`.
 @available(iOS 26.0, *)
 struct RepoSessionsSubSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     var gitWorkflowState: GitWorkflowState?
     var onSelectSession: ((String) -> Void)?
@@ -315,7 +315,7 @@ struct RepoSessionsSubSheet: View {
             isPruning = true
             defer { isPruning = false }
             do {
-                _ = try await rpcClient.worktree.pruneBranches(sessionId: sessionId)
+                _ = try await engineClient.worktree.pruneBranches(sessionId: sessionId, idempotencyKey: .userAction("worktree.pruneBranches"))
                 await loadAll()
             } catch {
                 errorMessage = friendlyGitError(error, action: .prune)
@@ -355,10 +355,10 @@ struct RepoSessionsSubSheet: View {
         isLoading = true
         defer { isLoading = false }
         async let active: [RepoSessionSummary] = {
-            (try? await rpcClient.repo.listSessions(sessionId: sessionId)) ?? []
+            (try? await engineClient.repo.listSessions(sessionId: sessionId)) ?? []
         }()
         async let all: [SessionBranchInfo] = {
-            (try? await rpcClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
+            (try? await engineClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
         }()
         let (activeResult, allBranches) = await (active, all)
         activeSessions = activeResult

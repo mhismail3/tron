@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::services::memory_retain as rpc_memory;
+use crate::server::services::memory_retain;
 
 pub(super) async fn handle(
     method: &str,
@@ -19,5 +19,5 @@ async fn retain_value(
     payload: &Value,
     deps: &EngineCapabilityDeps,
 ) -> Result<Value, CapabilityError> {
-    rpc_memory::trigger_manual_retain(Some(payload), &deps.capability_context).await
+    memory_retain::trigger_manual_retain(Some(payload), &deps.capability_context).await
 }

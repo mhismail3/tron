@@ -15,10 +15,11 @@ extension ChatViewModel: TranscriptionContext {
     }
 
     func transcribeAudio(data: Data, mimeType: String, fileName: String) async throws -> String {
-        let result = try await rpcClient.media.transcribeAudio(
+        let result = try await engineClient.media.transcribeAudio(
             audioData: data,
             mimeType: mimeType,
-            fileName: fileName
+            fileName: fileName,
+            idempotencyKey: .userAction("transcription.audio")
         )
         return result.text
     }

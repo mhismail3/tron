@@ -70,7 +70,8 @@ impl BlockingTaskSupervisor {
         F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
     {
         let start = Instant::now();
-        counter!("rpc_blocking_tasks_started_total", "task" => task_name.to_owned()).increment(1);
+        counter!("capability_blocking_tasks_started_total", "task" => task_name.to_owned())
+            .increment(1);
 
         let permit = self.semaphore.clone().acquire_owned().await.map_err(|_| {
             CapabilityError::Internal {
@@ -81,7 +82,7 @@ impl BlockingTaskSupervisor {
         let active = Arc::clone(&self.active);
         let drained = Arc::clone(&self.drained);
         let running = active.fetch_add(1, Ordering::SeqCst) + 1;
-        metrics::gauge!("rpc_blocking_tasks_active").set(running as f64);
+        metrics::gauge!("capability_blocking_tasks_active").set(running as f64);
 
         match tokio::task::spawn_blocking(move || {
             let _guard = BlockingTaskGuard {
@@ -102,7 +103,7 @@ impl BlockingTaskSupervisor {
                 Err(error)
             }
             Err(error) => {
-                counter!("rpc_blocking_failures_total", "task" => task_name.to_owned())
+                counter!("capability_blocking_failures_total", "task" => task_name.to_owned())
                     .increment(1);
                 record_blocking_outcome(task_name, start.elapsed(), "panic");
                 Err(CapabilityError::Internal {
@@ -139,7 +140,7 @@ struct BlockingTaskGuard {
 impl Drop for BlockingTaskGuard {
     fn drop(&mut self) {
         let remaining = self.active.fetch_sub(1, Ordering::SeqCst) - 1;
-        metrics::gauge!("rpc_blocking_tasks_active").set(remaining as f64);
+        metrics::gauge!("capability_blocking_tasks_active").set(remaining as f64);
         if remaining == 0 {
             self.drained.notify_waiters();
         }
@@ -340,13 +341,13 @@ fn record_blocking_outcome(
     outcome: &'static str,
 ) {
     counter!(
-        "rpc_blocking_tasks_completed_total",
+        "capability_blocking_tasks_completed_total",
         "task" => task_name.to_owned(),
         "outcome" => outcome.to_owned()
     )
     .increment(1);
     histogram!(
-        "rpc_blocking_task_duration_seconds",
+        "capability_blocking_task_duration_seconds",
         "task" => task_name.to_owned(),
         "outcome" => outcome.to_owned()
     )

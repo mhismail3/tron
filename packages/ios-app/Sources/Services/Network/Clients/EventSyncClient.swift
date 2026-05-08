@@ -1,8 +1,8 @@
 import Foundation
 
-/// Client for event synchronization and tree traversal RPC methods.
+/// Client for event synchronization and tree traversal engine protocol methods.
 /// Handles event history retrieval, incremental sync, and ancestor traversal.
-final class EventSyncClient: RPCDomainClient {
+final class EventSyncClient: EngineDomainClient {
 
     // MARK: - Event Sync Methods
 
@@ -13,7 +13,7 @@ final class EventSyncClient: RPCDomainClient {
         limit: Int? = nil,
         beforeEventId: String? = nil
     ) async throws -> EventsGetHistoryResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = EventsGetHistoryParams(
             sessionId: sessionId,
@@ -22,7 +22,7 @@ final class EventSyncClient: RPCDomainClient {
             beforeEventId: beforeEventId
         )
 
-        return try await ws.send(method: "events.getHistory", params: params)
+        return try await invokeRead("events::get_history", params)
     }
 
     /// Get events since a cursor (for incremental sync)
@@ -33,7 +33,7 @@ final class EventSyncClient: RPCDomainClient {
         afterTimestamp: String? = nil,
         limit: Int? = nil
     ) async throws -> EventsGetSinceResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = EventsGetSinceParams(
             sessionId: sessionId,
@@ -43,7 +43,7 @@ final class EventSyncClient: RPCDomainClient {
             limit: limit
         )
 
-        return try await ws.send(method: "events.getSince", params: params)
+        return try await invokeRead("events::get_since", params)
     }
 
     /// Get all events for a session (full sync with pagination)
@@ -71,14 +71,14 @@ final class EventSyncClient: RPCDomainClient {
 
     /// Get ancestor events for an event (traverses across session boundaries via parent_id chain)
     func getAncestors(_ eventId: String) async throws -> [RawEvent] {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = TreeGetAncestorsParams(eventId: eventId)
         logger.info("[ANCESTORS] Fetching ancestors for eventId=\(eventId)", category: .session)
 
-        let result: TreeGetAncestorsResult = try await ws.send(
-            method: "tree.getAncestors",
-            params: params
+        let result: TreeGetAncestorsResult = try await invokeRead(
+            "tree::get_ancestors",
+            params
         )
 
         logger.info("[ANCESTORS] Received \(result.events.count) ancestor events", category: .session)

@@ -150,9 +150,9 @@ final class ChatViewModel {
 
     // MARK: - Internal State (accessible to extensions)
 
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
-    /// Task for handling event stream from RPCClient
+    /// Task for handling event stream from EngineClient
     @ObservationIgnored
     private var eventTask: Task<Void, Never>?
     /// ID of the thinking message for the current turn (thinking appears before text response)
@@ -276,20 +276,20 @@ final class ChatViewModel {
 
     // MARK: - Initialization
 
-    init(rpcClient: RPCClient, sessionId: String, audioRecorder: AudioRecorder = AudioRecorder(), eventStoreManager: EventStoreManager? = nil) {
-        self.rpcClient = rpcClient
+    init(engineClient: EngineClient, sessionId: String, audioRecorder: AudioRecorder = AudioRecorder(), eventStoreManager: EventStoreManager? = nil) {
+        self.engineClient = engineClient
         self.sessionId = sessionId
         self.audioRecorder = audioRecorder
         self.eventStoreManager = eventStoreManager
-        self.connectionState = rpcClient.connectionState
-        self.modelPickerState = ModelPickerState(modelClient: rpcClient.model)
+        self.connectionState = engineClient.connectionState
+        self.modelPickerState = ModelPickerState(modelClient: engineClient.model)
         // Worktree state reads through the shared cache when a store manager
         // is available, else a lightweight fallback that exists only for this
         // view model — tests passing a nil manager still get a working object.
         let cache = eventStoreManager?.worktreeStatusCache
-            ?? WorktreeStatusCache(fetch: { [weak rpcClient] id in
-                guard let rpcClient else { throw CancellationError() }
-                return try await rpcClient.worktree.getStatus(sessionId: id)
+            ?? WorktreeStatusCache(fetch: { [weak engineClient] id in
+                guard let engineClient else { throw CancellationError() }
+                return try await engineClient.worktree.getStatus(sessionId: id)
             })
         self.worktreeState = WorktreeIsolationState(sessionId: sessionId, cache: cache)
         setupBindings()
@@ -317,7 +317,7 @@ final class ChatViewModel {
     }
 
     private func setupBindings() {
-        observationTasks.append(Self.observeLoop({ self.rpcClient.connectionState }) { [self] state in
+        observationTasks.append(Self.observeLoop({ self.engineClient.connectionState }) { [self] state in
             self.connectionState = state
 
             // Clear stale processing state on disconnect — server may have
@@ -447,12 +447,12 @@ final class ChatViewModel {
         setupUIUpdateQueueCallback()
         setupStreamingManagerCallbacks()
 
-        // Subscribe to plugin-based event stream from RPCClient using async stream
+        // Subscribe to plugin-based event stream from EngineClient using async stream
         // Filter to only handle events for this session
         eventTask?.cancel()
         eventTask = Task { [weak self] in
             guard let self else { return }
-            for await event in rpcClient.events(for: sessionId) {
+            for await event in engineClient.events(for: sessionId) {
                 guard !Task.isCancelled else { break }
                 handleEventV2(event)
             }
@@ -614,10 +614,10 @@ final class ChatViewModel {
     // MARK: - Message Operations
 
     /// Delete a message from the session.
-    /// This sends an RPC request to append a message.deleted event.
+    /// This sends an engine request to append a message.deleted event.
     /// The message will be filtered out during two-pass reconstruction.
     func deleteMessage(_ message: ChatMessage) async {
-        guard let sessionId = rpcClient.currentSessionId else {
+        guard let sessionId = engineClient.currentSessionId else {
             handleError("No active session", severity: .fatal)
             return
         }
@@ -636,7 +636,11 @@ final class ChatViewModel {
         logger.info("Deleting message: eventId=\(eventId)", category: .session)
 
         do {
-            let result = try await rpcClient.misc.deleteMessage(sessionId, targetEventId: eventId)
+            let result = try await engineClient.misc.deleteMessage(
+                sessionId,
+                targetEventId: eventId,
+                idempotencyKey: .userAction("message.delete")
+            )
             logger.info("Message deleted successfully: deletionEventId=\(result.deletionEventId)", category: .session)
 
             // Remove the message from local state immediately for responsive UI
@@ -696,11 +700,11 @@ final class ChatViewModel {
     }
 
     var currentModel: String {
-        rpcClient.currentModel
+        engineClient.currentModel
     }
 
     var hasActiveSession: Bool {
-        rpcClient.hasActiveSession
+        engineClient.hasActiveSession
     }
 
     /// Updates the context window based on available model info
@@ -716,12 +720,12 @@ final class ChatViewModel {
     /// Syncs both context limit and current token count to keep the pill in sync with the sheet.
     /// When the server returns currentTokens=0 (session not yet built), preserves existing tokens.
     func refreshContextFromServer() async {
-        guard let sessionId = rpcClient.currentSessionId else {
+        guard let sessionId = engineClient.currentSessionId else {
             logger.debug("No session ID available for context refresh", category: .session)
             return
         }
 
-        let contextClient = rpcClient.context
+        let contextClient = engineClient.context
         let sid = sessionId
         do {
             let snapshot = try await withRetry {

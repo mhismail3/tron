@@ -1,17 +1,17 @@
 import Foundation
 
-/// Client for miscellaneous RPC methods.
+/// Client for miscellaneous engine capabilities.
 /// Handles system, device token, memory, message, and log operations.
-final class MiscClient: RPCDomainClient {
+final class MiscClient: EngineDomainClient {
 
     // MARK: - System Methods
 
     func ping() async throws {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        let _: SystemPingResult = try await ws.send(
-            method: "system.ping",
-            params: SystemPingParams(
+        let _: SystemPingResult = try await invokeRead(
+            "system::ping",
+            SystemPingParams(
                 protocolVersion: 1,
                 clientVersion: AppConstants.canonicalVersion
             )
@@ -19,11 +19,11 @@ final class MiscClient: RPCDomainClient {
     }
 
     func getSystemInfo() async throws -> SystemInfoResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "system.getInfo",
-            params: EmptyParams()
+        return try await invokeRead(
+            "system::get_info",
+            EmptyParams()
         )
     }
 
@@ -33,22 +33,22 @@ final class MiscClient: RPCDomainClient {
     /// info (if any); the server caches upstream responses 60s to avoid API
     /// thrash.
     func checkForUpdates() async throws -> SystemCheckForUpdatesResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "system.checkForUpdates",
-            params: EmptyParams()
+        return try await invokeRead(
+            "system::check_for_updates",
+            EmptyParams()
         )
     }
 
     /// Snapshot of the updater state + configured settings. Used by update
     /// status surfaces such as the Mac menu bar.
     func getUpdateStatus() async throws -> SystemUpdateStatusResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "system.getUpdateStatus",
-            params: EmptyParams()
+        return try await invokeRead(
+            "system::get_update_status",
+            EmptyParams()
         )
     }
 
@@ -57,15 +57,21 @@ final class MiscClient: RPCDomainClient {
     /// Delete a message from a session.
     /// This appends a message.deleted event to the event log.
     /// The message will be filtered out during reconstruction (two-pass).
-    func deleteMessage(_ sessionId: String, targetEventId: String, reason: String? = "user_request") async throws -> MessageDeleteResult {
-        let ws = try requireTransport().requireConnection()
+    func deleteMessage(
+        _ sessionId: String,
+        targetEventId: String,
+        reason: String? = "user_request",
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> MessageDeleteResult {
+        _ = try requireTransport().requireConnection()
 
         let params = MessageDeleteParams(sessionId: sessionId, targetEventId: targetEventId, reason: reason)
         logger.info("[DELETE] Sending delete request: sessionId=\(sessionId), targetEventId=\(targetEventId)", category: .session)
 
-        let result: MessageDeleteResult = try await ws.send(
-            method: "message.delete",
-            params: params
+        let result: MessageDeleteResult = try await invokeWrite(
+            "message::delete",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         logger.info("[DELETE] Delete succeeded: deletionEventId=\(result.deletionEventId), targetType=\(result.targetType)", category: .session)
@@ -75,11 +81,11 @@ final class MiscClient: RPCDomainClient {
     // MARK: - Memory Methods
 
     /// Trigger manual memory retention — summarizes the session and appends to the memory log.
-    func retainMemory(sessionId: String) async throws -> MemoryRetainResult {
-        let ws = try requireTransport().requireConnection()
+    func retainMemory(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws -> MemoryRetainResult {
+        _ = try requireTransport().requireConnection()
 
         let params = MemoryRetainParams(sessionId: sessionId)
-        return try await ws.send(method: "memory.retain", params: params)
+        return try await invokeWrite("memory::retain", params, idempotencyKey: idempotencyKey)
     }
 
     // MARK: - Device Token Methods (Push Notifications)
@@ -94,8 +100,13 @@ final class MiscClient: RPCDomainClient {
     ///   runtime from `embedded.mobileprovision`, so Xcode-dev-signed
     ///   release builds correctly report `sandbox` instead of lying
     ///   about being `production` via a `#if DEBUG` heuristic.
-    func registerDeviceToken(_ deviceToken: String, sessionId: String? = nil, workspaceId: String? = nil) async throws {
-        let ws = try requireTransport().requireConnection()
+    func registerDeviceToken(
+        _ deviceToken: String,
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws {
+        _ = try requireTransport().requireConnection()
 
         let effectiveSessionId = sessionId ?? currentTransport?.currentSessionId
         let bundleId = Bundle.main.bundleIdentifier ?? "com.tron.mobile"
@@ -112,9 +123,10 @@ final class MiscClient: RPCDomainClient {
             bundleId: bundleId
         )
 
-        let result: DeviceTokenRegisterResult = try await ws.send(
-            method: "device.register",
-            params: params
+        let result: DeviceTokenRegisterResult = try await invokeWrite(
+            "device::register",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         logger.info(
@@ -124,13 +136,14 @@ final class MiscClient: RPCDomainClient {
     }
 
     /// Unregister a device token
-    func unregisterDeviceToken(_ deviceToken: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func unregisterDeviceToken(_ deviceToken: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         let params = DeviceTokenUnregisterParams(deviceToken: deviceToken)
-        let result: DeviceTokenUnregisterResult = try await ws.send(
-            method: "device.unregister",
-            params: params
+        let result: DeviceTokenUnregisterResult = try await invokeWrite(
+            "device::unregister",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         if result.success {
@@ -142,23 +155,24 @@ final class MiscClient: RPCDomainClient {
 
     /// Fetch recent server logs for an explicit user-generated diagnostics bundle.
     func recentLogs(limit: Int = 1000) async throws -> LogsRecentResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "logs.recent",
-            params: LogsRecentParams(limit: min(max(limit, 1), 1000))
+        return try await invokeRead(
+            "logs::recent",
+            LogsRecentParams(limit: min(max(limit, 1), 1000))
         )
     }
 
     #if DEBUG || BETA
     /// Ingest structured client logs into the server database.
-    func ingestLogs(entries: [ClientLogEntry]) async throws -> LogsIngestResult {
-        let ws = try requireTransport().requireConnection()
+    func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult {
+        _ = try requireTransport().requireConnection()
 
         let params = LogsIngestParams(entries: entries)
-        let result: LogsIngestResult = try await ws.send(
-            method: "logs.ingest",
-            params: params
+        let result: LogsIngestResult = try await invokeWrite(
+            "logs::ingest",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         logger.info("Ingested \(result.inserted) log entries into server database", category: .general)
@@ -168,14 +182,14 @@ final class MiscClient: RPCDomainClient {
     // MARK: - Diagnostics (debug / beta only)
 
     /// Fetch a structured snapshot of server identity, session counts,
-    /// and the full RPC method surface. Debug-only — the production
+    /// and the full engine protocol method surface. Debug-only — the production
     /// binary has no UI that consumes it.
     func getDiagnostics() async throws -> SystemDiagnosticsResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        return try await ws.send(
-            method: "system.getDiagnostics",
-            params: EmptyParams()
+        return try await invokeRead(
+            "system::get_diagnostics",
+            EmptyParams()
         )
     }
     #endif

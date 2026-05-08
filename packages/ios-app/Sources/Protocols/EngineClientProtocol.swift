@@ -1,8 +1,8 @@
 import Foundation
 
-/// Protocol for RPC client enabling dependency injection and mocking
+/// Protocol for engine client enabling dependency injection and mocking
 @MainActor
-protocol RPCClientProtocol: AnyObject {
+protocol EngineClientProtocol: AnyObject {
     // MARK: - Observable State
     var connectionState: ConnectionState { get }
     var currentSessionId: String? { get }
@@ -36,6 +36,6 @@ protocol RPCClientProtocol: AnyObject {
     func setBackgroundState(_ inBackground: Bool)
 }
 
-// MARK: - RPCClient Conformance
+// MARK: - EngineClient Conformance
 
-extension RPCClient: RPCClientProtocol {}
+extension EngineClient: EngineClientProtocol {}

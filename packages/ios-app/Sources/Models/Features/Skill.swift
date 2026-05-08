@@ -117,9 +117,9 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
     }
 }
 
-// MARK: - RPC Response Types
+// MARK: - Engine Response Types
 
-/// Response from skill.list RPC call
+/// Response from skill.list engine invocation
 struct SkillListResponse: Codable {
     let skills: [Skill]
     var totalCount: Int { skills.count }
@@ -129,19 +129,19 @@ struct SkillListResponse: Codable {
     }
 }
 
-/// Response from skill.get RPC call
+/// Response from skill.get engine invocation
 struct SkillGetResponse: Codable {
     let skill: SkillMetadata?
     let found: Bool
 }
 
-/// Response from skill.refresh RPC call
+/// Response from skill.refresh engine invocation
 struct SkillRefreshResponse: Codable {
     let success: Bool
     let skillCount: Int
 }
 
-/// Response from skill.remove RPC call
+/// Response from skills::deactivate engine invocation
 struct SkillRemoveResponse: Codable {
     let success: Bool
     let error: String?

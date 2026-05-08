@@ -9,8 +9,8 @@ protocol AskUserQuestionContext: LoggingContext {
     /// Messages array for updating tool status
     var messages: [ChatMessage] { get set }
 
-    /// RPC client for server communication
-    var rpcClient: RPCClient { get }
+    /// engine client for server communication
+    var engineClient: EngineClient { get }
 
     /// Append a message to the chat
     func appendMessage(_ message: ChatMessage)
@@ -24,7 +24,7 @@ protocol AskUserQuestionContext: LoggingContext {
 /// Responsibilities:
 /// - Sheet management (open/dismiss for pending and answered questions)
 /// - Answer submission and validation
-/// - Submitting answers to the server via RPC (server constructs the agent prompt)
+/// - Submitting answers to the server via engine protocol (server constructs the agent prompt)
 /// - Marking pending questions as superseded when user bypasses
 @MainActor
 final class AskUserQuestionCoordinator {
@@ -58,7 +58,7 @@ final class AskUserQuestionCoordinator {
     // sheet dismiss animation + state mutations glitch the safeAreaInset layout.
     //
     // Phase 1 (prepareSubmission): Updates chip, stores structured submission data.
-    // Phase 2 (executePendingSubmission): Sends via server RPC after sheet dismiss completes.
+    // Phase 2 (executePendingSubmission): Sends via server engine protocol after sheet dismiss completes.
 
     /// Phase 1: Prepare submission — updates chip, stores structured data as pending.
     /// Called BEFORE sheet dismiss. Does NOT send to server.
@@ -93,7 +93,7 @@ final class AskUserQuestionCoordinator {
             context: context
         )
 
-        // Build structured submission for server RPC
+        // Build structured submission for server engine protocol
         var submissions: [AnswerSubmission] = []
         for question in data.params.questions {
             guard let answer = answers.first(where: { $0.questionId == question.id }) else { continue }
@@ -115,7 +115,7 @@ final class AskUserQuestionCoordinator {
         context.logInfo("AskUserQuestion submission prepared, awaiting sheet dismiss")
     }
 
-    /// Phase 2: Execute pending submission — sends via server RPC.
+    /// Phase 2: Execute pending submission — sends via server engine protocol.
     /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
     func executePendingSubmission(context: AskUserQuestionContext) {
         guard let submissions = context.askUserQuestionState.pendingSubmission else { return }
@@ -131,11 +131,11 @@ final class AskUserQuestionCoordinator {
         context.appendMessage(answerChip)
         context.currentTurn += 1
 
-        // Submit via server RPC (server constructs the agent prompt)
+        // Submit via server engine protocol (server constructs the agent prompt)
         Task {
             do {
-                _ = try await context.rpcClient.agent.submitAnswers(questions: submissions)
-                context.logInfo("AskUserQuestion answers submitted via RPC")
+                _ = try await context.engineClient.agent.submitAnswers(questions: submissions, idempotencyKey: .userAction("agent.submitAnswers"))
+                context.logInfo("AskUserQuestion answers submitted via engine protocol")
             } catch {
                 context.logError("Failed to submit answers: \(error.localizedDescription)")
                 context.showError("Failed to submit answers: \(error.localizedDescription)")

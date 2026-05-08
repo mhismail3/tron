@@ -12,7 +12,7 @@ struct AgentSettingsPage: View {
     @State private var showHooksModelPicker = false
     @State private var newProtectedBranch = ""
 
-    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var engineClient: EngineClient { dependencies.engineClient }
     private var defaultModelValue: String { dependencies.defaultModel }
     private var defaultModelBinding: Binding<String> {
         Binding(
@@ -32,7 +32,7 @@ struct AgentSettingsPage: View {
         }
         .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
             WorkspaceSelector(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 selectedPath: Binding(
                     get: { settingsState.quickSessionWorkspace },
                     set: { newValue in

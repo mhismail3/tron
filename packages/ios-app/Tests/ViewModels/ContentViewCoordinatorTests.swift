@@ -3,7 +3,7 @@ import XCTest
 
 /// Tests for ContentViewCoordinator and its workspace resolution logic.
 ///
-/// The coordinator delegates most work to EventStoreManager and RPCClient via
+/// The coordinator delegates most work to EventStoreManager and EngineClient via
 /// async Tasks. Those delegation paths are tested indirectly through integration
 /// tests (ConnectionCoordinatorTests, ChatViewModelLifecycleTests). These tests
 /// cover the coordinator's own state management and the pure workspace resolution

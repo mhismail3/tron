@@ -9,7 +9,7 @@ struct SubagentDetailSheet: View {
     let data: SubagentToolData
     let subagentState: SubagentState
     let eventStoreManager: EventStoreManager
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     var onSendResults: ((SubagentToolData) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
@@ -87,7 +87,7 @@ struct SubagentDetailSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(titleColor)
         .task(id: data.status) {
-            // Load chat history (uses events.getHistory RPC → MessageBubble rendering)
+            // Load chat history (uses events::get_history engine protocol → MessageBubble rendering)
             await loadChatHistory()
 
             // While running, poll for new events as the child agent persists them
@@ -110,7 +110,7 @@ struct SubagentDetailSheet: View {
         defer { isLoadingChat = false }
 
         do {
-            let result = try await rpcClient.eventSync.getHistory(
+            let result = try await engineClient.eventSync.getHistory(
                 sessionId: data.subagentSessionId,
                 types: nil,
                 limit: 1000
@@ -124,7 +124,7 @@ struct SubagentDetailSheet: View {
     /// Refresh chat history without showing loading spinner (for polling while running)
     private func refreshChatHistory() async {
         do {
-            let result = try await rpcClient.eventSync.getHistory(
+            let result = try await engineClient.eventSync.getHistory(
                 sessionId: data.subagentSessionId,
                 types: nil,
                 limit: 1000

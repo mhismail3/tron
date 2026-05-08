@@ -59,7 +59,7 @@ struct TronMobileApp: App {
                     await registerDeviceToken(token)
                 }
             }
-            .onChange(of: container.rpcClient.connectionState) { oldState, newState in
+            .onChange(of: container.engineClient.connectionState) { oldState, newState in
                 handleConnectionBannerTransition(to: newState)
 
                 // When connection is established, register pending device token
@@ -277,13 +277,13 @@ struct TronMobileApp: App {
     /// server fans out every NotifyApp to all active tokens regardless of
     /// which session the notification originates from).
     private func registerDeviceToken(_ token: String) async {
-        guard container.rpcClient.isConnected else {
+        guard container.engineClient.isConnected else {
             TronLogger.shared.debug("Not connected, will register token when connected", category: .notification)
             return
         }
 
         do {
-            try await container.rpcClient.misc.registerDeviceToken(token)
+            try await container.engineClient.misc.registerDeviceToken(token, idempotencyKey: .userAction("device.register"))
             TronLogger.shared.info("Device token registered with server", category: .notification)
         } catch {
             TronLogger.shared.error("Failed to register device token: \(error.localizedDescription)", category: .notification)
@@ -341,34 +341,34 @@ struct TronMobileApp: App {
     }
 
     private func recoverForegroundConnection() async {
-        switch container.rpcClient.connectionState {
+        switch container.engineClient.connectionState {
         case .connected:
-            // Verify the connection before any foreground RPC refresh. A Mac
+            // Verify the connection before any foreground engine protocol refresh. A Mac
             // sleep can leave URLSession's WebSocket half-open; without this,
             // notification/session refreshes wait on stale server timeouts
             // before the UI sees the disconnected state.
             let isAlive = await container.verifyConnection()
             if !isAlive {
-                TronLogger.shared.info("Connection dead on foreground return - retrying", category: .rpc)
+                TronLogger.shared.info("Connection dead on foreground return - retrying", category: .engine)
                 await container.manualRetry()
             }
         case .deployRestarting:
             // Server restart flow owns its own reconnect budget — don't interfere.
-            TronLogger.shared.debug("Deploy-restart reconnect in progress on foreground return", category: .rpc)
+            TronLogger.shared.debug("Deploy-restart reconnect in progress on foreground return", category: .engine)
         case .disconnected, .failed, .connecting, .reconnecting:
             // Any non-connected/non-deploy state on foreground return is
             // treated as "kick a fresh retry". This covers the case where
             // the reconnect Task was paused during backgrounding and the
             // state is stale; manualRetry() resets the attempt counter and
             // cancels any lingering task before spawning a new one.
-            TronLogger.shared.info("Triggering manualRetry on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
+            TronLogger.shared.info("Triggering manualRetry on foreground return (state: \(container.engineClient.connectionState))", category: .engine)
             await container.manualRetry()
         case .unauthorized:
             // .unauthorized is a parked state — auto-retrying on foreground
             // would just re-trigger 401. The user must tap the pill (or open
             // the re-pair sheet) to provide a fresh token first; only then
             // does manualRetry fire.
-            TronLogger.shared.info("Skipping foreground auto-retry while unauthorized — awaiting user re-pair", category: .rpc)
+            TronLogger.shared.info("Skipping foreground auto-retry while unauthorized — awaiting user re-pair", category: .engine)
         }
     }
 }

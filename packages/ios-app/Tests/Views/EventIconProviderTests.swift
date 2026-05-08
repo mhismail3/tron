@@ -16,7 +16,7 @@ final class EventIconProviderTests: XCTestCase {
             "config.model_switch", "config.prompt_update", "config.reasoning_level",
             "message.deleted",
             "notification.interrupted", "notification.subagent_result",
-            "skill.activated", "skill.deactivated",
+            "skills::activated", "skills::deactivated",
             "rules.loaded", "rules.activated",
             "compact.boundary", "compact.summary",
             "context.cleared",

@@ -71,7 +71,7 @@ final class SettingsParityTests: XCTestCase {
     /// Explicit waivers — fields that exist on SettingsState but are
     /// NOT user-editable settings. Adding a waiver requires a reason.
     private let WAIVER: [String: String] = [
-        "availableModels": "cached model list from models.list RPC — not a setting",
+        "availableModels": "cached model list from models.list engine protocol — not a setting",
         "isLoaded": "UI loading flag — not persisted",
         "isLoadingModels": "UI loading flag — not persisted",
         "loadError": "transient error state — surfaced inline in the UI, not a setting",

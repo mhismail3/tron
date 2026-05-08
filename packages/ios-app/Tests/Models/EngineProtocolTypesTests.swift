@@ -1,7 +1,7 @@
 import XCTest
 @testable import TronMobile
 
-/// Comprehensive tests for RPC types to ensure zero regressions during refactoring.
+/// Comprehensive tests for engine protocol types to ensure zero regressions during refactoring.
 /// Tests cover Codable conformance, computed properties, and initializers.
 
 // MARK: - Session Types Tests
@@ -624,53 +624,71 @@ final class ModelTypesExtendedTests: XCTestCase {
     }
 }
 
-// MARK: - RPC Base Types Tests
+// MARK: - Engine Protocol Base Types Tests
 
 @MainActor
-final class RPCBaseTypesTests: XCTestCase {
+final class EngineProtocolBaseTypesTests: XCTestCase {
 
-    func testRPCRequestEncoding() throws {
+    func testEngineInvokeEncoding() throws {
         struct TestParams: Encodable {
             let name: String
             let value: Int
         }
+        struct TestInvokeFrame<P: Encodable>: Encodable {
+            let type = "invoke"
+            let id = "test-id"
+            let functionId: String
+            let payload: P
+            let idempotencyKey: String?
+        }
 
-        let request = RPCRequest(method: "test.method", params: TestParams(name: "test", value: 42))
+        let request = TestInvokeFrame(
+            functionId: "test::method",
+            payload: TestParams(name: "test", value: 42),
+            idempotencyKey: nil
+        )
 
         let data = try JSONEncoder().encode(request)
         let decoded = try JSONSerialization.jsonObject(with: data) as! [String: Any]
 
-        XCTAssertEqual(decoded["method"] as? String, "test.method")
-        XCTAssertNotNil(decoded["id"] as? String)
+        XCTAssertEqual(decoded["type"] as? String, "invoke")
+        XCTAssertEqual(decoded["id"] as? String, "test-id")
+        XCTAssertEqual(decoded["functionId"] as? String, "test::method")
 
-        let params = decoded["params"] as! [String: Any]
-        XCTAssertEqual(params["name"] as? String, "test")
-        XCTAssertEqual(params["value"] as? Int, 42)
+        let payload = decoded["payload"] as! [String: Any]
+        XCTAssertEqual(payload["name"] as? String, "test")
+        XCTAssertEqual(payload["value"] as? Int, 42)
     }
 
-    func testRPCResponseDecoding() throws {
+    func testEngineInvokeResponseDecoding() throws {
         struct TestResult: Decodable {
             let data: String
         }
+        struct Response<T: Decodable>: Decodable {
+            let id: String?
+            let ok: Bool
+            let result: T?
+            let error: EngineProtocolError?
+        }
 
         let json = """
-        {"id": "123", "success": true, "result": {"data": "hello"}, "error": null}
+        {"type":"response","id":"123","ok":true,"result":{"catalogRevision":7,"child":{"value":{"data":"hello"}}},"error":null}
         """.data(using: .utf8)!
 
-        let response = try JSONDecoder().decode(RPCResponse<TestResult>.self, from: json)
+        let response = try JSONDecoder().decode(Response<EngineInvokeEnvelope<TestResult>>.self, from: json)
 
         XCTAssertEqual(response.id, "123")
-        XCTAssertTrue(response.success)
-        XCTAssertEqual(response.result?.data, "hello")
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(response.result?.child.value?.data, "hello")
         XCTAssertNil(response.error)
     }
 
-    func testRPCErrorDecoding() throws {
+    func testEngineErrorDecoding() throws {
         let json = """
         {"code": "SESSION_NOT_FOUND", "message": "Session not found", "details": null}
         """.data(using: .utf8)!
 
-        let error = try JSONDecoder().decode(RPCError.self, from: json)
+        let error = try JSONDecoder().decode(EngineProtocolError.self, from: json)
 
         XCTAssertEqual(error.code, "SESSION_NOT_FOUND")
         XCTAssertEqual(error.message, "Session not found")

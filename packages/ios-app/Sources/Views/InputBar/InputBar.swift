@@ -306,7 +306,7 @@ struct InputBar: View {
             matching: .images
         )
         .sheet(isPresented: $showPromptLibrary) {
-            PromptLibrarySheet(rpcClient: dependencies.rpcClient) { selected in
+            PromptLibrarySheet(engineClient: dependencies.engineClient) { selected in
                 state.text = selected
             }
         }

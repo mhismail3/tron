@@ -61,7 +61,7 @@ use arc_swap::ArcSwapOption;
 /// Writers (reload / init) swap the new `Arc` atomically; readers with an
 /// older `Arc` keep a consistent snapshot until they drop it. Exactly the
 /// pattern `arc-swap` was designed for — a rarely-updated singleton read by
-/// many hot paths (every RPC, every turn, every tool).
+/// many hot paths (every engine invocation, every turn, every tool).
 ///
 /// `OnceLock` defers allocation until first access; inside that slot we keep
 /// the `ArcSwapOption` that carries the current value (or `None` until the
@@ -80,7 +80,7 @@ fn settings_slot() -> &'static ArcSwapOption<TronSettings> {
 ///
 /// Returns an `Arc` so callers hold a consistent snapshot even if another
 /// thread reloads settings concurrently. The underlying read is lock-free
-/// (arc-swap) — hot-path callers (every RPC, every turn) pay only an atomic
+/// (arc-swap) — hot-path callers (every engine invocation, every turn) pay only an atomic
 /// load + `Arc` clone.
 pub fn get_settings() -> Arc<TronSettings> {
     let slot = settings_slot();
@@ -326,7 +326,7 @@ discoverStandaloneFiles = false
 "#,
         );
 
-        // Reload (what the engine-owned settings.update RPC function should do)
+        // Reload (what the engine-owned settings.update capability function should do)
         reload_settings_from_path(&settings_path).unwrap();
 
         // Now get_settings should reflect the iOS toggle

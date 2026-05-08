@@ -39,23 +39,23 @@ final class SkillStore {
 
     // MARK: - Dependencies
 
-    private weak var rpcClient: RPCClient?
+    private weak var engineClient: EngineClient?
 
     // MARK: - Initialization
 
     init() {}
 
-    func configure(rpcClient: RPCClient) {
-        self.rpcClient = rpcClient
+    func configure(engineClient: EngineClient) {
+        self.engineClient = engineClient
     }
 
-    // MARK: - RPC Methods
+    // MARK: - Engine Capability Methods
 
     /// Load skills from the server's cache (does not rescan disk)
     /// For detecting disk changes, use `refreshAndLoadSkills` instead
     func loadSkills(sessionId: String? = nil, source: SkillSource? = nil) async {
-        guard let rpcClient = rpcClient else {
-            logger.warning("SkillStore: No RPC client configured", category: .rpc)
+        guard let engineClient = engineClient else {
+            logger.warning("SkillStore: No engine client configured", category: .engine)
             return
         }
 
@@ -63,17 +63,17 @@ final class SkillStore {
         error = nil
 
         do {
-            let result = try await rpcClient.skill.list(
+            let result = try await engineClient.skill.list(
                 sessionId: sessionId,
                 source: source?.rawValue
             )
             skills = result.skills
             // Note: Don't update lastRefresh here - this just loads from server cache
             // lastRefresh is only updated when we actually rescan from disk
-            logger.debug("Loaded \(result.totalCount) skills", category: .rpc)
+            logger.debug("Loaded \(result.totalCount) skills", category: .engine)
         } catch {
             self.error = error.localizedDescription
-            logger.error("Failed to load skills: \(error.localizedDescription)", category: .rpc)
+            logger.error("Failed to load skills: \(error.localizedDescription)", category: .engine)
         }
 
         isLoading = false
@@ -81,27 +81,27 @@ final class SkillStore {
 
     /// Get a skill by name
     func getSkill(name: String, sessionId: String? = nil) async -> SkillMetadata? {
-        guard let rpcClient = rpcClient else {
-            logger.warning("SkillStore: No RPC client configured", category: .rpc)
+        guard let engineClient = engineClient else {
+            logger.warning("SkillStore: No engine client configured", category: .engine)
             return nil
         }
 
         do {
-            let result = try await rpcClient.skill.get(name: name, sessionId: sessionId)
+            let result = try await engineClient.skill.get(name: name, sessionId: sessionId)
             if result.found, let skill = result.skill {
                 return skill
             }
             return nil
         } catch {
-            logger.error("Failed to get skill '\(name)': \(error.localizedDescription)", category: .rpc)
+            logger.error("Failed to get skill '\(name)': \(error.localizedDescription)", category: .engine)
             return nil
         }
     }
 
     /// Refresh skills cache on the server (rescans disk for changes)
     func refreshSkills(sessionId: String? = nil) async {
-        guard let rpcClient = rpcClient else {
-            logger.warning("SkillStore: No RPC client configured", category: .rpc)
+        guard let engineClient = engineClient else {
+            logger.warning("SkillStore: No engine client configured", category: .engine)
             return
         }
 
@@ -109,17 +109,20 @@ final class SkillStore {
         error = nil
 
         do {
-            let result = try await rpcClient.skill.refresh(sessionId: sessionId)
+            let result = try await engineClient.skill.refresh(
+                sessionId: sessionId,
+                idempotencyKey: .userAction("skills.refresh")
+            )
             if result.success {
                 // Reload the skills list after refresh
                 await loadSkills(sessionId: sessionId)
                 // Update lastRefresh after successful disk rescan
                 lastRefresh = Date()
-                logger.debug("Refreshed \(result.skillCount) skills", category: .rpc)
+                logger.debug("Refreshed \(result.skillCount) skills", category: .engine)
             }
         } catch {
             self.error = error.localizedDescription
-            logger.error("Failed to refresh skills: \(error.localizedDescription)", category: .rpc)
+            logger.error("Failed to refresh skills: \(error.localizedDescription)", category: .engine)
         }
 
         isLoading = false
@@ -128,7 +131,7 @@ final class SkillStore {
     /// Refresh and load skills - use this on session resume to detect disk changes
     /// This rescans the disk for new/modified/deleted skills, then loads the updated list
     func refreshAndLoadSkills(sessionId: String? = nil) async {
-        logger.debug("Refreshing skills from disk for session resume", category: .rpc)
+        logger.debug("Refreshing skills from disk for session resume", category: .engine)
         await refreshSkills(sessionId: sessionId)
     }
 

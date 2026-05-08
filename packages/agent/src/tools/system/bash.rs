@@ -290,7 +290,7 @@ impl BashTool {
 
         let process_id = handle.process_id.clone();
 
-        // Register the output buffer for on-demand streaming via job.subscribe RPC.
+        // Register the output buffer for on-demand streaming via job::subscribe capability.
         if let Some(ref registry) = ctx.output_buffer_registry {
             registry.register(&process_id, &ctx.tool_call_id, output_buffer);
         }

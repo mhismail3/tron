@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Display Tool Detail Sheet
 
 /// Detail sheet for the Display tool — renders visual content (images, streams).
-/// Images are fetched from blob storage via the `blob.get` RPC.
+/// Images are fetched from blob storage via the `blob::get` engine protocol.
 @available(iOS 26.0, *)
 struct DisplayToolDetailSheet: View {
     let data: CommandToolChipData
@@ -240,7 +240,7 @@ private struct WebViewSection: View {
 
 // MARK: - Blob Image View
 
-/// Fetches and displays an image from blob storage via the `blob.get` RPC.
+/// Fetches and displays an image from blob storage via the `blob::get` engine protocol.
 @available(iOS 26.0, *)
 private struct BlobImageView: View {
     let blobId: String
@@ -278,7 +278,7 @@ private struct BlobImageView: View {
     @MainActor
     private func fetchBlob() async {
         do {
-            if let data = try await dependencies.rpcClient.blob.getImageData(blobId: blobId) {
+            if let data = try await dependencies.engineClient.blob.getImageData(blobId: blobId) {
                 self.image = UIImage(data: data)
                 if self.image == nil {
                     self.errorMessage = "Failed to decode image data"

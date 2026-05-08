@@ -17,14 +17,14 @@ struct ToolCallRecord {
 // MARK: - Event Store Manager
 
 /// Central manager for event-sourced session state
-/// Coordinates between EventDatabase (local SQLite) and RPCClient (server sync)
+/// Coordinates between EventDatabase (local SQLite) and EngineClient (server sync)
 @Observable
 @MainActor
 final class EventStoreManager {
     // Uses global `logger` from TronLogger.swift
 
     let eventDB: EventDatabase
-    private(set) var rpcClient: RPCClient
+    private(set) var engineClient: EngineClient
     weak var draftStore: DraftStore?
 
     // MARK: - Observable State
@@ -41,15 +41,15 @@ final class EventStoreManager {
     /// Whether to filter sessions by current server origin
     var filterByOrigin: Bool = true
 
-    /// Current server origin from the RPC client
+    /// Current server origin from the engine client
     var currentServerOrigin: String {
-        rpcClient.serverOrigin
+        engineClient.serverOrigin
     }
 
     /// Handles synchronization of session events with the server
     @ObservationIgnored
     private(set) lazy var sessionSynchronizer: SessionSynchronizer = {
-        SessionSynchronizer(rpcClient: rpcClient, eventDB: eventDB)
+        SessionSynchronizer(engineClient: engineClient, eventDB: eventDB)
     }()
 
     /// Manages live streaming buffers for dashboard session cards
@@ -62,7 +62,7 @@ final class EventStoreManager {
     @ObservationIgnored
     private(set) lazy var refreshService: SessionRefreshService = SessionRefreshService(
         performRefresh: { [weak self] in await self?.refreshSessionList() },
-        isConnected: { [weak self] in self?.rpcClient.connectionState.isConnected ?? false }
+        isConnected: { [weak self] in self?.engineClient.connectionState.isConnected ?? false }
     )
 
     /// Per-session worktree status, shared by the chat toolbar and the sidebar.
@@ -72,7 +72,7 @@ final class EventStoreManager {
     private(set) lazy var worktreeStatusCache: WorktreeStatusCache = {
         WorktreeStatusCache(fetch: { [weak self] id in
             guard let self else { throw CancellationError() }
-            return try await self.rpcClient.worktree.getStatus(sessionId: id)
+            return try await self.engineClient.worktree.getStatus(sessionId: id)
         })
     }()
 
@@ -101,31 +101,31 @@ final class EventStoreManager {
 
     // MARK: - Initialization
 
-    init(eventDB: EventDatabase, rpcClient: RPCClient) {
+    init(eventDB: EventDatabase, engineClient: EngineClient) {
         self.eventDB = eventDB
-        self.rpcClient = rpcClient
+        self.engineClient = engineClient
         setupGlobalEventHandlers()
     }
 
-    /// Update the RPC client (e.g., when server settings change)
-    func updateRPCClient(_ client: RPCClient) {
-        rpcClient = client
-        sessionSynchronizer.updateRPCClient(client)
+    /// Update the engine client (e.g., when server settings change)
+    func updateEngineClient(_ client: EngineClient) {
+        engineClient = client
+        sessionSynchronizer.updateEngineClient(client)
         setupGlobalEventHandlers()
-        logger.info("RPC client updated to \(client.serverOrigin)", category: .session)
+        logger.info("engine client updated to \(client.serverOrigin)", category: .session)
     }
 
     /// Set up handlers for global events (events from all sessions)
     /// These events update dashboard state for ALL sessions, not just the active one.
     private func setupGlobalEventHandlers() {
-        // Cancel existing task to prevent duplicates when RPC client is updated
+        // Cancel existing task to prevent duplicates when engine client is updated
         globalEventTask?.cancel()
 
         // Subscribe to async event stream for global events
         // We don't filter by session ID here - we want events from ALL sessions
         globalEventTask = Task { [weak self] in
             guard let self else { return }
-            for await event in rpcClient.events {
+            for await event in engineClient.events {
                 guard !Task.isCancelled else { break }
                 self.handleGlobalEventV2(event)
             }
@@ -341,7 +341,7 @@ final class EventStoreManager {
             cacheCreationTokens: result.cacheCreationTokens,
             cost: result.cost,
             isFork: result.parentSessionId != nil,
-            serverOrigin: rpcClient.serverOrigin
+            serverOrigin: engineClient.serverOrigin
         )
         newSession.source = result.source
         newSession.profile = result.profile

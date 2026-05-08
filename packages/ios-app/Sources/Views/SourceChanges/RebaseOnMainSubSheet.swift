@@ -12,7 +12,7 @@ import SwiftUI
 /// dismisses.
 @available(iOS 26.0, *)
 struct RebaseOnMainSubSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let suggestedMainBranch: String?
     /// Divergence info for the "main behind origin" warning banner.
@@ -181,9 +181,10 @@ struct RebaseOnMainSubSheet: View {
         // open. Contract captured by WorktreeRebaseOnMainResult.isCleanSuccess.
         Task {
             await runner.run(action: .rebase, dismiss: { dismiss() }) {
-                try await rpcClient.worktree.rebaseOnMain(
+                try await engineClient.worktree.rebaseOnMain(
                     sessionId: sessionId,
-                    strategy: strategy.rawValue
+                    strategy: strategy.rawValue,
+                    idempotencyKey: .userAction("worktree.rebaseOnMain")
                 )
             }
         }

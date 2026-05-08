@@ -8,7 +8,7 @@ extension EventStoreManager {
     /// Does NOT sync events — just updates the session metadata so all devices see the same list.
     /// Reconciles local state: adds new sessions, updates existing, removes stale ones.
     func refreshSessionList() async {
-        let serverOrigin = rpcClient.serverOrigin
+        let serverOrigin = engineClient.serverOrigin
         logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
 
         do {
@@ -57,7 +57,7 @@ extension EventStoreManager {
                 // socket that is already reconnecting or about to reconnect.
                 let shouldRetryOnReconnect =
                     ConnectionErrorClassifier.requiresConnectionRecovery(error) ||
-                    !rpcClient.connectionState.isConnected
+                    !engineClient.connectionState.isConnected
                 if shouldRetryOnReconnect {
                     logger.info("Session refresh deferred until reconnect: \(error.localizedDescription)", category: .session)
                     refreshService.deferUntilReconnect()

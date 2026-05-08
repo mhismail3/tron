@@ -82,7 +82,7 @@ struct SystemEventView: View {
 
         case .skillsCleared(let clearedSkills, let mode):
             // M6: `.clearAll` renders an informational banner; `.askUser`
-            // renders tappable chips that call `skill.activate` via the
+            // renders tappable chips that call `skills::activate` via the
             // `.reactivateSkill` tap action.
             SkillsClearedNotificationView(
                 clearedSkills: clearedSkills,

@@ -113,7 +113,7 @@ impl AccumulatedToolCall {
 /// Minimal projection of the tool currently executing within a
 /// session's turn, returned by [`TurnAccumulatorMap::current_running_tool`].
 ///
-/// Kept deliberately narrow — the `agent.status` RPC wants human-readable
+/// Kept deliberately narrow — the `agent::status` capability wants human-readable
 /// "what is the agent doing" info, not the full accumulator state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CurrentToolSnapshot {

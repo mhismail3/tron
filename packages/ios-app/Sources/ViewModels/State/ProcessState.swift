@@ -22,7 +22,7 @@ final class ProcessState {
             case running, backgrounded, completed, failed, cancelling, cancelled
         }
 
-        /// Stored status before cancelling, used to revert on RPC failure.
+        /// Stored status before cancelling, used to revert on engine protocol failure.
         var statusBeforeCancelling: Status?
     }
 
@@ -92,21 +92,21 @@ final class ProcessState {
     }
 
     /// Mark a process as cancelling (pending server confirmation).
-    /// Stores the previous status so it can be reverted on RPC failure.
+    /// Stores the previous status so it can be reverted on engine protocol failure.
     func markCancelling(_ processId: String) {
         guard let current = processes[processId], current.status != .cancelling else { return }
         processes[processId]?.statusBeforeCancelling = current.status
         processes[processId]?.status = .cancelling
     }
 
-    /// Confirm cancellation after successful server RPC.
+    /// Confirm cancellation after successful server engine protocol.
     func confirmCancelled(_ processId: String) {
         guard processes[processId]?.status == .cancelling else { return }
         processes[processId]?.status = .cancelled
         processes[processId]?.statusBeforeCancelling = nil
     }
 
-    /// Revert from cancelling to previous status on RPC failure.
+    /// Revert from cancelling to previous status on engine protocol failure.
     func revertCancelling(_ processId: String) {
         guard let process = processes[processId], process.status == .cancelling else { return }
         processes[processId]?.status = process.statusBeforeCancelling ?? .running

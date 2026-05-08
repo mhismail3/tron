@@ -1,6 +1,6 @@
 import Foundation
 
-/// Periodic `system.ping` poller that drives the menu bar's status
+/// Periodic `system::ping` poller that drives the menu bar's status
 /// icon. Emits a `ServerStatusSnapshot` every 30 s (configurable).
 ///
 /// Marked actor so multiple readers can `snapshots()` safely (in

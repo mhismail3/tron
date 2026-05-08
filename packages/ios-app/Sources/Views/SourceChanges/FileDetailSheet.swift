@@ -8,7 +8,7 @@ import SwiftUI
 struct FileDetailSheet: View {
     let file: FileDetailData
     var stagingArea: StagingArea? = nil
-    var rpcClient: RPCClient? = nil
+    var engineClient: EngineClient? = nil
     var sessionId: String? = nil
     var onAction: (() -> Void)? = nil
     /// Invoked when the user taps "Open Conflict Resolver" on an
@@ -287,7 +287,7 @@ struct FileDetailSheet: View {
 
     @ViewBuilder
     private var stagingToolbarButtons: some View {
-        if let area = stagingArea, rpcClient != nil, sessionId != nil {
+        if let area = stagingArea, engineClient != nil, sessionId != nil {
             switch area {
             case .unstaged, .both:
                 stageButton
@@ -361,11 +361,11 @@ struct FileDetailSheet: View {
     }
 
     private func stageFile() async {
-        guard let rpcClient, let sessionId else { return }
+        guard let engineClient, let sessionId else { return }
         isStaging = true
         defer { isStaging = false }
         do {
-            let result = try await rpcClient.worktree.stageFiles(sessionId: sessionId, paths: [file.path])
+            let result = try await engineClient.worktree.stageFiles(sessionId: sessionId, paths: [file.path], idempotencyKey: .userAction("worktree.stageFiles"))
             if result.success {
                 onAction?()
                 dismiss()
@@ -376,11 +376,11 @@ struct FileDetailSheet: View {
     }
 
     private func unstageFile() async {
-        guard let rpcClient, let sessionId else { return }
+        guard let engineClient, let sessionId else { return }
         isStaging = true
         defer { isStaging = false }
         do {
-            let result = try await rpcClient.worktree.unstageFiles(sessionId: sessionId, paths: [file.path])
+            let result = try await engineClient.worktree.unstageFiles(sessionId: sessionId, paths: [file.path], idempotencyKey: .userAction("worktree.unstageFiles"))
             if result.success {
                 onAction?()
                 dismiss()
@@ -391,11 +391,11 @@ struct FileDetailSheet: View {
     }
 
     private func discardFile() async {
-        guard let rpcClient, let sessionId else { return }
+        guard let engineClient, let sessionId else { return }
         isDiscarding = true
         defer { isDiscarding = false }
         do {
-            let result = try await rpcClient.worktree.discardFiles(sessionId: sessionId, paths: [file.path])
+            let result = try await engineClient.worktree.discardFiles(sessionId: sessionId, paths: [file.path], idempotencyKey: .userAction("worktree.discardFiles"))
             if result.success {
                 onAction?()
                 dismiss()

@@ -5,7 +5,7 @@ import Foundation
 /// These sit logically outside a single session's worktree — `syncMain` is
 /// serialized per-repo on the server; `push` operates on the session
 /// branch but respects the server's protected-branch list.
-final class GitClient: RPCDomainClient {
+final class GitClient: EngineDomainClient {
 
     /// Fast-forward local `main` from its upstream. Idempotent when
     /// already up-to-date. Blocks (no rollback) on divergence/dirty tree.
@@ -15,9 +15,10 @@ final class GitClient: RPCDomainClient {
         remote: String? = nil,
         fetchTimeoutMs: UInt64? = nil,
         prune: Bool? = nil,
-        dryRun: Bool? = nil
+        dryRun: Bool? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> GitSyncOutcome {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
         let params = GitSyncMainParams(
             sessionId: sessionId,
             targetBranch: targetBranch,
@@ -26,15 +27,15 @@ final class GitClient: RPCDomainClient {
             prune: prune,
             dryRun: dryRun
         )
-        return try await ws.send(method: "git.syncMain", params: params)
+        return try await invokeWrite("git::sync_main", params, idempotencyKey: idempotencyKey)
     }
 
     /// List every local branch in the session's repo (mainline first,
     /// `session/*` last). Drives the target-branch picker UI.
     func listLocalBranches(sessionId: String) async throws -> GitListLocalBranchesResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
         let params = GitListLocalBranchesParams(sessionId: sessionId)
-        return try await ws.send(method: "git.listLocalBranches", params: params)
+        return try await invokeRead("git::list_local_branches", params)
     }
 
     /// List branches published on the session's remote (default `origin`).
@@ -44,9 +45,9 @@ final class GitClient: RPCDomainClient {
         sessionId: String,
         remote: String? = nil
     ) async throws -> GitListRemoteBranchesResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
         let params = GitListRemoteBranchesParams(sessionId: sessionId, remote: remote)
-        return try await ws.send(method: "git.listRemoteBranches", params: params)
+        return try await invokeRead("git::list_remote_branches", params)
     }
 
     /// Push a session branch to its remote. Protected branches require
@@ -59,9 +60,10 @@ final class GitClient: RPCDomainClient {
         setUpstream: Bool? = nil,
         dryRun: Bool? = nil,
         overrideProtected: Bool? = nil,
-        protectedBranches: [String]? = nil
+        protectedBranches: [String]? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> GitPushResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
         let params = GitPushParams(
             sessionId: sessionId,
             branch: branch,
@@ -72,6 +74,6 @@ final class GitClient: RPCDomainClient {
             overrideProtected: overrideProtected,
             protectedBranches: protectedBranches
         )
-        return try await ws.send(method: "git.push", params: params)
+        return try await invokeWrite("git::push", params, idempotencyKey: idempotencyKey)
     }
 }

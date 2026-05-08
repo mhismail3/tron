@@ -1,7 +1,7 @@
 import Foundation
 
 /// Plugin for handling auth.updated events broadcast by the server
-/// when auth.json changes (via RPC or CLI `tron login`).
+/// when auth.json changes (via engine protocol or CLI `tron login`).
 /// These are global events (no sessionId) broadcast to all WebSocket clients.
 enum AuthUpdatedPlugin: DispatchableEventPlugin {
     static let eventType = "auth.updated"
@@ -32,8 +32,8 @@ enum AuthUpdatedPlugin: DispatchableEventPlugin {
 
     @MainActor
     static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
-        // Auth updates are handled at the transport level (RPCClient),
-        // not via ChatViewModel dispatch. The RPCClient posts a notification
+        // Auth updates are handled at the transport level (EngineClient),
+        // not via ChatViewModel dispatch. The EngineClient posts a notification
         // that DependencyContainer observes to increment authVersion.
     }
 }

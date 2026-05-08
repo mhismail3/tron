@@ -44,7 +44,7 @@ struct InstallStep: View {
         .task {
             // Detection is observational only. Even an enabled Login
             // Item registration is not considered ready until the user
-            // explicitly starts the pipeline and `system.ping` answers.
+            // explicitly starts the pipeline and `system::ping` answers.
             prepareTerminalInstallStateIfNeeded()
         }
         .task(id: state.installRequestID) {
@@ -403,7 +403,7 @@ struct InstallStep: View {
         .wizardGlassCard()
     }
 
-    /// Polls `system.ping` for up to 30 s on a 1 s cadence. Returns true
+    /// Polls `system::ping` for up to 30 s on a 1 s cadence. Returns true
     /// the moment the server responds. Treats `.unauthorized` as a
     /// success signal too — the server is alive; the wizard moves on
     /// and the pairing step will surface the token.

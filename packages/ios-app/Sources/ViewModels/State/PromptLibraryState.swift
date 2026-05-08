@@ -4,8 +4,8 @@ import Foundation
 /// optimistic mutation bookkeeping, and error surface.
 ///
 /// Written to by `PromptLibrarySheet` and its child views; mutations are
-/// optimistic with RPC-error rollback. All RPC calls funnel through
-/// `RPCClient.promptLibrary`.
+/// optimistic with engine protocol-error rollback. All engine invocations funnel through
+/// `EngineClient.promptLibrary`.
 @Observable
 @MainActor
 final class PromptLibraryState {
@@ -42,7 +42,7 @@ final class PromptLibraryState {
     // MARK: - History
 
     /// Load the first page of history, replacing any prior items when `reset == true`.
-    func loadHistory(rpc: RPCClient, reset: Bool) async {
+    func loadHistory(rpc: EngineClient, reset: Bool) async {
         if reset {
             isLoadingHistory = true
         } else if historyCursor == nil {
@@ -79,13 +79,13 @@ final class PromptLibraryState {
     }
 
     /// Append the next page (no-op if no cursor).
-    func loadMoreHistory(rpc: RPCClient) async {
+    func loadMoreHistory(rpc: EngineClient) async {
         guard historyCursor != nil, !isLoadingMoreHistory else { return }
         await loadHistory(rpc: rpc, reset: false)
     }
 
     /// Update the search string and schedule a debounced reload.
-    func setSearch(_ text: String, rpc: RPCClient) {
+    func setSearch(_ text: String, rpc: EngineClient) {
         historySearch = text
         historyReloadTask?.cancel()
         historyReloadTask = Task { [weak self] in
@@ -96,11 +96,14 @@ final class PromptLibraryState {
     }
 
     /// Optimistically remove a history item; restore on failure.
-    func deleteHistory(id: String, rpc: RPCClient) async {
+    func deleteHistory(id: String, rpc: EngineClient) async {
         guard let idx = historyItems.firstIndex(where: { $0.id == id }) else { return }
         let removed = historyItems.remove(at: idx)
         do {
-            _ = try await rpc.promptLibrary.deleteHistory(id: id)
+            _ = try await rpc.promptLibrary.deleteHistory(
+                id: id,
+                idempotencyKey: .userAction("promptLibrary.historyDelete")
+            )
         } catch {
             historyItems.insert(removed, at: idx)
             errorMessage = "Failed to delete: \(error.localizedDescription)"
@@ -108,9 +111,11 @@ final class PromptLibraryState {
     }
 
     /// Clear every history row server-side, then locally.
-    func clearHistory(rpc: RPCClient) async {
+    func clearHistory(rpc: EngineClient) async {
         do {
-            _ = try await rpc.promptLibrary.clearHistory()
+            _ = try await rpc.promptLibrary.clearHistory(
+                idempotencyKey: .userAction("promptLibrary.historyClear")
+            )
             historyItems = []
             historyCursor = nil
             historyHasMore = false
@@ -121,7 +126,7 @@ final class PromptLibraryState {
 
     // MARK: - Snippets
 
-    func loadSnippets(rpc: RPCClient) async {
+    func loadSnippets(rpc: EngineClient) async {
         isLoadingSnippets = true
         defer { isLoadingSnippets = false }
         do {
@@ -134,9 +139,13 @@ final class PromptLibraryState {
 
     /// Create a snippet and insert at the top. Returns the created snippet.
     @discardableResult
-    func createSnippet(name: String, text: String, rpc: RPCClient) async -> PromptSnippet? {
+    func createSnippet(name: String, text: String, rpc: EngineClient) async -> PromptSnippet? {
         do {
-            let result = try await rpc.promptLibrary.createSnippet(name: name, text: text)
+            let result = try await rpc.promptLibrary.createSnippet(
+                name: name,
+                text: text,
+                idempotencyKey: .userAction("promptLibrary.snippetCreate")
+            )
             snippets.insert(result.snippet, at: 0)
             return result.snippet
         } catch {
@@ -147,11 +156,16 @@ final class PromptLibraryState {
 
     /// Update a snippet (partial). Moves it to the top of the list on success.
     @discardableResult
-    func updateSnippet(id: String, name: String?, text: String?, rpc: RPCClient) async -> Bool {
+    func updateSnippet(id: String, name: String?, text: String?, rpc: EngineClient) async -> Bool {
         isMutatingSnippet.insert(id)
         defer { isMutatingSnippet.remove(id) }
         do {
-            let result = try await rpc.promptLibrary.updateSnippet(id: id, name: name, text: text)
+            let result = try await rpc.promptLibrary.updateSnippet(
+                id: id,
+                name: name,
+                text: text,
+                idempotencyKey: .userAction("promptLibrary.snippetUpdate")
+            )
             snippets.removeAll { $0.id == id }
             snippets.insert(result.snippet, at: 0)
             return true
@@ -162,13 +176,16 @@ final class PromptLibraryState {
     }
 
     /// Optimistically delete a snippet; restore on failure.
-    func deleteSnippet(id: String, rpc: RPCClient) async {
+    func deleteSnippet(id: String, rpc: EngineClient) async {
         guard let idx = snippets.firstIndex(where: { $0.id == id }) else { return }
         let removed = snippets.remove(at: idx)
         isMutatingSnippet.insert(id)
         defer { isMutatingSnippet.remove(id) }
         do {
-            _ = try await rpc.promptLibrary.deleteSnippet(id: id)
+            _ = try await rpc.promptLibrary.deleteSnippet(
+                id: id,
+                idempotencyKey: .userAction("promptLibrary.snippetDelete")
+            )
         } catch {
             snippets.insert(removed, at: idx)
             errorMessage = "Failed to delete snippet: \(error.localizedDescription)"

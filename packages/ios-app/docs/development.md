@@ -118,7 +118,7 @@ Tron does not send usage analytics. `MetricKitDiagnosticsStore` subscribes to
 Apple MetricKit in `AppDelegate` and stores payload JSON under Application
 Support with 30-day / 50-file / 10 MB retention. Settings -> Send Feedback
 builds a redacted `tron-diagnostics-<timestamp>.json` attachment that includes
-bounded iOS logs, `logs.recent(limit: 1000)` when connected, local session and
+bounded iOS logs, `logs::recent(limit: 1000)` when connected, local session and
 event summaries, and MetricKit payloads.
 
 Mail delivery uses the tracked `TRON_FEEDBACK_EMAIL` build setting and opens

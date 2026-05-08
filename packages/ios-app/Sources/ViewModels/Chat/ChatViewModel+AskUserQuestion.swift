@@ -25,7 +25,7 @@ extension ChatViewModel {
         askUserQuestionCoordinator.prepareSubmission(answers, context: self)
     }
 
-    /// Phase 2: Execute pending submission — sends via server RPC.
+    /// Phase 2: Execute pending submission — sends via server engine protocol.
     func executePendingAskUserQuestionSubmission() {
         askUserQuestionCoordinator.executePendingSubmission(context: self)
     }

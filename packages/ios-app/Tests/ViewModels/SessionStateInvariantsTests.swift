@@ -17,18 +17,18 @@ import XCTest
 @MainActor
 final class SessionStateInvariantsTests: XCTestCase {
 
-    private var rpcClient: RPCClient!
+    private var engineClient: EngineClient!
 
     override func setUp() async throws {
-        rpcClient = RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!)
+        engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
     }
 
     override func tearDown() async throws {
-        rpcClient = nil
+        engineClient = nil
     }
 
     private func makeViewModel(_ id: String) -> ChatViewModel {
-        ChatViewModel(rpcClient: rpcClient, sessionId: id, eventStoreManager: nil)
+        ChatViewModel(engineClient: engineClient, sessionId: id, eventStoreManager: nil)
     }
 
     // MARK: - Per-session recreation

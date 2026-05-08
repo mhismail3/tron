@@ -7,7 +7,7 @@
 `Tron.app` is the macOS SwiftUI wrapper around the headless Rust agent. It has two runtime modes:
 
 - **Wizard mode** — shown on first launch, before `~/.tron/internal/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
-- **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Restarting"; the action handler owns the final status refresh when the command exits.
+- **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system::ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Restarting"; the action handler owns the final status refresh when the command exits.
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
@@ -61,7 +61,7 @@ packages/mac-app/
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Server/
 │   │       ├── BearerTokenReader.swift     # reads auth.json bearerToken; caches pairing Tailscale IP in profile.toml
-│   │       ├── ServerPing.swift            # one-shot string-id system.ping over WS → ServerPingResult; skips broadcast/event frames
+│   │       ├── ServerPing.swift            # one-shot string-id system::ping over WS → ServerPingResult; skips broadcast/event frames
 │   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
 │   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
 │   └── Wizard/
@@ -109,7 +109,7 @@ action for that live process.
 
 ### Protocol-bounded subprocess surface
 
-`LaunchAgentManaging` is the only launch-control interface — register/unregister/restart/isLoaded. `LiveLaunchAgentManager` uses `SMAppService` for registration and unregistration, and uses `launchctl print/kickstart` only for diagnostics/restart. Everything else (permission probes, Tailscale checks, logs) is internal to the wrapper or server RPC.
+`LaunchAgentManaging` is the only launch-control interface — register/unregister/restart/isLoaded. `LiveLaunchAgentManager` uses `SMAppService` for registration and unregistration, and uses `launchctl print/kickstart` only for diagnostics/restart. Everything else (permission probes, Tailscale checks, logs) is internal to the wrapper or server engine protocol.
 
 ### Wizard visual system
 
@@ -183,7 +183,7 @@ download a model. Applying the step copies only `worker.py` and
 `~/.tron/internal/transcription/`, making later iOS Settings enablement safe.
 If the user enables the toggle, the wrapper writes
 `server.transcription.enabled = true` into `profiles/user/profile.toml`, restarts
-`com.tron.server`, and waits for `system.ping`. The helper then owns the
+`com.tron.server`, and waits for `system::ping`. The helper then owns the
 Python venv and HuggingFace cache under that same directory. If the user skips
 the step, the wrapper writes `enabled = false` and does not restart the helper.
 
@@ -196,7 +196,7 @@ step persistence.
 
 The Pairing step does not require a pre-existing user profile. It
 reads the agent-issued `auth.json` bearer token, confirms the server is answering
-`system.ping`, probes the current Mac Tailscale state live, and only then
+`system::ping`, probes the current Mac Tailscale state live, and only then
 caches `server.tailscaleIp` into `profiles/user/profile.toml` for future wrapper/menu-bar
 reads and later server settings reloads. If the cache write fails, the freshly
 resolved QR payload still works; settings are a fallback/cache, not a
@@ -224,7 +224,7 @@ The menu bar renders an explicit server state rather than a generic dot:
 and `paused` is gray. On a successful ping the poller asks the local port owner
 for PID/uptime, so `tron dev` takeover reports the `Tron-Dev.app` process
 instead of stale LaunchAgent metadata and marks the header `Dev Server active`.
-If `system.ping` fails, the poller asks launchd whether `com.tron.server` is
+If `system::ping` fails, the poller asks launchd whether `com.tron.server` is
 loaded; unloaded maps to paused, loaded-but-unreachable maps to failed.
 
 ### Menu-bar auxiliary windows
@@ -245,7 +245,7 @@ and QR code are ready; it keeps the generated QR image in state so the spinner
 can crossfade smoothly into the QR/manual-value containers on a custom timing
 curve. Copy actions quickly swap to a checkmark for two seconds so the user gets
 deterministic visual feedback. "Show logs" opens a native logs window fed by
-the read-only `logs.recent` RPC, with refresh and copy controls.
+the read-only `logs::recent` engine protocol, with refresh and copy controls.
 The uptime row normalizes raw `ps` elapsed-time strings such as `10:48` to the
 same `HH:MM:SS` format used by the live one-second ticker, so opening the menu
 does not briefly switch display styles.
@@ -305,7 +305,7 @@ files are still preserved.
 
 ## Key Invariants
 
-- **`Tron.app` never builds the Rust agent.** The helper binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helper/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side RPC/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`. Local relay dogfood is configured through the ignored `packages/mac-app/.env.local` file that the bundle script reads before Cargo compiles the helper; production releases use GitHub Actions secrets instead.
+- **`Tron.app` never builds the Rust agent.** The helper binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helper/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine capability/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`. Local relay dogfood is configured through the ignored `packages/mac-app/.env.local` file that the bundle script reads before Cargo compiles the helper; production releases use GitHub Actions secrets instead.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper registers the service.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
@@ -315,7 +315,7 @@ files are still preserved.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. App activation, Re-check, and the gear-button watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after all rows are green and the user presses Continue.
 - **Transcription is opt-in user data.** `worker.py` and `requirements.txt` ship read-only in the app bundle, and the wizard copies them to `~/.tron/internal/transcription/` when the user applies the Transcription step. The app bundle never contains the Python venv or Parakeet model cache, and skipping the step leaves the server setting false.
 - **App bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/internal/run`; `Tron.app` is only replaced by a new notarized DMG.
-- **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `profile.toml`, `run/.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
+- **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `profile.toml`, `run/.onboarded`) or a engine protocol call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
 - **Production uses one port (`9847`) and one LaunchAgent label (`com.tron.server`).** The DMG-installed `Tron.app` (`com.tron.mac`), local Release copies, the default Xcode Debug companion (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) all target the production `~/.tron` data tree. Debug companion observes production but does not manage its Login Item; `tron dev` is the explicit server takeover path and stops the production LaunchAgent before binding 9847. The isolated install scheme is the exception by design: it uses `com.tron.server.dev`, port `9848`, and `~/.tron-dev`.
 - **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/core/foundation/paths.rs` for the Rust-side mirror.
 

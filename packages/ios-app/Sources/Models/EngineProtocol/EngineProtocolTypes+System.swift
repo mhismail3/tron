@@ -72,7 +72,7 @@ struct SystemUpdateStatusResult: Decodable {
 #if DEBUG || BETA
 /// Result of `system.getDiagnostics`.
 ///
-/// A structured snapshot of server identity, session counts, and RPC
+/// A structured snapshot of server identity, session counts, and engine protocol
 /// surface area. Drives the in-app debug panel and exists only in DEBUG
 /// / BETA builds to avoid bloating the production binary with debug UI
 /// state.
@@ -166,7 +166,7 @@ struct RecentLogEntry: Decodable, Sendable {
 struct ClientLogEntry: Encodable {
     let timestamp: String   // ISO 8601 with millis ("2026-03-03T14:30:05.123Z")
     let level: String       // "verbose", "debug", "info", "warning", "error"
-    let category: String    // "WebSocket", "RPC", etc.
+    let category: String    // "WebSocket", "engine protocol", etc.
     let message: String
 }
 

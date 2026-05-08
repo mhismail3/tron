@@ -81,14 +81,14 @@ final class TextContentLayoutTests: XCTestCase {
         let date = Date(timeIntervalSince1970: 0)
         let attributed = LogRow.attributedString(
             date: date,
-            category: .rpc,
+            category: .engine,
             level: .warning,
             message: "params=redacted"
         )
         let rendered = String(attributed.characters)
 
         XCTAssertTrue(rendered.contains(DateParser.formatLogTimestamp(date)))
-        XCTAssertTrue(rendered.contains("[RPC]"))
+        XCTAssertTrue(rendered.contains("[Engine]"))
         XCTAssertTrue(rendered.contains("params=redacted"))
     }
 }

@@ -6,67 +6,82 @@ import Foundation
 @Suite("MCPClient Tests")
 struct MCPClientTests {
 
-    @Test("status throws when webSocket is nil")
+    @Test("status throws when engineConnection is nil")
     func statusNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { _ = try await client.status() }
+        await #expect(throws: EngineClientError.self) { _ = try await client.status() }
     }
 
-    @Test("addServer throws when webSocket is nil")
+    @Test("addServer throws when engineConnection is nil")
     func addServerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { _ = try await client.addServer(MCPAddServerParams(name: "test", command: "echo", args: nil, env: nil, url: nil, enabled: true)) }
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.addServer(
+                MCPAddServerParams(name: "test", command: "echo", args: nil, env: nil, url: nil, enabled: true),
+                idempotencyKey: .userAction("mcp.addServer.test")
+            )
+        }
     }
 
-    @Test("removeServer throws when webSocket is nil")
+    @Test("removeServer throws when engineConnection is nil")
     func removeServerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { try await client.removeServer(name: "test") }
+        await #expect(throws: EngineClientError.self) {
+            try await client.removeServer(name: "test", idempotencyKey: .userAction("mcp.removeServer.test"))
+        }
     }
 
-    @Test("enableServer throws when webSocket is nil")
+    @Test("enableServer throws when engineConnection is nil")
     func enableServerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { try await client.enableServer(name: "test") }
+        await #expect(throws: EngineClientError.self) {
+            try await client.enableServer(name: "test", idempotencyKey: .userAction("mcp.enableServer.test"))
+        }
     }
 
-    @Test("disableServer throws when webSocket is nil")
+    @Test("disableServer throws when engineConnection is nil")
     func disableServerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { try await client.disableServer(name: "test") }
+        await #expect(throws: EngineClientError.self) {
+            try await client.disableServer(name: "test", idempotencyKey: .userAction("mcp.disableServer.test"))
+        }
     }
 
-    @Test("restartServer throws when webSocket is nil")
+    @Test("restartServer throws when engineConnection is nil")
     func restartServerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { _ = try await client.restartServer(name: "test") }
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.restartServer(name: "test", idempotencyKey: .userAction("mcp.restartServer.test"))
+        }
     }
 
-    @Test("listTools throws when webSocket is nil")
+    @Test("listTools throws when engineConnection is nil")
     func listToolsNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { _ = try await client.listTools(server: nil) }
+        await #expect(throws: EngineClientError.self) { _ = try await client.listTools(server: nil) }
     }
 
-    @Test("reload throws when webSocket is nil")
+    @Test("reload throws when engineConnection is nil")
     func reloadNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = MCPClient(transport: transport)
-        await #expect(throws: RPCClientError.self) { _ = try await client.reload() }
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.reload(idempotencyKey: .userAction("mcp.reload.test"))
+        }
     }
 }

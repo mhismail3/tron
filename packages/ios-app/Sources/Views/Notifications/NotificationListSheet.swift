@@ -64,7 +64,7 @@ struct NotificationListSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if notificationStore.unreadCount > 0 {
                         Button {
-                            Task { await notificationStore.markAllRead() }
+                            Task { await notificationStore.markAllRead(idempotencyKey: .userAction("notifications.markAllRead")) }
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "checkmark.circle")

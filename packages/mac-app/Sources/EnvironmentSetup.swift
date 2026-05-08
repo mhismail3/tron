@@ -61,7 +61,7 @@ struct EnvironmentSetup: Sendable {
     /// plist, or helper signature is missing/corrupt.
     var validateBundledHelper: @Sendable () -> String?
 
-    /// Performs a single `system.ping` against the running server.
+    /// Performs a single `system::ping` against the running server.
     /// Returns a classified `ServerPingResult` so the caller can
     /// distinguish "server is down" from "token rejected" — the menu
     /// bar tone + wizard recovery copy depend on this distinction.

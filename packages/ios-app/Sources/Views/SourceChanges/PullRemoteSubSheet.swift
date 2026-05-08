@@ -17,7 +17,7 @@ import SwiftUI
 /// toolbar slot; the leading `xmark` dismisses the sheet.
 @available(iOS 26.0, *)
 struct PullRemoteSubSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
 
     @State private var prune: Bool = false
@@ -171,11 +171,12 @@ struct PullRemoteSubSheet: View {
         Task {
             await runner.run(action: .sync, dismiss: { dismiss() }) {
                 // No targetBranch — server auto-detects the repo's default.
-                try await rpcClient.git.syncMain(
+                try await engineClient.git.syncMain(
                     sessionId: sessionId,
                     targetBranch: nil,
                     prune: prune ? true : nil,
-                    dryRun: dryRun ? true : nil
+                    dryRun: dryRun ? true : nil,
+                    idempotencyKey: .userAction("git.syncMain")
                 )
             }
         }

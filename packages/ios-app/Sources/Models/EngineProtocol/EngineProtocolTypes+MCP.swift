@@ -40,7 +40,7 @@ struct MCPServerNameParams: Encodable {
     let name: String
 }
 
-// MARK: - MCP RPC Responses
+// MARK: - MCP Engine Responses
 
 struct MCPAddServerResult: Decodable {
     let success: Bool

@@ -168,26 +168,26 @@ struct TronLoggerLevelFilteringTests {
 @MainActor
 struct TronLoggerSensitiveDataTests {
 
-    @Test("RPC request logging never buffers raw params")
-    func rpcRequestLoggingOmitsRawParams() {
+    @Test("Engine request logging never buffers raw payload")
+    func engineRequestLoggingOmitsRawPayload() {
         let logger = TronLogger.shared
         let originalLevel = logger.minimumLevel
         defer {
             logger.minimumLevel = originalLevel
-            logger.clearBufferForCategory(.rpc)
+            logger.clearBufferForCategory(.engine)
         }
 
         logger.minimumLevel = .verbose
-        logger.clearBufferForCategory(.rpc)
+        logger.clearBufferForCategory(.engine)
 
-        logger.logRPCRequest(
-            method: "auth.addApiKey",
-            params: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Work"}"#,
-            id: 42
+        logger.logEngineRequest(
+            functionId: "auth::update",
+            payload: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Work"}"#,
+            id: "42"
         )
 
-        let message = logger.getRecentLogs(category: .rpc).last?.3 ?? ""
-        #expect(message.contains("auth.addApiKey"))
+        let message = logger.getRecentLogs(category: .engine).last?.3 ?? ""
+        #expect(message.contains("auth::update"))
         #expect(message.contains("[42]"))
         #expect(!message.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
         #expect(!message.contains("apiKeyLabel"))

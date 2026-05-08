@@ -80,7 +80,11 @@ final class ModelPickerState {
         onOptimisticSet(model.id)
 
         do {
-            let result = try await modelClient.switchModel(sessionId, model: model.id)
+            let result = try await modelClient.switchModel(
+                sessionId,
+                model: model.id,
+                idempotencyKey: .userAction("model.switch")
+            )
             // Clear optimistic update - real value now reflected
             optimisticModelName = nil
             onSuccess(previousModel, result.newModel)

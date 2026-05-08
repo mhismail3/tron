@@ -1,15 +1,15 @@
 import Foundation
 
-// MARK: - session.reconstruct RPC Types
+// MARK: - session::reconstruct engine protocol Types
 
-/// Request parameters for `session.reconstruct`.
+/// Request parameters for `session::reconstruct`.
 struct SessionReconstructParams: Encodable {
     let sessionId: String
     let limit: Int?
     let beforeSequence: Int64?
 }
 
-/// Response from `session.reconstruct`.
+/// Response from `session::reconstruct`.
 ///
 /// Returns the complete session state in one response: persisted events,
 /// in-flight state (if agent is running), and session metadata. The client

@@ -10,11 +10,11 @@ final class ChatViewModelFindMessageTests: XCTestCase {
 
     override func setUp() async throws {
         // Create a minimal ChatViewModel for testing
-        // Note: We don't need a real RPC client for these tests since we're only
+        // Note: We don't need a real engine client for these tests since we're only
         // testing the findMessageId method which works on local messages array
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
     }
 
     override func tearDown() async throws {

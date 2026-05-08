@@ -1,8 +1,8 @@
 import Foundation
 
-/// Client for agent-related RPC methods.
+/// Client for agent-related engine capabilities.
 /// Handles prompts, abort, state queries, and tool results.
-final class AgentClient: RPCDomainClient {
+final class AgentClient: EngineDomainClient {
 
     // MARK: - Agent Methods
 
@@ -10,9 +10,10 @@ final class AgentClient: RPCDomainClient {
         _ prompt: String,
         images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
-        reasoningLevel: String? = nil
+        reasoningLevel: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws {
-        let (ws, sessionId) = try requireTransport().requireSession()
+        let (_, sessionId) = try requireTransport().requireSession()
 
         let params = AgentPromptParams(
             sessionId: sessionId,
@@ -22,9 +23,10 @@ final class AgentClient: RPCDomainClient {
             reasoningLevel: reasoningLevel
         )
 
-        let result: AgentPromptResult = try await ws.send(
-            method: "agent.prompt",
-            params: params
+        let result: AgentPromptResult = try await invokeWrite(
+            "agent::prompt",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         if !result.acknowledged {
@@ -34,86 +36,94 @@ final class AgentClient: RPCDomainClient {
 
     // MARK: - Session-Scoped Skill Methods
 
-    func activateSkill(_ skillName: String) async throws -> SkillActivateResult {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = SkillActivateParams(sessionId: sessionId, skillName: skillName)
-        return try await ws.send(method: "skill.activate", params: params)
+        return try await invokeWrite("skills::activate", params, idempotencyKey: idempotencyKey)
     }
 
-    func deactivateSkill(_ skillName: String) async throws -> SkillDeactivateResult {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = SkillDeactivateParams(sessionId: sessionId, skillName: skillName)
-        return try await ws.send(method: "skill.deactivate", params: params)
+        return try await invokeWrite("skills::deactivate", params, idempotencyKey: idempotencyKey)
     }
 
     func activeSkills() async throws -> SkillActiveResult {
-        let (ws, sessionId) = try requireTransport().requireSession()
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = SkillActiveParams(sessionId: sessionId)
-        return try await ws.send(method: "skill.active", params: params)
+        return try await invokeRead("skills::active", params)
     }
 
     // MARK: - Prompt Queue Methods
 
     /// Queue a prompt for later delivery when the agent becomes ready.
-    /// Server persists a `message.queued` event and broadcasts it via WebSocket.
-    func queuePrompt(_ text: String) async throws -> PendingQueueItem {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    /// Server persists a `message.queued` event and publishes it through engine streams.
+    func queuePrompt(_ text: String, idempotencyKey: EngineIdempotencyKey) async throws -> PendingQueueItem {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = QueuePromptParams(sessionId: sessionId, prompt: text)
-        return try await ws.send(method: "agent.queuePrompt", params: params)
+        return try await invokeWrite("agent::queue_prompt", params, idempotencyKey: idempotencyKey)
     }
 
     /// Cancel a specific queued prompt by its queue ID.
-    func dequeuePrompt(_ queueId: String) async throws {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func dequeuePrompt(_ queueId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = DequeuePromptParams(sessionId: sessionId, queueId: queueId)
-        let _: DequeueResult = try await ws.send(method: "agent.dequeuePrompt", params: params)
+        let _: DequeueResult = try await invokeWrite("agent::dequeue_prompt", params, idempotencyKey: idempotencyKey)
     }
 
     /// Clear all queued prompts for the current session.
-    func clearQueue() async throws {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func clearQueue(idempotencyKey: EngineIdempotencyKey) async throws {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = ClearQueueParams(sessionId: sessionId)
-        let _: ClearQueueResult = try await ws.send(method: "agent.clearQueue", params: params)
+        let _: ClearQueueResult = try await invokeWrite("agent::clear_queue", params, idempotencyKey: idempotencyKey)
     }
 
     // MARK: - Subagent Result Delivery
 
     /// Deliver pending subagent results as a server-constructed prompt.
     /// The server formats the results and either spawns a prompt run or queues if busy.
-    func deliverSubagentResults() async throws -> DeliverSubagentResultsResponse {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func deliverSubagentResults(idempotencyKey: EngineIdempotencyKey) async throws -> DeliverSubagentResultsResponse {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = DeliverSubagentResultsParams(sessionId: sessionId)
-        return try await ws.send(method: "agent.deliverSubagentResults", params: params)
+        return try await invokeWrite("agent::deliver_subagent_results", params, idempotencyKey: idempotencyKey)
     }
 
     // MARK: - Confirmation/Answer Submission
 
     /// Submit a confirmation decision for a GetConfirmation tool call.
     /// Server constructs the prompt and spawns a prompt run (or queues if busy).
-    func submitConfirmation(action: String, decision: String, note: String?) async throws -> SubmitConfirmationResponse {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func submitConfirmation(
+        action: String,
+        decision: String,
+        note: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SubmitConfirmationResponse {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = SubmitConfirmationParams(
             sessionId: sessionId,
             action: action,
             decision: decision,
             note: note
         )
-        return try await ws.send(method: "agent.submitConfirmation", params: params)
+        return try await invokeWrite("agent::submit_confirmation", params, idempotencyKey: idempotencyKey)
     }
 
     /// Submit answers for an AskUserQuestion tool call.
     /// Server constructs the prompt and spawns a prompt run (or queues if busy).
-    func submitAnswers(questions: [AnswerSubmission]) async throws -> SubmitAnswersResponse {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func submitAnswers(
+        questions: [AnswerSubmission],
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SubmitAnswersResponse {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = SubmitAnswersParams(sessionId: sessionId, questions: questions)
-        return try await ws.send(method: "agent.submitAnswers", params: params)
+        return try await invokeWrite("agent::submit_answers", params, idempotencyKey: idempotencyKey)
     }
 
-    func abort() async throws {
-        guard let (ws, sessionId) = try? requireTransport().requireSession() else { return }
+    func abort(idempotencyKey: EngineIdempotencyKey) async throws {
+        guard let (_, sessionId) = try? requireTransport().requireSession() else { return }
 
         let params = AgentAbortParams(sessionId: sessionId)
-        let _: EmptyParams = try await ws.send(method: "agent.abort", params: params)
+        let _: EmptyParams = try await invokeWrite("agent::abort", params, idempotencyKey: idempotencyKey)
         logger.info("Aborted agent", category: .chat)
     }
 
@@ -121,10 +131,10 @@ final class AgentClient: RPCDomainClient {
     /// Returns `true` when the server cancelled a registered tool, `false` when
     /// the tool had already finished or no call matched the id.
     @discardableResult
-    func abortTool(toolCallId: String) async throws -> Bool {
-        let (ws, sessionId) = try requireTransport().requireSession()
+    func abortTool(toolCallId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
+        let (_, sessionId) = try requireTransport().requireSession()
         let params = AgentAbortToolParams(sessionId: sessionId, toolCallId: toolCallId)
-        let result: AgentAbortToolResult = try await ws.send(method: "agent.abortTool", params: params)
+        let result: AgentAbortToolResult = try await invokeWrite("agent::abort_tool", params, idempotencyKey: idempotencyKey)
         logger.info(
             "Aborted tool call \(toolCallId): aborted=\(result.aborted)",
             category: .chat
@@ -136,15 +146,19 @@ final class AgentClient: RPCDomainClient {
 
     /// Send a tool result for interactive tools like AskUserQuestion.
     /// This unblocks the agent which is waiting for user input.
-    func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
-        let ws = try requireTransport().requireConnection()
-
+    func sendToolResult(
+        sessionId: String,
+        toolCallId: String,
+        result: AskUserQuestionResult,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws {
         let params = ToolResultParams(sessionId: sessionId, toolCallId: toolCallId, result: result)
         logger.info("[TOOL_RESULT] Sending tool result: sessionId=\(sessionId), toolCallId=\(toolCallId)", category: .session)
 
-        let response: ToolResultResponse = try await ws.send(
-            method: "tool.result",
-            params: params
+        let response: ToolResultResponse = try await invokeWrite(
+            "tool::result",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         logger.info("[TOOL_RESULT] Tool result sent successfully: success=\(response.success)", category: .session)

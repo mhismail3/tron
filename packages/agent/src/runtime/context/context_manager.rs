@@ -579,7 +579,7 @@ impl ContextManager {
     /// Build a context snapshot with token breakdown.
     ///
     /// H15: `debug_assert!`s that volatile tokens were refreshed this turn
-    /// (unless the generation is 0, i.e. we're outside the turn loop — RPC
+    /// (unless the generation is 0, i.e. we're outside the turn loop — engine
     /// status queries, tests, etc.). See `begin_turn()` / `set_volatile_tokens`.
     pub fn get_snapshot(&self) -> ContextSnapshot {
         self.assert_volatile_fresh_for_snapshot("get_snapshot");

@@ -5,7 +5,7 @@ import SwiftUI
 /// in the cloned workspace upon completion.
 @available(iOS 26.0, *)
 struct CloneRepoSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     /// Optional parent folder where the repository should be cloned.
     /// When provided, the destination is locked to this workspace.
     var initialDestinationPath: String?
@@ -101,7 +101,7 @@ struct CloneRepoSheet: View {
             }
             .sheet(isPresented: $showDestinationPicker) {
                 WorkspaceSelector(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     selectedPath: $destinationPath
                 )
             }
@@ -295,12 +295,12 @@ struct CloneRepoSheet: View {
     private func loadHome() async {
         isLoadingHome = true
         do {
-            await rpcClient.connect()
-            if !rpcClient.isConnected {
+            await engineClient.connect()
+            if !engineClient.isConnected {
                 try? await Task.sleep(for: .milliseconds(100))
             }
 
-            let home = try await rpcClient.filesystem.getHome()
+            let home = try await engineClient.filesystem.getHome()
             await MainActor.run {
                 homePath = home.homePath
                 destinationPath = lockedDestinationPath ?? defaultProjectsPath
@@ -324,9 +324,10 @@ struct CloneRepoSheet: View {
 
         Task {
             do {
-                let result = try await rpcClient.filesystem.cloneRepository(
+                let result = try await engineClient.filesystem.cloneRepository(
                     url: repo.normalizedURL,
-                    targetPath: fullDestinationPath
+                    targetPath: fullDestinationPath,
+                    idempotencyKey: .userAction("git.clone")
                 )
 
                 await MainActor.run {
@@ -338,7 +339,7 @@ struct CloneRepoSheet: View {
                         cloneError = result.error ?? "Clone failed"
                     }
                 }
-            } catch let error as RPCError {
+            } catch let error as EngineProtocolError {
                 await MainActor.run {
                     isCloning = false
                     cloneError = error.message

@@ -6,58 +6,70 @@ import Foundation
 @Suite("SandboxClient Tests")
 struct SandboxClientTests {
 
-    @Test("listContainers throws when webSocket is nil")
+    @Test("listContainers throws when engineConnection is nil")
     func listContainersNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = SandboxClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.listContainers()
         }
     }
 
-    @Test("stopContainer throws when webSocket is nil")
+    @Test("stopContainer throws when engineConnection is nil")
     func stopContainerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = SandboxClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.stopContainer(name: "test-container")
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.stopContainer(
+                name: "test-container",
+                idempotencyKey: .userAction("sandbox.stop.test")
+            )
         }
     }
 
-    @Test("startContainer throws when webSocket is nil")
+    @Test("startContainer throws when engineConnection is nil")
     func startContainerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = SandboxClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.startContainer(name: "test-container")
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.startContainer(
+                name: "test-container",
+                idempotencyKey: .userAction("sandbox.start.test")
+            )
         }
     }
 
-    @Test("killContainer throws when webSocket is nil")
+    @Test("killContainer throws when engineConnection is nil")
     func killContainerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = SandboxClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.killContainer(name: "test-container")
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.killContainer(
+                name: "test-container",
+                idempotencyKey: .userAction("sandbox.kill.test")
+            )
         }
     }
 
-    @Test("removeContainer throws when webSocket is nil")
+    @Test("removeContainer throws when engineConnection is nil")
     func removeContainerNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = SandboxClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.removeContainer(name: "test-container")
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.removeContainer(
+                name: "test-container",
+                idempotencyKey: .userAction("sandbox.remove.test")
+            )
         }
     }
 }

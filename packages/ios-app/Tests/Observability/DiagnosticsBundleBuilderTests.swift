@@ -143,8 +143,8 @@ struct DiagnosticsBundleBuilderTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let database = EventDatabase(fallbackPath: directory.appendingPathComponent("events.db").path)
         try await database.initialize()
-        let rpcClient = RPCClient(serverURL: URL(string: "ws://paired-server-required.invalid:1/ws")!)
-        let eventStoreManager = EventStoreManager(eventDB: database, rpcClient: rpcClient)
+        let engineClient = EngineClient(serverURL: URL(string: "ws://paired-server-required.invalid:1/engine")!)
+        let eventStoreManager = EventStoreManager(eventDB: database, engineClient: engineClient)
         let metricKitStore = MetricKitDiagnosticsStore(
             directoryURL: directory.appendingPathComponent("MetricKit", isDirectory: true)
         )
@@ -152,7 +152,7 @@ struct DiagnosticsBundleBuilderTests {
             directory: directory,
             database: database,
             eventStoreManager: eventStoreManager,
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             metricKitStore: metricKitStore
         )
     }
@@ -203,7 +203,7 @@ private struct DiagnosticsHarness {
     let directory: URL
     let database: EventDatabase
     let eventStoreManager: EventStoreManager
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let metricKitStore: MetricKitDiagnosticsStore
 
     func builder(
@@ -213,7 +213,7 @@ private struct DiagnosticsHarness {
         DiagnosticsBundleBuilder(
             eventDatabase: database,
             eventStoreManager: eventStoreManager,
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             activeServer: nil,
             metricKitStore: metricKitStore,
             now: now,

@@ -3,7 +3,7 @@ import SwiftUI
 /// List view showing saved voice note transcriptions.
 @available(iOS 26.0, *)
 struct VoiceNotesListView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onVoiceNote: () -> Void
     let actions: DashboardToolbarActions
 
@@ -63,7 +63,7 @@ struct VoiceNotesListView: View {
 
     private func deleteNote(_ note: VoiceNoteMetadata) async {
         do {
-            _ = try await rpcClient.media.deleteVoiceNote(filename: note.filename)
+            _ = try await engineClient.media.deleteVoiceNote(filename: note.filename, idempotencyKey: .userAction("voiceNotes.delete"))
             await MainActor.run {
                 notes.removeAll { $0.filename == note.filename }
             }
@@ -137,7 +137,7 @@ struct VoiceNotesListView: View {
         errorMessage = nil
 
         do {
-            let result = try await rpcClient.media.listVoiceNotes(limit: 100)
+            let result = try await engineClient.media.listVoiceNotes(limit: 100)
             await MainActor.run {
                 notes = result.notes
                 isLoading = false

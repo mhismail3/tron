@@ -63,7 +63,7 @@ pub struct CronScheduler {
     config_lock: tokio::sync::Mutex<()>,
     /// Wakes scheduler when config file changes.
     config_notify: Arc<tokio::sync::Notify>,
-    /// Wakes scheduler when RPC mutates a job.
+    /// Wakes scheduler when engine capability mutates a job.
     reschedule_notify: Arc<tokio::sync::Notify>,
     /// Shutdown signal.
     cancel: CancellationToken,
@@ -228,7 +228,7 @@ impl CronScheduler {
         self.runtime.read().get(job_id).cloned()
     }
 
-    /// Reload a single job into in-memory state (after RPC mutation).
+    /// Reload a single job into in-memory state (after engine capability mutation).
     pub fn reload_job(&self, job: CronJob) {
         let _ = self.jobs.write().insert(job.id.clone(), job);
     }

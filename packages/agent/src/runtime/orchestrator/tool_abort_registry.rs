@@ -3,7 +3,7 @@
 //! Each in-flight tool call gets its own `CancellationToken` child of the
 //! turn-level cancellation token. The registry maps
 //! `(session_id, tool_call_id)` to that child token so the `agent.abortTool`
-//! RPC can cancel a single tool without cancelling the rest of the turn.
+//! Engine capabilities can cancel a single tool without cancelling the rest of the turn.
 //!
 //! ## Lifecycle
 //!
@@ -13,7 +13,7 @@
 //! 2. `unregister(session_id, tool_call_id)` — removes the entry once the
 //!    tool completes (success, error, or cancellation). Called in a `Drop`
 //!    guard in the executor so early returns cannot leak entries.
-//! 3. `abort(session_id, tool_call_id)` — looked up by the RPC layer.
+//! 3. `abort(session_id, tool_call_id)` — looked up by the engine transport.
 //!    Returns `true` if a matching tool was in flight; the child token is
 //!    cancelled and the entry is removed.
 //!

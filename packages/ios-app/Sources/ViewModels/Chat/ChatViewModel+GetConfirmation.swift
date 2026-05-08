@@ -28,7 +28,7 @@ extension ChatViewModel {
         getConfirmationCoordinator.prepareSubmission(decision, note: note, context: self)
     }
 
-    /// Phase 2: Execute pending submission — sends via server RPC.
+    /// Phase 2: Execute pending submission — sends via server engine protocol.
     /// Called from ChatSheetModifier.onDismiss AFTER sheet dismiss animation completes.
     func executePendingGetConfirmationSubmission() {
         getConfirmationCoordinator.executePendingSubmission(context: self)

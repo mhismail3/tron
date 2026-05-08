@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Worktree RPC Methods
+// MARK: - Worktree Engine Capability Methods
 
 extension ChatViewModel {
 

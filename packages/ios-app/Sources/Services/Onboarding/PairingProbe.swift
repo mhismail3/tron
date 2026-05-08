@@ -3,18 +3,19 @@ import Foundation
 /// Result of one PairingProbe attempt — narrow enum so the caller can
 /// branch on every outcome without inspecting NSError details.
 enum PairingProbeOutcome: Equatable, Sendable {
-    /// `system.ping` returned success. The optional `serverVersion` lets
+    /// `system::ping` returned success. The optional `serverVersion` lets
     /// the UI confirm "you're talking to Tron 0.1.0-beta.1".
     case ok(serverVersion: String?)
     /// HTTP 401 on the WebSocket upgrade — bearer wrong/missing/rotated.
     case unauthorized
-    /// `system.ping` returned `CLIENT_VERSION_UNSUPPORTED`. The
+    /// `system::ping` returned `CLIENT_VERSION_UNSUPPORTED`. The
     /// `serverVersion` flows into the user-facing error message so the
     /// UI can say "Update to v0.6.0 on your Mac". `"unknown"` when the
     /// server didn't include the version in `details`.
     case incompatible(serverVersion: String)
-    /// Anything else — connection refused, DNS failure, malformed RPC
-    /// envelope. The `reason` is best-effort prose for diagnostics.
+    /// Anything else — connection refused, DNS failure, malformed engine
+    /// envelope, or an unexpected server response. The `reason` is
+    /// best-effort prose for diagnostics.
     case unreachable(reason: String)
 
     /// Bridge to the existing `PairingStepConnectError` taxonomy used by
@@ -54,10 +55,11 @@ protocol PairingProbing: Sendable {
 
 /// Concrete `PairingProbing` backed by `URLSessionWebSocketTask`. Opens
 /// one upgrade with `Authorization: Bearer <token>`, sends a
-/// `system.ping`, and waits up to 10s for a single response.
+/// protocol `hello`, invokes `system::ping`, and waits up to 10s for the
+/// matching response.
 ///
 /// The probe deliberately uses its own `URLSession` (not the shared one
-/// owned by `WebSocketService`) so there is **no chance** of mutating
+/// owned by `EngineConnection`) so there is **no chance** of mutating
 /// the live connection state of the active server while onboarding is
 /// in flight. The session is invalidated on the way out.
 @MainActor
@@ -98,6 +100,20 @@ final class URLSessionPairingProbe: PairingProbing {
         let task = session.webSocketTask(with: request)
         task.resume()
 
+        let helloId = UUID().uuidString
+        let helloPayload = Self.helloRequestData(
+            protocolVersion: 1,
+            clientVersion: AppConstants.canonicalVersion,
+            requestId: helloId
+        )
+
+        do {
+            try await task.send(.data(helloPayload))
+        } catch {
+            // Most likely a connection-refused or 401 — drain the delegate.
+            return await Self.classifyTransportError(error, delegate: delegate)
+        }
+
         let requestId = UUID().uuidString
         let payload = Self.pingRequestData(
             protocolVersion: 1,
@@ -108,7 +124,6 @@ final class URLSessionPairingProbe: PairingProbing {
         do {
             try await task.send(.data(payload))
         } catch {
-            // Most likely a connection-refused or 401 — drain the delegate.
             return await Self.classifyTransportError(error, delegate: delegate)
         }
 
@@ -132,12 +147,31 @@ final class URLSessionPairingProbe: PairingProbing {
     /// can call this directly. The function is pure — no isolation needed.
     nonisolated static func urlString(host: String, port: Int) -> String {
         let bracketed = host.contains(":") ? "[\(host)]" : host
-        return "ws://\(bracketed):\(port)/ws"
+        return "ws://\(bracketed):\(port)/engine"
     }
 
-    /// JSON-RPC frame the server's `PingHandler` consumes. Mirrors the
-    /// shape iOS already sends from `MiscClient.ping()` so the server
-    /// path under test is the production path.
+    /// Build the engine protocol hello frame sent before the pairing
+    /// probe invoke.
+    ///
+    /// `nonisolated` so tests can call without crossing an actor.
+    nonisolated static func helloRequestData(
+        protocolVersion: Int,
+        clientVersion: String,
+        requestId: String
+    ) -> Data {
+        let body: [String: Any] = [
+            "type": "hello",
+            "id": requestId,
+            "protocolVersion": protocolVersion,
+            "clientName": "tron-ios-pairing",
+            "clientVersion": clientVersion,
+        ]
+        return try! JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    /// Engine protocol frame invoking the canonical `system::ping`
+    /// capability. Mirrors the shape iOS sends from the live engine client
+    /// so onboarding probes the production capability path.
     ///
     /// `nonisolated` so tests can call without crossing an actor.
     nonisolated static func pingRequestData(
@@ -146,9 +180,10 @@ final class URLSessionPairingProbe: PairingProbing {
         requestId: String
     ) -> Data {
         let body: [String: Any] = [
+            "type": "invoke",
             "id": requestId,
-            "method": "system.ping",
-            "params": [
+            "functionId": "system::ping",
+            "payload": [
                 "protocolVersion": protocolVersion,
                 "clientVersion": clientVersion,
             ],
@@ -157,8 +192,8 @@ final class URLSessionPairingProbe: PairingProbing {
         return try! JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
     }
 
-    /// Map the raw RPC envelope bytes to a `PairingProbeOutcome`. Pure —
-    /// the heart of the test suite.
+    /// Map the raw engine response envelope bytes to a
+    /// `PairingProbeOutcome`. Pure — the heart of the test suite.
     ///
     /// `nonisolated` so tests can call without crossing an actor.
     nonisolated static func classify(envelope data: Data) -> PairingProbeOutcome {
@@ -169,11 +204,9 @@ final class URLSessionPairingProbe: PairingProbing {
     }
 
     /// Classify one incoming WebSocket frame while waiting for the
-    /// specific `system.ping` response this probe sent. Tron emits a
-    /// `connection.established` event immediately after the WS upgrade;
-    /// the production RPC client ignores events and matches by request id,
-    /// so the probe must do the same or it will report a healthy server as
-    /// unreachable.
+    /// specific `system::ping` response this probe sent. The server can
+    /// emit event frames before the response; the production engine client
+    /// matches by correlation id, so the probe must do the same.
     nonisolated static func classifyFrame(
         envelope data: Data,
         expectedRequestId: String
@@ -190,22 +223,42 @@ final class URLSessionPairingProbe: PairingProbing {
     }
 
     private nonisolated static func classifyResponseObject(_ object: [String: Any]) -> PairingProbeOutcome {
-        if let success = object["success"] as? Bool, success {
+        if let ok = object["ok"] as? Bool, ok {
             let result = object["result"] as? [String: Any]
-            let serverVersion = result?["serverVersion"] as? String
+            let child = result?["child"] as? [String: Any]
+            if let error = child?["error"] as? [String: Any] {
+                return classifyEngineError(error)
+            }
+            let value = child?["value"] as? [String: Any]
+            let serverVersion = value?["serverVersion"] as? String
             return .ok(serverVersion: serverVersion)
         }
         if let error = object["error"] as? [String: Any],
            let code = error["code"] as? String {
-            if code == "CLIENT_VERSION_UNSUPPORTED" {
-                let details = error["details"] as? [String: Any]
-                let serverVersion = details?["serverVersion"] as? String ?? "unknown"
-                return .incompatible(serverVersion: serverVersion)
-            }
-            let message = error["message"] as? String ?? code
-            return .unreachable(reason: message)
+            return classifyEngineError(error, code: code)
         }
         return .unreachable(reason: "Server returned an unexpected response")
+    }
+
+    private nonisolated static func classifyEngineError(
+        _ error: [String: Any],
+        code explicitCode: String? = nil
+    ) -> PairingProbeOutcome {
+        let code = explicitCode ?? error["kind"] as? String ?? error["code"] as? String
+        let details = error["details"] as? [String: Any]
+        let detailCode = details?["code"] as? String
+        if code == "CLIENT_VERSION_UNSUPPORTED" || detailCode == "CLIENT_VERSION_UNSUPPORTED" {
+            let nestedDetails = details?["details"] as? [String: Any]
+            let serverVersion = nestedDetails?["serverVersion"] as? String
+                ?? details?["serverVersion"] as? String
+                ?? "unknown"
+            return .incompatible(serverVersion: serverVersion)
+        }
+        let message = error["message"] as? String
+            ?? details?["message"] as? String
+            ?? code
+            ?? "Engine invocation failed"
+        return .unreachable(reason: message)
     }
 
     private nonisolated static func responseID(_ value: Any?, matches expectedID: String) -> Bool {

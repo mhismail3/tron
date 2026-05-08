@@ -459,7 +459,7 @@ impl RebaseOnMainOperation {
     ) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Parse strategy BEFORE touching the coordinator so "squash" is
-        // rejected at the RPC boundary (plan requirement).
+        // rejected at the engine transport boundary (plan requirement).
         let strategy = parse_rebase_strategy(opt_string(params.as_ref(), "strategy").as_deref())?;
         let main_branch = opt_string(params.as_ref(), "mainBranch");
 

@@ -73,7 +73,7 @@ struct ConnectionSettingsPage: View {
 
     private var activeServerUnavailable: Bool {
         dependencies.pairedServerStore.activeServer != nil
-            && !dependencies.rpcClient.connectionState.isConnected
+            && !dependencies.engineClient.connectionState.isConnected
     }
 
     private var pairedServersSection: some View {
@@ -555,7 +555,7 @@ struct ConnectionSettingsPage: View {
         defer { isCheckingForUpdates = false }
 
         do {
-            let result = try await dependencies.rpcClient.misc.checkForUpdates()
+            let result = try await dependencies.engineClient.misc.checkForUpdates()
             if result.available, let latest = result.latestVersion {
                 checkResultMessage = "Update available: \(VersionDisplay.label(for: latest))"
             } else {

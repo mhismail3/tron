@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Workspace Selector
 
 struct WorkspaceSelector: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     @Binding var selectedPath: String
 
     @Environment(\.dismiss) private var dismiss
@@ -83,7 +83,7 @@ struct WorkspaceSelector: View {
                 guard !currentPath.isEmpty else { return }
                 Task { await loadDirectory(currentPath) }
             }
-            .onChange(of: rpcClient.connectionState) { oldState, newState in
+            .onChange(of: engineClient.connectionState) { oldState, newState in
                 // React when connection transitions to connected
                 if newState.isConnected && !oldState.isConnected && errorMessage != nil {
                     // Connection established and we had an error - retry
@@ -222,14 +222,14 @@ struct WorkspaceSelector: View {
         isLoading = true
         do {
             // Ensure connection is established first
-            await rpcClient.connect()
+            await engineClient.connect()
 
             // Only wait briefly if not already connected
-            if !rpcClient.isConnected {
+            if !engineClient.isConnected {
                 try? await Task.sleep(for: .milliseconds(100))
             }
 
-            let home = try await rpcClient.filesystem.getHome()
+            let home = try await engineClient.filesystem.getHome()
             currentPath = home.homePath
             await loadDirectory(home.homePath)
         } catch {
@@ -240,7 +240,7 @@ struct WorkspaceSelector: View {
 
     private func loadDirectory(_ path: String) async {
         do {
-            let result = try await rpcClient.filesystem.listDirectory(path: path, showHidden: showHidden)
+            let result = try await engineClient.filesystem.listDirectory(path: path, showHidden: showHidden)
             await MainActor.run {
                 withAnimation(.tronFast) {
                     entries = result.entries
@@ -399,7 +399,10 @@ struct WorkspaceSelector: View {
         Task {
             do {
                 let newPath = (currentPath as NSString).appendingPathComponent(trimmedName)
-                let result = try await rpcClient.filesystem.createDirectory(path: newPath)
+                let result = try await engineClient.filesystem.createDirectory(
+                    path: newPath,
+                    idempotencyKey: .userAction("filesystem.createDir")
+                )
 
                 await MainActor.run {
                     isSubmittingFolder = false
@@ -410,7 +413,7 @@ struct WorkspaceSelector: View {
                     selectedPath = result.path
                     dismiss()
                 }
-            } catch let error as RPCError {
+            } catch let error as EngineProtocolError {
                 await MainActor.run {
                     isSubmittingFolder = false
                     folderCreationError = error.message

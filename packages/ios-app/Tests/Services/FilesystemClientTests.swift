@@ -6,13 +6,13 @@ import Foundation
 @Suite("FilesystemClient Tests")
 struct FilesystemClientTests {
 
-    @Test("listDirectory throws when webSocket is nil")
+    @Test("listDirectory throws when engineConnection is nil")
     func listDirectoryNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = FilesystemClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.listDirectory(path: "/tmp")
         }
     }

@@ -12,9 +12,9 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
     var viewModel: ChatViewModel!
 
     override func setUp() async throws {
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
     }
 
     override func tearDown() async throws {

@@ -11,7 +11,7 @@ import SwiftUI
 /// server-side override (not exposed in the UI today).
 @available(iOS 26.0, *)
 struct PushSubSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let currentBranch: String
     let defaultAutoSetUpstream: Bool
@@ -121,7 +121,7 @@ struct PushSubSheet: View {
             SettingsSectionHeader(title: "Branch")
             SettingsCard(accent: accent) {
                 BranchPickerField(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     sessionId: sessionId,
                     accent: accent,
                     placeholder: currentBranch,
@@ -174,7 +174,7 @@ struct PushSubSheet: View {
 
     private func resultBanner(_ r: GitPushResult) -> some View {
         // Reaching here means the server returned success — any failure
-        // throws a typed RPC error that the catch block renders as an
+        // throws a typed engine protocol error that the catch block renders as an
         // alert, not a banner.
         let detail: String = {
             var parts: [String] = []
@@ -199,7 +199,7 @@ struct PushSubSheet: View {
         // captured by GitPushResult.isCleanSuccess.
         Task {
             await runner.run(action: .push, dismiss: { dismiss() }) {
-                try await rpcClient.git.push(
+                try await engineClient.git.push(
                     sessionId: sessionId,
                     branch: pushBranch,
                     remote: nil,
@@ -207,7 +207,8 @@ struct PushSubSheet: View {
                     setUpstream: setUpstream,
                     dryRun: dryRun ? true : nil,
                     overrideProtected: nil,
-                    protectedBranches: nil
+                    protectedBranches: nil,
+                    idempotencyKey: .userAction("git.push")
                 )
             }
         }

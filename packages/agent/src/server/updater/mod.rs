@@ -563,7 +563,7 @@ impl ReleaseFetcher for MockReleaseFetcher {
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Outcome of a single `check_for_update` call. Matches the shape
-/// the `system.checkForUpdates` RPC surfaces to iOS / the Mac menu
+/// the `system.checkForUpdates` capability surfaces to iOS / the Mac menu
 /// bar; the event layer wraps this in `server.update_available`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckOutcome {

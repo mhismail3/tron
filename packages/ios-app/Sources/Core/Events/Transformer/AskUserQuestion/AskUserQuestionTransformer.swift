@@ -3,7 +3,7 @@ import Foundation
 /// Transformer for AskUserQuestion tool_use content blocks.
 ///
 /// Reads server-enriched status fields from the tool.call payload
-/// (`toolStatus`, `parsedAnswers`) injected by `session.reconstruct`
+/// (`toolStatus`, `parsedAnswers`) injected by `session::reconstruct`
 /// enrichment. For live WebSocket events (where the tool.call hasn't been
 /// enriched yet), status defaults to `.generating`.
 enum AskUserQuestionTransformer {

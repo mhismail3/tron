@@ -1,17 +1,18 @@
 import Foundation
 
-/// Client for media-related RPC methods.
+/// Client for media-related engine capabilities.
 /// Handles transcription, voice notes, and browser streaming.
-final class MediaClient: RPCDomainClient {
+final class MediaClient: EngineDomainClient {
 
     // MARK: - Transcription Methods
 
     func transcribeAudio(
         audioData: Data,
         mimeType: String = "audio/wav",
-        fileName: String? = nil
+        fileName: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> TranscribeAudioResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let audioBase64 = await Task.detached(priority: .utility) {
             audioData.base64EncodedString()
@@ -24,9 +25,10 @@ final class MediaClient: RPCDomainClient {
             fileName: fileName
         )
 
-        return try await ws.send(
-            method: "transcribe.audio",
-            params: params,
+        return try await invokeWrite(
+            "transcription::audio",
+            params,
+            idempotencyKey: idempotencyKey,
             timeout: 360.0
         )
     }
@@ -37,9 +39,10 @@ final class MediaClient: RPCDomainClient {
     func saveVoiceNote(
         audioData: Data,
         mimeType: String = "audio/wav",
-        fileName: String? = nil
+        fileName: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> VoiceNotesSaveResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         // Encode audio to base64 off main thread
         let audioBase64 = await Task.detached(priority: .utility) {
@@ -52,27 +55,28 @@ final class MediaClient: RPCDomainClient {
             fileName: fileName
         )
 
-        return try await ws.send(
-            method: "voiceNotes.save",
-            params: params,
-            timeout: 360.0  // 6 minutes for transcription
+        return try await invokeWrite(
+            "voice_notes::save",
+            params,
+            idempotencyKey: idempotencyKey,
+            timeout: 360.0
         )
     }
 
     /// List saved voice notes
     func listVoiceNotes(limit: Int = 50, offset: Int = 0) async throws -> VoiceNotesListResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = VoiceNotesListParams(limit: limit, offset: offset)
-        return try await ws.send(method: "voiceNotes.list", params: params)
+        return try await invokeRead("voice_notes::list", params)
     }
 
     /// Delete a voice note
-    func deleteVoiceNote(filename: String) async throws -> VoiceNotesDeleteResult {
-        let ws = try requireTransport().requireConnection()
+    func deleteVoiceNote(filename: String, idempotencyKey: EngineIdempotencyKey) async throws -> VoiceNotesDeleteResult {
+        _ = try requireTransport().requireConnection()
 
         let params = VoiceNotesDeleteParams(filename: filename)
-        return try await ws.send(method: "voiceNotes.delete", params: params)
+        return try await invokeWrite("voice_notes::delete", params, idempotencyKey: idempotencyKey)
     }
 
     // MARK: - Browser Methods
@@ -89,9 +93,10 @@ final class MediaClient: RPCDomainClient {
         quality: Int = 60,
         maxWidth: Int = 1280,
         maxHeight: Int = 960,
-        everyNthFrame: Int = 1
+        everyNthFrame: Int = 1,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws -> BrowserStartStreamResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = BrowserStartStreamParams(
             sessionId: sessionId,
@@ -102,23 +107,23 @@ final class MediaClient: RPCDomainClient {
             everyNthFrame: everyNthFrame
         )
 
-        return try await ws.send(method: "browser.startStream", params: params)
+        return try await invokeWrite("browser::start_stream", params, idempotencyKey: idempotencyKey)
     }
 
     /// Stop browser frame streaming for a session
-    func stopBrowserStream(sessionId: String) async throws -> BrowserStopStreamResult {
-        let ws = try requireTransport().requireConnection()
+    func stopBrowserStream(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws -> BrowserStopStreamResult {
+        _ = try requireTransport().requireConnection()
 
         let params = BrowserStopStreamParams(sessionId: sessionId)
-        return try await ws.send(method: "browser.stopStream", params: params)
+        return try await invokeWrite("browser::stop_stream", params, idempotencyKey: idempotencyKey)
     }
 
     /// Get browser status for a session
     func getBrowserStatus(sessionId: String) async throws -> BrowserGetStatusResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         let params = BrowserGetStatusParams(sessionId: sessionId)
-        return try await ws.send(method: "browser.getStatus", params: params)
+        return try await invokeRead("browser::get_status", params)
     }
 
     /// Get browser status for current session

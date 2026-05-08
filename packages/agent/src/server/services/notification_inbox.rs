@@ -25,7 +25,7 @@ pub(crate) struct NotificationInboxEntry {
     pub(crate) is_user_session: bool,
 }
 
-/// RPC response for listing notifications.
+/// capability response for listing notifications.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NotificationListResult {
@@ -33,14 +33,14 @@ pub(crate) struct NotificationListResult {
     pub(crate) unread_count: u64,
 }
 
-/// RPC response for marking a single notification as read.
+/// capability response for marking a single notification as read.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MarkReadResult {
     pub(crate) success: bool,
 }
 
-/// RPC response for marking all notifications as read.
+/// capability response for marking all notifications as read.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MarkAllReadResult {

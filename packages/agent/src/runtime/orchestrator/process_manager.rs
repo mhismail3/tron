@@ -460,7 +460,7 @@ impl ProcessManagerOps for ProcessManager {
             .iter()
             .find(|entry| {
                 let t = entry.value();
-                // Empty session_id matches any session (for RPC calls that don't know the session).
+                // Empty session_id matches any session (for engine invocations that don't know the session).
                 let session_match = session_id.is_empty() || t.session_id == session_id;
                 session_match
                     && t.config.label.starts_with(label_prefix)

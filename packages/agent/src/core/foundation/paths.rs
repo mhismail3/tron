@@ -114,8 +114,8 @@ pub mod files {
     pub const ACTIVE_TOML: &str = "active.toml";
     /// First-run sentinel: empty marker file at `~/.tron/internal/run/.onboarded`.
     /// Touched by the Mac wizard at the end of its install flow OR on
-    /// the first successful WS authentication from any iOS device. The
-    /// `system.getInfo` RPC reports `paired: true` once it exists.
+    /// the first successful engine authentication from any iOS device. The
+    /// `system.getInfo` engine capability reports `paired: true` once it exists.
     pub const ONBOARDED_MARKER: &str = ".onboarded";
     /// Persistent state for the user-mode auto-updater
     /// (`server::updater`) — lastCheckAt, lastInstalledVersion,

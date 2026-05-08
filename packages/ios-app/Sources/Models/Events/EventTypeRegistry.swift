@@ -7,7 +7,7 @@ import Foundation
 /// All persisted event types that are stored in the event database.
 /// This EXACTLY mirrors the server's EventType union in types.ts.
 ///
-/// These events are retrieved via `events.getHistory` RPC and represent
+/// These events are retrieved via `events::get_history` engine protocol and represent
 /// the immutable event log that forms the session tree.
 enum PersistedEventType: String, CaseIterable {
     // Session lifecycle
@@ -45,8 +45,8 @@ enum PersistedEventType: String, CaseIterable {
     case notificationSubagentResult = "notification.subagent_result"
 
     // Skills
-    case skillActivated = "skill.activated"
-    case skillDeactivated = "skill.deactivated"
+    case skillActivated = "skills::activated"
+    case skillDeactivated = "skills::deactivated"
     case skillsCleared = "skills.cleared"
 
     // Rules

@@ -212,7 +212,7 @@ struct PermissionsStep: View {
                     Self.applyPermissionSnapshot(snapshot, to: state)
                 }
                 // Stop polling once everything is granted — no point
-                // hammering the RPC when the user is still on this
+                // hammering the engine protocol when the user is still on this
                 // step admiring their green badges.
                 let allGranted = await MainActor.run { [weak state] in
                     Permission.allCases.allSatisfy { p in
@@ -301,7 +301,7 @@ struct PermissionsStep: View {
     }
 
     /// Applies a probe snapshot while preserving the last concrete
-    /// answer across transient RPC failures. If launchd is briefly
+    /// answer across transient engine protocol failures. If launchd is briefly
     /// cycling for some unrelated reason, an all-unknown fallback should
     /// not wipe green/red badges into confusing gray icons.
     @MainActor

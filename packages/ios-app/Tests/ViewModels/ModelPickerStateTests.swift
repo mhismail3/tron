@@ -30,7 +30,11 @@ struct ModelPickerStateTests {
             return listResult
         }
 
-        func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult {
+        func switchModel(
+            _ sessionId: String,
+            model: String,
+            idempotencyKey: EngineIdempotencyKey
+        ) async throws -> ModelSwitchResult {
             switchCallCount += 1
             switchSessionId = sessionId
             switchModelId = model
@@ -234,8 +238,8 @@ struct ModelPickerStateTests {
         #expect(optimisticDuringSwitch == "claude-sonnet-4-20250514")
     }
 
-    @Test("Switch model calls RPC with correct params")
-    func testSwitchModel_callsRPCWithCorrectParams() async {
+    @Test("Switch model calls engine protocol with correct params")
+    func testSwitchModel_callsEngineProtocolWithCorrectParams() async {
         let mockClient = MockModelClient()
         mockClient.switchResult = ModelSwitchResult(
             previousModel: "claude-opus-4-20250514",

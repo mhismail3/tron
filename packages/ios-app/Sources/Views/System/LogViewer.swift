@@ -190,8 +190,8 @@ struct LogViewer: View {
             }
 
             do {
-                let rpcClient = dependencies.rpcClient
-                let result = try await rpcClient.misc.ingestLogs(entries: entries)
+                let engineClient = dependencies.engineClient
+                let result = try await engineClient.misc.ingestLogs(entries: entries, idempotencyKey: .userAction("logs.ingest"))
                 logger.info("Ingested \(result.inserted) of \(entries.count) log entries into server", category: .general)
             } catch {
                 logger.error("Failed to ingest logs to server: \(error.localizedDescription)", category: .general)
@@ -216,7 +216,7 @@ struct LogViewer: View {
     private func colorForCategory(_ category: LogCategory) -> Color {
         switch category {
         case .websocket: return .blue
-        case .rpc: return .purple
+        case .engine: return .purple
         case .session: return .orange
         case .chat: return .green
         case .ui: return .pink
@@ -305,7 +305,7 @@ private extension LogCategory {
     var color: Color {
         switch self {
         case .websocket: return .blue
-        case .rpc: return .purple
+        case .engine: return .purple
         case .session: return .orange
         case .chat: return .green
         case .ui: return .pink

@@ -162,10 +162,10 @@ extension ChatViewModel {
 
     // MARK: - Subagent Result Delivery
 
-    /// Deliver all pending subagent results via server RPC.
+    /// Deliver all pending subagent results through the engine.
     /// The server retrieves unconsumed results, formats them, and spawns a prompt run (or queues).
     /// Called from both "Send" (individual) and "Send All" buttons in subagent sheets.
-    func deliverSubagentResults() {
+    func deliverSubagentResults(idempotencyKey: EngineIdempotencyKey) {
         let pending = subagentState.pendingSubagents
         guard !pending.isEmpty else { return }
         logger.info("Delivering \(pending.count) pending subagent results via server", category: .chat)
@@ -192,7 +192,7 @@ extension ChatViewModel {
 
         Task {
             do {
-                let response = try await rpcClient.agent.deliverSubagentResults()
+                let response = try await engineClient.agent.deliverSubagentResults(idempotencyKey: idempotencyKey)
                 logInfo("Subagent results delivered: count=\(response.subagentCount), queued=\(response.queued)")
             } catch {
                 logError("Failed to deliver subagent results: \(error.localizedDescription)")

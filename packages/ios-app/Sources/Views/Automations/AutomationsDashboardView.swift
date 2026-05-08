@@ -2,7 +2,7 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct AutomationsDashboardView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let actions: DashboardToolbarActions
 
     @State private var jobs: [CronJobDTO] = []
@@ -57,7 +57,7 @@ struct AutomationsDashboardView: View {
         }
         .sheet(item: $selectedJob) { job in
             AutomationDetailSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 job: job,
                 initialRuntimeState: runtimeStates[job.id],
                 onTrigger: { triggerJob(job) },
@@ -73,7 +73,7 @@ struct AutomationsDashboardView: View {
         }
         .sheet(isPresented: $showCreateSheet) {
             AutomationFormSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 onSaved: {
                     showCreateSheet = false
                     Task { await loadJobs() }
@@ -199,7 +199,11 @@ struct AutomationsDashboardView: View {
         actionInProgress = job.id
         Task {
             do {
-                _ = try await rpcClient.cron.updateJob(jobId: job.id, enabled: !job.enabled)
+                _ = try await engineClient.cron.updateJob(
+                    jobId: job.id,
+                    enabled: !job.enabled,
+                    idempotencyKey: .userAction("cron.update")
+                )
                 await loadJobs()
             } catch {
                 actionError = error.localizedDescription
@@ -212,7 +216,10 @@ struct AutomationsDashboardView: View {
         actionInProgress = job.id
         Task {
             do {
-                _ = try await rpcClient.cron.triggerJob(jobId: job.id)
+                _ = try await engineClient.cron.triggerJob(
+                    jobId: job.id,
+                    idempotencyKey: .userAction("cron.run")
+                )
             } catch {
                 actionError = error.localizedDescription
             }
@@ -225,7 +232,10 @@ struct AutomationsDashboardView: View {
         jobToDelete = nil
         Task {
             do {
-                _ = try await rpcClient.cron.deleteJob(jobId: job.id)
+                _ = try await engineClient.cron.deleteJob(
+                    jobId: job.id,
+                    idempotencyKey: .userAction("cron.delete")
+                )
                 await loadJobs()
             } catch {
                 actionError = error.localizedDescription
@@ -277,7 +287,7 @@ struct AutomationsDashboardView: View {
         errorMessage = nil
 
         do {
-            let result = try await rpcClient.cron.listJobs()
+            let result = try await engineClient.cron.listJobs()
             await MainActor.run {
                 jobs = result.jobs
                 runtimeStates = Dictionary(

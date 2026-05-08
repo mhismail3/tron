@@ -51,7 +51,7 @@ pub enum TronError {
 
     /// canonical capability function error.
     #[error("{0}")]
-    Rpc(#[from] RpcHandlerError),
+    Capability(#[from] CapabilityResponseError),
 
     /// Generic internal error with structured context.
     #[error("[{code}] {message}")]
@@ -113,7 +113,7 @@ impl TronError {
             Self::Session(e) => e.category,
             Self::Provider(e) => e.category,
             Self::Internal { category, .. } => *category,
-            Self::Persistence(_) | Self::Tool(_) | Self::Rpc(_) => ErrorCategory::Unknown,
+            Self::Persistence(_) | Self::Tool(_) | Self::Capability(_) => ErrorCategory::Unknown,
         }
     }
 
@@ -131,7 +131,7 @@ impl TronError {
                 }
             }
             Self::Tool(e) => e.severity,
-            Self::Rpc(_) => ErrorSeverity::Error,
+            Self::Capability(_) => ErrorSeverity::Error,
             Self::Internal { severity, .. } => *severity,
         }
     }
@@ -153,7 +153,7 @@ impl TronError {
             Self::Persistence(e) => &e.code,
             Self::Provider(e) => &e.code,
             Self::Tool(e) => &e.code,
-            Self::Rpc(e) => &e.code,
+            Self::Capability(e) => &e.code,
             Self::Internal { code, .. } => code,
         }
     }
@@ -519,13 +519,13 @@ impl ToolError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RpcHandlerError
+// CapabilityResponseError
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// canonical capability function error for converting response errors to typed errors.
 #[derive(Debug, Error)]
 #[error("[{code}] {message}")]
-pub struct RpcHandlerError {
+pub struct CapabilityResponseError {
     /// Machine-readable error code.
     pub code: String,
     /// Human-readable message.
@@ -535,12 +535,12 @@ pub struct RpcHandlerError {
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
-impl RpcHandlerError {
+impl CapabilityResponseError {
     /// Create a new canonical capability function error.
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
         Self {
-            code: "RPC_ERROR".to_owned(),
+            code: "CAPABILITY_ERROR".to_owned(),
             message: message.into(),
             source: None,
         }
@@ -553,11 +553,11 @@ impl RpcHandlerError {
         self
     }
 
-    /// Create from an RPC error response.
+    /// Create from a capability error response.
     #[must_use]
     pub fn from_response(message: impl Into<String>, code: Option<&str>) -> Self {
         Self {
-            code: code.unwrap_or("RPC_ERROR").to_owned(),
+            code: code.unwrap_or("CAPABILITY_ERROR").to_owned(),
             message: message.into(),
             source: None,
         }

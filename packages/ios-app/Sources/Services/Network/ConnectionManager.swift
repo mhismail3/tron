@@ -10,7 +10,7 @@ import Foundation
 ///   asks to wait for a future reconnect edge).
 /// - Forwards `manualRetry()` to the underlying transport.
 ///
-/// Replaces the scattered ad-hoc `rpcClient.connectionState` observers throughout the app.
+/// Replaces the scattered ad-hoc `engineClient.connectionState` observers throughout the app.
 @Observable
 @MainActor
 final class ConnectionManager {
@@ -123,7 +123,7 @@ final class ConnectionManager {
         hooks.removeAll()
         for (label, block) in toFire {
             Task { [logger] in
-                logger.debug("Firing reconnect hook '\(label)'", category: .rpc)
+                logger.debug("Firing reconnect hook '\(label)'", category: .engine)
                 await block()
             }
         }

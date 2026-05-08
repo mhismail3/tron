@@ -32,7 +32,7 @@ enum SystemEvent: Equatable, Hashable {
     /// - `.clearAll`: informational banner listing the cleared skill names.
     ///   The user can re-add via `@skill-name` or the sidebar picker.
     /// - `.askUser`: interactive picker — each skill becomes a tappable chip
-    ///   that re-activates it via the `skill.activate` RPC.
+    ///   that re-activates it via the `skills::activate` engine protocol.
     case skillsCleared(clearedSkills: [String], mode: SkillsClearedMode)
     /// Rules were loaded on session start
     case rulesLoaded(count: Int)

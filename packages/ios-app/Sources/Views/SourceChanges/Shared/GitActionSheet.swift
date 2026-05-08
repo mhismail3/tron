@@ -10,7 +10,7 @@ enum GitSheetTimings {
     static let autoDismissDelay: Duration = .milliseconds(700)
 }
 
-/// Marker protocol that a git RPC's result type conforms to. The single
+/// Marker protocol that a git engine protocol's result type conforms to. The single
 /// `isCleanSuccess` property tells `GitActionRunner` whether to schedule
 /// the auto-dismiss or to leave the sheet open so the user can read a
 /// banner (dry-run preview, "nothing to commit", conflicts, …).
@@ -38,7 +38,7 @@ protocol GitActionResult {
 /// SheetPrimaryActionButton(... isEnabled: runner.isEnabled) {
 ///     Task {
 ///         await runner.run(action: .commit, dismiss: { dismiss() }) {
-///             try await rpcClient.worktree.commit(...)
+///             try await engineClient.worktree.commit(...)
 ///         }
 ///     }
 /// }
@@ -72,7 +72,7 @@ final class GitActionRunner<R: GitActionResult> {
         !isRunning && result == nil && !isDismissingAfterSuccess
     }
 
-    /// Run a git RPC, capturing its result and routing failures through
+    /// Run a git engine protocol, capturing its result and routing failures through
     /// `friendlyGitError`. On a `isCleanSuccess` result, schedules a
     /// `GitSheetTimings.autoDismissDelay` and then calls `dismiss`.
     ///

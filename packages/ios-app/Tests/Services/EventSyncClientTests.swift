@@ -6,13 +6,13 @@ import Foundation
 @Suite("EventSyncClient Tests")
 struct EventSyncClientTests {
 
-    @Test("getHistory throws when webSocket is nil")
+    @Test("getHistory throws when engineConnection is nil")
     func getHistoryNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = EventSyncClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.getHistory(sessionId: "test-session")
         }
     }

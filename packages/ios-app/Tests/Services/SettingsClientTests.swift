@@ -6,27 +6,27 @@ import Foundation
 @Suite("SettingsClient Tests")
 struct SettingsClientTests {
 
-    @Test("get throws when webSocket is nil")
+    @Test("get throws when engineConnection is nil")
     func getNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = SettingsClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.get()
         }
     }
 
-    @Test("update throws when webSocket is nil")
+    @Test("update throws when engineConnection is nil")
     func updateNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = SettingsClient(transport: transport)
 
         let update = ServerSettingsUpdate()
 
-        await #expect(throws: RPCClientError.self) {
-            try await client.update(update)
+        await #expect(throws: EngineClientError.self) {
+            try await client.update(update, idempotencyKey: .userAction("settings.update.test"))
         }
     }
 

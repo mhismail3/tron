@@ -8,7 +8,7 @@ Codex mode is a separate iOS workflow for talking to a `codex app-server` proces
 on the active paired machine. It does not use Tron agent sessions, Tron event
 streams, or Rust agent turn execution. Tron Server owns the Codex process,
 configuration, bearer token file, startup, settings-triggered restart, and
-shutdown. iOS discovers the active endpoint through authenticated Tron RPC and
+shutdown. iOS discovers the active endpoint through authenticated Tron engine protocol and
 then connects directly to the managed Codex WebSocket.
 
 ## Server-Owned Lifecycle
@@ -83,7 +83,7 @@ half-height transcript. The `+` button opens a draft Codex thread view and the
 actual `thread/start` call is made when the first message is sent.
 When iOS foregrounds while Codex mode is visible, `CodexAppModeView` calls
 `CodexAppViewModel.recoverForeground()`: the direct Codex WebSocket is
-disconnected, managed server status is refreshed through Tron RPC, `thread/list`
+disconnected, managed server status is refreshed through Tron engine protocol, `thread/list`
 is reloaded, and the selected thread is resumed as a read-only snapshot. The
 foreground path never replays `turn/start`, so a stale socket can be replaced
 without duplicating user work.
@@ -102,7 +102,7 @@ restarting server states stay in the dashboard as retryable connection states so
 the thread list flow does not turn into a settings page.
 
 The direct Codex transport is `CodexJSONRPCTransport`, not Tron
-`WebSocketService`, because the wire protocol differs:
+`EngineConnection`, because the wire protocol differs:
 
 - requests are Codex JSON-RPC messages with `id`, `method`, and optional
   `params`;
@@ -151,7 +151,7 @@ are not enabled until remote-machine path semantics are verified.
 
 ## Tests
 
-Rust lifecycle and settings-RPC tests:
+Rust lifecycle and settings capability tests:
 
 ```bash
 cargo test --manifest-path packages/agent/Cargo.toml codex_app

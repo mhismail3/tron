@@ -65,7 +65,7 @@ enum ConnectionState: Equatable, Sendable {
 
 // MARK: - WebSocket Errors
 
-enum WebSocketError: Error, LocalizedError, Sendable, Equatable {
+enum EngineConnectionError: Error, LocalizedError, Sendable, Equatable {
     case notConnected
     case timeout
     case invalidResponse
@@ -94,7 +94,7 @@ enum WebSocketError: Error, LocalizedError, Sendable, Equatable {
 /// Strategy for resolving a bearer token to attach to the WebSocket upgrade
 /// request. Returns `nil` if no token is available; the request goes out
 /// without an Authorization header, the server returns 401, and
-/// `WebSocketService` transitions to `ConnectionState.unauthorized`.
+/// `EngineConnection` transitions to `ConnectionState.unauthorized`.
 typealias BearerTokenProvider = @MainActor () -> String?
 
 private final class SingleResumeContinuationBox: @unchecked Sendable {
@@ -135,10 +135,10 @@ private final class SingleResumeContinuationBox: @unchecked Sendable {
 
 @Observable
 @MainActor
-final class WebSocketService {
+final class EngineConnection {
 
     private var urlSession: URLSession?
-    private var webSocketTask: URLSessionWebSocketTask?
+    private var engineConnectionTask: URLSessionWebSocketTask?
     private var pingTask: Task<Void, Never>?
     private var receiveTask: Task<Void, Never>?
 
@@ -170,9 +170,8 @@ final class WebSocketService {
 
     private(set) var connectionState: ConnectionState = .disconnected
 
-    /// Event callback with pre-extracted type and sessionId to avoid double JSON parsing.
-    /// Parameters: (rawData, eventType, sessionId) — type/sessionId are nil for RPC responses.
-    var onEvent: ((Data, String?, String?) -> Void)?
+    /// Event callback with the decoded neutral payload plus stream cursor metadata.
+    var onEvent: ((EngineEventDelivery) -> Void)?
 
     // MARK: - Background State
 
@@ -198,7 +197,7 @@ final class WebSocketService {
     /// to `markUnauthorized(reason:)`. Held strong here because URLSession
     /// keeps a strong reference to its delegate; we own the lifetime so the
     /// session can be torn down cleanly on disconnect.
-    private var sessionDelegate: WebSocketSessionDelegate?
+    private var sessionDelegate: EngineConnectionSessionDelegate?
 
     init(serverURL: URL, bearerTokenProvider: BearerTokenProvider? = nil) {
         self.serverURL = serverURL
@@ -240,17 +239,17 @@ final class WebSocketService {
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
-        openContinuation?.resume(throwing: WebSocketError.unauthorized(reason))
+        openContinuation?.resume(throwing: EngineConnectionError.unauthorized(reason))
         openContinuation = nil
-        webSocketTask?.cancel(with: .normalClosure, reason: nil)
-        webSocketTask = nil
+        engineConnectionTask?.cancel(with: .normalClosure, reason: nil)
+        engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
         sessionDelegate = nil
         pingTask?.cancel(); pingTask = nil
         receiveTask?.cancel(); receiveTask = nil
 
-        failPendingRequests(error: WebSocketError.unauthorized(reason))
+        failPendingRequests(error: EngineConnectionError.unauthorized(reason))
 
         connectionState = .unauthorized(reason: reason)
     }
@@ -298,7 +297,7 @@ final class WebSocketService {
         // delegate routes to `markUnauthorized(reason:)` when it sees a 401
         // response code on the failed task. URLSession retains its delegate,
         // so we hold our own strong reference for symmetric teardown.
-        let delegate = WebSocketSessionDelegate(owner: self)
+        let delegate = EngineConnectionSessionDelegate(owner: self)
         sessionDelegate = delegate
 
         let session = URLSession(
@@ -312,7 +311,7 @@ final class WebSocketService {
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
         let task = session.webSocketTask(with: request)
-        webSocketTask = task
+        engineConnectionTask = task
         openedWebSocketTask = nil
         task.maximumMessageSize = 150 * 1024 * 1024  // 150MB — matches server limit; covers 15-min voice notes at 48kHz (~115MB base64)
         task.resume()
@@ -329,7 +328,7 @@ final class WebSocketService {
             return
         }
 
-        guard webSocketTask === task else {
+        guard engineConnectionTask === task else {
             logger.debug("Connection verified after socket was torn down", category: .websocket)
             return
         }
@@ -345,6 +344,14 @@ final class WebSocketService {
         }
         logger.verbose("Receive loop started", category: .websocket)
 
+        do {
+            try await hello()
+        } catch {
+            logger.warning("Engine hello failed: \(error.localizedDescription)", category: .websocket)
+            cleanupDeadConnection(error: error, stateAfterCleanup: stateOnFailure)
+            return
+        }
+
         pingTask = Task { [weak self] in
             await self?.heartbeatLoop()
         }
@@ -352,7 +359,7 @@ final class WebSocketService {
     }
 
     func markWebSocketOpened(_ task: URLSessionWebSocketTask) {
-        guard webSocketTask === task else { return }
+        guard engineConnectionTask === task else { return }
         openedWebSocketTask = task
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
@@ -362,14 +369,14 @@ final class WebSocketService {
     }
 
     func markWebSocketClosed(_ task: URLSessionWebSocketTask, closeCode: URLSessionWebSocketTask.CloseCode) async {
-        guard webSocketTask === task, isConnectedFlag else { return }
+        guard engineConnectionTask === task, isConnectedFlag else { return }
         logger.warning("WebSocket closed by server (code: \(closeCode.rawValue))", category: .websocket)
         await handleDisconnect()
     }
 
     func markWebSocketOpenFailed(_ task: URLSessionTask, error: Error) {
         guard let socketTask = task as? URLSessionWebSocketTask,
-              webSocketTask === socketTask,
+              engineConnectionTask === socketTask,
               openContinuation != nil else {
             return
         }
@@ -389,7 +396,7 @@ final class WebSocketService {
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
-        openContinuation?.resume(throwing: WebSocketError.notConnected)
+        openContinuation?.resume(throwing: EngineConnectionError.notConnected)
         openContinuation = nil
 
         // Cancel all background tasks
@@ -400,12 +407,12 @@ final class WebSocketService {
         reconnectTask?.cancel()
         reconnectTask = nil
 
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
+        engineConnectionTask?.cancel(with: .goingAway, reason: nil)
+        engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
 
-        failPendingRequests(error: WebSocketError.notConnected)
+        failPendingRequests(error: EngineConnectionError.notConnected)
 
         connectionState = .disconnected
         logger.logWebSocketState("Disconnected")
@@ -460,7 +467,7 @@ final class WebSocketService {
     /// Returns true if connection responds, false if dead.
     /// If dead, cleans up stale state so reconnection can proceed.
     func verifyConnection() async -> Bool {
-        guard isConnectedFlag, let task = webSocketTask else {
+        guard isConnectedFlag, let task = engineConnectionTask else {
             return false
         }
 
@@ -482,7 +489,7 @@ final class WebSocketService {
             let timeoutTask = Task {
                 try? await Task.sleep(for: .seconds(timeout))
                 guard !Task.isCancelled else { return }
-                box.resume(throwing: WebSocketError.timeout)
+                box.resume(throwing: EngineConnectionError.timeout)
             }
 
             task.sendPing { error in
@@ -510,7 +517,7 @@ final class WebSocketService {
                     guard let self, self.openContinuation === box else { return }
                     self.openContinuation = nil
                     self.openTimeoutTask = nil
-                    box.resume(throwing: WebSocketError.timeout)
+                    box.resume(throwing: EngineConnectionError.timeout)
                 }
             }
         }
@@ -527,8 +534,8 @@ final class WebSocketService {
         openTimeoutTask = nil
         openContinuation?.resume(throwing: error)
         openContinuation = nil
-        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
-        webSocketTask = nil
+        engineConnectionTask?.cancel(with: .abnormalClosure, reason: nil)
+        engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
         sessionDelegate = nil
@@ -536,105 +543,228 @@ final class WebSocketService {
         pingTask = nil
         receiveTask?.cancel()
         receiveTask = nil
-        failPendingRequests(error: WebSocketError.connectionFailed(error.localizedDescription))
+        failPendingRequests(error: EngineConnectionError.connectionFailed(error.localizedDescription))
     }
 
-    // MARK: - Request/Response
+    // MARK: - Engine Protocol Request/Response
 
-    func send<P: Encodable, R: Decodable>(
-        method: String,
-        params: P,
+    @discardableResult
+    func hello(
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
         timeout: TimeInterval? = nil
+    ) async throws -> EngineHelloResult {
+        let message = EngineHelloFrame(
+            id: UUID().uuidString,
+            protocolVersion: 1,
+            clientName: "tron-ios",
+            clientVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+        return try await sendProtocolMessage(message, id: message.id, operation: "hello", timeout: timeout)
+    }
+
+    func invokeRead<P: Encodable, R: Decodable>(
+        functionId: EngineFunctionId,
+        payload: P,
+        options: EngineInvocationOptions = EngineInvocationOptions()
     ) async throws -> R {
+        try await invoke(functionId: functionId, payload: payload, idempotencyKey: nil, options: options)
+    }
+
+    func invokeWrite<P: Encodable, R: Decodable>(
+        functionId: EngineFunctionId,
+        payload: P,
+        idempotencyKey: EngineIdempotencyKey,
+        options: EngineInvocationOptions = EngineInvocationOptions()
+    ) async throws -> R {
+        try await invoke(functionId: functionId, payload: payload, idempotencyKey: idempotencyKey, options: options)
+    }
+
+    func subscribe(
+        topic: String,
+        cursor: EngineStreamCursor? = nil,
+        filters: [String: AnyCodable]? = nil,
+        limit: Int? = nil,
+        context: EngineInvocationContext? = nil
+    ) async throws -> EngineSubscription {
+        let message = EngineSubscribeFrame(
+            id: UUID().uuidString,
+            topic: topic,
+            cursor: cursor?.rawValue,
+            filters: filters,
+            limit: limit,
+            context: context
+        )
+        return try await sendResponseMessage(message, id: message.id, operation: "subscribe", timeout: nil)
+    }
+
+    func poll(
+        subscriptionId: String? = nil,
+        topic: String? = nil,
+        cursor: EngineStreamCursor? = nil,
+        filters: [String: AnyCodable]? = nil,
+        limit: Int? = nil,
+        context: EngineInvocationContext? = nil
+    ) async throws -> EngineStreamPage {
+        let message = EnginePollFrame(
+            id: UUID().uuidString,
+            subscriptionId: subscriptionId,
+            topic: topic,
+            cursor: cursor?.rawValue,
+            filters: filters,
+            limit: limit,
+            context: context
+        )
+        return try await sendResponseMessage(message, id: message.id, operation: "poll", timeout: nil)
+    }
+
+    func ack(subscriptionId: String, cursor: EngineStreamCursor) async throws {
+        let message = EngineAckFrame(id: UUID().uuidString, subscriptionId: subscriptionId, cursor: cursor.rawValue)
+        let _: EmptyParams = try await sendResponseMessage(message, id: message.id, operation: "ack", timeout: nil)
+    }
+
+    private func invoke<P: Encodable, R: Decodable>(
+        functionId: EngineFunctionId,
+        payload: P,
+        idempotencyKey: EngineIdempotencyKey?,
+        options: EngineInvocationOptions
+    ) async throws -> R {
+        let requestId = UUID().uuidString
+        let message = EngineInvokeFrame(
+            id: requestId,
+            functionId: functionId.rawValue,
+            payload: payload,
+            expectedRevision: options.expectedRevision,
+            idempotencyKey: idempotencyKey?.rawValue,
+            context: options.context
+        )
         let startTime = CFAbsoluteTimeGetCurrent()
+        logger.logEngineRequest(functionId: functionId.rawValue, payload: payload, id: requestId)
+        let envelope: EngineInvokeEnvelope<R> = try await sendResponseMessage(
+            message,
+            id: requestId,
+            operation: functionId.rawValue,
+            timeout: options.timeout
+        )
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
+        if let error = envelope.child.error {
+            let protocolError = EngineProtocolError(
+                code: error.details?["code"]?.stringValue ?? error.kind ?? "ENGINE_ERROR",
+                message: error.details?["message"]?.stringValue ?? error.message ?? "Engine invocation failed",
+                details: error.details?["details"]?.dictionaryValue?.mapValues { AnyCodable($0) } ?? error.details
+            )
+            logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: protocolError.message)
+            throw protocolError
+        }
+        guard let value = envelope.child.value else {
+            logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: "Missing child value")
+            throw EngineConnectionError.invalidResponse
+        }
+        logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: true, duration: duration, result: value)
+        return value
+    }
+
+    private func sendProtocolMessage<M: Encodable, R: Decodable>(
+        _ message: M,
+        id: String,
+        operation: String,
+        timeout: TimeInterval?
+    ) async throws -> R {
+        let data = try await sendMessage(message, id: id, operation: operation, timeout: timeout)
+        do {
+            return try JSONDecoder().decode(R.self, from: data)
+        } catch {
+            throw EngineConnectionError.decodingError(error.localizedDescription)
+        }
+    }
+
+    private func sendResponseMessage<M: Encodable, R: Decodable>(
+        _ message: M,
+        id: String,
+        operation: String,
+        timeout: TimeInterval?
+    ) async throws -> R {
+        let data = try await sendMessage(message, id: id, operation: operation, timeout: timeout)
+        do {
+            let response = try JSONDecoder().decode(EngineResponseEnvelope<R>.self, from: data)
+            if response.ok, let result = response.result {
+                return result
+            }
+            if let error = response.error {
+                throw error
+            }
+            throw EngineConnectionError.invalidResponse
+        } catch let error as EngineProtocolError {
+            throw error
+        } catch let error as EngineConnectionError {
+            throw error
+        } catch {
+            throw EngineConnectionError.decodingError(error.localizedDescription)
+        }
+    }
+
+    private func sendMessage<M: Encodable>(
+        _ message: M,
+        id requestId: String,
+        operation: String,
+        timeout: TimeInterval? = nil
+    ) async throws -> Data {
         let timeoutInterval = timeout ?? requestTimeout
 
-        guard isConnectedFlag, let task = webSocketTask else {
-            logger.error("Cannot send \(method): not connected (isConnectedFlag=\(isConnectedFlag), task=\(webSocketTask != nil ? "exists" : "nil"))", category: .websocket)
-            throw WebSocketError.notConnected
+        guard isConnectedFlag, let task = engineConnectionTask else {
+            logger.error("Cannot send \(operation): not connected (isConnectedFlag=\(isConnectedFlag), task=\(engineConnectionTask != nil ? "exists" : "nil"))", category: .websocket)
+            throw EngineConnectionError.notConnected
         }
 
-        let request = RPCRequest(method: method, params: params)
-        let requestId = request.id
-
-        guard let data = try? JSONEncoder().encode(request) else {
-            logger.error("Failed to encode request for \(method)", category: .websocket)
-            throw WebSocketError.encodingError
+        guard let data = try? JSONEncoder().encode(message) else {
+            logger.error("Failed to encode engine message for \(operation)", category: .websocket)
+            throw EngineConnectionError.encodingError
         }
 
         #if DEBUG || BETA
-        logger.logRPCRequest(method: method, params: params, id: Int(requestId) ?? 0)
-        logger.logWebSocketMessage(direction: "→ SEND", type: method, size: data.count, preview: String(data: data, encoding: .utf8))
+        logger.logWebSocketMessage(direction: "→ SEND", type: operation, size: data.count, preview: String(data: data, encoding: .utf8))
         #endif
 
-        let message = URLSessionWebSocketTask.Message.data(data)
+        let socketMessage = URLSessionWebSocketTask.Message.data(data)
         do {
-            try await task.send(message)
-            logger.verbose("Message sent successfully for \(method) id=\(requestId)", category: .websocket)
+            try await task.send(socketMessage)
+            logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
         } catch {
-            logger.error("Failed to send message for \(method): \(error.localizedDescription)", category: .websocket)
+            logger.error("Failed to send message for \(operation): \(error.localizedDescription)", category: .websocket)
             if ConnectionErrorClassifier.requiresConnectionRecovery(error) {
-                await handleSendTransportFailure(error, method: method)
-                throw WebSocketError.connectionFailed(error.localizedDescription)
+                await handleSendTransportFailure(error, operation: operation)
+                throw EngineConnectionError.connectionFailed(error.localizedDescription)
             }
             throw error
         }
 
-        logger.verbose("Waiting for response to \(method) id=\(requestId)...", category: .websocket)
+        logger.verbose("Waiting for response to \(operation) id=\(requestId)...", category: .websocket)
 
-        let responseData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             pendingRequests[requestId] = continuation
             logger.verbose("Registered pending request id=\(requestId), total pending: \(pendingRequests.count)", category: .websocket)
 
-            // Store timeout task so it can be cancelled when response arrives
             let timeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(timeoutInterval))
                 await MainActor.run {
                     if let pending = self?.pendingRequests.removeValue(forKey: requestId) {
-                        logger.error("Request timeout for \(method) id=\(requestId) after \(timeoutInterval)s", category: .websocket)
-                        pending.resume(throwing: WebSocketError.timeout)
+                        logger.error("Request timeout for \(operation) id=\(requestId) after \(timeoutInterval)s", category: .websocket)
+                        pending.resume(throwing: EngineConnectionError.timeout)
                     }
                     self?.timeoutTasks.removeValue(forKey: requestId)
                 }
             }
             timeoutTasks[requestId] = timeoutTask
         }
-
-        let duration = CFAbsoluteTimeGetCurrent() - startTime
-        #if DEBUG || BETA
-        logger.logWebSocketMessage(direction: "← RECV", type: method, size: responseData.count, preview: String(data: responseData, encoding: .utf8))
-        #endif
-
-        let decoder = JSONDecoder()
-        do {
-            let response = try decoder.decode(RPCResponse<R>.self, from: responseData)
-            if response.success, let result = response.result {
-                logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: true, duration: duration, result: result)
-                return result
-            } else if let error = response.error {
-                logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.message)
-                throw error
-            } else {
-                logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: "Invalid response structure")
-                throw WebSocketError.invalidResponse
-            }
-        } catch let error as RPCError {
-            logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.message)
-            throw error
-        } catch let error as WebSocketError {
-            logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.localizedDescription)
-            throw error
-        } catch {
-            logger.logRPCResponse(method: method, id: Int(requestId) ?? 0, success: false, duration: duration, error: error.localizedDescription)
-            throw WebSocketError.decodingError(error.localizedDescription)
-        }
     }
 
     // MARK: - Receive Loop
 
-    private func handleSendTransportFailure(_ error: Error, method: String) async {
+    private func handleSendTransportFailure(_ error: Error, operation: String) async {
         guard isConnectedFlag else { return }
-        logger.warning("Send failure indicates connection loss for \(method): \(error.localizedDescription)", category: .websocket)
+        logger.warning("Send failure indicates connection loss for \(operation): \(error.localizedDescription)", category: .websocket)
         await handleDisconnect()
     }
 
@@ -644,7 +774,7 @@ final class WebSocketService {
 
         while isConnectedFlag {
             do {
-                guard let message = try await webSocketTask?.receive() else {
+                guard let message = try await engineConnectionTask?.receive() else {
                     logger.warning("Receive returned nil, exiting loop", category: .websocket)
                     break
                 }
@@ -688,26 +818,39 @@ final class WebSocketService {
             return
         }
 
-        if let id = json["id"] as? String {
-            // This is an RPC response - cancel timeout task and resume continuation
+        if let type = json["type"] as? String, type == "event" {
+            guard let eventValue = json["event"],
+                  JSONSerialization.isValidJSONObject(eventValue),
+                  let eventData = try? JSONSerialization.data(withJSONObject: eventValue),
+                  let event = try? JSONDecoder().decode(ServerEventPayload.self, from: eventData) else {
+                logger.warning("Received malformed engine event frame", category: .websocket)
+                return
+            }
+            #if DEBUG || BETA
+            logger.logEvent(type: event.type, sessionId: event.sessionId, data: event.data.map { String(describing: $0.value).prefix(300).description })
+            #endif
+            let cursor = (json["cursor"] as? UInt64).map(EngineStreamCursor.init(rawValue:))
+            let delivery = EngineEventDelivery(
+                topic: json["topic"] as? String,
+                subscriptionId: json["subscriptionId"] as? String,
+                cursor: cursor,
+                event: event,
+                eventData: eventData
+            )
+            onEvent?(delivery)
+        } else if let id = json["id"] as? String {
+            // This is an engine response - cancel timeout task and resume continuation.
             timeoutTasks[id]?.cancel()
             timeoutTasks.removeValue(forKey: id)
 
             if let continuation = pendingRequests.removeValue(forKey: id) {
                 continuation.resume(returning: data)
                 #if DEBUG || BETA
-                logger.debug("Resolved RPC response for id=\(id), remaining pending: \(pendingRequests.count)", category: .websocket)
+                logger.debug("Resolved engine response for id=\(id), remaining pending: \(pendingRequests.count)", category: .websocket)
                 #endif
             } else {
                 logger.warning("Received response for unknown/expired id=\(id)", category: .websocket)
             }
-        } else if let type = json["type"] as? String {
-            let sessionId = json["sessionId"] as? String
-            #if DEBUG || BETA
-            let eventData = json["data"]
-            logger.logEvent(type: type, sessionId: sessionId, data: eventData.map { String(describing: $0).prefix(300).description })
-            #endif
-            onEvent?(data, type, sessionId)
         } else {
             logger.warning("Received message without id or type", category: .websocket)
         }
@@ -731,8 +874,8 @@ final class WebSocketService {
 
             pingCount += 1
             do {
-                guard let task = webSocketTask else {
-                    throw WebSocketError.notConnected
+                guard let task = engineConnectionTask else {
+                    throw EngineConnectionError.notConnected
                 }
                 let pingStart = CFAbsoluteTimeGetCurrent()
                 try await sendPing(on: task, timeout: Self.connectionVerificationTimeout)
@@ -755,7 +898,7 @@ final class WebSocketService {
 
     // MARK: - Pending Request Cleanup
 
-    /// Fail all pending RPC requests and cancel their timeout tasks.
+    /// Fail all pending engine requests and cancel their timeout tasks.
     /// Shared between disconnect() (voluntary) and handleDisconnect() (involuntary).
     private func failPendingRequests(error: Error) {
         let pendingCount = pendingRequests.count
@@ -784,15 +927,15 @@ final class WebSocketService {
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
-        openContinuation?.resume(throwing: WebSocketError.notConnected)
+        openContinuation?.resume(throwing: EngineConnectionError.notConnected)
         openContinuation = nil
-        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
-        webSocketTask = nil
+        engineConnectionTask?.cancel(with: .abnormalClosure, reason: nil)
+        engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
         sessionDelegate = nil
 
-        failPendingRequests(error: WebSocketError.connectionFailed("Disconnected"))
+        failPendingRequests(error: EngineConnectionError.connectionFailed("Disconnected"))
 
         // Don't reconnect if in background
         if isInBackground {
@@ -947,49 +1090,118 @@ final class WebSocketService {
     }
 }
 
+// MARK: - Engine Protocol Frames
+
+private struct EngineHelloFrame: Encodable {
+    let type = "hello"
+    let id: String
+    let protocolVersion: UInt64
+    let clientName: String?
+    let clientVersion: String?
+    let sessionId: String?
+    let workspaceId: String?
+}
+
+struct EngineHelloResult: Decodable, Equatable, Sendable {
+    let type: String
+    let id: String?
+    let protocolVersion: UInt64
+    let minimumSupportedVersion: UInt64
+    let serverId: String
+    let currentCatalogRevision: UInt64
+}
+
+private struct EngineInvokeFrame<P: Encodable>: Encodable {
+    let type = "invoke"
+    let id: String
+    let functionId: String
+    let payload: P
+    let expectedRevision: UInt64?
+    let idempotencyKey: String?
+    let context: EngineInvocationContext?
+}
+
+private struct EngineSubscribeFrame: Encodable {
+    let type = "subscribe"
+    let id: String
+    let topic: String
+    let cursor: UInt64?
+    let filters: [String: AnyCodable]?
+    let limit: Int?
+    let context: EngineInvocationContext?
+}
+
+private struct EnginePollFrame: Encodable {
+    let type = "poll"
+    let id: String
+    let subscriptionId: String?
+    let topic: String?
+    let cursor: UInt64?
+    let filters: [String: AnyCodable]?
+    let limit: Int?
+    let context: EngineInvocationContext?
+}
+
+private struct EngineAckFrame: Encodable {
+    let type = "ack"
+    let id: String
+    let subscriptionId: String
+    let cursor: UInt64
+}
+
+private struct EngineResponseEnvelope<R: Decodable>: Decodable {
+    let type: String
+    let id: String?
+    let ok: Bool
+    let result: R?
+    let error: EngineProtocolError?
+    let traceId: String?
+    let catalogRevision: UInt64?
+}
+
 // MARK: - URLSession Delegate
 
 /// `URLSession` + `URLSessionWebSocket` delegate that detects HTTP 401 on
-/// the WS upgrade and routes the failure to `WebSocketService.markUnauthorized`.
+/// the WS upgrade and routes the failure to `EngineConnection.markUnauthorized`.
 ///
-/// URLSession retains its delegate; `WebSocketService` holds a strong
+/// URLSession retains its delegate; `EngineConnection` holds a strong
 /// reference here so the delegate's lifetime tracks the session — and
 /// `urlSession(_:didBecomeInvalidWithError:)` clears that reference when the
 /// session is torn down (manual disconnect, retry, unauthorized).
-final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+final class EngineConnectionSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     /// Stored as `weak` to avoid the URLSession ↔ delegate ↔ service retain
     /// cycle. `@unchecked Sendable` because Swift can't reason about the
     /// `weak` storage being safely accessed across actor boundaries — we
     /// hop to MainActor inside every callback before touching `owner`.
-    private weak var ownerRef: WebSocketService?
+    private weak var ownerRef: EngineConnection?
 
-    init(owner: WebSocketService) {
+    init(owner: EngineConnection) {
         self.ownerRef = owner
     }
 
     /// Snapshot the weak ref; the only caller is the `MainActor.run` body
     /// inside the URLSession callbacks below.
     @MainActor
-    private func owner() -> WebSocketService? { ownerRef }
+    private func owner() -> EngineConnection? { ownerRef }
 
     func urlSession(
         _ session: URLSession,
-        webSocketTask: URLSessionWebSocketTask,
+        engineConnectionTask: URLSessionWebSocketTask,
         didOpenWithProtocol protocol: String?
     ) {
         Task { @MainActor in
-            owner()?.markWebSocketOpened(webSocketTask)
+            owner()?.markWebSocketOpened(engineConnectionTask)
         }
     }
 
     func urlSession(
         _ session: URLSession,
-        webSocketTask: URLSessionWebSocketTask,
+        engineConnectionTask: URLSessionWebSocketTask,
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
         Task { @MainActor in
-            await owner()?.markWebSocketClosed(webSocketTask, closeCode: closeCode)
+            await owner()?.markWebSocketClosed(engineConnectionTask, closeCode: closeCode)
         }
     }
 

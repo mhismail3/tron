@@ -221,7 +221,7 @@ struct ContextClearedPayload {
 /// - `.clearAll`: informational banner listing the cleared skill names. The
 ///   user can re-activate manually via `@skill-name` mention or the sidebar.
 /// - `.askUser`: interactive picker — each cleared skill becomes a tappable
-///   chip that re-adds it via the `skill.activate` RPC.
+///   chip that re-adds it via the `skills::activate` engine protocol.
 ///
 /// Wire format is lowerCamelCase (`"clearAll"` / `"askUser"`).
 enum SkillsClearedMode: String, Codable, Equatable, Hashable {
@@ -269,12 +269,12 @@ struct SkillsClearedPayload {
 
 // MARK: - Context Snapshot Payloads
 
-/// Parameters for context.getSnapshot RPC method
+/// Parameters for context.getSnapshot engine protocol method
 struct ContextGetSnapshotParams: Codable {
     let sessionId: String
 }
 
-/// Result from context.getSnapshot RPC method
+/// Result from context.getSnapshot engine protocol method
 struct ContextSnapshotResult: Codable {
     let currentTokens: Int
     let contextLimit: Int
@@ -298,24 +298,24 @@ struct ContextSnapshotResult: Codable {
     }
 }
 
-/// Parameters for context.clear RPC method
+/// Parameters for context.clear engine protocol method
 struct ContextClearParams: Codable {
     let sessionId: String
 }
 
-/// Result from context.clear RPC method
+/// Result from context.clear engine protocol method
 struct ContextClearResult: Codable {
     let success: Bool
     let tokensBefore: Int
     let tokensAfter: Int
 }
 
-/// Parameters for context.compact RPC method
+/// Parameters for context.compact engine protocol method
 struct ContextCompactParams: Codable {
     let sessionId: String
 }
 
-/// Result from context.compact RPC method
+/// Result from context.compact engine protocol method
 struct ContextCompactResult: Codable {
     let success: Bool
     let tokensBefore: Int
@@ -358,7 +358,7 @@ struct ToolSummaryInfo: Codable, Identifiable {
     var id: String { name }
 }
 
-/// Result from context.getDetailedSnapshot RPC method
+/// Result from context.getDetailedSnapshot engine protocol method
 struct DetailedContextSnapshotResult: Codable {
     let currentTokens: Int
     let contextLimit: Int

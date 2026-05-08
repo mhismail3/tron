@@ -4,7 +4,7 @@ import Foundation
 
 extension ChatViewModel {
 
-    /// Process the reconstruction result from `session.reconstruct`.
+    /// Process the reconstruction result from `session::reconstruct`.
     ///
     /// Transforms persisted events into messages, updates metadata, and
     /// processes in-flight state if the agent is currently running.
@@ -371,7 +371,7 @@ extension ChatViewModel {
         animationCoordinator.makeToolVisible(toolCall.toolCallId)
     }
 
-    /// Load more older messages using `session.reconstruct` with pagination.
+    /// Load more older messages using `session::reconstruct` with pagination.
     func loadMoreMessagesFromServer() async {
         guard hasMoreMessages, !isLoadingMoreMessages else { return }
         isLoadingMoreMessages = true
@@ -384,7 +384,7 @@ extension ChatViewModel {
         }
 
         do {
-            let result = try await rpcClient.session.reconstruct(
+            let result = try await engineClient.session.reconstruct(
                 sessionId: sessionId,
                 limit: Self.additionalMessageBatchSize,
                 beforeSequence: oldestSeq

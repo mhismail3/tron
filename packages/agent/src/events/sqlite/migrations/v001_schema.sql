@@ -323,7 +323,7 @@ CREATE INDEX IF NOT EXISTS idx_cron_runs_created
 -- prompt_history  — auto-captured log of every interactive user prompt,
 --                   deduplicated by normalized text hash.
 -- prompt_snippets — user-authored named quick prompts with CRUD.
--- Both are exposed via RPC (promptHistory.*, promptSnippet.*) and browsed
+-- Both are exposed as canonical prompt-library capabilities and browsed
 -- from the iOS composer's Prompt Library sheet.
 
 CREATE TABLE IF NOT EXISTS prompt_history (

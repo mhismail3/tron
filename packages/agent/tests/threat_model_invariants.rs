@@ -144,7 +144,7 @@ fn lower_layers_do_not_depend_on_server_transport_modules() {
                 .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
             assert!(
                 !content.contains("crate::server::"),
-                "{} must not import server transport/RPC modules",
+                "{} must not import server transport modules",
                 path.strip_prefix(&crate_root).unwrap().display()
             );
         }
@@ -213,6 +213,58 @@ fn removed_server_owned_settings_store_stays_deleted() {
 }
 
 #[test]
+fn tron_server_transport_has_no_rpc_compatibility_surface() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+
+    for removed in [
+        "src/server/rpc",
+        concat!("src/server/transport/json", "_", "rpc"),
+        "src/server/engine_bridge",
+    ] {
+        assert!(
+            !crate_root.join(removed).exists(),
+            "{removed} must stay deleted; Tron exposes the engine WebSocket protocol only"
+        );
+    }
+
+    let forbidden = [
+        concat!("Method", "Handler"),
+        concat!("Handler", "Entry"),
+        concat!("Rpc", "Capability", "Spec"),
+        concat!("Json", "Rpc", "Alias", "Spec"),
+        concat!("Json", "Rpc", "Request", "Id", "Seed"),
+        concat!("Rpc", "Generic", "Trigger", "Handler"),
+        concat!("Generic", "Trigger"),
+        concat!("Json", "Rpc", "Event"),
+        concat!("Broadcast", "Manager"),
+        concat!("public", "_json", "_rpc"),
+        concat!("rpc", "::"),
+        concat!("rpc", ".read"),
+        concat!("rpc", ".write"),
+        concat!("/", "ws"),
+    ];
+
+    for root in [
+        crate_root.join("src/server"),
+        crate_root.join("src/engine"),
+        repo_root.join("README.md"),
+    ] {
+        for path in files_to_scan(&root) {
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            for needle in forbidden {
+                assert!(
+                    !content.contains(needle),
+                    "{} contains removed transport compatibility marker `{needle}`",
+                    path.strip_prefix(&repo_root).unwrap_or(&path).display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn main_background_work_is_registered_with_shutdown() {
     let main_path = crate_root().join("src/main.rs");
     let content = std::fs::read_to_string(&main_path)
@@ -236,6 +288,35 @@ fn rust_files_under(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_rust_files(root, &mut files);
     files
+}
+
+fn files_to_scan(root: &Path) -> Vec<PathBuf> {
+    if root.is_file() {
+        return vec![root.to_path_buf()];
+    }
+    let mut files = Vec::new();
+    visit_files(root, &mut files);
+    files
+}
+
+fn visit_files(root: &Path, files: &mut Vec<PathBuf>) {
+    if !root.exists() {
+        return;
+    }
+    let entries = std::fs::read_dir(root)
+        .unwrap_or_else(|e| panic!("failed to read directory {root:?}: {e}"));
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|e| panic!("failed to read entry in {root:?}: {e}"));
+        let path = entry.path();
+        if path.is_dir() {
+            visit_files(&path, files);
+        } else if matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("rs" | "md")
+        ) {
+            files.push(path);
+        }
+    }
 }
 
 fn visit_rust_files(path: &Path, files: &mut Vec<PathBuf>) {

@@ -39,38 +39,38 @@ struct ErrorHandlerTests {
         #expect(handler.currentError == nil)
     }
 
-    @Test("handle maps WebSocketError.notConnected to connection.transient dedup key")
+    @Test("handle maps EngineConnectionError.notConnected to connection.transient dedup key")
     func notConnectedDedupKey() {
         let (handler, toast) = makeSUT()
-        handler.handle(WebSocketError.notConnected, context: "Session refresh")
-        handler.handle(WebSocketError.notConnected, context: "Session refresh")
+        handler.handle(EngineConnectionError.notConnected, context: "Session refresh")
+        handler.handle(EngineConnectionError.notConnected, context: "Session refresh")
         #expect(toast.toasts.count == 1)
         #expect(toast.toasts[0].dedupKey == "connection.transient")
     }
 
-    @Test("handle maps WebSocketError.timeout to connection.transient")
+    @Test("handle maps EngineConnectionError.timeout to connection.transient")
     func timeoutDedupKey() {
         let (handler, toast) = makeSUT()
-        handler.handle(WebSocketError.timeout, context: "Session refresh")
-        handler.handle(WebSocketError.timeout, context: "Session refresh")
+        handler.handle(EngineConnectionError.timeout, context: "Session refresh")
+        handler.handle(EngineConnectionError.timeout, context: "Session refresh")
         #expect(toast.toasts.count == 1)
         #expect(toast.toasts[0].dedupKey == "connection.transient")
     }
 
-    @Test("handle maps WebSocketError.connectionFailed to connection.transient")
+    @Test("handle maps EngineConnectionError.connectionFailed to connection.transient")
     func connectionFailedDedupKey() {
         let (handler, toast) = makeSUT()
-        handler.handle(WebSocketError.connectionFailed("boom"), context: "x")
-        handler.handle(WebSocketError.connectionFailed("other"), context: "y")
+        handler.handle(EngineConnectionError.connectionFailed("boom"), context: "x")
+        handler.handle(EngineConnectionError.connectionFailed("other"), context: "y")
         #expect(toast.toasts.count == 1)
         #expect(toast.toasts[0].dedupKey == "connection.transient")
     }
 
-    @Test("handle maps RPCClientError.connectionNotEstablished to connection.transient")
+    @Test("handle maps EngineClientError.connectionNotEstablished to connection.transient")
     func rpcConnectionNotEstablishedDedupKey() {
         let (handler, toast) = makeSUT()
-        handler.handle(RPCClientError.connectionNotEstablished, context: "x")
-        handler.handle(RPCClientError.connectionNotEstablished, context: "y")
+        handler.handle(EngineClientError.connectionNotEstablished, context: "x")
+        handler.handle(EngineClientError.connectionNotEstablished, context: "y")
         #expect(toast.toasts.count == 1)
         #expect(toast.toasts[0].dedupKey == "connection.transient")
     }
@@ -205,7 +205,7 @@ struct ErrorHandlerTests {
     func logErrorSilent() {
         let (handler, toast) = makeSUT()
         handler.logError(anError(), context: "ctx")
-        handler.logError(anError(), context: "ctx", category: .rpc)
+        handler.logError(anError(), context: "ctx", category: .engine)
         #expect(handler.showError == false)
         #expect(toast.toasts.isEmpty)
     }
@@ -220,21 +220,21 @@ struct ErrorHandlerTests {
 
     // MARK: - classifyDedupKey static
 
-    @Test("classifyDedupKey handles each WebSocketError case")
+    @Test("classifyDedupKey handles each EngineConnectionError case")
     func classifyDedupKeyWebSocket() {
-        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.notConnected) == "connection.transient")
-        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.timeout) == "connection.transient")
-        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.connectionFailed("x")) == "connection.transient")
-        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.invalidResponse) == nil)
-        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.encodingError) == nil)
-        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.decodingError("x")) == nil)
+        #expect(ErrorHandler.classifyDedupKey(for: EngineConnectionError.notConnected) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: EngineConnectionError.timeout) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: EngineConnectionError.connectionFailed("x")) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: EngineConnectionError.invalidResponse) == nil)
+        #expect(ErrorHandler.classifyDedupKey(for: EngineConnectionError.encodingError) == nil)
+        #expect(ErrorHandler.classifyDedupKey(for: EngineConnectionError.decodingError("x")) == nil)
     }
 
-    @Test("classifyDedupKey handles each RPCClientError case")
-    func classifyDedupKeyRPC() {
-        #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.connectionNotEstablished) == "connection.transient")
-        #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.noActiveSession) == "connection.transient")
-        #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.invalidURL) == nil)
+    @Test("classifyDedupKey handles each EngineClientError case")
+    func classifyDedupKeyEngineProtocol() {
+        #expect(ErrorHandler.classifyDedupKey(for: EngineClientError.connectionNotEstablished) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: EngineClientError.noActiveSession) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: EngineClientError.invalidURL) == nil)
     }
 
     @Test("classifyDedupKey handles native transient transport errors")

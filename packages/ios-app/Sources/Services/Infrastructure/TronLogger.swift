@@ -41,7 +41,7 @@ enum LogLevel: Int, Comparable, CaseIterable {
 
 enum LogCategory: String, CaseIterable {
     case websocket = "WebSocket"
-    case rpc = "RPC"
+    case engine = "Engine"
     case session = "Session"
     case chat = "Chat"
     case ui = "UI"
@@ -90,10 +90,10 @@ final class TronLogger: @unchecked Sendable {
     private var categoryBuffers: [LogCategory: [(Date, LogCategory, LogLevel, String)]] = [:]
     private let bufferLock = NSLock()
 
-    // Per-category buffer sizes - WebSocket and RPC get more since they contain important info
+    // Per-category buffer sizes - engine transport gets more since it contains important info.
     private func maxBufferSize(for category: LogCategory) -> Int {
         switch category {
-        case .websocket, .rpc:
+        case .websocket, .engine:
             return 1000
         case .database:
             return 500  // Moderate retention for DB operations
@@ -189,22 +189,22 @@ final class TronLogger: @unchecked Sendable {
 
     // MARK: - Specialized Logging
 
-    func logRPCRequest(method: String, params: Any?, id: Int) {
+    func logEngineRequest(functionId: String, payload: Any?, id: String) {
         #if DEBUG || BETA
-        let paramsState = params == nil ? "none" : "redacted"
-        verbose("→ RPC Request [\(id)] \(method) params=\(paramsState)", category: .rpc)
+        let payloadState = payload == nil ? "none" : "redacted"
+        verbose("→ Engine Invoke [\(id)] \(functionId) payload=\(payloadState)", category: .engine)
         #endif
     }
 
-    func logRPCResponse(method: String, id: Int, success: Bool, duration: TimeInterval, result: Any? = nil, error: String? = nil) {
+    func logEngineResponse(functionId: String, id: String, success: Bool, duration: TimeInterval, result: Any? = nil, error: String? = nil) {
         let durationMs = String(format: "%.1fms", duration * 1000)
         if success {
             #if DEBUG || BETA
             let resultState = result == nil ? "none" : "redacted"
-            debug("← RPC Response [\(id)] \(method) ✓ (\(durationMs)) result=\(resultState)", category: .rpc)
+            debug("← Engine Response [\(id)] \(functionId) ✓ (\(durationMs)) result=\(resultState)", category: .engine)
             #endif
         } else {
-            self.error("← RPC Response [\(id)] \(method) ✗ (\(durationMs)): \(error ?? "unknown error")", category: .rpc)
+            self.error("← Engine Response [\(id)] \(functionId) ✗ (\(durationMs)): \(error ?? "unknown error")", category: .engine)
         }
     }
 

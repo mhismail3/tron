@@ -22,7 +22,11 @@ protocol ModelRepository: AnyObject {
     ///   - sessionId: The session to switch models for
     ///   - modelId: The model ID to switch to
     /// - Returns: Result of the model switch
-    func switchModel(sessionId: String, to modelId: String) async throws -> ModelSwitchResult
+    func switchModel(
+        sessionId: String,
+        to modelId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ModelSwitchResult
 
     /// Invalidate the model cache
     func invalidateCache()

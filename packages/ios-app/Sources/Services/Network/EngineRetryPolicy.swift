@@ -1,14 +1,14 @@
 import Foundation
 
-/// Retry policy for RPC calls.
+/// Retry policy for engine invocations.
 /// Centralizes retry logic so ViewModels don't implement their own retry loops.
-struct RPCRetryPolicy: Sendable {
+struct EngineRetryPolicy: Sendable {
     let maxRetries: Int
     let baseDelayMs: UInt64
     /// Determines if an error is retryable. Return false to fail immediately.
     let isRetryable: @Sendable (Error) -> Bool
 
-    static let `default` = RPCRetryPolicy(
+    static let `default` = EngineRetryPolicy(
         maxRetries: 3,
         baseDelayMs: 100,
         isRetryable: { _ in true }
@@ -24,10 +24,10 @@ struct RPCRetryPolicy: Sendable {
 /// - Throws: The last error if all retries are exhausted, or immediately for non-retryable errors
 @MainActor
 func withRetry<T>(
-    policy: RPCRetryPolicy = .default,
+    policy: EngineRetryPolicy = .default,
     operation: @MainActor () async throws -> T
 ) async throws -> T {
-    precondition(policy.maxRetries >= 1, "RPCRetryPolicy.maxRetries must be >= 1")
+    precondition(policy.maxRetries >= 1, "EngineRetryPolicy.maxRetries must be >= 1")
 
     var attempt = 1
     while true {

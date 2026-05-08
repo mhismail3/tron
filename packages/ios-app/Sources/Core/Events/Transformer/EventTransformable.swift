@@ -2,7 +2,7 @@ import Foundation
 
 /// Protocol unifying `RawEvent` and `SessionEvent` for generic transformation.
 ///
-/// Both `RawEvent` (from server RPC) and `SessionEvent` (from SQLite database)
+/// Both `RawEvent` (from server engine protocol) and `SessionEvent` (from SQLite database)
 /// have identical fields representing the same event structure. This protocol
 /// eliminates ~460 LOC of duplication by enabling a single generic implementation
 /// for event transformation logic.

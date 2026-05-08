@@ -129,7 +129,12 @@ pub(crate) fn retry_context_read<T>(
         jitter_percent: 15,
     };
 
-    match contention::retry_on_busy(operation_name, policy, &mut operation, is_busy_rpc_error) {
+    match contention::retry_on_busy(
+        operation_name,
+        policy,
+        &mut operation,
+        is_busy_capability_error,
+    ) {
         Ok(value) => Ok(value),
         Err(contention::RetryError::Inner(error)) => Err(error),
         Err(contention::RetryError::BusyTimeout(timeout)) => Err(CapabilityError::Internal {
@@ -141,7 +146,7 @@ pub(crate) fn retry_context_read<T>(
     }
 }
 
-fn is_busy_rpc_error(error: &CapabilityError) -> bool {
+fn is_busy_capability_error(error: &CapabilityError) -> bool {
     let CapabilityError::Internal { message } = error else {
         return false;
     };

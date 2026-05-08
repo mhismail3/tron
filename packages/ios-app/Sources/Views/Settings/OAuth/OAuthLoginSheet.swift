@@ -42,7 +42,7 @@ struct OAuthLoginSheet: View {
     @State private var webAuthSession: ASWebAuthenticationSession?
     @State private var loopbackServer: OAuthLoopbackServer?
 
-    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var engineClient: EngineClient { dependencies.engineClient }
 
     var body: some View {
         NavigationStack {
@@ -275,7 +275,10 @@ struct OAuthLoginSheet: View {
 
     private func beginOAuthFlow() async {
         do {
-            let response = try await rpcClient.auth.oauthBegin(provider: provider.id)
+            let response = try await engineClient.auth.oauthBegin(
+                provider: provider.id,
+                idempotencyKey: .userAction("auth.oauthBegin")
+            )
             guard let url = URL(string: response.authUrl) else {
                 flowState = .error("Invalid authorization URL")
                 return
@@ -309,10 +312,11 @@ struct OAuthLoginSheet: View {
 
         Task {
             do {
-                let authState = try await rpcClient.auth.oauthComplete(
+                let authState = try await engineClient.auth.oauthComplete(
                     flowId: flowId,
                     code: code,
-                    label: label
+                    label: label,
+                    idempotencyKey: .userAction("auth.oauthComplete")
                 )
                 onComplete(authState)
                 flowState = .success

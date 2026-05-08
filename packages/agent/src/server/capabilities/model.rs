@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::services::model_catalog as rpc_model;
+use crate::server::services::model_catalog;
 
 pub(super) async fn handle(
     method: &str,
@@ -13,10 +13,10 @@ pub(super) async fn handle(
             model_list_value(&invocation.payload, deps, allow_capability_context).await
         }
         "model::switch" => {
-            rpc_model::switch_model(Some(&invocation.payload), &deps.capability_context).await
+            model_catalog::switch_model(Some(&invocation.payload), &deps.capability_context).await
         }
         "config::set_reasoning_level" => {
-            rpc_model::set_reasoning_level(Some(&invocation.payload), &deps.capability_context)
+            model_catalog::set_reasoning_level(Some(&invocation.payload), &deps.capability_context)
                 .await
         }
         _ => Err(CapabilityError::Internal {
@@ -33,7 +33,7 @@ async fn model_list_value(
     let auth_json_path = allow_capability_context
         .then(|| {
             payload
-                .pointer("/__rpcContext/authPath")
+                .pointer("/__capabilityContext/authPath")
                 .and_then(Value::as_str)
                 .map(PathBuf::from)
         })
@@ -41,5 +41,5 @@ async fn model_list_value(
         .unwrap_or_else(|| deps.auth_path.clone());
     let auth_path = crate::llm::auth::openai::infer_auth_path(&auth_json_path, None)
         .unwrap_or(crate::llm::openai::types::OpenAIAuthPath::ChatGptCodex);
-    Ok(json!({ "models": rpc_model::known_models(auth_path).await }))
+    Ok(json!({ "models": model_catalog::known_models(auth_path).await }))
 }

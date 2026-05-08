@@ -436,7 +436,7 @@ struct WizardShell<Content: View>: View {
 
     /// Mirrors the gate previously implemented privately by
     /// `InstallStep`: the primary CTA advances only after the install
-    /// pipeline has started the helper and `system.ping` has answered.
+    /// pipeline has started the helper and `system::ping` has answered.
     /// Before then, the same CTA starts or retries the pipeline via
     /// `state.requestInstall()`.
     private var installCanContinue: Bool {

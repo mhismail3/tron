@@ -73,7 +73,7 @@ struct RpcTask: Decodable, Identifiable, Hashable {
     }
 }
 
-// MARK: - RPC Parameters & Results
+// MARK: - Engine Parameters & Results
 
 /// Parameters for tasks.list
 struct TaskListParams: Encodable {

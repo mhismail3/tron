@@ -148,7 +148,7 @@ pub struct MergeResult {
     pub strategy: MergeStrategy,
 }
 
-/// Enriched worktree status for RPC responses.
+/// Enriched worktree status for capability responses.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeStatus {
@@ -597,7 +597,7 @@ pub struct PendingMergeState {
 pub enum RebaseOnMainResult {
     /// Session branch moved forward to include main's commits (either
     /// cleanly via fast-forward / rebase, or after conflict resolution
-    /// in a separate RPC).
+    /// in a separate engine capability).
     Success {
         /// Session HEAD before the rebase.
         old_base_commit: String,

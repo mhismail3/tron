@@ -24,7 +24,7 @@ struct AgentPromptParams: Encodable {
     }
 }
 
-// MARK: - Session-Scoped Skill RPCs
+// MARK: - Session-Scoped Skill engine protocols
 
 struct SkillActivateParams: Encodable {
     let sessionId: String
@@ -115,7 +115,7 @@ struct AgentAbortToolResult: Decodable {
     let aborted: Bool
 }
 
-// MARK: - Prompt Queue RPCs
+// MARK: - Prompt Queue engine protocols
 
 struct QueuePromptParams: Encodable {
     let sessionId: String
@@ -149,7 +149,7 @@ struct DequeueResult: Decodable {
     let ok: Bool
 }
 
-/// Tool call info for in-progress turn (used by session.reconstruct inFlight state)
+/// Tool call info for in-progress turn (used by session::reconstruct inFlight state)
 struct CurrentTurnToolCall: Decodable {
     let toolCallId: String
     let toolName: String

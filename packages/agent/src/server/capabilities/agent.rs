@@ -350,7 +350,7 @@ async fn enqueue_and_sync_drain_agent_function(
 
     let drained = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        EngineQueueDrainer::drain_receipt(&deps.engine_host, &item.receipt_id, "rpc-agent-sync"),
+        EngineQueueDrainer::drain_receipt(&deps.engine_host, &item.receipt_id, "engine-agent-sync"),
     )
     .await
     .map_err(|_| CapabilityError::Internal {

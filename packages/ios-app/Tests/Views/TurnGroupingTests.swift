@@ -648,7 +648,7 @@ struct TurnGroupingTests {
         let events = [
             // Session setup
             makeEvent(type: "session.start", sequence: 0),
-            makeEvent(type: "skill.activated", sequence: 1),
+            makeEvent(type: "skills::activated", sequence: 1),
             makeEvent(type: "worktree.acquired", sequence: 2),
             // Prompt 1: 3 turns with tool calls
             makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Ingest all of them into the knowledge base")]),
@@ -683,7 +683,7 @@ struct TurnGroupingTests {
         // Turn 4-5: prompt 2 (user + 2 assistants + tool + notification + result + hook)
         // Turn 6: prompt 3 (user + assistant)
         #expect(groups[0].turnNumber == 0)
-        #expect(groups[0].events.count == 3) // session.start + skill.activated + worktree.acquired
+        #expect(groups[0].events.count == 3) // session.start + skills::activated + worktree.acquired
 
         // Prompt 1 turns
         #expect(groups[1].turnNumber == 1)

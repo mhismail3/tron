@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Each `PairedServer` gets its own bearer token, stored in the iOS Keychain
 /// under `com.tron.mobile.bearer.<serverId>`. Switching the active server
-/// changes which token `WebSocketService` sends in the
+/// changes which token `EngineConnection` sends in the
 /// `Authorization: Bearer …` header.
 struct PairedServerTokenStore {
     /// Keychain service prefix for per-server tokens. The Keychain account

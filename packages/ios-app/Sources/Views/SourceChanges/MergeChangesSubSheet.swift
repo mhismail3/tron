@@ -16,7 +16,7 @@ import SwiftUI
 /// Primary action lives in the trailing toolbar slot; leading `xmark` dismisses.
 @available(iOS 26.0, *)
 struct MergeChangesSubSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let suggestedTargetBranch: String?
     let defaultStrategy: String
@@ -152,7 +152,7 @@ struct MergeChangesSubSheet: View {
             SettingsSectionHeader(title: "Target Branch")
             SettingsCard(accent: accent) {
                 BranchPickerField(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     sessionId: sessionId,
                     accent: accent,
                     placeholder: "main",
@@ -240,12 +240,13 @@ struct MergeChangesSubSheet: View {
         Task {
             await runner.run(action: .merge, dismiss: { dismiss() }) {
                 let trimmed = targetBranch.trimmingCharacters(in: .whitespaces)
-                return try await rpcClient.worktree.finalizeSession(
+                return try await engineClient.worktree.finalizeSession(
                     sessionId: sessionId,
                     targetBranch: trimmed.isEmpty ? nil : trimmed,
                     strategy: strategy.rawValue,
                     preserveOld: !deleteOldBranch,
-                    rebranch: rebranch
+                    rebranch: rebranch,
+                    idempotencyKey: .userAction("worktree.finalizeSession")
                 )
             }
         }

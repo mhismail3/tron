@@ -3,7 +3,7 @@ import Foundation
 /// Handlers for transforming system notification events into ChatMessages.
 ///
 /// Handles: notification.interrupted, context.cleared, compact.boundary,
-///          skill.deactivated, rules.loaded, stream.thinking_complete
+///          skills::deactivated, rules.loaded, stream.thinking_complete
 enum SystemEventHandlers {
 
     /// Transform notification.interrupted event into a ChatMessage.
@@ -62,7 +62,7 @@ enum SystemEventHandlers {
         )
     }
 
-    /// Transform skill.deactivated event into a ChatMessage.
+    /// Transform skills::deactivated event into a ChatMessage.
     ///
     /// Skill deactivated events indicate when a skill was deactivated.
     static func transformSkillDeactivated(
@@ -71,7 +71,7 @@ enum SystemEventHandlers {
         logger: TronLogger = TronLogger.shared
     ) -> ChatMessage? {
         guard let skillName = payload["skillName"]?.value as? String else {
-            logger.warning("skill.deactivated event missing skillName in payload", category: .events)
+            logger.warning("skills::deactivated event missing skillName in payload", category: .events)
             return nil
         }
 
@@ -91,7 +91,7 @@ enum SystemEventHandlers {
     /// - `.clearAll`: informational banner. The user can re-add skills
     ///   manually via `@skill-name`.
     /// - `.askUser`: interactive picker — each cleared skill becomes a
-    ///   tappable chip that re-activates it via the `skill.activate` RPC.
+    ///   tappable chip that re-activates it via the `skills::activate` engine protocol.
     ///
     /// Returns `nil` (drops the message) when:
     /// - the payload is malformed (missing `clearedSkills`), OR

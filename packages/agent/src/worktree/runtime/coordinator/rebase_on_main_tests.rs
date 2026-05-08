@@ -1,5 +1,5 @@
 //! Tests for `rebase_on_main` — phases B through I of the plan's TDD
-//! matrix. Phase A (RPC-level parser tests) lives in
+//! matrix. Phase A (capability-level parser tests) lives in
 //! the engine protocol integration tests.
 //!
 //! Fixtures run real `git` against `tempfile::tempdir()` directories —

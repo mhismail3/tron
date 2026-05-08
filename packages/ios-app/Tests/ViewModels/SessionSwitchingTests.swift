@@ -11,12 +11,12 @@ final class SessionSwitchingTests: XCTestCase {
 
     func testChatViewModelHasCorrectSessionId() {
         // Given: A ChatViewModel created for a specific session
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
         let sessionId = "test-session-123"
 
         // When: Creating the ViewModel
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: sessionId)
+        let viewModel = ChatViewModel(engineClient: engineClient, sessionId: sessionId)
 
         // Then: ViewModel should have the correct sessionId
         XCTAssertEqual(viewModel.sessionId, sessionId)
@@ -24,12 +24,12 @@ final class SessionSwitchingTests: XCTestCase {
 
     func testChatViewModelSessionIdIsImmutable() {
         // Given: Two different session IDs
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
 
         // When: Creating ViewModels for different sessions
-        let viewModel1 = ChatViewModel(rpcClient: rpcClient, sessionId: "session-A")
-        let viewModel2 = ChatViewModel(rpcClient: rpcClient, sessionId: "session-B")
+        let viewModel1 = ChatViewModel(engineClient: engineClient, sessionId: "session-A")
+        let viewModel2 = ChatViewModel(engineClient: engineClient, sessionId: "session-B")
 
         // Then: Each ViewModel maintains its own sessionId
         XCTAssertEqual(viewModel1.sessionId, "session-A")
@@ -39,9 +39,9 @@ final class SessionSwitchingTests: XCTestCase {
 
     func testNewChatViewModelHasEmptyMessages() {
         // Given: A fresh ChatViewModel
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
         // Then: Messages should start empty
         XCTAssertTrue(viewModel.messages.isEmpty)
@@ -49,9 +49,9 @@ final class SessionSwitchingTests: XCTestCase {
 
     func testNewChatViewModelIsNotProcessing() {
         // Given: A fresh ChatViewModel
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
         // Then: Should not be processing
         XCTAssertFalse(viewModel.isProcessing)
@@ -59,9 +59,9 @@ final class SessionSwitchingTests: XCTestCase {
 
     func testNewChatViewModelHasDisconnectedState() {
         // Given: A fresh ChatViewModel
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
         // Then: Connection state should be disconnected
         XCTAssertEqual(viewModel.connectionState, .disconnected)
@@ -69,9 +69,9 @@ final class SessionSwitchingTests: XCTestCase {
 
     func testNewChatViewModelHasEmptyInputState() {
         // Given: A fresh ChatViewModel
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
         // Then: Input should be empty
         XCTAssertTrue(viewModel.inputText.isEmpty)
@@ -82,11 +82,11 @@ final class SessionSwitchingTests: XCTestCase {
 
     func testMultipleViewModelsHaveIndependentState() {
         // Given: Two ViewModels for different sessions
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
 
-        let viewModel1 = ChatViewModel(rpcClient: rpcClient, sessionId: "session-A")
-        let viewModel2 = ChatViewModel(rpcClient: rpcClient, sessionId: "session-B")
+        let viewModel1 = ChatViewModel(engineClient: engineClient, sessionId: "session-A")
+        let viewModel2 = ChatViewModel(engineClient: engineClient, sessionId: "session-B")
 
         // When: Modifying state on viewModel1
         viewModel1.inputText = "Hello from session A"
@@ -99,15 +99,15 @@ final class SessionSwitchingTests: XCTestCase {
         XCTAssertTrue(viewModel2.messages.isEmpty)
     }
 
-    func testViewModelsShareRPCClient() {
-        // Given: Two ViewModels sharing the same RPCClient
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
+    func testViewModelsShareEngineClient() {
+        // Given: Two ViewModels sharing the same EngineClient
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
 
-        let viewModel1 = ChatViewModel(rpcClient: rpcClient, sessionId: "session-A")
-        let viewModel2 = ChatViewModel(rpcClient: rpcClient, sessionId: "session-B")
+        let viewModel1 = ChatViewModel(engineClient: engineClient, sessionId: "session-A")
+        let viewModel2 = ChatViewModel(engineClient: engineClient, sessionId: "session-B")
 
-        // Then: Both should reference the same RPCClient (for efficient connection reuse)
-        XCTAssertTrue(viewModel1.rpcClient === viewModel2.rpcClient)
+        // Then: Both should reference the same EngineClient (for efficient connection reuse)
+        XCTAssertTrue(viewModel1.engineClient === viewModel2.engineClient)
     }
 }

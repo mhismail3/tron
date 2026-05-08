@@ -3,14 +3,14 @@ import os
 
 /// Per-session worktree status, shared across the app.
 ///
-/// Hydrated lazily from the worktree status RPC and kept live by
+/// Hydrated lazily from the worktree status engine protocol and kept live by
 /// `EventStoreManager.handleGlobalEventV2` forwarding worktree plugin events
 /// here. Both the chat toolbar (`WorktreeIsolationState`) and the session
 /// sidebar row read from the same entries.
 ///
 /// Invariants:
 /// - Only successful fetches write to `statuses`. Errors never poison.
-/// - Concurrent `ensureLoaded(id)` calls coalesce to a single RPC.
+/// - Concurrent `ensureLoaded(id)` calls coalesce to a single engine protocol.
 /// - Parallel cold fetches are capped at 4 via `AsyncSemaphore`.
 @Observable
 @MainActor

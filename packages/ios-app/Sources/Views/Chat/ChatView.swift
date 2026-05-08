@@ -53,19 +53,19 @@ struct ChatView: View {
 
     // MARK: - Stored Properties (internal for extension access)
     let sessionId: String
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let skillStore: SkillStore?
     let workspaceDeleted: Bool
     var onToggleSidebar: (() -> Void)?
 
-    init(rpcClient: RPCClient, sessionId: String, audioRecorder: AudioRecorder, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
+    init(engineClient: EngineClient, sessionId: String, audioRecorder: AudioRecorder, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
-        self.rpcClient = rpcClient
+        self.engineClient = engineClient
         self.skillStore = skillStore
         self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
-        _viewModel = State(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId, audioRecorder: audioRecorder))
+        _viewModel = State(wrappedValue: ChatViewModel(engineClient: engineClient, sessionId: sessionId, audioRecorder: audioRecorder))
     }
 
     // MARK: - Body
@@ -75,7 +75,7 @@ struct ChatView: View {
         .chatSheets(
             coordinator: sheetCoordinator,
             viewModel: viewModel,
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             sessionId: sessionId,
             skillStore: skillStore,
             workspaceDeleted: workspaceDeleted
@@ -143,13 +143,17 @@ struct ChatView: View {
                 viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
                 // Persist to server (event-sourced, survives reinstall/migration)
                 Task {
-                    try? await rpcClient.model.setReasoningLevel(sessionId, level: level)
+                    try? await engineClient.model.setReasoningLevel(
+                        sessionId,
+                        level: level,
+                        idempotencyKey: .userAction("config.setReasoningLevel")
+                    )
                 }
             }
         }
         // Handle "Draft a Plan" request: stage the plan skill as a draft chip.
         // Server activation is deferred to send time (see onSend below); eagerly
-        // activating here would produce misleading `skill.deactivated`
+        // activating here would produce misleading `skills::deactivated`
         // notifications if the user removes the chip without sending.
         .onReceive(NotificationCenter.default.publisher(for: .draftPlanRequested)) { _ in
             guard let skillStore = skillStore else { return }
@@ -231,7 +235,7 @@ struct ChatView: View {
             // time they've opened the session. Fire-and-forget so any
             // server hiccup doesn't delay the UI.
             Task {
-                await dependencies.notificationStore.markAllRead(sessionId: viewModel.sessionId)
+                await dependencies.notificationStore.markAllRead(sessionId: viewModel.sessionId, idempotencyKey: .userAction("notifications.markAllRead"))
             }
 
             // Handle message visibility and set initialLoadComplete
@@ -240,7 +244,7 @@ struct ChatView: View {
             await handleInitialMessageVisibility()
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
         }
-        .onChange(of: rpcClient.connectionState) { oldState, newState in
+        .onChange(of: engineClient.connectionState) { oldState, newState in
             // React when connection transitions to connected
             if newState.isConnected && !oldState.isConnected {
                 Task {
@@ -269,7 +273,7 @@ struct ChatView: View {
             // for this session are implicitly seen. Fire-and-forget.
             guard newPhase == .active, oldPhase != .active else { return }
             Task {
-                await dependencies.notificationStore.markAllRead(sessionId: viewModel.sessionId)
+                await dependencies.notificationStore.markAllRead(sessionId: viewModel.sessionId, idempotencyKey: .userAction("notifications.markAllRead"))
             }
         }
         .onChange(of: scrollTarget) { _, target in
@@ -396,7 +400,7 @@ struct ChatView: View {
                         },
                         onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill) },
                         onQueueRemove: { [viewModel] queueId in
-                            Task { try? await viewModel.rpcClient.agent.dequeuePrompt(queueId) }
+                            Task { try? await viewModel.engineClient.agent.dequeuePrompt(queueId, idempotencyKey: .userAction("agent.dequeuePrompt")) }
                         }
                     )
                 )
@@ -487,7 +491,7 @@ struct ChatView: View {
                 sheetCoordinator.showCommandToolDetail(data)
             }
         case .cancelCommandTool(let toolCallId):
-            viewModel.abortTool(toolCallId: toolCallId)
+            viewModel.abortTool(toolCallId: toolCallId, idempotencyKey: .userAction("agent.abortTool"))
         case .subagentResult(let sid):
             viewModel.subagentState.showDetails(for: sid)
         case .subagentResultsReady:
@@ -498,9 +502,9 @@ struct ChatView: View {
             sheetCoordinator.showMemoryRetainDetail(title: title, summary: summary)
         case .reactivateSkill(let skillName):
             // M6: user tapped a chip in the skills-cleared AskUser picker.
-            // Reuses the existing `skill.activate` RPC path used by sidebar
+            // Reuses the existing `skills::activate` engine protocol path used by sidebar
             // activation and @skill-name resolution — server emits
-            // `skill.activated` which the chip tracks via `SkillsClearedNotificationView`.
+            // `skills::activated` which the chip tracks via `SkillsClearedNotificationView`.
             // On failure, surface the error so the user knows the tap did nothing.
             viewModel.reactivateSkillWithUserErrorHandling(skillName)
         case .retryTurn:
@@ -568,7 +572,7 @@ struct ChatView: View {
                         // .unauthorized repair goes straight to the app-level pairing sheet
                         // so it does not depend on a nested Settings page being mounted.
                         ConnectionStatusPill(
-                            connectionState: rpcClient.connectionState,
+                            connectionState: engineClient.connectionState,
                             isReady: initialLoadComplete,
                             onRePair: {
                                 ServerOnboardingLauncher.post(prefill: dependencies.pairedServerStore.activeServer)
@@ -671,7 +675,7 @@ struct ChatView: View {
                     }
                 }
                 // Auto-scroll when ConnectionStatusPill appears/disappears
-                .onChange(of: rpcClient.connectionState) { _, _ in
+                .onChange(of: engineClient.connectionState) { _, _ in
                     guard initialLoadComplete else { return }
                     guard scrollCoordinator.shouldAutoScroll else { return }
                     Task { @MainActor in

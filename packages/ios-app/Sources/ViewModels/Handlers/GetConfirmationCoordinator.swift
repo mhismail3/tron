@@ -9,8 +9,8 @@ protocol GetConfirmationContext: LoggingContext {
     /// Messages array for updating tool status
     var messages: [ChatMessage] { get set }
 
-    /// RPC client for server communication
-    var rpcClient: RPCClient { get }
+    /// engine client for server communication
+    var engineClient: EngineClient { get }
 
     /// Append a message to the chat
     func appendMessage(_ message: ChatMessage)
@@ -24,7 +24,7 @@ protocol GetConfirmationContext: LoggingContext {
 /// Responsibilities:
 /// - Sheet management (open/dismiss for pending and decided confirmations)
 /// - Decision submission and validation
-/// - Submitting decisions to the server via RPC (server constructs the agent prompt)
+/// - Submitting decisions to the server via engine protocol (server constructs the agent prompt)
 /// - Marking pending confirmations as superseded when user bypasses
 @MainActor
 final class GetConfirmationCoordinator {
@@ -61,7 +61,7 @@ final class GetConfirmationCoordinator {
     // glitches the safeAreaInset layout, making the InputBar disappear permanently.
     //
     // Phase 1 (prepareSubmission): Updates chip, stores structured submission data.
-    // Phase 2 (executePendingSubmission): Sends via server RPC after sheet dismiss completes.
+    // Phase 2 (executePendingSubmission): Sends via server engine protocol after sheet dismiss completes.
 
     /// Phase 1: Prepare submission — updates chip, stores structured data as pending.
     /// Called BEFORE sheet dismiss. Does NOT send to server.
@@ -100,7 +100,7 @@ final class GetConfirmationCoordinator {
             context: context
         )
 
-        // Store structured submission data for deferred send via RPC
+        // Store structured submission data for deferred send via engine protocol
         context.getConfirmationState.pendingSubmission = (
             action: data.params.action,
             decision: decision.rawValue,
@@ -116,7 +116,7 @@ final class GetConfirmationCoordinator {
         context.logInfo("GetConfirmation submission prepared, awaiting sheet dismiss")
     }
 
-    /// Phase 2: Execute pending submission — sends via server RPC.
+    /// Phase 2: Execute pending submission — sends via server engine protocol.
     /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
     func executePendingSubmission(context: GetConfirmationContext) {
         guard let submission = context.getConfirmationState.pendingSubmission else { return }
@@ -132,15 +132,16 @@ final class GetConfirmationCoordinator {
         context.appendMessage(confirmChip)
         context.currentTurn += 1
 
-        // Submit via server RPC (server constructs the agent prompt)
+        // Submit via server engine protocol (server constructs the agent prompt)
         Task {
             do {
-                _ = try await context.rpcClient.agent.submitConfirmation(
+                _ = try await context.engineClient.agent.submitConfirmation(
                     action: submission.action,
                     decision: submission.decision,
-                    note: submission.note
+                    note: submission.note,
+                    idempotencyKey: .userAction("agent.submitConfirmation")
                 )
-                context.logInfo("GetConfirmation decision submitted via RPC")
+                context.logInfo("GetConfirmation decision submitted via engine")
             } catch {
                 context.logError("Failed to submit confirmation: \(error.localizedDescription)")
                 context.showError("Failed to submit confirmation: \(error.localizedDescription)")

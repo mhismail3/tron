@@ -8,7 +8,7 @@ struct SubagentResultsListSheet: View {
     let pendingSubagents: [SubagentToolData]
     let subagentState: SubagentState
     let eventStoreManager: EventStoreManager
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     var onSendAll: (() -> Void)?
     var onSendIndividual: ((SubagentToolData) -> Void)?
     @Environment(\.dismiss) private var dismiss
@@ -57,7 +57,7 @@ struct SubagentResultsListSheet: View {
                     data: subagent,
                     subagentState: subagentState,
                     eventStoreManager: eventStoreManager,
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     onSendResults: onSendIndividual
                 )
             }

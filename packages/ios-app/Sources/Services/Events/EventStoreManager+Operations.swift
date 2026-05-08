@@ -16,7 +16,7 @@ extension EventStoreManager {
         let now = DateParser.now
 
         // CRITICAL: Tag with current server origin for filtering
-        let serverOrigin = rpcClient.serverOrigin
+        let serverOrigin = engineClient.serverOrigin
 
         var session = CachedSession(
             id: sessionId,
@@ -62,7 +62,10 @@ extension EventStoreManager {
 
         // 3. Archive on server first — server is authoritative
         do {
-            try await rpcClient.session.archive(sessionId)
+            try await engineClient.session.archive(
+                sessionId,
+                idempotencyKey: .userAction("session.archive")
+            )
         } catch {
             // Revert: un-mark deleting and restore active session
             markSessionDeleting(sessionId, isDeleting: false)
@@ -110,7 +113,10 @@ extension EventStoreManager {
         // Archive each on server, then clean up locally
         for session in sessionsToArchive {
             do {
-                try await rpcClient.session.archive(session.id)
+                try await engineClient.session.archive(
+                    session.id,
+                    idempotencyKey: .userAction("session.archive")
+                )
                 _ = removeSessionLocally(session.id)
                 try await eventDB.sessions.delete(session.id)
                 try await eventDB.events.deleteBySession(session.id)
@@ -171,9 +177,9 @@ extension EventStoreManager {
     func validateWorkspacePath(_ path: String) async -> Bool? {
         guard !path.isEmpty else { return false }
         do {
-            _ = try await rpcClient.filesystem.listDirectory(path: path, showHidden: false)
+            _ = try await engineClient.filesystem.listDirectory(path: path, showHidden: false)
             return true
-        } catch is RPCError {
+        } catch is EngineProtocolError {
             // Server processed the request and returned an error (e.g. ENOENT)
             logger.debug("Workspace path confirmed deleted: '\(path)'", category: .session)
             return false
@@ -204,7 +210,11 @@ extension EventStoreManager {
         }
 
         // Call server with the specific event ID
-        let result = try await rpcClient.session.fork(sessionId, fromEventId: fromEventId)
+        let result = try await engineClient.session.fork(
+            sessionId,
+            fromEventId: fromEventId,
+            idempotencyKey: .userAction("session.fork")
+        )
         logger.info("[FORK] Server returned: newSessionId=\(result.newSessionId), rootEventId=\(result.rootEventId ?? "unknown")", category: .session)
 
         // CRITICAL: Fetch ancestor events to ensure parent history is in local DB
@@ -216,7 +226,7 @@ extension EventStoreManager {
             logger.info("[FORK] Fetching ancestor history from rootEventId=\(rootEventId)", category: .session)
 
             do {
-                let ancestorRawEvents = try await rpcClient.eventSync.getAncestors(rootEventId)
+                let ancestorRawEvents = try await engineClient.eventSync.getAncestors(rootEventId)
 
                 // Convert RawEvents to SessionEvents, keeping original session_id
                 // These may already exist in local DB from when parent session was active.
@@ -273,7 +283,7 @@ extension EventStoreManager {
         let workingDir = result.worktree?.path ?? sourceSession?.workingDirectory ?? ""
         let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent
         // CRITICAL: Tag with current server origin for filtering
-        let serverOrigin = rpcClient.serverOrigin
+        let serverOrigin = engineClient.serverOrigin
         var forkedSession = CachedSession(
             id: result.newSessionId,
             workspaceId: sourceSession?.workspaceId ?? workingDir,

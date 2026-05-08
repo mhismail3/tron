@@ -393,11 +393,11 @@ mod tests {
 
     #[test]
     fn not_found_carries_inner_session_id() {
-        let rpc = map_worktree_error(W::NotFound {
+        let mapped = map_worktree_error(W::NotFound {
             session_id: "sid-42".into(),
         });
-        assert_eq!(rpc.code(), "WORKTREE_NOT_FOUND");
-        let msg = rpc.to_string();
+        assert_eq!(mapped.code(), "WORKTREE_NOT_FOUND");
+        let msg = mapped.to_string();
         assert!(
             msg.contains("sid-42"),
             "message should carry session id; got {msg}"
@@ -406,321 +406,321 @@ mod tests {
 
     #[test]
     fn not_git_repo_is_typed() {
-        let rpc = map_worktree_error(W::NotGitRepo("/tmp/x".into()));
-        assert_eq!(rpc.code(), "NOT_GIT_REPO");
-        assert!(rpc.to_string().contains("/tmp/x"));
+        let mapped = map_worktree_error(W::NotGitRepo("/tmp/x".into()));
+        assert_eq!(mapped.code(), "NOT_GIT_REPO");
+        assert!(mapped.to_string().contains("/tmp/x"));
     }
 
     #[test]
     fn protected_branch_preserves_message() {
-        let rpc = map_worktree_error(W::ProtectedBranch("refusing to push 'main'".into()));
-        assert_eq!(rpc.code(), "PROTECTED_BRANCH");
-        assert!(rpc.to_string().contains("'main'"));
+        let mapped = map_worktree_error(W::ProtectedBranch("refusing to push 'main'".into()));
+        assert_eq!(mapped.code(), "PROTECTED_BRANCH");
+        assert!(mapped.to_string().contains("'main'"));
     }
 
     #[test]
     fn no_remote_is_typed() {
-        let rpc = map_worktree_error(W::NoRemoteConfigured("origin missing".into()));
-        assert_eq!(rpc.code(), "NO_REMOTE");
+        let mapped = map_worktree_error(W::NoRemoteConfigured("origin missing".into()));
+        assert_eq!(mapped.code(), "NO_REMOTE");
     }
 
     #[test]
     fn non_fast_forward_is_typed() {
-        let rpc = map_worktree_error(W::NonFastForward("rejected".into()));
-        assert_eq!(rpc.code(), "NON_FAST_FORWARD");
+        let mapped = map_worktree_error(W::NonFastForward("rejected".into()));
+        assert_eq!(mapped.code(), "NON_FAST_FORWARD");
     }
 
     #[test]
     fn auth_failure_is_typed() {
-        let rpc = map_worktree_error(W::AuthFailure("401".into()));
-        assert_eq!(rpc.code(), "GIT_AUTH_FAILED");
+        let mapped = map_worktree_error(W::AuthFailure("401".into()));
+        assert_eq!(mapped.code(), "GIT_AUTH_FAILED");
     }
 
     #[test]
     fn network_timeout_is_typed() {
-        let rpc = map_worktree_error(W::NetworkTimeout("timeout".into()));
-        assert_eq!(rpc.code(), "GIT_NETWORK_ERROR");
+        let mapped = map_worktree_error(W::NetworkTimeout("timeout".into()));
+        assert_eq!(mapped.code(), "GIT_NETWORK_ERROR");
     }
 
     #[test]
     fn dirty_working_tree_is_typed() {
-        let rpc = map_worktree_error(W::DirtyWorkingTree("dirty".into()));
-        assert_eq!(rpc.code(), "DIRTY_WORKING_TREE");
+        let mapped = map_worktree_error(W::DirtyWorkingTree("dirty".into()));
+        assert_eq!(mapped.code(), "DIRTY_WORKING_TREE");
     }
 
     #[test]
     fn pending_merge_exists_is_invalid_params() {
-        let rpc = map_worktree_error(W::PendingMergeExists);
-        assert_eq!(rpc.code(), "INVALID_PARAMS");
-        assert!(rpc.to_string().contains("pending merge"));
+        let mapped = map_worktree_error(W::PendingMergeExists);
+        assert_eq!(mapped.code(), "INVALID_PARAMS");
+        assert!(mapped.to_string().contains("pending merge"));
     }
 
     #[test]
     fn no_pending_merge_is_invalid_params() {
-        let rpc = map_worktree_error(W::NoPendingMerge);
-        assert_eq!(rpc.code(), "INVALID_PARAMS");
+        let mapped = map_worktree_error(W::NoPendingMerge);
+        assert_eq!(mapped.code(), "INVALID_PARAMS");
     }
 
     #[test]
     fn missing_base_branch_is_typed() {
-        let rpc = map_worktree_error(W::MissingBaseBranch);
-        assert_eq!(rpc.code(), "MISSING_BASE_BRANCH");
+        let mapped = map_worktree_error(W::MissingBaseBranch);
+        assert_eq!(mapped.code(), "MISSING_BASE_BRANCH");
     }
 
     #[test]
     fn ref_not_found_is_typed() {
-        let rpc = map_worktree_error(W::RefNotFound("refs/heads/x".into()));
-        assert_eq!(rpc.code(), "REF_NOT_FOUND");
-        assert!(rpc.to_string().contains("refs/heads/x"));
+        let mapped = map_worktree_error(W::RefNotFound("refs/heads/x".into()));
+        assert_eq!(mapped.code(), "REF_NOT_FOUND");
+        assert!(mapped.to_string().contains("refs/heads/x"));
     }
 
     #[test]
     fn branch_exists_is_typed() {
-        let rpc = map_worktree_error(W::BranchExists("feature/x".into()));
-        assert_eq!(rpc.code(), "BRANCH_EXISTS");
-        assert!(rpc.to_string().contains("feature/x"));
+        let mapped = map_worktree_error(W::BranchExists("feature/x".into()));
+        assert_eq!(mapped.code(), "BRANCH_EXISTS");
+        assert!(mapped.to_string().contains("feature/x"));
     }
 
     #[test]
     fn branch_active_is_typed() {
-        let rpc = map_worktree_error(W::BranchActive("feature/x".into()));
-        assert_eq!(rpc.code(), "BRANCH_ACTIVE");
+        let mapped = map_worktree_error(W::BranchActive("feature/x".into()));
+        assert_eq!(mapped.code(), "BRANCH_ACTIVE");
     }
 
     #[test]
     fn invalid_session_state_is_invalid_params() {
-        let rpc = map_worktree_error(W::InvalidSessionState("detached HEAD".into()));
-        assert_eq!(rpc.code(), "INVALID_PARAMS");
-        assert!(rpc.to_string().contains("detached HEAD"));
+        let mapped = map_worktree_error(W::InvalidSessionState("detached HEAD".into()));
+        assert_eq!(mapped.code(), "INVALID_PARAMS");
+        assert!(mapped.to_string().contains("detached HEAD"));
     }
 
     #[test]
     fn git_error_is_typed() {
-        let rpc = map_worktree_error(W::Git("fatal: …".into()));
-        assert_eq!(rpc.code(), "GIT_ERROR");
+        let mapped = map_worktree_error(W::Git("fatal: …".into()));
+        assert_eq!(mapped.code(), "GIT_ERROR");
     }
 
     #[test]
     fn merge_conflicts_should_not_reach_boundary_but_is_internal() {
         // Capability code must special-case this; if one doesn't, surfacing it
         // as an internal error is the fail-closed result.
-        let rpc = map_worktree_error(W::MergeConflicts(3));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
-        assert!(rpc.to_string().contains("MergeConflicts(3)"));
+        let mapped = map_worktree_error(W::MergeConflicts(3));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
+        assert!(mapped.to_string().contains("MergeConflicts(3)"));
     }
 
     #[test]
     fn timeout_is_internal() {
-        let rpc = map_worktree_error(W::Timeout(5000));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_worktree_error(W::Timeout(5000));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn io_error_is_internal() {
-        let rpc = map_worktree_error(W::Io(std::io::Error::new(
+        let mapped = map_worktree_error(W::Io(std::io::Error::new(
             std::io::ErrorKind::Other,
             "disk full",
         )));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn event_store_error_is_internal() {
-        let rpc = map_worktree_error(W::EventStore("sqlite locked".into()));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_worktree_error(W::EventStore("sqlite locked".into()));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     // ── map_event_store_error per-variant coverage ──
 
     #[test]
     fn event_store_session_not_found_is_typed() {
-        let rpc = map_event_store_error(E::SessionNotFound("sess-42".into()));
-        assert_eq!(rpc.code(), "SESSION_NOT_FOUND");
-        assert!(rpc.to_string().contains("sess-42"));
+        let mapped = map_event_store_error(E::SessionNotFound("sess-42".into()));
+        assert_eq!(mapped.code(), "SESSION_NOT_FOUND");
+        assert!(mapped.to_string().contains("sess-42"));
     }
 
     #[test]
     fn event_store_event_not_found_is_typed() {
-        let rpc = map_event_store_error(E::EventNotFound("evt-7".into()));
-        assert_eq!(rpc.code(), "EVENT_NOT_FOUND");
-        assert!(rpc.to_string().contains("evt-7"));
+        let mapped = map_event_store_error(E::EventNotFound("evt-7".into()));
+        assert_eq!(mapped.code(), "EVENT_NOT_FOUND");
+        assert!(mapped.to_string().contains("evt-7"));
     }
 
     #[test]
     fn event_store_workspace_not_found_is_typed() {
-        let rpc = map_event_store_error(E::WorkspaceNotFound("ws-1".into()));
-        assert_eq!(rpc.code(), "WORKSPACE_NOT_FOUND");
-        assert!(rpc.to_string().contains("ws-1"));
+        let mapped = map_event_store_error(E::WorkspaceNotFound("ws-1".into()));
+        assert_eq!(mapped.code(), "WORKSPACE_NOT_FOUND");
+        assert!(mapped.to_string().contains("ws-1"));
     }
 
     #[test]
     fn event_store_blob_not_found_is_typed() {
-        let rpc = map_event_store_error(E::BlobNotFound("blob-abc".into()));
-        assert_eq!(rpc.code(), "BLOB_NOT_FOUND");
-        assert!(rpc.to_string().contains("blob-abc"));
+        let mapped = map_event_store_error(E::BlobNotFound("blob-abc".into()));
+        assert_eq!(mapped.code(), "BLOB_NOT_FOUND");
+        assert!(mapped.to_string().contains("blob-abc"));
     }
 
     #[test]
     fn event_store_invalid_operation_is_invalid_params() {
-        let rpc = map_event_store_error(E::InvalidOperation("can't fork".into()));
-        assert_eq!(rpc.code(), "INVALID_PARAMS");
-        assert!(rpc.to_string().contains("can't fork"));
+        let mapped = map_event_store_error(E::InvalidOperation("can't fork".into()));
+        assert_eq!(mapped.code(), "INVALID_PARAMS");
+        assert!(mapped.to_string().contains("can't fork"));
     }
 
     #[test]
     fn event_store_sqlite_is_internal() {
-        let rpc = map_event_store_error(E::Sqlite(rusqlite::Error::QueryReturnedNoRows));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_event_store_error(E::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn event_store_busy_is_internal() {
-        let rpc = map_event_store_error(E::Busy {
+        let mapped = map_event_store_error(E::Busy {
             operation: "append",
             attempts: 5,
         });
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn event_store_serde_is_internal() {
         let serde_err = serde_json::from_str::<String>("not json").unwrap_err();
-        let rpc = map_event_store_error(E::Serde(serde_err));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_event_store_error(E::Serde(serde_err));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn event_store_migration_is_internal() {
-        let rpc = map_event_store_error(E::Migration {
+        let mapped = map_event_store_error(E::Migration {
             message: "v005 failed".into(),
         });
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn event_store_internal_is_internal() {
-        let rpc = map_event_store_error(E::Internal("poisoned lock".into()));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_event_store_error(E::Internal("poisoned lock".into()));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     // ── map_cron_error per-variant coverage ──
 
     #[test]
     fn cron_not_found_is_typed() {
-        let rpc = map_cron_error(C::NotFound("cron_42".into()));
-        assert_eq!(rpc.code(), "CRON_NOT_FOUND");
-        assert!(rpc.to_string().contains("cron_42"));
+        let mapped = map_cron_error(C::NotFound("cron_42".into()));
+        assert_eq!(mapped.code(), "CRON_NOT_FOUND");
+        assert!(mapped.to_string().contains("cron_42"));
     }
 
     #[test]
     fn cron_duplicate_name_is_typed() {
-        let rpc = map_cron_error(C::DuplicateName("daily-summary".into()));
-        assert_eq!(rpc.code(), "CRON_DUPLICATE_NAME");
-        assert!(rpc.to_string().contains("daily-summary"));
+        let mapped = map_cron_error(C::DuplicateName("daily-summary".into()));
+        assert_eq!(mapped.code(), "CRON_DUPLICATE_NAME");
+        assert!(mapped.to_string().contains("daily-summary"));
     }
 
     #[test]
     fn cron_invalid_expression_is_typed() {
-        let rpc = map_cron_error(C::InvalidExpression("bad cron".into()));
-        assert_eq!(rpc.code(), "CRON_INVALID_EXPRESSION");
-        assert!(rpc.to_string().contains("bad cron"));
+        let mapped = map_cron_error(C::InvalidExpression("bad cron".into()));
+        assert_eq!(mapped.code(), "CRON_INVALID_EXPRESSION");
+        assert!(mapped.to_string().contains("bad cron"));
     }
 
     #[test]
     fn cron_invalid_timezone_is_typed() {
-        let rpc = map_cron_error(C::InvalidTimezone("Mars/Olympus".into()));
-        assert_eq!(rpc.code(), "CRON_INVALID_TIMEZONE");
-        assert!(rpc.to_string().contains("Mars/Olympus"));
+        let mapped = map_cron_error(C::InvalidTimezone("Mars/Olympus".into()));
+        assert_eq!(mapped.code(), "CRON_INVALID_TIMEZONE");
+        assert!(mapped.to_string().contains("Mars/Olympus"));
     }
 
     #[test]
     fn cron_validation_is_invalid_params() {
-        let rpc = map_cron_error(C::Validation("name too short".into()));
-        assert_eq!(rpc.code(), "INVALID_PARAMS");
-        assert!(rpc.to_string().contains("name too short"));
+        let mapped = map_cron_error(C::Validation("name too short".into()));
+        assert_eq!(mapped.code(), "INVALID_PARAMS");
+        assert!(mapped.to_string().contains("name too short"));
     }
 
     #[test]
     fn cron_timed_out_is_typed() {
-        let rpc = map_cron_error(C::TimedOut);
-        assert_eq!(rpc.code(), "CRON_TIMED_OUT");
+        let mapped = map_cron_error(C::TimedOut);
+        assert_eq!(mapped.code(), "CRON_TIMED_OUT");
     }
 
     #[test]
     fn cron_cancelled_is_typed() {
-        let rpc = map_cron_error(C::Cancelled("shutdown".into()));
-        assert_eq!(rpc.code(), "CRON_CANCELLED");
-        assert!(rpc.to_string().contains("shutdown"));
+        let mapped = map_cron_error(C::Cancelled("shutdown".into()));
+        assert_eq!(mapped.code(), "CRON_CANCELLED");
+        assert!(mapped.to_string().contains("shutdown"));
     }
 
     #[test]
     fn cron_config_is_internal() {
-        let rpc = map_cron_error(C::Config("corrupt yaml".into()));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_cron_error(C::Config("corrupt yaml".into()));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn cron_database_is_internal() {
-        let rpc = map_cron_error(C::Database("locked".into()));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_cron_error(C::Database("locked".into()));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn cron_execution_is_internal() {
-        let rpc = map_cron_error(C::Execution("shell exit 1".into()));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_cron_error(C::Execution("shell exit 1".into()));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn cron_io_is_internal() {
-        let rpc = map_cron_error(C::Io(std::io::Error::new(
+        let mapped = map_cron_error(C::Io(std::io::Error::new(
             std::io::ErrorKind::Other,
             "disk",
         )));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     // ── map_auth_error per-variant coverage ──
 
     #[test]
     fn auth_not_configured_is_typed() {
-        let rpc = map_auth_error(A::NotConfigured("anthropic".into()));
-        assert_eq!(rpc.code(), "AUTH_NOT_CONFIGURED");
-        assert!(rpc.to_string().contains("anthropic"));
+        let mapped = map_auth_error(A::NotConfigured("anthropic".into()));
+        assert_eq!(mapped.code(), "AUTH_NOT_CONFIGURED");
+        assert!(mapped.to_string().contains("anthropic"));
     }
 
     #[test]
     fn auth_token_expired_is_typed() {
-        let rpc = map_auth_error(A::TokenExpired("refresh returned 403".into()));
-        assert_eq!(rpc.code(), "AUTH_TOKEN_EXPIRED");
-        assert!(rpc.to_string().contains("refresh returned 403"));
+        let mapped = map_auth_error(A::TokenExpired("refresh returned 403".into()));
+        assert_eq!(mapped.code(), "AUTH_TOKEN_EXPIRED");
+        assert!(mapped.to_string().contains("refresh returned 403"));
     }
 
     #[test]
     fn auth_oauth_error_is_typed() {
-        let rpc = map_auth_error(A::OAuth {
+        let mapped = map_auth_error(A::OAuth {
             status: 401,
             message: "invalid_grant".into(),
         });
-        assert_eq!(rpc.code(), "AUTH_OAUTH_ERROR");
-        assert!(rpc.to_string().contains("invalid_grant"));
-        assert!(rpc.to_string().contains("401"));
+        assert_eq!(mapped.code(), "AUTH_OAUTH_ERROR");
+        assert!(mapped.to_string().contains("invalid_grant"));
+        assert!(mapped.to_string().contains("401"));
     }
 
     #[test]
     fn auth_io_is_internal() {
-        let rpc = map_auth_error(A::Io(std::io::Error::new(
+        let mapped = map_auth_error(A::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "x",
         )));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn auth_json_is_internal() {
         let serde_err = serde_json::from_str::<String>("not json").unwrap_err();
-        let rpc = map_auth_error(A::Json(serde_err));
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        let mapped = map_auth_error(A::Json(serde_err));
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 
     /// R3: malformed provider auth (e.g. outdated Google `endpoint` field)
@@ -729,12 +729,12 @@ mod tests {
     /// the re-auth command.
     #[test]
     fn auth_malformed_provider_auth_is_not_configured() {
-        let rpc = map_auth_error(A::MalformedProviderAuth {
+        let mapped = map_auth_error(A::MalformedProviderAuth {
             provider: "google".into(),
             details: "unknown field `endpoint`".into(),
         });
-        assert_eq!(rpc.code(), "AUTH_NOT_CONFIGURED");
-        let msg = rpc.to_string();
+        assert_eq!(mapped.code(), "AUTH_NOT_CONFIGURED");
+        let msg = mapped.to_string();
         assert!(msg.contains("google"));
         assert!(msg.contains("endpoint"));
         assert!(msg.contains("tron auth google"));
@@ -744,53 +744,53 @@ mod tests {
 
     #[test]
     fn import_session_not_found_is_typed() {
-        let rpc = map_import_error(I::SessionNotFound {
+        let mapped = map_import_error(I::SessionNotFound {
             path: std::path::PathBuf::from("/x/missing.jsonl"),
         });
-        assert_eq!(rpc.code(), "IMPORT_SESSION_NOT_FOUND");
-        assert!(rpc.to_string().contains("missing.jsonl"));
+        assert_eq!(mapped.code(), "IMPORT_SESSION_NOT_FOUND");
+        assert!(mapped.to_string().contains("missing.jsonl"));
     }
 
     #[test]
     fn import_already_imported_is_typed_with_details() {
-        let rpc = map_import_error(I::AlreadyImported {
+        let mapped = map_import_error(I::AlreadyImported {
             tron_session_id: "sess_42".into(),
         });
-        assert_eq!(rpc.code(), "IMPORT_ALREADY_IMPORTED");
-        assert!(rpc.to_string().contains("sess_42"));
+        assert_eq!(mapped.code(), "IMPORT_ALREADY_IMPORTED");
+        assert!(mapped.to_string().contains("sess_42"));
         // Details payload carries the session id for clients to follow.
-        assert_eq!(rpc.details().unwrap()["existingSessionId"], "sess_42");
+        assert_eq!(mapped.details().unwrap()["existingSessionId"], "sess_42");
     }
 
     #[test]
     fn import_empty_session_is_typed() {
-        let rpc = map_import_error(I::EmptySession);
-        assert_eq!(rpc.code(), "IMPORT_EMPTY_SESSION");
+        let mapped = map_import_error(I::EmptySession);
+        assert_eq!(mapped.code(), "IMPORT_EMPTY_SESSION");
     }
 
     #[test]
     fn import_no_claude_directory_is_typed() {
-        let rpc = map_import_error(I::NoClaudeDirectory {
+        let mapped = map_import_error(I::NoClaudeDirectory {
             path: std::path::PathBuf::from("/no/such/dir"),
         });
-        assert_eq!(rpc.code(), "IMPORT_NO_CLAUDE_DIRECTORY");
-        assert!(rpc.to_string().contains("/no/such/dir"));
+        assert_eq!(mapped.code(), "IMPORT_NO_CLAUDE_DIRECTORY");
+        assert!(mapped.to_string().contains("/no/such/dir"));
     }
 
     #[test]
     fn import_database_delegates_to_event_store() {
         // Database errors should surface their typed event-store code
         // (SESSION_NOT_FOUND in this case), not the bare "Database: …".
-        let rpc = map_import_error(I::Database(E::SessionNotFound("sess-x".into())));
-        assert_eq!(rpc.code(), "SESSION_NOT_FOUND");
+        let mapped = map_import_error(I::Database(E::SessionNotFound("sess-x".into())));
+        assert_eq!(mapped.code(), "SESSION_NOT_FOUND");
     }
 
     #[test]
     fn import_io_is_internal() {
-        let rpc = map_import_error(I::Io {
+        let mapped = map_import_error(I::Io {
             path: std::path::PathBuf::from("/x"),
             source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no"),
         });
-        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 }

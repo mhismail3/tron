@@ -13,7 +13,7 @@
 //! ## Invariants
 //!
 //! - When a feature flag is off, iOS-originating requests that would
-//!   trigger a push still return success at the RPC layer — the stub
+//!   trigger a push still return success at the engine transport — the stub
 //!   `StubNotifyDelegate` ([`crate::tools::backends::stubs`]) surfaces
 //!   a warning so the agent can mention it instead of failing.
 //! - APNS 410 Gone responses remove the offending device token from

@@ -5,7 +5,7 @@ import Foundation
 /// and transient-error deduping.
 ///
 /// URLSession WebSocket failures often arrive as `NSError` values instead of
-/// `WebSocketError` (for example POSIX `ECONNABORTED` after foregrounding). Keep the
+/// `EngineConnectionError` (for example POSIX `ECONNABORTED` after foregrounding). Keep the
 /// policy centralized so foreground refreshes, send failures, and toast deduping agree
 /// on which failures are connection churn versus real application errors.
 enum ConnectionErrorClassifier {
@@ -31,7 +31,7 @@ enum ConnectionErrorClassifier {
     private static func classify(_ error: Error, depth: Int = 0) -> Classification {
         guard depth < 6 else { return .none }
 
-        if let ws = error as? WebSocketError {
+        if let ws = error as? EngineConnectionError {
             switch ws {
             case .notConnected, .connectionFailed:
                 return .requiresConnectionRecovery
@@ -42,7 +42,7 @@ enum ConnectionErrorClassifier {
             }
         }
 
-        if let rpc = error as? RPCClientError {
+        if let rpc = error as? EngineClientError {
             switch rpc {
             case .connectionNotEstablished:
                 return .requiresConnectionRecovery

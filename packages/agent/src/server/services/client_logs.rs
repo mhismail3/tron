@@ -24,7 +24,7 @@ pub(crate) struct ClientLogEntry {
     pub(crate) message: String,
 }
 
-/// RPC response for client log ingestion.
+/// capability response for client log ingestion.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClientLogIngestResult {
@@ -152,13 +152,13 @@ mod tests {
             ClientLogEntry {
                 timestamp: "2026-03-03T14:30:05.100Z".to_string(),
                 level: "info".to_string(),
-                category: "RPC".to_string(),
+                category: "Engine".to_string(),
                 message: "a".to_string(),
             },
             ClientLogEntry {
                 timestamp: "2026-03-03T14:30:05.200Z".to_string(),
                 level: "info".to_string(),
-                category: "RPC".to_string(),
+                category: "Engine".to_string(),
                 message: "b".to_string(),
             },
         ];
@@ -178,7 +178,7 @@ mod tests {
             .map(|i| ClientLogEntry {
                 timestamp: format!("2026-03-03T14:30:{:02}.{:03}Z", i / 1000, i % 1000),
                 level: "info".to_string(),
-                category: "RPC".to_string(),
+                category: "Engine".to_string(),
                 message: format!("message-{i}"),
             })
             .collect();
@@ -195,7 +195,7 @@ mod tests {
         let entries = vec![ClientLogEntry {
             timestamp: "2026-03-03T14:30:05.100Z".to_string(),
             level: "verbose".to_string(),
-            category: "RPC".to_string(),
+            category: "Engine".to_string(),
             message: "trace me".to_string(),
         }];
 
@@ -264,7 +264,7 @@ mod tests {
         let entries = vec![ClientLogEntry {
             timestamp: "2026-03-03T14:30:05.000Z".to_string(),
             level: "info".to_string(),
-            category: "RPC".to_string(),
+            category: "Engine".to_string(),
             message: huge_message,
         }];
 

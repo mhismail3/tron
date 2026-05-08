@@ -1,20 +1,20 @@
 import Foundation
 
-/// Client for display.* RPC methods.
+/// Client for display stream engine capabilities.
 /// Used to control display streams (e.g., stopping an active screen capture stream).
 @MainActor
-final class DisplayClient: RPCDomainClient {
+final class DisplayClient: EngineDomainClient {
 
     /// Stop an active display stream by stream ID.
-    func stopStream(streamId: String) async throws -> StopStreamResult {
-        let ws = try requireTransport().requireConnection()
+    func stopStream(streamId: String, idempotencyKey: EngineIdempotencyKey) async throws -> StopStreamResult {
+        _ = try requireTransport().requireConnection()
 
         struct StopStreamParams: Codable {
             let streamId: String
         }
 
         let params = StopStreamParams(streamId: streamId)
-        return try await ws.send(method: "display.stopStream", params: params)
+        return try await invokeWrite("display::stop_stream", params, idempotencyKey: idempotencyKey)
     }
 }
 

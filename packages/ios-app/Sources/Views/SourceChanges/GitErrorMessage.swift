@@ -16,21 +16,21 @@ enum GitActionVerb: String {
 
 /// Shared friendly-error formatter for git workflow sub-sheets.
 ///
-/// Maps typed `RPCErrorCode` cases (from the Rust handlers' new
+/// Maps typed `EngineErrorCode` cases (from the Rust handlers' new
 /// `map_worktree_error`) to user-facing copy so that every sub-sheet
 /// shows an actionable message instead of the bare Rust error string.
 ///
-/// INVARIANT: the switch on `RPCErrorCode` is exhaustive — adding a
+/// INVARIANT: the switch on `EngineErrorCode` is exhaustive — adding a
 /// new case to the enum forces a compile error here. Never add a
 /// `default` branch; route the new case through an explicit arm so
 /// it gets phrased for a human.
 ///
 /// Convention: do NOT pass `error.localizedDescription` directly to
-/// user-visible alerts for an RPC error. Always route through this
+/// user-visible alerts for an engine protocol error. Always route through this
 /// function so typed codes get human copy.
 ///
 /// - Parameters:
-///   - error: The error caught from an `rpcClient.*` call.
+///   - error: The error caught from an `engineClient.*` call.
 ///   - action: Typed verb naming the attempted action. Used in the
 ///     "{Action} failed: …" fallback for codes without specific copy
 ///     and in the "Cannot {action} ..." protected-branch arm.
@@ -38,7 +38,7 @@ enum GitActionVerb: String {
 ///   `tronErrorAlert`. Never an empty string.
 func friendlyGitError(_ error: Error, action: GitActionVerb) -> String {
     let verb = action.titleCase
-    guard let rpc = error as? RPCError else {
+    guard let rpc = error as? EngineProtocolError else {
         return "\(verb) failed: \(error.localizedDescription)"
     }
     guard let code = rpc.errorCode else {
@@ -83,7 +83,7 @@ func friendlyGitError(_ error: Error, action: GitActionVerb) -> String {
     case .blobNotFound:
         return "Couldn't find that file."
     // Cron / auth / import codes pass through to the standard
-    // "{verb} failed: {message}" — these RPCs aren't called from git
+    // "{verb} failed: {message}" — these engine protocols aren't called from git
     // sub-sheets, but the case-iterable contract requires every code to
     // produce a message so we route them to the same fallback.
     case .cronNotFound, .cronDuplicateName, .cronInvalidExpression,
@@ -92,7 +92,9 @@ func friendlyGitError(_ error: Error, action: GitActionVerb) -> String {
          .importSessionNotFound, .importAlreadyImported,
          .importEmptySession, .importNoClaudeDirectory:
         return "\(verb) failed: \(rpc.message)"
-    case .sessionNotFound, .agentNotRunning, .methodNotFound, .internalError:
+    case .sessionNotFound, .agentNotRunning, .capabilityNotFound, .invalidFunctionId,
+         .unknownMessageType, .unauthorized, .approvalRequired, .idempotencyConflict,
+         .internalError:
         return "\(verb) failed: \(rpc.message)"
     }
 }

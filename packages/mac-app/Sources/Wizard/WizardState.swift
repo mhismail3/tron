@@ -104,7 +104,7 @@ final class WizardState {
     var installIsRunning = false
 
     /// Pairing payload assembled at the Pairing-info step. Populated
-    /// after `system.ping` succeeds AND we read the bearer token off
+    /// after `system::ping` succeeds AND we read the bearer token off
     /// disk.
     var pairingPayload: PairingPayload?
 

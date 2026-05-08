@@ -145,7 +145,7 @@ final class TranscriptionCoordinator {
             let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 
             let transcript = result.trimmingCharacters(in: .whitespacesAndNewlines)
-            log.info("[Transcription] SERVER RETURNED — transcribeRPC=\(String(format: "%.0f", transcribeMs))ms, totalPipeline=\(String(format: "%.0f", totalMs))ms, rawLen=\(result.count), trimmedLen=\(transcript.count), text=\"\(String(transcript.prefix(100)))\"", category: .audio)
+            log.info("[Transcription] SERVER RETURNED — transcribeengine protocol=\(String(format: "%.0f", transcribeMs))ms, totalPipeline=\(String(format: "%.0f", totalMs))ms, rawLen=\(result.count), trimmedLen=\(transcript.count), text=\"\(String(transcript.prefix(100)))\"", category: .audio)
 
             guard !transcript.isEmpty else {
                 log.warning("[Transcription] empty transcript after trim — showing noSpeech", category: .audio)
@@ -201,7 +201,7 @@ final class TranscriptionCoordinator {
     /// - Returns: `true` if the error indicates no speech
     func isNoSpeechDetectedError(_ error: Error) -> Bool {
         let message: String
-        if let rpcError = error as? RPCError {
+        if let rpcError = error as? EngineProtocolError {
             message = rpcError.message
         } else {
             message = error.localizedDescription

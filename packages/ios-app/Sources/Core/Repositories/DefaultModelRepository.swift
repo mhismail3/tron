@@ -34,8 +34,12 @@ final class DefaultModelRepository: ModelRepository {
         return models
     }
 
-    func switchModel(sessionId: String, to modelId: String) async throws -> ModelSwitchResult {
-        try await modelClient.switchModel(sessionId, model: modelId)
+    func switchModel(
+        sessionId: String,
+        to modelId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ModelSwitchResult {
+        try await modelClient.switchModel(sessionId, model: modelId, idempotencyKey: idempotencyKey)
     }
 
     func invalidateCache() {

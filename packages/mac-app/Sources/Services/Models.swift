@@ -130,7 +130,7 @@ enum ExistingInstallStatus: Equatable, Sendable {
     case registered(version: String?)
 }
 
-/// Subset of `system.getInfo` the wrapper needs. Decoded from the WS RPC
+/// Subset of `system.getInfo` the wrapper needs. Decoded from the WS engine protocol
 /// response by `ServerPing`.
 struct ServerInfo: Equatable, Sendable {
     var version: String

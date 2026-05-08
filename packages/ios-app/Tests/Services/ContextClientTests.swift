@@ -6,13 +6,13 @@ import Foundation
 @Suite("ContextClient Tests")
 struct ContextClientTests {
 
-    @Test("getSnapshot throws when webSocket is nil")
+    @Test("getSnapshot throws when engineConnection is nil")
     func getSnapshotNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = ContextClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.getSnapshot(sessionId: "test-session")
         }
     }

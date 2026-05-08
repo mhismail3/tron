@@ -21,19 +21,19 @@ import XCTest
 @MainActor
 final class StreamingRecoveryTests: XCTestCase {
 
-    private var rpcClient: RPCClient!
+    private var engineClient: EngineClient!
 
     override func setUp() async throws {
-        rpcClient = RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!)
+        engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
     }
 
     override func tearDown() async throws {
-        rpcClient = nil
+        engineClient = nil
     }
 
     private func makeViewModel() -> ChatViewModel {
         ChatViewModel(
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             sessionId: "sess-h7-\(UUID().uuidString)",
             eventStoreManager: nil
         )

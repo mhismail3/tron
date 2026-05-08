@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Settings Methods
 
-/// Server-authoritative settings decoded from `settings.get` RPC.
+/// Server-authoritative settings decoded from `settings::get` engine protocol.
 ///
 /// Every field uses `decodeIfPresent` with sensible defaults so that a missing
 /// or newly-added field never crashes the entire decode. This is critical because

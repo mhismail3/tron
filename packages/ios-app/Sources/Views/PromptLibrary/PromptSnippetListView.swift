@@ -5,7 +5,7 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct PromptSnippetListView: View {
     @Bindable var state: PromptLibraryState
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onSelect: (String) -> Void
     let onEdit: (PromptSnippet) -> Void
 
@@ -31,7 +31,7 @@ struct PromptSnippetListView: View {
                     .onTapGesture { onSelect(snippet.text) }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
-                            Task { await state.deleteSnippet(id: snippet.id, rpc: rpcClient) }
+                            Task { await state.deleteSnippet(id: snippet.id, rpc: engineClient) }
                         } label: { Label("Delete", systemImage: "trash") }
                         .tint(.tronError)
 

@@ -5,10 +5,10 @@ import Testing
 
 @Suite("MenuBarLogReader")
 struct MenuBarLogReaderTests {
-    @Test("decodes logs.recent response")
+    @Test("decodes logs::recent response")
     func decodesRecentLogsResponse() throws {
         let data = """
-        {"id":"mac-logs-recent","success":true,"result":{"count":1,"entries":[{"id":7,"timestamp":"2026-04-27T10:00:00Z","level":"info","component":"server","message":"ready","origin":"server","sessionId":null,"errorMessage":null}]}}
+        {"type":"response","id":"mac-logs-recent","ok":true,"result":{"child":{"value":{"count":1,"entries":[{"id":7,"timestamp":"2026-04-27T10:00:00Z","level":"info","component":"server","message":"ready","origin":"server","sessionId":null,"errorMessage":null}]}}}}
         """.data(using: .utf8)!
 
         let frame = MenuBarLogReader.decodeFrame(data: data)

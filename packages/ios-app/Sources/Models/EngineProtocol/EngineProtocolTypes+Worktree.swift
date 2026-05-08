@@ -102,7 +102,7 @@ struct WorktreeCommitParams: Encodable {
 }
 
 /// Result of a successful `worktree.commit` call. Failures throw a typed
-/// `RPCError` (see `friendlyGitError`) — there is no `success: false` path.
+/// `EngineProtocolError` (see `friendlyGitError`) — there is no `success: false` path.
 /// `commitHash == nil` means "nothing to commit" (the working tree was clean).
 struct WorktreeCommitResult: Decodable {
     let commitHash: String?

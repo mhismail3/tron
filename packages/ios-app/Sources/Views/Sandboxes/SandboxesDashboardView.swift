@@ -2,7 +2,7 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct SandboxesDashboardView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let actions: DashboardToolbarActions
 
     @State private var containers: [ContainerDTO] = []
@@ -226,13 +226,13 @@ struct SandboxesDashboardView: View {
             do {
                 switch action {
                 case .stop(let c):
-                    _ = try await rpcClient.sandbox.stopContainer(name: c.name)
+                    _ = try await engineClient.sandbox.stopContainer(name: c.name, idempotencyKey: .userAction("sandbox.stop"))
                 case .start(let c):
-                    _ = try await rpcClient.sandbox.startContainer(name: c.name)
+                    _ = try await engineClient.sandbox.startContainer(name: c.name, idempotencyKey: .userAction("sandbox.start"))
                 case .kill(let c):
-                    _ = try await rpcClient.sandbox.killContainer(name: c.name)
+                    _ = try await engineClient.sandbox.killContainer(name: c.name, idempotencyKey: .userAction("sandbox.kill"))
                 case .remove(let c):
-                    _ = try await rpcClient.sandbox.removeContainer(name: c.name)
+                    _ = try await engineClient.sandbox.removeContainer(name: c.name, idempotencyKey: .userAction("sandbox.remove"))
                 }
                 await loadContainers()
             } catch {
@@ -285,7 +285,7 @@ struct SandboxesDashboardView: View {
         errorMessage = nil
 
         do {
-            let result = try await rpcClient.sandbox.listContainers()
+            let result = try await engineClient.sandbox.listContainers()
             await MainActor.run {
                 containers = result.containers
                 hostIp = result.hostIp

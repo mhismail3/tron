@@ -49,7 +49,7 @@
 //! There's no on-disk `.git/MERGE_HEAD` / `.git/rebase-merge` for the
 //! `StashPop` origin — conflicts live purely in the index. The shared
 //! `listConflicts` / `resolveConflict` / `continueMerge` / `abortMerge`
-//! RPC surface works uniformly across all three origins; only the
+//! capability surface works uniformly across all three origins; only the
 //! continue/abort side effects differ.
 //!
 //! `merge_context` routes the working directory by origin:

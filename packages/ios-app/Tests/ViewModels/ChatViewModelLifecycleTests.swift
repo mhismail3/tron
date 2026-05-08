@@ -11,9 +11,9 @@ struct ChatViewModelLifecycleTests {
     @Test("Observation tasks are cancelled on deinit")
     func testObservationTasksCancelledOnDeinit() async {
         // Create a ChatViewModel instance
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        var viewModel: ChatViewModel? = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        var viewModel: ChatViewModel? = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
         // Verify the view model was created (compiler won't optimize away)
         #expect(viewModel != nil)
@@ -28,9 +28,9 @@ struct ChatViewModelLifecycleTests {
 
     @Test("ChatViewModel initializes with idle agent phase")
     func testInitialState() {
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        let viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
         #expect(viewModel.agentPhase == .idle)
         #expect(viewModel.isCompacting == false)

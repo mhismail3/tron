@@ -25,22 +25,22 @@ final class WorkspaceValidationTests: XCTestCase {
     /// Test that validateWorkspacePath returns true for existing paths
     @MainActor
     func testValidateWorkspacePathExistingPath() async throws {
-        let mockRPC = MockRPCClient()
+        let mockEngine = MockEngineClient()
 
-        let result = await mockRPC.validateWorkspacePath("/existing/path")
+        let result = await mockEngine.validateWorkspacePath("/existing/path")
 
         XCTAssertEqual(result, true)
-        XCTAssertEqual(mockRPC.listDirectoryCallCount, 1)
+        XCTAssertEqual(mockEngine.listDirectoryCallCount, 1)
     }
 
-    /// Test that validateWorkspacePath returns false for confirmed-deleted paths (RPCError)
+    /// Test that validateWorkspacePath returns false for confirmed-deleted paths (EngineProtocolError)
     @MainActor
     func testValidateWorkspacePathNonExistentPath() async throws {
-        let mockRPC = MockRPCClient()
-        // RPCError = server processed request and returned error (e.g. ENOENT)
-        mockRPC.listDirectoryError = RPCError(code: "ENOENT", message: "no such file or directory", details: nil)
+        let mockEngine = MockEngineClient()
+        // EngineProtocolError = server processed request and returned error (e.g. ENOENT)
+        mockEngine.listDirectoryError = EngineProtocolError(code: "ENOENT", message: "no such file or directory", details: nil)
 
-        let result = await mockRPC.validateWorkspacePath("/deleted/path")
+        let result = await mockEngine.validateWorkspacePath("/deleted/path")
 
         XCTAssertEqual(result, false)
     }
@@ -48,21 +48,21 @@ final class WorkspaceValidationTests: XCTestCase {
     /// Test that validateWorkspacePath returns false for empty path
     @MainActor
     func testValidateWorkspacePathEmptyPath() async throws {
-        let mockRPC = MockRPCClient()
+        let mockEngine = MockEngineClient()
 
-        let result = await mockRPC.validateWorkspacePath("")
+        let result = await mockEngine.validateWorkspacePath("")
 
         XCTAssertEqual(result, false)
-        XCTAssertEqual(mockRPC.listDirectoryCallCount, 0)
+        XCTAssertEqual(mockEngine.listDirectoryCallCount, 0)
     }
 
     /// Test that connection errors return nil (indeterminate), not false
     @MainActor
     func testValidateWorkspacePathConnectionError() async throws {
-        let mockRPC = MockRPCClient()
-        mockRPC.listDirectoryError = MockRPCError.connectionNotEstablished
+        let mockEngine = MockEngineClient()
+        mockEngine.listDirectoryError = MockEngineProtocolError.connectionNotEstablished
 
-        let result = await mockRPC.validateWorkspacePath("/some/path")
+        let result = await mockEngine.validateWorkspacePath("/some/path")
 
         // Connection errors are indeterminate — must NOT be treated as "deleted"
         XCTAssertNil(result)
@@ -73,24 +73,24 @@ final class WorkspaceValidationTests: XCTestCase {
     /// Test that connection errors produce nil (indeterminate), NOT false (deleted)
     @MainActor
     func testConnectionErrorDoesNotProduceFalsePositive() async throws {
-        let mockRPC = MockRPCClient()
-        mockRPC.listDirectoryError = MockRPCError.connectionNotEstablished
+        let mockEngine = MockEngineClient()
+        mockEngine.listDirectoryError = MockEngineProtocolError.connectionNotEstablished
 
-        let result = await mockRPC.validateWorkspacePath("/some/path")
+        let result = await mockEngine.validateWorkspacePath("/some/path")
 
         // Connection errors must return nil so callers don't store false "deleted" state
         XCTAssertNil(result)
     }
 
-    /// Test that RPCError (server-confirmed) produces definitive false
+    /// Test that EngineProtocolError (server-confirmed) produces definitive false
     @MainActor
-    func testRPCErrorProducesDefinitiveFalse() async throws {
-        let mockRPC = MockRPCClient()
-        mockRPC.listDirectoryError = RPCError(code: "ENOENT", message: "no such file or directory", details: nil)
+    func testengineProtocolErrorProducesDefinitiveFalse() async throws {
+        let mockEngine = MockEngineClient()
+        mockEngine.listDirectoryError = EngineProtocolError(code: "ENOENT", message: "no such file or directory", details: nil)
 
-        let result = await mockRPC.validateWorkspacePath("/deleted/path")
+        let result = await mockEngine.validateWorkspacePath("/deleted/path")
 
-        // RPCError = server processed request → confirmed deleted
+        // EngineProtocolError = server processed request → confirmed deleted
         XCTAssertEqual(result, false)
     }
 

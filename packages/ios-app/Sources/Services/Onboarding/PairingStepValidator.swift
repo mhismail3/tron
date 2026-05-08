@@ -6,7 +6,7 @@ import Foundation
 ///   1. Validate + trim the four form inputs (host / port / token / label).
 ///   2. Produce a `PairingURLParser.PairingPayload` on success that the View
 ///      hands back to `DependencyContainer` to install as a paired server + token.
-///   3. Classify thrown errors from the post-validation `system.ping`
+///   3. Classify thrown errors from the post-validation `system::ping`
 ///      reachability probe into user-facing categories.
 ///
 /// **Why a dedicated type**: onboarding validation should stay about field
@@ -23,7 +23,7 @@ enum PairingStepValidator {
         /// Server reachable but returned 401 / WebSocket close 4001 — bad
         /// or missing bearer token.
         case unauthorized
-        /// Server replied to `system.ping` with `CLIENT_VERSION_UNSUPPORTED`.
+        /// Server replied to `system::ping` with `CLIENT_VERSION_UNSUPPORTED`.
         case incompatibleServer(String)
         /// Token validated and server reachable, but the Keychain write
         /// failed. Distinct from `.unauthorized` so the user message
@@ -119,7 +119,7 @@ enum PairingStepValidator {
 enum PairingStepConnectError: Error, Equatable {
     /// Server returned 401 / closed WS with code 4001.
     case unauthorized
-    /// Server returned `CLIENT_VERSION_UNSUPPORTED` from `system.ping`.
+    /// Server returned `CLIENT_VERSION_UNSUPPORTED` from `system::ping`.
     case incompatible(serverVersion: String)
     /// Anything else — wraps the underlying network error for classification.
     case network(NSError)

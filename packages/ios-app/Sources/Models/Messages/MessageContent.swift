@@ -71,7 +71,7 @@ enum MessageContent: Equatable {
     ///
     /// - `.clearAll` mode renders an informational banner.
     /// - `.askUser` mode renders a tappable picker that re-activates each
-    ///   skill via `skill.activate` RPC.
+    ///   skill via `skills::activate` engine protocol.
     static func skillsCleared(clearedSkills: [String], mode: SkillsClearedMode) -> MessageContent {
         .systemEvent(.skillsCleared(clearedSkills: clearedSkills, mode: mode))
     }

@@ -891,7 +891,7 @@ mod tests {
     }
 
     /// Empty store: no candidates, no panic, no error. This is how the iOS
-    /// client will call the RPC on a fresh install — it must not special-case.
+    /// client will call the capability on a fresh install — it must not special-case.
     #[tokio::test]
     async fn archive_older_than_on_empty_store_returns_zero() {
         let ctx = make_test_context();

@@ -16,16 +16,22 @@ protocol AgentRepository: AnyObject {
         _ prompt: String,
         images: [ImageAttachment]?,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?
+        reasoningLevel: String?,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws
 
     /// Abort the current agent operation.
-    func abort() async throws
+    func abort(idempotencyKey: EngineIdempotencyKey) async throws
 
     /// Send a tool result for interactive tools.
     /// - Parameters:
     ///   - sessionId: The session ID
     ///   - toolCallId: The tool call ID to respond to
     ///   - result: The result of the user interaction
-    func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws
+    func sendToolResult(
+        sessionId: String,
+        toolCallId: String,
+        result: AskUserQuestionResult,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws
 }

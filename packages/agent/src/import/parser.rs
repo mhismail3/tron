@@ -175,7 +175,7 @@ pub struct ParseWarning {
 ///
 /// `parse_session` keeps the original API by discarding warnings. Callers
 /// that want dry-run visibility (the validator, the `import.previewSession`
-/// RPC) use [`parse_session_detailed`] directly.
+/// engine capability) use [`parse_session_detailed`] directly.
 #[derive(Debug)]
 pub struct ParseOutcome {
     /// Records that parsed successfully.

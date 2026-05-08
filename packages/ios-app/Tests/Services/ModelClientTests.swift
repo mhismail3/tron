@@ -6,31 +6,35 @@ import Foundation
 @Suite("ModelClient Tests")
 struct ModelClientTests {
 
-    @Test("switchModel throws when webSocket is nil")
+    @Test("switchModel throws when engineConnection is nil")
     func switchModelNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = ModelClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.switchModel("test-session", model: "claude-sonnet-4-20250514")
+        await #expect(throws: EngineClientError.self) {
+            _ = try await client.switchModel(
+                "test-session",
+                model: "claude-sonnet-4-20250514",
+                idempotencyKey: .userAction("model.switch.test")
+            )
         }
     }
 
-    @Test("list throws when webSocket is nil")
+    @Test("list throws when engineConnection is nil")
     func listNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = ModelClient(transport: transport)
 
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.list()
         }
     }
 
     @Test("invalidateCache clears cached models")
     func invalidateCache() {
-        let transport = MockRPCTransport()
+        let transport = MockEngineTransport()
         let client = ModelClient(transport: transport)
 
         // After invalidation, next list() should attempt server call (and throw due to no ws)
@@ -42,17 +46,17 @@ struct ModelClientTests {
 
     @Test("list with forceRefresh bypasses cache")
     func listForceRefreshBypassesCache() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
+        let transport = MockEngineTransport()
+        transport.engineConnection = nil
         let client = ModelClient(transport: transport)
 
         // First call: throws because no connection
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.list(forceRefresh: false)
         }
 
         // Force refresh should also throw (not use non-existent cache)
-        await #expect(throws: RPCClientError.self) {
+        await #expect(throws: EngineClientError.self) {
             _ = try await client.list(forceRefresh: true)
         }
     }

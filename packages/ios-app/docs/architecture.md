@@ -32,10 +32,10 @@ Sources/
 │   ├── Events/             # Event types and registry
 │   ├── Features/           # Feature-specific models
 │   ├── Messages/           # Message models
-│   └── RPC/                # RPC types and codables
+│   └── EngineProtocol/     # /engine frame, invocation, and stream codables
 ├── Services/               # Network, state management
 │   ├── CodexApp/           # Codex endpoint store, token store, JSON-RPC transport/client
-│   ├── Network/            # RPC, WebSocket (with Bearer auth), deep links
+│   ├── Network/            # engine protocol, WebSocket (with Bearer auth), deep links
 │   ├── Events/             # Event store, sync
 │   ├── Audio/              # Recording, transcription
 │   ├── Diagnostics/        # Local MetricKit store + redacted feedback bundle builder
@@ -135,7 +135,7 @@ final class SubagentState {
 | `Core/Events/EventDispatchCoordinator.swift` | Routes events to handlers |
 | `Models/UnifiedEventTransformer.swift` | History reconstruction |
 | `ViewModels/Chat/ChatViewModel.swift` | Main chat state |
-| `Services/Network/RPCClient.swift` | WebSocket RPC |
+| `Services/Network/EngineClient.swift` | /engine client protocol, canonical invoke, and stream subscriptions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `Services/CodexApp/CodexJSONRPCTransport.swift` | Direct Codex App Server JSON-RPC transport |
 | `ViewModels/CodexApp/CodexAppViewModel.swift` | Codex mode setup, connection, thread, turn, and approval state |
@@ -157,8 +157,8 @@ Tron-managed codex app-server on the active paired machine
 ```
 
 Codex mode does not use Tron sessions, the Tron agent turn pipeline, or
-`EventRegistry`/`EventStoreManager`. It does use authenticated Tron RPC for
-discovery: `CodexAppModeView` asks `RPCClient.codexAppServer.status()` for the
+`EventRegistry`/`EventStoreManager`. It does use authenticated Tron engine protocol for
+discovery: `CodexAppModeView` asks `engineClient.codexAppServer.status()` for the
 server-owned endpoint, bearer token, lifecycle state, and thread defaults. The
 iOS view model keeps that data in memory only; Codex endpoint configuration and
 the WebSocket bearer token are owned by Tron Server.
@@ -170,7 +170,7 @@ dashboard auto-connects, auto-loads `thread/list`, and keeps polling managed
 server status while disconnected so a restarted Codex child recovers without
 manual refresh. Foreground transitions in Codex mode also recover the dedicated
 Codex WebSocket: the view model disconnects the stale direct socket, refreshes
-managed status through Tron RPC, reconnects, reloads `thread/list`, and resumes
+managed status through Tron engine protocol, reconnects, reloads `thread/list`, and resumes
 the selected thread without replaying any turn. Detail views render text
 messages and Codex tool items as one chronological transcript, show the newest
 resumed history window first, keep older decoded entries outside the SwiftUI
@@ -184,7 +184,7 @@ Settings sheet instead of an in-dashboard settings subpage.
 ```
 WebSocket message
     ↓
-RPCClient.eventPublisherV2
+engineClient.eventPublisherV2
     ↓
 EventRegistry.parse() → EventPlugin → EventResult
     ↓
@@ -199,7 +199,7 @@ UI updates via @Observable
 
 ```
 SessionClient.reconstruct(sessionId, limit, beforeSequence)
-    ↓  (calls session.reconstruct RPC)
+    ↓  (calls session::reconstruct engine protocol)
 SessionReconstructResult (events, isRunning, hasMoreEvents, oldestSequence)
     ↓
 UnifiedEventTransformer.reconstructSessionState(from: events)
@@ -254,7 +254,7 @@ All services injected via SwiftUI environment:
 
 // In views
 @Environment(\.dependencies) var dependencies
-dependencies.rpcClient
+dependencies.engineClient
 dependencies.eventStoreManager
 ```
 
@@ -263,37 +263,37 @@ dependencies.eventStoreManager
 | Type | Recreated On |
 |------|--------------|
 | Persistent | Never (eventDatabase, pushNotificationService) |
-| Connection-based | Server change (rpcClient, skillStore) |
+| Connection-based | Server change (engineClient, skillStore) |
 | Codex mode | Active paired server change; foreground recovery resets the direct Codex WebSocket only |
 
-Foreground/background handling for the primary Tron RPC socket is owned by
+Foreground/background handling for the primary Tron engine connection is owned by
 `TronMobileApp` and the network services rather than by session views. SwiftUI
 `scenePhase` changes call `DependencyContainer.setBackgroundState(_:)`, which
 pauses WebSocket heartbeats while inactive and resets paused reconnect attempts
 to `.disconnected` so the next foreground transition can kick a fresh retry. On
 foreground return, the app verifies any apparently connected socket with a
-bounded URLSession WebSocket ping before issuing notification or session-list RPC
-refreshes, and manually retries through the same path as the status pill when
+bounded URLSession WebSocket ping before issuing notification or session-list
+engine refreshes, and manually retries through the same path as the status pill when
 the connection state machine says retrying is appropriate. Codex mode owns a
 small mode-scoped foreground hook because its Codex WebSocket bypasses
-`WebSocketService`; that hook refreshes only the direct Codex transport and does
+`EngineConnection`; that hook refreshes only the direct Codex transport and does
 not mutate Tron session state. Normal automatic recovery uses one short
 two-second WebSocket-open probe; if that probe cannot connect, the transport
 parks in the user-retryable failed/not-connected state instead of cycling
 through repeated reconnect windows. Deploy-aware reconnect remains more patient
 because `server.restarting` is an explicit signal that the Mac is expected to
-come back. New WebSocket tasks also stay in
+come back. New engine WebSocket tasks also stay in
 `.connecting` until URLSession reports that the WebSocket upgrade opened, so a
 sleeping Mac cannot be reported as connected just because a task was resumed.
 Foreground ping failures and ping timeouts transition the stale socket out of
 `.connected` so the status pill and settings sheets immediately render the
-reconnecting or unavailable state instead of waiting on server-backed RPC
+reconnecting or unavailable state instead of waiting on server-backed engine protocol
 timeouts. While foregrounded, the WebSocket heartbeat pings every five seconds
 with the same bounded verification timeout, and URLSession's WebSocket close
 delegate feeds remote closes into the reconnect state machine. Failed WebSocket
 upgrade completions also resume the open wait immediately, leaving the 10-second
 open timeout as a fallback instead of the primary failure signal. If a failed
-open leaves an `RPCClient` wrapper with a disconnected transport, the next
+open leaves an `engineClient` wrapper with a disconnected transport, the next
 `connect()` discards that stale transport instead of treating it as an active
 connection.
 `ConnectionToastPolicy` bridges app-level connection state into the global
@@ -324,7 +324,7 @@ visible.
 | Type | Location |
 |------|----------|
 | Event plugin | `Core/Events/Plugins/<Category>/` |
-| RPC client | `Services/Network/` |
+| engine client | `Services/Network/` |
 | State object | `ViewModels/State/` |
 | Coordinator | `ViewModels/Handlers/` |
 | Tool chip+sheet | `Views/Tools/<ToolName>/` |

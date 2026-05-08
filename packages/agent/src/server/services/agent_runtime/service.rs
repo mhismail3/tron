@@ -977,7 +977,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     // and disabled-interval cases are filtered inside `maybe_fire`, so the
     // gate here only covers interrupt/error (retentions of half-finished runs
     // would summarize noise) and interactive-tool pauses (`ToolStop` — the
-    // turn is waiting for user input, not concluded). Spawned so the RPC
+    // turn is waiting for user input, not concluded). Spawned so the engine invocation
     // response returns immediately; the summarizer itself is async inside
     // `trigger_retain`.
     if result.error.is_none() && !result.interrupted && retain_eligible(&result.stop_reason) {
@@ -1182,7 +1182,7 @@ pub(crate) fn drain_prompt_queue(
     }
 
     // Broadcast the user message so iOS can render the bubble in real-time.
-    // In the normal flow, iOS adds the user bubble locally before the RPC.
+    // In the normal flow, iOS adds the user bubble locally before the engine invocation.
     // During auto-drain, the server owns the prompt — this event is how iOS learns about it.
     let _ = orchestrator
         .broadcast()

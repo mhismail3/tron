@@ -8,7 +8,7 @@ struct SettingsView: View {
     @AppStorage("confirmArchive") private var confirmArchive = true
     @AppStorage("autoMarkNotificationsRead") private var autoMarkRead = true
 
-    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var engineClient: EngineClient { dependencies.engineClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     private var defaultModelValue: String { dependencies.defaultModel }
 
@@ -45,13 +45,13 @@ struct SettingsView: View {
 
     private var serverSettingsReady: Bool {
         dependencies.pairedServerStore.activeServer != nil
-            && rpcClient.connectionState.isConnected
+            && engineClient.connectionState.isConnected
             && settingsState.isLoaded
     }
 
     private var activeServerUnavailable: Bool {
         dependencies.pairedServerStore.activeServer != nil
-            && !rpcClient.connectionState.isConnected
+            && !engineClient.connectionState.isConnected
     }
 
     private var showsServerUnavailableFallback: Bool {
@@ -151,7 +151,7 @@ struct SettingsView: View {
                 settingsState.clearServerSnapshot()
                 Task { await loadServerSettingsIfAvailable() }
             }
-            .onChange(of: rpcClient.connectionState) { oldState, newState in
+            .onChange(of: engineClient.connectionState) { oldState, newState in
                 guard hasPairedServers else { return }
                 if newState.isConnected {
                     Task { await loadServerSettingsIfAvailable() }
@@ -603,14 +603,14 @@ struct SettingsView: View {
             settingsState.clearServerSnapshot()
             return
         }
-        let client = rpcClient
+        let client = engineClient
         guard client.connectionState.isConnected else {
             settingsState.clearServerSnapshot()
             return
         }
         let isAlive = await client.verifyConnection()
         guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
-              dependencies.rpcClient === client else {
+              dependencies.engineClient === client else {
             return
         }
         guard isAlive else {
@@ -620,7 +620,7 @@ struct SettingsView: View {
         }
         await settingsState.reload(using: client) {
             dependencies.pairedServerStore.activeServer?.id == activeServer.id
-                && dependencies.rpcClient === client
+                && dependencies.engineClient === client
         }
     }
 
@@ -633,16 +633,16 @@ struct SettingsView: View {
         autoMarkRead = true
         guard serverSettingsReady else { return }
         let activeServerId = dependencies.pairedServerStore.activeServer?.id
-        let client = rpcClient
+        let client = engineClient
         Task {
             do {
                 try await settingsState.resetToDefaults(using: client) {
                     dependencies.pairedServerStore.activeServer?.id == activeServerId
-                        && dependencies.rpcClient === client
+                        && dependencies.engineClient === client
                 }
             } catch {
                 if dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                   dependencies.rpcClient === client {
+                   dependencies.engineClient === client {
                     settingsState.loadError = "Failed to reset: \(error.localizedDescription)"
                 }
             }
@@ -664,14 +664,16 @@ struct SettingsView: View {
         }
 
         isClearingPromptHistory = true
-        let client = rpcClient
+        let client = engineClient
         let activeServerId = dependencies.pairedServerStore.activeServer?.id
         Task {
             do {
-                let result = try await client.promptLibrary.clearHistory()
+                let result = try await client.promptLibrary.clearHistory(
+                    idempotencyKey: .userAction("promptLibrary.historyClear")
+                )
                 await MainActor.run {
                     guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.rpcClient === client
+                          dependencies.engineClient === client
                     else {
                         isClearingPromptHistory = false
                         return
@@ -682,7 +684,7 @@ struct SettingsView: View {
             } catch {
                 await MainActor.run {
                     guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.rpcClient === client
+                          dependencies.engineClient === client
                     else {
                         isClearingPromptHistory = false
                         return
@@ -739,15 +741,18 @@ struct SettingsView: View {
 
     private func updateServerSetting(_ build: () -> ServerSettingsUpdate) {
         let update = build()
-        let client = rpcClient
+        let client = engineClient
         let activeServerId = dependencies.pairedServerStore.activeServer?.id
         Task {
             do {
-                try await client.settings.update(update)
+                try await client.settings.update(
+                    update,
+                    idempotencyKey: .userAction("settings.update")
+                )
                 let fresh = try await client.settings.get()
                 await MainActor.run {
                     guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.rpcClient === client
+                          dependencies.engineClient === client
                     else { return }
                     settingsState.applyServerSettings(fresh)
                     settingsState.isLoaded = true
@@ -756,7 +761,7 @@ struct SettingsView: View {
             } catch {
                 await MainActor.run {
                     guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.rpcClient === client
+                          dependencies.engineClient === client
                     else { return }
                     settingsState.rollbackToLastLoadedSettings(
                         message: "Could not save server setting: \(error.localizedDescription)"

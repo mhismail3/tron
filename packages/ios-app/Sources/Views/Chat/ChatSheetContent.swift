@@ -7,7 +7,7 @@ import SwiftUI
 struct ChatSheetContent: View {
     let sheet: ChatSheet
     let viewModel: ChatViewModel
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let skillStore: SkillStore?
     let workspaceDeleted: Bool
@@ -38,7 +38,7 @@ struct ChatSheetContent: View {
 
         case .agentControl:
             AgentControlView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 skillStore: skillStore,
                 readOnly: sheetReadOnly,
@@ -128,9 +128,9 @@ struct ChatSheetContent: View {
         case "edit":
             EditToolDetailSheet(data: liveData)
         case "bash":
-            BashToolDetailSheet(data: liveData, rpcClient: rpcClient, sessionId: sessionId)
+            BashToolDetailSheet(data: liveData, engineClient: engineClient, sessionId: sessionId)
         case "wait":
-            WaitToolDetailSheet(data: liveData, viewModel: viewModel, rpcClient: rpcClient, sessionId: sessionId)
+            WaitToolDetailSheet(data: liveData, viewModel: viewModel, engineClient: engineClient, sessionId: sessionId)
         case "glob", "find":
             GlobToolDetailSheet(data: liveData)
         case "search":
@@ -206,9 +206,9 @@ struct ChatSheetContent: View {
                 data: data,
                 subagentState: viewModel.subagentState,
                 eventStoreManager: eventStoreManager,
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 onSendResults: { _ in
-                    viewModel.deliverSubagentResults()
+                    viewModel.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults"))
                     sheetCoordinator?.dismiss()
                 }
             )
@@ -225,13 +225,13 @@ struct ChatSheetContent: View {
             pendingSubagents: pending,
             subagentState: viewModel.subagentState,
             eventStoreManager: eventStoreManager,
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             onSendAll: {
-                viewModel.deliverSubagentResults()
+                viewModel.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults"))
                 sheetCoordinator?.dismiss()
             },
             onSendIndividual: { _ in
-                viewModel.deliverSubagentResults()
+                viewModel.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults"))
                 sheetCoordinator?.dismiss()
             }
         )

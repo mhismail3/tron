@@ -6,9 +6,9 @@ import SwiftUI
 extension Notification.Name {
     /// Posted when the active paired server changes.
     static let serverSettingsDidChange = Notification.Name("tron.serverSettingsDidChange")
-    /// Posted when auth.json changes on the server (via RPC or WebSocket event)
+    /// Posted when auth.json changes on the server.
     static let authDidUpdate = Notification.Name("tron.authDidUpdate")
-    /// Posted when MCP server status changes (via WebSocket mcp.status_changed event)
+    /// Posted when MCP server status changes.
     static let mcpStatusChanged = Notification.Name("tron.mcpStatusChanged")
 }
 
@@ -72,27 +72,27 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Recreatable Services (When Server Changes)
 
-    /// RPC client for server communication - recreated when active server changes
-    private(set) var rpcClient: RPCClient
+    /// engine client for server communication - recreated when active server changes
+    private(set) var engineClient: EngineClient
 
-    /// Centralized connection policy layer (replaces scattered `rpcClient.connectionState`
-    /// observers). Recreated when the active server changes because `rpcClient` is.
+    /// Centralized connection policy layer (replaces scattered `engineClient.connectionState`
+    /// observers). Recreated when the active server changes because `engineClient` is.
     private(set) var connectionManager: ConnectionManager
 
     /// Single read-only / interaction-allowed policy for all UI surfaces. Recreated with
     /// `connectionManager`.
     private(set) var interactionPolicy: InteractionPolicy
 
-    /// Skill store - updated when RPC client changes
+    /// Skill store - updated when engine client changes
     private(set) var skillStore: SkillStore
 
-    /// Event store manager - updated when RPC client changes
+    /// Event store manager - updated when engine client changes
     private(set) var eventStoreManager: EventStoreManager
 
     /// Notification inbox store - refreshed from server
     private(set) var notificationStore: NotificationStore
 
-    /// Dedicated direct-to-Codex mode state. It uses `RPCClient` only to
+    /// Dedicated direct-to-Codex mode state. It uses `EngineClient` only to
     /// discover the server-owned endpoint, then keeps Codex threads separate
     /// from Tron sessions and event streams.
     private(set) var codexAppViewModel: CodexAppViewModel
@@ -176,17 +176,17 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             Self.buildServerURL(host: $0.host, port: String($0.port))
         } ?? Self.placeholderServerURL
 
-        // Initialize RPC client. Bearer resolver closes over a copy of the
+        // Initialize engine client. Bearer resolver closes over a copy of the
         // (struct-valued) PairedServerTokenStore so there's no retain cycle on
         // the container, and reads the active paired server id from
         // UserDefaults at upgrade time so the resolver tracks server-switching
         // without re-instantiation.
         let tokenStore = pairedServerTokenStore
-        let client = RPCClient(
+        let client = EngineClient(
             serverURL: url,
             bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
         )
-        rpcClient = client
+        engineClient = client
 
         // Initialize centralized connection policy layer
         let manager = ConnectionManager(provider: client)
@@ -198,10 +198,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         skillStore = store
 
         // Initialize event store manager
-        eventStoreManager = EventStoreManager(eventDB: db, rpcClient: client)
+        eventStoreManager = EventStoreManager(eventDB: db, engineClient: client)
 
         // Initialize notification store
-        notificationStore = NotificationStore(rpcClient: client)
+        notificationStore = NotificationStore(engineClient: client)
 
         // Initialize server-owned Codex App Server mode.
         codexAppViewModel = CodexAppViewModel()
@@ -211,8 +211,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
         agentRepository = DefaultAgentRepository(agentClient: client.agent)
 
-        // Configure skill store with RPC client (after all properties initialized)
-        store.configure(rpcClient: client)
+        // Configure skill store with engine client (after all properties initialized)
+        store.configure(engineClient: client)
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
@@ -301,29 +301,29 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Connect to the server
     func connect() async {
         guard pairedServerStore.activeServer != nil else { return }
-        await rpcClient.connect()
+        await engineClient.connect()
     }
 
     /// Disconnect from the server
     func disconnect() async {
-        await rpcClient.disconnect()
+        await engineClient.disconnect()
     }
 
     /// Set background state for battery optimization
     func setBackgroundState(_ inBackground: Bool) {
-        rpcClient.setBackgroundState(inBackground)
+        engineClient.setBackgroundState(inBackground)
     }
 
     /// Verify connection is alive
     func verifyConnection() async -> Bool {
         guard pairedServerStore.activeServer != nil else { return false }
-        return await rpcClient.verifyConnection()
+        return await engineClient.verifyConnection()
     }
 
     /// Manual retry triggered from UI
     func manualRetry() async {
         guard pairedServerStore.activeServer != nil else { return }
-        await rpcClient.manualRetry()
+        await engineClient.manualRetry()
     }
 
     // MARK: - Settings Reload
@@ -334,16 +334,16 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// the previously selected Mac.
     func reloadServerSettings() async {
         guard let activeServer = pairedServerStore.activeServer else { return }
-        let client = rpcClient
+        let client = engineClient
         do {
             let settings = try await client.settings.get()
             guard pairedServerStore.activeServer?.id == activeServer.id,
-                  rpcClient === client
+                  engineClient === client
             else { return }
             applyServerSettingsSnapshot(settings, for: activeServer.id)
         } catch {
             guard pairedServerStore.activeServer?.id == activeServer.id,
-                  rpcClient === client
+                  engineClient === client
             else { return }
             pairedServerStore.updateMetadata(for: activeServer.id) { server in
                 server.lastKnownStatus = "Offline"
@@ -367,11 +367,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     // MARK: - Private Helpers
 
     private static var placeholderServerURL: URL {
-        URL(string: "ws://paired-server-required.invalid:1/ws")!
+        URL(string: "ws://paired-server-required.invalid:1/engine")!
     }
 
     private static func buildServerURL(host: String, port: String) -> URL {
-        let urlString = "ws://\(host):\(port)/ws"
+        let urlString = "ws://\(host):\(port)/engine"
         guard let url = URL(string: urlString) else {
             TronLogger.shared.error("Invalid server URL '\(urlString)', using inert placeholder", category: .general)
             return Self.placeholderServerURL
@@ -380,7 +380,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     }
 
     private func rebuildServerBoundServices() {
-        let oldClient = rpcClient
+        let oldClient = engineClient
         Task {
             await oldClient.disconnect()
         }
@@ -389,20 +389,20 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             Self.buildServerURL(host: $0.host, port: String($0.port))
         } ?? Self.placeholderServerURL
         let tokenStore = pairedServerTokenStore
-        let newClient = RPCClient(
+        let newClient = EngineClient(
             serverURL: url,
             bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
         )
-        rpcClient = newClient
+        engineClient = newClient
 
         let newManager = ConnectionManager(provider: newClient)
         connectionManager = newManager
         interactionPolicy = InteractionPolicy(connection: newManager)
 
-        skillStore.configure(rpcClient: newClient)
-        eventStoreManager.updateRPCClient(newClient)
+        skillStore.configure(engineClient: newClient)
+        eventStoreManager.updateEngineClient(newClient)
         eventStoreManager.attachConnectionManager(newManager)
-        notificationStore = NotificationStore(rpcClient: newClient)
+        notificationStore = NotificationStore(engineClient: newClient)
         modelRepository = DefaultModelRepository(modelClient: newClient.model)
         sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
         agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
@@ -423,7 +423,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// looks up the per-server token in Keychain.
     ///
     /// Returns `nil` when no active paired server has a token. The server
-    /// returns 401, `WebSocketService` parks in `.unauthorized`, and the user
+    /// returns 401, `EngineConnection` parks in `.unauthorized`, and the user
     /// re-pairs via the connection status CTA.
     @MainActor
     private static func resolveBearerToken(tokenStore: PairedServerTokenStore) -> String? {

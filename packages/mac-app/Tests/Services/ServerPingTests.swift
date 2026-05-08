@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// Tests for the JSON-RPC response decoder behind `ServerPing`. The
+/// Tests for the engine protocol response decoder behind `ServerPing`. The
 /// network ping itself is not unit-tested (URLSession mocking is
 /// expensive); we cover the decode path which is where every
 /// JSON-shape edge lives.
@@ -11,7 +11,7 @@ struct ServerPingDecodeTests {
     @Test("happy path: full result object")
     func happyDecode() throws {
         let body = """
-        {"jsonrpc":"2.0","id":1,"result":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}}}
         """
         let info = try #require(ServerPing.decode(data: Data(body.utf8)))
         #expect(info.version == "0.5.0")
@@ -23,7 +23,7 @@ struct ServerPingDecodeTests {
     @Test("missing optional fields fall back to defaults")
     func missingOptionalFields() throws {
         let body = """
-        {"jsonrpc":"2.0","id":1,"result":{}}
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{}}}}
         """
         let info = try #require(ServerPing.decode(data: Data(body.utf8)))
         #expect(info.version == "")
@@ -35,7 +35,7 @@ struct ServerPingDecodeTests {
     @Test("error response (no result) returns nil")
     func errorResponseReturnsNil() throws {
         let body = """
-        {"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}
+        {"type":"response","id":"mac-system-ping","ok":false,"error":{"code":"CAPABILITY_NOT_FOUND","message":"capability not found"}}
         """
         #expect(ServerPing.decode(data: Data(body.utf8)) == nil)
     }
@@ -49,7 +49,7 @@ struct ServerPingDecodeTests {
     @Test("paired defaults to false when field is missing")
     func pairedDefaults() throws {
         let body = """
-        {"result":{"serverVersion":"0.5.0","port":1234}}
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":1234}}}}
         """
         let info = try #require(ServerPing.decode(data: Data(body.utf8)))
         #expect(info.paired == false)
@@ -58,7 +58,7 @@ struct ServerPingDecodeTests {
     @Test("response frame decodes string-id server response")
     func responseFrameDecodesStringID() {
         let body = """
-        {"id":"mac-system-ping","success":true,"result":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}}}
         """
         let expected = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
@@ -72,10 +72,10 @@ struct ServerPingDecodeTests {
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .ignore)
     }
 
-    @Test("matching RPC error frame is not mistaken for a heartbeat")
-    func rpcErrorFrameIsError() {
+    @Test("matching engine protocol error frame is not mistaken for a heartbeat")
+    func engineErrorFrameIsError() {
         let body = """
-        {"id":"mac-system-ping","success":false,"error":{"code":"INVALID_PARAMS","message":"invalid id"}}
+        {"type":"response","id":"mac-system-ping","ok":false,"error":{"code":"INVALID_PARAMS","message":"invalid id"}}
         """
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .error)
     }

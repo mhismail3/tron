@@ -2,14 +2,14 @@ import Foundation
 
 /// Pure-value planner that maps a parsed `PairingURLParser.PairingPayload`
 /// to the side effects the onboarding Pairing step must perform on commit.
-/// Keeps the decision testable without SwiftUI, dependency container, RPC, or
+/// Keeps the decision testable without SwiftUI, dependency container, engine protocol, or
 /// Keychain.
 ///
 /// The caller is responsible for *applying* the plan:
 ///   1. Write `plan.token` to `PairedServerTokenStore` keyed on `plan.activeServer.id`.
 ///   2. Persist `plan.updatedServers` to `PairedServerStore` with
 ///      `plan.activeServer` selected.
-///   3. Rebuild/reconnect the RPC client so the new bearer is picked up.
+///   3. Rebuild/reconnect the engine client so the new bearer is picked up.
 ///
 /// **Existing vs add**: if `existing` already contains a server matching
 /// `(host, port)` the existing server is preserved wholesale (id + label).

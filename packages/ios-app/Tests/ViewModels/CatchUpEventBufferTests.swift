@@ -12,9 +12,9 @@ final class CatchUpEventBufferTests: XCTestCase {
     private var viewModel: ChatViewModel!
 
     override func setUp() async throws {
-        let rpcClient = RPCClient(serverURL: URL(string: "ws://localhost:8080/ws")!)
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
         viewModel = ChatViewModel(
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             sessionId: "test-buffer-\(UUID().uuidString)",
             eventStoreManager: nil
         )

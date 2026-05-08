@@ -18,7 +18,7 @@ enum BranchPickerSource {
 /// sheet is instant — no "Loading branches…" flicker on every tap.
 @available(iOS 26.0, *)
 struct BranchPickerField: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let accent: Color
     let placeholder: String
@@ -93,11 +93,11 @@ struct BranchPickerField: View {
         do {
             switch source {
             case .local:
-                let result = try await rpcClient.git.listLocalBranches(sessionId: sessionId)
+                let result = try await engineClient.git.listLocalBranches(sessionId: sessionId)
                 branches = result.branches
                 errorMessage = nil
             case .remote(let remote):
-                let result = try await rpcClient.git.listRemoteBranches(
+                let result = try await engineClient.git.listRemoteBranches(
                     sessionId: sessionId,
                     remote: remote
                 )

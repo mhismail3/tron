@@ -1,12 +1,12 @@
 import Foundation
 
-/// Client for job.* RPC methods.
+/// Client for job engine capabilities.
 /// Unified interface for managing background processes and subagents.
-final class JobClient: RPCDomainClient {
+final class JobClient: EngineDomainClient {
 
     /// Promote a blocking job to background.
-    func background(jobId: String, sessionId: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func background(jobId: String, sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String
@@ -18,15 +18,16 @@ final class JobClient: RPCDomainClient {
             let backgrounded: Bool
         }
 
-        let _: Result = try await ws.send(
-            method: "job.background",
-            params: Params(jobId: jobId, sessionId: sessionId)
+        let _: Result = try await invokeWrite(
+            "job::background",
+            Params(jobId: jobId, sessionId: sessionId),
+            idempotencyKey: idempotencyKey
         )
     }
 
     /// Cancel a running job.
-    func cancel(jobId: String, sessionId: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func cancel(jobId: String, sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String
@@ -38,15 +39,16 @@ final class JobClient: RPCDomainClient {
             let cancelled: Bool
         }
 
-        let _: Result = try await ws.send(
-            method: "job.cancel",
-            params: Params(jobId: jobId, sessionId: sessionId)
+        let _: Result = try await invokeWrite(
+            "job::cancel",
+            Params(jobId: jobId, sessionId: sessionId),
+            idempotencyKey: idempotencyKey
         )
     }
 
     /// Subscribe to real-time output streaming for a job.
-    func subscribe(jobId: String, sessionId: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func subscribe(jobId: String, sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String
@@ -58,15 +60,16 @@ final class JobClient: RPCDomainClient {
             let jobId: String
         }
 
-        let _: Result = try await ws.send(
-            method: "job.subscribe",
-            params: Params(jobId: jobId, sessionId: sessionId)
+        let _: Result = try await invokeWrite(
+            "job::subscribe",
+            Params(jobId: jobId, sessionId: sessionId),
+            idempotencyKey: idempotencyKey
         )
     }
 
     /// Stop streaming output for a job.
-    func unsubscribe(jobId: String) async throws {
-        let ws = try requireTransport().requireConnection()
+    func unsubscribe(jobId: String, idempotencyKey: EngineIdempotencyKey) async throws {
+        _ = try requireTransport().requireConnection()
 
         struct Params: Codable {
             let jobId: String
@@ -77,9 +80,10 @@ final class JobClient: RPCDomainClient {
             let unsubscribed: Bool
         }
 
-        let _: Result = try await ws.send(
-            method: "job.unsubscribe",
-            params: Params(jobId: jobId)
+        let _: Result = try await invokeWrite(
+            "job::unsubscribe",
+            Params(jobId: jobId),
+            idempotencyKey: idempotencyKey
         )
     }
 }

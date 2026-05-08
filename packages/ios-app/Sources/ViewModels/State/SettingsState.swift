@@ -2,7 +2,7 @@ import Foundation
 
 /// Observable state for server-authoritative settings.
 ///
-/// Loads values via RPC on first appearance and sends updates back to the server
+/// Loads values via engine protocol on first appearance and sends updates back to the server
 /// when the user changes a setting. SettingsView retains this object and passes
 /// `@Bindable` projections to section views.
 @Observable
@@ -127,12 +127,12 @@ final class SettingsState {
     // MARK: - Load from Server
 
     func load(
-        using rpcClient: RPCClient,
+        using engineClient: EngineClient,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async {
         guard !isLoaded else { return }
         do {
-            let settings = try await rpcClient.settings.get()
+            let settings = try await engineClient.settings.get()
             guard acceptResult() else { return }
             applyServerSettings(settings)
             isLoaded = true
@@ -143,22 +143,22 @@ final class SettingsState {
     }
 
     func reload(
-        using rpcClient: RPCClient,
+        using engineClient: EngineClient,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async {
         clearServerSnapshot()
-        await load(using: rpcClient, acceptResult: acceptResult)
+        await load(using: engineClient, acceptResult: acceptResult)
         guard acceptResult() else { return }
-        await loadModels(using: rpcClient, acceptResult: acceptResult)
+        await loadModels(using: engineClient, acceptResult: acceptResult)
     }
 
     func loadModels(
-        using rpcClient: RPCClient,
+        using engineClient: EngineClient,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async {
         isLoadingModels = true
         do {
-            let models = try await rpcClient.model.list()
+            let models = try await engineClient.model.list()
             guard acceptResult() else { return }
             availableModels = models
         } catch {
@@ -171,13 +171,15 @@ final class SettingsState {
 
     // MARK: - Reset
 
-    /// Reset settings to server defaults via RPC. The server applies its own defaults
+    /// Reset settings to server defaults through the engine. The server applies its own defaults
     /// and returns the new values — no hardcoded defaults on the client.
     func resetToDefaults(
-        using rpcClient: RPCClient,
+        using engineClient: EngineClient,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async throws {
-        let settings = try await rpcClient.settings.resetToDefaults()
+        let settings = try await engineClient.settings.resetToDefaults(
+            idempotencyKey: .userAction("settings.resetToDefaults")
+        )
         guard acceptResult() else { return }
         applyServerSettings(settings)
     }

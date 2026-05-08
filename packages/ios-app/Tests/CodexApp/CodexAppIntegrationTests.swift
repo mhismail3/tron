@@ -53,11 +53,11 @@ struct CodexAppIntegrationTests {
         let server = server()
         let container = DependencyContainer()
         container.replacePairedServers([server], activeServer: server)
-        let rpcClient = container.rpcClient
+        let engineClient = container.engineClient
 
         container.codexAppViewModel.configure(activeServer: server)
 
-        #expect(container.rpcClient === rpcClient)
+        #expect(container.engineClient === engineClient)
     }
 
     @Test("forgetting a paired server clears Codex mode without local Codex secrets")

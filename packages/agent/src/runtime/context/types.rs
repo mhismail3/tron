@@ -721,7 +721,7 @@ mod tests {
     }
 
     /// Verify that CompactionConfig and CompactionTriggerConfig use the same
-    /// default threshold, preventing the RPC `shouldCompact` query from
+    /// default threshold, preventing the `context::should_compact` capability query from
     /// diverging from the auto-compaction trigger.
     #[test]
     fn threshold_parity_defaults() {

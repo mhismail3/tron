@@ -26,7 +26,7 @@ pub struct SkillDeactivatedPayload {
 ///   skill names. Users can re-activate manually via `@skill-name` mention
 ///   (or the sidebar picker) if desired.
 /// - [`AskUser`](Self::AskUser): interactive picker chips; tapping a chip
-///   calls the `skill.activate` RPC to re-add that skill to the session.
+///   calls the `skills::activate capability to re-add that skill to the session.
 ///
 /// Serializes as camelCase (`"clearAll"` / `"askUser"`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

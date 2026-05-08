@@ -80,7 +80,7 @@ pub(crate) enum RetainSource {
 ///
 /// Exists so the pipeline can be driven from two different call sites without
 /// requiring the full `ServerCapabilityContext`: the manual engine function constructs one
-/// via [`RetainDeps::from_rpc`], while the auto-retain path in
+/// via [`RetainDeps::from_capability_context`], while the auto-retain path in
 /// `agent_prompt_service::execute_prompt_run` builds it directly from the
 /// fields it already holds.
 #[derive(Clone)]
@@ -91,7 +91,7 @@ pub(crate) struct RetainDeps {
 }
 
 impl RetainDeps {
-    pub fn from_rpc(ctx: &ServerCapabilityContext) -> Self {
+    pub fn from_capability_context(ctx: &ServerCapabilityContext) -> Self {
         Self {
             orchestrator: Arc::clone(&ctx.orchestrator),
             event_store: Arc::clone(&ctx.event_store),
@@ -115,7 +115,7 @@ pub(crate) async fn trigger_manual_retain(
     ctx: &ServerCapabilityContext,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
-    let deps = RetainDeps::from_rpc(ctx);
+    let deps = RetainDeps::from_capability_context(ctx);
     trigger_retain(&deps, session_id, RetainSource::Manual).await
 }
 
@@ -1565,7 +1565,7 @@ mod tests {
             .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
             .unwrap();
 
-        let deps = RetainDeps::from_rpc(&ctx);
+        let deps = RetainDeps::from_capability_context(&ctx);
         let result = trigger_retain(&deps, cr.session.id.clone(), RetainSource::Manual)
             .await
             .unwrap();
@@ -1585,7 +1585,7 @@ mod tests {
             .unwrap();
         let session_id = cr.session.id.clone();
 
-        let deps = RetainDeps::from_rpc(&ctx);
+        let deps = RetainDeps::from_capability_context(&ctx);
         let _ = trigger_retain(
             &deps,
             session_id.clone(),
@@ -1624,7 +1624,7 @@ mod tests {
             .try_begin_retain(&session_id)
             .expect("fresh session must be claimable");
 
-        let deps = RetainDeps::from_rpc(&ctx);
+        let deps = RetainDeps::from_capability_context(&ctx);
         let result = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
             .await
             .unwrap();
@@ -1663,7 +1663,7 @@ mod tests {
             .unwrap();
         let session_id = cr.session.id.clone();
 
-        let deps = RetainDeps::from_rpc(&ctx);
+        let deps = RetainDeps::from_capability_context(&ctx);
         let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
             .await
             .unwrap();
@@ -1740,7 +1740,8 @@ mod tests {
         let session_id = cr.session.id.clone();
 
         // Step 1: record the triggered event.
-        emit_auto_retain_triggered(&RetainDeps::from_rpc(&ctx), &session_id, 3).await;
+        emit_auto_retain_triggered(&RetainDeps::from_capability_context(&ctx), &session_id, 3)
+            .await;
 
         // Step 2: record the failed event.
         let broadcast = Arc::clone(ctx.orchestrator.broadcast());
@@ -1790,7 +1791,7 @@ mod tests {
             })
             .unwrap();
 
-        let deps = RetainDeps::from_rpc(&ctx);
+        let deps = RetainDeps::from_capability_context(&ctx);
         let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
             .await
             .unwrap();

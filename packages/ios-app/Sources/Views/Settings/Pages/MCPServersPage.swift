@@ -19,7 +19,7 @@ struct MCPServersPage: View {
     @State private var toolsLoading: String?
     @State private var expandedTool: String?
 
-    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var engineClient: EngineClient { dependencies.engineClient }
 
     /// Display a refresh TTL as seconds, or "Disabled" when 0.
     private var schemaRefreshDisplay: String {
@@ -152,7 +152,7 @@ struct MCPServersPage: View {
     private func loadStatus() async {
         loadError = nil
         do {
-            servers = try await rpcClient.mcp.status()
+            servers = try await engineClient.mcp.status()
         } catch {
             loadError = error.localizedDescription
         }
@@ -176,7 +176,7 @@ struct MCPServersPage: View {
         toolsLoading = serverName
         Task {
             do {
-                let tools = try await rpcClient.mcp.listTools(server: serverName)
+                let tools = try await engineClient.mcp.listTools(server: serverName)
                 toolsByServer[serverName] = tools
             } catch {
                 toolsByServer[serverName] = []
@@ -188,7 +188,10 @@ struct MCPServersPage: View {
     private func addServer(_ params: MCPAddServerParams) async {
         actionInProgress = params.name
         do {
-            let _ = try await rpcClient.mcp.addServer(params)
+            let _ = try await engineClient.mcp.addServer(
+                params,
+                idempotencyKey: .userAction("mcp.addServer")
+            )
             await loadStatus()
         } catch {
             loadError = error.localizedDescription
@@ -200,7 +203,10 @@ struct MCPServersPage: View {
         actionInProgress = name
         Task {
             do {
-                try await rpcClient.mcp.removeServer(name: name)
+                try await engineClient.mcp.removeServer(
+                    name: name,
+                    idempotencyKey: .userAction("mcp.removeServer")
+                )
                 toolsByServer.removeValue(forKey: name)
                 if expandedServer == name { expandedServer = nil }
                 await loadStatus()
@@ -216,10 +222,16 @@ struct MCPServersPage: View {
         Task {
             do {
                 if server.isConnected {
-                    try await rpcClient.mcp.disableServer(name: server.name)
+                    try await engineClient.mcp.disableServer(
+                        name: server.name,
+                        idempotencyKey: .userAction("mcp.disableServer")
+                    )
                     toolsByServer.removeValue(forKey: server.name)
                 } else {
-                    try await rpcClient.mcp.enableServer(name: server.name)
+                    try await engineClient.mcp.enableServer(
+                        name: server.name,
+                        idempotencyKey: .userAction("mcp.enableServer")
+                    )
                 }
                 await loadStatus()
             } catch {
@@ -233,7 +245,10 @@ struct MCPServersPage: View {
         actionInProgress = name
         Task {
             do {
-                let _ = try await rpcClient.mcp.restartServer(name: name)
+                let _ = try await engineClient.mcp.restartServer(
+                    name: name,
+                    idempotencyKey: .userAction("mcp.restartServer")
+                )
                 toolsByServer.removeValue(forKey: name)
                 await loadStatus()
                 if expandedServer == name {

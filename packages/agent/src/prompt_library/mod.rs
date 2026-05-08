@@ -1,6 +1,6 @@
 //! Prompt Library — history and snippets persistence.
 //!
-//! Provides two server-persisted datasets exposed via RPC:
+//! Provides two server-persisted datasets exposed via engine capabilities:
 //! - **History** (`prompt_history` table): auto-captured log of every
 //!   interactive user prompt, deduplicated by normalized-text hash. Each
 //!   row tracks `first_used_at`, `last_used_at`, and `use_count`.
@@ -12,7 +12,7 @@
 //! | Module      | Purpose                                                   |
 //! |-------------|-----------------------------------------------------------|
 //! | [`normalize`] | Text normalization + SHA-256 hashing for dedup.          |
-//! | [`types`]     | Public data types returned to RPC callers.               |
+//! | [`types`]     | Public data types returned to engine clients.               |
 //! | [`store`]     | SQLite-backed CRUD over the shared event-store pool.     |
 //!
 //! # Invariants

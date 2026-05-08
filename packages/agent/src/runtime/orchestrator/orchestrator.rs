@@ -151,7 +151,7 @@ pub struct Orchestrator {
     /// so background tasks can hold a reference independent of the orchestrator.
     retain_in_flight: Arc<DashMap<String, ()>>,
     /// Per-tool cancellation tokens for `agent.abortTool`. Populated by the
-    /// tool executor on each call, consumed (cancelled) by the RPC layer.
+    /// tool executor on each call, consumed (cancelled) by the engine transport.
     tool_abort_registry: Arc<ToolAbortRegistry>,
 }
 
@@ -319,7 +319,7 @@ impl Orchestrator {
 
     /// Register a compaction handler for a session.
     ///
-    /// Called when an agent starts running so that RPC compaction
+    /// Called when an agent starts running so that engine compaction
     /// requests can route through the handler (with concurrency guard
     /// and PreCompact hooks).
     pub fn register_compaction_handler(&self, session_id: &str, handler: Arc<CompactionHandler>) {

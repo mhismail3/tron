@@ -23,20 +23,20 @@ pub fn render(handle: &PrometheusHandle) -> String {
 
 // Metric name constants to avoid typos across crates.
 
-/// RPC requests total (counter, labels: method).
-pub const RPC_REQUESTS_TOTAL: &str = "rpc_requests_total";
-/// RPC errors total (counter, labels: method, `error_type`).
-pub const RPC_ERRORS_TOTAL: &str = "rpc_errors_total";
-/// RPC request duration seconds (histogram, labels: method).
-pub const RPC_REQUEST_DURATION_SECONDS: &str = "rpc_request_duration_seconds";
-/// WebSocket connections opened total (counter).
-pub const WS_CONNECTIONS_TOTAL: &str = "ws_connections_total";
-/// WebSocket disconnections total (counter).
-pub const WS_DISCONNECTIONS_TOTAL: &str = "ws_disconnections_total";
-/// Active WebSocket connections (gauge).
-pub const WS_CONNECTIONS_ACTIVE: &str = "ws_connections_active";
-/// Broadcast drops total (counter).
-pub const WS_BROADCAST_DROPS_TOTAL: &str = "ws_broadcast_drops_total";
+/// Engine client protocol requests total (counter, labels: message type).
+pub const ENGINE_REQUESTS_TOTAL: &str = "engine_requests_total";
+/// Engine client protocol errors total (counter, labels: message type, `error_type`).
+pub const ENGINE_ERRORS_TOTAL: &str = "engine_errors_total";
+/// Engine client protocol request duration seconds (histogram, labels: message type).
+pub const ENGINE_REQUEST_DURATION_SECONDS: &str = "engine_request_duration_seconds";
+/// Engine client WebSocket connections opened total (counter).
+pub const ENGINE_WS_CONNECTIONS_TOTAL: &str = "engine_ws_connections_total";
+/// Engine client WebSocket disconnections total (counter).
+pub const ENGINE_WS_DISCONNECTIONS_TOTAL: &str = "engine_ws_disconnections_total";
+/// Active engine client WebSocket connections (gauge).
+pub const ENGINE_WS_CONNECTIONS_ACTIVE: &str = "engine_ws_connections_active";
+/// Engine client stream delivery drops total (counter).
+pub const ENGINE_WS_STREAM_DROPS_TOTAL: &str = "engine_ws_stream_drops_total";
 /// Active agent runs (gauge).
 pub const AGENT_RUNS_ACTIVE: &str = "agent_runs_active";
 /// Agent turns total (counter, labels: model).
@@ -92,13 +92,13 @@ mod tests {
     #[test]
     fn metric_constants_are_snake_case() {
         let names = [
-            RPC_REQUESTS_TOTAL,
-            RPC_ERRORS_TOTAL,
-            RPC_REQUEST_DURATION_SECONDS,
-            WS_CONNECTIONS_TOTAL,
-            WS_DISCONNECTIONS_TOTAL,
-            WS_CONNECTIONS_ACTIVE,
-            WS_BROADCAST_DROPS_TOTAL,
+            ENGINE_REQUESTS_TOTAL,
+            ENGINE_ERRORS_TOTAL,
+            ENGINE_REQUEST_DURATION_SECONDS,
+            ENGINE_WS_CONNECTIONS_TOTAL,
+            ENGINE_WS_DISCONNECTIONS_TOTAL,
+            ENGINE_WS_CONNECTIONS_ACTIVE,
+            ENGINE_WS_STREAM_DROPS_TOTAL,
             AGENT_RUNS_ACTIVE,
             AGENT_TURNS_TOTAL,
             AGENT_TURN_DURATION_SECONDS,

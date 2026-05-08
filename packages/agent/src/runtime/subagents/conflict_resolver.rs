@@ -1,6 +1,6 @@
 //! Conflict resolver subagent — drives git merge conflict resolution.
 //!
-//! Spawned by the `worktree.resolveConflictsWithSubagent` RPC once the
+//! Spawned by the `worktree::resolve_conflicts_with_subagent capability once the
 //! user has tapped "Let Resolver Run" on the iOS conflict sub-sheet. The
 //! subagent runs inside the same worktree as the parent session with a
 //! restricted tool allowlist (`Read`, `Edit`, `Write`, `Bash`) and drives
@@ -100,7 +100,7 @@ pub struct SpawnOutcome {
 ///
 /// Looks up the session's worktree + pending merge state via `coord`,
 /// builds the live system prompt, and hands off to the `SubagentManager`
-/// as a non-blocking [`SpawnType::Subsession`] (so the caller — an RPC
+/// as a non-blocking [`SpawnType::Subsession`] (so the caller — an engine invocation
 /// handler — can return immediately while the subagent works).
 ///
 /// Auto-abort on failure is wired via a post-completion watcher task

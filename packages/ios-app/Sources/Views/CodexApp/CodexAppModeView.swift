@@ -69,7 +69,7 @@ struct CodexAppModeView: View {
     }
 
     private func configureViewModel() {
-        let client = dependencies.rpcClient
+        let client = dependencies.engineClient
         viewModel.configure(
             activeServer: activeServer,
             serverStatusProvider: { try await client.codexAppServer.status() }

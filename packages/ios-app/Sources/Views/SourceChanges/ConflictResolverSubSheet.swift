@@ -13,7 +13,7 @@ import SwiftUI
 /// infrequent, so doesn't earn the toolbar slot.
 @available(iOS 26.0, *)
 struct ConflictResolverSubSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     /// Shared git workflow state — observed for `conflictBanner` clearing
     /// (fires on `worktree.merge_continued` / `merge_aborted`) so the sheet
@@ -264,7 +264,7 @@ struct ConflictResolverSubSheet: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            conflicts = try await rpcClient.worktree.listConflicts(sessionId: sessionId)
+            conflicts = try await engineClient.worktree.listConflicts(sessionId: sessionId)
         } catch {
             errorMessage = friendlyGitError(error, action: .load)
         }
@@ -275,7 +275,10 @@ struct ConflictResolverSubSheet: View {
             isSpawning = true
             defer { isSpawning = false }
             do {
-                let result = try await rpcClient.worktree.resolveConflictsWithSubagent(sessionId: sessionId)
+                let result = try await engineClient.worktree.resolveConflictsWithSubagent(
+                    sessionId: sessionId,
+                    idempotencyKey: .userAction("worktree.resolveConflictsWithSubagent")
+                )
                 if result.spawned, let subId = result.subagentSessionId {
                     subagentSessionId = subId
                     stage = .running
@@ -295,7 +298,7 @@ struct ConflictResolverSubSheet: View {
         isAborting = true
         defer { isAborting = false }
         do {
-            _ = try await rpcClient.worktree.abortMerge(sessionId: sessionId)
+            _ = try await engineClient.worktree.abortMerge(sessionId: sessionId, idempotencyKey: .userAction("worktree.abortMerge"))
             abortedMessage = (kind == .cancel)
                 ? "Subagent canceled. Worktree restored to pre-merge state."
                 : "Merge aborted. Worktree restored to pre-merge state."

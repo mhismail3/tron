@@ -405,11 +405,11 @@ final class MessagingCoordinatorTests: XCTestCase {
     // MARK: - Draft Skill Management Tests
     //
     // Invariant: chip add/remove in the input bar is purely LOCAL draft state.
-    // It must never trigger skill.activate / skill.deactivate RPCs.
+    // It must never trigger skills::activate / skills::deactivate engine protocols.
     //
     // Regression guard: eagerly activating a skill on chip-add (e.g. via the
     // "Draft a Plan" menu item) caused a subsequent chip-removal to emit a
-    // real skill.deactivated event, which surfaced in the chat transcript as
+    // real skills::deactivated event, which surfaced in the chat transcript as
     // a misleading "plan deactivated from context" pill even though no turn
     // ever ran with the skill. Server activation must happen only at send time.
 
@@ -646,7 +646,8 @@ final class MockMessagingContext: MessagingContext {
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?
+        reasoningLevel: String?,
+        idempotencyKey: EngineIdempotencyKey
     ) async throws {
         sendPromptCalled = true
         lastSentText = text
@@ -664,18 +665,18 @@ final class MockMessagingContext: MessagingContext {
     var activateSkillShouldFailOnName: String?
     var deactivateSkillOnServerCallCount = 0
 
-    func activateSkillOnServer(_ skillName: String) async throws {
+    func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
         activateSkillOnServerCallCount += 1
         activateSkillOnServerNames.append(skillName)
         if activateSkillShouldFail || activateSkillShouldFailOnName == skillName {
             throw MessagingTestError.serverError
         }
     }
-    func deactivateSkillOnServer(_ skillName: String) async throws {
+    func deactivateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
         deactivateSkillOnServerCallCount += 1
     }
 
-    func abortAgentOnServer() async throws {
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
         abortAgentCalled = true
         if abortShouldFail {
             throw MessagingTestError.serverError

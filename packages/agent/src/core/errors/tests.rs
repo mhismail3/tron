@@ -74,9 +74,9 @@ fn tron_error_from_tool() {
 }
 
 #[test]
-fn tron_error_from_rpc_handler() {
-    let rpc_err = RpcHandlerError::new("not found").with_code("SESSION_NOT_FOUND");
-    let err = TronError::from(rpc_err);
+fn tron_error_from_capability_response() {
+    let capability_err = CapabilityResponseError::new("not found").with_code("SESSION_NOT_FOUND");
+    let err = TronError::from(capability_err);
     assert_eq!(err.code(), "SESSION_NOT_FOUND");
 }
 
@@ -261,37 +261,37 @@ fn tool_error_with_source() {
     assert!(err.source.is_some());
 }
 
-// -- RpcHandlerError --
+// -- CapabilityResponseError --
 
 #[test]
-fn rpc_handler_error_basic() {
-    let err = RpcHandlerError::new("session not found");
-    assert_eq!(err.code, "RPC_ERROR");
+fn capability_response_error_basic() {
+    let err = CapabilityResponseError::new("session not found");
+    assert_eq!(err.code, "CAPABILITY_ERROR");
     assert_eq!(err.message, "session not found");
 }
 
 #[test]
-fn rpc_handler_error_with_code() {
-    let err = RpcHandlerError::new("not found").with_code("SESSION_NOT_FOUND");
+fn capability_response_error_with_code() {
+    let err = CapabilityResponseError::new("not found").with_code("SESSION_NOT_FOUND");
     assert_eq!(err.code, "SESSION_NOT_FOUND");
 }
 
 #[test]
-fn rpc_handler_error_from_response() {
-    let err = RpcHandlerError::from_response("bad request", Some("INVALID_PARAMS"));
+fn capability_response_error_from_response() {
+    let err = CapabilityResponseError::from_response("bad request", Some("INVALID_PARAMS"));
     assert_eq!(err.code, "INVALID_PARAMS");
     assert_eq!(err.message, "bad request");
 }
 
 #[test]
-fn rpc_handler_error_from_response_no_code() {
-    let err = RpcHandlerError::from_response("unknown error", None);
-    assert_eq!(err.code, "RPC_ERROR");
+fn capability_response_error_from_response_no_code() {
+    let err = CapabilityResponseError::from_response("unknown error", None);
+    assert_eq!(err.code, "CAPABILITY_ERROR");
 }
 
 #[test]
-fn rpc_handler_error_display() {
-    let err = RpcHandlerError::new("test error").with_code("MY_CODE");
+fn capability_response_error_display() {
+    let err = CapabilityResponseError::new("test error").with_code("MY_CODE");
     assert_eq!(err.to_string(), "[MY_CODE] test error");
 }
 

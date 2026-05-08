@@ -6,8 +6,8 @@ import Testing
 /// PairingStep runs before committing the new bearer token + paired server.
 ///
 /// The production probe is `URLSessionPairingProbe`, which opens a single
-/// WebSocket upgrade to `ws://<host>:<port>/ws` carrying
-/// `Authorization: Bearer <token>`, sends a `system.ping` JSON-RPC frame,
+/// WebSocket upgrade to `ws://<host>:<port>/engine` carrying
+/// `Authorization: Bearer <token>`, sends a `system::ping` JSON-engine protocol frame,
 /// and classifies the outcome. Tests focus on the **pure** parts of that
 /// pipeline:
 ///
@@ -30,31 +30,31 @@ struct PairingProbeTests {
     @Test("urlString(): builds ws scheme with host and port")
     func urlStringBasic() {
         let url = URLSessionPairingProbe.urlString(host: "100.64.0.7", port: 9847)
-        #expect(url == "ws://100.64.0.7:9847/ws")
+        #expect(url == "ws://100.64.0.7:9847/engine")
     }
 
     @Test("urlString(): hostname (MagicDNS) works the same as an IP")
     func urlStringHostname() {
         let url = URLSessionPairingProbe.urlString(host: "mac-name.tail-scale.ts.net", port: 9847)
-        #expect(url == "ws://mac-name.tail-scale.ts.net:9847/ws")
+        #expect(url == "ws://mac-name.tail-scale.ts.net:9847/engine")
     }
 
     @Test("urlString(): IPv6 literal gets bracketed")
     func urlStringIPv6() {
         let url = URLSessionPairingProbe.urlString(host: "fd7a:115c:a1e0::1", port: 9847)
-        #expect(url == "ws://[fd7a:115c:a1e0::1]:9847/ws",
+        #expect(url == "ws://[fd7a:115c:a1e0::1]:9847/engine",
                 "IPv6 literals must be wrapped in brackets per RFC 3986")
     }
 
     @Test("urlString(): non-default port is preserved verbatim")
     func urlStringCustomPort() {
         let url = URLSessionPairingProbe.urlString(host: "h", port: 9000)
-        #expect(url == "ws://h:9000/ws")
+        #expect(url == "ws://h:9000/engine")
     }
 
     // MARK: - Ping payload
 
-    @Test("pingRequestData(): produces a JSON-RPC ping with protocolVersion + clientVersion")
+    @Test("pingRequestData(): produces an engine invoke frame with protocolVersion + clientVersion")
     func pingPayloadShape() throws {
         let data = URLSessionPairingProbe.pingRequestData(
             protocolVersion: 1,
@@ -63,10 +63,11 @@ struct PairingProbeTests {
         )
         let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         #expect(parsed?["id"] as? String == "req-1")
-        #expect(parsed?["method"] as? String == "system.ping")
-        let params = parsed?["params"] as? [String: Any]
-        #expect(params?["protocolVersion"] as? Int == 1)
-        #expect(params?["clientVersion"] as? String == "1.2.3")
+        #expect(parsed?["type"] as? String == "invoke")
+        #expect(parsed?["functionId"] as? String == "system::ping")
+        let payload = parsed?["payload"] as? [String: Any]
+        #expect(payload?["protocolVersion"] as? Int == 1)
+        #expect(payload?["clientVersion"] as? String == "1.2.3")
     }
 
     // MARK: - Classification
@@ -76,13 +77,17 @@ struct PairingProbeTests {
         let json = """
         {
             "id": "req-1",
-            "success": true,
+            "ok": true,
             "result": {
-                "pong": true,
-                "serverVersion": "0.5.0",
-                "serverProtocolVersion": 1,
-                "minClientProtocolVersion": 1,
-                "compatible": true
+                "child": {
+                    "value": {
+                        "pong": true,
+                        "serverVersion": "0.5.0",
+                        "serverProtocolVersion": 1,
+                        "minClientProtocolVersion": 1,
+                        "compatible": true
+                    }
+                }
             }
         }
         """.data(using: .utf8)!
@@ -93,7 +98,7 @@ struct PairingProbeTests {
     @Test("classify(): success result without serverVersion still ok")
     func classifySuccessNoVersion() throws {
         let json = """
-        { "id": "x", "success": true, "result": { "pong": true } }
+        { "id": "x", "ok": true, "result": { "child": { "value": { "pong": true } } } }
         """.data(using: .utf8)!
         let outcome = URLSessionPairingProbe.classify(envelope: json)
         #expect(outcome == .ok(serverVersion: nil))
@@ -104,7 +109,7 @@ struct PairingProbeTests {
         let json = """
         {
             "id": "x",
-            "success": false,
+            "ok": false,
             "error": {
                 "code": "CLIENT_VERSION_UNSUPPORTED",
                 "message": "Upgrade required",
@@ -124,7 +129,7 @@ struct PairingProbeTests {
         let json = """
         {
             "id": "x",
-            "success": false,
+            "ok": false,
             "error": {
                 "code": "CLIENT_VERSION_UNSUPPORTED",
                 "message": "Upgrade required"
@@ -140,7 +145,7 @@ struct PairingProbeTests {
         let json = """
         {
             "id": "x",
-            "success": false,
+            "ok": false,
             "error": { "code": "INTERNAL_ERROR", "message": "boom" }
         }
         """.data(using: .utf8)!
@@ -178,10 +183,10 @@ struct PairingProbeTests {
         #expect(frame == .ignore)
     }
 
-    @Test("classifyFrame(): ignores non-matching RPC response ids")
+    @Test("classifyFrame(): ignores non-matching engine protocol response ids")
     func classifyFrameIgnoresOtherResponses() {
         let response = """
-        { "id": "other", "success": true, "result": { "pong": true } }
+        { "id": "other", "ok": true, "result": { "child": { "value": { "pong": true } } } }
         """.data(using: .utf8)!
 
         let frame = URLSessionPairingProbe.classifyFrame(
@@ -197,8 +202,8 @@ struct PairingProbeTests {
         let response = """
         {
             "id": "pairing-ping",
-            "success": true,
-            "result": { "pong": true, "serverVersion": "0.5.0" }
+            "ok": true,
+            "result": { "child": { "value": { "pong": true, "serverVersion": "0.5.0" } } }
         }
         """.data(using: .utf8)!
 
@@ -246,7 +251,7 @@ struct PairingProbeTests {
     @Test("ProbeSessionDelegate records HTTP 401 upgrade responses")
     func delegateRecordsUnauthorizedResponse() throws {
         let delegate = ProbeSessionDelegate()
-        let url = try #require(URL(string: "ws://127.0.0.1:9847/ws"))
+        let url = try #require(URL(string: "ws://127.0.0.1:9847/engine"))
         let response = try #require(HTTPURLResponse(
             url: url,
             statusCode: 401,
@@ -262,7 +267,7 @@ struct PairingProbeTests {
     @Test("ProbeSessionDelegate ignores non-401 responses")
     func delegateIgnoresNonUnauthorizedResponse() throws {
         let delegate = ProbeSessionDelegate()
-        let url = try #require(URL(string: "ws://127.0.0.1:9847/ws"))
+        let url = try #require(URL(string: "ws://127.0.0.1:9847/engine"))
         let response = try #require(HTTPURLResponse(
             url: url,
             statusCode: 101,
@@ -277,7 +282,7 @@ struct PairingProbeTests {
     @Test("ProbeSessionDelegate wait catches a 401 that arrives after the transport error")
     func delegateWaitsBrieflyForUnauthorizedResponse() async throws {
         let delegate = ProbeSessionDelegate()
-        let url = try #require(URL(string: "ws://127.0.0.1:9847/ws"))
+        let url = try #require(URL(string: "ws://127.0.0.1:9847/engine"))
         let response = try #require(HTTPURLResponse(
             url: url,
             statusCode: 401,

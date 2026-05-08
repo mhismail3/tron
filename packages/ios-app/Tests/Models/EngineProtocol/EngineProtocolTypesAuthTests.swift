@@ -2,8 +2,8 @@ import Testing
 import Foundation
 @testable import TronMobile
 
-@Suite("Auth RPC Types Tests")
-struct RPCTypesAuthTests {
+@Suite("Auth engine protocol Types Tests")
+struct EngineProtocolTypesAuthTests {
 
     // MARK: - ProviderAuthInfo
 

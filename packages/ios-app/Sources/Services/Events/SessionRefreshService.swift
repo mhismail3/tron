@@ -11,7 +11,7 @@ import Foundation
 /// - **any non-connected state** → register a hook with `ConnectionManager` under label
 ///   `"session-refresh"`. Repeated requests replace the hook (coalesce by label).
 /// - **`.foreground` reason** carries a short debounce (default 1s) so rapid Control Center /
-///   notification-center swipes during foreground return don't each trigger an RPC. The
+///   notification-center swipes during foreground return don't each trigger an engine protocol. The
 ///   connection is re-checked after the debounce because foregrounding may discover a stale
 ///   socket and start a reconnect while the debounce is sleeping.
 @MainActor
@@ -67,7 +67,7 @@ final class SessionRefreshService {
         self.connectionManager = manager
     }
 
-    /// Request a session list refresh. The actual RPC call happens asynchronously and may be
+    /// Request a session list refresh. The actual engine invocation happens asynchronously and may be
     /// coalesced, debounced, or queued depending on current state.
     func request(reason: RefreshReason) {
         // Any non-foreground request cancels the foreground debounce — its slot will be taken.
@@ -94,7 +94,7 @@ final class SessionRefreshService {
 
     /// Defer a failed refresh until a future connected transition.
     ///
-    /// Used when an RPC began while the transport looked connected but URLSession reported
+    /// Used when an engine protocol began while the transport looked connected but URLSession reported
     /// native socket churn (for example `ECONNABORTED` during foreground return). Waiting for
     /// a future reconnect edge avoids immediately retrying against the same stale socket.
     func deferUntilReconnect() {

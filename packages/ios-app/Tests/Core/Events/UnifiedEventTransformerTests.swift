@@ -91,7 +91,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
     private func renderableEventFixtures() -> [PersistedEventType: [String: AnyCodable]] {
         [
             .messageUser: [
-                // Production `session.reconstruct` payloads may omit `turn`.
+                // Production `session::reconstruct` payloads may omit `turn`.
                 "content": AnyCodable("Hello from the persisted event log")
             ],
             .messageAssistant: [
@@ -211,7 +211,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
     }
 
     func testTransformUserMessageWithoutTurnMatchesProductionWirePayload() {
-        // `session.reconstruct` returns live prompt/subagent user messages
+        // `session::reconstruct` returns live prompt/subagent user messages
         // with content-only payloads. This is the regression guard for the
         // resume bug where every user bubble disappeared.
         let event = RawEvent(

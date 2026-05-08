@@ -18,7 +18,7 @@ pub enum UpdateChannel {
 }
 
 impl UpdateChannel {
-    /// Wire-format string used in RPC responses and persisted state.
+    /// Wire-format string used in capability responses and persisted state.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Stable => "stable",
@@ -45,7 +45,7 @@ pub enum UpdateFrequency {
 }
 
 impl UpdateFrequency {
-    /// Wire-format string used in RPC responses.
+    /// Wire-format string used in capability responses.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Manual => "manual",
@@ -78,7 +78,7 @@ pub enum UpdateAction {
 }
 
 impl UpdateAction {
-    /// Wire-format string used in RPC responses.
+    /// Wire-format string used in capability responses.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Notify => "notify",

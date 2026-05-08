@@ -2,9 +2,9 @@ import Testing
 import Foundation
 @testable import TronMobile
 
-@Suite("System RPC Types")
-struct SystemRPCTypesTests {
-    @Test("system.ping params encode protocol version and client version")
+@Suite("System engine protocol Types")
+struct SystemEngineProtocolTypesTests {
+    @Test("system::ping params encode protocol version and client version")
     func pingParamsEncodeHandshake() throws {
         let params = SystemPingParams(protocolVersion: 1, clientVersion: "1.2.3")
         let data = try JSONEncoder().encode(params)

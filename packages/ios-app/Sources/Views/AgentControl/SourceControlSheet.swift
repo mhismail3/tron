@@ -6,7 +6,7 @@ import SwiftUI
 /// Presented from AgentControlView via the SourceControlCardView.
 @available(iOS 26.0, *)
 struct SourceControlSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     var initialDiffResult: WorktreeGetDiffResult?
     var initialWorktreeStatus: WorktreeGetStatusResult?
@@ -49,7 +49,7 @@ struct SourceControlSheet: View {
     @State private var isAbortingConflict = false
 
     // Server-sourced defaults for git sub-sheets. Fetched once in `.task`;
-    // fall back to hard-coded defaults if the RPC fails.
+    // fall back to hard-coded defaults if the engine protocol fails.
     @State private var defaultMergeStrategy: String = "merge"
     @State private var defaultSessionBranchPolicy: String = "keep"
     @State private var defaultAutoSetUpstream: Bool = true
@@ -187,7 +187,7 @@ struct SourceControlSheet: View {
             FileDetailSheet(
                 file: fileData,
                 stagingArea: fileData.stagingArea,
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 onAction: {
                     Task { await loadData() }
@@ -351,7 +351,7 @@ struct SourceControlSheet: View {
         switch action {
         case .commit:
             CommitSubSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 diffResult: diffResult,
                 worktreeStatus: worktreeStatus,
@@ -359,12 +359,12 @@ struct SourceControlSheet: View {
             )
         case .syncMain:
             PullRemoteSubSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId
             )
         case .finalize:
             MergeChangesSubSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 suggestedTargetBranch: worktreeStatus?.worktree?.baseBranch,
                 defaultStrategy: defaultMergeStrategy,
@@ -375,14 +375,14 @@ struct SourceControlSheet: View {
             )
         case .push:
             PushSubSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 currentBranch: worktreeStatus?.worktree?.branch ?? "",
                 defaultAutoSetUpstream: defaultAutoSetUpstream
             )
         case .repoSessions:
             RepoSessionsSubSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 gitWorkflowState: gitWorkflowState,
                 onSelectSession: { targetSessionId in
@@ -398,13 +398,13 @@ struct SourceControlSheet: View {
             )
         case .conflictResolver:
             ConflictResolverSubSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 gitWorkflowState: gitWorkflowState
             )
         case .rebaseOnMain:
             RebaseOnMainSubSheet(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 suggestedMainBranch: worktreeStatus?.worktree?.baseBranch,
                 divergence: divergence,
@@ -416,10 +416,10 @@ struct SourceControlSheet: View {
     }
 
     private func loadDivergence() async {
-        // Resolve both RPCs in parallel, then flush to state once with a
+        // Resolve both engine protocols in parallel, then flush to state once with a
         // coordinated animation so chips + Sessions tile fade in together.
-        async let d = rpcClient.repo.getDivergence(sessionId: sessionId)
-        async let s = rpcClient.repo.listSessions(sessionId: sessionId)
+        async let d = engineClient.repo.getDivergence(sessionId: sessionId)
+        async let s = engineClient.repo.listSessions(sessionId: sessionId)
         let resolvedDivergence = try? await d
         let resolvedSessions = try? await s
         withAnimation(.easeInOut(duration: 0.25)) {
@@ -440,7 +440,7 @@ struct SourceControlSheet: View {
         isAbortingConflict = true
         defer { isAbortingConflict = false }
         do {
-            _ = try await rpcClient.worktree.abortMerge(sessionId: sessionId)
+            _ = try await engineClient.worktree.abortMerge(sessionId: sessionId, idempotencyKey: .userAction("worktree.abortMerge"))
             pendingAbortOrigin = nil
             // Refresh so UI reflects the post-abort state immediately
             // rather than waiting on the next event round-trip.
@@ -457,7 +457,7 @@ struct SourceControlSheet: View {
     /// user's preferences (strategy, branch policy, upstream behavior) instead
     /// of the hard-coded fallbacks. Failure silently keeps the defaults.
     private func loadGitDefaults() async {
-        guard let settings = try? await rpcClient.settings.get() else { return }
+        guard let settings = try? await engineClient.settings.get() else { return }
         defaultMergeStrategy = settings.gitMergeStrategy
         defaultSessionBranchPolicy = settings.gitSessionBranchPolicy
         defaultAutoSetUpstream = settings.gitAutoSetUpstream
@@ -468,8 +468,8 @@ struct SourceControlSheet: View {
 
     private func loadData() async {
         do {
-            async let diff = rpcClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
-            async let status: WorktreeGetStatusResult? = { try? await rpcClient.worktree.getStatus(sessionId: sessionId) }()
+            async let diff = engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
+            async let status: WorktreeGetStatusResult? = { try? await engineClient.worktree.getStatus(sessionId: sessionId) }()
             diffResult = try await diff
             worktreeStatus = await status
         } catch {

@@ -43,7 +43,8 @@ struct AgentClientTests {
             _ prompt: String,
             images: [ImageAttachment]?,
             attachments: [FileAttachment]?,
-            reasoningLevel: String?
+            reasoningLevel: String?,
+            idempotencyKey: EngineIdempotencyKey
         ) async throws {
             sendPromptCallCount += 1
             lastPrompt = prompt
@@ -53,19 +54,24 @@ struct AgentClientTests {
             if sendPromptShouldThrow { throw TestError.mockError }
         }
 
-        func abort() async throws {
+        func abort(idempotencyKey: EngineIdempotencyKey) async throws {
             abortCallCount += 1
             if abortShouldThrow { throw TestError.mockError }
         }
 
-        func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
+        func sendToolResult(
+            sessionId: String,
+            toolCallId: String,
+            result: AskUserQuestionResult,
+            idempotencyKey: EngineIdempotencyKey
+        ) async throws {
             sendToolResultCallCount += 1
             sendToolResultSessionId = sessionId
             sendToolResultToolCallId = toolCallId
             if sendToolResultShouldThrow { throw TestError.mockError }
         }
 
-        func activateSkill(_ skillName: String) async throws -> SkillActivateResult {
+        func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult {
             activateSkillCallCount += 1
             lastActivatedSkill = skillName
             let json = """
@@ -74,7 +80,7 @@ struct AgentClientTests {
             return try! JSONDecoder().decode(SkillActivateResult.self, from: json.data(using: .utf8)!)
         }
 
-        func deactivateSkill(_ skillName: String) async throws -> SkillDeactivateResult {
+        func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult {
             deactivateSkillCallCount += 1
             lastDeactivatedSkill = skillName
             let json = """
@@ -114,7 +120,7 @@ struct AgentClientTests {
     func testSendPrompt_minimal() async throws {
         let mock = MockAgentClient()
 
-        try await mock.sendPrompt("Hello")
+        try await mock.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
 
         #expect(mock.sendPromptCallCount == 1)
         #expect(mock.lastPrompt == "Hello")
@@ -131,7 +137,8 @@ struct AgentClientTests {
             "Hello",
             images: nil,
             attachments: nil,
-            reasoningLevel: "medium"
+            reasoningLevel: "medium",
+            idempotencyKey: .userAction("agent.prompt.test")
         )
 
         #expect(mock.lastReasoningLevel == "medium")
@@ -143,7 +150,7 @@ struct AgentClientTests {
         mock.sendPromptShouldThrow = true
 
         await #expect(throws: MockAgentClient.TestError.self) {
-            try await mock.sendPrompt("Hello")
+            try await mock.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
         }
     }
 
@@ -153,7 +160,7 @@ struct AgentClientTests {
     func testActivateSkill_calls() async throws {
         let mock = MockAgentClient()
 
-        let result = try await mock.activateSkill("browser")
+        let result = try await mock.activateSkill("browser", idempotencyKey: .userAction("skills.activate.test"))
 
         #expect(mock.activateSkillCallCount == 1)
         #expect(mock.lastActivatedSkill == "browser")
@@ -165,7 +172,7 @@ struct AgentClientTests {
     func testDeactivateSkill_calls() async throws {
         let mock = MockAgentClient()
 
-        let result = try await mock.deactivateSkill("browser")
+        let result = try await mock.deactivateSkill("browser", idempotencyKey: .userAction("skills.deactivate.test"))
 
         #expect(mock.deactivateSkillCallCount == 1)
         #expect(mock.lastDeactivatedSkill == "browser")
@@ -189,7 +196,7 @@ struct AgentClientTests {
     func testAbort_calls() async throws {
         let mock = MockAgentClient()
 
-        try await mock.abort()
+        try await mock.abort(idempotencyKey: .userAction("agent.abort.test"))
 
         #expect(mock.abortCallCount == 1)
     }
@@ -200,7 +207,7 @@ struct AgentClientTests {
         mock.abortShouldThrow = true
 
         await #expect(throws: MockAgentClient.TestError.self) {
-            try await mock.abort()
+            try await mock.abort(idempotencyKey: .userAction("agent.abort.test"))
         }
     }
 
@@ -224,7 +231,12 @@ struct AgentClientTests {
         let mock = MockAgentClient()
         let result = Self.makeTestResult()
 
-        try await mock.sendToolResult(sessionId: "session-123", toolCallId: "tool-456", result: result)
+        try await mock.sendToolResult(
+            sessionId: "session-123",
+            toolCallId: "tool-456",
+            result: result,
+            idempotencyKey: .userAction("tool.result.test")
+        )
 
         #expect(mock.sendToolResultCallCount == 1)
         #expect(mock.sendToolResultSessionId == "session-123")
@@ -238,7 +250,12 @@ struct AgentClientTests {
         let result = Self.makeTestResult()
 
         await #expect(throws: MockAgentClient.TestError.self) {
-            try await mock.sendToolResult(sessionId: "session-123", toolCallId: "tool-456", result: result)
+            try await mock.sendToolResult(
+                sessionId: "session-123",
+                toolCallId: "tool-456",
+                result: result,
+                idempotencyKey: .userAction("tool.result.test")
+            )
         }
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Final onboarding page: scan, paste, or manually enter the Mac pairing
-/// details, verify the server with `system.ping`, then persist the active
+/// details, verify the server with `system::ping`, then persist the active
 /// paired server locally on this device.
 @available(iOS 26.0, *)
 struct PairingStep: View {
@@ -327,13 +327,13 @@ struct PairingStep: View {
         }
 
         dependencies.replacePairedServers(plan.updatedServers, activeServer: plan.activeServer)
-        let client = dependencies.rpcClient
+        let client = dependencies.engineClient
 
         do {
             await client.connect()
             let settings = try await client.settings.get()
             guard dependencies.pairedServerStore.activeServer?.id == plan.activeServer.id,
-                  dependencies.rpcClient === client
+                  dependencies.engineClient === client
             else {
                 state.pairingError = .settingsFailed("Active server changed before setup settings loaded.")
                 state.isConnecting = false

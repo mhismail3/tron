@@ -135,7 +135,7 @@ pub fn gather_state(
 /// but never surfaced upward.
 ///
 /// Reads the current `memory.auto_retain_interval` from the settings singleton.
-/// The setting is hot-reloadable via `settings.update` RPC, so user changes
+/// The setting is hot-reloadable via `settings::update` capability, so user changes
 /// take effect on the next agent run without a server restart.
 pub async fn maybe_fire(deps: &RetainDeps, session_id: &str) {
     let interval = crate::settings::get_settings().memory.auto_retain_interval;
@@ -545,7 +545,7 @@ mod tests {
     fn deps_from_ctx(
         ctx: &crate::server::services::context::ServerCapabilityContext,
     ) -> crate::server::services::memory_retain::RetainDeps {
-        crate::server::services::memory_retain::RetainDeps::from_rpc(ctx)
+        crate::server::services::memory_retain::RetainDeps::from_capability_context(ctx)
     }
 
     #[tokio::test]

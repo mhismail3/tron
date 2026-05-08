@@ -20,7 +20,7 @@ extension ChatViewModel: DisplayStreamEventHandler {
         displayStreamState.endStream()
     }
 
-    /// Stop the active display stream via RPC and clean up active state.
+    /// Stop the active display stream via engine protocol and clean up active state.
     /// Keeps the last frame for post-stream viewing.
     func stopDisplayStream() {
         guard let streamId = displayStreamState.activeStreamId else { return }
@@ -30,7 +30,7 @@ extension ChatViewModel: DisplayStreamEventHandler {
         launchBackground { [weak self] in
             guard let self else { return }
             do {
-                let _ = try await self.rpcClient.display.stopStream(streamId: streamId)
+                let _ = try await self.engineClient.display.stopStream(streamId: streamId, idempotencyKey: .userAction("display.stopStream"))
                 self.logInfo("Stopped display stream: \(streamId)")
             } catch {
                 self.logWarning("Failed to stop display stream: \(error)")

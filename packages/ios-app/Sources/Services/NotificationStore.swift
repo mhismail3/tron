@@ -12,10 +12,10 @@ final class NotificationStore {
     private(set) var unreadCount: Int = 0
     private(set) var isLoading = false
 
-    private let rpcClient: RPCClient
+    private let engineClient: EngineClient
 
-    init(rpcClient: RPCClient) {
-        self.rpcClient = rpcClient
+    init(engineClient: EngineClient) {
+        self.engineClient = engineClient
     }
 
     /// Refresh the notification list from the server.
@@ -24,7 +24,7 @@ final class NotificationStore {
         defer { isLoading = false }
 
         do {
-            let result = try await rpcClient.notifications.listNotifications()
+            let result = try await engineClient.notifications.listNotifications()
             notifications = result.notifications
             unreadCount = result.unreadCount
         } catch {
@@ -35,9 +35,9 @@ final class NotificationStore {
     /// Mark a single notification as read.
     /// Returns `true` if the server acknowledged the mark-read.
     @discardableResult
-    func markRead(eventId: String) async -> Bool {
+    func markRead(eventId: String, idempotencyKey: EngineIdempotencyKey) async -> Bool {
         do {
-            _ = try await rpcClient.notifications.markRead(eventId: eventId)
+            _ = try await engineClient.notifications.markRead(eventId: eventId, idempotencyKey: idempotencyKey)
             // Update local state only on success
             if let index = notifications.firstIndex(where: { $0.eventId == eventId }) {
                 let n = notifications[index]
@@ -76,9 +76,12 @@ final class NotificationStore {
     /// AND the local unread count reaches zero — a scoped clear can
     /// leave notifications in other sessions unread, and the badge
     /// should reflect the total.
-    func markAllRead(sessionId: String? = nil) async {
+    func markAllRead(
+        sessionId: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async {
         do {
-            _ = try await rpcClient.notifications.markAllRead(sessionId: sessionId)
+            _ = try await engineClient.notifications.markAllRead(sessionId: sessionId, idempotencyKey: idempotencyKey)
             // Update local state — only flip `isRead` for rows matching
             // the scope (or all rows when unscoped).
             let now = DateParser.toISO8601(Date())

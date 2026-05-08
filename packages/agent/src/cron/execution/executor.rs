@@ -1037,7 +1037,7 @@ mod tests {
     // Regression coverage for the plan-H18 fix. The production path
     // (execute_with_retries, ~line 200) re-queries is_job_enabled from
     // the DB at the top of every retry iteration so a mid-retry
-    // `jobs.setEnabled(false)` RPC causes the next attempt to abort
+    // `jobs.setEnabled(false)` engine capability causes the next attempt to abort
     // with Cancelled/`"job disabled during retry"` rather than Failed.
 
     fn insert_enabled_job_row(pool: &ConnectionPool, job_id: &str, enabled: bool) {

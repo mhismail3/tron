@@ -674,7 +674,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "source": {"type": "string"},
                 "profile": {"type": "string"},
                 "useWorktree": {"type": "boolean"},
-                "__rpcContext": {
+                "__capabilityContext": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -1076,7 +1076,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "__rpcContext": {
+                "__capabilityContext": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -1192,7 +1192,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "__rpcContext": {
+                "__capabilityContext": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {

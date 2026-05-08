@@ -4,7 +4,7 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct PromptHistoryListView: View {
     @Bindable var state: PromptLibraryState
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onSelect: (String) -> Void
     let onPreview: (PromptHistoryItem) -> Void
 
@@ -31,7 +31,7 @@ struct PromptHistoryListView: View {
                     .onLongPressGesture { onPreview(item) }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            Task { await state.deleteHistory(id: item.id, rpc: rpcClient) }
+                            Task { await state.deleteHistory(id: item.id, rpc: engineClient) }
                         } label: { Label("Delete", systemImage: "trash") }
                         .tint(.tronError)
                     }
@@ -39,7 +39,7 @@ struct PromptHistoryListView: View {
                     .listRowSeparatorTint(.tronEmerald.opacity(0.15))
                     .onAppear {
                         if item.id == state.historyItems.last?.id && state.historyHasMore {
-                            Task { await state.loadMoreHistory(rpc: rpcClient) }
+                            Task { await state.loadMoreHistory(rpc: engineClient) }
                         }
                     }
             }

@@ -8,7 +8,7 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     // Convenience accessors
-    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var engineClient: EngineClient { dependencies.engineClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     private var skillStore: SkillStore { dependencies.skillStore }
     private var defaultModel: String { dependencies.defaultModel }
@@ -96,7 +96,7 @@ struct ContentView: View {
                 }
             }
             .onDisappear {}
-            .onChange(of: rpcClient.connectionState) { oldState, newState in
+            .onChange(of: engineClient.connectionState) { oldState, newState in
                 // Session list refresh on reconnect is now handled by the central
                 // SessionRefreshService via ConnectionManager.runOnReconnect. Other
                 // connection-restored side effects still live here until migrated.
@@ -193,7 +193,7 @@ struct ContentView: View {
     private var compactVoiceNotesList: some View {
         NavigationStack {
             VoiceNotesListView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 onVoiceNote: { showVoiceNotesRecording = true },
                 actions: dashboardActions
             )
@@ -204,7 +204,7 @@ struct ContentView: View {
     private var compactSandboxesDashboard: some View {
         NavigationStack {
             SandboxesDashboardView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 actions: dashboardActions
             )
         }
@@ -214,7 +214,7 @@ struct ContentView: View {
     private var compactAutomationsDashboard: some View {
         NavigationStack {
             AutomationsDashboardView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 actions: dashboardActions
             )
         }
@@ -295,17 +295,17 @@ struct ContentView: View {
                 )
             } else if navigationMode == .sandboxes {
                 SandboxesDashboardView(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     actions: dashboardActions
                 )
             } else if navigationMode == .automations {
                 AutomationsDashboardView(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     actions: dashboardActions
                 )
             } else {
                 VoiceNotesListView(
-                    rpcClient: rpcClient,
+                    engineClient: engineClient,
                     onVoiceNote: { showVoiceNotesRecording = true },
                     actions: dashboardActions
                 )
@@ -338,7 +338,7 @@ struct ContentView: View {
 
     private var newSessionFlowSheet: some View {
         NewSessionFlow(
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             defaultModel: defaultModel,
             eventStoreManager: eventStoreManager,
             selectedSessionId: selectedSessionId,
@@ -365,7 +365,7 @@ struct ContentView: View {
 
     private var voiceNotesRecordingSheet: some View {
         VoiceNotesRecordingSheet(
-            rpcClient: rpcClient,
+            engineClient: engineClient,
             onComplete: { _ in
                 showVoiceNotesRecording = false
             },
@@ -436,7 +436,7 @@ struct ContentView: View {
     private func chatViewForSession(_ sessionId: String) -> some View {
         if horizontalSizeClass == .regular {
             ChatView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 audioRecorder: dependencies.audioRecorder,
                 skillStore: skillStore,
@@ -447,7 +447,7 @@ struct ContentView: View {
             .id(sessionId)
         } else {
             ChatView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 sessionId: sessionId,
                 audioRecorder: dependencies.audioRecorder,
                 skillStore: skillStore,

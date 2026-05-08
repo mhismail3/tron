@@ -3,7 +3,7 @@
 //! Tron owns the child `codex app-server` process so mobile clients never have
 //! to invent host commands, endpoint ports, or bearer tokens. The Rust daemon
 //! starts the child on daemon startup, restarts it when server settings change,
-//! exposes its current endpoint through authenticated Tron RPC, and kills the
+//! exposes its current endpoint through authenticated Tron engine capability, and kills the
 //! child during Tron shutdown. Startup also removes stale managed listeners
 //! left behind by a hard-killed previous Tron process, but only when the
 //! process command line matches both the managed listen URL and token file.
@@ -59,7 +59,7 @@ pub struct CodexAppServerEndpointStatus {
     pub path: &'static str,
     /// Whether clients must send `Authorization: Bearer`.
     pub requires_token: bool,
-    /// Raw bearer token, delivered only over authenticated Tron RPC.
+    /// Raw bearer token, delivered only over authenticated Tron engine capability.
     pub bearer_token: String,
 }
 

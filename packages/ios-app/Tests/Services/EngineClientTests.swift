@@ -1,23 +1,23 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for RPC Client types and data structures
+/// Tests for Engine Client types and data structures
 /// Note: Full integration tests require actual server connection.
-/// These tests focus on the RPC error types and connection state.
+/// These tests focus on the engine protocol error types and connection state.
 @MainActor
-final class RPCClientErrorTests: XCTestCase {
+final class EngineClientErrorTests: XCTestCase {
 
     func testErrorDescriptions() {
         XCTAssertEqual(
-            RPCClientError.noActiveSession.errorDescription,
+            EngineClientError.noActiveSession.errorDescription,
             "No active session"
         )
         XCTAssertEqual(
-            RPCClientError.invalidURL.errorDescription,
+            EngineClientError.invalidURL.errorDescription,
             "Invalid server URL"
         )
         XCTAssertEqual(
-            RPCClientError.connectionNotEstablished.errorDescription,
+            EngineClientError.connectionNotEstablished.errorDescription,
             "Connection not established"
         )
     }

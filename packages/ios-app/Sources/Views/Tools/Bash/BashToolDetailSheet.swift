@@ -8,7 +8,7 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct BashToolDetailSheet: View {
     let data: CommandToolChipData
-    var rpcClient: RPCClient?
+    var engineClient: EngineClient?
     var sessionId: String?
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAllLines = false
@@ -143,16 +143,16 @@ struct BashToolDetailSheet: View {
     }
 
     private func subscribeToOutputIfNeeded() {
-        guard let processId, let rpcClient, let sessionId, isJobActive else { return }
+        guard let processId, let engineClient, let sessionId, isJobActive else { return }
         Task {
-            try? await rpcClient.job.subscribe(jobId: processId, sessionId: sessionId)
+            try? await engineClient.job.subscribe(jobId: processId, sessionId: sessionId, idempotencyKey: .userAction("job.subscribe"))
         }
     }
 
     private func unsubscribeFromOutput() {
-        guard let processId, let rpcClient else { return }
+        guard let processId, let engineClient else { return }
         Task {
-            try? await rpcClient.job.unsubscribe(jobId: processId)
+            try? await engineClient.job.unsubscribe(jobId: processId, idempotencyKey: .userAction("job.unsubscribe"))
         }
     }
 
@@ -328,18 +328,18 @@ struct BashToolDetailSheet: View {
     // MARK: - Job Actions
 
     private func backgroundJob() {
-        guard let processId, let rpcClient, let sessionId else { return }
+        guard let processId, let engineClient, let sessionId else { return }
         actionTaken = true
         Task {
-            try? await rpcClient.job.background(jobId: processId, sessionId: sessionId)
+            try? await engineClient.job.background(jobId: processId, sessionId: sessionId, idempotencyKey: .userAction("job.background"))
         }
     }
 
     private func cancelJob() {
-        guard let processId, let rpcClient, let sessionId else { return }
+        guard let processId, let engineClient, let sessionId else { return }
         actionTaken = true
         Task {
-            try? await rpcClient.job.cancel(jobId: processId, sessionId: sessionId)
+            try? await engineClient.job.cancel(jobId: processId, sessionId: sessionId, idempotencyKey: .userAction("job.cancel"))
         }
     }
 }

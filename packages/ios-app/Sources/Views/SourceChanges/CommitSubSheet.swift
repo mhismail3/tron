@@ -18,7 +18,7 @@ import SwiftUI
 /// `SourceControlSheet` reloads its data on dismiss.
 @available(iOS 26.0, *)
 struct CommitSubSheet: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let sessionId: String
     let diffResult: WorktreeGetDiffResult?
     let worktreeStatus: WorktreeGetStatusResult?
@@ -339,7 +339,7 @@ struct CommitSubSheet: View {
 
     @ViewBuilder
     private func resultBanner(_ r: WorktreeCommitResult) -> some View {
-        // Server-side failures throw typed RPC errors (rendered in the
+        // Server-side failures throw typed engine protocol errors (rendered in the
         // alert via `friendlyGitError`). Reaching the banner path means
         // the commit ran — either as a real commit (`commitHash` set)
         // or as a no-op (`commitHash == nil`).
@@ -383,12 +383,13 @@ struct CommitSubSheet: View {
         // IS the feedback the user needs.
         Task {
             await runner.run(action: .commit, dismiss: { dismiss() }) {
-                try await rpcClient.worktree.commit(
+                try await engineClient.worktree.commit(
                     sessionId: sessionId,
                     message: trimmedMessage,
                     stageAll: stageAll,
                     amend: amendPrevious ? true : nil,
-                    signoff: signOff ? true : nil
+                    signoff: signOff ? true : nil,
+                    idempotencyKey: .userAction("worktree.commit")
                 )
             }
         }

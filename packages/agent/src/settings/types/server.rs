@@ -196,7 +196,7 @@ pub struct UpdateSettings {
     pub channel: UpdateChannel,
     /// How often the in-process scheduler fires an automatic check.
     /// `manual` disables the scheduler entirely; checks only fire
-    /// on explicit RPC.
+    /// on explicit engine invocation.
     pub frequency: UpdateFrequency,
     /// What to do when a newer release is found. `notify` reports
     /// availability; `download` also stages and verifies the DMG.

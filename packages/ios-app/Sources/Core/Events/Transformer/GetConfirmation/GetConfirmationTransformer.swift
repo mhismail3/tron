@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Reads server-enriched status fields from the tool.call payload
 /// (`toolStatus`, `confirmationDecision`, `confirmationNote`) injected by
-/// `session.reconstruct` enrichment. For live WebSocket events (where the
+/// `session::reconstruct` enrichment. For live WebSocket events (where the
 /// tool.call hasn't been enriched yet), status defaults to `.generating`.
 enum GetConfirmationTransformer {
 

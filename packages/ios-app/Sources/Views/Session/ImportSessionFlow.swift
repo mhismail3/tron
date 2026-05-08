@@ -4,7 +4,7 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct ImportSessionFlow: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onImported: (String, String, String) -> Void  // (sessionId, workingDirectory, model)
 
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +12,7 @@ struct ImportSessionFlow: View {
     var body: some View {
         NavigationStack {
             ImportProjectListView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 onImported: { sessionId, workingDirectory, model in
                     dismiss()
                     onImported(sessionId, workingDirectory, model)
@@ -29,7 +29,7 @@ struct ImportSessionFlow: View {
 
 @available(iOS 26.0, *)
 struct ImportProjectListView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let onImported: (String, String, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -109,7 +109,7 @@ struct ImportProjectListView: View {
         }
         .navigationDestination(for: ImportSource.self) { source in
             ImportSessionListView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 source: source,
                 onImported: onImported
             )
@@ -121,7 +121,7 @@ struct ImportProjectListView: View {
 
     private func loadSources() async {
         do {
-            let result = try await rpcClient.importClient.listSources()
+            let result = try await engineClient.importClient.listSources()
             await MainActor.run {
                 sources = result.sources
                 isLoading = false
@@ -182,7 +182,7 @@ private struct ImportProjectCard: View {
 
 @available(iOS 26.0, *)
 struct ImportSessionListView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let source: ImportSource
     let onImported: (String, String, String) -> Void
 
@@ -251,7 +251,7 @@ struct ImportSessionListView: View {
         }
         .navigationDestination(for: ImportableSession.self) { session in
             ImportSessionPreviewView(
-                rpcClient: rpcClient,
+                engineClient: engineClient,
                 session: session,
                 projectPath: source.projectPath,
                 onImported: onImported
@@ -264,7 +264,7 @@ struct ImportSessionListView: View {
 
     private func loadSessions() async {
         do {
-            let result = try await rpcClient.importClient.listSessions(
+            let result = try await engineClient.importClient.listSessions(
                 encodedDir: source.encodedDir
             )
             await MainActor.run {
@@ -358,7 +358,7 @@ private struct ImportSessionRow: View {
 
 @available(iOS 26.0, *)
 struct ImportSessionPreviewView: View {
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let session: ImportableSession
     let projectPath: String
     let onImported: (String, String, String) -> Void
@@ -603,7 +603,7 @@ struct ImportSessionPreviewView: View {
 
     private func loadPreview() async {
         do {
-            let result = try await rpcClient.importClient.previewSession(
+            let result = try await engineClient.importClient.previewSession(
                 sessionPath: session.sessionPath
             )
             await MainActor.run {
@@ -623,9 +623,10 @@ struct ImportSessionPreviewView: View {
         errorMessage = nil
 
         do {
-            let result = try await rpcClient.importClient.execute(
+            let result = try await engineClient.importClient.execute(
                 sessionPath: session.sessionPath,
-                workingDirectory: projectPath
+                workingDirectory: projectPath,
+                idempotencyKey: .userAction("import.execute")
             )
 
             if result.alreadyImported {
@@ -767,4 +768,3 @@ private struct ImportPreviewRow: View {
             .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.1)), in: Capsule())
     }
 }
-

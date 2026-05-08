@@ -689,8 +689,8 @@ struct MemoryRetainedNotificationView: View {
 ///   above a wrapped row of tappable chips. Tapping a chip fires
 ///   `onReactivate(skillName)` which percolates up as
 ///   `MessageBubbleTapAction.reactivateSkill` and ultimately invokes the
-///   `skill.activate` RPC. Tapped chips greying-out is tracked locally via
-///   `activatedSkills` — the server-emitted `skill.activated` event is the
+///   `skills::activate` engine protocol. Tapped chips greying-out is tracked locally via
+///   `activatedSkills` — the server-emitted `skills::activated` event is the
 ///   source of truth, but local feedback is needed for tap responsiveness.
 ///
 /// Empty `clearedSkills` is not rendered (caller drops the message), so the
@@ -704,7 +704,7 @@ struct SkillsClearedNotificationView: View {
 
     /// Skills the user has tapped this render cycle. Kept local to the view
     /// so the chip greys out immediately; the authoritative state comes back
-    /// via the server-emitted `skill.activated` event, which clears the
+    /// via the server-emitted `skills::activated` event, which clears the
     /// skill from the `inputBarState.selectedSkills` set elsewhere.
     @State private var activatedSkills: Set<String> = []
 

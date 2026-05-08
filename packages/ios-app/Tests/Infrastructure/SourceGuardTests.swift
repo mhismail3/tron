@@ -3,7 +3,7 @@ import Foundation
 
 /// Regression guard: iOS source code and tests must contain no hardcoded
 /// personal-info literals. User identity belongs in `MEMORY.md` on the server
-/// (auto-injected into every session's context via the `memory.content` RPC
+/// (auto-injected into every session's context via the `memory.content` engine protocol
 /// field); the iOS client never needs to encode it in code.
 ///
 /// Needles are assembled from substrings so this test file itself doesn't
@@ -102,6 +102,58 @@ struct SourceGuardTests {
                     #expect(
                         !content.contains(needle),
                         "\(url.lastPathComponent) contains removed diagnostics scaffold `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
+
+    @Test("Tron client code uses the engine protocol only")
+    func testTronClientTransportIsEngineOnly() throws {
+        let forbidden: [(String, String)] = [
+            ("R" + "PCClient", "old Tron client type"),
+            ("R" + "PCTransport", "old Tron transport type"),
+            ("R" + "PCTypes", "old Tron protocol model namespace"),
+            ("Mock" + "R" + "PC", "old Tron test mock name"),
+            ("rpc" + "Client", "old dependency name"),
+            ("send" + "(method:", "old method-string transport API"),
+            ("Web" + "SocketService", "old connection type"),
+            ("Json" + "RpcEvent", "old event wrapper"),
+            ("Json" + "R" + "pc", "old Tron method-string transport spelling"),
+            ("/" + "ws", "removed Tron client endpoint"),
+        ]
+
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+
+        for root in sourceRoots {
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                Issue.record("Could not enumerate \(root.path)")
+                continue
+            }
+
+            while let any = enumerator.nextObject() {
+                guard let url = any as? URL else { continue }
+                guard url.pathExtension == "swift" || url.pathExtension == "md" else { continue }
+                if url.path == #filePath { continue }
+                if url.path.contains("/CodexApp/") { continue }
+
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbidden {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
                     )
                 }
             }

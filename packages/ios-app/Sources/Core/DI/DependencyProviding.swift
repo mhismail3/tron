@@ -6,8 +6,8 @@ import Foundation
 /// All services that need to be injected should be accessed through this protocol.
 @MainActor
 protocol DependencyProviding: AnyObject {
-    /// RPC client for server communication
-    var rpcClient: RPCClient { get }
+    /// engine client for server communication
+    var engineClient: EngineClient { get }
 
     /// Local SQLite event database
     var eventDatabase: EventDatabase { get }
@@ -49,7 +49,7 @@ protocol ServerSettingsProvider: AnyObject {
     var currentServerOrigin: String { get }
 
     /// Select a locally paired server.
-    /// This disconnects from the current server and recreates the RPC client.
+    /// This disconnects from the current server and recreates the engine client.
     func selectPairedServer(_ server: PairedServer, connectAfterSwitch: Bool)
 }
 

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// ARCHITECTURE: ~115 lines coordinator. Provider list, auth state, RPC calls,
+// ARCHITECTURE: ~115 lines coordinator. Provider list, auth state, engine invocations,
 // OAuth sheet, and error alert live here; per-provider/service UI lives under
 // ModelProviders/ (ModelProviderSection, ProviderServiceCard, ...).
 
@@ -13,7 +13,7 @@ struct ProvidersSettingsPage: View {
     @State private var error: String?
     @State private var oauthProvider: OAuthProvider?
 
-    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var engineClient: EngineClient { dependencies.engineClient }
 
     var body: some View {
         SettingsPageContainer(title: Self.title) {
@@ -86,7 +86,7 @@ struct ProvidersSettingsPage: View {
 
     private func loadAuthState() async {
         do {
-            authState = try await rpcClient.auth.get()
+            authState = try await engineClient.auth.get()
         } catch {
             self.error = error.localizedDescription
         }
@@ -94,43 +94,69 @@ struct ProvidersSettingsPage: View {
 
     private func setActive(provider: String, credential: ActiveCredentialParam) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await rpcClient.auth.setActive(provider: provider, credential: credential)
+            try await engineClient.auth.setActive(
+                provider: provider,
+                credential: credential,
+                idempotencyKey: .userAction("auth.setActive")
+            )
         }
     }
 
     private func removeAccount(provider: String, label: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await rpcClient.auth.removeAccount(provider: provider, label: label)
+            try await engineClient.auth.removeAccount(
+                provider: provider,
+                label: label,
+                idempotencyKey: .userAction("auth.removeAccount")
+            )
         }
     }
 
     private func removeApiKey(provider: String, label: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await rpcClient.auth.removeApiKey(provider: provider, label: label)
+            try await engineClient.auth.removeApiKey(
+                provider: provider,
+                label: label,
+                idempotencyKey: .userAction("auth.removeApiKey")
+            )
         }
     }
 
     private func addApiKey(provider: String, label: String, key: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await rpcClient.auth.addNamedApiKey(provider: provider, label: label, key: key)
+            try await engineClient.auth.addNamedApiKey(
+                provider: provider,
+                label: label,
+                key: key,
+                idempotencyKey: .userAction("auth.addNamedApiKey")
+            )
         }
     }
 
     private func saveProvider(_ params: AuthUpdateParams) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await rpcClient.auth.update(params)
+            try await engineClient.auth.update(
+                params,
+                idempotencyKey: .userAction("auth.update")
+            )
         }
     }
 
     private func clearProvider(_ providerId: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await rpcClient.auth.clear(AuthClearParams(provider: providerId))
+            try await engineClient.auth.clear(
+                AuthClearParams(provider: providerId),
+                idempotencyKey: .userAction("auth.clear")
+            )
         }
     }
 
     private func clearService(_ serviceId: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await rpcClient.auth.clear(AuthClearParams(service: serviceId))
+            try await engineClient.auth.clear(
+                AuthClearParams(service: serviceId),
+                idempotencyKey: .userAction("auth.clear")
+            )
         }
     }
 

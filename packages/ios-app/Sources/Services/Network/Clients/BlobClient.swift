@@ -2,18 +2,18 @@ import Foundation
 
 /// Client for fetching blob content from the server.
 /// Used by the Display tool to load images stored in blob storage.
-final class BlobClient: RPCDomainClient {
+final class BlobClient: EngineDomainClient {
 
     /// Fetch blob content by ID. Returns base64-encoded data and MIME type.
     func getBlob(blobId: String) async throws -> BlobGetResult {
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
         struct BlobGetParams: Codable {
             let blobId: String
         }
 
         let params = BlobGetParams(blobId: blobId)
-        return try await ws.send(method: "blob.get", params: params)
+        return try await invokeRead("blob::get", params)
     }
 
     /// Fetch blob content and decode as image data.

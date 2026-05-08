@@ -16,8 +16,8 @@
 //!
 //! - **`run/.onboarded`** sentinel at [`crate::core::paths::onboarded_marker_path()`].
 //!   Empty marker file. Touched by the Mac wizard at the end of its
-//!   install flow OR on the first successful WS auth. The
-//!   `system.getInfo` RPC returns `paired: true` once it exists so iOS
+//!   install flow OR on the first successful engine auth. The
+//!   `system::get_info` capability returns `paired: true` once it exists so iOS
 //!   can detect "this server has already been paired with someone."
 //!
 //! ## INVARIANTS
@@ -114,7 +114,7 @@ pub fn load_or_create_bearer_token(path: &Path) -> io::Result<String> {
 
 /// Replace the stored bearer token with a fresh one. Returns the new
 /// token so the caller can display it (CLI) or push a notification
-/// (RPC).
+/// (engine capability).
 ///
 /// Serialized through a process-wide mutex so two concurrent rotations
 /// cannot corrupt the file. The file write itself is also atomic

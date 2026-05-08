@@ -5,12 +5,16 @@ import Foundation
 @MainActor
 protocol ModelClientProtocol {
     func list(forceRefresh: Bool) async throws -> [ModelInfo]
-    func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult
+    func switchModel(
+        _ sessionId: String,
+        model: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ModelSwitchResult
 }
 
-/// Client for model-related RPC methods.
+/// Client for model-related engine capabilities.
 /// Handles model switching and listing with caching.
-final class ModelClient: RPCDomainClient, ModelClientProtocol {
+final class ModelClient: EngineDomainClient, ModelClientProtocol {
 
     // Model list cache (5-minute TTL to reduce redundant server calls)
     private var modelCache: [ModelInfo]?
@@ -19,13 +23,18 @@ final class ModelClient: RPCDomainClient, ModelClientProtocol {
 
     // MARK: - Model Methods
 
-    func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult {
-        let ws = try requireTransport().requireConnection()
+    func switchModel(
+        _ sessionId: String,
+        model: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ModelSwitchResult {
+        _ = try requireTransport().requireConnection()
 
         let params = ModelSwitchParams(sessionId: sessionId, model: model)
-        let result: ModelSwitchResult = try await ws.send(
-            method: "model.switch",
-            params: params
+        let result: ModelSwitchResult = try await invokeWrite(
+            "model::switch",
+            params,
+            idempotencyKey: idempotencyKey
         )
 
         if currentTransport?.currentSessionId == sessionId {
@@ -47,11 +56,11 @@ final class ModelClient: RPCDomainClient, ModelClientProtocol {
             return cached
         }
 
-        let ws = try requireTransport().requireConnection()
+        _ = try requireTransport().requireConnection()
 
-        let result: ModelListResult = try await ws.send(
-            method: "model.list",
-            params: EmptyParams()
+        let result: ModelListResult = try await invokeRead(
+            "model::list",
+            EmptyParams()
         )
 
         // Update cache and name formatter
@@ -64,13 +73,18 @@ final class ModelClient: RPCDomainClient, ModelClientProtocol {
 
     // MARK: - Reasoning Level
 
-    func setReasoningLevel(_ sessionId: String, level: String) async throws -> ReasoningLevelResult {
-        let ws = try requireTransport().requireConnection()
+    func setReasoningLevel(
+        _ sessionId: String,
+        level: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ReasoningLevelResult {
+        _ = try requireTransport().requireConnection()
 
         let params = ReasoningLevelParams(sessionId: sessionId, level: level)
-        return try await ws.send(
-            method: "config.setReasoningLevel",
-            params: params
+        return try await invokeWrite(
+            "config::set_reasoning_level",
+            params,
+            idempotencyKey: idempotencyKey
         )
     }
 

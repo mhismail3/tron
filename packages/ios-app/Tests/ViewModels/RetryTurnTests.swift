@@ -5,7 +5,7 @@ import XCTest
 ///
 /// Covers the pure traversal logic in `findLastUserTextMessage()` — the
 /// piece of `retryLastTurn()` that decides WHICH prompt to re-issue.
-/// The RPC call itself is integration-tested via live sessions; here we
+/// The engine invocation itself is integration-tested via live sessions; here we
 /// enumerate every history-shape edge case the plan calls out so that
 /// future refactors can't regress the retry target silently.
 @MainActor
@@ -14,9 +14,9 @@ final class RetryTurnTests: XCTestCase {
     var viewModel: ChatViewModel!
 
     override func setUp() async throws {
-        let mockURL = URL(string: "ws://localhost:8080/ws")!
-        let rpcClient = RPCClient(serverURL: mockURL)
-        viewModel = ChatViewModel(rpcClient: rpcClient, sessionId: "test-session")
+        let mockURL = URL(string: "ws://localhost:8080/engine")!
+        let engineClient = EngineClient(serverURL: mockURL)
+        viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
     }
 
     override func tearDown() async throws {

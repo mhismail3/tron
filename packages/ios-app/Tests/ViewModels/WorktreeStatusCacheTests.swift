@@ -29,7 +29,7 @@ final class WorktreeStatusCacheTests: XCTestCase {
     }
 
     // T2
-    func test_ensureLoaded_storesResultFromRPC() async {
+    func test_ensureLoaded_storesResultFromEngineProtocol() async {
         mock.getStatusResultBySession["x"] = .fixture()
 
         await cache.ensureLoaded(sessionId: "x")
@@ -39,14 +39,14 @@ final class WorktreeStatusCacheTests: XCTestCase {
     }
 
     // T3 — cache hit
-    func test_secondEnsureLoaded_doesNotCallRPC() async {
+    func test_secondEnsureLoaded_doesNotCallEngineProtocol() async {
         mock.getStatusResultBySession["x"] = .fixture()
         await cache.ensureLoaded(sessionId: "x")
         await cache.ensureLoaded(sessionId: "x")
         XCTAssertEqual(mock.getStatusCallCount, 1)
     }
 
-    // T4 — concurrent dedupe (same id → single RPC)
+    // T4 — concurrent dedupe (same id → single engine protocol)
     func test_concurrentEnsureLoaded_dedupesSameSession() async {
         mock.getStatusDelay = 40_000_000  // 40 ms
         mock.getStatusResultBySession["x"] = .fixture()
@@ -77,7 +77,7 @@ final class WorktreeStatusCacheTests: XCTestCase {
         XCTAssertEqual(cache.status(for: "y")?.worktree?.branch, "session/y")
     }
 
-    // T6 — RPC error does not poison the cache
+    // T6 — engine protocol error does not poison the cache
     func test_rpcError_leavesStatusNil_andAllowsRetry() async {
         mock.getStatusError = MockWorktreeError.simulated
         await cache.ensureLoaded(sessionId: "x")
@@ -321,7 +321,7 @@ final class WorktreeStatusCacheTests: XCTestCase {
         XCTAssertNil(cache.status(for: "x")?.worktree)
     }
 
-    // T29 — merged event triggers refresh (refetches via RPC)
+    // T29 — merged event triggers refresh (refetches via engine protocol)
     func test_apply_mergedEvent_triggersRefresh() async {
         cache.set(.fixture(worktree: .fixture(branch: "old")), for: "x")
         mock.getStatusResultBySession["x"] = .fixture(worktree: .fixture(branch: "main", baseBranch: "main"))

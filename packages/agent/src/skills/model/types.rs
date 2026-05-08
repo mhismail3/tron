@@ -44,7 +44,7 @@ pub enum SkillSubagentMode {
 pub enum SkillAddMethod {
     /// Added via `@skill-name` mention in user prompt.
     Mention,
-    /// Added explicitly (e.g., via RPC call).
+    /// Added explicitly (e.g., via engine invocation).
     Explicit,
 }
 

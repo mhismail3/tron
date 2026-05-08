@@ -9,7 +9,7 @@
 //!    cryptic "No configured push destination").
 //! 3. Consistent typed error mapping via `classify_push_error`.
 //!
-//! This is the only safe way for the coordinator / RPC layer to push;
+//! This is the only safe way for the coordinator / engine transport to push;
 //! the raw `GitExecutor::push` is for the SCM layer's own use.
 
 use std::path::Path;

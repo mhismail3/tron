@@ -50,7 +50,7 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
 /// Responsibilities:
 /// - Connecting to server and resuming sessions
 /// - Reconnecting after app returns to foreground
-/// - Reconstructing session state via single `session.reconstruct` RPC call
+/// - Reconstructing session state via single `session::reconstruct` engine invocation
 /// - Setting sequence high-water mark for deterministic event dedup
 ///
 /// This coordinator extracts connection logic from ChatViewModel+Connection.swift,
@@ -67,7 +67,7 @@ final class ConnectionCoordinator {
     /// Connect, resume, and reconstruct the session.
     ///
     /// Single flow for both initial connect and reconnection. The server's
-    /// `session.reconstruct` response provides everything: persisted events,
+    /// `session::reconstruct` response provides everything: persisted events,
     /// in-flight state, and session metadata.
     func connectAndReconstruct(context: ConnectionContext) async {
         context.logInfo("connectAndReconstruct() called for session \(context.sessionId)")
@@ -101,7 +101,7 @@ final class ConnectionCoordinator {
             return
         }
 
-        // Reconstruct session state from server (single RPC call)
+        // Reconstruct session state from server (single engine invocation)
         do {
             let result = try await context.reconstructSession(
                 sessionId: context.sessionId,
@@ -144,7 +144,7 @@ final class ConnectionCoordinator {
             context.logInfo("Not connected, reconnecting...")
         }
 
-        // Reuse the same flow — session.reconstruct handles everything
+        // Reuse the same flow — session::reconstruct handles everything
         await connectAndReconstruct(context: context)
     }
 
@@ -154,7 +154,7 @@ final class ConnectionCoordinator {
     /// Detects session-not-found errors and sets shouldDismiss to navigate away.
     private func handleSessionResumeFailure(_ error: Error, context: ConnectionContext) {
         let isNotFound: Bool
-        if let rpcError = error as? RPCError {
+        if let rpcError = error as? EngineProtocolError {
             isNotFound = rpcError.errorCode == .sessionNotFound
         } else {
             let errorString = error.localizedDescription.lowercased()

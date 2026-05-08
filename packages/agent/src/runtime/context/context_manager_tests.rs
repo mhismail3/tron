@@ -1112,7 +1112,7 @@ fn volatile_fresh_tracks_current_generation() {
 
 #[test]
 fn snapshot_outside_turn_loop_is_accepted_without_refresh() {
-    // RPC paths construct a ContextManager and read a snapshot without
+    // engine invocation paths construct a ContextManager and read a snapshot without
     // ever entering a turn. The debug_assert is bypassed when
     // turn_generation == 0 so these reads don't false-positive.
     let cm = ContextManager::new(test_config());

@@ -403,7 +403,7 @@ final class MockAskUserQuestionContext: AskUserQuestionContext {
     var showErrorCalled = false
     var lastErrorMessage: String?
 
-    let rpcClient = RPCClient(serverURL: URL(string: "ws://localhost:0")!)
+    let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:0")!)
 
     // MARK: - Protocol Methods
 

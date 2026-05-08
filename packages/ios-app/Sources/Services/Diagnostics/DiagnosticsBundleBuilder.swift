@@ -48,7 +48,7 @@ struct DiagnosticsBundleBuilder {
 
     let eventDatabase: EventDatabase
     let eventStoreManager: EventStoreManager
-    let rpcClient: RPCClient
+    let engineClient: EngineClient
     let activeServer: PairedServer?
     let metricKitStore: MetricKitDiagnosticsStore
     let now: () -> Date
@@ -62,7 +62,7 @@ struct DiagnosticsBundleBuilder {
     ) {
         self.eventDatabase = dependencies.eventDatabase
         self.eventStoreManager = dependencies.eventStoreManager
-        self.rpcClient = dependencies.rpcClient
+        self.engineClient = dependencies.engineClient
         self.activeServer = dependencies.pairedServerStore.activeServer
         self.metricKitStore = metricKitStore
         self.now = now
@@ -74,7 +74,7 @@ struct DiagnosticsBundleBuilder {
     init(
         eventDatabase: EventDatabase,
         eventStoreManager: EventStoreManager,
-        rpcClient: RPCClient,
+        engineClient: EngineClient,
         activeServer: PairedServer?,
         metricKitStore: MetricKitDiagnosticsStore,
         now: @escaping () -> Date = { Date() },
@@ -82,7 +82,7 @@ struct DiagnosticsBundleBuilder {
     ) {
         self.eventDatabase = eventDatabase
         self.eventStoreManager = eventStoreManager
-        self.rpcClient = rpcClient
+        self.engineClient = engineClient
         self.activeServer = activeServer
         self.metricKitStore = metricKitStore
         self.now = now
@@ -146,7 +146,7 @@ struct DiagnosticsBundleBuilder {
                 platform: "iOS",
                 osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                 deviceModelClass: UIDevice.current.model,
-                connectionState: Self.connectionStateName(rpcClient.connectionState),
+                connectionState: Self.connectionStateName(engineClient.connectionState),
                 activeServer: DiagnosticsActiveServer(server: activeServer)
             ),
             logs: DiagnosticsLogs(ios: iosLogs, server: serverLogs),
@@ -181,11 +181,11 @@ struct DiagnosticsBundleBuilder {
     }
 
     private func buildServerLogs(redactor: DiagnosticsRedactor) async -> DiagnosticsServerLogsResult {
-        guard rpcClient.connectionState.isConnected else {
+        guard engineClient.connectionState.isConnected else {
             return DiagnosticsServerLogsResult(entries: [], timestamps: [])
         }
         do {
-            let result = try await rpcClient.misc.recentLogs(limit: Self.maxServerLogs)
+            let result = try await engineClient.misc.recentLogs(limit: Self.maxServerLogs)
             let includedEntries = Array(result.entries.prefix(Self.maxServerLogs))
             return DiagnosticsServerLogsResult(
                 entries: includedEntries.map { entry in
@@ -210,7 +210,7 @@ struct DiagnosticsBundleBuilder {
                         timestamp: Self.isoFormatter.string(from: now()),
                         level: "warning",
                         component: "ios.diagnostics",
-                        message: "logs.recent failed: \(redactor.redactMessage(error.localizedDescription))",
+                        message: "logs::recent failed: \(redactor.redactMessage(error.localizedDescription))",
                         originHash: nil,
                         sessionIdHash: nil,
                         errorMessage: nil
@@ -274,7 +274,7 @@ struct DiagnosticsBundleBuilder {
 
     private func selectedSessions() async -> [CachedSession] {
         let sessions = (try? await eventDatabase.sessions.getAll()) ?? eventStoreManager.sessions
-        let activeId = eventStoreManager.activeSessionId ?? rpcClient.currentSessionId
+        let activeId = eventStoreManager.activeSessionId ?? engineClient.currentSessionId
         var selected: [CachedSession] = []
         var seen: Set<String> = []
 
