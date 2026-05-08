@@ -255,7 +255,6 @@ pub(super) fn capability_context_view(deps: &EngineCapabilityDeps) -> ServerCapa
             crate::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: deps.auth_path.clone(),
-        broadcast_manager: deps.broadcast_manager.clone(),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: deps.mcp_router.clone(),
         display_stream_registry: None,

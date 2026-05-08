@@ -3,8 +3,8 @@
 //! This module owns the server-specific `namespace::function` implementations
 //! that the engine catalog exposes to agents, tools, triggers, and public
 //! transports. Capability handlers return transport-neutral
-//! [`CapabilityError`] values and plain JSON results; JSON-RPC mapping is kept
-//! in `server::transport::json_rpc`.
+//! [`CapabilityError`] values and plain JSON results; client protocols map
+//! those values at their own transport boundaries.
 //!
 //! ## Submodules
 //!
@@ -17,9 +17,9 @@
 //!
 //! # INVARIANT: no transport-owned behavior
 //!
-//! Domain methods here are canonical operation keys only. Public JSON-RPC
-//! methods are limited to `engine.*`; they translate into the transport-neutral
-//! engine envelope before reaching these handlers.
+//! Domain methods here are canonical operation keys only. Public client
+//! protocols translate into the transport-neutral engine envelope before
+//! reaching these handlers.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,7 +53,6 @@ use crate::server::services::context::{ServerCapabilityContext, run_blocking_tas
 use crate::server::services::events_wire::ServerEventPayload;
 use crate::server::services::filesystem_service;
 use crate::server::services::notification_inbox::NotificationInboxService;
-use crate::server::websocket::broadcast::BroadcastManager;
 use crate::skills::registry::SkillRegistry;
 
 use crate::server::capabilities::error_mapping::capability_error_to_engine;
@@ -113,7 +112,6 @@ pub(crate) struct EngineCapabilityDeps {
     settings_path: PathBuf,
     auth_path: PathBuf,
     mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
-    broadcast_manager: Option<Arc<BroadcastManager>>,
     codex_app_server: Option<Arc<CodexAppServerManager>>,
     ws_port: Arc<AtomicU16>,
     onboarded_marker_path: PathBuf,
@@ -139,7 +137,6 @@ impl EngineCapabilityDeps {
             settings_path: ctx.settings_path.clone(),
             auth_path: ctx.auth_path.clone(),
             mcp_router: ctx.mcp_router.clone(),
-            broadcast_manager: ctx.broadcast_manager.clone(),
             codex_app_server: ctx.codex_app_server.clone(),
             ws_port: Arc::clone(&ctx.ws_port),
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),

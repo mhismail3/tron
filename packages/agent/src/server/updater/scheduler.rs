@@ -4,8 +4,8 @@
 //! `com.tron.server` LaunchAgent). Arms a Tokio interval per the
 //! user's configured [`UpdateFrequency`], fires a check on each tick,
 //! persists the outcome to `updater-state.json`, and — when a newer
-//! release is available — broadcasts a `server.update_available`
-//! event to every connected iOS / Mac client.
+//! release is available — publishes a `server.update_available`
+//! event to engine streams for connected clients.
 //!
 //! ## Guarantees
 //!
@@ -46,7 +46,8 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::server::websocket::broadcast::BroadcastManager;
+use crate::engine::{EngineHostHandle, PublishStreamEvent, VisibilityScope};
+use crate::server::services::events_wire::ServerEventPayload;
 
 use super::{
     CheckOutcome, ReleaseFetcher, UpdateDecision, UpdaterState, check_for_update, is_paused,
@@ -66,11 +67,8 @@ pub struct SchedulerDeps {
     /// [`super::HttpReleaseFetcher`]; tests inject
     /// [`super::MockReleaseFetcher`].
     pub fetcher: Arc<dyn ReleaseFetcher>,
-    /// Broadcast channel used to emit server-wide events (no session
-    /// binding). Matches the `cron::impls::CronEventBroadcaster`
-    /// pattern — server-lifecycle events are not persisted in the
-    /// session log.
-    pub broadcast: Arc<BroadcastManager>,
+    /// Engine host used to publish server-wide update lifecycle events.
+    pub engine_host: EngineHostHandle,
     /// Path to `updater-state.json`. Typically
     /// `~/.tron/internal/run/updater-state.json`.
     pub state_path: PathBuf,
@@ -218,15 +216,39 @@ pub async fn perform_tick(deps: &SchedulerDeps) -> TickReport {
                         "channel": update_cfg.channel.as_str(),
                         "timestamp": now,
                     });
-                    let event = crate::server::transport::json_rpc::types::JsonRpcEvent {
+                    let event = ServerEventPayload {
                         event_type: "server.update_available".to_owned(),
                         session_id: None,
+                        workspace_id: None,
                         timestamp: now.clone(),
                         data: Some(payload),
                         run_id: None,
                         sequence: None,
+                        trace_id: None,
+                        parent_invocation_id: None,
+                        source_event_id: None,
+                        source_sequence: None,
+                        stream_cursor: None,
                     };
-                    deps.broadcast.broadcast_all(&event).await;
+                    if let Err(error) = deps
+                        .engine_host
+                        .publish_stream_event(PublishStreamEvent {
+                            topic: "updates".to_owned(),
+                            payload: serde_json::json!({
+                                "serverEvent": event,
+                                "sourceEventType": "server.update_available",
+                            }),
+                            visibility: VisibilityScope::System,
+                            session_id: None,
+                            workspace_id: None,
+                            producer: "updater".to_owned(),
+                            trace_id: None,
+                            parent_invocation_id: None,
+                        })
+                        .await
+                    {
+                        warn!(error = %error, "updater stream publication failed");
+                    }
                     emitted = Some(release.version.clone());
                     info!(
                         version = %release.version,
@@ -383,6 +405,7 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::EngineHostHandle;
     use crate::server::updater::{MockReleaseFetcher, ReleaseInfo};
     use crate::settings::types::{UpdateChannel, UpdateFrequency};
 
@@ -405,7 +428,7 @@ mod tests {
     ) -> SchedulerDeps {
         SchedulerDeps {
             fetcher,
-            broadcast: Arc::new(BroadcastManager::new()),
+            engine_host: EngineHostHandle::new_in_memory().unwrap(),
             state_path: tmp.path().join("updater-state.json"),
             pause_path: tmp.path().join("auto-update.pause"),
             current_version: current_version.to_string(),
@@ -520,7 +543,7 @@ mod tests {
         ]));
         let deps2 = SchedulerDeps {
             fetcher: fetcher2,
-            broadcast: deps1.broadcast.clone(),
+            engine_host: deps1.engine_host.clone(),
             state_path: deps1.state_path.clone(),
             pause_path: deps1.pause_path.clone(),
             current_version: "0.5.0".to_string(),

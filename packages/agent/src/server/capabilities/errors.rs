@@ -1,7 +1,7 @@
 //! Capability error codes and error type.
 //!
 //! Domain code uses these typed errors without knowing which transport will
-//! serialize them. JSON-RPC conversion lives in `server::transport::json_rpc`.
+//! serialize them. Transport conversion lives at the client protocol boundary.
 
 // ── Error code constants ────────────────────────────────────────────
 
@@ -10,7 +10,6 @@ pub const INVALID_PARAMS: &str = "INVALID_PARAMS";
 /// Unexpected internal error.
 pub const INTERNAL_ERROR: &str = "INTERNAL_ERROR";
 /// Public transport method not found.
-pub const METHOD_NOT_FOUND: &str = "METHOD_NOT_FOUND";
 /// Resource or feature not available.
 pub const NOT_AVAILABLE: &str = "NOT_AVAILABLE";
 /// Generic not-found.

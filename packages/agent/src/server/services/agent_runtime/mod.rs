@@ -1,7 +1,7 @@
 //! Agent prompt runtime support owned by canonical engine functions.
 //!
 //! The production prompt path is owned by `agent::prompt` and hidden apply/run
-//! functions. JSON-RPC reaches it only through `engine.invoke`; this module owns
+//! functions. Client protocols reach it only through `/engine` `invoke`; this module owns
 //! the reusable prompt bootstrap, run spawning, queue drain, and completion
 //! helpers used by canonical agent functions and tests.
 

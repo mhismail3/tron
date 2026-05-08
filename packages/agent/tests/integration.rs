@@ -31,8 +31,7 @@ use tron::runtime::orchestrator::session_manager::SessionManager;
 use tron::server::config::ServerConfig;
 use tron::server::server::TronServer;
 use tron::server::services::context::{AgentDeps, ServerCapabilityContext};
-use tron::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
-use tron::server::websocket::stream_pump::EngineStreamEventPump;
+use tron::server::stream_pump::EngineStreamEventPump;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
 
@@ -124,7 +123,6 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
             tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
-        broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
         display_stream_registry: None,
@@ -138,42 +136,28 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         updater_state_path: unique_runtime_path("updater-state", "json"),
     };
 
-    let mut registry = JsonRpcTransportRegistry::new();
-    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
-
     let config = ServerConfig::default(); // port 0 = auto-assign
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = Arc::new(TronServer::new(
-        config,
-        registry,
-        capability_context,
-        metrics_handle,
-    ));
-    tron::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
+    let server = Arc::new(TronServer::new(config, capability_context, metrics_handle));
+    tron::server::transport::setup::register_engine_protocol_for_context(
         server.capability_context(),
-        server.registry(),
     )
-    .expect("integration RPC engine pump should register");
+    .expect("integration engine protocol should register");
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
-        server.broadcast().clone(),
+        server.capability_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
-    )
-    .with_engine_streams(server.capability_context().engine_host.clone());
+    );
     let _stream_pump_handle = tokio::spawn(pump.run());
 
     let (addr, _handle) = server.listen().await.unwrap();
-    let ws_url = format!("ws://{addr}/ws");
+    let ws_url = format!("ws://{addr}/engine");
     register_server_auth_path(&ws_url, &server.capability_context().auth_path);
-    register_server_auth_path(
-        &engine_ws_url_for(&ws_url),
-        &server.capability_context().auth_path,
-    );
 
     (ws_url, server)
 }
@@ -429,7 +413,6 @@ async fn boot_server_with_provider_and_handles(
             tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
-        broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
         display_stream_registry: None,
@@ -443,47 +426,33 @@ async fn boot_server_with_provider_and_handles(
         updater_state_path: unique_runtime_path("updater-state", "json"),
     };
 
-    let mut registry = JsonRpcTransportRegistry::new();
-    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
-
     let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = Arc::new(TronServer::new(
-        config,
-        registry,
-        capability_context,
-        metrics_handle,
-    ));
-    tron::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
+    let server = Arc::new(TronServer::new(config, capability_context, metrics_handle));
+    tron::server::transport::setup::register_engine_protocol_for_context(
         server.capability_context(),
-        server.registry(),
     )
-    .expect("integration RPC engine pump should register");
+    .expect("integration engine protocol should register");
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
-        server.broadcast().clone(),
+        server.capability_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
-    )
-    .with_engine_streams(server.capability_context().engine_host.clone());
+    );
     let stream_pump_handle = tokio::spawn(pump.run());
 
     let (addr, server_handle) = server.listen().await.unwrap();
-    let ws_url = format!("ws://{addr}/ws");
+    let ws_url = format!("ws://{addr}/engine");
     register_server_auth_path(&ws_url, &server.capability_context().auth_path);
-    register_server_auth_path(
-        &engine_ws_url_for(&ws_url),
-        &server.capability_context().auth_path,
-    );
 
     (ws_url, server, vec![stream_pump_handle, server_handle])
 }
 
-/// Connect and skip the initial system.connected message.
+/// Connect to the `/engine` protocol.
 async fn connect(url: &str) -> WsStream {
     let auth_path = TEST_SERVER_AUTH_PATHS
         .lock()
@@ -501,10 +470,11 @@ async fn connect(url: &str) -> WsStream {
 }
 
 fn engine_ws_url_for(ws_url: &str) -> String {
-    ws_url.strip_suffix("/ws").map_or_else(
-        || ws_url.replace("/ws", "/engine"),
-        |base| format!("{base}/engine"),
-    )
+    if ws_url.ends_with("/engine") {
+        ws_url.to_owned()
+    } else {
+        format!("{}/engine", ws_url.trim_end_matches('/'))
+    }
 }
 
 fn register_server_auth_path(url: &str, auth_path: &std::path::Path) {
@@ -524,12 +494,20 @@ async fn read_json(ws: &mut WsStream) -> Value {
             .expect("stream closed")
             .expect("ws error");
         if let Message::Text(text) = msg {
-            return serde_json::from_str(&text).unwrap();
+            let parsed: Value = serde_json::from_str(&text).unwrap();
+            return normalize_engine_ws_value(parsed);
         }
     }
 }
 
-/// Send a JSON-RPC request and read the response.
+fn normalize_engine_ws_value(parsed: Value) -> Value {
+    if parsed.get("type").and_then(Value::as_str) == Some("event") {
+        return parsed.get("event").cloned().unwrap_or(parsed);
+    }
+    parsed
+}
+
+/// Send an engine invocation request and read the response.
 async fn rpc_call(ws: &mut WsStream, id: u64, method: &str, params: Option<Value>) -> Value {
     let (response, _) = rpc_call_with_interleaved_events(ws, id, method, params).await;
     response
@@ -541,24 +519,22 @@ async fn rpc_call_with_interleaved_events(
     method: &str,
     params: Option<Value>,
 ) -> (Value, Vec<Value>) {
-    if method.contains("::") {
-        return engine_invoke_call_with_interleaved_events(ws, id, method, params).await;
-    }
-    raw_rpc_call_with_interleaved_events(ws, id, method, params).await
+    engine_invoke_call_with_interleaved_events(ws, id, method, params).await
 }
 
 async fn raw_rpc_call_with_interleaved_events(
     ws: &mut WsStream,
     id: u64,
-    method: &str,
-    params: Option<Value>,
+    message_type: &str,
+    payload: Option<Value>,
 ) -> (Value, Vec<Value>) {
     let id_str = format!("r{id}");
-    let mut req = json!({"id": id_str, "method": method});
-    if method == "engine.invoke" {
-        req["params"] = params.unwrap_or_else(|| json!({}));
-    } else if let Some(p) = params {
-        req["params"] = p;
+    let mut req = payload.unwrap_or_else(|| json!({}));
+    if let Some(object) = req.as_object_mut() {
+        object.insert("type".to_owned(), json!(message_type));
+        object.insert("id".to_owned(), json!(id_str));
+    } else {
+        req = json!({"type": message_type, "id": id_str});
     }
     ws.send(Message::text(req.to_string())).await.unwrap();
 
@@ -569,7 +545,7 @@ async fn raw_rpc_call_with_interleaved_events(
         if parsed.get("id").and_then(|v| v.as_str()) == Some(&id_str) {
             return (parsed, interleaved);
         }
-        interleaved.push(parsed);
+        interleaved.push(normalize_engine_ws_value(parsed));
     }
 }
 
@@ -590,25 +566,59 @@ async fn engine_invoke_call_with_interleaved_events(
         "payload": payload,
         "idempotencyKey": idempotency_key,
     });
-    if let Some(session_id) = invoke_params
+    let session_id = invoke_params
         .pointer("/payload/sessionId")
         .and_then(Value::as_str)
-        .map(str::to_owned)
-        && let Some(object) = invoke_params.as_object_mut()
-    {
-        object.insert("sessionId".to_owned(), json!(session_id));
-    }
-    if let Some(workspace_id) = invoke_params
+        .map(str::to_owned);
+    let workspace_id = invoke_params
         .pointer("/payload/workspaceId")
         .and_then(Value::as_str)
-        .map(str::to_owned)
+        .map(str::to_owned);
+    if (session_id.is_some() || workspace_id.is_some())
         && let Some(object) = invoke_params.as_object_mut()
     {
-        object.insert("workspaceId".to_owned(), json!(workspace_id));
+        let mut context = serde_json::Map::new();
+        if let Some(session_id) = session_id {
+            context.insert("sessionId".to_owned(), json!(session_id));
+        }
+        if let Some(workspace_id) = workspace_id {
+            context.insert("workspaceId".to_owned(), json!(workspace_id));
+        }
+        object.insert("context".to_owned(), Value::Object(context));
     }
     let (response, events) =
-        raw_rpc_call_with_interleaved_events(ws, id, "engine.invoke", Some(invoke_params)).await;
-    (unwrap_engine_invoke_response(response), events)
+        raw_rpc_call_with_interleaved_events(ws, id, "invoke", Some(invoke_params)).await;
+    let response = unwrap_engine_invoke_response(response);
+    if response.get("success") == Some(&Value::Bool(true))
+        && let Some(session_id) = response
+            .pointer("/result/sessionId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    {
+        subscribe_to_session_events(ws, id, &session_id).await;
+    }
+    (response, events)
+}
+
+async fn subscribe_to_session_events(ws: &mut WsStream, id: u64, session_id: &str) {
+    let subscribe_id = format!("sub-{id}-{session_id}");
+    let request = json!({
+        "type": "subscribe",
+        "id": subscribe_id,
+        "topic": "events.session",
+        "context": {"sessionId": session_id},
+    });
+    ws.send(Message::text(request.to_string())).await.unwrap();
+    loop {
+        let parsed = read_json(ws).await;
+        if parsed.get("id").and_then(Value::as_str) == Some(subscribe_id.as_str()) {
+            assert_eq!(
+                parsed["ok"], true,
+                "session event subscription failed: {parsed}"
+            );
+            return;
+        }
+    }
 }
 
 async fn publish_engine_session_event(
@@ -644,11 +654,19 @@ async fn publish_engine_session_event(
 }
 
 fn unwrap_engine_invoke_response(response: Value) -> Value {
-    if response.get("success") != Some(&Value::Bool(true)) {
-        return response;
+    if response.get("ok") == Some(&Value::Bool(false)) {
+        return json!({
+            "id": response.get("id").cloned().unwrap_or(Value::Null),
+            "success": false,
+            "error": response.get("error").cloned().unwrap_or(Value::Null),
+        });
     }
     let Some(child) = response.pointer("/result/child") else {
-        return response;
+        return json!({
+            "id": response.get("id").cloned().unwrap_or(Value::Null),
+            "success": response.get("ok").cloned().unwrap_or(Value::Bool(false)),
+            "result": response.get("result").cloned().unwrap_or(Value::Null),
+        });
     };
     if !child.get("error").is_none_or(Value::is_null) {
         let error = child.get("error").unwrap_or(&Value::Null);

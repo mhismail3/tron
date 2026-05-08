@@ -71,20 +71,6 @@ impl ServerEventPayload {
             stream_cursor: None,
         }
     }
-
-    /// Convert to the current `/ws` event wire shape.
-    pub(crate) fn to_json_rpc_event(
-        &self,
-    ) -> crate::server::transport::json_rpc::types::JsonRpcEvent {
-        crate::server::transport::json_rpc::types::JsonRpcEvent {
-            event_type: self.event_type.clone(),
-            session_id: self.session_id.clone(),
-            timestamp: self.timestamp.clone(),
-            data: self.data.clone(),
-            run_id: self.run_id.clone(),
-            sequence: self.sequence,
-        }
-    }
 }
 
 /// Convert an `EventRow` to the neutral server event payload.
@@ -168,7 +154,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn server_event_payload_is_not_json_rpc_event_shaped() {
+    fn server_event_payload_is_neutral_event_shaped() {
         let mut payload = ServerEventPayload::new(
             "agent.updated",
             Some("session-1".to_owned()),
@@ -189,25 +175,6 @@ mod tests {
         assert_eq!(value["sourceEventId"], "event-1");
         assert_eq!(value["sourceSequence"], 7);
         assert_eq!(value["streamCursor"], 42);
-        assert!(value.get("__rpcEvent").is_none());
-    }
-
-    #[test]
-    fn json_rpc_conversion_preserves_current_ws_shape() {
-        let mut payload = ServerEventPayload::new(
-            "agent.updated",
-            Some("session-1".to_owned()),
-            Some(json!({"ok": true})),
-        );
-        payload.run_id = Some("run-1".to_owned());
-        payload.sequence = Some(9);
-        payload.trace_id = Some("trace-1".to_owned());
-
-        let event = payload.to_json_rpc_event();
-        assert_eq!(event.event_type, "agent.updated");
-        assert_eq!(event.session_id.as_deref(), Some("session-1"));
-        assert_eq!(event.run_id.as_deref(), Some("run-1"));
-        assert_eq!(event.sequence, Some(9));
-        assert_eq!(event.data, Some(json!({"ok": true})));
+        assert!(value.get("type").is_some());
     }
 }

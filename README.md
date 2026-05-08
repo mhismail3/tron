@@ -4,7 +4,7 @@
 
 Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, tool execution, and event-sourced session persistence. A native iOS app provides a real-time chat interface with streaming, session management, push notifications, and a separate direct Codex App Server mode.
 
-This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, tools, RPC methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
+This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, tools, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
 ---
 
@@ -16,7 +16,7 @@ This README is the single, canonical reference for the project and is expected t
 - [Quick Start](#quick-start)
 - [CLI Reference](#cli-reference)
 - [Tools](#tools)
-- [RPC API](#rpc-api)
+- [Engine Protocol API](#engine-protocol-api)
 - [Event System](#event-system)
 - [Settings](#settings)
 - [Authentication](#authentication)
@@ -39,7 +39,7 @@ This README is the single, canonical reference for the project and is expected t
 |                           packages/ios-app                                  |
 |              MVVM  -  Coordinators  -  Event Plugins  -  Swift 6            |
 +-------------------------------+---------------------------------------------+
-                                | WebSocket (`/ws`, `/engine`), port 9847
+                                | WebSocket (`/engine`), port 9847
                                 v
 +-----------------------------------------------------------------------------+
 |                          Rust Agent Server                                  |
@@ -64,24 +64,25 @@ This README is the single, canonical reference for the project and is expected t
 
 +-----------------------------------------------------------------------------+
 | Optional Codex mode                                                         |
-| engine.invoke(codex_app::status) -> Codex App Server WS -> managed child    |
+| /engine invoke(codex_app::status) -> Codex App Server WS -> managed child   |
 +-----------------------------------------------------------------------------+
 
 Optional Codex mode connects the iOS app directly to a `codex app-server`
 process on the active paired machine, but Tron Server owns that child process,
 its bearer token file, and its lifecycle. Clients discover the live endpoint via
-authenticated `engine.invoke(codex_app::status)`, then use a dedicated Codex JSON-RPC transport
-that does not route turns through the Tron agent.
+authenticated `/engine` `invoke` for `codex_app::status`, then use the
+dedicated Codex App Server transport that does not route turns through the Tron
+agent.
 ```
 
 ### Data Path
 
-1. Client sends either five-method JSON-RPC over `/ws` or the engine protocol over `/engine`
+1. Client connects to `/engine` and sends engine protocol messages
 2. The `server` module validates framing and builds an `EngineTransportRequest`
 3. The envelope invokes a canonical `namespace::function` engine capability through a transport trigger
 4. Canonical functions call runtime, orchestrator, event store, or domain services as needed
 5. Domain output is serialized at the transport boundary
-6. Runtime events publish neutral `ServerEventPayload` records to engine streams, and WebSocket pumps stream records
+6. Runtime events publish neutral `ServerEventPayload` records to engine streams, and `/engine` subscriptions deliver stream records
 
 ---
 
@@ -167,10 +168,10 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
-| `server` | HTTP/WS + engine transport | `TronServer`, `JsonRpcTransportRegistry`, `ServerCapabilityContext`, `EngineStreamEventPump` |
+| `server` | HTTP/WS + engine protocol | `TronServer`, `ServerCapabilityContext`, `EngineStreamEventPump` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
 | `server::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
-| `server::websocket` | WS upgrade + bearer-auth middleware | `BearerTokenStore`, `verify_bearer_header()` |
+| `server::transport` | `/engine` client protocol, worker auth, transport envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `server::updater` | GitHub Releases checks + update notifications | `SchedulerDeps`, `UpdaterState`, `UpdateDecision` |
 
 ---
@@ -325,38 +326,24 @@ Source-control operations are now canonical engine capabilities as well as iOS S
 
 ---
 
-## RPC API
+## Engine Protocol API
 
-Tron exposes a deliberately small JSON-RPC transport over WebSocket. The public JSON-RPC registry contains exactly **5 methods**, all in the `engine` group:
-
-| Group | Count | Methods |
-|-------|------:|---------|
-| `engine` | 5 | `engine.discover`, `engine.inspect`, `engine.watch`, `engine.invoke`, `engine.promote` |
-
-Domain behavior is addressed only by live canonical `namespace::function` capabilities invoked through `engine.invoke`. Dotted domain method names are not registered and return `METHOD_NOT_FOUND`.
+Tron exposes one public client capability protocol: the authenticated `/engine`
+WebSocket. Domain behavior is addressed only by live canonical
+`namespace::function` capabilities discovered through the catalog and invoked
+with engine protocol messages. Dotted domain method names are not registered.
 
 ### Connection
 
 ```
-JSON-RPC + events: ws://<host>:<port>/ws                Default port: 9847 (set via --port CLI flag)
-Engine protocol:   ws://<host>:<port>/engine            Bearer-authenticated client capability protocol
-Workers:           ws://<host>:<port>/engine/workers    Loopback-only local engine workers
-Health:            GET  http://<host>:<port>/health
-Metrics:           GET  http://<host>:<port>/metrics
+Engine clients:    GET /engine            ws://<host>:<port>/engine            Bearer-authenticated client capability protocol
+Workers:           GET /engine/workers    ws://<host>:<port>/engine/workers    Loopback-only local engine workers
+Health:            GET /health            http://<host>:<port>/health
+Metrics:           GET /metrics           http://<host>:<port>/metrics
 ```
 
-JSON-RPC messages use the server's existing WebSocket RPC framing. Request IDs are strings and are echoed on responses:
-
-```json
-{"id":"discover-1","method":"engine.discover","params":{"text":"session"}}
-{"id":"discover-1","success":true,"result":{"functions":[{"id":"session::create"}]}}
-```
-
-`engine.invoke` accepts only canonical function ids such as `system::ping`, `agent::prompt`, or `settings::get`. Mutating calls must include an explicit idempotency key in the payload. JSON-RPC request ids are correlation ids only.
-
-Hidden apply functions remain in the engine catalog for queue/cron/runtime execution, but normal discovery excludes them and the public transport cannot invoke them directly.
-
-The `/engine` protocol is the engine-native sibling transport. Messages are JSON objects with a `type`, optional correlation `id`, and camelCase fields. The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`, `promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`:
+Engine protocol messages are JSON objects with a `type`, optional correlation
+`id`, and camelCase fields:
 
 ```json
 {"type":"hello","id":"h1","protocolVersion":1,"sessionId":"session-1"}
@@ -364,10 +351,17 @@ The `/engine` protocol is the engine-native sibling transport. Messages are JSON
 {"type":"response","id":"i1","ok":true,"result":{"child":{"value":{"pong":true}}}}
 ```
 
-Both JSON-RPC and `/engine` requests translate into the same internal
-`EngineTransportRequest`, carrying actor, authority, trace, scope, payload,
-expected revision, and explicit idempotency. Correlation ids are never command
-ids or idempotency keys.
+`invoke` accepts only canonical function ids such as `system::ping`,
+`agent::prompt`, or `settings::get`. Mutating calls must include an explicit
+idempotency key. Message ids are correlation ids only.
+
+Hidden apply functions remain in the engine catalog for queue/cron/runtime execution, but normal discovery excludes them and the public transport cannot invoke them directly.
+
+The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
+`promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`. Every request
+translates into an internal `EngineTransportRequest`, carrying actor,
+authority, trace, scope, payload, expected revision, and explicit idempotency.
+Correlation ids are never command ids or idempotency keys.
 
 ---
 
@@ -407,7 +401,7 @@ The canonical event list is generated by the `define_events!` macro in `packages
 ### Event Broadcasting
 
 Runtime events are projected into neutral server event payloads and stored in
-engine streams before WebSocket delivery:
+engine streams before `/engine` delivery:
 
 ```
 TronAgent (run loop)  ->  EventEmitter  ->  Orchestrator broadcast
@@ -418,7 +412,7 @@ EngineStreamEventPump  <------------------------------------------+
 Engine stream (`events.session`, `catalog`, `jobs`, ...)
     |
     v
-BroadcastManager  ->  Per-connection WebSocket writers
+/engine subscriptions -> Per-connection WebSocket writers
 ```
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` tool frames when iOS clients are subscribed.
@@ -563,7 +557,7 @@ tron login --label work
 tron login --label personal
 ```
 
-`auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app, CLI, or canonical `auth::*` capabilities through `engine.invoke`. When an API key is saved without a custom label, Tron stores it as `Default`.
+`auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app, CLI, or canonical `auth::*` capabilities through `/engine` `invoke`. When an API key is saved without a custom label, Tron stores it as `Default`.
 
 OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth credentials route to `chatgpt.com/backend-api/codex` and use Codex catalog limits such as `gpt-5.5` and `gpt-5.3-codex` at 272K context. OpenAI API keys route to `api.openai.com/v1/responses` and use Platform limits such as `gpt-5.5` at 1.05M context and `gpt-5.3-codex` at 400K context. `model.list` is auth-path-aware: OAuth shows the live Codex catalog plus documented Codex previews, while API keys show all streaming text/image-in-to-text-out Responses models Tron can serve without a separate image, audio, video, embedding, moderation, realtime, or background provider path. Dated snapshots like `gpt-5.5-2026-04-23` are accepted as hidden aliases and preserve the exact request model ID. Deprecated OpenAI models remain listed with `isDeprecated` and `replacementModel` metadata, but `model.switch` rejects them so they cannot be newly selected; non-streaming models such as `gpt-5.5-pro`, `o3-pro`, and `o1-pro` stay hidden and are rejected by the streaming provider.
 
@@ -689,9 +683,9 @@ packages/ios-app/Sources/
 +-- App/                  App entry point, delegates, scene phases
 +-- Core/                 DI, EventDispatchCoordinator, plugins, payloads
 +-- Database/             SQLite event database, queries
-+-- Models/               Data models, RPC codables, event types
++-- Models/               Data models, engine protocol codables, event types
 +-- Protocols/            Coordinator and view model protocols
-+-- Services/             Network (RPC client, WebSocket, deep links), paired servers, audio,
++-- Services/             Network (engine client, WebSocket, deep links), paired servers, audio,
 +                         Codex App Server client, push notifications, local diagnostics,
 +                         feedback composer, Keychain tokens
 +-- ViewModels/           Chat and Codex view models, handlers, managers, @Observable state,
@@ -724,9 +718,9 @@ packages/ios-app/Sources/
 ### Data Flow
 
 ```
-Live:    WebSocket -> RPCClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
+Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
-Codex:   engine.invoke(codex_app::status) -> Codex App Server WS -> CodexJSONRPCTransport -> CodexAppClient -> CodexAppViewModel -> Codex mode UI
+Codex:   /engine invoke(codex_app::status) -> Codex App Server WS -> CodexJSONRPCTransport -> CodexAppClient -> CodexAppViewModel -> Codex mode UI
 ```
 
 ### Build Configurations
@@ -753,7 +747,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `engine.invoke`.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
 
 ```
 packages/mac-app/Sources/
@@ -784,7 +778,7 @@ packages/mac-app/Sources/
 
 1. **Welcome** — introduces Tron.
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
-3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `engine.invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system::ping` while ignoring initial `connection.established` frames.
+3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `/engine` `invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system::ping` after the initial `hello.ok` frame.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
 5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/internal/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/internal/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
 6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open alternatives. TestFlight then owns beta availability and update selection.
@@ -1041,7 +1035,7 @@ style/pedantic suggestions stay advisory so the signal is not buried.
 
 These constraints are enforced in code with `// INVARIANT:` markers at the enforcement site.
 
-1. **Canonical engine execution**: Production behavior is owned by canonical engine functions. The public JSON-RPC surface contains only `engine.*` transport methods; domain behavior is discovered and invoked by canonical `namespace::function` ids.
+1. **Canonical engine execution**: Production behavior is owned by canonical engine functions. The public `/engine` protocol is only transport; domain behavior is discovered and invoked by canonical `namespace::function` ids.
 
 2. **Fail-fast on unknown models**: Unknown model or provider returns a typed `UnsupportedModel` error immediately. No silent substitution or default provider substitution.
 

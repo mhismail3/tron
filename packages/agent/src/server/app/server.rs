@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
 use axum::Router;
 use axum::extract::ConnectInfo;
 use axum::extract::Request as AxumRequest;
@@ -32,10 +31,8 @@ use crate::server::config::ServerConfig;
 use crate::server::external_workers::{SharedExternalWorkerRuntime, run_external_worker_socket};
 use crate::server::health::{self, HealthResponse};
 use crate::server::shutdown::ShutdownCoordinator;
-use crate::server::transport::engine_ws::run_engine_ws_session;
-use crate::server::websocket::auth::{BearerTokenStore, verify_bearer_header};
-use crate::server::websocket::broadcast::BroadcastManager;
-use crate::server::websocket::session::run_ws_session;
+use crate::server::transport::auth::{BearerTokenStore, verify_bearer_header};
+use crate::server::transport::engine_ws::{EngineClientRegistry, run_engine_ws_session};
 
 /// Generates `UUIDv7` request IDs.
 #[derive(Clone)]
@@ -53,36 +50,33 @@ impl MakeRequestId for UuidV7RequestId {
 /// Shared state accessible from Axum handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// Broadcast manager for event fan-out.
-    pub broadcast: Arc<BroadcastManager>,
     /// Shutdown coordinator.
     pub shutdown: Arc<ShutdownCoordinator>,
     /// When the server started.
     pub start_time: Instant,
-    /// Public JSON-RPC engine transport registry.
-    pub registry: Arc<JsonRpcTransportRegistry>,
     /// Capability context shared across domain functions.
     pub capability_context: Arc<ServerCapabilityContext>,
     /// Server configuration.
     pub config: ServerConfig,
     /// Prometheus metrics handle for rendering.
     pub metrics_handle: Arc<PrometheusHandle>,
-    /// Bearer-token verifier for `/ws` upgrades.
+    /// Bearer-token verifier for engine WebSocket upgrades.
     pub auth_store: Arc<BearerTokenStore>,
     /// Shared local external-worker runtime.
     pub external_workers: SharedExternalWorkerRuntime,
+    /// Connected `/engine` clients.
+    pub engine_clients: Arc<EngineClientRegistry>,
 }
 
 /// The main Tron server.
 pub struct TronServer {
     config: ServerConfig,
-    registry: Arc<JsonRpcTransportRegistry>,
-    broadcast: Arc<BroadcastManager>,
     shutdown: Arc<ShutdownCoordinator>,
     capability_context: Arc<ServerCapabilityContext>,
     metrics_handle: Arc<PrometheusHandle>,
     auth_store: Arc<BearerTokenStore>,
     external_workers: SharedExternalWorkerRuntime,
+    engine_clients: Arc<EngineClientRegistry>,
     start_time: Instant,
 }
 
@@ -90,34 +84,32 @@ impl TronServer {
     /// Create a new server.
     pub fn new(
         config: ServerConfig,
-        registry: JsonRpcTransportRegistry,
         mut capability_context: ServerCapabilityContext,
         metrics_handle: PrometheusHandle,
     ) -> Self {
         let shutdown = Arc::new(ShutdownCoordinator::new());
-        let broadcast = Arc::new(BroadcastManager::new());
         // Inject shutdown coordinator into context so handlers can register tasks
         capability_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
-        // Inject broadcast manager so auth handlers can push events
-        capability_context.broadcast_manager = Some(Arc::clone(&broadcast));
-        // Inject device request broker (uses broadcast for device.request events)
-        capability_context.device_request_broker = Some(Arc::new(
-            crate::server::device::DeviceRequestBroker::new(broadcast.clone(), shutdown.token()),
-        ));
+        // Inject device request broker (publishes device.request events to engine streams)
+        capability_context.device_request_broker =
+            Some(Arc::new(crate::server::device::DeviceRequestBroker::new(
+                capability_context.engine_host.clone(),
+                shutdown.token(),
+            )));
         capability_context.set_ws_port(config.port);
         let auth_store = Arc::new(BearerTokenStore::new(capability_context.auth_path.clone()));
         let external_workers = Arc::new(tokio::sync::Mutex::new(
             crate::engine::EngineExternalWorkerRuntime::new(capability_context.engine_host.clone()),
         ));
+        let engine_clients = Arc::new(EngineClientRegistry::new());
         Self {
             config,
-            registry: Arc::new(registry),
-            broadcast,
             shutdown,
             capability_context: Arc::new(capability_context),
             metrics_handle: Arc::new(metrics_handle),
             auth_store,
             external_workers,
+            engine_clients,
             start_time: Instant::now(),
         }
     }
@@ -125,25 +117,19 @@ impl TronServer {
     /// Build the Axum router with all routes and middleware.
     pub fn router(&self) -> Router {
         let state = AppState {
-            broadcast: self.broadcast.clone(),
             shutdown: self.shutdown.clone(),
             start_time: self.start_time,
-            registry: self.registry.clone(),
             capability_context: self.capability_context.clone(),
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
             auth_store: self.auth_store.clone(),
             external_workers: self.external_workers.clone(),
+            engine_clients: self.engine_clients.clone(),
         };
 
         Router::new()
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
-            .route(
-                "/ws",
-                get(ws_upgrade_handler)
-                    .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
-            )
             .route(
                 "/engine",
                 get(engine_upgrade_handler)
@@ -179,8 +165,7 @@ impl TronServer {
         let bound_addr = listener.local_addr()?;
         self.capability_context.set_ws_port(bound_addr.port());
 
-        let methods = self.registry.methods().len();
-        info!(addr = %bound_addr, methods, "server started");
+        info!(addr = %bound_addr, "engine server started");
 
         let router = self.router();
         let shutdown_token = self.shutdown.token();
@@ -201,11 +186,6 @@ impl TronServer {
         Ok((bound_addr, handle))
     }
 
-    /// Get the broadcast manager.
-    pub fn broadcast(&self) -> &Arc<BroadcastManager> {
-        &self.broadcast
-    }
-
     /// Get the shutdown coordinator.
     pub fn shutdown(&self) -> &Arc<ShutdownCoordinator> {
         &self.shutdown
@@ -214,11 +194,6 @@ impl TronServer {
     /// Get the server configuration.
     pub fn config(&self) -> &ServerConfig {
         &self.config
-    }
-
-    /// Get the method registry.
-    pub fn registry(&self) -> &Arc<JsonRpcTransportRegistry> {
-        &self.registry
     }
 
     /// Get the capability context.
@@ -230,6 +205,11 @@ impl TronServer {
     pub fn external_workers(&self) -> &SharedExternalWorkerRuntime {
         &self.external_workers
     }
+
+    /// Get the connected engine client registry.
+    pub fn engine_clients(&self) -> &Arc<EngineClientRegistry> {
+        &self.engine_clients
+    }
 }
 
 /// GET /engine — public engine client WebSocket protocol.
@@ -239,11 +219,12 @@ async fn engine_upgrade_handler(
 ) -> Result<impl IntoResponse, StatusCode> {
     let client_id = uuid::Uuid::now_v7().to_string();
     let ctx = state.capability_context;
+    let clients = state.engine_clients;
     let max_message_size = state.config.max_message_size;
     Ok(ws
         .max_message_size(max_message_size)
         .on_upgrade(move |socket| async move {
-            run_engine_ws_session(socket, client_id, ctx).await;
+            run_engine_ws_session(socket, client_id, ctx, clients).await;
         }))
 }
 
@@ -265,7 +246,7 @@ async fn engine_worker_upgrade_handler(
 
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
-    let connections = state.broadcast.connection_count();
+    let connections = state.engine_clients.connection_count();
     let sessions = state.capability_context.orchestrator.active_session_count();
     let resp = health::health_check(state.start_time, connections, sessions);
     Json(resp)
@@ -273,7 +254,7 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
 
 /// GET /health/deep — Deep health check with per-subsystem results.
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
-    let connections = state.broadcast.connection_count();
+    let connections = state.engine_clients.connection_count();
     let sessions = state.capability_context.orchestrator.active_session_count();
     let pool = state.capability_context.event_store.pool().clone();
     let tron_home = crate::settings::tron_home_dir();
@@ -321,50 +302,6 @@ async fn ws_auth_gate(
     Ok(next.run(request).await)
 }
 
-/// GET /ws — WebSocket upgrade handler.
-async fn ws_upgrade_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, StatusCode> {
-    // Enforce max_connections
-    let current = state.broadcast.connection_count();
-    if current >= state.config.max_connections {
-        tracing::warn!(
-            current,
-            max = state.config.max_connections,
-            "connection limit reached, rejecting WebSocket upgrade"
-        );
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-
-    let client_id = uuid::Uuid::now_v7().to_string();
-    let registry = state.registry;
-    let ctx = state.capability_context;
-    let broadcast = state.broadcast;
-    let max_message_size = state.config.max_message_size;
-    let ping_interval = Duration::from_millis(state.config.heartbeat_interval_ms);
-    let pong_timeout = Duration::from_millis(state.config.heartbeat_timeout_ms);
-    let onboarded_marker_path = ctx.onboarded_marker_path.clone();
-
-    Ok(ws
-        .max_message_size(max_message_size)
-        .on_upgrade(move |socket| async move {
-            if let Err(error) = crate::server::onboarding::mark_onboarded(&onboarded_marker_path) {
-                tracing::warn!(%error, "failed to mark server onboarded after WebSocket auth");
-            }
-            run_ws_session(
-                socket,
-                client_id,
-                registry,
-                ctx,
-                broadcast,
-                ping_interval,
-                pong_timeout,
-            )
-            .await;
-        }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,12 +318,7 @@ mod tests {
 
     fn make_server() -> TronServer {
         let ctx = make_test_context();
-        TronServer::new(
-            ServerConfig::default(),
-            JsonRpcTransportRegistry::new(),
-            ctx,
-            make_metrics_handle(),
-        )
+        TronServer::new(ServerConfig::default(), ctx, make_metrics_handle())
     }
 
     fn make_server_with_auth() -> (TronServer, tempfile::TempDir, String) {
@@ -395,12 +327,7 @@ mod tests {
         let token = crate::server::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
         let mut ctx = make_test_context();
         ctx.auth_path = auth_path;
-        let server = TronServer::new(
-            ServerConfig::default(),
-            JsonRpcTransportRegistry::new(),
-            ctx,
-            make_metrics_handle(),
-        );
+        let server = TronServer::new(ServerConfig::default(), ctx, make_metrics_handle());
         (server, dir, token)
     }
 
@@ -419,7 +346,7 @@ mod tests {
     }
 
     fn ws_upgrade_request(auth: Option<String>) -> Request<Body> {
-        ws_upgrade_request_to("/ws", auth)
+        ws_upgrade_request_to("/engine", auth)
     }
 
     #[tokio::test]
@@ -430,22 +357,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn broadcast_manager_accessible() {
+    async fn engine_client_registry_accessible() {
         let server = make_server();
-        let bm = server.broadcast();
-        assert_eq!(bm.connection_count(), 0);
+        assert_eq!(server.engine_clients().connection_count(), 0);
     }
 
     #[test]
     fn shutdown_coordinator_accessible() {
         let server = make_server();
         assert!(!server.shutdown().is_shutting_down());
-    }
-
-    #[test]
-    fn registry_accessible() {
-        let server = make_server();
-        assert!(server.registry().methods().is_empty());
     }
 
     #[test]
@@ -477,14 +397,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ws_endpoint_requires_upgrade() {
+    async fn engine_endpoint_requires_upgrade() {
         let (server, _dir, token) = make_server_with_auth();
         let marker = server.capability_context().onboarded_marker_path.clone();
         let app = server.router();
 
-        // GET /ws without WebSocket upgrade headers → should return an error
+        // GET /engine without WebSocket upgrade headers → should return an error
         let req = Request::builder()
-            .uri("/ws")
+            .uri("/engine")
             .header("authorization", format!("Bearer {token}"))
             .body(Body::empty())
             .unwrap();
@@ -497,7 +417,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ws_endpoint_rejects_missing_bearer() {
+    async fn engine_endpoint_rejects_missing_bearer() {
         let (server, _dir, _token) = make_server_with_auth();
         let app = server.router();
 
@@ -522,7 +442,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ws_endpoint_rejects_wrong_bearer() {
+    async fn engine_endpoint_rejects_wrong_bearer() {
         let (server, _dir, _token) = make_server_with_auth();
         let app = server.router();
 
@@ -533,7 +453,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ws_endpoint_rejects_wrong_auth_scheme() {
+    async fn engine_endpoint_rejects_wrong_auth_scheme() {
         let (server, _dir, token) = make_server_with_auth();
         let app = server.router();
 
@@ -544,7 +464,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ws_endpoint_reloads_rotated_bearer() {
+    async fn engine_endpoint_reloads_rotated_bearer() {
         let (server, dir, token) = make_server_with_auth();
         let app = server.router();
         std::thread::sleep(std::time::Duration::from_millis(1100));
@@ -597,12 +517,7 @@ mod tests {
             ..ServerConfig::default()
         };
         let ctx = make_test_context();
-        let server = TronServer::new(
-            config,
-            JsonRpcTransportRegistry::new(),
-            ctx,
-            make_metrics_handle(),
-        );
+        let server = TronServer::new(config, ctx, make_metrics_handle());
         assert_eq!(server.config().host, "0.0.0.0");
         assert_eq!(server.config().port, 9090);
         assert_eq!(server.config().max_connections, 10);
@@ -639,12 +554,7 @@ mod tests {
                 .create_session("claude-opus-4-6", "/tmp", None, None)
                 .is_ok()
         );
-        let server = TronServer::new(
-            ServerConfig::default(),
-            JsonRpcTransportRegistry::new(),
-            ctx,
-            make_metrics_handle(),
-        );
+        let server = TronServer::new(ServerConfig::default(), ctx, make_metrics_handle());
         let app = server.router();
 
         let req = Request::builder()

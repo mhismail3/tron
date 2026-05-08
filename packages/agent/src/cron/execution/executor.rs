@@ -72,9 +72,8 @@ pub trait SystemEventInjector: Send + Sync {
 pub struct ExecutorDeps {
     /// Agent turn executor (None if no auth).
     pub agent_executor: Option<Arc<dyn AgentTurnExecutor>>,
-    /// WebSocket broadcaster. Uses `OnceLock` because it's set after server
-    /// creation (the `BroadcastManager` comes from `TronServer`), but before
-    /// the scheduler starts.
+    /// Cron event publisher. Uses `OnceLock` because it's set after server
+    /// creation, but before the scheduler starts.
     pub broadcaster: std::sync::OnceLock<Arc<dyn EventBroadcaster>>,
     /// Push notification sender.
     pub push_notifier: Option<Arc<dyn PushNotifier>>,

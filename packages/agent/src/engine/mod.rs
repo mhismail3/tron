@@ -3,9 +3,9 @@
 //! In-process live capability fabric for the Tron agent.
 //!
 //! This module is the foundation for the engine redesign documented in
-//! `packages/agent/docs/engine-redesign/`. Production JSON-RPC is only a thin
-//! transport for reserved `engine.*` meta-capabilities, and agents get
-//! first-party tools over this same live catalog. The core invariants are:
+//! `packages/agent/docs/engine-redesign/`. The public `/engine` protocol is
+//! only a transport over canonical capabilities, and agents get first-party
+//! tools over this same live catalog. The core invariants are:
 //!
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;
@@ -43,9 +43,9 @@
 //! # INVARIANT: one production execution shape
 //!
 //! Production behavior must enter the fabric as a canonical engine function.
-//! JSON-RPC transport exposes only `engine.discover`, `engine.inspect`,
-//! `engine.watch`, `engine.invoke`, and `engine.promote`. Production engine
-//! modules must not call handler-shaped transport shims.
+//! The `/engine` protocol exposes discovery, inspection, watch, invocation,
+//! promotion, and stream subscription messages. Production engine modules must
+//! not call handler-shaped transport shims.
 //!
 //! ## Module Position
 //!

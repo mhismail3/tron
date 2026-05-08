@@ -1,17 +1,18 @@
 //! Server-owned cron callbacks.
 //!
 //! The cron scheduler owns automation semantics. This module projects cron
-//! domain callbacks onto server surfaces such as WebSocket events and APNS
-//! pushes, keeping `cron` independent of `server`.
+//! domain callbacks onto engine stream events and APNS pushes, keeping `cron`
+//! independent of client transports.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde_json::json;
 
 use crate::cron::errors::CronError;
 use crate::cron::types::{CronJob, CronRun};
-use crate::server::transport::json_rpc::types::JsonRpcEvent;
-use crate::server::websocket::broadcast::BroadcastManager;
+use crate::engine::{EngineHostHandle, PublishStreamEvent, VisibilityScope};
+use crate::server::services::events_wire::ServerEventPayload;
 
 #[cfg(feature = "apns")]
 use crate::events::ConnectionPool;
@@ -100,22 +101,44 @@ impl crate::cron::executor::PushNotifier for CronPushNotifier {
     }
 }
 
-/// Broadcasts cron events to all connected WebSocket clients.
+/// Publishes cron lifecycle events to engine streams.
 pub struct CronEventBroadcaster {
-    broadcast: Arc<BroadcastManager>,
+    engine_host: EngineHostHandle,
 }
 
 impl CronEventBroadcaster {
-    /// Create a new broadcaster.
-    pub fn new(broadcast: Arc<BroadcastManager>) -> Self {
-        Self { broadcast }
+    /// Create a new stream-backed cron event publisher.
+    pub fn new(engine_host: EngineHostHandle) -> Self {
+        Self { engine_host }
+    }
+
+    async fn publish(&self, event: ServerEventPayload) {
+        if let Err(error) = self
+            .engine_host
+            .publish_stream_event(PublishStreamEvent {
+                topic: "cron".to_owned(),
+                payload: json!({
+                    "serverEvent": event.clone(),
+                    "sourceEventType": event.event_type.clone(),
+                }),
+                visibility: VisibilityScope::System,
+                session_id: None,
+                workspace_id: None,
+                producer: "cron".to_owned(),
+                trace_id: None,
+                parent_invocation_id: None,
+            })
+            .await
+        {
+            tracing::warn!(error = %error, "cron stream publication failed");
+        }
     }
 }
 
 #[async_trait]
 impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
     async fn broadcast_cron_result(&self, job: &CronJob, run: &CronRun) {
-        let event = JsonRpcEvent {
+        let event = ServerEventPayload {
             event_type: "cron.runComplete".to_owned(),
             session_id: None,
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -129,19 +152,31 @@ impl crate::cron::executor::EventBroadcaster for CronEventBroadcaster {
             })),
             run_id: Some(run.id.clone()),
             sequence: None,
+            workspace_id: None,
+            trace_id: None,
+            parent_invocation_id: None,
+            source_event_id: None,
+            source_sequence: None,
+            stream_cursor: None,
         };
-        self.broadcast.broadcast_all(&event).await;
+        self.publish(event).await;
     }
 
     async fn broadcast_cron_event(&self, event_type: &str, payload: serde_json::Value) {
-        let event = JsonRpcEvent {
+        let event = ServerEventPayload {
             event_type: event_type.to_owned(),
             session_id: None,
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             data: Some(payload),
             run_id: None,
             sequence: None,
+            workspace_id: None,
+            trace_id: None,
+            parent_invocation_id: None,
+            source_event_id: None,
+            source_sequence: None,
+            stream_cursor: None,
         };
-        self.broadcast.broadcast_all(&event).await;
+        self.publish(event).await;
     }
 }

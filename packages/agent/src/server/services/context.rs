@@ -25,7 +25,6 @@ use crate::server::codex_app::CodexAppServerManager;
 use crate::server::device::DeviceRequestBroker;
 use crate::server::services::session_context::ContextArtifactsService;
 use crate::server::shutdown::{ShutdownCoordinator, ShutdownPhase};
-use crate::server::websocket::broadcast::BroadcastManager;
 
 const DEFAULT_BLOCKING_CONCURRENCY: usize = 16;
 const BLOCKING_SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -233,8 +232,6 @@ pub struct ServerCapabilityContext {
     pub context_artifacts: Arc<ContextArtifactsService>,
     /// Path to auth JSON file (`~/.tron/profiles/auth.json`).
     pub auth_path: PathBuf,
-    /// Broadcast manager for pushing events to WebSocket clients.
-    pub broadcast_manager: Option<Arc<BroadcastManager>>,
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
     pub oauth_flows: Arc<
         tokio::sync::Mutex<

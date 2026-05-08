@@ -2,8 +2,8 @@
 
 The current server capability inventory is canonical-first. Each row below is a
 worker namespace that owns `namespace::function` capabilities in the live engine
-catalog. JSON-RPC does not expose these domains directly; clients invoke them
-through `engine.invoke` after discovery/inspection.
+catalog. The `/engine` protocol exposes these domains through discovery,
+inspection, invocation, and stream subscription messages.
 
 | Worker | Default Visibility | Primary Effect Classes | Idempotency | Authority / Risk Notes |
 |--------|--------------------|------------------------|-------------|------------------------|

@@ -1,7 +1,7 @@
 //! Parameter extraction helpers shared by transport and capability code.
 //!
 //! Each helper turns a `Option<&Value>` (the raw `params` payload from a
-//! JSON-RPC request) into a typed value, returning `CapabilityError::InvalidParams`
+//! client request) into a typed value, returning `CapabilityError::InvalidParams`
 //! for missing or wrong-typed required fields. Optional helpers return
 //! `Option<T>` plus an explicit defaulted variant for `u64`.
 

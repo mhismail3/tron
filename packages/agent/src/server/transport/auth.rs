@@ -1,11 +1,11 @@
-//! WebSocket bearer-token authentication middleware.
+//! Engine transport bearer-token authentication middleware.
 //!
-//! Gates every `/ws` upgrade behind a bearer token stored as `bearerToken`
+//! Gates `/engine` and `/engine/workers` upgrades behind a bearer token stored as `bearerToken`
 //! in `~/.tron/profiles/auth.json`. The token is created lazily by
 //! [`crate::server::onboarding::load_or_create_bearer_token`] at server
-//! startup; the WS upgrade handler asks this module to verify the
-//! `Authorization: Bearer <token>` header before passing control to
-//! [`crate::server::websocket::session::run_ws_session`].
+//! startup; the upgrade handlers ask this module to verify the
+//! `Authorization: Bearer <token>` header before starting an engine protocol
+//! session.
 //!
 //! ## Why a small cache
 //!

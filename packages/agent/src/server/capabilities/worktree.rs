@@ -1,6 +1,6 @@
 //! Canonical worktree engine functions.
 //!
-//! JSON-RPC now reaches these operations through `json_rpc` triggers targeting
+//! Client protocols reach these operations through engine triggers targeting
 //! canonical `worktree::*` function ids. The operation helpers below are private
 //! domain services for the engine-owned function module, not transport-owned
 //! dispatch branches.

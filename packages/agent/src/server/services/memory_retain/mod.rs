@@ -16,7 +16,7 @@
 //! ## Entry points
 //!
 //! - `memory::retain` engine function — manual retain arrives through
-//!   `engine.invoke`, acquires a session resource lease, builds a
+//!   `/engine` `invoke`, acquires a session resource lease, builds a
 //!   [`RetainDeps`] from `ServerCapabilityContext`, and calls [`trigger_retain`] with
 //!   [`RetainSource::Manual`].
 //! - [`auto_retain::maybe_fire`] — called from `agent_prompt_service` after

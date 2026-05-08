@@ -1,9 +1,9 @@
-//! JSON-RPC transport for the engine capability fabric.
+//! Engine protocol capability registration.
 //!
-//! JSON-RPC is now only a public transport for the five reserved `engine.*`
-//! meta-capabilities. Domain-owned in-process workers register executable
-//! canonical functions; dotted domain method names are absent from the public
-//! transport and are not executable ids.
+//! This module registers canonical in-process domain functions, internal
+//! hidden apply functions, tool functions, and the trigger types used by the
+//! pure `/engine` client protocol. Clients invoke canonical function ids
+//! through `engine::invoke`.
 //!
 //! Domain workers such as `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
@@ -15,23 +15,13 @@
 //! the live catalog, so built-ins, engine meta-tools, and eligible MCP
 //! capabilities are all surfaced through the same agent-facing capability
 //! fabric instead of through a frozen `ToolRegistry` snapshot.
-//! `json_rpc` trigger records are limited to engine meta-methods. `cron_schedule`
-//! trigger records capture scheduled automation fires. Engine-native callers
-//! invoke canonical ids such as `skills::activate` or `agent::prompt` through
-//! the engine host.
+//! `engine_ws` trigger records capture public engine protocol messages.
+//! `cron_schedule` trigger records capture scheduled automation fires.
 //!
-//! # INVARIANT: JSON-RPC is a transport, not a capability namespace
+//! # INVARIANT: canonical capabilities are the executable surface
 //!
-//! This branch is a collapsed engine architecture where JSON-RPC is only a
-//! transport trigger over canonical domain functions. The canonical `engine.*`
-//! methods are the only public discovery/invocation/promote transport. Domain
-//! method names remain internal operation keys for service routing only; they
-//! must not be registered as public transport methods.
-
-mod dispatch;
-
-#[cfg(test)]
-mod tests;
+//! Domain method names are internal operation keys for service routing only.
+//! Only canonical function ids are registered.
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -43,45 +33,32 @@ use crate::engine::{
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use crate::server::services::context::ServerCapabilityContext;
-use crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
 use crate::tools::capability_runtime;
 use crate::tools::traits::{ToolContext, TronTool};
 
 use crate::server::capabilities::catalog;
 
-pub use crate::server::capabilities::catalog::{
-    CanonicalCapabilitySpec, CapabilitySpec, TransportIdempotencyMode, public_json_rpc_specs,
-};
-pub use dispatch::dispatch_engine_json_rpc_method;
-
 pub(crate) use crate::server::capabilities::catalog::{SYSTEM_AUTHORITY_GRANT, SYSTEM_OWNER_ACTOR};
 
-/// Register in-process engine capabilities and public JSON-RPC engine triggers.
-pub fn register_engine_json_rpc_for_context(
-    ctx: &ServerCapabilityContext,
-    registry: &JsonRpcTransportRegistry,
-) -> EngineResult<()> {
-    register_engine_json_rpc(
+/// Register in-process engine capabilities and public `/engine` triggers.
+pub fn register_engine_protocol_for_context(ctx: &ServerCapabilityContext) -> EngineResult<()> {
+    register_engine_protocol(
         &ctx.engine_host,
-        registry,
         crate::server::capabilities::EngineCapabilityDeps::from_context(ctx),
     )?;
     register_tool_worker_for_context(ctx)?;
     Ok(())
 }
 
-fn register_engine_json_rpc(
+fn register_engine_protocol(
     handle: &EngineHostHandle,
-    registry: &JsonRpcTransportRegistry,
     deps: crate::server::capabilities::EngineCapabilityDeps,
 ) -> EngineResult<()> {
     let canonical_specs = catalog::canonical_capability_specs()?;
-    let registered_methods = registry.methods();
-    let public_transport_specs = catalog::public_json_rpc_specs(&registered_methods)?;
+    let public_transport_specs = catalog::public_engine_transport_specs()?;
     for worker in catalog::domain_workers()? {
         handle.register_worker_for_setup(worker, false)?;
     }
-    handle.register_trigger_type_for_setup(catalog::json_rpc_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(catalog::engine_ws_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(catalog::manual_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(catalog::cron_schedule_trigger_type()?, false)?;
@@ -117,9 +94,6 @@ fn register_engine_json_rpc(
     register_hidden_agent_prompt_functions(handle, &deps)?;
     register_hidden_cron_schedule_function(handle, &deps)?;
     for spec in &public_transport_specs {
-        if let Some(trigger) = catalog::json_rpc_trigger_for_spec(spec)? {
-            handle.register_trigger_for_setup(trigger, false)?;
-        }
         if let Some(trigger) = catalog::engine_ws_trigger_for_spec(spec)? {
             handle.register_trigger_for_setup(trigger, false)?;
         }

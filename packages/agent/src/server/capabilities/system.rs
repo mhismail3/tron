@@ -91,12 +91,12 @@ fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, Capabi
     let uptime = deps.server_start_time.elapsed().as_secs();
     let active_sessions = deps.orchestrator.active_session_count();
     let active_runs = deps.orchestrator.active_run_count();
-    let transport_methods = super::catalog::public_json_rpc_methods()
+    let transport_messages = super::catalog::public_engine_transport_methods()
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
-    let total_methods = transport_methods.len();
+    let total_messages = transport_messages.len();
     let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
-    for method in &transport_methods {
+    for method in &transport_messages {
         let prefix = method.split('.').next().unwrap_or(method).to_owned();
         *by_group.entry(prefix).or_insert(0) += 1;
     }
@@ -126,9 +126,9 @@ fn system_diagnostics_value(deps: &EngineCapabilityDeps) -> Result<Value, Capabi
             "workers": domain_workers,
         },
         "transport": {
-            "totalMethods": total_methods,
-            "methodsByGroup": by_group,
-            "methods": transport_methods,
+            "totalMessages": total_messages,
+            "messagesByGroup": by_group,
+            "messages": transport_messages,
         },
         "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     }))

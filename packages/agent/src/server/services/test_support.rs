@@ -179,7 +179,6 @@ pub fn make_test_context() -> ServerCapabilityContext {
         device_request_broker: None,
         context_artifacts: Arc::new(ContextArtifactsService::new()),
         auth_path,
-        broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
         display_stream_registry: None,
@@ -192,12 +191,6 @@ pub fn make_test_context() -> ServerCapabilityContext {
         release_fetcher: None,
         updater_state_path: unique_test_path("updater-state", "json"),
     };
-    let mut registry =
-        crate::server::transport::json_rpc::registry::JsonRpcTransportRegistry::new();
-    crate::server::transport::json_rpc::bindings::register_all(&mut registry);
-    crate::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
-        &ctx, &registry,
-    )
-    .unwrap();
+    crate::server::transport::setup::register_engine_protocol_for_context(&ctx).unwrap();
     ctx
 }

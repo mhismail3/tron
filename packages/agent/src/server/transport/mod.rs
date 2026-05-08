@@ -9,12 +9,14 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `engine` | Protocol-neutral `EngineTransportRequest` builder/dispatcher |
+//! | `auth` | Bearer-token auth gate for engine WebSocket transports |
+//! | `engine` | Engine protocol `EngineTransportRequest` builder/dispatcher |
 //! | `engine_ws` | `/engine` WebSocket protocol, heartbeat, stream subscribe/poll/ack |
-//! | `json_rpc` | Five-method JSON-RPC transport over `/ws` |
 //! | `protocol` | Shared protocol constants |
+//! | `setup` | Canonical capability and engine trigger registration |
 
+pub mod auth;
 pub mod engine;
 pub mod engine_ws;
-pub mod json_rpc;
 pub mod protocol;
+pub mod setup;

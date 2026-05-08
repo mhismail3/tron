@@ -3,11 +3,11 @@
 //! This module owns only WebSocket framing, protocol validation, correlation
 //! ids, heartbeat, and stream cursor subscription state. Discover/inspect/watch
 //! invoke/promote messages are translated into [`EngineTransportRequest`] and
-//! then dispatched through the same path as the five `engine.*` JSON-RPC
-//! transport methods.
+//! then dispatched through the canonical engine transport path.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
@@ -15,6 +15,7 @@ use metrics::counter;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::engine::{StreamActorScope, StreamCursor, VisibilityScope};
 use crate::server::capabilities::error_mapping::engine_error_to_capability_error;
@@ -25,8 +26,8 @@ use crate::server::capabilities::validation::{
 use crate::server::services::context::ServerCapabilityContext;
 use crate::server::services::events_wire::ServerEventPayload;
 use crate::server::transport::engine::{
-    EngineTransportBuildRequest, EngineTransportContext, EngineTransportKind,
-    build_engine_transport_request, dispatch_engine_transport_request,
+    EngineTransportBuildRequest, EngineTransportContext, build_engine_transport_request,
+    dispatch_engine_transport_request,
 };
 
 const PROTOCOL_VERSION: u64 = 1;
@@ -34,13 +35,47 @@ const MIN_PROTOCOL_VERSION: u64 = 1;
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
+const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Tracks connected `/engine` clients.
+#[derive(Default)]
+pub struct EngineClientRegistry {
+    active: AtomicUsize,
+}
+
+impl EngineClientRegistry {
+    /// Create an empty client registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of active engine clients.
+    #[must_use]
+    pub fn connection_count(&self) -> usize {
+        self.active.load(Ordering::Relaxed)
+    }
+
+    fn add(&self) {
+        let _ = self.active.fetch_add(1, Ordering::Relaxed);
+        metrics::gauge!("engine_ws_connections_active").set(self.connection_count() as f64);
+    }
+
+    fn remove(&self) {
+        let _ = self.active.fetch_sub(1, Ordering::Relaxed);
+        metrics::gauge!("engine_ws_connections_active").set(self.connection_count() as f64);
+    }
+}
 
 /// Run one authenticated `/engine` client WebSocket connection.
 pub async fn run_engine_ws_session(
     ws: WebSocket,
     client_id: String,
     ctx: Arc<ServerCapabilityContext>,
+    clients: Arc<EngineClientRegistry>,
 ) {
+    clients.add();
+    counter!("engine_ws_connections_total").increment(1);
     let (mut ws_tx, mut ws_rx) = ws.split();
     let (out_tx, mut out_rx) = mpsc::channel::<String>(OUTBOUND_QUEUE_CAPACITY);
     let writer = tokio::spawn(async move {
@@ -51,7 +86,15 @@ pub async fn run_engine_ws_session(
         }
     });
 
-    let mut session = EngineWsSession::new(client_id, ctx, out_tx);
+    let subscriptions = Arc::new(tokio::sync::Mutex::new(BTreeMap::new()));
+    let cancel = CancellationToken::new();
+    let push_task = tokio::spawn(push_subscription_events(
+        ctx.clone(),
+        out_tx.clone(),
+        subscriptions.clone(),
+        cancel.clone(),
+    ));
+    let mut session = EngineWsSession::new(client_id, ctx, out_tx, subscriptions, cancel.clone());
     while let Some(frame) = ws_rx.next().await {
         match frame {
             Ok(Message::Text(text)) => {
@@ -67,17 +110,21 @@ pub async fn run_engine_ws_session(
             }
         }
     }
+    cancel.cancel();
     session.cleanup().await;
     drop(session);
+    let _ = push_task.await;
     let _ = writer.await;
+    clients.remove();
 }
 
 struct EngineWsSession {
     client_id: String,
     ctx: Arc<ServerCapabilityContext>,
     out_tx: mpsc::Sender<String>,
+    subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
+    cancel: CancellationToken,
     hello: Option<HelloState>,
-    subscriptions: BTreeMap<String, SubscriptionState>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -99,13 +146,16 @@ impl EngineWsSession {
         client_id: String,
         ctx: Arc<ServerCapabilityContext>,
         out_tx: mpsc::Sender<String>,
+        subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
+        cancel: CancellationToken,
     ) -> Self {
         Self {
             client_id,
             ctx,
             out_tx,
+            subscriptions,
+            cancel,
             hello: None,
-            subscriptions: BTreeMap::new(),
         }
     }
 
@@ -144,15 +194,9 @@ impl EngineWsSession {
 
         match message_type {
             "hello" => self.handle_hello(id, value).await,
-            "discover" => {
-                self.handle_request_message(id, "engine.discover", value)
-                    .await
-            }
-            "inspect" => {
-                self.handle_request_message(id, "engine.inspect", value)
-                    .await
-            }
-            "watch" => self.handle_request_message(id, "engine.watch", value).await,
+            "discover" => self.handle_request_message(id, "discover", value).await,
+            "inspect" => self.handle_request_message(id, "inspect", value).await,
+            "watch" => self.handle_request_message(id, "watch", value).await,
             "invoke" => self.handle_invoke(id, value).await,
             "promote" => self.handle_promote(id, value).await,
             "subscribe" => self.handle_subscribe(id, value).await,
@@ -266,7 +310,7 @@ impl EngineWsSession {
         }
         self.dispatch_transport(
             message.id,
-            "engine.invoke",
+            "invoke",
             Value::Object(payload),
             message.context,
         )
@@ -302,7 +346,7 @@ impl EngineWsSession {
         }
         self.dispatch_transport(
             message.id,
-            "engine.promote",
+            "promote",
             Value::Object(payload),
             message.context,
         )
@@ -322,7 +366,6 @@ impl EngineWsSession {
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let envelope = match build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id,
-            transport: EngineTransportKind::EngineWs,
             public_method: public_method.to_owned(),
             params_payload,
             context,
@@ -388,7 +431,7 @@ impl EngineWsSession {
             .await
         {
             Ok(subscription) => {
-                self.subscriptions.insert(
+                self.subscriptions.lock().await.insert(
                     subscription_id.clone(),
                     SubscriptionState {
                         cursor,
@@ -428,7 +471,13 @@ impl EngineWsSession {
             Err(error) => return self.send_error(message.id, error),
         };
         if let Some(subscription_id) = message.subscription_id {
-            let Some(subscription) = self.subscriptions.get(&subscription_id).cloned() else {
+            let Some(subscription) = self
+                .subscriptions
+                .lock()
+                .await
+                .get(&subscription_id)
+                .cloned()
+            else {
                 return self.send_error(
                     message.id,
                     protocol_error(
@@ -534,7 +583,7 @@ impl EngineWsSession {
                     .events
                     .iter()
                     .filter(|event| stream_event_matches_filters(event, filters))
-                    .map(protocol_event_value)
+                    .map(|event| protocol_event_value(event, None))
                     .collect::<Vec<_>>();
                 self.send_success(
                     id,
@@ -561,7 +610,8 @@ impl EngineWsSession {
                 );
             }
         };
-        let Some(subscription) = self.subscriptions.get_mut(&message.subscription_id) else {
+        let mut subscriptions = self.subscriptions.lock().await;
+        let Some(subscription) = subscriptions.get_mut(&message.subscription_id) else {
             return self.send_error(
                 message.id,
                 protocol_error(
@@ -661,26 +711,12 @@ impl EngineWsSession {
     fn send_value(&self, value: Value) -> bool {
         let mut value = value;
         remove_null_transport_fields(&mut value);
-        let json = match serde_json::to_string(&value) {
-            Ok(json) => json,
-            Err(error) => {
-                tracing::error!(%error, "failed to serialize engine WebSocket response");
-                return false;
-            }
-        };
-        match self.out_tx.try_send(json) {
-            Ok(()) => true,
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                counter!("engine_ws_overload_total").increment(1);
-                tracing::warn!("engine WebSocket outbound queue overloaded; closing connection");
-                false
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => false,
-        }
+        send_engine_ws_value(&self.out_tx, value)
     }
 
     async fn cleanup(&mut self) {
-        let subscriptions = std::mem::take(&mut self.subscriptions);
+        self.cancel.cancel();
+        let subscriptions = std::mem::take(&mut *self.subscriptions.lock().await);
         for subscription_id in subscriptions.keys() {
             let _ = self
                 .ctx
@@ -688,6 +724,96 @@ impl EngineWsSession {
                 .unsubscribe_stream(subscription_id)
                 .await;
         }
+    }
+}
+
+async fn push_subscription_events(
+    ctx: Arc<ServerCapabilityContext>,
+    out_tx: mpsc::Sender<String>,
+    subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
+    cancel: CancellationToken,
+) {
+    let mut ticker = tokio::time::interval(PUSH_POLL_INTERVAL);
+    let _ = ticker.tick().await;
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => break,
+            _ = ticker.tick() => {
+                let snapshot = subscriptions
+                    .lock()
+                    .await
+                    .iter()
+                    .map(|(id, state)| (id.clone(), state.clone()))
+                    .collect::<Vec<_>>();
+                for (subscription_id, state) in snapshot {
+                    let actor = StreamActorScope::scoped(
+                        state.session_id.clone(),
+                        state.workspace_id.clone(),
+                    );
+                    let page = match ctx
+                        .engine_host
+                        .poll_stream(
+                            &subscription_id,
+                            Some(state.cursor),
+                            STREAM_MAX_LIMIT,
+                            &actor,
+                        )
+                        .await
+                    {
+                        Ok(page) => page,
+                        Err(error) => {
+                            tracing::debug!(%subscription_id, %error, "engine stream push poll failed");
+                            continue;
+                        }
+                    };
+                    let mut latest_cursor = state.cursor;
+                    for event in page
+                        .events
+                        .iter()
+                        .filter(|event| stream_event_matches_filters(event, state.filters.as_ref()))
+                    {
+                        latest_cursor = event.cursor;
+                        if !send_engine_ws_value(
+                            &out_tx,
+                            protocol_event_value(event, Some(subscription_id.clone())),
+                        ) {
+                            cancel.cancel();
+                            return;
+                        }
+                    }
+                    if latest_cursor > state.cursor {
+                        if let Some(subscription) =
+                            subscriptions.lock().await.get_mut(&subscription_id)
+                        {
+                            if subscription.cursor < latest_cursor {
+                                subscription.cursor = latest_cursor;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn send_engine_ws_value(out_tx: &mpsc::Sender<String>, value: Value) -> bool {
+    let mut value = value;
+    remove_null_transport_fields(&mut value);
+    let json = match serde_json::to_string(&value) {
+        Ok(json) => json,
+        Err(error) => {
+            tracing::error!(%error, "failed to serialize engine WebSocket response");
+            return false;
+        }
+    };
+    match out_tx.try_send(json) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            counter!("engine_ws_overload_total").increment(1);
+            tracing::warn!("engine WebSocket outbound queue overloaded; closing connection");
+            false
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
     }
 }
 
@@ -890,10 +1016,13 @@ fn visibility_for_context(context: &EngineTransportContext) -> VisibilityScope {
     }
 }
 
-fn protocol_event_value(event: &crate::engine::EngineStreamEvent) -> Value {
+fn protocol_event_value(
+    event: &crate::engine::EngineStreamEvent,
+    subscription_id: Option<String>,
+) -> Value {
     serde_json::to_value(ProtocolEvent {
         message_type: "event",
-        subscription_id: None,
+        subscription_id,
         topic: event.topic.clone(),
         cursor: event.cursor.0,
         event: server_payload_from_stream_event(event),
@@ -996,7 +1125,16 @@ mod tests {
     fn test_session() -> (EngineWsSession, mpsc::Receiver<String>) {
         let ctx = Arc::new(make_test_context());
         let (tx, rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
-        (EngineWsSession::new("client-1".to_owned(), ctx, tx), rx)
+        (
+            EngineWsSession::new(
+                "client-1".to_owned(),
+                ctx,
+                tx,
+                Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+                CancellationToken::new(),
+            ),
+            rx,
+        )
     }
 
     #[tokio::test]
@@ -1068,7 +1206,14 @@ mod tests {
                 .handle_text(r#"{"type":"subscribe","id":"s","topic":"events.session"}"#)
                 .await
         );
-        let subscription_id = session.subscriptions.keys().next().unwrap().clone();
+        let subscription_id = session
+            .subscriptions
+            .lock()
+            .await
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
         let page = session
             .ctx
             .engine_host

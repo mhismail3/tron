@@ -1,8 +1,4 @@
-//! Public engine transport protocol constants.
-//!
-//! The current public transport is JSON-RPC, but these values describe the
-//! engine transport contract exposed by `engine.*` methods rather than any
-//! domain capability implementation.
+//! Public `/engine` protocol constants.
 
 /// Current public engine transport protocol version.
 ///

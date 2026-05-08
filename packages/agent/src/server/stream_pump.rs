@@ -1,0 +1,153 @@
+//! Engine stream event pump — projects `TronEvent`s into neutral server events and
+//! routes them through engine stream delivery.
+//!
+//! Runtime event classes publish to the engine stream primitive
+//! (`events.session`). `/engine` clients subscribe, poll, and ack those stream
+//! records directly; there is no separate broadcast transport.
+
+use std::sync::Arc;
+
+use crate::core::events::TronEvent;
+use crate::engine::{EngineHostHandle, PublishStreamEvent, VisibilityScope};
+use crate::runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
+use serde_json::json;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
+
+use routed::BroadcastScope;
+use tron::tron_event_to_projected;
+
+#[path = "stream_pump/hook.rs"]
+mod hook;
+#[path = "stream_pump/message.rs"]
+mod message;
+#[path = "stream_pump/routed.rs"]
+mod routed;
+#[path = "stream_pump/session.rs"]
+mod session;
+#[path = "stream_pump/streaming.rs"]
+mod streaming;
+#[path = "stream_pump/tool.rs"]
+mod tool;
+#[path = "stream_pump/tron.rs"]
+mod tron;
+#[path = "stream_pump/turn.rs"]
+mod turn;
+
+/// Projects orchestrator events into engine streams.
+pub struct EngineStreamEventPump {
+    rx: broadcast::Receiver<TronEvent>,
+    cancel: CancellationToken,
+    accumulators: Arc<TurnAccumulatorMap>,
+    engine_streams: EngineHostHandle,
+}
+
+impl EngineStreamEventPump {
+    /// Create a new stream event pump.
+    pub fn new(
+        rx: broadcast::Receiver<TronEvent>,
+        engine_streams: EngineHostHandle,
+        cancel: CancellationToken,
+        accumulators: Arc<TurnAccumulatorMap>,
+    ) -> Self {
+        Self {
+            rx,
+            cancel,
+            accumulators,
+            engine_streams,
+        }
+    }
+
+    /// Run the stream pump loop. Exits on shutdown signal or when the broadcast sender is dropped.
+    #[tracing::instrument(skip_all, name = "stream_pump")]
+    pub async fn run(mut self) {
+        loop {
+            tokio::select! {
+                () = self.cancel.cancelled() => {
+                    tracing::debug!("stream pump: shutdown signal received");
+                    break;
+                }
+                result = self.rx.recv() => {
+                    if !self.handle_tron_recv(result).await {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Process a `TronEvent` recv result. Returns `false` when the channel is closed.
+    async fn handle_tron_recv(
+        &mut self,
+        result: Result<TronEvent, broadcast::error::RecvError>,
+    ) -> bool {
+        match result {
+            Ok(event) => {
+                self.project_tron_event(&event).await;
+                true
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::debug!(lagged = n, "stream pump lagged");
+                metrics::counter!("broadcast_lagged_events_total", "source" => "stream_pump")
+                    .increment(n);
+                true
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                tracing::debug!("stream pump: sender closed, exiting");
+                false
+            }
+        }
+    }
+
+    async fn project_tron_event(&self, event: &TronEvent) {
+        self.accumulators.update_from_event(event);
+
+        let event_type = event.event_type();
+        tracing::debug!(event_type, "projecting event to engine stream");
+        let projected = tron_event_to_projected(event);
+        let (visibility, session_id) = match &projected.scope {
+            BroadcastScope::All => (VisibilityScope::System, None),
+            BroadcastScope::Session(session_id) => {
+                (VisibilityScope::Session, Some(session_id.clone()))
+            }
+        };
+        if let Err(error) = self
+            .engine_streams
+            .publish_stream_event(PublishStreamEvent {
+                topic: "events.session".to_owned(),
+                payload: json!({
+                    "serverEvent": projected.server_event.clone(),
+                    "streamScope": stream_scope_payload(&projected.scope),
+                    "sourceEventType": event.event_type(),
+                    "sourceSequence": event.sequence(),
+                }),
+                visibility,
+                session_id,
+                workspace_id: None,
+                producer: "agent-runtime".to_owned(),
+                trace_id: None,
+                parent_invocation_id: None,
+            })
+            .await
+        {
+            tracing::warn!(
+                event_type,
+                error = %error,
+                "engine stream publish failed; dropping runtime event"
+            );
+        }
+    }
+}
+
+fn stream_scope_payload(scope: &BroadcastScope) -> serde_json::Value {
+    match scope {
+        BroadcastScope::All => json!({ "kind": "all" }),
+        BroadcastScope::Session(session_id) => {
+            json!({ "kind": "session", "sessionId": session_id })
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "stream_pump/tests.rs"]
+mod tests;

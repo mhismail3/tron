@@ -1,10 +1,10 @@
 //! # server
 //!
-//! Axum HTTP + `WebSocket` server and event broadcasting.
+//! Axum HTTP + engine WebSocket server.
 //!
-//! - HTTP endpoints: health check, metrics, `/ws`, `/engine`, and `/engine/workers`
-//! - WebSocket transports: JSON-RPC `/ws`, engine protocol `/engine`, local workers
-//! - Event fan-out to connected clients via `BroadcastManager`
+//! - HTTP endpoints: health check, metrics, `/engine`, and `/engine/workers`
+//! - WebSocket transports: engine client protocol and loopback local workers
+//! - Event delivery via engine streams
 //! - Graceful shutdown via `CancellationToken` coordination
 //!
 //! ## Module Position
@@ -18,7 +18,7 @@
 //! | `capabilities` | Canonical domain function handlers and capability runtime dependencies           |
 //! | `config`      | `ServerConfig` (host/port + heartbeat/buffer tuning)                               |
 //! | `codex_app`   | Server-owned `codex app-server` child lifecycle + iOS discovery status             |
-//! | `cron_callbacks` | Cron WebSocket/APNS callback projection                                           |
+//! | `cron_callbacks` | Cron stream/APNS callback projection                                             |
 //! | `device`      | iOS push-device registry; APNs token storage                                       |
 //! | `disk`        | Disk-space probes for health diagnostics                                           |
 //! | `engine_runtime` | Queue drainers and stream pump for engine primitives                           |
@@ -27,12 +27,12 @@
 //! | `metrics`     | Prometheus recorder install + `/metrics` exporter                                  |
 //! | `onboarding`  | Per-server bearer-token lifecycle + first-run sentinel                             |
 //! | `platform`    | OS-specific surfaces (APNs, launchd, codesign helpers)                             |
-//! | `server`      | `TronServer::new` wiring (registry + context + bind)                               |
+//! | `server`      | `TronServer::new` wiring (engine context + bind)                                   |
 //! | `services`    | Server-local services used by canonical engine capabilities                        |
 //! | `shutdown`    | Phased graceful shutdown coordinator (MCP → tasks → IO)                            |
+//! | `stream_pump` | Runtime event projection into engine streams                                      |
 //! | `transport`   | Thin client transports over canonical engine capabilities                          |
 //! | `updater`     | User-mode GitHub Releases checks/downloads — channel + action + state           |
-//! | `websocket`   | WS upgrade, framing, heartbeat, mandatory bearer-auth middleware                   |
 
 #![deny(unsafe_code)]
 
@@ -59,6 +59,6 @@ pub mod server;
 pub mod services;
 #[path = "app/shutdown.rs"]
 pub mod shutdown;
+pub mod stream_pump;
 pub mod transport;
 pub mod updater;
-pub mod websocket;

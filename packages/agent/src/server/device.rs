@@ -1,11 +1,10 @@
 //! Device request/response broker.
 //!
-//! Implements a request/response pattern over the existing WebSocket event
-//! channel. Server broadcasts a `device.request` event, iOS handles it locally,
-//! and sends the result back via the `device::respond` capability.
+//! Implements a request/response pattern over engine streams. Server publishes
+//! a `device.request` event scoped to the session, the client handles it
+//! locally, and sends the result back via the `device::respond` capability.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use metrics::{counter, gauge, histogram};
@@ -15,8 +14,8 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::server::transport::json_rpc::types::JsonRpcEvent;
-use crate::server::websocket::broadcast::BroadcastManager;
+use crate::engine::{EngineHostHandle, PublishStreamEvent, VisibilityScope};
+use crate::server::services::events_wire::ServerEventPayload;
 
 /// Broker for device request/response round-trips.
 ///
@@ -24,14 +23,14 @@ use crate::server::websocket::broadcast::BroadcastManager;
 ///
 /// 1. Tool calls `broker.request(method, params)`.
 /// 2. Broker generates a `requestId`, stores a oneshot sender, and broadcasts
-///    a `device.request` event via `BroadcastManager`.
+///    a `device.request` event to the session stream.
 /// 3. iOS receives the event, dispatches to a local handler, and sends the
 ///    result back via the `device::respond` capability.
 /// 4. `device::respond` calls `broker.resolve(requestId, result)`,
 ///    which completes the oneshot and unblocks the tool.
 pub struct DeviceRequestBroker {
     pending: Mutex<HashMap<String, PendingRequest>>,
-    broadcast: Arc<BroadcastManager>,
+    engine_host: EngineHostHandle,
     shutdown: CancellationToken,
 }
 
@@ -41,11 +40,11 @@ struct PendingRequest {
 }
 
 impl DeviceRequestBroker {
-    /// Create a new broker backed by the given broadcast manager.
-    pub fn new(broadcast: Arc<BroadcastManager>, shutdown: CancellationToken) -> Self {
+    /// Create a new broker backed by the engine stream store.
+    pub fn new(engine_host: EngineHostHandle, shutdown: CancellationToken) -> Self {
         Self {
             pending: Mutex::new(HashMap::new()),
-            broadcast,
+            engine_host,
             shutdown,
         }
     }
@@ -76,7 +75,7 @@ impl DeviceRequestBroker {
         gauge!("device_requests_pending").set(pending_count as f64);
         counter!("device_requests_started_total").increment(1);
 
-        let event = JsonRpcEvent {
+        let event = ServerEventPayload {
             event_type: "device.request".into(),
             session_id: Some(session_id.to_string()),
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -88,10 +87,37 @@ impl DeviceRequestBroker {
             })),
             run_id: None,
             sequence: None,
+            workspace_id: None,
+            trace_id: None,
+            parent_invocation_id: None,
+            source_event_id: None,
+            source_sequence: None,
+            stream_cursor: None,
         };
-        self.broadcast
-            .broadcast_to_session(session_id, &event)
-            .await;
+        if let Err(error) = self
+            .engine_host
+            .publish_stream_event(PublishStreamEvent {
+                topic: "events.session".to_owned(),
+                payload: json!({
+                    "serverEvent": event.clone(),
+                    "sourceEventType": event.event_type.clone(),
+                }),
+                visibility: VisibilityScope::Session,
+                session_id: Some(session_id.to_owned()),
+                workspace_id: None,
+                producer: "device".to_owned(),
+                trace_id: None,
+                parent_invocation_id: None,
+            })
+            .await
+        {
+            tracing::warn!(
+                session_id,
+                method,
+                error = %error,
+                "device request stream publication failed"
+            );
+        }
 
         let shutdown = self.shutdown.clone();
         tokio::select! {
@@ -209,10 +235,16 @@ pub enum DeviceRequestError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    use crate::engine::{EngineHostHandle, StreamActorScope, StreamCursor};
+
+    fn make_host() -> EngineHostHandle {
+        EngineHostHandle::new_in_memory().unwrap()
+    }
 
     fn make_broker() -> DeviceRequestBroker {
-        let broadcast = Arc::new(BroadcastManager::new());
-        DeviceRequestBroker::new(broadcast, CancellationToken::new())
+        DeviceRequestBroker::new(make_host(), CancellationToken::new())
     }
 
     #[test]
@@ -342,27 +374,31 @@ mod tests {
 
     #[tokio::test]
     async fn request_only_reaches_target_session() {
-        let broadcast = Arc::new(BroadcastManager::new());
+        let host = make_host();
+        host.subscribe_stream(
+            "device-session-a".to_owned(),
+            "events.session".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-a".to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
+        host.subscribe_stream(
+            "device-session-b".to_owned(),
+            "events.session".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-b".to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
         let broker = Arc::new(DeviceRequestBroker::new(
-            broadcast.clone(),
+            host.clone(),
             CancellationToken::new(),
         ));
-
-        let (session_a_tx, mut session_a_rx) = tokio::sync::mpsc::unbounded_channel();
-        let conn_a = Arc::new(crate::server::websocket::connection::ClientConnection::new(
-            "conn-a".into(),
-            session_a_tx,
-        ));
-        conn_a.bind_session("session-a");
-        broadcast.add(conn_a).await;
-
-        let (session_b_tx, mut session_b_rx) = tokio::sync::mpsc::unbounded_channel();
-        let conn_b = Arc::new(crate::server::websocket::connection::ClientConnection::new(
-            "conn-b".into(),
-            session_b_tx,
-        ));
-        conn_b.bind_session("session-b");
-        broadcast.add(conn_b).await;
 
         let broker_clone = broker.clone();
         let request = tokio::spawn(async move {
@@ -376,11 +412,24 @@ mod tests {
                 .await
         });
 
-        let targeted = session_a_rx.recv().await.unwrap();
-        let event: serde_json::Value = serde_json::from_str(&targeted).unwrap();
+        let page_a = poll_until_event(&host, "device-session-a", Some("session-a")).await;
+        let event = page_a.events[0]
+            .payload
+            .get("serverEvent")
+            .cloned()
+            .unwrap();
         let request_id = event["data"]["requestId"].as_str().unwrap().to_string();
         assert_eq!(event["sessionId"], "session-a");
-        assert!(session_b_rx.try_recv().is_err());
+        let page_b = host
+            .poll_stream(
+                "device-session-b",
+                Some(StreamCursor(0)),
+                10,
+                &StreamActorScope::scoped(Some("session-b".to_owned()), None),
+            )
+            .await
+            .unwrap();
+        assert!(page_b.events.is_empty());
 
         assert!(broker.resolve(&request_id, json!({"ok": true})));
         let result = request.await.unwrap().unwrap();
@@ -440,10 +489,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_token_cancels_pending_requests() {
         let cancel = CancellationToken::new();
-        let broker = Arc::new(DeviceRequestBroker::new(
-            Arc::new(BroadcastManager::new()),
-            cancel.clone(),
-        ));
+        let broker = Arc::new(DeviceRequestBroker::new(make_host(), cancel.clone()));
 
         let broker_clone = broker.clone();
         let handle = tokio::spawn(async move {
@@ -465,5 +511,24 @@ mod tests {
             Err(DeviceRequestError::Cancelled)
         ));
         assert_eq!(broker.pending_count(), 0);
+    }
+
+    async fn poll_until_event(
+        host: &EngineHostHandle,
+        subscription_id: &str,
+        session_id: Option<&str>,
+    ) -> crate::engine::EngineStreamPage {
+        let actor = StreamActorScope::scoped(session_id.map(ToOwned::to_owned), None);
+        for _ in 0..20 {
+            let page = host
+                .poll_stream(subscription_id, Some(StreamCursor(0)), 10, &actor)
+                .await
+                .unwrap();
+            if !page.events.is_empty() {
+                return page;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("timed out waiting for device stream event");
     }
 }

@@ -1,6 +1,6 @@
 //! Canonical git engine functions.
 //!
-//! JSON-RPC reaches these operations through `json_rpc` triggers targeting
+//! Client protocols reach these operations through engine triggers targeting
 //! canonical `git::*` function ids. The helpers keep git service behavior
 //! behind engine policy, idempotency, leases, and compensation
 //! metadata.

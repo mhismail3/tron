@@ -10,20 +10,13 @@ Tron now treats the server as a live capability fabric. The executable surface i
 the canonical engine catalog: `namespace::function` capabilities owned by live
 workers, invoked by triggers, and recorded through the engine ledger.
 
-JSON-RPC is not a domain API. It is one thin transport for five reserved engine
-meta-capabilities:
+The `/engine` WebSocket protocol is the public client capability protocol. It
+is transport only; executable behavior lives behind canonical functions.
 
-- `engine.discover`
-- `engine.inspect`
-- `engine.watch`
-- `engine.invoke`
-- `engine.promote`
+The request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
+`promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`.
 
-Dotted domain calls are not registered public methods on this branch. Clients
-and agents discover canonical ids and invoke them through `engine.invoke`.
-
-The `/engine` WebSocket protocol is the engine-native sibling transport. Both
-JSON-RPC and `/engine` messages are translated into the same protocol-neutral
+All `/engine` messages are translated into the same protocol-neutral
 `EngineTransportRequest` before trigger dispatch. That envelope carries the
 target function, trigger, actor, authority, trace, scope, payload, expected
 revision, and explicit idempotency key.
@@ -39,8 +32,8 @@ revision, and explicit idempotency key.
   ownership.
 - Triggers are causal rules. They carry actor, authority, trace, delivery mode,
   idempotency, parent invocation, and target revision into the engine.
-- Mutating effects require explicit idempotency from engine-native callers.
-  JSON-RPC request ids are correlation ids only.
+- Mutating effects require explicit idempotency. Message ids are correlation
+  ids only.
 - High-risk autonomous actions are approval-gated. Approval resolution resumes
   the original invocation context rather than starting a new unrelated command.
 - Event store rows remain durable session truth. Engine streams provide live,
@@ -53,9 +46,7 @@ revision, and explicit idempotency key.
 
 ```mermaid
 flowchart LR
-  Client["Client / Agent"] --> JsonRpc["JSON-RPC engine.* transport"]
-  Client --> EngineWs["/engine WebSocket protocol"]
-  JsonRpc --> Transport["EngineTransportRequest"]
+  Client["Client / Agent"] --> EngineWs["/engine WebSocket protocol"]
   EngineWs --> Transport
   Transport --> Engine["EngineHost"]
   AgentTool["Agent engine tools"] --> Engine
@@ -76,21 +67,18 @@ The code layout follows the same boundary:
   and canonical specs.
 - `packages/agent/src/server/services/`: reusable server-local services used by
   capabilities.
-- `packages/agent/src/server/transport/json_rpc/`: JSON-RPC framing, registry,
-  validation, and the five `engine.*` transport methods.
 - `packages/agent/src/server/transport/engine_ws.rs`: `/engine` WebSocket
   protocol parsing, heartbeat, stream subscribe/poll/ack, and envelope
   construction.
 - `packages/agent/src/server/transport/engine.rs`: protocol-neutral transport
-  envelope used by JSON-RPC and `/engine`.
-- `packages/agent/src/server/websocket/`: WebSocket delivery over engine stream
-  records.
+  envelope used by `/engine`.
+- `packages/agent/src/server/stream_pump.rs`: runtime event projection into
+  engine stream records.
 
 ## Single-Shape Invariants
 
-- Public JSON-RPC registry contains exactly five `engine.*` methods.
-- Public `/engine` clients use the same envelope path and cannot invoke dotted
-  names or hidden/internal functions.
+- Public `/engine` clients cannot invoke dotted names or hidden/internal
+  functions.
 - No executable or discoverable noncanonical transport namespace exists.
 - Domain dotted names are internal operation keys only, not public transport.
 - Production code does not implement method-specific canonical capability functions.
@@ -108,9 +96,9 @@ registered capability appears on the next live catalog projection if it is
 visible, healthy, schema-bearing, and authorized for the actor.
 
 Agent-created capabilities default to session visibility. Promotion to
-workspace or system visibility goes through `engine.promote`, requires expected
-function revision and explicit idempotency, and records an auditable catalog
-change.
+workspace or system visibility goes through `/engine` `promote`, requires
+expected function revision and explicit idempotency, and records an auditable
+catalog change.
 
 High-risk capabilities are discoverable with their effect, authority, approval,
 lease, and compensation metadata. Autonomous invocation returns structured

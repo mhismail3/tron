@@ -53,8 +53,8 @@ pub struct CapabilitySpec {
     pub visibility: VisibilityScope,
     /// Optional authority scope required to invoke.
     pub authority_scope: Option<&'static str>,
-    /// Public transport idempotency mode when this function is exposed as an
-    /// `engine.*` JSON-RPC method.
+    /// Public transport idempotency mode when this function is exposed through
+    /// an engine protocol message.
     pub idempotency_mode: TransportIdempotencyMode,
     /// Domain module/group provenance.
     pub handler_module: &'static str,
@@ -90,20 +90,15 @@ macro_rules! capability_seed {
     };
 }
 
-const PUBLIC_JSON_RPC_METHODS: &[&str] = &[
-    "engine.discover",
-    "engine.inspect",
-    "engine.watch",
-    "engine.invoke",
-    "engine.promote",
-];
+const PUBLIC_ENGINE_TRANSPORT_METHODS: &[&str] =
+    &["discover", "inspect", "watch", "invoke", "promote"];
 
 const CAPABILITY_SEEDS: &[CapabilitySeed] = &[
-    capability_seed!("engine.discover"),
-    capability_seed!("engine.inspect"),
-    capability_seed!("engine.watch"),
-    capability_seed!("engine.invoke"),
-    capability_seed!("engine.promote"),
+    capability_seed!("engine::discover"),
+    capability_seed!("engine::inspect"),
+    capability_seed!("engine::watch"),
+    capability_seed!("engine::invoke"),
+    capability_seed!("engine::promote"),
     capability_seed!("system::ping"),
     capability_seed!("system::get_info"),
     capability_seed!("system::get_diagnostics"),
@@ -276,9 +271,9 @@ const CAPABILITY_SEEDS: &[CapabilitySeed] = &[
     capability_seed!("cron::get_runs"),
 ];
 
-/// Public JSON-RPC engine transport methods.
-pub fn public_json_rpc_methods() -> impl Iterator<Item = &'static str> {
-    PUBLIC_JSON_RPC_METHODS.iter().copied()
+/// Public `/engine` client protocol meta-methods.
+pub fn public_engine_transport_methods() -> impl Iterator<Item = &'static str> {
+    PUBLIC_ENGINE_TRANSPORT_METHODS.iter().copied()
 }
 
 /// Build canonical capability specs from the complete domain capability catalog.
@@ -301,27 +296,10 @@ pub fn canonical_capability_specs() -> EngineResult<Vec<CanonicalCapabilitySpec>
         .collect()
 }
 
-/// Build and validate the public JSON-RPC engine transport method set.
-pub fn public_json_rpc_specs(registered_methods: &[String]) -> EngineResult<Vec<CapabilitySpec>> {
-    let registered = registered_methods.iter().cloned().collect::<BTreeSet<_>>();
-    let seeded = PUBLIC_JSON_RPC_METHODS
-        .iter()
-        .map(|method| (*method).to_owned())
-        .collect::<BTreeSet<_>>();
-
-    if let Some(method) = registered.difference(&seeded).next() {
-        return Err(EngineError::PolicyViolation(format!(
-            "JSON-RPC method {method} is registered without a public engine transport spec"
-        )));
-    }
-    if let Some(method) = seeded.difference(&registered).next() {
-        return Err(EngineError::PolicyViolation(format!(
-            "public engine transport method {method} does not match a registered method"
-        )));
-    }
-
-    let mut specs = Vec::with_capacity(PUBLIC_JSON_RPC_METHODS.len());
-    for method in PUBLIC_JSON_RPC_METHODS {
+/// Build and validate the public `/engine` client protocol method set.
+pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
+    let mut specs = Vec::with_capacity(PUBLIC_ENGINE_TRANSPORT_METHODS.len());
+    for method in PUBLIC_ENGINE_TRANSPORT_METHODS {
         let seed = CapabilitySeed { method: *method };
         let spec = spec_from_seed(seed)?;
         if spec.visibility.is_agent_visible()
@@ -390,7 +368,7 @@ pub fn public_json_rpc_specs(registered_methods: &[String]) -> EngineResult<Vec<
 pub(crate) fn public_engine_transport_spec_for_method(
     method: &str,
 ) -> EngineResult<Option<CapabilitySpec>> {
-    let Some(seed) = PUBLIC_JSON_RPC_METHODS
+    let Some(seed) = PUBLIC_ENGINE_TRANSPORT_METHODS
         .iter()
         .find(|candidate| **candidate == method)
         .map(|method| CapabilitySeed { method: *method })
@@ -447,7 +425,7 @@ fn idempotency_mode_for_method(
     method: &str,
     effect_class: EffectClass,
 ) -> TransportIdempotencyMode {
-    if method == "engine.promote" {
+    if matches!(method, "promote" | "engine::promote") {
         TransportIdempotencyMode::ExplicitRequired
     } else {
         let _ = effect_class;
@@ -458,9 +436,12 @@ fn idempotency_mode_for_method(
 fn is_pure_read_method(method: &str) -> bool {
     matches!(
         method,
-        "engine.discover"
-            | "engine.inspect"
-            | "engine.watch"
+        "discover"
+            | "inspect"
+            | "watch"
+            | "engine::discover"
+            | "engine::inspect"
+            | "engine::watch"
             | "system::ping"
             | "system::get_info"
             | "system::get_diagnostics"
@@ -534,10 +515,10 @@ fn is_pure_read_method(method: &str) -> bool {
 }
 
 fn effect_class_for_method(method: &str) -> EffectClass {
-    if method == "engine.invoke" {
+    if matches!(method, "invoke" | "engine::invoke") {
         return EffectClass::DelegatedInvocation;
     }
-    if method == "engine.promote" {
+    if matches!(method, "promote" | "engine::promote") {
         return EffectClass::IdempotentWrite;
     }
     if is_pure_read_method(method) {
@@ -629,7 +610,7 @@ fn effect_class_for_method(method: &str) -> EffectClass {
 fn risk_for_method(method: &str, effect: EffectClass) -> RiskLevel {
     if matches!(method, "git::push" | "system::shutdown") {
         RiskLevel::Critical
-    } else if method == "engine.promote" {
+    } else if matches!(method, "promote" | "engine::promote") {
         RiskLevel::Medium
     } else if matches!(
         method,
@@ -738,7 +719,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
 }
 
 fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
-    if method == "engine.promote" {
+    if matches!(method, "promote" | "engine::promote") {
         IdempotencyContract::caller_session_engine_ledger()
     } else if method.starts_with("logs::")
         || method.starts_with("mcp::")
@@ -774,7 +755,8 @@ fn idempotency_contract_for_method(method: &str) -> IdempotencyContract {
 fn settings_write_requires_approval(method: &str) -> bool {
     matches!(
         method,
-        "engine.promote"
+        "promote"
+            | "engine::promote"
             | "settings::update"
             | "settings::reset_to_defaults"
             | "context::confirm_compaction"
@@ -1211,25 +1193,6 @@ pub(crate) fn domain_workers() -> EngineResult<Vec<WorkerDefinition>> {
         .collect()
 }
 
-pub(crate) fn json_rpc_trigger_type() -> EngineResult<TriggerTypeDefinition> {
-    let mut definition = TriggerTypeDefinition::new(
-        TriggerTypeId::new("json_rpc")?,
-        worker_id("engine")?,
-        "JSON-RPC engine transport dispatch into a canonical function",
-    );
-    definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
-    definition.visibility = VisibilityScope::Internal;
-    definition.config_schema = Some(json!({
-        "type": "object",
-        "required": ["method"],
-        "additionalProperties": false,
-        "properties": {
-            "method": {"type": "string"}
-        }
-    }));
-    Ok(definition)
-}
-
 pub(crate) fn engine_ws_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     let mut definition = TriggerTypeDefinition::new(
         TriggerTypeId::new("engine_ws")?,
@@ -1283,31 +1246,6 @@ pub(crate) fn cron_schedule_trigger_type() -> EngineResult<TriggerTypeDefinition
     Ok(definition)
 }
 
-pub(crate) fn json_rpc_trigger_for_spec(
-    spec: &CapabilitySpec,
-) -> EngineResult<Option<TriggerDefinition>> {
-    let mut trigger = TriggerDefinition::new(
-        json_rpc_trigger_id_for_method(spec.method)?,
-        worker_id("engine")?,
-        TriggerTypeId::new("json_rpc")?,
-        spec.function_id.clone(),
-        grant_id(SYSTEM_AUTHORITY_GRANT)?,
-    )
-    .with_delivery_mode(DeliveryMode::Sync);
-    trigger.config = json!({ "method": spec.method });
-    trigger.idempotency_key_strategy = if spec.effect_class.is_mutating() {
-        Some(IdempotencyKeySource::TriggerDerived)
-    } else {
-        None
-    };
-    trigger.visibility = VisibilityScope::Internal;
-    Ok(Some(trigger))
-}
-
-pub(crate) fn json_rpc_trigger_id_for_method(method: &str) -> EngineResult<TriggerId> {
-    TriggerId::new(format!("json_rpc:{method}"))
-}
-
 pub(crate) fn engine_ws_trigger_for_spec(
     spec: &CapabilitySpec,
 ) -> EngineResult<Option<TriggerDefinition>> {
@@ -1343,7 +1281,14 @@ pub(crate) fn canonical_function_id_for_method(method: &str) -> EngineResult<Fun
 
 fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
     worker_id(match method {
-        method if method.starts_with("engine.") => "engine",
+        method
+            if matches!(
+                method,
+                "discover" | "inspect" | "watch" | "invoke" | "promote"
+            ) || method.starts_with("engine::") =>
+        {
+            "engine"
+        }
         method if method.starts_with("settings::") => "settings",
         method if method.starts_with("logs::") => "logs",
         method if method.starts_with("memory::") => "memory",
@@ -1365,7 +1310,7 @@ fn domain_worker_for_method(method: &str) -> EngineResult<WorkerId> {
         method if method.starts_with("agent::") => "agent",
         method if method.starts_with("mcp::") => "mcp",
         method if method.starts_with("auth::") => "auth",
-        method if method.starts_with("approval.") => "approval",
+        method if method.starts_with("approval::") => "approval",
         method if method.starts_with("notifications::") => "notifications",
         method if method.starts_with("plan::") => "plan",
         method if method.starts_with("tree::") => "tree",
@@ -1397,11 +1342,11 @@ fn canonical_capability_for_method(method: &str) -> String {
 
 fn canonical_parts_for_method(method: &str) -> (&'static str, String) {
     match method {
-        "engine.discover" => ("engine", "discover".to_owned()),
-        "engine.inspect" => ("engine", "inspect".to_owned()),
-        "engine.watch" => ("engine", "watch".to_owned()),
-        "engine.invoke" => ("engine", "invoke".to_owned()),
-        "engine.promote" => ("engine", "promote".to_owned()),
+        "discover" | "engine::discover" => ("engine", "discover".to_owned()),
+        "inspect" | "engine::inspect" => ("engine", "inspect".to_owned()),
+        "watch" | "engine::watch" => ("engine", "watch".to_owned()),
+        "invoke" | "engine::invoke" => ("engine", "invoke".to_owned()),
+        "promote" | "engine::promote" => ("engine", "promote".to_owned()),
         "system::ping" => ("system", "ping".to_owned()),
         "system::get_info" => ("system", "get_info".to_owned()),
         "system::get_diagnostics" => ("system", "get_diagnostics".to_owned()),
@@ -1731,15 +1676,19 @@ pub(crate) fn grant_id(value: &str) -> EngineResult<AuthorityGrantId> {
 }
 
 fn handler_module_for_method(method: &str) -> &'static str {
-    let prefix = method.split('.').next().unwrap_or(method);
+    let prefix = method
+        .split_once("::")
+        .map(|(prefix, _)| prefix)
+        .unwrap_or_else(|| method.split('.').next().unwrap_or(method));
     match prefix {
         "codexApp" => "codex_app",
+        "codex_app" => "codex_app",
         "config" => "model",
         "file" | "filesystem" => "filesystem",
         "repo" => "git_workflow",
-        "transcribe" => "transcription",
-        "voiceNotes" => "voice_notes",
-        "promptHistory" | "promptSnippet" => "prompt_library",
+        "transcribe" | "transcription" => "transcription",
+        "voiceNotes" | "voice_notes" => "voice_notes",
+        "promptHistory" | "promptSnippet" | "prompt_library" => "prompt_library",
         other => match other {
             "agent" => "agent",
             "auth" => "auth",

@@ -8,7 +8,7 @@
 //!
 //! * The server is assumed to be reachable only from the user's own
 //!   devices via Tailscale (see the project threat-model in `README.md`
-//!   and [`crate::server::websocket::broadcast`]).
+//!   and engine stream publishers).
 //! * The iOS project picker must be free to browse anywhere on the host
 //!   filesystem (external drives, `/etc/hosts`, sibling repos, etc.)
 //!   to choose a working dir.

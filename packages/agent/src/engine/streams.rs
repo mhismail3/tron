@@ -1,8 +1,8 @@
 //! Engine stream primitive.
 //!
 //! Streams are resumable cursor views over engine-visible change records. They
-//! are not a transport: JSON-RPC, WebSocket, agent tools, and future external
-//! workers can all poll the same stream cursor model.
+//! are not a transport: engine clients, agent tools, and external workers can
+//! all poll the same stream cursor model.
 
 use std::collections::BTreeMap;
 use std::path::Path;

@@ -33,12 +33,6 @@ const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
     ("src/server/services/filesystem_service.rs", "trusted-local"),
     // C2 — server binds 0.0.0.0 by default
     ("src/main.rs", "trusted-local"),
-    // M1 — NotFound messages echo caller-supplied IDs
-    ("src/server/transport/json_rpc/errors.rs", "trusted-local"),
-    // M4 — BroadcastManager trusts client-claimed session_id
-    ("src/server/websocket/broadcast.rs", "trusted-local"),
-    // L7 — no per-client JSON-RPC rate limiting
-    ("src/server/transport/json_rpc/mod.rs", "trusted-local"),
     // L8 — client-supplied bundleId trusted at register time
     ("src/server/capabilities/device.rs", "trusted-local"),
     // L14 — `is_path_within` is lexical, no symlink resolution
@@ -214,7 +208,7 @@ fn removed_server_owned_settings_store_stays_deleted() {
             .join("src/server/services")
             .join(file_name)
             .exists(),
-        "settings persistence belongs to settings::SettingsStore, not server::transport::json_rpc"
+        "settings persistence belongs to settings::SettingsStore, not server transport code"
     );
 }
 

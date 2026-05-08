@@ -51,36 +51,26 @@ A trigger is a causal rule that invokes a function. Trigger dispatch records:
 - idempotency key;
 - result or structured error.
 
-Current trigger types include `json_rpc`, `manual`, `cron_schedule`, queue
+Current trigger types include `engine_ws`, `manual`, `cron_schedule`, queue
 delivery, stream publication, and local worker invocation paths.
 
 ## Public Transport
 
-JSON-RPC exposes only:
+The public `/engine` protocol exposes `hello`, `discover`, `inspect`, `watch`,
+`invoke`, `promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`.
 
-- `engine.discover`
-- `engine.inspect`
-- `engine.watch`
-- `engine.invoke`
-- `engine.promote`
-
-`engine.invoke` rejects noncanonical ids, hidden/internal ids, stale revisions,
+`invoke` rejects noncanonical ids, hidden/internal ids, stale revisions,
 unhealthy functions, unauthorized calls, missing explicit idempotency for
 mutations, and approval-required autonomous writes before handler execution.
 
-JSON-RPC request ids are correlation ids. They do not become command ids or
-idempotency keys.
+Message ids are correlation ids. They do not become command ids or idempotency
+keys. Mutating `invoke`/`promote` messages require explicit idempotency.
 
-The `/engine` WebSocket protocol exposes engine-native messages for `hello`,
-`discover`, `inspect`, `watch`, `invoke`, `promote`, `subscribe`, `poll`, `ack`,
-`heartbeat`, and `goodbye`. The `id` field is correlation-only, and mutating
-`invoke`/`promote` messages require explicit idempotency.
-
-The server translates both JSON-RPC and `/engine` messages into an internal
-`EngineTransportRequest` before dispatch. The envelope is protocol-neutral: it
-contains the target function, trigger, actor, authority grant/scopes, trace,
-parent invocation, session/workspace scope, payload, expected revision, and
-explicit idempotency key.
+The server translates `/engine` messages into an internal
+`EngineTransportRequest` before dispatch. The envelope contains the target
+function, trigger, actor, authority grant/scopes, trace, parent invocation,
+session/workspace scope, payload, expected revision, and explicit idempotency
+key.
 
 ## Agent Semantics
 
@@ -133,15 +123,14 @@ exists to do so.
 - Engine-generic behavior belongs in `engine`.
 - Tron domain capability handlers and specs belong in `server/capabilities`.
 - Reusable server-local dependencies belong in `server/services`.
-- JSON-RPC framing/validation/registry belongs in `server/transport/json_rpc`.
 - Engine WebSocket framing/validation/subscription state belongs in
   `server/transport/engine_ws.rs`.
-- WebSocket owns delivery only; engine streams are the source for migrated live
-  events.
+- `/engine` subscriptions deliver stream records; engine streams are the source
+  for live events.
 
 ## Non-Goals For This Branch
 
 - No remote worker hosting.
 - No managed-service behavior.
 - No production database migration for engine ledger primitives.
-- No public dotted JSON-RPC domain methods.
+- No public dotted domain methods.

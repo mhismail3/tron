@@ -1,6 +1,6 @@
 //! Canonical git/worktree workflow engine functions.
 //!
-//! JSON-RPC reaches these operations through `json_rpc` triggers targeting
+//! Client protocols reach these operations through engine triggers targeting
 //! canonical `git::*` and `worktree::*` function ids. The private operation
 //! helpers preserve coordinator behavior for sync, push, branch listing,
 //! finalize, merge/rebase, conflict resolution, and repo read capabilities.
@@ -9,11 +9,11 @@
 //! param extraction → coordinator call → JSON response. Event emission
 //! (`WorktreeMainSynced`, `RepoMainAdvanced`, lock acquire/release, …) is
 //! owned by the coordinator layer so it fires for every caller (tool,
-//! JSON-RPC transport, subagent).
+//! engine transport, subagent).
 //!
 //! Error mapping: every coordinator error is routed through
 //! `crate::server::capabilities::error_mapping::map_worktree_error`, which classifies `WorktreeError`
-//! variants into typed JSON-RPC error codes (`PROTECTED_BRANCH`,
+//! variants into typed capability error codes (`PROTECTED_BRANCH`,
 //! `NON_FAST_FORWARD`, `NO_REMOTE`, `GIT_AUTH_FAILED`, …). Domain functions
 //! should not produce `CapabilityError::Internal` for a predictable git failure; use
 //! the helper instead.

@@ -4,10 +4,10 @@
 //! [`EngineTransportRequest`] and then call [`dispatch_engine_transport_request`].
 //! The envelope contains engine concepts only: target function, trigger,
 //! payload, actor, authority, trace, optional session/workspace scope, and
-//! explicit idempotency. JSON-RPC request ids stay outside engine semantics as
+//! explicit idempotency. Protocol message ids stay outside engine semantics as
 //! correlation ids.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::engine::{
     ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, InvocationId, TraceId,
@@ -17,34 +17,6 @@ use crate::server::capabilities::catalog::{self, TransportIdempotencyMode};
 use crate::server::capabilities::error_mapping::engine_error_to_capability_error;
 use crate::server::capabilities::errors::CapabilityError;
 use crate::server::services::context::ServerCapabilityContext;
-
-/// Public transport that delivered an engine request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EngineTransportKind {
-    /// Five-method JSON-RPC transport.
-    JsonRpc,
-    /// `/engine` WebSocket protocol.
-    EngineWs,
-}
-
-impl EngineTransportKind {
-    /// Stable transport label stored in causal metadata.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::JsonRpc => "json_rpc",
-            Self::EngineWs => "engine_ws",
-        }
-    }
-
-    fn trigger_id_for_method(self, method: &str) -> Result<TriggerId, CapabilityError> {
-        match self {
-            Self::JsonRpc => catalog::json_rpc_trigger_id_for_method(method),
-            Self::EngineWs => catalog::engine_ws_trigger_id_for_method(method),
-        }
-        .map_err(engine_error_to_capability_error)
-    }
-}
 
 /// Optional context supplied by a transport message.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -66,9 +38,7 @@ pub struct EngineTransportContext {
 pub struct EngineTransportBuildRequest {
     /// Protocol-level correlation id.
     pub correlation_id: String,
-    /// Transport kind.
-    pub transport: EngineTransportKind,
-    /// Public engine method such as `engine.invoke`.
+    /// Public engine message type such as `invoke`.
     pub public_method: String,
     /// Method params/payload before transport-only fields are stripped.
     pub params_payload: Value,
@@ -81,9 +51,9 @@ pub struct EngineTransportBuildRequest {
 pub struct EngineTransportRequest {
     /// Protocol-level correlation id, never an idempotency key.
     pub correlation_id: String,
-    /// Transport name, for example `json_rpc`.
+    /// Transport name, currently always `engine_ws`.
     pub transport: String,
-    /// Public transport method, for example `engine.invoke`.
+    /// Public transport message type, for example `invoke`.
     pub public_method: String,
     /// Canonical target function id selected by the transport binding.
     pub function_id: FunctionId,
@@ -113,18 +83,14 @@ pub fn build_engine_transport_request(
                 spec.method
             ),
         })?;
-    let mut causal_context = transport_causal_context_for_method(
-        spec.method,
-        domain_authority_scope,
-        input.transport,
-        &input.context,
-    )?;
-    if spec.method == "engine.promote" {
+    let mut causal_context =
+        transport_causal_context_for_method(spec.method, domain_authority_scope, &input.context)?;
+    if spec.method == "promote" {
         causal_context = causal_context
             .with_scope("engine.promote.workspace")
             .with_scope("engine.promote.system");
     }
-    if spec.method == "engine.invoke" {
+    if spec.method == "invoke" {
         for scope in target_authority_scopes_for_engine_invoke(&input.params_payload) {
             causal_context = causal_context.with_scope(scope);
         }
@@ -163,10 +129,11 @@ pub fn build_engine_transport_request(
 
     Ok(Some(EngineTransportRequest {
         correlation_id: input.correlation_id,
-        transport: input.transport.as_str().to_owned(),
+        transport: "engine_ws".to_owned(),
         public_method: input.public_method,
         function_id: spec.function_id,
-        trigger_id: input.transport.trigger_id_for_method(spec.method)?,
+        trigger_id: catalog::engine_ws_trigger_id_for_method(spec.method)
+            .map_err(engine_error_to_capability_error)?,
         payload,
         causal_context,
     }))
@@ -199,19 +166,16 @@ pub async fn dispatch_engine_transport_request(
 fn transport_causal_context_for_method(
     method: &str,
     scope: &str,
-    transport: EngineTransportKind,
     context: &EngineTransportContext,
 ) -> Result<CausalContext, CapabilityError> {
-    let actor_kind = if method == "engine.promote" {
+    let actor_kind = if method == "promote" {
         ActorKind::User
     } else {
         ActorKind::Client
     };
-    let actor_id = match (transport, method == "engine.promote") {
-        (EngineTransportKind::JsonRpc, true) => "engine-user",
-        (EngineTransportKind::JsonRpc, false) => "engine-client",
-        (EngineTransportKind::EngineWs, true) => "engine-ws-user",
-        (EngineTransportKind::EngineWs, false) => "engine-ws-client",
+    let actor_id = match method == "promote" {
+        true => "engine-user",
+        false => "engine-client",
     };
     let trace_id = match context.trace_id.as_deref() {
         Some(id) if !id.trim().is_empty() => {
@@ -254,7 +218,7 @@ fn transport_causal_context_for_method(
 }
 
 fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), CapabilityError> {
-    if method != "engine.invoke" {
+    if method != "invoke" {
         return Ok(());
     }
     let Some(function_id) = extract_string(payload, "functionId") else {
@@ -262,7 +226,7 @@ fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), Capab
     };
     let Some((namespace, operation)) = function_id.split_once("::") else {
         return Err(CapabilityError::InvalidParams {
-            message: "engine.invoke requires a canonical function id".to_owned(),
+            message: "invoke requires a canonical function id".to_owned(),
         });
     };
     if namespace == "rpc"
@@ -271,7 +235,7 @@ fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), Capab
         || function_id.contains('.')
     {
         return Err(CapabilityError::InvalidParams {
-            message: "engine.invoke requires a canonical function id".to_owned(),
+            message: "invoke requires a canonical function id".to_owned(),
         });
     }
     Ok(())
@@ -296,7 +260,7 @@ fn target_authority_scopes_for_engine_invoke(payload: &Value) -> Vec<String> {
 }
 
 fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
-    if method.starts_with("engine.") && method != "engine.promote" {
+    if matches!(method, "discover" | "inspect" | "watch" | "invoke") {
         if let Some(object) = payload.as_object_mut() {
             let _ = object.remove("sessionId");
             let _ = object.remove("workspaceId");
@@ -305,7 +269,7 @@ fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
             let _ = object.remove("authorityScopes");
         }
     }
-    if method == "engine.promote" {
+    if method == "promote" {
         if let Some(object) = payload.as_object_mut() {
             let _ = object.remove("idempotencyKey");
             let _ = object.remove("traceId");
@@ -321,10 +285,4 @@ fn extract_string(payload: &Value, key: &str) -> Option<String> {
         .get(key)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
-}
-
-/// Build a params object from optional transport payload.
-#[must_use]
-pub fn params_or_empty(params: Option<Value>) -> Value {
-    params.unwrap_or_else(|| json!({}))
 }

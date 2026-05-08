@@ -1,15 +1,19 @@
 use super::*;
 
 #[tokio::test]
-async fn e2e_system_connected_on_connect() {
+async fn e2e_engine_hello_on_connect() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
 
-    // First message should be system.connected with clientId nested in data
+    ws.send(Message::text(
+        json!({"type": "hello", "id": "hello", "protocolVersion": 1}).to_string(),
+    ))
+    .await
+    .unwrap();
     let msg = read_json(&mut ws).await;
-    assert_eq!(msg["type"], "connection.established");
-    assert!(msg["data"]["clientId"].is_string());
-    assert!(msg["timestamp"].is_string());
+    assert_eq!(msg["type"], "hello.ok");
+    assert_eq!(msg["id"], "hello");
+    assert!(msg["serverId"].is_string());
 
     server.shutdown().shutdown();
 }
@@ -18,7 +22,6 @@ async fn e2e_system_connected_on_connect() {
 async fn e2e_connect_and_ping() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await; // skip system.connected
 
     let resp = rpc_call(&mut ws, 1, "system::ping", None).await;
     assert_eq!(resp["success"], true);
@@ -132,7 +135,6 @@ async fn e2e_engine_ws_hello_discover_invoke_and_stream_poll() {
 async fn e2e_session_lifecycle() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Create
     let resp = rpc_call(
@@ -180,7 +182,6 @@ async fn e2e_session_lifecycle() {
 async fn e2e_events_round_trip() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Create session
     let resp = rpc_call(
@@ -226,7 +227,6 @@ async fn e2e_events_round_trip() {
 async fn e2e_settings_get() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "settings::get", None).await;
     assert_eq!(resp["success"], true);
@@ -239,7 +239,6 @@ async fn e2e_settings_get() {
 async fn e2e_model_list() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "model::list", None).await;
     assert_eq!(resp["success"], true);
@@ -259,7 +258,6 @@ async fn e2e_model_list() {
 async fn e2e_agent_prompt_acknowledged() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -290,7 +288,6 @@ async fn e2e_agent_prompt_acknowledged() {
 async fn e2e_agent_abort() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -322,7 +319,6 @@ async fn e2e_agent_abort() {
 async fn e2e_error_handling() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "nonexistent.method", None).await;
     assert_eq!(resp["success"], false);
@@ -335,12 +331,11 @@ async fn e2e_error_handling() {
 async fn e2e_invalid_json() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     ws.send(Message::text("not valid json")).await.unwrap();
 
     let msg = read_json(&mut ws).await;
-    assert_eq!(msg["success"], false);
+    assert_eq!(msg["ok"], false);
 
     server.shutdown().shutdown();
 }
@@ -349,7 +344,6 @@ async fn e2e_invalid_json() {
 async fn e2e_missing_params() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "session::get_state", Some(json!({}))).await;
     assert_eq!(resp["success"], false);
@@ -362,7 +356,6 @@ async fn e2e_missing_params() {
 async fn e2e_session_not_found() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -381,7 +374,6 @@ async fn e2e_session_not_found() {
 async fn e2e_skill_list() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -401,10 +393,8 @@ async fn e2e_two_clients() {
     let (url, server) = boot_server().await;
 
     let mut ws1 = connect(&url).await;
-    let _ = read_json(&mut ws1).await;
 
     let mut ws2 = connect(&url).await;
-    let _ = read_json(&mut ws2).await;
 
     // Both can ping
     let resp1 = rpc_call(&mut ws1, 1, "system::ping", None).await;
@@ -419,19 +409,16 @@ async fn e2e_two_clients() {
 async fn e2e_rapid_fire_requests() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Send 50 rapid pings
     for i in 1..=50u64 {
         let payload = ping_params();
         let req = json!({
+            "type": "invoke",
             "id": format!("rapid_{i}"),
-            "method": "engine.invoke",
-            "params": {
-                "functionId": "system::ping",
-                "payload": payload,
-                "idempotencyKey": integration_idempotency_key(i, "system::ping", &payload),
-            },
+            "functionId": "system::ping",
+            "payload": payload,
+            "idempotencyKey": integration_idempotency_key(i, "system::ping", &payload),
         });
         ws.send(Message::text(req.to_string())).await.unwrap();
     }
@@ -447,8 +434,9 @@ async fn e2e_rapid_fire_requests() {
             .expect("stream closed")
             .expect("ws error");
         if let Message::Text(text) = msg {
-            let parsed: Value = serde_json::from_str(&text).unwrap();
+            let parsed: Value = normalize_engine_ws_value(serde_json::from_str(&text).unwrap());
             if parsed.get("id").and_then(|v| v.as_str()).is_some() {
+                let parsed = unwrap_engine_invoke_response(parsed);
                 assert_eq!(parsed["success"], true);
                 received += 1;
             }
@@ -463,7 +451,6 @@ async fn e2e_rapid_fire_requests() {
 async fn e2e_context_snapshot() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -490,7 +477,6 @@ async fn e2e_context_snapshot() {
 async fn e2e_concurrent_sessions() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp1 = rpc_call(
         &mut ws,
@@ -523,7 +509,6 @@ async fn e2e_concurrent_sessions() {
 async fn e2e_system_get_info() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "system::get_info", None).await;
     assert_eq!(resp["success"], true);
@@ -536,7 +521,6 @@ async fn e2e_system_get_info() {
 async fn e2e_tree_visualization() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -564,7 +548,6 @@ async fn e2e_tree_visualization() {
 async fn e2e_agent_get_state() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -617,7 +600,6 @@ async fn e2e_agent_get_state() {
 async fn e2e_session_archive_unarchive() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -657,7 +639,6 @@ async fn e2e_session_archive_unarchive() {
 async fn e2e_session_create_enriched_response() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -687,7 +668,6 @@ async fn e2e_session_create_enriched_response() {
 async fn e2e_session_list_enriched_fields() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let _ = rpc_call(
         &mut ws,
@@ -717,7 +697,6 @@ async fn e2e_session_list_enriched_fields() {
 async fn e2e_graceful_shutdown() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Verify the server is working before shutdown
     let resp = rpc_call(&mut ws, 1, "system::ping", None).await;
@@ -772,7 +751,9 @@ async fn try_read_json(ws: &mut WsStream, dur: Duration) -> Option<Value> {
     timeout(dur, async {
         loop {
             if let Some(Ok(Message::Text(text))) = ws.next().await {
-                return serde_json::from_str::<Value>(&text).ok();
+                return serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .map(normalize_engine_ws_value);
             }
         }
     })
@@ -833,9 +814,8 @@ async fn wait_for_detailed_snapshot_rules(
 async fn e2e_stream_pump_delivers_to_bound_client() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await; // skip connected
 
-    // session::create through engine.invoke auto-binds the connection.
+    // session::create through the `/engine` `invoke` message auto-binds the connection.
     let sid = create_and_bind_session(&mut ws, 1).await;
 
     publish_engine_session_event(&server, &sid, "agent.turn_start", json!({})).await;
@@ -852,14 +832,12 @@ async fn e2e_stream_pump_multiple_clients() {
     let (url, server) = boot_server().await;
 
     let mut ws1 = connect(&url).await;
-    let _ = read_json(&mut ws1).await;
     let mut ws2 = connect(&url).await;
-    let _ = read_json(&mut ws2).await;
 
-    // ws1 creates a session through engine.invoke, which auto-binds ws1.
+    // ws1 creates a session through the `/engine` `invoke` message, which auto-binds ws1.
     let sid = create_and_bind_session(&mut ws1, 1).await;
 
-    // ws2 resumes the same session through engine.invoke, which auto-binds ws2.
+    // ws2 resumes the same session through the `/engine` `invoke` message, which auto-binds ws2.
     let _ = rpc_call(
         &mut ws2,
         1,
@@ -890,9 +868,7 @@ async fn e2e_stream_pump_session_isolation() {
 
     // Two connections, each bound to a different session
     let mut ws1 = connect(&url).await;
-    let _ = read_json(&mut ws1).await;
     let mut ws2 = connect(&url).await;
-    let _ = read_json(&mut ws2).await;
 
     let _sid1 = create_and_bind_session(&mut ws1, 1).await;
     let sid2 = create_and_bind_session(&mut ws2, 1).await;
@@ -939,7 +915,6 @@ async fn e2e_stream_pump_session_isolation() {
 async fn e2e_events_have_type_field() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -982,7 +957,6 @@ async fn e2e_events_have_type_field() {
 async fn e2e_events_have_timestamp() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -999,7 +973,6 @@ async fn e2e_events_have_timestamp() {
 async fn e2e_events_have_session_id() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1016,7 +989,6 @@ async fn e2e_events_have_session_id() {
 async fn e2e_event_ordering_preserved() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1061,7 +1033,6 @@ async fn e2e_state_persists_after_disconnect() {
 
     // Create session with first client
     let mut ws1 = connect(&url).await;
-    let _ = read_json(&mut ws1).await;
     let sid = create_and_bind_session(&mut ws1, 1).await;
 
     // Disconnect first client
@@ -1069,7 +1040,6 @@ async fn e2e_state_persists_after_disconnect() {
 
     // Reconnect with new client
     let mut ws2 = connect(&url).await;
-    let _ = read_json(&mut ws2).await;
 
     // Session should still exist
     let resp = rpc_call(
@@ -1090,7 +1060,6 @@ async fn e2e_events_survive_reconnect() {
     let (url, server) = boot_server().await;
 
     let mut ws1 = connect(&url).await;
-    let _ = read_json(&mut ws1).await;
     let sid = create_and_bind_session(&mut ws1, 1).await;
 
     // Append event
@@ -1111,7 +1080,6 @@ async fn e2e_events_survive_reconnect() {
 
     // Reconnect
     let mut ws2 = connect(&url).await;
-    let _ = read_json(&mut ws2).await;
 
     // Get history should still return the event
     let resp = rpc_call(
@@ -1132,7 +1100,6 @@ async fn e2e_events_survive_reconnect() {
 async fn e2e_reconstruct_messages() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1177,7 +1144,6 @@ async fn e2e_reconstruct_messages() {
 async fn e2e_reconstruct_preserves_tokens() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1216,7 +1182,6 @@ async fn e2e_reconstruct_preserves_tokens() {
 async fn e2e_multiple_events_in_sequence() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1252,7 +1217,6 @@ async fn e2e_multiple_events_in_sequence() {
 async fn e2e_context_history() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1278,7 +1242,6 @@ async fn e2e_context_history() {
 async fn e2e_concurrent_isolated() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Create two sessions
     let sid1 = create_and_bind_session(&mut ws, 1).await;
@@ -1345,7 +1308,6 @@ async fn e2e_concurrent_isolated() {
 async fn e2e_many_sessions_stress() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let mut sids = Vec::new();
     for i in 0..10 {
@@ -1384,7 +1346,6 @@ async fn e2e_many_sessions_stress() {
 async fn e2e_concurrent_prompts_different_sessions() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid1 = create_and_bind_session(&mut ws, 1).await;
     let sid2 = create_and_bind_session(&mut ws, 2).await;
@@ -1417,7 +1378,6 @@ async fn e2e_concurrent_prompts_different_sessions() {
 async fn e2e_cleanup_after_delete() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1462,18 +1422,17 @@ async fn e2e_cleanup_after_delete() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn e2e_error_malformed_rpc() {
+async fn e2e_error_malformed_engine_message() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
-    // Send valid JSON but invalid RPC (missing method)
+    // Send valid JSON but invalid engine protocol payload (missing type)
     ws.send(Message::text(r#"{"id": "test", "params": {}}"#))
         .await
         .unwrap();
 
     let msg = read_json(&mut ws).await;
-    assert_eq!(msg["success"], false);
+    assert_eq!(msg["ok"], false);
 
     server.shutdown().shutdown();
 }
@@ -1482,7 +1441,6 @@ async fn e2e_error_malformed_rpc() {
 async fn e2e_error_empty_method() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "", None).await;
     assert_eq!(resp["success"], false);
@@ -1494,7 +1452,6 @@ async fn e2e_error_empty_method() {
 async fn e2e_error_prompt_nonexistent_session() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -1513,7 +1470,6 @@ async fn e2e_error_prompt_nonexistent_session() {
 async fn e2e_error_delete_active_session() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1545,7 +1501,6 @@ async fn e2e_error_delete_active_session() {
 async fn e2e_error_get_events_no_session() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -1564,7 +1519,6 @@ async fn e2e_error_get_events_no_session() {
 async fn e2e_error_append_invalid() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Missing sessionId
     let resp = rpc_call(
@@ -1583,7 +1537,6 @@ async fn e2e_error_append_invalid() {
 async fn e2e_error_settings_update_invalid() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Update with empty params
     let resp = rpc_call(&mut ws, 1, "settings::update", Some(json!({}))).await;
@@ -1597,7 +1550,6 @@ async fn e2e_error_settings_update_invalid() {
 async fn e2e_reject_concurrent_same_session() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1631,7 +1583,6 @@ async fn e2e_reject_concurrent_same_session() {
 async fn e2e_sequential_prompts_after_abort() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1795,7 +1746,6 @@ async fn e2e_prompt_text_response() {
     let provider = Arc::new(TextOnlyProvider::new("Hello from the agent!"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1826,7 +1776,6 @@ async fn e2e_prompt_panic_cleans_up_and_server_recovers() {
     let provider = Arc::new(PanicThenTextProvider::new("recovered"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1885,7 +1834,6 @@ async fn e2e_prompt_event_ordering() {
     let provider = Arc::new(TextOnlyProvider::new("ordered"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1930,7 +1878,6 @@ async fn e2e_prompt_error_from_provider() {
     let provider = Arc::new(ErrorProvider);
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1962,7 +1909,6 @@ async fn e2e_prompt_cleans_up_on_complete() {
     let provider = Arc::new(TextOnlyProvider::new("done"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -1998,7 +1944,6 @@ async fn e2e_prompt_sequential() {
     let provider = Arc::new(TextOnlyProvider::new("response"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2038,7 +1983,6 @@ async fn e2e_prompt_reject_concurrent() {
     let provider = Arc::new(SlowProvider);
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2076,7 +2020,6 @@ async fn e2e_graceful_shutdown_cleans_up_active_prompt_run() {
     let provider = Arc::new(SlowProvider);
     let (url, server, handles) = boot_server_with_provider_and_handles(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2127,7 +2070,6 @@ async fn e2e_prompt_abort_mid_stream() {
     let provider = Arc::new(SlowProvider);
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2156,7 +2098,6 @@ async fn e2e_prompt_abort_mid_stream() {
 async fn e2e_prompt_without_deps_returns_not_available() {
     let (url, server) = boot_server_without_deps().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2178,7 +2119,6 @@ async fn e2e_prompt_multiple_sessions() {
     let provider = Arc::new(TextOnlyProvider::new("multi"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid1 = create_and_bind_session(&mut ws, 1).await;
     let sid2 = create_and_bind_session(&mut ws, 2).await;
@@ -2214,7 +2154,6 @@ async fn e2e_prompt_run_id_matches() {
     let provider = Arc::new(SlowProvider);
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2252,7 +2191,6 @@ async fn e2e_prompt_text_content_arrives() {
     let provider = Arc::new(TextOnlyProvider::new("specific text content"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2297,7 +2235,6 @@ async fn e2e_prompt_events_scoped_to_session() {
     let provider = Arc::new(TextOnlyProvider::new("scoped"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2334,7 +2271,6 @@ async fn e2e_prompt_state_transitions() {
     let provider = Arc::new(TextOnlyProvider::new("state"));
     let (url, server) = boot_server_with_provider(provider).await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2382,10 +2318,9 @@ async fn e2e_prompt_state_transitions() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn e2e_system_get_info_engine_json_rpc_payload() {
+async fn e2e_system_get_info_engine_protocol_payload() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "system::get_info", None).await;
     let result = &resp["result"];
@@ -2400,10 +2335,9 @@ async fn e2e_system_get_info_engine_json_rpc_payload() {
 }
 
 #[tokio::test]
-async fn e2e_agent_get_state_engine_json_rpc_payload() {
+async fn e2e_agent_get_state_engine_protocol_payload() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2428,7 +2362,6 @@ async fn e2e_agent_get_state_engine_json_rpc_payload() {
 async fn e2e_session_get_history_exists() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
@@ -2451,13 +2384,18 @@ async fn e2e_session_get_history_exists() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn e2e_connected_event_is_connection_established() {
+async fn e2e_engine_hello_returns_server_id() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
 
+    ws.send(Message::text(
+        json!({"type": "hello", "id": "hello", "protocolVersion": 1}).to_string(),
+    ))
+    .await
+    .unwrap();
     let msg = read_json(&mut ws).await;
-    assert_eq!(msg["type"], "connection.established");
-    assert!(msg["data"]["clientId"].is_string());
+    assert_eq!(msg["type"], "hello.ok");
+    assert!(msg["serverId"].is_string());
 
     server.shutdown().shutdown();
 }
@@ -2466,7 +2404,6 @@ async fn e2e_connected_event_is_connection_established() {
 async fn e2e_session_list_has_cache_tokens() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let _ = rpc_call(
         &mut ws,
@@ -2491,7 +2428,6 @@ async fn e2e_session_list_has_cache_tokens() {
 async fn e2e_model_list_ios_cost_fields() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(&mut ws, 1, "model::list", None).await;
     let models = resp["result"]["models"].as_array().unwrap();
@@ -2519,7 +2455,6 @@ async fn e2e_model_list_ios_cost_fields() {
 async fn e2e_context_snapshot_has_real_tokens() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     // Create session
     let resp = rpc_call(
@@ -2560,7 +2495,6 @@ async fn e2e_context_snapshot_has_real_tokens() {
 async fn e2e_detailed_snapshot_has_system_prompt() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -2604,7 +2538,6 @@ async fn e2e_detailed_snapshot_has_rules_when_present() {
 
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -2633,7 +2566,6 @@ async fn e2e_detailed_snapshot_has_rules_when_present() {
 async fn e2e_should_compact_reflects_usage() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -2661,7 +2593,6 @@ async fn e2e_should_compact_reflects_usage() {
 async fn e2e_can_accept_turn_empty_session() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,
@@ -2688,7 +2619,6 @@ async fn e2e_can_accept_turn_empty_session() {
 async fn e2e_context_snapshot_session_not_found() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
-    let _ = read_json(&mut ws).await;
 
     let resp = rpc_call(
         &mut ws,

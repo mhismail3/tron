@@ -307,12 +307,9 @@ fn agent_client(
     Ok(client)
 }
 
-fn agent_authority_scopes() -> [&'static str; 37] {
+fn agent_authority_scopes() -> [&'static str; 34] {
     [
-        "engine.discover",
-        "engine.inspect",
-        "engine.watch",
-        "engine.invoke",
+        "engine.read",
         "system.read",
         "model.read",
         "settings.read",

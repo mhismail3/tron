@@ -16,16 +16,15 @@
 //! tron::skills        SKILL.md parser, registry, context injection
 //! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
 //! tron::runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
-//! tron::server        Axum HTTP/WS, engine transport, stream pump, APNS
+//! tron::server        Axum HTTP/WS, engine protocol, stream projection, APNS
 //! ```
 //!
 //! ## Data Path
 //!
-//! 1. Client sends one of the five public `engine.*` JSON-RPC methods
-//! 2. `server` dispatches through the `json_rpc` engine trigger
+//! 1. Client connects to `/engine` and sends engine protocol messages
+//! 2. `server` translates each message into the engine transport envelope
 //! 3. Canonical `namespace::function` capabilities call domain services
-//! 4. Domain output is serialized at the JSON-RPC/WebSocket boundary
-//! 5. Engine streams publish live events; WebSocket pumps stream records
+//! 4. Engine streams publish live events and `/engine` subscriptions deliver them
 //!
 //! ## Core Invariants
 //!
@@ -59,8 +58,7 @@ use tron::server::server::TronServer;
 use tron::server::services::context::{
     AgentDeps, ServerCapabilityContext, register_blocking_supervisor_shutdown,
 };
-use tron::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
-use tron::server::websocket::stream_pump::EngineStreamEventPump;
+use tron::server::stream_pump::EngineStreamEventPump;
 use tron::settings::db_path_policy::resolve_production_db_path;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
@@ -196,11 +194,7 @@ fn initialize_bearer_token_at(path: &Path) -> Result<String> {
 /// * `127.0.0.1` / `localhost` — annotated as loopback-only.
 /// * Any other explicit host — left bare, since the operator chose it
 ///   deliberately.
-fn format_listening_log(
-    addr: &std::net::SocketAddr,
-    bind_host: &str,
-    method_count: usize,
-) -> String {
+fn format_listening_log(addr: &std::net::SocketAddr, bind_host: &str) -> String {
     let trust_note = if bind_host == "0.0.0.0" || bind_host == "::" {
         " — reachable on all interfaces (trusted-local threat model: ensure Tailscale ACLs or firewall gating is in place)"
     } else if bind_host == "127.0.0.1" || bind_host == "::1" || bind_host == "localhost" {
@@ -208,9 +202,7 @@ fn format_listening_log(
     } else {
         ""
     };
-    format!(
-        "Tron agent listening on http://{addr} ({method_count} JSON-RPC transport methods registered){trust_note}"
-    )
+    format!("Tron agent listening on http://{addr} (/engine protocol enabled){trust_note}")
 }
 
 #[cfg(unix)]
@@ -856,7 +848,6 @@ fn build_capability_context(
             tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: auth_path(),
-        broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: Some(mcp_router),
         display_stream_registry: None,
@@ -1019,18 +1010,14 @@ async fn main() -> Result<()> {
     );
 
     // Phase 5: Build and start server
-    let mut registry = JsonRpcTransportRegistry::new();
-    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
-    let method_count = registry.methods().len();
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = tron::server::metrics::install_recorder();
-    let server = TronServer::new(config, registry, capability_context, metrics_handle);
-    tron::server::transport::json_rpc::engine_methods::register_engine_json_rpc_for_context(
+    let server = TronServer::new(config, capability_context, metrics_handle);
+    tron::server::transport::setup::register_engine_protocol_for_context(
         server.capability_context(),
-        server.registry(),
     )
-    .context("Failed to register JSON-RPC engine transport")?;
+    .context("Failed to register engine protocol capabilities")?;
     cron.scheduler
         .set_engine_host(server.capability_context().engine_host.clone());
     register_blocking_supervisor_shutdown(server.shutdown());
@@ -1066,20 +1053,21 @@ async fn main() -> Result<()> {
         },
     );
 
-    // Stream pump: orchestrator events -> WebSocket clients
+    // Stream pump: orchestrator events -> engine streams.
     let pump = EngineStreamEventPump::new(
         orchestrator_for_stream_pump.subscribe(),
-        server.broadcast().clone(),
+        server.capability_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator_for_stream_pump.turn_accumulators().clone(),
-    )
-    .with_engine_streams(server.capability_context().engine_host.clone());
+    );
     let stream_pump_handle = tokio::spawn(pump.run());
     tron::server::engine_runtime::EngineRuntimeServices::start(&server);
 
     // Wire cron broadcaster and shutdown forwarding
     cron.scheduler.set_broadcaster(Arc::new(
-        tron::server::cron_callbacks::CronEventBroadcaster::new(server.broadcast().clone()),
+        tron::server::cron_callbacks::CronEventBroadcaster::new(
+            server.capability_context().engine_host.clone(),
+        ),
     ));
     {
         let cron_cancel = cron.cancel.clone();
@@ -1112,7 +1100,7 @@ async fn main() -> Result<()> {
     {
         let deps = tron::server::updater::SchedulerDeps {
             fetcher,
-            broadcast: server.broadcast().clone(),
+            engine_host: server.capability_context().engine_host.clone(),
             state_path: server.capability_context().updater_state_path.clone(),
             pause_path: tron::server::updater::pause_sentinel_path(),
             current_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1126,10 +1114,7 @@ async fn main() -> Result<()> {
     };
 
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
-    tracing::info!(
-        "{}",
-        format_listening_log(&addr, &bind_host_label, method_count)
-    );
+    tracing::info!("{}", format_listening_log(&addr, &bind_host_label));
 
     // Wait for shutdown signal
     tracing::debug!(

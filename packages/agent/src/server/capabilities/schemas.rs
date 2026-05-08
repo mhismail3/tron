@@ -14,7 +14,7 @@ fn session_scoped_schema() -> Value {
 
 pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
     Some(match method {
-        "engine.discover" => json!({
+        "discover" | "engine::discover" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -29,7 +29,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "engine.inspect" => json!({
+        "inspect" | "engine::inspect" => json!({
             "type": "object",
             "required": ["kind", "id"],
             "additionalProperties": false,
@@ -40,7 +40,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "engine.watch" => json!({
+        "watch" | "engine::watch" => json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -54,7 +54,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "engine.invoke" => json!({
+        "invoke" | "engine::invoke" => json!({
             "type": "object",
             "required": ["functionId"],
             "additionalProperties": false,
@@ -68,7 +68,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
                 "workspaceId": {"type": "string"}
             }
         }),
-        "engine.promote" => json!({
+        "promote" | "engine::promote" => json!({
             "type": "object",
             "required": [
                 "functionId",
@@ -1409,7 +1409,7 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
 
 pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
     Some(match method {
-        "engine.discover" => json!({
+        "discover" | "engine::discover" => json!({
             "type": "object",
             "required": ["catalogRevision", "functions"],
             "additionalProperties": false,
@@ -1418,7 +1418,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "functions": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
             }
         }),
-        "engine.inspect" => json!({
+        "inspect" | "engine::inspect" => json!({
             "type": "object",
             "required": ["catalogRevision", "kind", "definition"],
             "additionalProperties": false,
@@ -1428,7 +1428,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "definition": {"type": "object", "additionalProperties": true}
             }
         }),
-        "engine.watch" => json!({
+        "watch" | "engine::watch" => json!({
             "type": "object",
             "required": ["changes", "currentRevision", "hasMore"],
             "additionalProperties": false,
@@ -1438,7 +1438,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "hasMore": {"type": "boolean"}
             }
         }),
-        "engine.invoke" => json!({
+        "invoke" | "engine::invoke" => json!({
             "type": "object",
             "required": ["catalogRevision", "child"],
             "additionalProperties": false,
@@ -1447,7 +1447,7 @@ pub(crate) fn response_schema_for_method(method: &str) -> Option<Value> {
                 "child": {"type": "object", "additionalProperties": true}
             }
         }),
-        "engine.promote" => json!({
+        "promote" | "engine::promote" => json!({
             "type": "object",
             "required": ["functionId", "revision", "visibility"],
             "additionalProperties": false,

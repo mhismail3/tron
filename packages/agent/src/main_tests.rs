@@ -1,6 +1,7 @@
 use super::tool_factory::create_tool_registry;
 use super::*;
 use clap::Parser;
+use tron::server::stream_pump::EngineStreamEventPump;
 use tron::settings::TronSettings;
 use tron::settings::db_path_policy::{
     PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
@@ -46,14 +47,10 @@ fn cli_default_host() {
 #[test]
 fn startup_log_on_all_interfaces_names_trust_boundary() {
     let addr: std::net::SocketAddr = "0.0.0.0:9847".parse().unwrap();
-    let msg = format_listening_log(&addr, "0.0.0.0", 42);
+    let msg = format_listening_log(&addr, "0.0.0.0");
     assert!(
         msg.contains("0.0.0.0:9847"),
         "bind address must appear: {msg}"
-    );
-    assert!(
-        msg.contains("42 JSON-RPC transport methods"),
-        "method count must appear: {msg}"
     );
     assert!(
         msg.to_lowercase().contains("tailscale") || msg.to_lowercase().contains("firewall"),
@@ -65,7 +62,7 @@ fn startup_log_on_all_interfaces_names_trust_boundary() {
 #[test]
 fn startup_log_on_ipv6_all_interfaces_names_trust_boundary() {
     let addr: std::net::SocketAddr = "[::]:9847".parse().unwrap();
-    let msg = format_listening_log(&addr, "::", 10);
+    let msg = format_listening_log(&addr, "::");
     assert!(
         msg.to_lowercase().contains("tailscale") || msg.to_lowercase().contains("firewall"),
         "`::` bind must name the trust assumption, got: {msg}"
@@ -77,7 +74,7 @@ fn startup_log_on_ipv6_all_interfaces_names_trust_boundary() {
 fn startup_log_on_loopback_is_annotated() {
     for host in ["127.0.0.1", "::1", "localhost"] {
         let addr: std::net::SocketAddr = "127.0.0.1:9847".parse().unwrap();
-        let msg = format_listening_log(&addr, host, 10);
+        let msg = format_listening_log(&addr, host);
         assert!(
             msg.to_lowercase().contains("loopback"),
             "{host}-bound log must note loopback scope: {msg}"
@@ -91,7 +88,7 @@ fn startup_log_on_loopback_is_annotated() {
 #[test]
 fn startup_log_on_specific_host_is_bare() {
     let addr: std::net::SocketAddr = "192.168.1.5:9847".parse().unwrap();
-    let msg = format_listening_log(&addr, "192.168.1.5", 10);
+    let msg = format_listening_log(&addr, "192.168.1.5");
     assert!(!msg.to_lowercase().contains("tailscale"));
     assert!(!msg.to_lowercase().contains("loopback"));
     assert!(msg.contains("192.168.1.5:9847"));
@@ -469,7 +466,6 @@ async fn server_boots_and_responds() {
             tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: dir.path().join("auth.json"),
-        broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
         display_stream_registry: None,
@@ -483,18 +479,19 @@ async fn server_boots_and_responds() {
         updater_state_path: dir.path().join("updater-state.json"),
     };
 
-    let mut registry = JsonRpcTransportRegistry::new();
-    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
-
     let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = TronServer::new(config, registry, capability_context, metrics_handle);
+    let server = TronServer::new(config, capability_context, metrics_handle);
+    tron::server::transport::setup::register_engine_protocol_for_context(
+        server.capability_context(),
+    )
+    .unwrap();
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
-        server.broadcast().clone(),
+        server.capability_context().engine_host.clone(),
         server.shutdown().token(),
         orchestrator.turn_accumulators().clone(),
     );
@@ -680,28 +677,61 @@ async fn init_mcp_registers_meta_tools_without_servers() {
 }
 
 #[test]
-fn server_registers_public_engine_json_rpc_methods_only() {
-    let mut registry = JsonRpcTransportRegistry::new();
-    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
-    let mut methods = registry.methods();
+fn server_registers_public_engine_protocol_messages_only() {
+    let mut methods = vec!["discover", "inspect", "invoke", "promote", "watch"];
     methods.sort();
     assert_eq!(
         methods,
-        vec![
-            "engine.discover",
-            "engine.inspect",
-            "engine.invoke",
-            "engine.promote",
-            "engine.watch",
-        ],
-        "public JSON-RPC is intentionally limited to the engine transport surface"
+        vec!["discover", "inspect", "invoke", "promote", "watch",],
+        "public engine protocol is intentionally limited to the engine transport surface"
     );
 }
 
 #[test]
-fn readme_rpc_count_matches_registry() {
-    let mut registry = JsonRpcTransportRegistry::new();
-    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
+fn removed_client_transport_scaffolding_stays_deleted() {
+    let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for removed in [
+        ["src", "server", "transport", &["json", "_rpc"].concat()]
+            .iter()
+            .collect::<std::path::PathBuf>(),
+        ["src", "server", "websocket"]
+            .iter()
+            .collect::<std::path::PathBuf>(),
+    ] {
+        assert!(
+            !crate_root.join(&removed).exists(),
+            "{} must stay deleted",
+            removed.display()
+        );
+    }
+
+    let banned = [
+        ["Json", "Rpc"].concat(),
+        ["json", "_rpc"].concat(),
+        ["Broadcast", "Manager"].concat(),
+        ["/", "ws"].concat(),
+        ["rpc", "::"].concat(),
+        ["rpc", ".read"].concat(),
+        ["rpc", ".write"].concat(),
+    ];
+    for rel in ["src/server", "src/main.rs"] {
+        let path = crate_root.join(rel);
+        for file in rust_files_under_path(&path) {
+            let content = std::fs::read_to_string(&file)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
+            for needle in &banned {
+                assert!(
+                    !content.contains(needle),
+                    "{} still contains removed transport marker `{needle}`",
+                    file.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn readme_documents_engine_protocol() {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
@@ -709,11 +739,29 @@ fn readme_rpc_count_matches_registry() {
     let readme_path = repo_root.join("README.md");
     let readme = std::fs::read_to_string(&readme_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
-    let expected = format!("**{} methods**", registry.methods().len());
     assert!(
-        readme.contains(&expected),
-        "README RPC total must be derived from register_all; expected marker `{expected}`"
+        readme.contains("GET /engine"),
+        "README must document the public engine protocol endpoint"
     );
+}
+
+fn rust_files_under_path(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    if path.is_file() {
+        return vec![path.to_path_buf()];
+    }
+    let mut files = Vec::new();
+    let entries = std::fs::read_dir(path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|error| panic!("failed to read dir entry: {error}"));
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(rust_files_under_path(&path));
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            files.push(path);
+        }
+    }
+    files
 }
 
 #[tokio::test]
@@ -758,7 +806,6 @@ async fn server_graceful_shutdown() {
             tron::server::services::session_context::ContextArtifactsService::new(),
         ),
         auth_path: dir.path().join("auth.json"),
-        broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
         display_stream_registry: None,
@@ -772,18 +819,14 @@ async fn server_graceful_shutdown() {
         updater_state_path: dir.path().join("updater-state.json"),
     };
 
-    let mut registry = JsonRpcTransportRegistry::new();
-    tron::server::transport::json_rpc::bindings::register_all(&mut registry);
-
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = TronServer::new(
-        ServerConfig::default(),
-        registry,
-        capability_context,
-        metrics_handle,
-    );
+    let server = TronServer::new(ServerConfig::default(), capability_context, metrics_handle);
+    tron::server::transport::setup::register_engine_protocol_for_context(
+        server.capability_context(),
+    )
+    .unwrap();
     let (_, handle) = server.listen().await.unwrap();
 
     server.shutdown().shutdown();

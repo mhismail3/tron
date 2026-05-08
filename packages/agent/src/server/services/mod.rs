@@ -4,8 +4,7 @@
 //! Transport layers may depend on [`context`] to access shared server state,
 //! but executable behavior is owned by `server::capabilities` and these
 //! services. Event-producing services publish neutral `ServerEventPayload`
-//! values; `/ws` JSON-RPC event objects are created only at delivery
-//! boundaries.
+//! values into engine streams; client transports only deliver stream records.
 
 pub(crate) mod agent_commands;
 pub(crate) mod agent_runtime;

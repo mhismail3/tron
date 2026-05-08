@@ -1,7 +1,7 @@
 //! Agent-facing capability client.
 //!
 //! The client is a thin, typed domain over [`EngineHostHandle`] for agents and
-//! tools. It deliberately speaks canonical engine ids, not JSON-RPC method ids.
+//! tools. It deliberately speaks canonical engine ids, not transport method ids.
 
 use serde_json::Value;
 
