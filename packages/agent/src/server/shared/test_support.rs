@@ -23,9 +23,8 @@ use crate::runtime::memory::MemoryRegistry;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::server::domains::session::context::ContextArtifactsService;
-use crate::server::shared::context::{AgentDeps, ServerRuntimeContext};
+use crate::server::shared::context::{AgentDeps, ServerRuntimeContext, ToolRuntimeConfig};
 use crate::skills::registry::SkillRegistry;
-use crate::tools::registry::ToolRegistry;
 
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -138,8 +137,16 @@ impl ProviderFactory for StrictMockFactory {
 pub fn make_test_agent_deps() -> AgentDeps {
     AgentDeps {
         provider_factory: Arc::new(MockProviderFactory),
-        tool_factory: Arc::new(ToolRegistry::new),
         guardrails: None,
+    }
+}
+
+pub(crate) fn make_test_tool_runtime_config() -> ToolRuntimeConfig {
+    ToolRuntimeConfig {
+        http_client: reqwest::Client::new(),
+        sandbox_settings: crate::settings::BashSandboxSettings::default(),
+        computer_use_settings: crate::settings::ComputerUseSettings::default(),
+        notify_delegate: Arc::new(crate::tools::backends::StubNotifyDelegate),
     }
 }
 
@@ -167,6 +174,7 @@ pub fn make_test_context() -> ServerRuntimeContext {
         settings_path,
         profile_runtime,
         agent_deps: None,
+        tool_runtime: make_test_tool_runtime_config(),
         server_start_time: Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,

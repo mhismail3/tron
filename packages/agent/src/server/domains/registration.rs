@@ -14,7 +14,7 @@
 //! canonical `tool::*` functions. Provider requests now resolve schemas from
 //! the live catalog, so built-ins, engine meta-tools, and eligible MCP
 //! capabilities are all surfaced through the same agent-facing capability
-//! fabric instead of through a frozen `ToolRegistry` snapshot.
+//! fabric.
 //! `engine_ws` trigger records capture public engine protocol messages.
 //! `cron_schedule` trigger records capture scheduled automation fires.
 //!
@@ -40,10 +40,7 @@ use crate::server::domains::{
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
 pub fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
-    register_domain_workers(ctx)?;
-    let deps = DomainRegistrationContext::from_context(ctx);
-    tools::register_builtin_tools_for_setup(&deps)?;
-    Ok(())
+    register_domain_workers(ctx)
 }
 
 fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {

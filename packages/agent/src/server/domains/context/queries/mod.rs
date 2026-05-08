@@ -44,7 +44,7 @@ impl ContextQueryService {
         let profile_runtime = deps.profile_runtime.clone();
         let skill_registry = deps.skill_registry.clone();
         let memory_registry = deps.memory_registry.clone();
-        let tool_definitions = tool_definitions(deps);
+        let tool_definitions = tool_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.get_snapshot", move || {
             retry_context_read("context.get_snapshot", || {
@@ -107,7 +107,7 @@ impl ContextQueryService {
         let profile_runtime = deps.profile_runtime.clone();
         let skill_registry = deps.skill_registry.clone();
         let memory_registry = deps.memory_registry.clone();
-        let tool_definitions = tool_definitions(deps);
+        let tool_definitions = tool_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.get_detailed_snapshot", move || {
             retry_context_read("context.get_detailed_snapshot", || {
@@ -166,7 +166,7 @@ impl ContextQueryService {
         let event_store = deps.event_store.clone();
         let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
-        let tool_definitions = tool_definitions(deps);
+        let tool_definitions = tool_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.should_compact", move || {
             retry_context_read("context.should_compact", || {
@@ -221,7 +221,7 @@ impl ContextQueryService {
         let event_store = deps.event_store.clone();
         let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
-        let tool_definitions = tool_definitions(deps);
+        let tool_definitions = tool_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.can_accept_turn", move || {
             retry_context_read("context.can_accept_turn", || {

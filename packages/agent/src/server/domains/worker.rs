@@ -17,7 +17,7 @@ use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::profile_runtime::ProfileRuntime;
 use crate::server::domains::catalog;
 use crate::server::platform::codex_app::CodexAppServerManager;
-use crate::server::shared::context::{AgentDeps, ServerRuntimeContext};
+use crate::server::shared::context::{AgentDeps, ServerRuntimeContext, ToolRuntimeConfig};
 use crate::server::shutdown::ShutdownCoordinator;
 use crate::skills::registry::SkillRegistry;
 
@@ -61,6 +61,7 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) onboarded_marker_path: PathBuf,
     pub(crate) updater_state_path: PathBuf,
     pub(crate) engine_host: crate::engine::EngineHostHandle,
+    pub(crate) tool_runtime: ToolRuntimeConfig,
     pub(crate) process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     pub(crate) job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     pub(crate) output_buffer_registry:
@@ -98,6 +99,7 @@ impl DomainRegistrationContext {
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),
             updater_state_path: ctx.updater_state_path.clone(),
             engine_host: ctx.engine_host.clone(),
+            tool_runtime: ctx.tool_runtime.clone(),
             process_manager: ctx.process_manager.clone(),
             job_manager: ctx.job_manager.clone(),
             output_buffer_registry: ctx.output_buffer_registry.clone(),

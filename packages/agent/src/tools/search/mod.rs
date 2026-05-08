@@ -13,9 +13,9 @@
 //!
 //! ## Invariants
 //!
-//! - The unified [`search_tool::SearchTool`] is the only entry point
-//!   wired into the tool registry; [`text_search`] / [`ast_search`] are
-//!   internal backends.
+//! - The unified [`search_tool::SearchTool`] is the only implementation entry
+//!   point behind the `tool::search` capability; [`text_search`] /
+//!   [`ast_search`] are internal backends.
 //! - Pattern syntax: ripgrep accepts regex, ast-grep accepts meta-variable
 //!   templates. The front-end never rewrites the pattern — whichever
 //!   backend was selected gets the pattern verbatim, so the agent always

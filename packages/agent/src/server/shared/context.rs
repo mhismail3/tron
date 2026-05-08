@@ -15,7 +15,6 @@ use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::orchestrator::subagent_manager::SubagentManager;
 use crate::skills::registry::SkillRegistry;
-use crate::tools::registry::ToolRegistry;
 use crate::transcription::MlxEngine;
 use metrics::{counter, histogram};
 use parking_lot::{Mutex, RwLock};
@@ -176,10 +175,34 @@ pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>
 pub struct AgentDeps {
     /// Factory that creates a fresh LLM provider per request (reads current model + auth).
     pub provider_factory: Arc<dyn ProviderFactory>,
-    /// Factory that creates a fresh tool registry per agent.
-    pub tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
     /// Guardrail engine (optional).
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
+}
+
+/// Runtime dependencies used by the tools domain to construct built-in tool
+/// capability handlers.
+#[derive(Clone)]
+pub struct ToolRuntimeConfig {
+    /// Shared HTTP client (connection pool reused across web/MCP-related tools).
+    pub http_client: reqwest::Client,
+    /// Bash sandbox settings from the active profile.
+    pub sandbox_settings: crate::settings::BashSandboxSettings,
+    /// Computer-use settings from the active profile.
+    pub computer_use_settings: crate::settings::ComputerUseSettings,
+    /// Notification delivery implementation. Production may be APNS-backed;
+    /// development/test contexts use the stub delegate.
+    pub notify_delegate: Arc<dyn crate::tools::traits::NotifyDelegate>,
+}
+
+impl Default for ToolRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            http_client: reqwest::Client::new(),
+            sandbox_settings: crate::settings::BashSandboxSettings::default(),
+            computer_use_settings: crate::settings::ComputerUseSettings::default(),
+            notify_delegate: Arc::new(crate::tools::backends::StubNotifyDelegate),
+        }
+    }
 }
 
 /// Broad server runtime context used at app setup and domain registration.
@@ -210,6 +233,8 @@ pub struct ServerRuntimeContext {
     pub profile_runtime: Arc<crate::runtime::profile_runtime::ProfileRuntime>,
     /// Agent execution dependencies (None = prompt handler returns error).
     pub agent_deps: Option<AgentDeps>,
+    /// Built-in tool capability construction dependencies.
+    pub tool_runtime: ToolRuntimeConfig,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
     /// MLX transcription engine (lazily loaded via `OnceLock`).
@@ -650,13 +675,6 @@ mod tests {
             Err(e) => assert_eq!(e.category(), "auth"),
             Ok(_) => panic!("expected auth error"),
         }
-    }
-
-    #[test]
-    fn agent_deps_tool_factory_creates_registry() {
-        let deps = make_test_agent_deps();
-        let registry = (deps.tool_factory)();
-        assert!(registry.is_empty());
     }
 
     #[test]

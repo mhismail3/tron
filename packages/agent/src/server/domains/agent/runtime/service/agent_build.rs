@@ -14,7 +14,6 @@ pub(super) struct BuiltPromptAgent {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn build_prompt_agent(
     provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
-    tool_factory: &Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
     guardrails: Option<Arc<parking_lot::Mutex<crate::runtime::guardrails::GuardrailEngine>>>,
     health_tracker: Arc<crate::llm::ProviderHealthTracker>,
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
@@ -104,13 +103,11 @@ pub(super) async fn build_prompt_agent(
     };
 
     let provider_type = provider.provider_type().as_str().to_string();
-    let tools = tool_factory();
     let agent = AgentFactory::create_agent(
         config,
         session_id.to_owned(),
         CreateAgentOpts {
             provider,
-            tools,
             context_policy: session_plan.runtime_context_policy(),
             tool_policy: session_plan.tool_policy.clone(),
             guardrails,

@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::core::events::{BaseEvent, TronEvent};
 use crate::events::{AppendOptions, EventType};
 use crate::llm::provider::ProviderFactory;
-use crate::tools::registry::ToolRegistry;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, info, info_span};
@@ -42,7 +41,8 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) spawn_type: String,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
-    pub(super) tools: ToolRegistry,
+    pub(super) tool_policy: crate::core::profile::ToolPolicySpec,
+    pub(super) denied_tools: Vec<String>,
     pub(super) engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -68,7 +68,6 @@ pub(super) struct ToolAgentTaskLaunch {
     pub(super) blocking_timeout_ms: Option<u64>,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
-    pub(super) tools: ToolRegistry,
     pub(super) denied_tools: Vec<String>,
     /// Optional weak probe to query whether the parent session has an active
     /// agent run. Used to compute the `notify` field on
@@ -149,13 +148,12 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         params.child_session_id.clone(),
         CreateAgentOpts {
             provider,
-            tools: params.tools,
             context_policy: params.process_plan.runtime_context_policy(),
-            tool_policy: params.process_plan.tool_policy.clone(),
+            tool_policy: params.tool_policy.clone(),
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
-            denied_tools: vec![],
+            denied_tools: params.denied_tools.clone(),
             subagent_depth: 0,
             subagent_max_depth: params.subagent_max_depth,
             rules_content: None,
@@ -321,7 +319,6 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         params.child_session_id.clone(),
         CreateAgentOpts {
             provider,
-            tools: params.tools,
             context_policy: params.process_plan.runtime_context_policy(),
             tool_policy: params.process_plan.tool_policy.clone(),
             guardrails: params.guardrails,

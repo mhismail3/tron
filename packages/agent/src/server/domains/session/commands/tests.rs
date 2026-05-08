@@ -61,6 +61,7 @@ fn make_context_with_worktree(
         settings_path,
         profile_runtime,
         agent_deps: None,
+        tool_runtime: crate::server::shared::context::ToolRuntimeConfig::default(),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,

@@ -8,7 +8,7 @@
 //!
 //! For inline skills on the main agent, restrictions are soft-enforced via prompt
 //! XML hints. For subagent skills and cron jobs, restrictions are hard-enforced via
-//! tool registry removal in `AgentFactory`.
+//! live tool catalog removal in `AgentFactory`.
 //!
 //! Callers:
 //! - `cron::impls::to_denied_list` — cron-job skill denials

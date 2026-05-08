@@ -269,6 +269,62 @@ fn tron_server_transport_has_no_removed_rpc_surface() {
 }
 
 #[test]
+fn tool_registry_authority_stays_deleted() {
+    let crate_root = crate_root();
+    let repo_root = repo_root();
+
+    for removed in ["src/tool_factory.rs", "src/tools/registry.rs"] {
+        assert!(
+            !crate_root.join(removed).exists(),
+            "{removed} must stay deleted; built-in tools are domain-owned tool::* capabilities"
+        );
+    }
+
+    let forbidden = [
+        "ToolRegistry",
+        "ToolRegistryConfig",
+        "create_tool_registry",
+        "tool_factory",
+        "registry.names()",
+        "registry.definitions()",
+        "registry-driven",
+    ];
+    for root in [
+        crate_root.join("src/main.rs"),
+        crate_root.join("src/runtime"),
+        crate_root.join("src/server"),
+        crate_root.join("src/tools"),
+        repo_root.join("README.md"),
+    ] {
+        for path in files_to_scan(&root) {
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            for needle in forbidden {
+                assert!(
+                    !content.contains(needle),
+                    "{} must not reintroduce deleted tool registry authority `{needle}`",
+                    path.strip_prefix(&repo_root).unwrap_or(&path).display()
+                );
+            }
+        }
+    }
+
+    let tool_execution = std::fs::read_to_string(
+        crate_root.join("src/server/domains/tools/operations/execution.rs"),
+    )
+    .expect("failed to read tool execution handler");
+    assert!(
+        tool_execution.contains("TOOL_RUNTIME_CONTEXT_REQUIRED"),
+        "tool::* handlers must fail closed unless the agent turn prepared runtime context"
+    );
+    assert_eq!(
+        tool_execution.matches("tool.execute(").count(),
+        1,
+        "TronTool::execute may be called only inside the tools-domain runtime-context helper"
+    );
+}
+
+#[test]
 fn server_package_uses_domain_owned_engine_layout() {
     let crate_root = crate_root();
     for removed in ["src/server/capabilities", "src/server/services"] {

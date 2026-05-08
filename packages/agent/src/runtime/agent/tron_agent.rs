@@ -9,7 +9,7 @@ use crate::llm::provider::Provider;
 use crate::runtime::context::context_manager::ContextManager;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
-use crate::tools::registry::ToolRegistry;
+use crate::tools::capability_surface::ToolSurfacePolicy;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -46,8 +46,8 @@ impl Drop for RunGuard<'_> {
 pub struct AgentDeps {
     /// LLM provider for generating completions.
     pub provider: Arc<dyn Provider>,
-    /// Tool registry for tool execution.
-    pub registry: ToolRegistry,
+    /// Live catalog policy for model-facing tools.
+    pub tool_surface_policy: ToolSurfacePolicy,
     /// Optional guardrail engine for content safety.
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for lifecycle hooks.
@@ -75,7 +75,7 @@ pub struct AgentDeps {
 pub struct TronAgent {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
-    registry: ToolRegistry,
+    tool_surface_policy: ToolSurfacePolicy,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
     context_manager: ContextManager,
@@ -120,7 +120,7 @@ impl TronAgent {
         Self {
             config,
             provider: deps.provider,
-            registry: deps.registry,
+            tool_surface_policy: deps.tool_surface_policy,
             guardrails: deps.guardrails,
             hooks: deps.hooks,
             context_manager: deps.context_manager,
@@ -210,7 +210,7 @@ impl TronAgent {
                 turn,
                 context_manager: &mut self.context_manager,
                 provider: &self.provider,
-                registry: &self.registry,
+                tool_surface_policy: &self.tool_surface_policy,
                 guardrails: &self.guardrails,
                 hooks: &self.hooks,
                 compaction: &*self.compaction,
@@ -456,15 +456,7 @@ impl TronAgent {
 }
 
 #[cfg(test)]
-impl TronAgent {
-    pub(crate) fn subagent_depth(&self) -> u32 {
-        self.config.subagent_depth
-    }
-
-    pub(crate) fn subagent_max_depth(&self) -> u32 {
-        self.config.subagent_max_depth
-    }
-}
+impl TronAgent {}
 
 #[cfg(test)]
 #[path = "tron_agent_tests.rs"]

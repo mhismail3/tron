@@ -1,8 +1,7 @@
 //! Stub implementations of DI traits for tools whose backends aren't yet wired.
 //!
-//! These allow ALL tools to be registered in the tool registry (so they appear
-//! in the iOS context manager sheet) while gracefully returning "not available"
-//! errors at execution time.
+//! These support product-degraded tool capability handlers while gracefully
+//! returning "not available" errors at execution time.
 
 use async_trait::async_trait;
 

@@ -4,8 +4,8 @@
 //! Supports blocking (wait for result within timeout) and non-blocking (return session ID) modes.
 //!
 //! Tool restrictions: `deniedTools` (string array) removes named tools from the
-//! subagent's registry. `denyAllTools` (boolean) removes all tools for text-only
-//! agents. Both are hard-enforced via `AgentFactory` registry removal.
+//! subagent's live catalog. `denyAllTools` (boolean) removes all tools for text-only
+//! agents. Both are hard-enforced via `AgentFactory` live catalog removal.
 
 use std::sync::Arc;
 
@@ -109,7 +109,7 @@ Parameters:\n\
 - **mode**: 'inProcess' (default) or 'tmux'\n\
 - **timeout**: How long to block before auto-backgrounding in ms (default: {default_timeout}). Set 0 to background immediately.\n\
 - **model**, **systemPrompt**, **deniedTools**, **denyAllTools**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
-- **deniedTools**: Array of tool names to remove from the subagent's registry\n\
+- **deniedTools**: Array of tool names to remove from the subagent's live catalog\n\
 - **denyAllTools**: Set true for text-only agents (removes all tools)\n\n\
 Returns (when completed within timeout):\n\
 - Full output, token usage, duration statistics, status",
@@ -119,7 +119,7 @@ Returns (when completed within timeout):\n\
         .property("mode", json!({"type": "string", "enum": ["inProcess", "tmux"], "description": "Execution mode"}))
         .property("model", json!({"type": "string", "description": "Override model for the subagent"}))
         .property("systemPrompt", json!({"type": "string", "description": "Custom system prompt"}))
-        .property("deniedTools", json!({"type": "array", "items": {"type": "string"}, "description": "Tool names to remove from the subagent's registry."}))
+        .property("deniedTools", json!({"type": "array", "items": {"type": "string"}, "description": "Tool names to remove from the subagent's live catalog."}))
         .property("denyAllTools", json!({"type": "boolean", "description": "Remove all tools (text-only agent). Takes precedence over deniedTools."}))
         .property("skills", json!({"type": "array", "items": {"type": "string"}, "description": "Skills to enable"}))
         .property("workingDirectory", json!({"type": "string", "description": "Working directory"}))

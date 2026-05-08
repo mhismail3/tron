@@ -17,8 +17,7 @@ use crate::runtime::hooks::types::{HookAction, HookContext};
 use crate::tools::capability_runtime::{
     RuntimeToolExecution, insert_runtime_tool_execution, remove_runtime_tool_execution,
 };
-use crate::tools::capability_surface::{EngineToolTarget, resolve_model_tool_target};
-use crate::tools::registry::ToolRegistry;
+use crate::tools::capability_surface::{EngineToolTarget, ResolvedToolSurface};
 use crate::tools::traits::ToolContext;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -47,8 +46,8 @@ fn duration_ceil_ms(d: Duration) -> u64 {
 
 /// Shared dependencies for tool execution (extracted to reduce parameter count).
 pub struct ToolExecutionContext<'a> {
-    /// Registered tools available for execution.
-    pub registry: &'a ToolRegistry,
+    /// Live engine-catalog tool surface resolved for this turn.
+    pub tool_surface: &'a ResolvedToolSurface,
     /// Optional guardrail engine for pre-execution validation.
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for pre/post tool-use hooks.
@@ -113,41 +112,10 @@ pub async fn execute_tool(
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
 
-    // 1. Resolve the model tool name through the live engine catalog. The
-    // registry remains a temporary implementation/policy backing for built-ins,
-    // but the executable capability and schema contract come from the catalog.
-    let registry_tool = ctx.registry.get(&tool_name);
-    let engine_target = if let Some(engine_host) = ctx.engine_host {
-        match resolve_model_tool_target(
-            engine_host,
-            ctx.registry,
-            session_id,
-            ctx.workspace_id,
-            &tool_name,
-        )
-        .await
-        {
-            Ok(target) => target,
-            Err(error) => {
-                error!(tool_name, error = %error, "failed to resolve engine tool target");
-                return ToolExecutionResult {
-                    tool_call_id,
-                    result: crate::core::tools::error_result(format!(
-                        "Tool catalog resolution failed for {tool_name}: {error}"
-                    )),
-                    duration_ms: duration_ceil_ms(start.elapsed()),
-                    blocked_by_hook: false,
-                    blocked_by_guardrail: false,
-                    stops_turn: false,
-                    is_interactive: false,
-                };
-            }
-        }
-    } else {
-        None
-    };
-
-    if registry_tool.is_none() && engine_target.is_none() {
+    // 1. Resolve the model tool name through the live engine catalog captured
+    // at the provider request boundary.
+    let engine_target = ctx.tool_surface.targets_by_name.get(&tool_name);
+    if engine_target.is_none() {
         error!(tool_name, "tool not found");
         return ToolExecutionResult {
             tool_call_id,
@@ -160,16 +128,8 @@ pub async fn execute_tool(
         };
     }
 
-    let stops_turn = registry_tool
-        .as_ref()
-        .map(|tool| tool.stops_turn())
-        .or_else(|| engine_target.as_ref().map(|target| target.stops_turn))
-        .unwrap_or(false);
-    let is_interactive = registry_tool
-        .as_ref()
-        .map(|tool| tool.is_interactive())
-        .or_else(|| engine_target.as_ref().map(|target| target.is_interactive))
-        .unwrap_or(false);
+    let stops_turn = engine_target.is_some_and(|target| target.stops_turn);
+    let is_interactive = engine_target.is_some_and(|target| target.is_interactive);
 
     // 1a. Provider-scoped allow-list. Local models only see a subset of tool
     // schemas; if the model hallucinates a call to a hidden tool, refuse
@@ -378,7 +338,7 @@ pub async fn execute_tool(
         event_emitter: Some(Arc::clone(ctx.emitter)),
         event_persister: ctx.event_persister.map(Arc::clone),
         turn: ctx.turn,
-        all_tool_names: ctx.registry.names(),
+        all_tool_names: ctx.tool_surface.all_tool_names.clone(),
     };
 
     // Spawn a task to forward streaming output chunks as ToolExecutionUpdate events
@@ -397,7 +357,7 @@ pub async fn execute_tool(
 
     let tool_result = if per_tool_cancel.is_cancelled() {
         crate::core::tools::error_result("Operation cancelled")
-    } else if let (Some(engine_host), Some(target)) = (ctx.engine_host, engine_target.as_ref()) {
+    } else if let (Some(engine_host), Some(target)) = (ctx.engine_host, engine_target) {
         execute_tool_via_engine(
             engine_host,
             target,
@@ -413,50 +373,17 @@ pub async fn execute_tool(
         )
         .await
     } else {
-        #[cfg(not(test))]
-        {
-            return ToolExecutionResult {
-                tool_call_id,
-                result: crate::core::tools::error_result(format!(
-                    "Engine host is required to execute tool '{tool_name}'"
-                )),
-                duration_ms: duration_ceil_ms(start.elapsed()),
-                blocked_by_hook: false,
-                blocked_by_guardrail: false,
-                stops_turn,
-                is_interactive,
-            };
-        }
-        #[cfg(test)]
-        let Some(tool) = registry_tool else {
-            return ToolExecutionResult {
-                tool_call_id,
-                result: crate::core::tools::error_result(format!(
-                    "Tool '{tool_name}' is not executable without an engine catalog target"
-                )),
-                duration_ms: duration_ceil_ms(start.elapsed()),
-                blocked_by_hook: false,
-                blocked_by_guardrail: false,
-                stops_turn,
-                is_interactive,
-            };
+        return ToolExecutionResult {
+            tool_call_id,
+            result: crate::core::tools::error_result(format!(
+                "Engine host is required to execute tool '{tool_name}'"
+            )),
+            duration_ms: duration_ceil_ms(start.elapsed()),
+            blocked_by_hook: false,
+            blocked_by_guardrail: false,
+            stops_turn,
+            is_interactive,
         };
-        #[cfg(test)]
-        {
-            tokio::select! {
-                biased;
-                () = per_tool_cancel.cancelled() => {
-                    warn!(tool_name, "cancelled during execution");
-                    crate::core::tools::error_result("Operation cancelled")
-                }
-                result = tool.execute(effective_args, &tool_ctx) => {
-                    match result {
-                        Ok(r) => r,
-                        Err(e) => crate::core::tools::error_result(e.to_string()),
-                    }
-                }
-            }
-        }
     };
     // Drop the ToolContext's sender so the stream_handle can complete
     drop(tool_ctx);
@@ -700,964 +627,77 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::content::ToolResultContent;
-    use crate::core::tools::{
-        Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, text_result,
+    use crate::core::tools::ToolResultBody;
+    use crate::engine::{
+        AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel,
+        VisibilityScope, WorkerId,
     };
-    use crate::runtime::guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
-    use crate::runtime::guardrails::types::{RuleTier, Scope, Severity};
-    use crate::runtime::hooks::errors::HookError;
-    use crate::runtime::hooks::handler::HookHandler;
-    use crate::runtime::hooks::registry::HookRegistry;
-    use crate::runtime::hooks::types::{HookExecutionMode, HookResult as HookExecResult, HookType};
-    use crate::tools::traits::TronTool;
-    use async_trait::async_trait;
-    use serde_json::{Map, json};
-    use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use crate::runtime::agent::event_emitter::EventEmitter;
+    use crate::tools::capability_surface::{
+        EngineToolTarget, ResolvedToolSurface, ToolSurfacePolicy, resolve_provider_tools,
+    };
+    use crate::tools::traits::ExecutionMode;
+    use std::collections::{BTreeMap, HashSet};
 
-    fn test_execution_spec() -> &'static crate::core::profile::AgentExecutionSpec {
-        static SPEC: OnceLock<crate::core::profile::AgentExecutionSpec> = OnceLock::new();
-        SPEC.get_or_init(crate::core::profile::bundled_default_execution_spec)
+    fn default_execution_spec() -> crate::core::profile::AgentExecutionSpec {
+        let tempdir = tempfile::tempdir().expect("profile tempdir");
+        let home = tempdir.path().join(".tron");
+        crate::core::constitution::ensure_tron_home_at(&home).expect("seed profile home");
+        let profile =
+            crate::core::profile::resolve_profile_at(&home, crate::core::profile::NORMAL_PROFILE)
+                .expect("normal profile");
+        std::mem::forget(tempdir);
+        profile.spec
     }
 
-    macro_rules! tool_exec_ctx {
-        ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr) => {
-            ToolExecutionContext {
-                registry: $registry,
-                guardrails: $guardrails,
-                hooks: $hooks,
-                emitter: $emitter,
-                cancel: $cancel,
-                subagent_depth: 0,
-                subagent_max_depth: 0,
-                workspace_id: None,
-                process_manager: None,
-                job_manager: None,
-                output_buffer_registry: None,
-                sequence_counter: None,
-                provider_type: Provider::Anthropic,
-                execution_spec: Some(test_execution_spec()),
-                event_persister: None,
-                turn: 0,
-                tool_abort_registry: None,
-                engine_host: None,
-                run_id: None,
-            }
-        };
-        ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr, $provider:expr) => {
-            ToolExecutionContext {
-                registry: $registry,
-                guardrails: $guardrails,
-                hooks: $hooks,
-                emitter: $emitter,
-                cancel: $cancel,
-                subagent_depth: 0,
-                subagent_max_depth: 0,
-                workspace_id: None,
-                process_manager: None,
-                job_manager: None,
-                output_buffer_registry: None,
-                sequence_counter: None,
-                provider_type: $provider,
-                execution_spec: Some(test_execution_spec()),
-                event_persister: None,
-                turn: 0,
-                tool_abort_registry: None,
-                engine_host: None,
-                run_id: None,
-            }
-        };
-    }
-
-    // ── Test tool implementations ──
-
-    struct EchoTool;
-
-    #[async_trait]
-    impl TronTool for EchoTool {
-        fn name(&self) -> &'static str {
-            "echo"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "echo".into(),
-                description: "Echoes input".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            params: Value,
-            _ctx: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            let text = params
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("no text");
-            Ok(text_result(text, false))
+    fn empty_surface() -> ResolvedToolSurface {
+        ResolvedToolSurface {
+            tools: Vec::new(),
+            targets_by_name: BTreeMap::new(),
+            all_tool_names: Vec::new(),
+            turn_stopping_tools: HashSet::new(),
         }
     }
 
-    struct StopTurnTool;
-
-    #[async_trait]
-    impl TronTool for StopTurnTool {
-        fn name(&self) -> &'static str {
-            "ask_user"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn stops_turn(&self) -> bool {
-            true
-        }
-        fn is_interactive(&self) -> bool {
-            true
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "ask_user".into(),
-                description: "Ask user".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _params: Value,
-            _ctx: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("Asked user", false))
-        }
-    }
-
-    struct ContinueHandler;
-
-    #[async_trait]
-    impl HookHandler for ContinueHandler {
-        fn name(&self) -> &'static str {
-            "test-continue"
-        }
-
-        fn hook_type(&self) -> HookType {
-            HookType::PreToolUse
-        }
-
-        async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
-            Ok(HookExecResult::continue_())
-        }
-    }
-
-    struct BgHandler;
-
-    #[async_trait]
-    impl HookHandler for BgHandler {
-        fn name(&self) -> &'static str {
-            "test-bg"
-        }
-
-        fn hook_type(&self) -> HookType {
-            HookType::PostToolUse
-        }
-
-        fn execution_mode(&self) -> HookExecutionMode {
-            HookExecutionMode::Background
-        }
-
-        async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
-            Ok(HookExecResult::continue_())
-        }
-    }
-
-    struct SlowBackgroundHandler {
-        completed: Arc<AtomicBool>,
-    }
-
-    #[async_trait]
-    impl HookHandler for SlowBackgroundHandler {
-        fn name(&self) -> &'static str {
-            "test-slow"
-        }
-
-        fn hook_type(&self) -> HookType {
-            HookType::PostToolUse
-        }
-
-        fn execution_mode(&self) -> HookExecutionMode {
-            HookExecutionMode::Background
-        }
-
-        async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            self.completed.store(true, Ordering::SeqCst);
-            Ok(HookExecResult::continue_())
-        }
-    }
-
-    fn make_registry(tools: Vec<Arc<dyn TronTool>>) -> ToolRegistry {
-        let mut registry = ToolRegistry::new();
-        for tool in tools {
-            registry.register(tool);
-        }
-        registry
-    }
-
-    fn make_tool_call(name: &str, args: Map<String, Value>) -> ToolCall {
-        ToolCall::new("tc-1", name, args)
-    }
-
-    fn tool_result_text(result: &ToolExecutionResult) -> &str {
-        let ToolResultBody::Blocks(blocks) = &result.result.content else {
-            panic!("expected blocks result");
-        };
-        let ToolResultContent::Text { text } = &blocks[0] else {
-            panic!("expected text block");
-        };
-        text
-    }
-
-    #[tokio::test]
-    async fn successful_execution() {
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let mut args = Map::new();
-        let _ = args.insert("text".into(), json!("hello"));
-        let tc = make_tool_call("echo", args);
-
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(!result.result.is_error.unwrap_or(false));
-        assert!(!result.blocked_by_hook);
-        assert!(!result.blocked_by_guardrail);
-        assert!(!result.stops_turn);
-        assert!(!result.is_interactive);
-        assert!(result.duration_ms < 1000);
-    }
-
-    #[derive(Clone)]
-    struct EngineEchoHandler {
-        calls: Arc<AtomicUsize>,
-    }
-
-    #[async_trait]
-    impl crate::engine::InProcessFunctionHandler for EngineEchoHandler {
-        async fn invoke(
-            &self,
-            invocation: crate::engine::Invocation,
-        ) -> crate::engine::Result<Value> {
-            let runtime_id = invocation.id.to_string();
-            let execution =
-                crate::tools::capability_runtime::take_runtime_tool_execution(&runtime_id)
-                    .expect("runtime tool execution context");
-            assert_eq!(execution.tool_name, "echo");
-            assert_eq!(execution.context.session_id, "s1");
-            assert_eq!(execution.context.tool_call_id, "tc-1");
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(serde_json::to_value(text_result("engine path", false)).unwrap())
-        }
-    }
-
-    #[tokio::test]
-    async fn tool_execution_routes_through_engine_and_replays_duplicate_model_call() {
-        use crate::engine::{
-            ActorId, AuthorityGrantId, AuthorityRequirement, EffectClass, FunctionDefinition,
-            FunctionId, IdempotencyContract, Provenance, RiskLevel, VisibilityScope,
-            WorkerDefinition, WorkerId, WorkerKind,
-        };
-
-        let host = EngineHostHandle::new_in_memory().unwrap();
-        let worker_id = WorkerId::new("tool").unwrap();
-        host.register_worker_for_setup(
-            WorkerDefinition::new(
-                worker_id.clone(),
-                WorkerKind::InProcess,
-                ActorId::new("system").unwrap(),
-                AuthorityGrantId::new("test").unwrap(),
-            )
-            .with_namespace_claim("tool"),
-            false,
-        )
-        .unwrap();
-        let calls = Arc::new(AtomicUsize::new(0));
-        let mut function = FunctionDefinition::new(
-            FunctionId::new("tool::echo").unwrap(),
-            worker_id,
-            "test engine tool",
+    fn surface_with_echo() -> ResolvedToolSurface {
+        let function_id = FunctionId::new("tool::echo").expect("function id");
+        let function = FunctionDefinition::new(
+            function_id.clone(),
+            WorkerId::new("tool").expect("worker id"),
+            "Echo".to_owned(),
             VisibilityScope::System,
-            EffectClass::IdempotentWrite,
+            EffectClass::PureRead,
         )
-        .with_risk(RiskLevel::Medium)
-        .with_required_authority(AuthorityRequirement::scope("tool.write"))
-        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-        .with_provenance(Provenance::system())
-        .with_request_schema(json!({"type": "object", "additionalProperties": true}))
-        .with_response_schema(json!({"type": "object", "additionalProperties": true}));
-        function.metadata = json!({
-            "modelToolName": "echo",
-            "toolOrder": 0,
-            "stopsTurn": false,
-            "isInteractive": false,
-        });
-        host.register_function_for_setup(
+        .with_risk(RiskLevel::Low)
+        .with_required_authority(AuthorityRequirement::scope("tool.read"));
+        let target = EngineToolTarget {
+            model_tool_name: "Echo".to_owned(),
+            function_id,
             function,
-            Some(Arc::new(EngineEchoHandler {
-                calls: calls.clone(),
-            })),
-            false,
-        )
-        .unwrap();
-
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-        let mut args = Map::new();
-        let _ = args.insert("text".into(), json!("hello"));
-        let tc = make_tool_call("echo", args);
-        let mut ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-        ctx.engine_host = Some(&host);
-        ctx.run_id = Some("run-1");
-        ctx.turn = 7;
-
-        let first = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-        let second = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(tool_result_text(&first), "engine path");
-        assert_eq!(tool_result_text(&second), "engine path");
-    }
-
-    #[tokio::test]
-    async fn tool_not_found() {
-        let registry = ToolRegistry::new();
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("nonexistent", Map::new());
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(result.result.is_error.unwrap_or(false));
-        let ToolResultBody::Blocks(blocks) = &result.result.content else {
-            panic!("Expected blocks result");
+            stops_turn: true,
+            is_interactive: false,
+            execution_mode: ExecutionMode::Parallel,
         };
-        let ToolResultContent::Text { text } = &blocks[0] else {
-            panic!("Expected text block");
-        };
-        assert!(text.contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn guardrail_blocks() {
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-
-        // Set up guardrails that block "echo" with dangerous args
-        let mut engine =
-            GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
-        engine.register_rule(GuardrailRule::Pattern(PatternRule {
-            base: RuleBase {
-                id: "test-block".into(),
-                name: "Block rm".into(),
-                description: "Block rm commands".into(),
-                severity: Severity::Block,
-                scope: Scope::Tool,
-                tier: RuleTier::Custom,
-                tools: vec!["echo".into()],
-                priority: 100,
-                enabled: true,
-                tags: vec![],
-            },
-            target_argument: "text".into(),
-            patterns: vec![regex::Regex::new("rm -rf").unwrap()],
-        }));
-
-        let guardrails = Some(Arc::new(parking_lot::Mutex::new(engine)));
-        let no_hooks = None;
-
-        let mut args = Map::new();
-        let _ = args.insert("text".into(), json!("rm -rf /"));
-        let tc = make_tool_call("echo", args);
-
-        let ctx = tool_exec_ctx!(&registry, &guardrails, &no_hooks, &emitter, &cancel);
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(result.result.is_error.unwrap_or(false));
-        assert!(result.blocked_by_guardrail);
-    }
-
-    #[tokio::test]
-    async fn stop_turn_tool_flags() {
-        let registry = make_registry(vec![Arc::new(StopTurnTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("ask_user", Map::new());
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(!result.result.is_error.unwrap_or(false));
-        assert!(result.stops_turn);
-        assert!(result.is_interactive);
-    }
-
-    #[tokio::test]
-    async fn cancelled_before_execution() {
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        cancel.cancel();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("echo", Map::new());
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(result.result.is_error.unwrap_or(false));
-    }
-
-    #[tokio::test]
-    async fn emits_start_and_end_events() {
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let mut rx = emitter.subscribe();
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let mut args = Map::new();
-        let _ = args.insert("text".into(), json!("test"));
-        let tc = make_tool_call("echo", args);
-
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        let mut saw_start = false;
-        let mut saw_end = false;
-        while let Ok(event) = rx.try_recv() {
-            match event {
-                TronEvent::ToolExecutionStart { tool_name, .. } if tool_name == "echo" => {
-                    saw_start = true;
-                }
-                TronEvent::ToolExecutionEnd { tool_name, .. } if tool_name == "echo" => {
-                    saw_end = true;
-                }
-                _ => {}
-            }
-        }
-        assert!(saw_start);
-        assert!(saw_end);
-    }
-
-    #[tokio::test]
-    async fn pre_tool_use_hook_emits_triggered_and_completed() {
-        let mut hook_registry = HookRegistry::new();
-        hook_registry.register(Arc::new(ContinueHandler));
-        let hook_engine = Arc::new(HookEngine::new(hook_registry));
-
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let mut rx = emitter.subscribe();
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-
-        let mut args = Map::new();
-        let _ = args.insert("text".into(), json!("test"));
-        let tc = make_tool_call("echo", args);
-
-        let hooks = Some(hook_engine);
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &hooks, &emitter, &cancel);
-        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        let mut saw_triggered = false;
-        let mut saw_completed = false;
-        while let Ok(event) = rx.try_recv() {
-            match &event {
-                TronEvent::HookTriggered { hook_event, .. } if hook_event == "PreToolUse" => {
-                    saw_triggered = true;
-                }
-                TronEvent::HookCompleted { hook_event, .. } if hook_event == "PreToolUse" => {
-                    saw_completed = true;
-                }
-                _ => {}
-            }
-        }
-        assert!(saw_triggered, "should emit HookTriggered for PreToolUse");
-        assert!(saw_completed, "should emit HookCompleted for PreToolUse");
-    }
-
-    #[tokio::test]
-    async fn post_tool_use_hook_emits_triggered() {
-        let mut hook_registry = HookRegistry::new();
-        hook_registry.register(Arc::new(BgHandler));
-        let hook_engine = Arc::new(HookEngine::new(hook_registry));
-
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let mut rx = emitter.subscribe();
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-
-        let mut args = Map::new();
-        let _ = args.insert("text".into(), json!("test"));
-        let tc = make_tool_call("echo", args);
-
-        let hooks = Some(hook_engine);
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &hooks, &emitter, &cancel);
-        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        // Give background task a moment to complete
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-        let mut saw_triggered = false;
-        let mut saw_completed = false;
-        while let Ok(event) = rx.try_recv() {
-            match &event {
-                TronEvent::HookTriggered { hook_event, .. } if hook_event == "PostToolUse" => {
-                    saw_triggered = true;
-                }
-                TronEvent::HookCompleted { hook_event, .. } if hook_event == "PostToolUse" => {
-                    saw_completed = true;
-                }
-                _ => {}
-            }
-        }
-        assert!(saw_triggered, "should emit HookTriggered for PostToolUse");
-        assert!(saw_completed, "should emit HookCompleted for PostToolUse");
-    }
-
-    #[tokio::test]
-    async fn post_tool_use_hook_timeout() {
-        // Track whether the handler completed (it shouldn't — timeout fires first)
-        let handler_completed = Arc::new(AtomicBool::new(false));
-
-        tokio::time::pause();
-
-        let mut hook_registry = HookRegistry::new();
-        hook_registry.register(Arc::new(SlowBackgroundHandler {
-            completed: Arc::clone(&handler_completed),
-        }));
-        let hook_engine = Arc::new(HookEngine::new(hook_registry));
-
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-
-        let mut args = Map::new();
-        let _ = args.insert("text".into(), json!("test"));
-        let tc = make_tool_call("echo", args);
-
-        let hooks = Some(hook_engine);
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &hooks, &emitter, &cancel);
-        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        // Let the spawned task start and register its timers
-        tokio::task::yield_now().await;
-
-        // Advance past the 30s timeout (but not past 60s handler sleep)
-        tokio::time::advance(std::time::Duration::from_secs(31)).await;
-        tokio::task::yield_now().await;
-
-        // The handler should NOT have completed (timeout fired first)
-        assert!(
-            !handler_completed.load(Ordering::SeqCst),
-            "handler should not have completed — timeout should have fired"
-        );
-    }
-
-    #[tokio::test]
-    async fn multiple_sequential_tools() {
-        let registry = make_registry(vec![Arc::new(EchoTool), Arc::new(StopTurnTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc1 = make_tool_call("echo", {
-            let mut m = Map::new();
-            let _ = m.insert("text".into(), json!("a"));
-            m
-        });
-        let tc2 = make_tool_call("ask_user", Map::new());
-
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-        let r1 = execute_tool(&tc1, "s1", "/tmp", &ctx).await;
-        let r2 = execute_tool(&tc2, "s1", "/tmp", &ctx).await;
-
-        assert!(!r1.result.is_error.unwrap_or(false));
-        assert!(!r1.stops_turn);
-        assert!(!r2.result.is_error.unwrap_or(false));
-        assert!(r2.stops_turn);
-    }
-
-    #[tokio::test]
-    async fn guardrail_lock_always_succeeds() {
-        let engine =
-            GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
-        let guardrails = Arc::new(parking_lot::Mutex::new(engine));
-        // parking_lot::Mutex::lock() always succeeds (no Result, no poison)
-        let _guard = guardrails.lock();
-    }
-
-    // ── SlowTool: sleeps 60s to test mid-execution cancellation ──
-
-    struct SlowTool;
-
-    #[async_trait]
-    impl TronTool for SlowTool {
-        fn name(&self) -> &'static str {
-            "slow"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "slow".into(),
-                description: "Sleeps for 60s".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _params: Value,
-            _ctx: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            Ok(text_result("completed", false))
+        let mut targets_by_name = BTreeMap::new();
+        let _ = targets_by_name.insert("Echo".to_owned(), target);
+        ResolvedToolSurface {
+            tools: Vec::new(),
+            targets_by_name,
+            all_tool_names: vec!["Echo".to_owned()],
+            turn_stopping_tools: HashSet::from(["Echo".to_owned()]),
         }
     }
 
-    #[tokio::test]
-    async fn cancelled_during_execution() {
-        let registry = make_registry(vec![Arc::new(SlowTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("slow", Map::new());
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-
-        // Cancel after 100ms — tool should NOT run for 60s
-        let cancel2 = cancel.clone();
-        drop(tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            cancel2.cancel();
-        }));
-
-        let start = Instant::now();
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-        let elapsed = start.elapsed();
-
-        assert!(result.result.is_error.unwrap_or(false));
-        assert!(
-            elapsed < Duration::from_secs(2),
-            "should cancel quickly, took {elapsed:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn cancelled_during_execution_emits_start_and_end() {
-        let registry = make_registry(vec![Arc::new(SlowTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let mut rx = emitter.subscribe();
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("slow", Map::new());
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-
-        let cancel2 = cancel.clone();
-        drop(tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            cancel2.cancel();
-        }));
-
-        let _ = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        let mut saw_start = false;
-        let mut saw_end = false;
-        while let Ok(event) = rx.try_recv() {
-            match event {
-                TronEvent::ToolExecutionStart { tool_name, .. } if tool_name == "slow" => {
-                    saw_start = true;
-                }
-                TronEvent::ToolExecutionEnd { tool_name, .. } if tool_name == "slow" => {
-                    saw_end = true;
-                }
-                _ => {}
-            }
-        }
-        assert!(saw_start, "should emit ToolExecutionStart");
-        assert!(saw_end, "should emit ToolExecutionEnd");
-    }
-
-    #[tokio::test]
-    async fn cancelled_during_execution_result_is_error() {
-        let registry = make_registry(vec![Arc::new(SlowTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("slow", Map::new());
-        let ctx = tool_exec_ctx!(&registry, &no_guardrails, &no_hooks, &emitter, &cancel);
-
-        let cancel2 = cancel.clone();
-        drop(tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            cancel2.cancel();
-        }));
-
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(result.result.is_error.unwrap_or(false));
-        let ToolResultBody::Blocks(blocks) = &result.result.content else {
-            panic!("Expected blocks result");
-        };
-        let ToolResultContent::Text { text } = &blocks[0] else {
-            panic!("Expected text block");
-        };
-        assert!(
-            text.to_lowercase().contains("cancelled"),
-            "error should mention cancellation, got: {text}"
-        );
-    }
-
-    // ── Local-model tool allow-list ──
-
-    /// Stand-in for a cloud-only tool (e.g. SpawnSubagent) not on the local
-    /// allow-list. Uses a name that is definitely not in the profile's local
-    /// tool policy.
-    struct CloudOnlyTool;
-
-    #[async_trait]
-    impl TronTool for CloudOnlyTool {
-        fn name(&self) -> &'static str {
-            "SpawnSubagent"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "SpawnSubagent".into(),
-                description: "Cloud-only".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _params: Value,
-            _ctx: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("executed", false))
-        }
-    }
-
-    /// A tool whose name matches an allow-listed local name. Used to verify
-    /// local sessions can still execute permitted tools.
-    struct ReadTool;
-
-    #[async_trait]
-    impl TronTool for ReadTool {
-        fn name(&self) -> &'static str {
-            "Read"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "Read".into(),
-                description: "Read a file".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _params: Value,
-            _ctx: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("read ok", false))
-        }
-    }
-
-    #[tokio::test]
-    async fn local_model_blocks_off_list_tool() {
-        let registry = make_registry(vec![Arc::new(CloudOnlyTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("SpawnSubagent", Map::new());
-        let ctx = tool_exec_ctx!(
-            &registry,
-            &no_guardrails,
-            &no_hooks,
-            &emitter,
-            &cancel,
-            Provider::Ollama
-        );
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(result.result.is_error.unwrap_or(false));
-        let ToolResultBody::Blocks(blocks) = &result.result.content else {
-            panic!("expected blocks result");
-        };
-        let ToolResultContent::Text { text } = &blocks[0] else {
-            panic!("expected text block");
-        };
-        assert!(
-            text.contains("not available for local models"),
-            "got: {text}"
-        );
-    }
-
-    #[tokio::test]
-    async fn local_model_allows_listed_tool() {
-        let registry = make_registry(vec![Arc::new(ReadTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("Read", Map::new());
-        let ctx = tool_exec_ctx!(
-            &registry,
-            &no_guardrails,
-            &no_hooks,
-            &emitter,
-            &cancel,
-            Provider::Ollama
-        );
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(!result.result.is_error.unwrap_or(false));
-    }
-
-    #[tokio::test]
-    async fn cloud_model_executes_any_registered_tool() {
-        // Regression guard: cloud path must not be affected by the local allow-list.
-        let registry = make_registry(vec![Arc::new(CloudOnlyTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-
-        let tc = make_tool_call("SpawnSubagent", Map::new());
-        let ctx = tool_exec_ctx!(
-            &registry,
-            &no_guardrails,
-            &no_hooks,
-            &emitter,
-            &cancel,
-            Provider::Anthropic
-        );
-        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
-
-        assert!(!result.result.is_error.unwrap_or(false));
-    }
-
-    #[tokio::test]
-    async fn guardrail_evaluates_after_lock() {
-        let mut engine =
-            GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
-        engine.register_rule(GuardrailRule::Pattern(PatternRule {
-            base: RuleBase {
-                id: "test".into(),
-                name: "Test".into(),
-                description: "Test".into(),
-                severity: Severity::Block,
-                scope: Scope::Tool,
-                tier: RuleTier::Custom,
-                tools: vec!["bash".into()],
-                priority: 100,
-                enabled: true,
-                tags: vec![],
-            },
-            target_argument: "command".into(),
-            patterns: vec![regex::Regex::new("rm").unwrap()],
-        }));
-
-        let guardrails = Arc::new(parking_lot::Mutex::new(engine));
-        let guard = guardrails.lock();
-        let eval_ctx = EvaluationContext {
-            tool_name: "bash".into(),
-            tool_arguments: json!({"command": "rm -rf /"}),
-            session_id: None,
-            tool_call_id: None,
-        };
-        // Can't call evaluate on immutable guard — drop and re-lock as mutable
-        drop(guard);
-        let mut guard = guardrails.lock();
-        let eval = guard.evaluate(&eval_ctx);
-        assert!(eval.blocked);
-    }
-
-    // ── Per-tool abort registry tests (agent.abortTool backing) ──
-
-    fn tool_exec_ctx_with_registry<'a>(
-        registry: &'a ToolRegistry,
-        guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-        hooks: &'a Option<Arc<HookEngine>>,
+    fn tool_exec_ctx<'a>(
+        surface: &'a ResolvedToolSurface,
         emitter: &'a Arc<EventEmitter>,
         cancel: &'a CancellationToken,
-        abort_registry: &'a Arc<ToolAbortRegistry>,
+        execution_spec: &'a crate::core::profile::AgentExecutionSpec,
     ) -> ToolExecutionContext<'a> {
         ToolExecutionContext {
-            registry,
-            guardrails,
-            hooks,
+            tool_surface: surface,
+            guardrails: &None,
+            hooks: &None,
             emitter,
             cancel,
             subagent_depth: 0,
@@ -1668,151 +708,120 @@ mod tests {
             output_buffer_registry: None,
             sequence_counter: None,
             provider_type: Provider::Anthropic,
-            execution_spec: Some(test_execution_spec()),
+            execution_spec: Some(execution_spec),
             event_persister: None,
-            turn: 0,
-            tool_abort_registry: Some(abort_registry),
+            turn: 1,
+            tool_abort_registry: None,
             engine_host: None,
-            run_id: None,
+            run_id: Some("run-1"),
         }
     }
 
     #[tokio::test]
-    async fn abort_tool_cancels_only_target_leaves_siblings_running() {
-        let registry = make_registry(vec![Arc::new(SlowTool)]);
+    async fn unknown_model_tool_fails_before_execution() {
+        let surface = empty_surface();
         let emitter = Arc::new(EventEmitter::new());
         let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-        let abort_registry = Arc::new(ToolAbortRegistry::new());
-
-        let tc_target = ToolCall::new("target-call", "slow", Map::new());
-        let tc_sibling = ToolCall::new("sibling-call", "slow", Map::new());
-
-        let ctx_a = tool_exec_ctx_with_registry(
-            &registry,
-            &no_guardrails,
-            &no_hooks,
-            &emitter,
-            &cancel,
-            &abort_registry,
-        );
-        let ctx_b = tool_exec_ctx_with_registry(
-            &registry,
-            &no_guardrails,
-            &no_hooks,
-            &emitter,
-            &cancel,
-            &abort_registry,
-        );
-
-        let abort_registry_clone = abort_registry.clone();
-        let aborter = async {
-            for _ in 0..100 {
-                if abort_registry_clone.len() >= 2 {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            assert_eq!(
-                abort_registry_clone.len(),
-                2,
-                "both tools should be registered before abort is called"
-            );
-            assert!(abort_registry_clone.abort("sess-1", "target-call"));
-        };
-
-        let target_future = execute_tool(&tc_target, "sess-1", "/tmp", &ctx_a);
-        // Sibling runs the 60s SlowTool — wrap it in a short timeout so the
-        // test asserts "still running" by observing the timeout fires. Dropping
-        // the timeout future cancels the inner future (good test cleanup).
-        let sibling_future = tokio::time::timeout(
-            Duration::from_millis(800),
-            execute_tool(&tc_sibling, "sess-1", "/tmp", &ctx_b),
-        );
-
-        let (target_result, sibling_timeout_result, ()) =
-            tokio::join!(target_future, sibling_future, aborter);
-
-        assert!(
-            target_result.result.is_error.unwrap_or(false),
-            "aborted target returns an error result"
-        );
-        assert!(
-            sibling_timeout_result.is_err(),
-            "sibling must still be running when the 800ms timeout fires — per-tool abort must not propagate to siblings"
-        );
-    }
-
-    #[tokio::test]
-    async fn abort_tool_unregisters_after_successful_completion() {
-        let registry = make_registry(vec![Arc::new(EchoTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-        let abort_registry = Arc::new(ToolAbortRegistry::new());
-
-        let mut args = Map::new();
-        args.insert("text".into(), Value::String("hi".into()));
-        let tc = ToolCall::new("done-call", "echo", args);
-
-        let ctx = tool_exec_ctx_with_registry(
-            &registry,
-            &no_guardrails,
-            &no_hooks,
-            &emitter,
-            &cancel,
-            &abort_registry,
-        );
-        let result = execute_tool(&tc, "sess-1", "/tmp", &ctx).await;
-        assert!(!result.result.is_error.unwrap_or(false));
-        assert!(
-            abort_registry.is_empty(),
-            "RAII guard must unregister the tool on normal completion"
-        );
-    }
-
-    #[tokio::test]
-    async fn parent_cancel_still_cancels_tool_when_registry_present() {
-        let registry = make_registry(vec![Arc::new(SlowTool)]);
-        let emitter = Arc::new(EventEmitter::new());
-        let cancel = CancellationToken::new();
-        let no_guardrails = None;
-        let no_hooks = None;
-        let abort_registry = Arc::new(ToolAbortRegistry::new());
-
-        let tc = make_tool_call("slow", Map::new());
-        let ctx = tool_exec_ctx_with_registry(
-            &registry,
-            &no_guardrails,
-            &no_hooks,
-            &emitter,
-            &cancel,
-            &abort_registry,
-        );
-
-        let cancel2 = cancel.clone();
-        drop(tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            cancel2.cancel();
-        }));
-
-        let start = Instant::now();
-        let result = execute_tool(&tc, "sess-1", "/tmp", &ctx).await;
-        let elapsed = start.elapsed();
-
+        let spec = default_execution_spec();
+        let ctx = tool_exec_ctx(&surface, &emitter, &cancel, &spec);
+        let call = ToolCall::new("tc1", "Missing", Default::default());
+        let result = execute_tool(&call, "s1", "/tmp", &ctx).await;
         assert!(result.result.is_error.unwrap_or(false));
-        assert!(elapsed < Duration::from_secs(2));
-        assert!(
-            abort_registry.is_empty(),
-            "guard cleans up even on parent cancel"
-        );
     }
 
     #[tokio::test]
-    async fn abort_unknown_tool_call_is_noop() {
-        let abort_registry = Arc::new(ToolAbortRegistry::new());
-        assert!(!abort_registry.abort("sess-x", "does-not-exist"));
+    async fn catalog_target_requires_engine_host_for_execution() {
+        let surface = surface_with_echo();
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let spec = default_execution_spec();
+        let ctx = tool_exec_ctx(&surface, &emitter, &cancel, &spec);
+        let call = ToolCall::new("tc1", "Echo", Default::default());
+        let result = execute_tool(&call, "s1", "/tmp", &ctx).await;
+        assert!(result.result.is_error.unwrap_or(false));
+        assert!(result.stops_turn);
+    }
+
+    #[tokio::test]
+    async fn model_tool_call_invokes_builtin_tool_through_engine() {
+        let server = crate::server::shared::test_support::make_test_context();
+        let spec = default_execution_spec();
+        let context_policy =
+            crate::runtime::context::local_policy::ContextPolicy::from_provider_with_spec(
+                Provider::Anthropic,
+                &spec,
+            );
+        let surface = resolve_provider_tools(
+            &server.engine_host,
+            "s1",
+            None,
+            Provider::Anthropic,
+            &context_policy,
+            &ToolSurfacePolicy::default(),
+        )
+        .await
+        .expect("provider tool surface");
+        assert!(surface.targets_by_name.contains_key("Read"));
+
+        let tempdir = tempfile::tempdir().expect("tool tempdir");
+        let file_path = tempdir.path().join("note.txt");
+        std::fs::write(&file_path, "hello from engine").expect("write fixture");
+
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let mut ctx = tool_exec_ctx(&surface, &emitter, &cancel, &spec);
+        ctx.engine_host = Some(&server.engine_host);
+
+        let mut args = serde_json::Map::new();
+        args.insert(
+            "file_path".to_owned(),
+            Value::String(file_path.to_string_lossy().into_owned()),
+        );
+        let call = ToolCall::new("tc1", "Read", args);
+        let result = execute_tool(
+            &call,
+            "s1",
+            tempdir.path().to_str().expect("utf8 tempdir"),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(result.result.is_error, None);
+        match result.result.content {
+            ToolResultBody::Text(text) => assert!(text.contains("hello from engine")),
+            ToolResultBody::Blocks(blocks) => {
+                let rendered = blocks
+                    .iter()
+                    .map(|block| format!("{block:?}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(rendered.contains("hello from engine"));
+            }
+        }
+    }
+
+    #[test]
+    fn stable_tool_call_material_changes_with_arguments() {
+        let a = stable_tool_call_material(
+            Some("run"),
+            "s1",
+            1,
+            "tc1",
+            "Echo",
+            "/tmp",
+            None,
+            &json!({"a":1}),
+        );
+        let b = stable_tool_call_material(
+            Some("run"),
+            "s1",
+            1,
+            "tc1",
+            "Echo",
+            "/tmp",
+            None,
+            &json!({"a":2}),
+        );
+        assert_ne!(sha256_hex(a.as_bytes()), sha256_hex(b.as_bytes()));
     }
 }

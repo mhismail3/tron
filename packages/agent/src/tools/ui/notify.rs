@@ -538,8 +538,8 @@ mod tests {
 
     #[tokio::test]
     async fn stub_delegate_integration_produces_warning_result() {
-        // Full stack: ship the real StubNotifyDelegate (as used by
-        // tool_factory when push_service is None) and assert the tool
+        // Full stack: ship the real StubNotifyDelegate (as used by the
+        // tools-domain capability spec when push delivery is absent) and assert the tool
         // result carries the stub's warning.
         use crate::tools::backends::{STUB_NOTIFY_WARNING, StubNotifyDelegate};
         let tool = NotifyAppTool::new(Arc::new(StubNotifyDelegate));

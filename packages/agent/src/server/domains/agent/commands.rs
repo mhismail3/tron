@@ -49,7 +49,7 @@ impl AgentCommandService {
     /// Returns `{ "aborted": true }` if the tool was in flight (its child
     /// `CancellationToken` was cancelled) or `{ "aborted": false }` when
     /// there is no matching tool — the call already finished, the id is
-    /// wrong, or the session has no per-tool registry. Callers treat both
+    /// wrong, or the session has no matching per-tool abort entry. Callers treat both
     /// as "nothing to do" rather than errors.
     pub(crate) fn abort_tool(
         deps: &Deps,

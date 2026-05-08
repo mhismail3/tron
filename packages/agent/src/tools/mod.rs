@@ -2,9 +2,9 @@
 //!
 //! Tool trait and all tool implementations for the Tron agent.
 //!
-//! This module defines the [`TronTool`](traits::TronTool) trait that every tool
-//! implements, plus the [`ToolRegistry`](registry::ToolRegistry) for managing
-//! registered tools. Tools are grouped by category:
+//! This module defines the [`TronTool`](traits::TronTool) trait that each
+//! built-in tool implementation may use behind its canonical `tool::*`
+//! capability. Tools are grouped by category:
 //!
 //! - **Filesystem**: `Read`, `Write`, `Edit`, `Find`
 //! - **System**: `Bash`
@@ -19,11 +19,9 @@
 //! Depends on: core.
 //! Depended on by: runtime, server.
 //!
-//! The server also projects registered tools into the engine catalog as
-//! `tool::*` functions. Provider-facing schemas now come from the live engine
-//! catalog at every model-call boundary, while [`ToolRegistry`] remains the
-//! temporary implementation store for built-ins during the migration.
-//! Dynamic MCP capabilities and future external workers can therefore appear
+//! The tools domain owns built-in `tool::*` capability contracts. Provider-facing
+//! schemas come from the live engine catalog at every model-call boundary, so
+//! built-ins, dynamic MCP capabilities, and future external workers can appear
 //! or disappear from the model-visible tool surface without restarting a run.
 
 #![deny(unsafe_code)]
@@ -40,7 +38,6 @@ pub(crate) mod capability_runtime;
 pub(crate) mod capability_surface;
 pub mod engine;
 pub mod errors;
-pub mod registry;
 pub mod traits;
 pub(crate) mod utils;
 

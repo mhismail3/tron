@@ -33,7 +33,6 @@ use tron::server::runtime::streams::EngineStreamEventPump;
 use tron::server::server::TronServer;
 use tron::server::shared::context::{AgentDeps, ServerRuntimeContext};
 use tron::skills::registry::SkillRegistry;
-use tron::tools::registry::ToolRegistry;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -109,6 +108,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         profile_runtime: profile_runtime_for_settings_path(&settings_path),
         settings_path,
         agent_deps: None,
+        tool_runtime: tron::server::shared::context::ToolRuntimeConfig::default(),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
@@ -394,9 +394,9 @@ async fn boot_server_with_provider_and_handles(
         settings_path,
         agent_deps: Some(AgentDeps {
             provider_factory: Arc::new(FixedProviderFactory(provider)),
-            tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
         }),
+        tool_runtime: tron::server::shared::context::ToolRuntimeConfig::default(),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,

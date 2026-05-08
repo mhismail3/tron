@@ -160,7 +160,6 @@ pub(crate) async fn prompt_queue_drain_value(
         &session.working_directory,
         deps.orchestrator.broadcast().clone(),
         agent_deps.provider_factory.clone(),
-        agent_deps.tool_factory.clone(),
         agent_deps.guardrails.clone(),
         deps.health_tracker.clone(),
         deps.context_artifacts.clone(),

@@ -135,7 +135,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |     +-- kimi/        Kimi/Moonshot (API key only)
   |     +-- ollama/      Gemma 4 local inference (no auth, native /api/chat)
   +-- mcp              Model Context Protocol client/server pump
-  +-- tools            Tool trait, registry, tool implementations
+  +-- tools            Tool trait plus canonical tool::* implementations
   +-- engine           Live capability catalog (workers, functions, triggers)
   +-- cron             Scheduled job runner (automations)
   +-- prompt_library   Persistent prompt history + user-authored snippets
@@ -164,7 +164,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `import` | Claude Code session import | `import_session()`, `ImportResult`, `ClaudeProject`, `ClaudeSessionMeta` |
 | `llm` | LLM abstraction + model registry | `Provider` trait, `ProviderFactory`, `ProviderStreamOptions` |
 | `mcp` | Model Context Protocol integration | MCP client/server types |
-| `tools` | Tool implementations | `TronTool` trait, `ToolRegistry`, per-tool structs |
+| `tools` | Tool implementation bodies used by canonical `tool::*` capabilities | `TronTool` trait, per-tool structs |
 | `engine` | Live capability catalog foundation | `LiveCatalog`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
 | `cron` | Automation scheduler | Cron job runner, schedule parser |
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
@@ -312,7 +312,7 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 ## Tools
 
-Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registry`, with subagent and job tools added in the `tool_factory` closure in `main.rs`. To add or rename a tool, update both files. At model-call time, provider-facing tool schemas are projected from the live engine catalog, so registered built-ins, engine meta-tools, and eligible live MCP capabilities are filtered by current visibility, health, authority, and schema metadata before being sent to the model.
+Tools are registered by the `server::domains::tools` worker as canonical `tool::*` capabilities. Each built-in tool has a tools-domain capability spec with model-facing schema metadata, authority/risk/idempotency policy, and a local handler binding. At model-call time, provider-facing tool schemas are projected from the live engine catalog, so built-ins, engine meta-tools, and eligible live MCP capabilities are filtered by current visibility, health, authority, and schema metadata before being sent to the model.
 
 ### Always-on (22)
 

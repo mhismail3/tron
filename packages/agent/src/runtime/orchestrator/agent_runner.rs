@@ -133,7 +133,6 @@ mod tests {
     use crate::runtime::context::context_manager::ContextManager;
     use crate::runtime::context::types::ContextManagerConfig;
     use crate::runtime::errors::StopReason;
-    use crate::tools::registry::ToolRegistry;
     use async_trait::async_trait;
     use futures::stream;
 
@@ -210,7 +209,8 @@ mod tests {
             AgentConfig::default(),
             AgentDeps {
                 provider,
-                registry: ToolRegistry::new(),
+                tool_surface_policy:
+                    crate::tools::capability_surface::ToolSurfacePolicy::default(),
                 guardrails: None,
                 hooks: None,
                 context_manager: ContextManager::new(ContextManagerConfig {

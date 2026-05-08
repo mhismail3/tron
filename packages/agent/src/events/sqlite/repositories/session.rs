@@ -130,7 +130,7 @@ fn extract_text_from_payload(payload_str: &str) -> String {
 }
 
 /// Activity summary line for dashboard card display.
-/// Lightweight: iOS enriches with ToolRegistry for icons/colors/summaries.
+/// Lightweight: iOS enriches with its local tool presentation catalog.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySummaryLine {
@@ -562,7 +562,7 @@ impl SessionRepo {
     /// Build activity summary lines for a session's dashboard card.
     ///
     /// Walks persisted events to produce a compact summary of recent activity.
-    /// iOS enriches each line with `ToolRegistry` for icons, colors, and argument summaries.
+    /// iOS enriches each line with its local tool presentation catalog.
     pub fn get_activity_summaries(
         conn: &Connection,
         session_id: &str,

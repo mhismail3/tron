@@ -17,7 +17,7 @@ pub(crate) async fn prepare_session_context(
     let event_store = deps.event_store.clone();
     let context_artifacts = deps.context_artifacts.clone();
     let profile_runtime = deps.profile_runtime.clone();
-    let tool_definitions = tool_definitions(deps);
+    let tool_definitions = tool_definitions(deps, session_id).await;
     let session_id = session_id.to_owned();
     run_blocking_task(task_name, move || {
         retry_context_read(task_name, || {

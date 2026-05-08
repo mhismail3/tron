@@ -8,7 +8,6 @@ pub(crate) struct PromptRunPlan {
     pub(super) session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
     pub(super) broadcast: Arc<crate::runtime::EventEmitter>,
     pub(super) provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
-    pub(super) tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
     pub(super) guardrails:
         Option<Arc<parking_lot::Mutex<crate::runtime::guardrails::GuardrailEngine>>>,
     pub(super) health_tracker: Arc<crate::llm::ProviderHealthTracker>,

@@ -142,7 +142,6 @@ fn make_subagent_manager(
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
     (manager, mgr, store)
 }
 
@@ -309,7 +308,6 @@ async fn subagent_completion_emits_events() {
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let mut rx = broadcast.subscribe();
     let config = make_config("test task");
@@ -447,7 +445,7 @@ async fn spawn_subsession_nonblocking_returns_session_id() {
 
 #[tokio::test]
 async fn spawn_subsession_no_tools_by_default() {
-    // Default inherit_tools = false, so subsession should have empty tool registry
+    // Default inherit_tools = false, so subsession should have empty live tool catalog
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
     let config = make_subsession_config("summarize", "parent-001");
     let result = manager.spawn_subsession(config).await.unwrap();
@@ -475,7 +473,6 @@ async fn spawn_subsession_emits_events() {
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let mut rx = broadcast.subscribe();
     let config = make_subsession_config("summarize", "parent-001");
@@ -550,7 +547,6 @@ async fn spawn_provider_creation_failure_ends_child_session() {
         None,
     ));
     manager.set_self_ref();
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let handle = manager.spawn(make_config("task")).await.unwrap();
 
@@ -583,7 +579,6 @@ async fn spawn_subsession_provider_creation_failure_ends_child_session() {
         None,
     ));
     manager.set_self_ref();
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let result = manager
         .spawn_subsession(make_subsession_config("task", "parent-001"))
@@ -1031,7 +1026,6 @@ async fn spawn_subsession_emits_spawn_type_in_event() {
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let mut rx = broadcast.subscribe();
     let config = make_subsession_config("test spawn type", "parent-001");
@@ -1063,7 +1057,6 @@ async fn spawn_subsession_with_hook_type_emits_hook_in_event() {
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let mut rx = broadcast.subscribe();
     let mut config = make_subsession_config("title gen task", "parent-001");
@@ -1096,7 +1089,6 @@ async fn spawn_tool_agent_emits_tool_agent_type_in_event() {
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let mut rx = broadcast.subscribe();
     let config = make_config("tool agent task");
@@ -1128,7 +1120,6 @@ async fn subagent_completed_includes_spawn_type() {
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let mut rx = broadcast.subscribe();
     let config = make_subsession_config("check completed type", "parent-001");
@@ -1160,7 +1151,6 @@ async fn subagent_failed_includes_spawn_type() {
         None,
         None,
     );
-    manager.set_tool_factory(Arc::new(ToolRegistry::new));
 
     let mut rx = broadcast.subscribe();
     let config = make_subsession_config("will fail", "parent-001");
@@ -1394,8 +1384,8 @@ async fn spawn_with_skill_denials_forwards_merged_denied_tools_to_execution() {
     // End-to-end wiring test: construct a SubagentManager with a skill
     // registry, spawn a subagent with `skills: ["restricted"]`, and observe
     // that the resulting subagent run executed with the skill's
-    // `deniedTools` in force (via side-channel: the mock provider/tool
-    // factory path doesn't block compilation, but we verify by the spawn
+    // `deniedTools` in force (via side-channel: the mock provider path
+    // doesn't block compilation, but we verify by the spawn
     // completing successfully and inspecting captured state on the
     // tracker). The load-bearing assertion is on the helper above; this
     // test exists so that if `compute_denied_tools` is inadvertently

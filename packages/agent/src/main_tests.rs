@@ -1,4 +1,3 @@
-use super::tool_factory::create_tool_registry;
 use super::*;
 use clap::Parser;
 use tron::server::runtime::streams::EngineStreamEventPump;
@@ -452,6 +451,7 @@ async fn server_boots_and_responds() {
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
+        tool_runtime: tron::server::shared::context::ToolRuntimeConfig::default(),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
@@ -541,136 +541,12 @@ fn server_runs_migrations() {
     assert_eq!(count, 1);
 }
 
-struct RegistryTestTool {
-    name: &'static str,
-}
-
-#[async_trait::async_trait]
-impl tron::tools::traits::TronTool for RegistryTestTool {
-    fn name(&self) -> &str {
-        self.name
-    }
-
-    fn category(&self) -> tron::core::tools::ToolCategory {
-        tron::core::tools::ToolCategory::Custom
-    }
-
-    fn definition(&self) -> tron::core::tools::Tool {
-        tron::core::tools::Tool {
-            name: self.name.to_string(),
-            description: "test tool".into(),
-            parameters: tron::core::tools::ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some(serde_json::Map::new()),
-                required: None,
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
-    }
-
-    async fn execute(
-        &self,
-        _params: serde_json::Value,
-        _ctx: &tron::tools::traits::ToolContext,
-    ) -> Result<tron::core::tools::TronToolResult, tron::tools::errors::ToolError> {
-        Ok(tron::core::tools::text_result("ok", false))
-    }
-}
-
-fn make_tool_config() -> ToolRegistryConfig {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("tools-test.db");
-    let auth_path = dir.path().join("auth.json");
-    let db_str = db_path.to_string_lossy();
-    let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = tron::events::run_migrations(&conn).unwrap();
-    }
-    let event_store = Arc::new(EventStore::new(pool));
-    ToolRegistryConfig {
-        event_store,
-        auth_path,
-        push_service: None,
-        http_client: reqwest::Client::new(),
-        sandbox_settings: tron::settings::BashSandboxSettings::default(),
-        computer_use_settings: tron::settings::ComputerUseSettings::default(),
-        display_event_tx: None,
-        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
-        mcp_search: Arc::new(RegistryTestTool { name: "McpSearch" }),
-        mcp_call: Arc::new(RegistryTestTool { name: "McpCall" }),
-    }
-}
-
-#[test]
-fn tool_registry_order() {
-    let config = make_tool_config();
-    let registry = create_tool_registry(&config);
-    let names = registry.names();
-    assert_eq!(names[0], "Read");
-    assert_eq!(names[1], "Write");
-    assert_eq!(names[2], "Edit");
-    assert_eq!(names[3], "Bash");
-    assert_eq!(names[4], "Search");
-    assert_eq!(names[5], "Find");
-    assert_eq!(names[6], "AskUserQuestion");
-    assert_eq!(names[7], "GetConfirmation");
-    assert_eq!(names[8], "NotifyApp");
-    assert_eq!(names[9], "WebFetch");
-    assert_eq!(names[10], "WebSearch");
-    assert_eq!(names[11], "Display");
-    assert_eq!(names[12], "ComputerUse");
-    assert_eq!(names[13], "engine_discover");
-    assert_eq!(names[14], "engine_inspect");
-    assert_eq!(names[15], "engine_watch");
-    assert_eq!(names[16], "engine_invoke");
-    assert_eq!(names[17], "McpSearch");
-    assert_eq!(names[18], "McpCall");
-}
-
-#[test]
-fn tool_registry_has_notify_app() {
-    let config = make_tool_config();
-    let registry = create_tool_registry(&config);
-    assert!(registry.names().contains(&"NotifyApp".to_string()));
-}
-
-#[test]
-fn tool_registry_count() {
-    let config = make_tool_config();
-    let registry = create_tool_registry(&config);
-    assert_eq!(
-        registry.len(),
-        19,
-        "expected 19 base tools before subagent/job tools, got: {:?}",
-        registry.names()
-    );
-}
-
-#[test]
-fn tool_registry_always_includes_web_search_and_mcp_meta_tools() {
-    let config = make_tool_config();
-    let registry = create_tool_registry(&config);
-    let names = registry.names();
-    assert!(names.contains(&"WebSearch".to_string()));
-    assert!(names.contains(&"engine_discover".to_string()));
-    assert!(names.contains(&"engine_inspect".to_string()));
-    assert!(names.contains(&"engine_watch".to_string()));
-    assert!(names.contains(&"engine_invoke".to_string()));
-    assert!(names.contains(&"McpSearch".to_string()));
-    assert!(names.contains(&"McpCall".to_string()));
-}
-
 #[tokio::test]
 async fn init_mcp_registers_meta_tools_without_servers() {
     let settings = TronSettings::default();
     let dir = tempfile::tempdir().unwrap();
     let home = test_tron_home(&dir);
     let state = init_mcp(&settings, &test_settings_path(&home)).await;
-
-    assert_eq!(state.search.name(), "McpSearch");
-    assert_eq!(state.call.name(), "McpCall");
     assert!(state.router.read().await.status().is_empty());
 }
 
@@ -790,6 +666,7 @@ async fn server_graceful_shutdown() {
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
+        tool_runtime: tron::server::shared::context::ToolRuntimeConfig::default(),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,

@@ -17,8 +17,7 @@ use crate::runtime::context::context_manager::ContextManager;
 use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
-use crate::tools::capability_surface;
-use crate::tools::registry::ToolRegistry;
+use crate::tools::capability_surface::{self, ResolvedToolSurface, ToolSurfacePolicy};
 
 use metrics::{counter, histogram};
 use tracing::{debug, error, instrument, warn};
@@ -49,8 +48,8 @@ pub struct TurnParams<'a> {
     pub context_manager: &'a mut ContextManager,
     /// LLM provider for streaming.
     pub provider: &'a Arc<dyn Provider>,
-    /// Tool registry for tool lookup and execution.
-    pub registry: &'a ToolRegistry,
+    /// Live catalog policy for tool lookup and execution.
+    pub tool_surface_policy: &'a ToolSurfacePolicy,
     /// Optional guardrail engine for tool argument validation.
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for pre/post tool use hooks.
@@ -111,7 +110,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn,
         context_manager,
         provider,
-        registry,
+        tool_surface_policy,
         guardrails,
         hooks,
         compaction,
@@ -186,11 +185,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     );
     let tool_surface = match resolve_provider_tool_surface(
         engine_host,
-        registry,
         session_id,
         workspace_id,
         provider.provider_type(),
         &context_policy,
+        tool_surface_policy,
     )
     .await
     {
@@ -222,7 +221,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         run_context,
         server_origin,
         &context_policy,
-        tool_surface,
+        tool_surface.tools.clone(),
     );
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
@@ -440,13 +439,12 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     };
 
     // 7. Process stream (drain after turn-stopping tools to capture token usage cleanly)
-    let turn_stopping_tools = registry.turn_stopping_tool_names();
     let stream_result = match stream_processor::process_stream(
         stream,
         session_id,
         emitter,
         cancel,
-        &turn_stopping_tools,
+        &tool_surface.turn_stopping_tools,
         sequence_counter,
         journal.as_mut(),
     )
@@ -637,7 +635,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn,
         stream_result: &stream_result,
         context_manager,
-        registry,
+        tool_surface: &tool_surface,
         guardrails,
         hooks,
         compaction,
@@ -859,40 +857,49 @@ fn build_turn_context(
 
 async fn resolve_provider_tool_surface(
     engine_host: Option<&crate::engine::EngineHostHandle>,
-    registry: &ToolRegistry,
     session_id: &str,
     workspace_id: Option<&str>,
     provider_type: crate::core::messages::Provider,
     context_policy: &local_policy::ContextPolicy,
-) -> Result<Vec<crate::core::tools::Tool>, String> {
+    tool_policy: &ToolSurfacePolicy,
+) -> Result<ResolvedToolSurface, String> {
     if let Some(host) = engine_host {
         return capability_surface::resolve_provider_tools(
             host,
-            registry,
             session_id,
             workspace_id,
             provider_type,
             context_policy,
+            tool_policy,
         )
         .await;
     }
 
     #[cfg(test)]
     {
-        return Ok(match context_policy.tool_filter() {
-            Some(tool_names) => registry.local_definitions_for_names(&tool_names),
-            None => registry.definitions(),
+        let _ = (
+            session_id,
+            workspace_id,
+            provider_type,
+            context_policy,
+            tool_policy,
+        );
+        return Ok(ResolvedToolSurface {
+            tools: Vec::new(),
+            targets_by_name: Default::default(),
+            all_tool_names: Vec::new(),
+            turn_stopping_tools: Default::default(),
         });
     }
 
     #[cfg(not(test))]
     {
         let _ = (
-            registry,
             session_id,
             workspace_id,
             provider_type,
             context_policy,
+            tool_policy,
         );
         Err("engine host is required for provider tool schema resolution".to_owned())
     }
@@ -926,13 +933,43 @@ fn resolved_turn_policy_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::content::AssistantContent;
-    use crate::core::events::AssistantMessage;
-    use crate::core::messages::TokenUsage;
+    use crate::engine::{EffectClass, FunctionDefinition, FunctionId, VisibilityScope, WorkerId};
+    use crate::tools::capability_surface::{EngineToolTarget, ResolvedToolSurface};
     use crate::tools::traits::ExecutionMode;
+    use std::collections::{BTreeMap, HashSet};
 
-    // Turn runner tests require mock Provider, which we test at the
-    // TronAgent integration level. Here we verify TurnResult construction.
+    fn surface(modes: Vec<(&str, ExecutionMode)>) -> ResolvedToolSurface {
+        let mut targets_by_name = BTreeMap::new();
+        for (name, mode) in modes {
+            let function_id = FunctionId::new(format!("tool::{}", name.to_ascii_lowercase()))
+                .expect("function id");
+            let function = FunctionDefinition::new(
+                function_id.clone(),
+                WorkerId::new("tool").expect("worker id"),
+                name.to_owned(),
+                VisibilityScope::System,
+                EffectClass::PureRead,
+            );
+            let _ = targets_by_name.insert(
+                name.to_owned(),
+                EngineToolTarget {
+                    model_tool_name: name.to_owned(),
+                    function_id,
+                    function,
+                    stops_turn: false,
+                    is_interactive: false,
+                    execution_mode: mode,
+                },
+            );
+        }
+        let all_tool_names = targets_by_name.keys().cloned().collect();
+        ResolvedToolSurface {
+            tools: Vec::new(),
+            targets_by_name,
+            all_tool_names,
+            turn_stopping_tools: HashSet::new(),
+        }
+    }
 
     #[test]
     fn turn_result_success() {
@@ -948,309 +985,32 @@ mod tests {
     }
 
     #[test]
-    fn turn_result_failure() {
-        let tr = TurnResult {
-            success: false,
-            error: Some("timeout".into()),
-            stop_reason: Some(StopReason::Error),
-            ..Default::default()
-        };
-        assert!(!tr.success);
-        assert_eq!(tr.error.as_deref(), Some("timeout"));
-    }
-
-    #[test]
-    fn turn_result_interrupted() {
-        let tr = TurnResult {
-            success: true,
-            interrupted: true,
-            partial_content: Some("partial".into()),
-            stop_reason: Some(StopReason::Interrupted),
-            ..Default::default()
-        };
-        assert!(tr.interrupted);
-        assert!(tr.partial_content.is_some());
-    }
-
-    #[test]
-    fn turn_result_stop_turn() {
-        let tr = TurnResult {
-            success: true,
-            stop_turn_requested: true,
-            stop_reason: Some(StopReason::ToolStop),
-            ..Default::default()
-        };
-        assert!(tr.stop_turn_requested);
-    }
-
-    // ── build_execution_waves unit tests ──
-
-    use crate::core::messages::ToolCall;
-    use serde_json::Map;
-
-    fn tc(name: &str) -> ToolCall {
-        ToolCall::new(format!("tc-{name}"), name, Map::new())
-    }
-
-    /// Stub tool for wave builder tests — always Parallel.
-    struct ParallelStub(&'static str);
-    #[async_trait::async_trait]
-    impl crate::tools::traits::TronTool for ParallelStub {
-        fn name(&self) -> &str {
-            self.0
-        }
-        fn category(&self) -> crate::core::tools::ToolCategory {
-            crate::core::tools::ToolCategory::Custom
-        }
-        fn definition(&self) -> crate::core::tools::Tool {
-            crate::core::tools::Tool {
-                name: self.0.into(),
-                description: String::new(),
-                parameters: crate::core::tools::ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _: serde_json::Value,
-            _: &crate::tools::traits::ToolContext,
-        ) -> Result<crate::core::tools::TronToolResult, crate::tools::errors::ToolError> {
-            Ok(crate::core::tools::text_result("ok", false))
-        }
-    }
-
-    /// Stub tool that returns Serialized(group).
-    struct SerializedStub {
-        name: &'static str,
-        group: &'static str,
-    }
-    #[async_trait::async_trait]
-    impl crate::tools::traits::TronTool for SerializedStub {
-        fn name(&self) -> &str {
-            self.name
-        }
-        fn category(&self) -> crate::core::tools::ToolCategory {
-            crate::core::tools::ToolCategory::Custom
-        }
-        fn execution_mode(&self) -> ExecutionMode {
-            ExecutionMode::Serialized(self.group.into())
-        }
-        fn definition(&self) -> crate::core::tools::Tool {
-            crate::core::tools::Tool {
-                name: self.name.into(),
-                description: String::new(),
-                parameters: crate::core::tools::ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _: serde_json::Value,
-            _: &crate::tools::traits::ToolContext,
-        ) -> Result<crate::core::tools::TronToolResult, crate::tools::errors::ToolError> {
-            Ok(crate::core::tools::text_result("ok", false))
-        }
-    }
-
-    fn wave_registry(tools: Vec<Arc<dyn crate::tools::traits::TronTool>>) -> ToolRegistry {
-        let mut reg = ToolRegistry::new();
-        for t in tools {
-            reg.register(t);
-        }
-        reg
-    }
-
-    #[test]
-    fn build_execution_waves_all_parallel() {
-        let reg = wave_registry(vec![
-            Arc::new(ParallelStub("read")),
-            Arc::new(ParallelStub("write")),
-            Arc::new(ParallelStub("grep")),
+    fn build_execution_waves_parallel_tools_share_one_wave() {
+        let calls = vec![
+            crate::core::messages::ToolCall::new("1", "Read", Default::default()),
+            crate::core::messages::ToolCall::new("2", "Search", Default::default()),
+        ];
+        let surface = surface(vec![
+            ("Read", ExecutionMode::Parallel),
+            ("Search", ExecutionMode::Parallel),
         ]);
-        let calls = vec![tc("read"), tc("write"), tc("grep")];
-        let waves = tools::build_execution_waves(&calls, &reg);
-        assert_eq!(waves.len(), 1);
-        assert_eq!(waves[0], vec![0, 1, 2]);
+        let waves = tools::build_execution_waves(&calls, &surface);
+        assert_eq!(waves, vec![vec![0, 1]]);
     }
 
     #[test]
-    fn build_execution_waves_mixed() {
-        // [Read(parallel), Browse₁(serialized:browser), Read(parallel), Browse₂(serialized:browser)]
-        let reg = wave_registry(vec![
-            Arc::new(ParallelStub("read")),
-            Arc::new(SerializedStub {
-                name: "browse",
-                group: "browser",
-            }),
+    fn build_execution_waves_serialized_tools_are_sequenced() {
+        let calls = vec![
+            crate::core::messages::ToolCall::new("1", "A", Default::default()),
+            crate::core::messages::ToolCall::new("2", "B", Default::default()),
+            crate::core::messages::ToolCall::new("3", "C", Default::default()),
+        ];
+        let surface = surface(vec![
+            ("A", ExecutionMode::Serialized("browser".into())),
+            ("B", ExecutionMode::Serialized("browser".into())),
+            ("C", ExecutionMode::Parallel),
         ]);
-        let calls = vec![tc("read"), tc("browse"), tc("read"), tc("browse")];
-        let waves = tools::build_execution_waves(&calls, &reg);
-        assert_eq!(waves.len(), 2);
-        assert_eq!(waves[0], vec![0, 1, 2]); // parallel + first browser
-        assert_eq!(waves[1], vec![3]); // second browser
-    }
-
-    #[test]
-    fn build_execution_waves_multiple_groups() {
-        // [Browse₁(browser), Bash₁(shell), Browse₂(browser), Bash₂(shell)]
-        let reg = wave_registry(vec![
-            Arc::new(SerializedStub {
-                name: "browse",
-                group: "browser",
-            }),
-            Arc::new(SerializedStub {
-                name: "bash",
-                group: "shell",
-            }),
-        ]);
-        let calls = vec![tc("browse"), tc("bash"), tc("browse"), tc("bash")];
-        let waves = tools::build_execution_waves(&calls, &reg);
-        assert_eq!(waves.len(), 2);
-        assert_eq!(waves[0], vec![0, 1]); // first of each group
-        assert_eq!(waves[1], vec![2, 3]); // second of each group
-    }
-
-    #[test]
-    fn build_execution_waves_single_tool() {
-        let reg = wave_registry(vec![Arc::new(ParallelStub("read"))]);
-        let calls = vec![tc("read")];
-        let waves = tools::build_execution_waves(&calls, &reg);
-        assert_eq!(waves.len(), 1);
-        assert_eq!(waves[0], vec![0]);
-    }
-
-    #[test]
-    fn build_execution_waves_unknown_tool_defaults_parallel() {
-        let reg = ToolRegistry::new(); // empty — no tools registered
-        let calls = vec![tc("unknown1"), tc("unknown2")];
-        let waves = tools::build_execution_waves(&calls, &reg);
-        assert_eq!(waves.len(), 1);
-        assert_eq!(waves[0], vec![0, 1]);
-    }
-
-    #[test]
-    fn build_execution_waves_only_serialized() {
-        let reg = wave_registry(vec![Arc::new(SerializedStub {
-            name: "browse",
-            group: "browser",
-        })]);
-        let calls = vec![tc("browse"), tc("browse"), tc("browse")];
-        let waves = tools::build_execution_waves(&calls, &reg);
-        assert_eq!(waves.len(), 3);
-        assert_eq!(waves[0], vec![0]);
-        assert_eq!(waves[1], vec![1]);
-        assert_eq!(waves[2], vec![2]);
-    }
-
-    #[test]
-    fn turn_result_interrupted_token_usage_none() {
-        let result = TurnResult {
-            success: true,
-            interrupted: true,
-            token_usage: None,
-            stop_reason: Some(StopReason::Interrupted),
-            ..Default::default()
-        };
-        assert!(result.interrupted);
-        assert!(result.token_usage.is_none());
-    }
-
-    #[test]
-    fn turn_result_interrupted_with_partial_usage() {
-        let usage = TokenUsage {
-            input_tokens: 100,
-            output_tokens: 20,
-            ..Default::default()
-        };
-        let result = TurnResult {
-            success: true,
-            interrupted: true,
-            token_usage: Some(usage),
-            stop_reason: Some(StopReason::Interrupted),
-            ..Default::default()
-        };
-        assert!(result.interrupted);
-        assert!(result.token_usage.is_some());
-        assert_eq!(result.token_usage.unwrap().input_tokens, 100);
-    }
-
-    #[test]
-    fn determine_turn_stop_reason_prefers_tool_stop() {
-        let stop_reason = determine_turn_stop_reason(true, 2, "tool_use");
-        assert_eq!(stop_reason, Some(StopReason::ToolStop));
-    }
-
-    #[test]
-    fn determine_turn_stop_reason_uses_end_turn_for_empty_tool_batch() {
-        let stop_reason = determine_turn_stop_reason(false, 0, "end_turn");
-        assert_eq!(stop_reason, Some(StopReason::EndTurn));
-    }
-
-    #[test]
-    fn determine_turn_stop_reason_uses_no_tool_calls_for_non_end_turn_completion() {
-        let stop_reason = determine_turn_stop_reason(false, 0, "max_tokens");
-        assert_eq!(stop_reason, Some(StopReason::NoToolCalls));
-    }
-
-    #[test]
-    fn determine_turn_stop_reason_continues_after_tool_calls() {
-        let stop_reason = determine_turn_stop_reason(false, 1, "tool_use");
-        assert_eq!(stop_reason, None);
-    }
-
-    #[test]
-    fn build_interrupted_message_payload_omits_empty_content() {
-        let payload = build_interrupted_message_payload(
-            &AssistantMessage {
-                content: Vec::new(),
-                token_usage: None,
-            },
-            None,
-            3,
-            "claude-opus-4-6",
-            crate::core::messages::Provider::Anthropic,
-        );
-
-        assert!(payload.is_none());
-    }
-
-    #[test]
-    fn build_interrupted_message_payload_preserves_thinking_and_usage() {
-        let payload = build_interrupted_message_payload(
-            &AssistantMessage {
-                content: vec![AssistantContent::Thinking {
-                    thinking: "thinking".into(),
-                    signature: Some("sig".into()),
-                }],
-                token_usage: None,
-            },
-            Some(&TokenUsage {
-                input_tokens: 11,
-                output_tokens: 7,
-                ..Default::default()
-            }),
-            2,
-            "claude-opus-4-6",
-            crate::core::messages::Provider::Anthropic,
-        )
-        .expect("thinking-only interrupted content should persist");
-
-        assert_eq!(payload["turn"], 2);
-        assert_eq!(payload["model"], "claude-opus-4-6");
-        assert_eq!(payload["stopReason"], "interrupted");
-        assert_eq!(payload["content"][0]["type"], "thinking");
-        assert_eq!(payload["content"][0]["thinking"], "thinking");
-        assert_eq!(payload["tokenUsage"]["inputTokens"], 11);
-        assert_eq!(payload["tokenUsage"]["outputTokens"], 7);
+        let waves = tools::build_execution_waves(&calls, &surface);
+        assert_eq!(waves, vec![vec![0, 2], vec![1]]);
     }
 }

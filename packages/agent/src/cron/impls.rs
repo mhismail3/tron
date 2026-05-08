@@ -28,7 +28,7 @@ pub struct CronAgentTurnExecutor {
     event_store: Arc<crate::events::EventStore>,
     session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
     provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
-    tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
+    engine_host: crate::engine::EngineHostHandle,
     profile_runtime: Arc<crate::runtime::ProfileRuntime>,
     origin: String,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
@@ -40,7 +40,7 @@ impl CronAgentTurnExecutor {
         event_store: Arc<crate::events::EventStore>,
         session_manager: Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
         provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
-        tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
+        engine_host: crate::engine::EngineHostHandle,
         profile_runtime: Arc<crate::runtime::ProfileRuntime>,
         origin: String,
         subagent_manager: Option<
@@ -51,7 +51,7 @@ impl CronAgentTurnExecutor {
             event_store,
             session_manager,
             provider_factory,
-            tool_factory,
+            engine_host,
             profile_runtime,
             origin,
             subagent_manager,
@@ -186,11 +186,20 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
             ..crate::runtime::AgentConfig::default()
         };
 
-        // 4. Create tools
-        let tools = (self.tool_factory)();
-
-        // 5. Build denied tools list from user restrictions
-        let tool_names: Vec<String> = tools.names();
+        // 4. Build denied tools list from user restrictions using the live tool catalog.
+        let tool_names = match crate::tools::capability_surface::list_model_tool_names(
+            &self.engine_host,
+            &session_id,
+            workspace_id,
+        )
+        .await
+        {
+            Ok(names) => names,
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to read live tool catalog for cron restrictions");
+                Vec::new()
+            }
+        };
         let denied_tools = tool_restrictions
             .map(|r| r.to_denied_list(&tool_names))
             .unwrap_or_default();
@@ -203,7 +212,6 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
             session_id.clone(),
             crate::runtime::CreateAgentOpts {
                 provider,
-                tools,
                 context_policy: session_plan.runtime_context_policy(),
                 tool_policy: session_plan.tool_policy.clone(),
                 guardrails: None,
@@ -223,7 +231,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
-                engine_host: None,
+                engine_host: Some(self.engine_host.clone()),
             },
         );
 
@@ -490,7 +498,7 @@ mod tests {
             store.clone(),
             mgr.clone(),
             factory,
-            Arc::new(crate::tools::registry::ToolRegistry::new),
+            crate::engine::EngineHostHandle::new_in_memory().unwrap(),
             make_profile_runtime(),
             "http://localhost:0".into(),
             None,
@@ -536,7 +544,7 @@ mod tests {
             store.clone(),
             mgr.clone(),
             factory,
-            Arc::new(crate::tools::registry::ToolRegistry::new),
+            crate::engine::EngineHostHandle::new_in_memory().unwrap(),
             make_profile_runtime(),
             "http://localhost:0".into(),
             None,
@@ -574,7 +582,7 @@ mod tests {
             store.clone(),
             mgr.clone(),
             factory,
-            Arc::new(crate::tools::registry::ToolRegistry::new),
+            crate::engine::EngineHostHandle::new_in_memory().unwrap(),
             make_profile_runtime(),
             "http://localhost:0".into(),
             None,

@@ -205,9 +205,18 @@ pub(crate) fn build_summarizer(
     }
 }
 
-pub(crate) fn tool_definitions(deps: &Deps) -> Vec<Tool> {
-    deps.agent_deps
-        .as_ref()
-        .map(|deps| (deps.tool_factory)().definitions())
-        .unwrap_or_default()
+pub(crate) async fn tool_definitions(deps: &Deps, session_id: &str) -> Vec<Tool> {
+    match crate::tools::capability_surface::list_model_tools(&deps.engine_host, session_id, None)
+        .await
+    {
+        Ok(tools) => tools,
+        Err(error) => {
+            tracing::warn!(
+                session_id,
+                error = %error,
+                "failed to read live tool catalog for context assembly"
+            );
+            Vec::new()
+        }
+    }
 }

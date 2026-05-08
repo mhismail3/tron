@@ -11,7 +11,6 @@ pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
 pub(crate) use deps::Deps;
-pub(crate) use operations::register_builtin_tools_for_setup;
 
 use crate::server::domains::worker::DomainRegistrationContext;
 use crate::server::domains::worker::DomainWorkerModule;
@@ -21,10 +20,13 @@ pub(crate) fn worker_module(
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
+        let mut registrations =
+            handlers::function_registrations(contract::capabilities()?, domain_deps)?;
+        registrations.extend(operations::builtin_function_registrations(deps)?);
         crate::server::domains::worker::domain_worker_module(
             "tool",
             contract::STREAM_TOPICS,
-            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+            registrations,
         )
     }
 }

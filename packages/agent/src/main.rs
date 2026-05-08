@@ -11,7 +11,7 @@
 //! tron::engine        Live capability fabric, host lifecycle, engine ledger
 //! tron::events        SQLite event store, migrations, session reconstruction
 //! tron::llm           Provider trait, model registry, SSE streaming, auth
-//! tron::tools         Tool trait, registry, filesystem/bash/web/subagent tools
+//! tron::tools         Tool trait, canonical tool::* implementations
 //! tron::mcp           MCP router and always-on McpSearch/McpCall meta-tools
 //! tron::skills        SKILL.md parser, registry, context injection
 //! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
@@ -57,14 +57,10 @@ use tron::server::config::ServerConfig;
 use tron::server::runtime::streams::EngineStreamEventPump;
 use tron::server::server::TronServer;
 use tron::server::shared::context::{
-    AgentDeps, ServerRuntimeContext, register_blocking_supervisor_shutdown,
+    AgentDeps, ServerRuntimeContext, ToolRuntimeConfig, register_blocking_supervisor_shutdown,
 };
 use tron::settings::db_path_policy::resolve_production_db_path;
 use tron::skills::registry::SkillRegistry;
-use tron::tools::registry::ToolRegistry;
-
-mod tool_factory;
-use tool_factory::ToolRegistryConfig;
 
 /// Resolved push notification transport.
 #[cfg(feature = "apns")]
@@ -393,8 +389,6 @@ fn init_push() -> PushServiceOption {
 
 /// MCP initialization result.
 struct McpState {
-    search: Arc<dyn tron::tools::traits::TronTool>,
-    call: Arc<dyn tron::tools::traits::TronTool>,
     router: Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>,
 }
 
@@ -435,21 +429,12 @@ async fn init_mcp(
         );
     }
     let router = Arc::new(tokio::sync::RwLock::new(router));
-    let search = Arc::new(tron::mcp::search_tool::McpSearchTool::new(router.clone()))
-        as Arc<dyn tron::tools::traits::TronTool>;
-    let call = Arc::new(tron::mcp::call_tool::McpCallTool::new(router.clone()))
-        as Arc<dyn tron::tools::traits::TronTool>;
-
     // Shutdown is coordinated via `ShutdownCoordinator::register_phase_hook`
     // in main after the server is built — see the `ShutdownPhase::Mcp`
     // registration there. INVARIANT: there is exactly one place that drives
     // `McpRouter::shutdown_all` and that place observes phase ordering.
 
-    McpState {
-        search,
-        call,
-        router,
-    }
+    McpState { router }
 }
 
 /// Shared state produced by service initialization, consumed by server setup.
@@ -459,10 +444,12 @@ struct ServiceState {
     orchestrator: Arc<Orchestrator>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
     memory_registry: Arc<parking_lot::Mutex<tron::runtime::memory::MemoryRegistry>>,
+    engine_host: tron::engine::EngineHostHandle,
     agent_deps: Option<AgentDeps>,
     shared_subagent_manager: Option<Arc<SubagentManager>>,
     hook_abort_tracker: Arc<tron::runtime::hooks::abort_tracker::HookAbortTracker>,
-    tool_config: Arc<ToolRegistryConfig>,
+    push_service: PushServiceOption,
+    tool_runtime: ToolRuntimeConfig,
     process_manager: Arc<dyn tron::tools::traits::ProcessManagerOps>,
     job_manager: Arc<dyn tron::tools::traits::JobManagerOps>,
     output_buffer_registry: Arc<tron::runtime::orchestrator::output_buffer::OutputBufferRegistry>,
@@ -478,7 +465,7 @@ async fn init_services(
     engine_host: tron::engine::EngineHostHandle,
     origin: &str,
     push_service: PushServiceOption,
-    mcp: McpState,
+    _mcp: McpState,
 ) -> anyhow::Result<ServiceState> {
     let session_manager =
         Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.to_owned()));
@@ -512,21 +499,32 @@ async fn init_services(
     let output_buffer_registry =
         Arc::new(tron::runtime::orchestrator::output_buffer::OutputBufferRegistry::new());
 
-    let tool_config = Arc::new(ToolRegistryConfig {
-        event_store: event_store.clone(),
-        auth_path: auth_path(),
-        push_service,
+    let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
+        #[cfg(feature = "apns")]
+        {
+            match &push_service {
+                Some(PushService::Relay(relay)) => Arc::new(
+                    tron::server::platform::apns::relay_delegate::RelayNotifyDelegate::new(
+                        relay.clone(),
+                        event_store.clone(),
+                    ),
+                ),
+                None => Arc::new(tron::tools::backends::StubNotifyDelegate),
+            }
+        }
+        #[cfg(not(feature = "apns"))]
+        {
+            Arc::new(tron::tools::backends::StubNotifyDelegate)
+        }
+    };
+    let tool_runtime = ToolRuntimeConfig {
         http_client: shared_http_client,
         sandbox_settings: settings.tools.bash.sandbox.clone(),
         computer_use_settings: settings.tools.computer_use.clone(),
-        display_event_tx: Some(orchestrator.broadcast().sender()),
-        engine_host,
-        mcp_search: mcp.search,
-        mcp_call: mcp.call,
-    });
+        notify_delegate,
+    };
 
     // Subagent manager
-    let profile_runtime_for_tools = profile_runtime.clone();
     let subagent_manager = Arc::new(SubagentManager::new(
         session_manager.clone(),
         event_store.clone(),
@@ -542,7 +540,7 @@ async fn init_services(
     subagent_manager.set_run_state_probe(orchestrator.run_state_probe());
     // Wire skill registry so subagents spawned with `skills: [...]`
     // honor each skill's frontmatter `deniedTools` / `allowedTools`
-    // via hard tool-registry removal. Without this, subagent skill
+    // via hard tool-catalog removal. Without this, subagent skill
     // restrictions would silently no-op (see
     // `SubagentManager::compute_denied_tools`).
     subagent_manager.set_skill_registry(skill_registry.clone());
@@ -555,20 +553,10 @@ async fn init_services(
             subagent_ops,
         ));
 
-    let tool_factory = build_tool_factory(
-        &tool_config,
-        &subagent_manager,
-        &job_manager,
-        &profile_runtime_for_tools,
-    );
-
-    // Break circular dep: SubagentManager needs tool_factory to spawn children
-    subagent_manager.set_tool_factory(tool_factory.clone());
-    subagent_manager.set_engine_host(tool_config.engine_host.clone());
+    subagent_manager.set_engine_host(engine_host.clone());
 
     let agent_deps = Some(AgentDeps {
         provider_factory: provider_factory.clone(),
-        tool_factory,
         guardrails: None,
     });
     let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
@@ -588,10 +576,12 @@ async fn init_services(
         orchestrator,
         skill_registry,
         memory_registry,
+        engine_host,
         agent_deps,
         shared_subagent_manager,
         hook_abort_tracker,
-        tool_config,
+        push_service,
+        tool_runtime,
         process_manager,
         job_manager,
         output_buffer_registry,
@@ -623,62 +613,6 @@ async fn init_provider_factory(
     }
 
     (provider_factory, shared_http_client)
-}
-
-/// Build the tool factory closure that creates a fresh ToolRegistry per agent run.
-///
-/// Adds subagent spawning, job management, and LLM-summarizer-backed WebFetch
-/// on top of the base registry from `create_tool_registry()`.
-///
-/// INVARIANT: `SubagentManager` and `JobManager` are created once at startup
-/// (`main.rs` bootstrap) and are NEVER swapped. The closure below captures
-/// `Arc` clones of each and relies on this invariant — if either becomes
-/// swap-capable later, the closure's captured `Arc` would pin the old
-/// instance and the factory would silently diverge from new subagent/job
-/// work. Revisit M33 in the audit plan if introducing a swap path.
-fn build_tool_factory(
-    tool_config: &Arc<ToolRegistryConfig>,
-    subagent_manager: &Arc<SubagentManager>,
-    job_manager: &Arc<dyn tron::tools::traits::JobManagerOps>,
-    profile_runtime: &Arc<tron::runtime::ProfileRuntime>,
-) -> Arc<dyn Fn() -> ToolRegistry + Send + Sync> {
-    let config = tool_config.clone();
-    let spawner: Arc<dyn tron::tools::traits::SubagentSpawner> = subagent_manager.clone();
-    let profile_runtime = profile_runtime.clone();
-    let sm_for_summarizer = subagent_manager.clone();
-    let jm_for_tools = job_manager.clone();
-    Arc::new(move || {
-        let mut registry = tool_factory::create_tool_registry(&config);
-        registry.register(Arc::new(
-            tron::tools::subagent::spawn::SpawnSubagentTool::with_profile_runtime(
-                spawner.clone(),
-                profile_runtime.clone(),
-            ),
-        ));
-
-        // Job management tools
-        registry.register(Arc::new(
-            tron::tools::system::manage_process::ManageJobTool::new(jm_for_tools.clone()),
-        ));
-        registry.register(Arc::new(tron::tools::system::wait::WaitTool::new(
-            jm_for_tools.clone(),
-        )));
-
-        // Re-register WebFetch with LLM summarizer (overrides the basic version)
-        let summarizer: Arc<dyn tron::tools::traits::ContentSummarizer> = Arc::new(
-            tron::runtime::agent::compaction_handler::SubagentContentSummarizer {
-                manager: sm_for_summarizer.clone(),
-            },
-        );
-        let http: Arc<dyn tron::tools::traits::HttpClient> = Arc::new(
-            tron::tools::backends::ReqwestHttpClient::from_client(config.http_client.clone()),
-        );
-        registry.register(Arc::new(
-            tron::tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
-        ));
-
-        registry
-    })
 }
 
 /// Register transcription sidecar startup with graceful shutdown tracking.
@@ -735,7 +669,7 @@ fn init_cron(
             services.event_store.clone(),
             services.session_manager.clone(),
             deps.provider_factory.clone(),
-            deps.tool_factory.clone(),
+            services.engine_host.clone(),
             profile_runtime.clone(),
             origin.to_owned(),
             services.shared_subagent_manager.clone(),
@@ -747,7 +681,7 @@ fn init_cron(
         push_notifier: {
             #[cfg(feature = "apns")]
             {
-                services.tool_config.push_service.as_ref().map(|ps| {
+                services.push_service.as_ref().map(|ps| {
                     Arc::new(
                         tron::server::domains::cron::callbacks::CronPushNotifier::new(
                             ps.as_sender(),
@@ -764,7 +698,7 @@ fn init_cron(
         event_injector: Some(Arc::new(tron::cron::impls::CronSystemEventInjector::new(
             services.event_store.clone(),
         )) as _),
-        http_client: services.tool_config.http_client.clone(),
+        http_client: services.tool_runtime.http_client.clone(),
         pool: services.event_store.pool().clone(),
     };
     let scheduler = Arc::new(tron::cron::CronScheduler::new(
@@ -836,6 +770,7 @@ fn build_server_runtime_context(
         settings_path,
         profile_runtime,
         agent_deps: services.agent_deps,
+        tool_runtime: services.tool_runtime,
         server_start_time: std::time::Instant::now(),
         transcription_engine: services.transcription_engine,
         subagent_manager: services.shared_subagent_manager,

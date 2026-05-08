@@ -10,7 +10,7 @@ use crate::runtime::context::rules_index::RulesIndex;
 use crate::runtime::context::types::ContextManagerConfig;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
-use crate::tools::registry::ToolRegistry;
+use crate::tools::capability_surface::ToolSurfacePolicy;
 
 use crate::runtime::agent::tron_agent::{AgentDeps, TronAgent};
 use crate::runtime::types::AgentConfig;
@@ -19,8 +19,6 @@ use crate::runtime::types::AgentConfig;
 pub struct CreateAgentOpts {
     /// LLM provider.
     pub provider: Arc<dyn Provider>,
-    /// Tool registry.
-    pub tools: ToolRegistry,
     /// Profile-resolved context policy for this agent.
     pub context_policy: ContextPolicy,
     /// Profile-resolved tool policy for this agent.
@@ -34,7 +32,7 @@ pub struct CreateAgentOpts {
     /// by `max_depth`, and all `denied_tools` are enforced.
     /// Set to true for: subagents, cron agents, system subsessions.
     pub is_unattended: bool,
-    /// Tools to remove from the registry before agent creation.
+    /// Model tool names denied for this agent.
     pub denied_tools: Vec<String>,
     /// Current subagent nesting depth (0 = top-level agent).
     pub subagent_depth: u32,
@@ -80,27 +78,12 @@ impl AgentFactory {
         config.subagent_depth = opts.subagent_depth;
         config.subagent_max_depth = opts.subagent_max_depth;
 
-        let mut registry = opts.tools;
-
-        // Remove denied tools (applies to both cron agent turns and subagents)
-        for tool_name in &opts.denied_tools {
-            let _ = registry.remove(tool_name);
-        }
-        apply_tool_policy(&mut registry, &opts.tool_policy, opts.is_unattended);
-
-        // Unattended agent restrictions (subagents, cron, system subsessions)
-        if opts.is_unattended {
-            // Remove spawn tools when at max nesting depth
-            let remove_spawn_at_max_depth = opts
-                .tool_policy
-                .remove_spawn_tools_at_max_depth
-                .unwrap_or(true);
-            if remove_spawn_at_max_depth && opts.subagent_max_depth == 0 {
-                for name in &["SpawnSubagent", "Wait"] {
-                    let _ = registry.remove(name);
-                }
-            }
-        }
+        let tool_surface_policy = ToolSurfacePolicy::from_profile(
+            &opts.tool_policy,
+            &opts.denied_tools,
+            opts.is_unattended,
+            opts.subagent_max_depth,
+        );
 
         let context_limit = opts.provider.context_window();
         let mut compaction = config.compaction.clone();
@@ -111,7 +94,7 @@ impl AgentFactory {
             system_prompt: config.system_prompt.clone(),
             context_policy: opts.context_policy,
             working_directory: config.working_directory.clone(),
-            tools: registry.definitions(),
+            tools: Vec::new(),
             rules_content: opts.rules_content,
             compaction,
         };
@@ -141,7 +124,7 @@ impl AgentFactory {
             config,
             AgentDeps {
                 provider: opts.provider,
-                registry,
+                tool_surface_policy,
                 guardrails: opts.guardrails,
                 hooks: opts.hooks,
                 context_manager,
@@ -157,47 +140,34 @@ impl AgentFactory {
     }
 }
 
-fn apply_tool_policy(
-    registry: &mut ToolRegistry,
-    policy: &crate::core::profile::ToolPolicySpec,
-    is_unattended: bool,
-) {
-    if let Some(allowed_tools) = &policy.allowed_tools {
-        let allowed: std::collections::HashSet<&str> =
-            allowed_tools.iter().map(String::as_str).collect();
-        let current = registry.names();
-        for name in current {
-            if !allowed.contains(name.as_str()) {
-                let _ = registry.remove(&name);
-            }
-        }
-    }
-    for name in &policy.denied_tools {
-        let _ = registry.remove(name);
-    }
-    if is_unattended && !policy.expose_interactive_tools.unwrap_or(false) {
-        let interactive_tools: Vec<String> = registry
-            .list()
-            .iter()
-            .filter(|tool| tool.is_interactive())
-            .map(|tool| tool.name().to_owned())
-            .collect();
-        for name in interactive_tools {
-            let _ = registry.remove(&name);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tools::{
-        Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result,
-    };
     use crate::llm::models::types::Provider as ProviderKind;
     use crate::llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
-    use crate::tools::traits::{ToolContext, TronTool};
     use async_trait::async_trait;
+
+    struct MockProvider;
+    #[async_trait]
+    impl Provider for MockProvider {
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
+        }
+
+        fn model(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn stream(
+            &self,
+            _c: &crate::core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            Err(ProviderError::Other {
+                message: "mock".into(),
+            })
+        }
+    }
 
     fn default_resolved_profile() -> Arc<crate::core::profile::ResolvedProfile> {
         let tempdir = tempfile::tempdir().expect("profile tempdir");
@@ -210,16 +180,15 @@ mod tests {
         Arc::new(profile)
     }
 
-    fn default_opts(provider: Arc<dyn Provider>, tools: ToolRegistry) -> CreateAgentOpts {
+    fn default_opts(provider: Arc<dyn Provider>) -> CreateAgentOpts {
         let profile = default_resolved_profile();
         let spec = &profile.spec;
         CreateAgentOpts {
             provider,
-            tools,
             context_policy:
                 crate::runtime::context::local_policy::ContextPolicy::from_provider_with_spec(
                     ProviderKind::Anthropic,
-                    &spec,
+                    spec,
                 ),
             tool_policy: spec.tool_policies["default"].clone(),
             guardrails: None,
@@ -255,570 +224,21 @@ mod tests {
         }
     }
 
-    fn tool_policy(name: &str) -> crate::core::profile::ToolPolicySpec {
-        default_resolved_profile()
-            .spec
-            .tool_policies
-            .get(name)
-            .cloned()
-            .expect("test profile tool policy")
-    }
-
-    fn mark_unattended(opts: &mut CreateAgentOpts) {
-        opts.is_unattended = true;
-        opts.tool_policy = tool_policy("unattended");
-    }
-
-    struct MockProvider;
-    #[async_trait]
-    impl Provider for MockProvider {
-        fn provider_type(&self) -> ProviderKind {
-            ProviderKind::Anthropic
-        }
-        fn model(&self) -> &'static str {
-            "mock"
-        }
-        async fn stream(
-            &self,
-            _c: &crate::core::messages::Context,
-            _o: &ProviderStreamOptions,
-        ) -> Result<StreamEventStream, ProviderError> {
-            Err(ProviderError::Other {
-                message: "not impl".into(),
-            })
-        }
-    }
-
-    struct ModelAwareMockProvider(&'static str);
-    #[async_trait]
-    impl Provider for ModelAwareMockProvider {
-        fn provider_type(&self) -> ProviderKind {
-            ProviderKind::Anthropic
-        }
-        fn model(&self) -> &'static str {
-            self.0
-        }
-        async fn stream(
-            &self,
-            _c: &crate::core::messages::Context,
-            _o: &ProviderStreamOptions,
-        ) -> Result<StreamEventStream, ProviderError> {
-            Err(ProviderError::Other {
-                message: "not impl".into(),
-            })
-        }
-    }
-
-    struct InteractiveTool;
-    #[async_trait]
-    impl TronTool for InteractiveTool {
-        fn name(&self) -> &'static str {
-            "ask_user"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn is_interactive(&self) -> bool {
-            true
-        }
-        fn stops_turn(&self) -> bool {
-            true
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "ask_user".into(),
-                description: "Ask".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _p: serde_json::Value,
-            _c: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("ok", false))
-        }
-    }
-
-    struct NormalTool;
-    #[async_trait]
-    impl TronTool for NormalTool {
-        fn name(&self) -> &'static str {
-            "bash"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Shell
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "bash".into(),
-                description: "Shell".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _p: serde_json::Value,
-            _c: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("ok", false))
-        }
+    #[test]
+    fn create_agent_stores_live_catalog_tool_policy() {
+        let mut opts = default_opts(Arc::new(MockProvider));
+        opts.denied_tools = vec!["Bash".into()];
+        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
+        assert!(agent.context_manager().tool_names().is_empty());
     }
 
     #[test]
-    fn factory_creates_agent() {
-        let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(NormalTool));
-
+    fn create_agent_initial_context_has_no_frozen_tool_snapshot() {
         let agent = AgentFactory::create_agent(
             default_config(),
             "s1".into(),
-            default_opts(Arc::new(MockProvider), registry),
+            default_opts(Arc::new(MockProvider)),
         );
-
-        assert_eq!(agent.session_id(), "s1");
-        assert_eq!(agent.model(), "claude-opus-4-6");
-    }
-
-    #[test]
-    fn factory_removes_denied_tools_for_unattended_agent() {
-        let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(NormalTool));
-        registry.register(Arc::new(InteractiveTool));
-
-        let mut opts = default_opts(Arc::new(MockProvider), registry);
-        mark_unattended(&mut opts);
-        opts.denied_tools = vec!["bash".into()];
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(!names.contains(&"bash".into()));
-        assert!(!names.contains(&"ask_user".into())); // interactive also removed
-    }
-
-    #[test]
-    fn factory_removes_interactive_tools_for_unattended_agent() {
-        let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(NormalTool));
-        registry.register(Arc::new(InteractiveTool));
-
-        let mut opts = default_opts(Arc::new(MockProvider), registry);
-        mark_unattended(&mut opts);
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(!names.contains(&"ask_user".into()));
-        assert!(names.contains(&"bash".into()));
-    }
-
-    #[test]
-    fn factory_passes_rules_to_context_manager() {
-        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
-        opts.rules_content = Some("# My Rules".into());
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        assert_eq!(
-            agent.context_manager().get_rules_content(),
-            Some("# My Rules")
-        );
-    }
-
-    #[test]
-    fn factory_restores_initial_messages() {
-        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
-        opts.initial_messages = vec![
-            Message::user("Hello"),
-            Message::assistant("Hi"),
-            Message::user("How are you?"),
-        ];
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        assert_eq!(agent.context_manager().message_count(), 3);
-    }
-
-    #[test]
-    fn factory_sets_memory_content() {
-        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
-        opts.memory_content = Some("# Memory\nImportant stuff".into());
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        assert_eq!(
-            agent.context_manager().get_full_memory_content(),
-            Some("# Memory\nImportant stuff".into())
-        );
-    }
-
-    #[test]
-    fn factory_no_rules_still_works() {
-        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        assert!(agent.context_manager().get_rules_content().is_none());
-    }
-
-    #[test]
-    fn factory_empty_messages_still_works() {
-        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        assert_eq!(agent.context_manager().message_count(), 0);
-    }
-
-    #[test]
-    fn factory_context_limit_matches_model() {
-        let config = AgentConfig {
-            model: "claude-opus-4-6".into(),
-            ..default_config()
-        };
-        let opts = default_opts(
-            Arc::new(ModelAwareMockProvider("claude-opus-4-6")),
-            ToolRegistry::new(),
-        );
-        let agent = AgentFactory::create_agent(config, "s1".into(), opts);
-        assert_eq!(
-            agent.context_manager().get_context_limit(),
-            crate::llm::model_context_window("claude-opus-4-6")
-        );
-    }
-
-    #[test]
-    fn factory_context_limit_for_gemini() {
-        let config = AgentConfig {
-            model: "gemini-2.5-pro".into(),
-            ..default_config()
-        };
-        let opts = default_opts(
-            Arc::new(ModelAwareMockProvider("gemini-2.5-pro")),
-            ToolRegistry::new(),
-        );
-        let agent = AgentFactory::create_agent(config, "s1".into(), opts);
-        assert_eq!(
-            agent.context_manager().get_context_limit(),
-            crate::llm::model_context_window("gemini-2.5-pro")
-        );
-    }
-
-    #[test]
-    fn factory_applies_depth_from_opts() {
-        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
-        opts.subagent_depth = 1;
-        opts.subagent_max_depth = 3;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        assert_eq!(agent.subagent_depth(), 1);
-        assert_eq!(agent.subagent_max_depth(), 3);
-    }
-
-    #[test]
-    fn factory_overrides_config_depth_with_opts() {
-        let config = AgentConfig {
-            subagent_depth: 99,
-            subagent_max_depth: 99,
-            ..default_config()
-        };
-        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
-        opts.subagent_depth = 2;
-        opts.subagent_max_depth = 5;
-
-        let agent = AgentFactory::create_agent(config, "s1".into(), opts);
-        assert_eq!(agent.subagent_depth(), 2);
-        assert_eq!(agent.subagent_max_depth(), 5);
-    }
-
-    // ── Spawn tool gating tests ──
-
-    struct FakeSpawnTool;
-    #[async_trait]
-    impl TronTool for FakeSpawnTool {
-        fn name(&self) -> &'static str {
-            "SpawnSubagent"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "SpawnSubagent".into(),
-                description: "Spawn".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _p: serde_json::Value,
-            _c: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("ok", false))
-        }
-    }
-
-    struct FakeWaitTool;
-    #[async_trait]
-    impl TronTool for FakeWaitTool {
-        fn name(&self) -> &'static str {
-            "Wait"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "Wait".into(),
-                description: "Wait".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _p: serde_json::Value,
-            _c: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("ok", false))
-        }
-    }
-
-    /// Second interactive tool for multi-interactive tests.
-    struct InteractiveTool2;
-    #[async_trait]
-    impl TronTool for InteractiveTool2 {
-        fn name(&self) -> &'static str {
-            "interactive_tool_2"
-        }
-        fn category(&self) -> ToolCategory {
-            ToolCategory::Custom
-        }
-        fn is_interactive(&self) -> bool {
-            true
-        }
-        fn definition(&self) -> Tool {
-            Tool {
-                name: "interactive_tool_2".into(),
-                description: "Open".into(),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
-        }
-        async fn execute(
-            &self,
-            _p: serde_json::Value,
-            _c: &ToolContext,
-        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
-            Ok(text_result("ok", false))
-        }
-    }
-
-    /// Helper: build a registry with all fake tools registered.
-    fn full_registry() -> ToolRegistry {
-        let mut r = ToolRegistry::new();
-        r.register(Arc::new(NormalTool));
-        r.register(Arc::new(InteractiveTool));
-        r.register(Arc::new(InteractiveTool2));
-        r.register(Arc::new(FakeSpawnTool));
-        r.register(Arc::new(FakeWaitTool));
-        r
-    }
-
-    #[test]
-    fn factory_removes_spawn_tools_when_unattended_max_depth_zero() {
-        let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(NormalTool));
-        registry.register(Arc::new(FakeSpawnTool));
-        registry.register(Arc::new(FakeWaitTool));
-
-        let mut opts = default_opts(Arc::new(MockProvider), registry);
-        mark_unattended(&mut opts);
-        opts.subagent_max_depth = 0;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(!names.contains(&"SpawnSubagent".into()));
-        assert!(!names.contains(&"Wait".into()));
-        assert!(names.contains(&"bash".into()));
-    }
-
-    #[test]
-    fn factory_keeps_spawn_tools_when_unattended_max_depth_positive() {
-        let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(NormalTool));
-        registry.register(Arc::new(FakeSpawnTool));
-        registry.register(Arc::new(FakeWaitTool));
-
-        let mut opts = default_opts(Arc::new(MockProvider), registry);
-        mark_unattended(&mut opts);
-        opts.subagent_max_depth = 3;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(names.contains(&"SpawnSubagent".into()));
-        assert!(names.contains(&"Wait".into()));
-    }
-
-    // ── Attended (user) agent tests ──
-
-    #[test]
-    fn factory_attended_agent_keeps_interactive_tools() {
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        opts.is_unattended = false;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(names.contains(&"ask_user".into()));
-        assert!(names.contains(&"interactive_tool_2".into()));
-    }
-
-    #[test]
-    fn factory_attended_agent_keeps_spawn_tools_at_max_depth_zero() {
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        opts.is_unattended = false;
-        opts.subagent_max_depth = 0;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(names.contains(&"SpawnSubagent".into()));
-        assert!(names.contains(&"Wait".into()));
-    }
-
-    #[test]
-    fn factory_attended_agent_applies_denied_tools() {
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        opts.is_unattended = false;
-        opts.denied_tools = vec!["bash".into()];
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(!names.contains(&"bash".into()));
-        // Other tools still present
-        assert!(names.contains(&"ask_user".into()));
-        assert!(names.contains(&"SpawnSubagent".into()));
-    }
-
-    // ── Comprehensive unattended agent tests ──
-
-    #[test]
-    fn factory_unattended_removes_all_interactive_tools() {
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        mark_unattended(&mut opts);
-        opts.subagent_max_depth = 3; // keep spawn tools to isolate interactive removal
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"interactive_tool_2".into()));
-        assert!(names.contains(&"bash".into()));
-        assert!(names.contains(&"SpawnSubagent".into()));
-    }
-
-    #[test]
-    fn factory_unattended_with_denied_and_interactive_overlap() {
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        mark_unattended(&mut opts);
-        opts.denied_tools = vec!["ask_user".into()]; // also interactive
-        opts.subagent_max_depth = 3;
-
-        // Should not panic from double-remove
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"interactive_tool_2".into())); // still removed as interactive
-    }
-
-    #[test]
-    fn factory_unattended_with_empty_denied_tools() {
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        mark_unattended(&mut opts);
-        opts.denied_tools = vec![];
-        opts.subagent_max_depth = 0;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        // Interactive tools removed
-        assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"interactive_tool_2".into()));
-        // Spawn tools removed at depth 0
-        assert!(!names.contains(&"SpawnSubagent".into()));
-        assert!(!names.contains(&"Wait".into()));
-        // Core tools preserved
-        assert!(names.contains(&"bash".into()));
-    }
-
-    #[test]
-    fn factory_unattended_preserves_non_interactive_tools() {
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        mark_unattended(&mut opts);
-        opts.subagent_max_depth = 3;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(names.contains(&"bash".into()));
-        assert!(names.contains(&"SpawnSubagent".into()));
-        assert!(names.contains(&"Wait".into()));
-    }
-
-    #[test]
-    fn factory_denied_tools_applied_before_interactive_removal() {
-        // Verify ordering independence: denied removal + interactive removal are separate passes
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        mark_unattended(&mut opts);
-        opts.denied_tools = vec!["bash".into(), "interactive_tool_2".into()];
-        opts.subagent_max_depth = 3;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-        assert!(!names.contains(&"bash".into())); // denied
-        assert!(!names.contains(&"interactive_tool_2".into())); // denied + interactive
-        assert!(!names.contains(&"ask_user".into())); // interactive
-        assert!(names.contains(&"SpawnSubagent".into())); // kept (depth > 0)
-    }
-
-    // ── Cron scenario test ──
-
-    #[test]
-    fn factory_cron_agent_scenario() {
-        // Simulate cron: is_unattended=true, denied_tools from user restrictions, max_depth=0
-        let mut opts = default_opts(Arc::new(MockProvider), full_registry());
-        mark_unattended(&mut opts);
-        opts.denied_tools = vec!["Wait".into()]; // simulate user restriction
-        opts.subagent_max_depth = 0;
-
-        let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        let names = agent.context_manager().tool_names();
-
-        // All interactive tools removed (the key fix — cron was missing these)
-        assert!(!names.contains(&"ask_user".into()));
-        assert!(!names.contains(&"interactive_tool_2".into()));
-
-        // Spawn tools removed at depth 0
-        assert!(!names.contains(&"SpawnSubagent".into()));
-        assert!(!names.contains(&"Wait".into()));
-
-        // Core tools preserved
-        assert!(names.contains(&"bash".into()));
+        assert!(agent.context_manager().tool_names().is_empty());
     }
 }

@@ -24,7 +24,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         session_manager,
         broadcast,
         provider_factory,
-        tool_factory,
         guardrails,
         health_tracker,
         event_store,
@@ -174,7 +173,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         provider_type,
     } = match build_prompt_agent(
         provider_factory,
-        &tool_factory,
         guardrails,
         health_tracker,
         process_manager,

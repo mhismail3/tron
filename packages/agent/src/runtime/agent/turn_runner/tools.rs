@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::core::events::ActivatedRuleInfo;
 use crate::core::messages::{Message, ToolResultMessageContent};
-use crate::tools::registry::ToolRegistry;
+use crate::tools::capability_surface::ResolvedToolSurface;
 use crate::tools::traits::ExecutionMode;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -27,7 +27,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub turn: u32,
     pub stream_result: &'a StreamResult,
     pub context_manager: &'a mut ContextManager,
-    pub registry: &'a ToolRegistry,
+    pub tool_surface: &'a ResolvedToolSurface,
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     pub hooks: &'a Option<Arc<HookEngine>>,
     pub compaction: &'a CompactionHandler,
@@ -124,7 +124,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         params.sequence_counter,
     );
 
-    let waves = build_execution_waves(&params.stream_result.tool_calls, params.registry);
+    let waves = build_execution_waves(&params.stream_result.tool_calls, params.tool_surface);
     let mut results: Vec<Option<ToolExecutionResult>> =
         vec![None; params.stream_result.tool_calls.len()];
 
@@ -139,7 +139,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                 let tool_call = &params.stream_result.tool_calls[idx];
                 let working_dir = &working_dir;
                 let tool_ctx = tool_executor::ToolExecutionContext {
-                    registry: params.registry,
+                    tool_surface: params.tool_surface,
                     guardrails: params.guardrails,
                     hooks: params.hooks,
                     emitter: params.emitter,
@@ -289,14 +289,17 @@ async fn process_tool_results(
 /// - Returns `Vec<Vec<usize>>` where each inner vec is indices into `tool_calls`
 pub(super) fn build_execution_waves(
     tool_calls: &[crate::core::messages::ToolCall],
-    registry: &ToolRegistry,
+    tool_surface: &ResolvedToolSurface,
 ) -> Vec<Vec<usize>> {
     let modes: Vec<_> = tool_calls
         .iter()
         .map(|tc| {
-            registry
+            tool_surface
+                .targets_by_name
                 .get(&tc.name)
-                .map_or(ExecutionMode::Parallel, |t| t.execution_mode())
+                .map_or(ExecutionMode::Parallel, |target| {
+                    target.execution_mode.clone()
+                })
         })
         .collect();
 

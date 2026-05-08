@@ -12,7 +12,6 @@ use crate::llm::provider::ProviderFactory;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
 use crate::tools::errors::ToolError;
-use crate::tools::registry::ToolRegistry;
 use crate::tools::traits::{
     SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner, WaitMode,
 };
@@ -83,13 +82,13 @@ pub struct SubsessionConfig {
     pub max_turns: u32,
     /// Maximum subagent nesting depth (default 0 = no nesting).
     pub max_depth: u32,
-    /// Whether to inherit tools from the parent's tool factory (default false).
+    /// Whether to inherit tools from the parent's live catalog policy (default false).
     pub inherit_tools: bool,
     /// Tools to deny from the inherited set.
     pub denied_tools: Vec<String>,
     /// Optional strict allowlist — when `Some`, ONLY these tools are kept
-    /// (applied after `denied_tools`). Future-proof: new tools added to
-    /// the registry won't leak into a restricted subagent.
+    /// (applied after `denied_tools`). Future-proof: newly registered tools
+    /// will not leak into a restricted subagent.
     pub allowed_tools: Option<Vec<String>>,
     /// Reasoning effort level (default Some(Medium)).
     pub reasoning_level: Option<ReasoningLevel>,
@@ -150,7 +149,6 @@ pub struct SubagentManager {
     broadcast: Arc<EventEmitter>,
     provider_factory: Arc<dyn ProviderFactory>,
     profile_runtime: Arc<crate::runtime::ProfileRuntime>,
-    tool_factory: tokio::sync::OnceCell<Arc<dyn Fn() -> ToolRegistry + Send + Sync>>,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
     /// Worktree coordinator for subagent isolation (each subagent gets its own worktree).
@@ -194,7 +192,6 @@ impl SubagentManager {
             broadcast,
             provider_factory,
             profile_runtime,
-            tool_factory: tokio::sync::OnceCell::new(),
             guardrails,
             hooks,
             worktree_coordinator: std::sync::OnceLock::new(),
@@ -239,11 +236,6 @@ impl SubagentManager {
     /// Set the worktree coordinator for subagent isolation.
     pub fn set_worktree_coordinator(&self, coordinator: Arc<crate::worktree::WorktreeCoordinator>) {
         let _ = self.worktree_coordinator.set(coordinator);
-    }
-
-    /// Set the tool factory (breaks circular dependency with tool registry).
-    pub fn set_tool_factory(&self, factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>) {
-        let _ = self.tool_factory.set(factory);
     }
 
     /// Set the shared engine host for subagents.
@@ -314,6 +306,20 @@ impl SubagentManager {
         denied.into_iter().collect()
     }
 
+    async fn current_tool_names(&self, session_id: &str) -> Vec<String> {
+        let Some(host) = self.engine_host.get() else {
+            return Vec::new();
+        };
+        match crate::tools::capability_surface::list_model_tool_names(host, session_id, None).await
+        {
+            Ok(names) => names,
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to read live tool catalog for subagent policy");
+                Vec::new()
+            }
+        }
+    }
+
     /// Spawn a system subsession for programmatic tasks (hooks, compaction, memory).
     ///
     /// Unlike `spawn()` (tool-agent path), the caller provides the system prompt
@@ -378,33 +384,12 @@ impl SubagentManager {
             spawn_type: Some(spawn_type.as_str().to_owned()),
         });
 
-        // 4. Build tools
-        let tools = if config.inherit_tools {
-            if let Some(factory) = self.tool_factory.get() {
-                let mut registry = factory();
-                for name in &config.denied_tools {
-                    let _ = registry.remove(name);
-                }
-                // Strict allowlist — remove anything not in the allowed set.
-                if let Some(ref allowed) = config.allowed_tools {
-                    let allowed_set: std::collections::HashSet<&str> =
-                        allowed.iter().map(String::as_str).collect();
-                    let to_remove: Vec<String> = registry
-                        .names()
-                        .into_iter()
-                        .filter(|n| !allowed_set.contains(n.as_str()))
-                        .collect();
-                    for name in to_remove {
-                        let _ = registry.remove(&name);
-                    }
-                }
-                registry
-            } else {
-                ToolRegistry::new()
-            }
+        let mut tool_policy = process_plan.tool_policy.clone();
+        if config.inherit_tools {
+            tool_policy.allowed_tools = config.allowed_tools.clone();
         } else {
-            ToolRegistry::new()
-        };
+            tool_policy.allowed_tools = Some(Vec::new());
+        }
 
         execution::spawn_subsession_task(execution::SubsessionTaskLaunch {
             session_manager: self.session_manager.clone(),
@@ -428,7 +413,8 @@ impl SubagentManager {
             spawn_type: spawn_type.as_str().to_owned(),
             tracker: tracker.clone(),
             cancel,
-            tools,
+            tool_policy,
+            denied_tools: config.denied_tools.clone(),
             engine_host: self.engine_host.get().cloned(),
         });
 
@@ -490,23 +476,15 @@ impl SubagentSpawner for SubagentManager {
             });
         }
 
-        let tool_factory = self.tool_factory.get().ok_or_else(|| ToolError::Internal {
-            message: "SubagentManager tool factory not initialized".into(),
-        })?;
-
-        // Build the initial registry once so we can observe the full tool
-        // universe (for allow-list inversion) before `spawn_tool_agent_task`
-        // mutates it via `AgentFactory::create_agent`.
-        let child_registry = tool_factory();
-        let all_tool_names: Vec<String> = child_registry.names();
+        let all_tool_names = self
+            .current_tool_names(config.parent_session_id.as_deref().unwrap_or("subagent"))
+            .await;
 
         // INVARIANT: subagent denied_tools = union(explicit_deniedTools,
-        // each skill's frontmatter denials). Enforced by registry removal
-        // inside `AgentFactory::create_agent`. Without this merge, skills
-        // with `deniedTools: [...]` or `allowedTools: [...]` frontmatter
-        // are honored only as soft XML hints on the main agent but leak
-        // into subagents that supposedly use them — the exact risk
-        // `skill_frontmatter_to_denials` exists to prevent.
+        // each skill's frontmatter denials). AgentFactory applies this merged
+        // policy to the live catalog tool surface for the child agent. Without
+        // this merge, skills with `deniedTools: [...]` or `allowedTools: [...]`
+        // frontmatter would not affect the child agent's model-visible tools.
         let merged_denied_tools = self.compute_denied_tools(
             &config.denied_tools,
             config.skills.as_deref(),
@@ -629,7 +607,6 @@ impl SubagentSpawner for SubagentManager {
             blocking_timeout_ms: config.blocking_timeout_ms,
             tracker: tracker.clone(),
             cancel,
-            tools: child_registry,
             denied_tools: merged_denied_tools,
             run_state_probe: self.probe_clone(),
             spawn_type: SpawnType::ToolAgent.as_str().to_owned(),
