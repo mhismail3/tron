@@ -18,10 +18,14 @@
 //! function ids, schemas, authority, risk, idempotency, leases, compensation,
 //! stream topics, and operation keys. Each domain `deps.rs` narrows setup
 //! context into the service handles that worker actually needs; `handlers.rs`
-//! binds operation keys to domain operations; and flow-critical domains expose
-//! an `operations/` boundary for splitting large workflows without rebuilding a
-//! central dispatcher. The catalog only aggregates those records; it does not
-//! derive domain policy from central method tables.
+//! binds operation keys to domain operations; and flow-critical domains keep
+//! executable bodies in `operations/`. The catalog only aggregates those
+//! records; it does not derive domain policy from central method tables.
+//!
+//! The intended execution flow is:
+//! `/engine frame -> EngineTransportRequest -> EngineTriggerRuntime -> domain
+//! worker -> contract operation key -> handlers.rs -> operations/ -> narrow
+//! deps/service -> engine ledger/streams/queues/approvals/leases`.
 //!
 //! # INVARIANT: no transport-owned behavior
 //!
@@ -41,7 +45,7 @@ use serde_json::{Value, json};
 
 use crate::engine::{
     ActorKind, EngineError, FunctionDefinition, InProcessFunctionHandler, Invocation,
-    PublishStreamEvent, VisibilityScope, WorkerDefinition, WorkerKind,
+    VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use crate::events::EventStore;
 use crate::prompt_library::store;
@@ -52,7 +56,7 @@ use crate::server::domains::filesystem::service as filesystem_service;
 use crate::server::domains::logs::client_logs::{ClientLogEntry, ClientLogsService};
 use crate::server::domains::notifications::inbox::NotificationInboxService;
 use crate::server::platform::codex_app::CodexAppServerManager;
-use crate::server::shared::context::{ServerCapabilityContext, run_blocking_task};
+use crate::server::shared::context::{AgentDeps, ServerCapabilityContext, run_blocking_task};
 use crate::server::shared::error_mapping::{map_cron_error, map_event_store_error};
 use crate::server::shared::errors;
 use crate::server::shared::errors::{CLIENT_VERSION_UNSUPPORTED, CapabilityError, to_json_value};
@@ -61,6 +65,7 @@ use crate::server::shared::params::{
     opt_array, opt_bool, opt_string, opt_u64, require_param, require_string_param,
 };
 use crate::server::shared::validation::validate_string_param;
+use crate::server::shutdown::ShutdownCoordinator;
 use crate::skills::registry::SkillRegistry;
 
 use crate::server::shared::error_mapping::capability_error_to_engine;
@@ -106,18 +111,37 @@ pub(crate) mod worktree;
 
 #[derive(Clone)]
 pub(crate) struct DomainSetupContext {
-    server_context: Arc<ServerCapabilityContext>,
     orchestrator: Arc<Orchestrator>,
     session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
-    agent_deps: Option<crate::server::shared::context::AgentDeps>,
+    agent_deps: Option<AgentDeps>,
     skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,
+    memory_registry: Arc<parking_lot::Mutex<crate::runtime::memory::MemoryRegistry>>,
     profile_runtime: Arc<ProfileRuntime>,
+    health_tracker: Arc<crate::llm::ProviderHealthTracker>,
+    shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
+    subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
+    context_artifacts: Arc<crate::server::domains::session::context::ContextArtifactsService>,
+    origin: String,
     server_start_time: Instant,
     settings_path: PathBuf,
     auth_path: PathBuf,
+    oauth_flows: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<
+                String,
+                crate::server::domains::auth::flows::PendingOAuthFlow,
+            >,
+        >,
+    >,
     mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
     codex_app_server: Option<Arc<CodexAppServerManager>>,
+    device_request_broker: Option<Arc<crate::server::platform::device_broker::DeviceRequestBroker>>,
+    transcription_engine: Arc<std::sync::OnceLock<Arc<crate::transcription::MlxEngine>>>,
+    cron_scheduler: Option<Arc<crate::cron::CronScheduler>>,
+    release_fetcher: Option<Arc<dyn crate::server::updater::ReleaseFetcher>>,
+    hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
     ws_port: Arc<AtomicU16>,
     onboarded_marker_path: PathBuf,
     updater_state_path: PathBuf,
@@ -131,18 +155,30 @@ pub(crate) struct DomainSetupContext {
 impl DomainSetupContext {
     pub(crate) fn from_context(ctx: &ServerCapabilityContext) -> Self {
         Self {
-            server_context: Arc::new(ctx.clone()),
             orchestrator: Arc::clone(&ctx.orchestrator),
             session_manager: Arc::clone(&ctx.session_manager),
             event_store: Arc::clone(&ctx.event_store),
             agent_deps: ctx.agent_deps.clone(),
             skill_registry: Arc::clone(&ctx.skill_registry),
+            memory_registry: Arc::clone(&ctx.memory_registry),
             profile_runtime: Arc::clone(&ctx.profile_runtime),
+            health_tracker: Arc::clone(&ctx.health_tracker),
+            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
+            subagent_manager: ctx.subagent_manager.clone(),
+            worktree_coordinator: ctx.worktree_coordinator.clone(),
+            context_artifacts: Arc::clone(&ctx.context_artifacts),
+            origin: ctx.origin.clone(),
             server_start_time: ctx.server_start_time,
             settings_path: ctx.settings_path.clone(),
             auth_path: ctx.auth_path.clone(),
+            oauth_flows: Arc::clone(&ctx.oauth_flows),
             mcp_router: ctx.mcp_router.clone(),
             codex_app_server: ctx.codex_app_server.clone(),
+            device_request_broker: ctx.device_request_broker.clone(),
+            transcription_engine: Arc::clone(&ctx.transcription_engine),
+            cron_scheduler: ctx.cron_scheduler.clone(),
+            release_fetcher: ctx.release_fetcher.clone(),
+            hook_abort_tracker: Arc::clone(&ctx.hook_abort_tracker),
             ws_port: Arc::clone(&ctx.ws_port),
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),
             updater_state_path: ctx.updater_state_path.clone(),
@@ -360,41 +396,6 @@ domain_handler!(transcription_handler, transcription);
 domain_handler!(tree_handler, tree);
 domain_handler!(voice_notes_handler, voice_notes);
 domain_handler!(worktree_handler, worktree);
-
-async fn publish_engine_stream_event(
-    engine_host: &crate::engine::EngineHostHandle,
-    topic: &str,
-    producer: &str,
-    event: ServerEventPayload,
-    invocation: Option<&Invocation>,
-) {
-    if let Err(error) = engine_host
-        .publish_stream_event(PublishStreamEvent {
-            topic: topic.to_owned(),
-            payload: json!({
-                "serverEvent": event.clone(),
-                "__broadcastScope": event
-                    .session_id
-                    .as_ref()
-                    .map(|session_id| json!({ "kind": "session", "sessionId": session_id }))
-                    .unwrap_or_else(|| json!({ "kind": "all" })),
-                "sourceEventType": event.event_type.clone(),
-            }),
-            visibility: VisibilityScope::System,
-            session_id: invocation
-                .and_then(|invocation| invocation.causal_context.session_id.clone())
-                .or_else(|| event.session_id.clone()),
-            workspace_id: invocation
-                .and_then(|invocation| invocation.causal_context.workspace_id.clone()),
-            producer: producer.to_owned(),
-            trace_id: invocation.map(|invocation| invocation.causal_context.trace_id.clone()),
-            parent_invocation_id: invocation.map(|invocation| invocation.id.clone()),
-        })
-        .await
-    {
-        tracing::warn!(topic, producer, error = %error, "engine stream publication failed");
-    }
-}
 
 fn map_store_err(e: crate::events::EventStoreError) -> CapabilityError {
     match e {

@@ -8,30 +8,31 @@ use parking_lot::RwLock;
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
+use crate::server::domains::context::Deps;
 use crate::server::domains::context::service::{
     PreparedSessionContext, build_active_skill_context, build_context_manager_for_session,
     build_summarizer, retry_context_read, tool_definitions,
 };
 use crate::server::domains::session::context::{RuleFileLevel, collect_dynamic_rule_paths};
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::shared::context::run_blocking_task;
 use crate::server::shared::errors::CapabilityError;
 
 pub(crate) struct ContextQueryService;
 
 impl ContextQueryService {
     pub(crate) async fn get_snapshot(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
-        let context_artifacts = ctx.context_artifacts.clone();
-        let profile_runtime = ctx.profile_runtime.clone();
-        let skill_registry = ctx.skill_registry.clone();
-        let memory_registry = ctx.memory_registry.clone();
-        let tool_definitions = tool_definitions(ctx);
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
+        let context_artifacts = deps.context_artifacts.clone();
+        let profile_runtime = deps.profile_runtime.clone();
+        let skill_registry = deps.skill_registry.clone();
+        let memory_registry = deps.memory_registry.clone();
+        let tool_definitions = tool_definitions(deps);
         let session_id_for_query = session_id.clone();
-        ctx.run_blocking("context.get_snapshot", move || {
+        run_blocking_task("context.get_snapshot", move || {
             retry_context_read("context.get_snapshot", || {
                 let mut prepared = build_context_manager_for_session(
                     &session_id_for_query,
@@ -83,18 +84,18 @@ impl ContextQueryService {
     }
 
     pub(crate) async fn get_detailed_snapshot(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
-        let context_artifacts = ctx.context_artifacts.clone();
-        let profile_runtime = ctx.profile_runtime.clone();
-        let skill_registry = ctx.skill_registry.clone();
-        let memory_registry = ctx.memory_registry.clone();
-        let tool_definitions = tool_definitions(ctx);
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
+        let context_artifacts = deps.context_artifacts.clone();
+        let profile_runtime = deps.profile_runtime.clone();
+        let skill_registry = deps.skill_registry.clone();
+        let memory_registry = deps.memory_registry.clone();
+        let tool_definitions = tool_definitions(deps);
         let session_id_for_query = session_id.clone();
-        ctx.run_blocking("context.get_detailed_snapshot", move || {
+        run_blocking_task("context.get_detailed_snapshot", move || {
             retry_context_read("context.get_detailed_snapshot", || {
                 let prepared = build_context_manager_for_session(
                     &session_id_for_query,
@@ -117,13 +118,13 @@ impl ContextQueryService {
     }
 
     pub(crate) async fn get_audit_trace(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
         turn: Option<u32>,
     ) -> Result<Value, CapabilityError> {
-        let event_store = ctx.event_store.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_query = session_id.clone();
-        ctx.run_blocking("context.get_audit_trace", move || {
+        run_blocking_task("context.get_audit_trace", move || {
             let conn = event_store
                 .pool()
                 .get()
@@ -144,16 +145,16 @@ impl ContextQueryService {
     }
 
     pub(crate) async fn should_compact(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
-        let context_artifacts = ctx.context_artifacts.clone();
-        let profile_runtime = ctx.profile_runtime.clone();
-        let tool_definitions = tool_definitions(ctx);
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
+        let context_artifacts = deps.context_artifacts.clone();
+        let profile_runtime = deps.profile_runtime.clone();
+        let tool_definitions = tool_definitions(deps);
         let session_id_for_query = session_id.clone();
-        ctx.run_blocking("context.should_compact", move || {
+        run_blocking_task("context.should_compact", move || {
             retry_context_read("context.should_compact", || {
                 let prepared = build_context_manager_for_session(
                     &session_id_for_query,
@@ -172,12 +173,13 @@ impl ContextQueryService {
     }
 
     pub(crate) async fn preview_compaction(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
         let prepared =
-            prepare_session_context(ctx, "context.preview_compaction.prepare", &session_id).await?;
-        let summarizer = build_summarizer(ctx, &session_id, &prepared.session.working_directory);
+            prepare_session_context(deps, "context.preview_compaction.prepare", &session_id)
+                .await?;
+        let summarizer = build_summarizer(deps, &session_id, &prepared.session.working_directory);
         let preview = prepared
             .context_manager
             .preview_compaction(summarizer.as_ref())
@@ -198,16 +200,16 @@ impl ContextQueryService {
     }
 
     pub(crate) async fn can_accept_turn(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
-        let context_artifacts = ctx.context_artifacts.clone();
-        let profile_runtime = ctx.profile_runtime.clone();
-        let tool_definitions = tool_definitions(ctx);
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
+        let context_artifacts = deps.context_artifacts.clone();
+        let profile_runtime = deps.profile_runtime.clone();
+        let tool_definitions = tool_definitions(deps);
         let session_id_for_query = session_id.clone();
-        ctx.run_blocking("context.can_accept_turn", move || {
+        run_blocking_task("context.can_accept_turn", move || {
             retry_context_read("context.can_accept_turn", || {
                 let prepared = build_context_manager_for_session(
                     &session_id_for_query,
@@ -227,17 +229,17 @@ impl ContextQueryService {
 }
 
 pub(crate) async fn prepare_session_context(
-    ctx: &ServerCapabilityContext,
+    deps: &Deps,
     task_name: &'static str,
     session_id: &str,
 ) -> Result<PreparedSessionContext, CapabilityError> {
-    let session_manager = ctx.session_manager.clone();
-    let event_store = ctx.event_store.clone();
-    let context_artifacts = ctx.context_artifacts.clone();
-    let profile_runtime = ctx.profile_runtime.clone();
-    let tool_definitions = tool_definitions(ctx);
+    let session_manager = deps.session_manager.clone();
+    let event_store = deps.event_store.clone();
+    let context_artifacts = deps.context_artifacts.clone();
+    let profile_runtime = deps.profile_runtime.clone();
+    let tool_definitions = tool_definitions(deps);
     let session_id = session_id.to_owned();
-    ctx.run_blocking(task_name, move || {
+    run_blocking_task(task_name, move || {
         retry_context_read(task_name, || {
             build_context_manager_for_session(
                 &session_id,

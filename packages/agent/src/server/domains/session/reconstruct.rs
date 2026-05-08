@@ -32,7 +32,8 @@ use serde_json::{Value, json};
 use tracing::{debug, instrument};
 
 use crate::server::domains::agent::prompt_queue::PromptQueueService;
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::domains::session::Deps;
+use crate::server::shared::context::run_blocking_task;
 use crate::server::shared::errors::{self, CapabilityError};
 use crate::server::shared::events::event_row_to_wire;
 
@@ -51,9 +52,9 @@ pub(crate) struct SessionReconstructService;
 
 impl SessionReconstructService {
     /// Reconstruct the full session state for a reconnecting client.
-    #[instrument(skip(ctx), fields(session_id = %session_id))]
+    #[instrument(skip(deps), fields(session_id = %session_id))]
     pub(crate) async fn reconstruct(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
         limit: Option<i64>,
         before_sequence: Option<i64>,
@@ -67,14 +68,14 @@ impl SessionReconstructService {
             .clamp(0, MAX_RECONSTRUCT_EVENTS);
         let limit = Some(effective_limit);
 
-        let event_store = ctx.event_store.clone();
-        let session_manager = ctx.session_manager.clone();
-        let orchestrator = ctx.orchestrator.clone();
+        let event_store = deps.event_store.clone();
+        let session_manager = deps.session_manager.clone();
+        let orchestrator = deps.orchestrator.clone();
         let sid = session_id.clone();
 
         // 1. Load events and pending queue from DB (blocking — SQLite)
-        let (events, has_more, session_metadata, pending_queue) = ctx
-            .run_blocking("session.reconstruct.load", move || {
+        let (events, has_more, session_metadata, pending_queue) =
+            run_blocking_task("session.reconstruct.load", move || {
                 // Verify session exists
                 let session = session_manager
                     .get_session(&sid)

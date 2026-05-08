@@ -1,5 +1,6 @@
 //! Operation binding for the job worker.
 
+use super::operations::*;
 use super::*;
 
 pub(crate) async fn handle(

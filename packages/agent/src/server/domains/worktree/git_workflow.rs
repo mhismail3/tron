@@ -21,7 +21,6 @@
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use crate::server::shared::context::ServerCapabilityContext;
 use crate::server::shared::error_mapping::map_worktree_error;
 use crate::server::shared::errors::CapabilityError;
 use crate::server::shared::params::{opt_bool, opt_string, opt_u64, require_string_param};
@@ -40,21 +39,22 @@ pub(crate) async fn handle(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let params = Some(invocation.payload.clone());
-    let ctx = deps.server_context.as_ref();
     match method {
-        "git::sync_main" => SyncMainOperation.run(params, ctx).await,
-        "git::push" => PushOperation.run(params, ctx).await,
-        "git::list_local_branches" => ListLocalBranchesOperation.run(params, ctx).await,
-        "git::list_remote_branches" => ListRemoteBranchesOperation.run(params, ctx).await,
-        "worktree::finalize_session" => FinalizeSessionOperation.run(params, ctx).await,
-        "worktree::rebase_on_main" => RebaseOnMainOperation.run(params, ctx).await,
-        "worktree::start_merge" => StartMergeOperation.run(params, ctx).await,
-        "worktree::list_conflicts" => ListConflictsOperation.run(params, ctx).await,
-        "worktree::resolve_conflict" => ResolveConflictOperation.run(params, ctx).await,
-        "worktree::continue_merge" => ContinueMergeOperation.run(params, ctx).await,
-        "worktree::abort_merge" => AbortMergeOperation.run(params, ctx).await,
+        "git::sync_main" => SyncMainOperation.run(params, deps).await,
+        "git::push" => PushOperation.run(params, deps).await,
+        "git::list_local_branches" => ListLocalBranchesOperation.run(params, deps).await,
+        "git::list_remote_branches" => ListRemoteBranchesOperation.run(params, deps).await,
+        "worktree::finalize_session" => FinalizeSessionOperation.run(params, deps).await,
+        "worktree::rebase_on_main" => RebaseOnMainOperation.run(params, deps).await,
+        "worktree::start_merge" => StartMergeOperation.run(params, deps).await,
+        "worktree::list_conflicts" => ListConflictsOperation.run(params, deps).await,
+        "worktree::resolve_conflict" => ResolveConflictOperation.run(params, deps).await,
+        "worktree::continue_merge" => ContinueMergeOperation.run(params, deps).await,
+        "worktree::abort_merge" => AbortMergeOperation.run(params, deps).await,
         "worktree::resolve_conflicts_with_subagent" => {
-            ResolveConflictsWithSubagentOperation.run(params, ctx).await
+            ResolveConflictsWithSubagentOperation
+                .run(params, deps)
+                .await
         }
         _ => Err(CapabilityError::Internal {
             message: format!("operation {method} is not git workflow-owned"),
@@ -64,10 +64,8 @@ pub(crate) async fn handle(
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-fn require_coordinator(
-    ctx: &ServerCapabilityContext,
-) -> Result<&WorktreeCoordinator, CapabilityError> {
-    ctx.worktree_coordinator
+fn require_coordinator(deps: &Deps) -> Result<&WorktreeCoordinator, CapabilityError> {
+    deps.worktree_coordinator
         .as_deref()
         .ok_or_else(|| CapabilityError::Internal {
             message: "Worktree isolation is not enabled".into(),
@@ -79,8 +77,8 @@ fn require_coordinator(
 /// (passthrough mode — session on `main`, or post-finalize with no
 /// rebranch). Returns `None` when the session isn't registered, which
 /// is propagated as a normal "not found" error by the coordinator.
-fn session_working_dir(ctx: &ServerCapabilityContext, session_id: &str) -> Option<PathBuf> {
-    ctx.session_manager
+fn session_working_dir(deps: &Deps, session_id: &str) -> Option<PathBuf> {
+    deps.session_manager
         .get_session(session_id)
         .ok()
         .flatten()
@@ -211,21 +209,17 @@ fn sync_outcome_json(o: &SyncOutcome) -> Value {
 pub struct SyncMainOperation;
 
 impl SyncMainOperation {
-    #[instrument(skip(self, ctx), fields(method = "git::sync_main"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "git::sync_main"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target = opt_string(params.as_ref(), "targetBranch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
         let timeout_ms = opt_u64(params.as_ref(), "fetchTimeoutMs", 60_000);
         let prune = opt_bool(params.as_ref(), "prune").unwrap_or(false);
         let dry_run = opt_bool(params.as_ref(), "dryRun").unwrap_or(false);
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
 
-        let session_dir_hint = session_working_dir(ctx, &session_id);
+        let session_dir_hint = session_working_dir(deps, &session_id);
         let outcome = coord
             .sync_main(
                 &session_id,
@@ -248,12 +242,8 @@ impl SyncMainOperation {
 pub struct PushOperation;
 
 impl PushOperation {
-    #[instrument(skip(self, ctx), fields(method = "git::push"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "git::push"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let branch = opt_string(params.as_ref(), "branch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
@@ -273,8 +263,8 @@ impl PushOperation {
             })
             .unwrap_or_else(|| vec!["main".into(), "master".into(), "develop".into()]);
 
-        let coord = require_coordinator(ctx)?;
-        let session_dir_hint = session_working_dir(ctx, &session_id);
+        let coord = require_coordinator(deps)?;
+        let session_dir_hint = session_working_dir(deps, &session_id);
         let out = coord
             .push_branch(
                 &session_id,
@@ -309,15 +299,11 @@ impl PushOperation {
 pub struct ListLocalBranchesOperation;
 
 impl ListLocalBranchesOperation {
-    #[instrument(skip(self, ctx), fields(method = "git::list_local_branches"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "git::list_local_branches"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let coord = require_coordinator(ctx)?;
-        let session_dir_hint = session_working_dir(ctx, &session_id);
+        let coord = require_coordinator(deps)?;
+        let session_dir_hint = session_working_dir(deps, &session_id);
         let branches = coord
             .list_local_branches(&session_id, session_dir_hint.as_deref())
             .await
@@ -352,16 +338,12 @@ impl ListLocalBranchesOperation {
 pub struct ListRemoteBranchesOperation;
 
 impl ListRemoteBranchesOperation {
-    #[instrument(skip(self, ctx), fields(method = "git::list_remote_branches"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "git::list_remote_branches"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let remote = opt_string(params.as_ref(), "remote");
-        let coord = require_coordinator(ctx)?;
-        let session_dir_hint = session_working_dir(ctx, &session_id);
+        let coord = require_coordinator(deps)?;
+        let session_dir_hint = session_working_dir(deps, &session_id);
         let branches = coord
             .list_remote_branches(&session_id, remote.as_deref(), session_dir_hint.as_deref())
             .await
@@ -379,14 +361,10 @@ impl ListRemoteBranchesOperation {
 pub struct FinalizeSessionOperation;
 
 impl FinalizeSessionOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree::finalize_session"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "worktree::finalize_session"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
 
         // Source branch defaults to the session's current branch.
         let info = coord
@@ -451,19 +429,15 @@ impl FinalizeSessionOperation {
 pub struct RebaseOnMainOperation;
 
 impl RebaseOnMainOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree::rebase_on_main"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "worktree::rebase_on_main"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Parse strategy BEFORE touching the coordinator so "squash" is
         // rejected at the engine transport boundary (plan requirement).
         let strategy = parse_rebase_strategy(opt_string(params.as_ref(), "strategy").as_deref())?;
         let main_branch = opt_string(params.as_ref(), "mainBranch");
 
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
 
         match coord
             .rebase_on_main(&session_id, main_branch.as_deref(), strategy)
@@ -503,17 +477,13 @@ impl RebaseOnMainOperation {
 pub struct StartMergeOperation;
 
 impl StartMergeOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree::start_merge"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "worktree::start_merge"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let source = require_string_param(params.as_ref(), "sourceBranch")?;
         let target = require_string_param(params.as_ref(), "targetBranch")?;
         let strategy = parse_strategy(opt_string(params.as_ref(), "strategy").as_deref());
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
 
         let pending = coord
             .start_merge_keep_conflicts(&session_id, &source, &target, strategy)
@@ -542,14 +512,10 @@ impl StartMergeOperation {
 pub struct ListConflictsOperation;
 
 impl ListConflictsOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree::list_conflicts"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "worktree::list_conflicts"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
         let conflicts = coord
             .list_conflicts(&session_id)
             .await
@@ -566,17 +532,13 @@ impl ListConflictsOperation {
 pub struct ResolveConflictOperation;
 
 impl ResolveConflictOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree::resolve_conflict"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "worktree::resolve_conflict"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let path = require_string_param(params.as_ref(), "path")?;
         let resolution_str = require_string_param(params.as_ref(), "resolution")?;
         let resolution = parse_resolution(&resolution_str)?;
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
 
         coord
             .resolve_conflict(&session_id, &path, resolution)
@@ -600,15 +562,11 @@ impl ResolveConflictOperation {
 pub struct ContinueMergeOperation;
 
 impl ContinueMergeOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree::continue_merge"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "worktree::continue_merge"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = opt_string(params.as_ref(), "message");
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
         let sha = coord
             .continue_merge(&session_id, message.as_deref())
             .await
@@ -623,15 +581,11 @@ impl ContinueMergeOperation {
 pub struct AbortMergeOperation;
 
 impl AbortMergeOperation {
-    #[instrument(skip(self, ctx), fields(method = "worktree::abort_merge"))]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    #[instrument(skip(self, deps), fields(method = "worktree::abort_merge"))]
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let reason = opt_string(params.as_ref(), "reason").unwrap_or_else(|| "user".into());
-        let coord = require_coordinator(ctx)?;
+        let coord = require_coordinator(deps)?;
         coord
             .abort_merge_with_reason(&session_id, &reason)
             .await
@@ -653,17 +607,13 @@ pub struct ResolveConflictsWithSubagentOperation;
 
 impl ResolveConflictsWithSubagentOperation {
     #[instrument(
-        skip(self, ctx),
+        skip(self, deps),
         fields(method = "worktree::resolve_conflicts_with_subagent")
     )]
-    async fn run(
-        &self,
-        params: Option<Value>,
-        ctx: &ServerCapabilityContext,
-    ) -> Result<Value, CapabilityError> {
+    async fn run(&self, params: Option<Value>, deps: &Deps) -> Result<Value, CapabilityError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Must have a live coordinator to resolve worktree + merge state.
-        let coord = ctx
+        let coord = deps
             .worktree_coordinator
             .clone()
             .ok_or(CapabilityError::Internal {
@@ -672,7 +622,7 @@ impl ResolveConflictsWithSubagentOperation {
 
         // Subagent manager is optional server-wide. Without it we cannot
         // spawn — return a graceful stub so iOS falls back to manual.
-        let Some(manager) = ctx.subagent_manager.clone() else {
+        let Some(manager) = deps.subagent_manager.clone() else {
             return Ok(json!({
                 "spawned": false,
                 "subagentSessionId": Value::Null,

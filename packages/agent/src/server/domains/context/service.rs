@@ -10,8 +10,8 @@ use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::skills::registry::SkillRegistry;
 use parking_lot::RwLock;
 
+use crate::server::domains::context::Deps;
 use crate::server::domains::session::context::SessionContextArtifacts;
-use crate::server::shared::context::ServerCapabilityContext;
 use crate::server::shared::errors::{self, CapabilityError};
 
 pub(crate) struct PreparedSessionContext {
@@ -182,11 +182,11 @@ pub(crate) fn build_active_skill_context(
 }
 
 pub(crate) fn build_summarizer(
-    ctx: &ServerCapabilityContext,
+    deps: &Deps,
     session_id: &str,
     working_directory: &str,
 ) -> Box<dyn Summarizer> {
-    if let Some(manager) = ctx.subagent_manager.as_ref() {
+    if let Some(manager) = deps.subagent_manager.as_ref() {
         let process_plan = manager.plan_process("compaction").ok();
         let spawner = crate::runtime::agent::compaction_handler::SubagentManagerSpawner {
             manager: manager.clone(),
@@ -205,8 +205,8 @@ pub(crate) fn build_summarizer(
     }
 }
 
-pub(crate) fn tool_definitions(ctx: &ServerCapabilityContext) -> Vec<Tool> {
-    ctx.agent_deps
+pub(crate) fn tool_definitions(deps: &Deps) -> Vec<Tool> {
+    deps.agent_deps
         .as_ref()
         .map(|deps| (deps.tool_factory)().definitions())
         .unwrap_or_default()

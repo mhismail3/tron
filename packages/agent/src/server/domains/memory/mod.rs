@@ -2,10 +2,13 @@
 //!
 //! This module owns canonical function execution for the memory namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
+//! The `memory::retain` operation body lives in `operations/`; summarization,
+//! persistence, and auto-retain policy remain in the `retain` service tree.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
+pub(crate) mod operations;
 pub(crate) use deps::Deps;
 pub(super) use handlers::handle;
 
@@ -24,9 +27,3 @@ pub(crate) fn worker_module(
 }
 
 pub(crate) mod retain;
-
-use crate::server::domains::memory::retain as memory_retain;
-
-async fn retain_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
-    memory_retain::trigger_manual_retain(Some(payload), &deps.server_context).await
-}

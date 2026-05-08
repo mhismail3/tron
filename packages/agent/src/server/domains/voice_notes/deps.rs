@@ -10,7 +10,7 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
         Self {
-            transcription_engine: deps.server_context.transcription_engine.clone(),
+            transcription_engine: deps.transcription_engine.clone(),
         }
     }
 }

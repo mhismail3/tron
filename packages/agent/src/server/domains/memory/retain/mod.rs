@@ -17,7 +17,7 @@
 //!
 //! - `memory::retain` engine function — manual retain arrives through
 //!   `/engine` `invoke`, acquires a session resource lease, builds a
-//!   [`RetainDeps`] from `ServerCapabilityContext`, and calls [`trigger_retain`] with
+//!   narrow memory deps into [`RetainDeps`], and calls [`trigger_retain`] with
 //!   [`RetainSource::Manual`].
 //! - [`auto_retain::maybe_fire`] — called from `agent_prompt_service` after
 //!   each successful agent run. Evaluates the auto-retain policy against the
@@ -46,7 +46,8 @@ use crate::events::{
 };
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
-use crate::server::shared::context::{ServerCapabilityContext, run_blocking_task};
+use crate::server::domains::memory::Deps as MemoryDeps;
+use crate::server::shared::context::run_blocking_task;
 use crate::server::shared::error_mapping::map_event_store_error;
 use crate::server::shared::errors::CapabilityError;
 use crate::server::shared::params::require_string_param;
@@ -79,8 +80,8 @@ pub(crate) enum RetainSource {
 /// The narrow set of dependencies the retain pipeline needs.
 ///
 /// Exists so the pipeline can be driven from two different call sites without
-/// requiring the full `ServerCapabilityContext`: the manual engine function constructs one
-/// via [`RetainDeps::from_server_context`], while the auto-retain path in
+/// requiring the full server context: the manual engine function constructs one
+/// via [`RetainDeps::from_memory_deps`], while the auto-retain path in
 /// `agent_prompt_service::execute_prompt_run` builds it directly from the
 /// fields it already holds.
 #[derive(Clone)]
@@ -91,7 +92,16 @@ pub(crate) struct RetainDeps {
 }
 
 impl RetainDeps {
-    pub fn from_server_context(ctx: &ServerCapabilityContext) -> Self {
+    pub(crate) fn from_memory_deps(deps: &MemoryDeps) -> Self {
+        Self {
+            orchestrator: Arc::clone(&deps.orchestrator),
+            event_store: Arc::clone(&deps.event_store),
+            subagent_manager: deps.subagent_manager.clone(),
+        }
+    }
+
+    #[cfg(test)]
+    fn from_test_context(ctx: &crate::server::shared::context::ServerCapabilityContext) -> Self {
         Self {
             orchestrator: Arc::clone(&ctx.orchestrator),
             event_store: Arc::clone(&ctx.event_store),
@@ -112,10 +122,10 @@ impl RetainDeps {
 /// task emits `MemoryUpdated` when done.
 pub(crate) async fn trigger_manual_retain(
     params: Option<&Value>,
-    ctx: &ServerCapabilityContext,
+    memory_deps: &MemoryDeps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
-    let deps = RetainDeps::from_server_context(ctx);
+    let deps = RetainDeps::from_memory_deps(memory_deps);
     trigger_retain(&deps, session_id, RetainSource::Manual).await
 }
 
@@ -1548,9 +1558,14 @@ mod tests {
     async fn handler_requires_session_id() {
         use crate::server::shared::test_support::make_test_context;
         let ctx = make_test_context();
-        let err = trigger_manual_retain(Some(&serde_json::json!({})), &ctx)
-            .await
-            .unwrap_err();
+        let err = trigger_manual_retain(
+            Some(&serde_json::json!({})),
+            &crate::server::domains::memory::Deps::from_engine(
+                &crate::server::domains::DomainSetupContext::from_context(&ctx),
+            ),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
@@ -1565,7 +1580,7 @@ mod tests {
             .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
             .unwrap();
 
-        let deps = RetainDeps::from_server_context(&ctx);
+        let deps = RetainDeps::from_test_context(&ctx);
         let result = trigger_retain(&deps, cr.session.id.clone(), RetainSource::Manual)
             .await
             .unwrap();
@@ -1585,7 +1600,7 @@ mod tests {
             .unwrap();
         let session_id = cr.session.id.clone();
 
-        let deps = RetainDeps::from_server_context(&ctx);
+        let deps = RetainDeps::from_test_context(&ctx);
         let _ = trigger_retain(
             &deps,
             session_id.clone(),
@@ -1624,7 +1639,7 @@ mod tests {
             .try_begin_retain(&session_id)
             .expect("fresh session must be claimable");
 
-        let deps = RetainDeps::from_server_context(&ctx);
+        let deps = RetainDeps::from_test_context(&ctx);
         let result = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
             .await
             .unwrap();
@@ -1663,7 +1678,7 @@ mod tests {
             .unwrap();
         let session_id = cr.session.id.clone();
 
-        let deps = RetainDeps::from_server_context(&ctx);
+        let deps = RetainDeps::from_test_context(&ctx);
         let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
             .await
             .unwrap();
@@ -1740,7 +1755,7 @@ mod tests {
         let session_id = cr.session.id.clone();
 
         // Step 1: record the triggered event.
-        emit_auto_retain_triggered(&RetainDeps::from_server_context(&ctx), &session_id, 3).await;
+        emit_auto_retain_triggered(&RetainDeps::from_test_context(&ctx), &session_id, 3).await;
 
         // Step 2: record the failed event.
         let broadcast = Arc::clone(ctx.orchestrator.broadcast());
@@ -1790,7 +1805,7 @@ mod tests {
             })
             .unwrap();
 
-        let deps = RetainDeps::from_server_context(&ctx);
+        let deps = RetainDeps::from_test_context(&ctx);
         let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
             .await
             .unwrap();

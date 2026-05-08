@@ -545,7 +545,7 @@ mod tests {
     fn deps_from_ctx(
         ctx: &crate::server::shared::context::ServerCapabilityContext,
     ) -> crate::server::domains::memory::retain::RetainDeps {
-        crate::server::domains::memory::retain::RetainDeps::from_server_context(ctx)
+        crate::server::domains::memory::retain::RetainDeps::from_test_context(ctx)
     }
 
     #[tokio::test]

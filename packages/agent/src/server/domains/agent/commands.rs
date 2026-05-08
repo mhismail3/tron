@@ -2,19 +2,20 @@
 
 use serde_json::{Value, json};
 
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::domains::agent::Deps;
+use crate::server::shared::context::run_blocking_task;
 use crate::server::shared::errors::{self, CapabilityError};
 
 pub(crate) struct AgentCommandService;
 
 impl AgentCommandService {
     pub(crate) async fn load_prompt_session(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: &str,
     ) -> Result<crate::events::sqlite::row_types::SessionRow, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let session_id = session_id.to_owned();
-        ctx.run_blocking("agent.prompt.load_session", move || {
+        run_blocking_task("agent.prompt.load_session", move || {
             session_manager
                 .get_session(&session_id)
                 .map_err(|error| CapabilityError::Internal {
@@ -28,18 +29,15 @@ impl AgentCommandService {
         .await
     }
 
-    pub(crate) fn abort(
-        ctx: &ServerCapabilityContext,
-        session_id: &str,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) fn abort(deps: &Deps, session_id: &str) -> Result<Value, CapabilityError> {
         let aborted =
-            ctx.orchestrator
+            deps.orchestrator
                 .abort(session_id)
                 .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })?;
 
-        if aborted && let Some(ref broker) = ctx.device_request_broker {
+        if aborted && let Some(ref broker) = deps.device_request_broker {
             broker.cancel_session_pending(session_id);
         }
 
@@ -54,11 +52,11 @@ impl AgentCommandService {
     /// wrong, or the session has no per-tool registry. Callers treat both
     /// as "nothing to do" rather than errors.
     pub(crate) fn abort_tool(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: &str,
         tool_call_id: &str,
     ) -> Result<Value, CapabilityError> {
-        let aborted = ctx
+        let aborted = deps
             .orchestrator
             .tool_abort_registry()
             .abort(session_id, tool_call_id);

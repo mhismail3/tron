@@ -1,5 +1,6 @@
 //! Operation binding for the mcp worker.
 
+use super::operations::*;
 use super::*;
 
 pub(crate) async fn handle(

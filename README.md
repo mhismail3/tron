@@ -179,6 +179,15 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `server::transport` | `/engine` client protocol, worker auth, transport envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `server::updater` | GitHub Releases checks + update notifications | `SchedulerDeps`, `UpdaterState`, `UpdateDecision` |
 
+The server package is intentionally vertical by domain. A domain root is only
+docs, exports, and worker registration. `contract.rs` owns the canonical
+function ids, schemas, authority, idempotency, risk, leases, compensation, and
+declared stream topics; `deps.rs` narrows setup into the handles that domain
+uses; `handlers.rs` binds operation keys; and `operations/` contains executable
+operation bodies. Cross-domain access goes through explicit domain services or
+shared DTOs, so an engineer can follow a capability by reading one domain folder
+instead of a central dispatch table.
+
 ---
 
 ## Quick Start

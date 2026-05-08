@@ -10,7 +10,7 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
         Self {
-            worktree_coordinator: deps.server_context.worktree_coordinator.clone(),
+            worktree_coordinator: deps.worktree_coordinator.clone(),
         }
     }
 }

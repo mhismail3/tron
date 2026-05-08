@@ -2,19 +2,17 @@
 
 use serde_json::{Value, json};
 
-use crate::server::shared::context::ServerCapabilityContext;
+use crate::server::domains::session::Deps;
+use crate::server::shared::context::run_blocking_task;
 use crate::server::shared::errors::{self, CapabilityError};
 
 pub(crate) struct SessionQueryService;
 
 impl SessionQueryService {
-    pub(crate) async fn resume(
-        ctx: &ServerCapabilityContext,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
+    pub(crate) async fn resume(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+        let session_manager = deps.session_manager.clone();
         let session_id_for_resume = session_id.clone();
-        ctx.run_blocking("session.resume", move || {
+        run_blocking_task("session.resume", move || {
             let active = session_manager
                 .resume_session(&session_id_for_resume)
                 .map_err(|error| CapabilityError::NotFound {
@@ -33,7 +31,7 @@ impl SessionQueryService {
     }
 
     pub(crate) async fn list(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         include_archived: bool,
         limit: Option<usize>,
     ) -> Result<Value, CapabilityError> {
@@ -44,10 +42,10 @@ impl SessionQueryService {
             limit,
             ..Default::default()
         };
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
-        let orchestrator = ctx.orchestrator.clone();
-        ctx.run_blocking("session.list", move || {
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
+        let orchestrator = deps.orchestrator.clone();
+        run_blocking_task("session.list", move || {
             let sessions =
                 session_manager
                     .list_sessions(&filter)
@@ -106,12 +104,12 @@ impl SessionQueryService {
     }
 
     pub(crate) async fn get_head(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let session_id_for_head = session_id.clone();
-        ctx.run_blocking("session.get_head", move || {
+        run_blocking_task("session.get_head", move || {
             let session = session_manager
                 .get_session(&session_id_for_head)
                 .map_err(|error| CapabilityError::Internal {
@@ -131,13 +129,13 @@ impl SessionQueryService {
     }
 
     pub(crate) async fn get_state(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_state = session_id.clone();
-        ctx.run_blocking("session.get_state", move || {
+        run_blocking_task("session.get_state", move || {
             let session = session_manager
                 .get_session(&session_id_for_state)
                 .map_err(|error| CapabilityError::Internal {
@@ -190,14 +188,11 @@ impl SessionQueryService {
     /// sessions larger than ~50k events the export is large but not
     /// unbounded — the payload is serialized in memory before being
     /// returned, which matches how `session.reconstruct` already behaves.
-    pub(crate) async fn export(
-        ctx: &ServerCapabilityContext,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
+    pub(crate) async fn export(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_export = session_id.clone();
-        ctx.run_blocking("session.export", move || {
+        run_blocking_task("session.export", move || {
             let session = session_manager
                 .get_session(&session_id_for_export)
                 .map_err(|error| CapabilityError::Internal {
@@ -235,15 +230,15 @@ impl SessionQueryService {
     }
 
     pub(crate) async fn get_history(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
         limit: Option<usize>,
         before_id: Option<String>,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
-        let event_store = ctx.event_store.clone();
+        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_history = session_id.clone();
-        ctx.run_blocking("session.get_history", move || {
+        run_blocking_task("session.get_history", move || {
             let _ = session_manager
                 .get_session(&session_id_for_history)
                 .map_err(|error| CapabilityError::Internal {
@@ -351,7 +346,7 @@ mod tests {
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
-        let result = SessionQueryService::export(ctx_ref(&ctx), sid.clone())
+        let result = SessionQueryService::export(&Deps::from_test_context(&ctx), sid.clone())
             .await
             .unwrap();
 
@@ -369,9 +364,12 @@ mod tests {
     #[tokio::test]
     async fn export_of_nonexistent_session_is_not_found() {
         let ctx = make_test_context();
-        let err = SessionQueryService::export(ctx_ref(&ctx), "sess_does_not_exist".to_string())
-            .await
-            .unwrap_err();
+        let err = SessionQueryService::export(
+            &Deps::from_test_context(&ctx),
+            "sess_does_not_exist".to_string(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), "SESSION_NOT_FOUND");
     }
 
@@ -400,7 +398,7 @@ mod tests {
                 .unwrap();
         }
 
-        let result = SessionQueryService::export(ctx_ref(&ctx), sid)
+        let result = SessionQueryService::export(&Deps::from_test_context(&ctx), sid)
             .await
             .unwrap();
 
@@ -432,7 +430,7 @@ mod tests {
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
-        let result = SessionQueryService::export(ctx_ref(&ctx), sid)
+        let result = SessionQueryService::export(&Deps::from_test_context(&ctx), sid)
             .await
             .unwrap();
         let ts = result["exportedAt"].as_str().unwrap();
@@ -458,14 +456,9 @@ mod tests {
             .create_session_for_subagent("m", "/tmp", Some("sub"), &parent, "task", "desc")
             .unwrap();
 
-        let result = SessionQueryService::export(ctx_ref(&ctx), subagent.clone())
+        let result = SessionQueryService::export(&Deps::from_test_context(&ctx), subagent.clone())
             .await
             .unwrap();
         assert_eq!(result["session"]["id"].as_str().unwrap(), subagent);
-    }
-
-    // Tiny helper so tests don't get cluttered with `&` every call.
-    fn ctx_ref<'a>(c: &'a ServerCapabilityContext) -> &'a ServerCapabilityContext {
-        c
     }
 }

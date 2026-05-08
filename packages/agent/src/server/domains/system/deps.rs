@@ -19,9 +19,9 @@ impl Deps {
         Self {
             onboarded_marker_path: deps.onboarded_marker_path.clone(),
             orchestrator: deps.orchestrator.clone(),
-            origin: deps.server_context.origin.clone(),
+            origin: deps.origin.clone(),
             profile_runtime: deps.profile_runtime.clone(),
-            release_fetcher: deps.server_context.release_fetcher.clone(),
+            release_fetcher: deps.release_fetcher.clone(),
             server_start_time: deps.server_start_time,
             updater_state_path: deps.updater_state_path.clone(),
             ws_port: deps.ws_port.clone(),

@@ -15,6 +15,7 @@
 
 use serde_json::Value;
 
+use super::Deps;
 use crate::llm::anthropic::types::{all_claude_models_api_json, get_claude_model};
 use crate::llm::google::types::{all_gemini_models_api_json, get_gemini_model};
 use crate::llm::kimi::types::all_kimi_models_api_json;
@@ -26,7 +27,6 @@ use crate::llm::openai::types::{
     OpenAIAuthPath, all_openai_models_api_json_for_auth_path, get_openai_model,
     get_openai_model_profile,
 };
-use crate::server::shared::context::ServerCapabilityContext;
 use crate::server::shared::errors::{self, CapabilityError};
 use crate::server::shared::params::require_string_param;
 
@@ -69,15 +69,15 @@ pub(crate) fn is_model_deprecated(model_id: &str) -> bool {
     false
 }
 
-pub(crate) fn active_openai_auth_path(ctx: &ServerCapabilityContext) -> OpenAIAuthPath {
-    crate::llm::auth::openai::infer_auth_path(&ctx.auth_path, None)
+pub(crate) fn active_openai_auth_path(deps: &Deps) -> OpenAIAuthPath {
+    crate::llm::auth::openai::infer_auth_path(&deps.auth_path, None)
         .unwrap_or(OpenAIAuthPath::ChatGptCodex)
 }
 
 /// Switch the model for a session.
 pub(crate) async fn switch_model(
     params: Option<&Value>,
-    ctx: &ServerCapabilityContext,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let requested_model = require_string_param(params, "model")?;
@@ -96,7 +96,7 @@ pub(crate) async fn switch_model(
     }
 
     if get_openai_model(&model).is_some() {
-        let auth_path = active_openai_auth_path(ctx);
+        let auth_path = active_openai_auth_path(deps);
         if !openai_model_available_for_auth_path(&model, auth_path) {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
@@ -107,7 +107,7 @@ pub(crate) async fn switch_model(
         }
     }
 
-    let session = ctx
+    let session = deps
         .event_store
         .get_session(&session_id)
         .map_err(|e| CapabilityError::Internal {
@@ -120,7 +120,7 @@ pub(crate) async fn switch_model(
 
     let previous_model = session.latest_model.clone();
 
-    if ctx.orchestrator.has_active_run(&session_id) {
+    if deps.orchestrator.has_active_run(&session_id) {
         return Err(CapabilityError::Custom {
             code: "SESSION_BUSY".into(),
             message: "Cannot switch model while session is running".into(),
@@ -128,14 +128,14 @@ pub(crate) async fn switch_model(
         });
     }
 
-    let _ = ctx
+    let _ = deps
         .event_store
         .update_latest_model(&session_id, &model)
         .map_err(|e| CapabilityError::Internal {
             message: e.to_string(),
         })?;
 
-    let _ = ctx.event_store.append(&crate::events::AppendOptions {
+    let _ = deps.event_store.append(&crate::events::AppendOptions {
         session_id: &session_id,
         event_type: crate::events::EventType::ConfigModelSwitch,
         payload: serde_json::json!({
@@ -146,10 +146,10 @@ pub(crate) async fn switch_model(
         sequence: None,
     });
 
-    ctx.session_manager.invalidate_session(&session_id);
+    deps.session_manager.invalidate_session(&session_id);
 
-    let is_active = ctx.session_manager.is_active(&session_id);
-    let _ = ctx
+    let is_active = deps.session_manager.is_active(&session_id);
+    let _ = deps
         .orchestrator
         .broadcast()
         .emit(crate::core::events::TronEvent::SessionUpdated {
@@ -200,12 +200,12 @@ pub(crate) fn default_reasoning_level(
 /// change in a session. The client only sends `sessionId` and `level`.
 pub(crate) async fn set_reasoning_level(
     params: Option<&Value>,
-    ctx: &ServerCapabilityContext,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let new_level = require_string_param(params, "level")?;
 
-    let _ = ctx
+    let _ = deps
         .event_store
         .get_session(&session_id)
         .map_err(|e| CapabilityError::Internal {
@@ -216,7 +216,7 @@ pub(crate) async fn set_reasoning_level(
             message: format!("Session '{session_id}' not found"),
         })?;
 
-    let state = ctx
+    let state = deps
         .event_store
         .get_state_at_head(&session_id)
         .map_err(|e| CapabilityError::Internal {
@@ -225,7 +225,7 @@ pub(crate) async fn set_reasoning_level(
     let previous_level = state
         .reasoning_level
         .clone()
-        .or_else(|| default_reasoning_level(&state.model, active_openai_auth_path(ctx)));
+        .or_else(|| default_reasoning_level(&state.model, active_openai_auth_path(deps)));
 
     if previous_level.as_deref().map(str::to_lowercase) == Some(new_level.to_lowercase()) {
         return Ok(serde_json::json!({
@@ -235,7 +235,7 @@ pub(crate) async fn set_reasoning_level(
         }));
     }
 
-    let _ = ctx.event_store.append(&crate::events::AppendOptions {
+    let _ = deps.event_store.append(&crate::events::AppendOptions {
         session_id: &session_id,
         event_type: crate::events::EventType::ConfigReasoningLevel,
         payload: serde_json::json!({
@@ -246,7 +246,7 @@ pub(crate) async fn set_reasoning_level(
         sequence: None,
     });
 
-    ctx.session_manager.invalidate_session(&session_id);
+    deps.session_manager.invalidate_session(&session_id);
 
     Ok(serde_json::json!({
         "previousLevel": previous_level,

@@ -7,17 +7,18 @@ use crate::runtime::agent::event_emitter::EventEmitter;
 use metrics::{counter, histogram};
 use serde_json::{Value, json};
 
+use crate::server::domains::session::Deps;
 use crate::server::domains::session::context::{ContextArtifactsService, RuleFileLevel};
-use crate::server::shared::context::{ServerCapabilityContext, run_blocking_task};
+use crate::server::shared::context::run_blocking_task;
 use crate::server::shared::errors::{self, CapabilityError};
 
 fn resolve_session_profile(
-    ctx: &ServerCapabilityContext,
+    deps: &Deps,
     requested: Option<&str>,
     model: &str,
     source: Option<&str>,
 ) -> Result<String, CapabilityError> {
-    ctx.profile_runtime
+    deps.profile_runtime
         .plan_session(crate::runtime::SessionPlanRequest {
             requested_profile: requested.map(str::to_string),
             model: model.to_string(),
@@ -35,8 +36,8 @@ fn resolve_session_profile(
 /// Logs and swallows errors — archive/delete must not fail due to worktree issues.
 /// Mirrors the invariant in `SessionManager::end_session()`: worktree is released
 /// BEFORE the session is marked as ended.
-async fn release_worktree_if_active(ctx: &ServerCapabilityContext, session_id: &str) {
-    if let Some(ref coord) = ctx.worktree_coordinator {
+async fn release_worktree_if_active(deps: &Deps, session_id: &str) {
+    if let Some(ref coord) = deps.worktree_coordinator {
         if let Err(e) = coord.release(session_id).await {
             tracing::warn!(
                 session_id,
@@ -63,40 +64,39 @@ pub(crate) struct SessionCommandService;
 
 impl SessionCommandService {
     pub(crate) async fn create(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         request: CreateSessionRequest,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let working_directory = request.working_directory.clone();
         let model = request.model.clone();
         let title = request.title.clone();
         let source = request.source.clone();
         let profile = resolve_session_profile(
-            ctx,
+            deps,
             request.profile.as_deref(),
             request.model.as_str(),
             request.source.as_deref(),
         )?;
         let use_worktree = request.use_worktree;
         let profile_for_create = profile.clone();
-        let session_id = ctx
-            .run_blocking("session.create", move || {
-                session_manager
-                    .create_session_with_profile_and_worktree_override(
-                        &model,
-                        &working_directory,
-                        title.as_deref(),
-                        source.as_deref(),
-                        Some(profile_for_create.as_str()),
-                        use_worktree,
-                    )
-                    .map_err(|error| CapabilityError::Internal {
-                        message: error.to_string(),
-                    })
-            })
-            .await?;
+        let session_id = run_blocking_task("session.create", move || {
+            session_manager
+                .create_session_with_profile_and_worktree_override(
+                    &model,
+                    &working_directory,
+                    title.as_deref(),
+                    source.as_deref(),
+                    Some(profile_for_create.as_str()),
+                    use_worktree,
+                )
+                .map_err(|error| CapabilityError::Internal {
+                    message: error.to_string(),
+                })
+        })
+        .await?;
 
-        let _ = ctx
+        let _ = deps
             .orchestrator
             .broadcast()
             .emit(TronEvent::SessionCreated {
@@ -108,11 +108,11 @@ impl SessionCommandService {
                 title: request.title.clone(),
             });
 
-        ctx.orchestrator.init_sequence_counter(&session_id, 0);
+        deps.orchestrator.init_sequence_counter(&session_id, 0);
 
         // Skip optimistic context preload for chat sessions — they don't load context artifacts
         if profile.as_str() != crate::core::profile::CHAT_PROFILE {
-            spawn_optimistic_context_preload(ctx, &session_id, &request.working_directory);
+            spawn_optimistic_context_preload(deps, &session_id, &request.working_directory);
         }
 
         Ok(json!({
@@ -132,15 +132,12 @@ impl SessionCommandService {
         }))
     }
 
-    pub(crate) async fn delete(
-        ctx: &ServerCapabilityContext,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
-        release_worktree_if_active(ctx, &session_id).await;
+    pub(crate) async fn delete(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+        release_worktree_if_active(deps, &session_id).await;
 
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let session_id_for_delete = session_id.clone();
-        ctx.run_blocking("session.delete", move || {
+        run_blocking_task("session.delete", move || {
             session_manager
                 .delete_session(&session_id_for_delete)
                 .map_err(|error| CapabilityError::Internal {
@@ -150,10 +147,10 @@ impl SessionCommandService {
         })
         .await?;
 
-        ctx.orchestrator.remove_sequence_counter(&session_id);
-        ctx.orchestrator.remove_compaction_handler(&session_id);
+        deps.orchestrator.remove_sequence_counter(&session_id);
+        deps.orchestrator.remove_compaction_handler(&session_id);
 
-        let _ = ctx
+        let _ = deps
             .orchestrator
             .broadcast()
             .emit(TronEvent::SessionDeleted {
@@ -164,16 +161,16 @@ impl SessionCommandService {
     }
 
     pub(crate) async fn fork(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
         from_event_id: Option<String>,
         title: Option<String>,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let session_id_for_fork = session_id.clone();
         let title_for_fork = title.clone();
-        let (new_session_id, forked_from_event_id, root_event_id) = ctx
-            .run_blocking("session.fork", move || {
+        let (new_session_id, forked_from_event_id, root_event_id) =
+            run_blocking_task("session.fork", move || {
                 let result = session_manager
                     .fork_session(
                         &session_id_for_fork,
@@ -193,12 +190,15 @@ impl SessionCommandService {
             })
             .await?;
 
-        ctx.orchestrator.init_sequence_counter(&new_session_id, 0);
+        deps.orchestrator.init_sequence_counter(&new_session_id, 0);
 
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionForked {
-            base: BaseEvent::now(&session_id),
-            new_session_id: new_session_id.clone(),
-        });
+        let _ = deps
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::SessionForked {
+                base: BaseEvent::now(&session_id),
+                new_session_id: new_session_id.clone(),
+            });
 
         Ok(json!({
             "newSessionId": new_session_id,
@@ -208,15 +208,12 @@ impl SessionCommandService {
         }))
     }
 
-    pub(crate) async fn archive(
-        ctx: &ServerCapabilityContext,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
-        release_worktree_if_active(ctx, &session_id).await;
+    pub(crate) async fn archive(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+        release_worktree_if_active(deps, &session_id).await;
 
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let session_id_for_archive = session_id.clone();
-        ctx.run_blocking("session.archive", move || {
+        run_blocking_task("session.archive", move || {
             session_manager
                 .archive_session(&session_id_for_archive)
                 .map_err(|error| CapabilityError::Internal {
@@ -226,10 +223,10 @@ impl SessionCommandService {
         })
         .await?;
 
-        ctx.orchestrator.remove_sequence_counter(&session_id);
-        ctx.orchestrator.remove_compaction_handler(&session_id);
+        deps.orchestrator.remove_sequence_counter(&session_id);
+        deps.orchestrator.remove_compaction_handler(&session_id);
 
-        let _ = ctx
+        let _ = deps
             .orchestrator
             .broadcast()
             .emit(TronEvent::SessionArchived {
@@ -240,12 +237,12 @@ impl SessionCommandService {
     }
 
     pub(crate) async fn unarchive(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let session_id_for_unarchive = session_id.clone();
-        ctx.run_blocking("session.unarchive", move || {
+        run_blocking_task("session.unarchive", move || {
             session_manager
                 .unarchive_session(&session_id_for_unarchive)
                 .map_err(|error| CapabilityError::Internal {
@@ -255,7 +252,7 @@ impl SessionCommandService {
         })
         .await?;
 
-        let _ = ctx
+        let _ = deps
             .orchestrator
             .broadcast()
             .emit(TronEvent::SessionUnarchived {
@@ -287,7 +284,7 @@ impl SessionCommandService {
     /// can surface them to the user and retry — partial success is explicit
     /// rather than rolled back.
     pub(crate) async fn archive_older_than(
-        ctx: &ServerCapabilityContext,
+        deps: &Deps,
         days: u32,
     ) -> Result<Value, CapabilityError> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(days));
@@ -296,10 +293,10 @@ impl SessionCommandService {
         // Gather candidate session IDs inside a blocking task. Use the
         // existing filter that already excludes archived + subagents + non-user
         // sources so the batch is a strict subset of what the iOS sidebar shows.
-        let session_manager = ctx.session_manager.clone();
+        let session_manager = deps.session_manager.clone();
         let cutoff_for_filter = cutoff_rfc.clone();
-        let candidates: Vec<String> = ctx
-            .run_blocking("session.archiveOlderThan.list", move || {
+        let candidates: Vec<String> =
+            run_blocking_task("session.archiveOlderThan.list", move || {
                 let filter = crate::runtime::SessionFilter {
                     include_archived: false,
                     exclude_subagents: true,
@@ -326,7 +323,7 @@ impl SessionCommandService {
         let mut skipped: Vec<Value> = Vec::new();
 
         for session_id in candidates {
-            match Self::archive(ctx, session_id.clone()).await {
+            match Self::archive(deps, session_id.clone()).await {
                 Ok(_) => archived.push(session_id),
                 Err(err) => skipped.push(json!({
                     "sessionId": session_id,
@@ -347,15 +344,11 @@ impl SessionCommandService {
     }
 }
 
-fn spawn_optimistic_context_preload(
-    ctx: &ServerCapabilityContext,
-    session_id: &str,
-    working_dir: &str,
-) {
-    let event_store = ctx.event_store.clone();
-    let context_artifacts = ctx.context_artifacts.clone();
-    let broadcast = ctx.orchestrator.broadcast().clone();
-    let shutdown_coordinator = ctx.shutdown_coordinator.clone();
+fn spawn_optimistic_context_preload(deps: &Deps, session_id: &str, working_dir: &str) {
+    let event_store = deps.event_store.clone();
+    let context_artifacts = deps.context_artifacts.clone();
+    let broadcast = deps.orchestrator.broadcast().clone();
+    let shutdown_coordinator = deps.shutdown_coordinator.clone();
     let session_id_for_task = session_id.to_owned();
     let working_dir_for_task = working_dir.to_owned();
     let handle = tokio::spawn(async move {
@@ -466,6 +459,7 @@ mod tests {
 
     use crate::events::EventStore;
     use crate::runtime::Orchestrator;
+    use crate::server::shared::context::ServerCapabilityContext;
     use crate::server::shared::test_support::make_test_context;
     use crate::skills::registry::SkillRegistry;
     use crate::worktree::{AcquireResult, WorktreeConfig, WorktreeCoordinator};
@@ -592,7 +586,7 @@ mod tests {
         );
 
         // Archive via command service
-        SessionCommandService::archive(&ctx, sid.clone())
+        SessionCommandService::archive(&Deps::from_test_context(&ctx), sid.clone())
             .await
             .unwrap();
 
@@ -626,7 +620,7 @@ mod tests {
             .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
-        SessionCommandService::archive(&ctx, sid.clone())
+        SessionCommandService::archive(&Deps::from_test_context(&ctx), sid.clone())
             .await
             .unwrap();
 
@@ -656,7 +650,7 @@ mod tests {
         };
         assert!(wt_path.exists());
 
-        SessionCommandService::delete(&ctx, sid.clone())
+        SessionCommandService::delete(&Deps::from_test_context(&ctx), sid.clone())
             .await
             .unwrap();
 
@@ -681,7 +675,7 @@ mod tests {
             .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
-        SessionCommandService::delete(&ctx, sid.clone())
+        SessionCommandService::delete(&Deps::from_test_context(&ctx), sid.clone())
             .await
             .unwrap();
 
@@ -721,7 +715,7 @@ mod tests {
         let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
         set_last_activity(&ctx.event_store, &stale, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
             .await
             .unwrap();
 
@@ -753,14 +747,14 @@ mod tests {
             .unwrap();
 
         // Pre-archive s1 by hand.
-        SessionCommandService::archive(&ctx, s1.clone())
+        SessionCommandService::archive(&Deps::from_test_context(&ctx), s1.clone())
             .await
             .unwrap();
 
         let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
         set_last_activity(&ctx.event_store, &s1, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
             .await
             .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 0);
@@ -788,7 +782,7 @@ mod tests {
         set_last_activity(&ctx.event_store, &parent, &ten_days_ago);
         set_last_activity(&ctx.event_store, &subagent, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
             .await
             .unwrap();
         let archived_ids: Vec<&str> = result["archivedSessionIds"]
@@ -823,7 +817,7 @@ mod tests {
         set_last_activity(&ctx.event_store, &user_sid, &ten_days_ago);
         set_last_activity(&ctx.event_store, &cron_sid, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
             .await
             .unwrap();
         let archived_ids: Vec<&str> = result["archivedSessionIds"]
@@ -858,7 +852,7 @@ mod tests {
         set_last_activity(&ctx.event_store, &a, &one_hour_ago);
         set_last_activity(&ctx.event_store, &b, &one_hour_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 0)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 0)
             .await
             .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 2);
@@ -876,7 +870,7 @@ mod tests {
     async fn archive_older_than_returns_cutoff_in_the_past() {
         let ctx = make_test_context();
         let now = chrono::Utc::now();
-        let result = SessionCommandService::archive_older_than(&ctx, 30)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 30)
             .await
             .unwrap();
         let cutoff_str = result["cutoff"].as_str().unwrap();
@@ -895,7 +889,7 @@ mod tests {
     #[tokio::test]
     async fn archive_older_than_on_empty_store_returns_zero() {
         let ctx = make_test_context();
-        let result = SessionCommandService::archive_older_than(&ctx, 7)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
             .await
             .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 0);
@@ -928,7 +922,7 @@ mod tests {
             set_last_activity(&ctx.event_store, sid, &old);
         }
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7)
+        let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
             .await
             .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 3);

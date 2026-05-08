@@ -11,7 +11,7 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
         Self {
-            cron_scheduler: deps.server_context.cron_scheduler.clone(),
+            cron_scheduler: deps.cron_scheduler.clone(),
             engine_host: deps.engine_host.clone(),
         }
     }

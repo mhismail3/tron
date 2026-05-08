@@ -12,7 +12,7 @@ impl Deps {
     pub(crate) fn from_engine(deps: &DomainSetupContext) -> Self {
         Self {
             event_store: deps.event_store.clone(),
-            origin: deps.server_context.origin.clone(),
+            origin: deps.origin.clone(),
         }
     }
 }

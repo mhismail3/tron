@@ -10,6 +10,7 @@ pub(crate) use deps::Deps;
 pub(super) use handlers::handle;
 
 use super::*;
+use crate::engine::{PublishStreamEvent, VisibilityScope};
 
 pub(crate) fn worker_module(
     deps: &DomainSetupContext,
@@ -271,12 +272,25 @@ async fn broadcast_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
         None,
         Some(serde_json::to_value(status).unwrap_or_default()),
     );
-    super::publish_engine_stream_event(
-        &deps.engine_host,
-        contract::STREAM_TOPICS[0],
-        "settings",
-        event,
-        Some(invocation),
-    )
-    .await;
+    let topic = contract::STREAM_TOPICS[0];
+    if let Err(error) = deps
+        .engine_host
+        .publish_stream_event(PublishStreamEvent {
+            topic: topic.to_owned(),
+            payload: json!({
+                "serverEvent": event,
+                "__broadcastScope": { "kind": "all" },
+                "sourceEventType": "mcp.status_changed",
+            }),
+            visibility: VisibilityScope::System,
+            session_id: invocation.causal_context.session_id.clone(),
+            workspace_id: invocation.causal_context.workspace_id.clone(),
+            producer: "settings".to_owned(),
+            trace_id: Some(invocation.causal_context.trace_id.clone()),
+            parent_invocation_id: Some(invocation.id.clone()),
+        })
+        .await
+    {
+        tracing::warn!(topic, error = %error, "settings stream publication failed");
+    }
 }

@@ -1,0 +1,40 @@
+//! Model operation implementations.
+//!
+//! Model catalog reads, model switching, and reasoning-level mutation live here
+//! behind canonical `model::*` and `config::*` functions.
+
+use super::*;
+use crate::server::domains::model::catalog as model_catalog;
+use crate::server::shared::errors::CapabilityError;
+use serde_json::{Value, json};
+use std::path::PathBuf;
+
+pub(super) async fn list_models(
+    payload: &Value,
+    deps: &Deps,
+    allow_server_context: bool,
+) -> Result<Value, CapabilityError> {
+    let auth_json_path = allow_server_context
+        .then(|| {
+            payload
+                .pointer("/__capabilityContext/authPath")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+        })
+        .flatten()
+        .unwrap_or_else(|| deps.auth_path.clone());
+    let auth_path = crate::llm::auth::openai::infer_auth_path(&auth_json_path, None)
+        .unwrap_or(crate::llm::openai::types::OpenAIAuthPath::ChatGptCodex);
+    Ok(json!({ "models": model_catalog::known_models(auth_path).await }))
+}
+
+pub(super) async fn switch_model(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+    model_catalog::switch_model(Some(payload), deps).await
+}
+
+pub(super) async fn set_reasoning_level(
+    payload: &Value,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    model_catalog::set_reasoning_level(Some(payload), deps).await
+}

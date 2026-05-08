@@ -1,5 +1,6 @@
 //! Operation binding for the tools worker.
 
+use super::operations::*;
 use super::*;
 
 pub(crate) async fn handle(

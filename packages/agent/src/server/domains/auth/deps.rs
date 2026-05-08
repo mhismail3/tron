@@ -21,7 +21,7 @@ impl Deps {
         Self {
             auth_path: deps.auth_path.clone(),
             engine_host: deps.engine_host.clone(),
-            oauth_flows: deps.server_context.oauth_flows.clone(),
+            oauth_flows: deps.oauth_flows.clone(),
         }
     }
 }

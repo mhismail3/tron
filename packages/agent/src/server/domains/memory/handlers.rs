@@ -1,5 +1,6 @@
 //! Operation binding for the memory worker.
 
+use super::operations;
 use super::*;
 
 pub(crate) async fn handle(
@@ -8,7 +9,7 @@ pub(crate) async fn handle(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     match method {
-        "memory::retain" => retain_value(&invocation.payload, deps).await,
+        "memory::retain" => operations::retain(&invocation.payload, deps).await,
         _ => Err(CapabilityError::Internal {
             message: format!("memory method {method} is not engine-owned"),
         }),

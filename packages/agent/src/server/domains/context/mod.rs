@@ -2,10 +2,13 @@
 //!
 //! This module owns canonical function execution for the context namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
+//! Snapshot, audit, compaction, and clear operation bindings live in
+//! `operations/`; query/command services take the narrowed context deps.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
+pub(crate) mod operations;
 pub(crate) use deps::Deps;
 pub(super) use handlers::handle;
 

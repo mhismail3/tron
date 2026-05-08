@@ -34,7 +34,8 @@ use crate::server::domains::{DomainFunctionRegistration, DomainWorkerModule};
 /// Register server-owned domain workers, canonical functions, and trigger records.
 pub fn register_domain_workers_for_context(ctx: &ServerCapabilityContext) -> EngineResult<()> {
     register_domain_workers(ctx)?;
-    crate::server::domains::tools::register_builtin_tools_for_context(ctx)?;
+    let deps = crate::server::domains::DomainSetupContext::from_context(ctx);
+    crate::server::domains::tools::register_builtin_tools_for_setup(&deps)?;
     Ok(())
 }
 

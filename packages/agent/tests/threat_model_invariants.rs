@@ -336,12 +336,23 @@ fn server_package_uses_domain_owned_engine_layout() {
         );
     }
     for required in [
-        "agent", "auth", "cron", "job", "mcp", "session", "tools", "worktree",
+        "agent", "auth", "context", "cron", "job", "mcp", "memory", "model", "session", "tools",
+        "worktree",
     ] {
         let domain_root = domains_root.join(required);
+        let operations_mod = domain_root.join("operations").join("mod.rs");
         assert!(
-            domain_root.join("operations").join("mod.rs").is_file(),
+            operations_mod.is_file(),
             "flow-critical domain worker `{required}` must expose an operations/ boundary"
+        );
+        let operations_content = std::fs::read_to_string(&operations_mod)
+            .unwrap_or_else(|e| panic!("failed to read {operations_mod:?}: {e}"));
+        assert!(
+            operations_content.contains("pub(super) async fn")
+                || operations_content.contains("pub(super) fn")
+                || operations_content.contains("impl ")
+                || operations_content.contains("InProcessFunctionHandler"),
+            "flow-critical domain worker `{required}` must keep executable operation code in operations/mod.rs, not placeholder docs"
         );
     }
     assert!(
@@ -370,6 +381,10 @@ fn server_package_uses_domain_owned_engine_layout() {
     assert!(
         !domains_mod.contains("_stream_topics"),
         "domain registration must validate stream topics instead of ignoring them"
+    );
+    assert!(
+        !domains_mod.contains("publish_engine_stream_event"),
+        "domain stream publication must be owned by domain-local publishers, not a shared catch-all helper"
     );
     let catalog = std::fs::read_to_string(domains_root.join("catalog.rs"))
         .expect("failed to read server/domains/catalog.rs");
@@ -419,27 +434,37 @@ fn server_package_uses_domain_owned_engine_layout() {
             "{} must not reintroduce EngineCapabilityDeps",
             rel.display()
         );
+        let production_content = content
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(content.as_str());
+        if rel.ends_with("deps.rs") {
+            assert!(
+                !production_content.contains("ServerCapabilityContext"),
+                "{} must not store or construct deps from the full ServerCapabilityContext",
+                rel.display()
+            );
+        }
+        let allowed_setup_boundary = rel == Path::new("src/server/domains/mod.rs")
+            || rel == Path::new("src/server/domains/registration.rs");
+        if !allowed_setup_boundary {
+            assert!(
+                !production_content.contains("&ServerCapabilityContext"),
+                "{} production domain operations must take narrow deps, not &ServerCapabilityContext",
+                rel.display()
+            );
+        }
         assert!(
             !content.contains(".stream_topics(vec![\"resource.leases\", \"catalog.changes\"])")
                 && !content.contains("\"streamTopics\":[\"resource.leases\",\"catalog.changes\"]"),
             "{} must not copy engine-global stream topics into domain contracts",
             rel.display()
         );
-        if content.contains("server_context: Arc<ServerCapabilityContext>") {
-            let allowed_full_context_holders = [
-                Path::new("src/server/domains/mod.rs"),
-                Path::new("src/server/domains/agent/deps.rs"),
-                Path::new("src/server/domains/context/deps.rs"),
-                Path::new("src/server/domains/memory/deps.rs"),
-                Path::new("src/server/domains/model/deps.rs"),
-                Path::new("src/server/domains/worktree/deps.rs"),
-            ];
-            assert!(
-                allowed_full_context_holders.contains(&rel),
-                "{} must expose narrow deps instead of storing the full ServerCapabilityContext",
-                rel.display()
-            );
-        }
+        assert!(
+            !content.contains("server_context: Arc<ServerCapabilityContext>"),
+            "{} must expose narrow deps instead of storing the full ServerCapabilityContext",
+            rel.display()
+        );
     }
 }
 
