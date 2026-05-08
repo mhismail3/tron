@@ -692,6 +692,11 @@ impl EngineHostHandle {
         self.inner.lock().await.watch_catalog(actor, request)
     }
 
+    /// Return the current live catalog revision.
+    pub async fn catalog_revision(&self) -> CatalogRevision {
+        self.inner.lock().await.catalog.revision()
+    }
+
     /// Promote function visibility through the host boundary.
     pub async fn promote_function_visibility(
         &self,
@@ -2070,7 +2075,6 @@ impl EngineHost {
 
     fn meta_promote(&mut self, invocation: &Invocation) -> Result<Value> {
         let function_id = function_id(required_str(&invocation.payload, "functionId")?)?;
-        let owner_worker = worker_id(required_str(&invocation.payload, "ownerWorker")?)?;
         let target = required_visibility(&invocation.payload, "targetVisibility")?;
         let expected_revision = FunctionRevision(required_u64(
             &invocation.payload,
@@ -2086,6 +2090,10 @@ impl EngineHost {
                 kind: "function",
                 id: function_id.to_string(),
             })?;
+        let owner_worker = match optional_string(invocation.payload.get("ownerWorker"))? {
+            Some(owner) => worker_id(&owner)?,
+            None => function.owner_worker.clone(),
+        };
         if function.revision != expected_revision {
             return Err(EngineError::StaleFunctionRevision {
                 function_id: function_id.to_string(),
@@ -2300,7 +2308,7 @@ fn invoke_schema() -> Value {
 fn promote_schema() -> Value {
     json!({
         "type": "object",
-        "required": ["functionId", "ownerWorker", "targetVisibility", "expectedFunctionRevision"],
+        "required": ["functionId", "targetVisibility", "expectedFunctionRevision"],
         "additionalProperties": false,
         "properties": {
             "functionId": {"type": "string"},

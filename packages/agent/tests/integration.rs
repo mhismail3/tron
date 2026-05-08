@@ -32,7 +32,6 @@ use tron::server::config::ServerConfig;
 use tron::server::server::TronServer;
 use tron::server::services::context::{AgentDeps, ServerCapabilityContext};
 use tron::server::transport::json_rpc::registry::JsonRpcTransportRegistry;
-use tron::server::transport::json_rpc::types::JsonRpcEvent;
 use tron::server::websocket::stream_pump::EngineStreamEventPump;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
@@ -171,6 +170,10 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let (addr, _handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
     register_server_auth_path(&ws_url, &server.capability_context().auth_path);
+    register_server_auth_path(
+        &engine_ws_url_for(&ws_url),
+        &server.capability_context().auth_path,
+    );
 
     (ws_url, server)
 }
@@ -472,6 +475,10 @@ async fn boot_server_with_provider_and_handles(
     let (addr, server_handle) = server.listen().await.unwrap();
     let ws_url = format!("ws://{addr}/ws");
     register_server_auth_path(&ws_url, &server.capability_context().auth_path);
+    register_server_auth_path(
+        &engine_ws_url_for(&ws_url),
+        &server.capability_context().auth_path,
+    );
 
     (ws_url, server, vec![stream_pump_handle, server_handle])
 }
@@ -491,6 +498,13 @@ async fn connect(url: &str) -> WsStream {
         .insert("authorization", format!("Bearer {token}").parse().unwrap());
     let (ws, _) = connect_async(request).await.unwrap();
     ws
+}
+
+fn engine_ws_url_for(ws_url: &str) -> String {
+    ws_url.strip_suffix("/ws").map_or_else(
+        || ws_url.replace("/ws", "/engine"),
+        |base| format!("{base}/engine"),
+    )
 }
 
 fn register_server_auth_path(url: &str, auth_path: &std::path::Path) {
@@ -603,14 +617,19 @@ async fn publish_engine_session_event(
     event_type: &str,
     data: Value,
 ) {
-    let event = JsonRpcEvent::new(event_type, Some(session_id.to_owned()), Some(data));
+    let event = json!({
+        "type": event_type,
+        "sessionId": session_id,
+        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "data": data,
+    });
     server
         .capability_context()
         .engine_host
         .publish_stream_event(tron::engine::PublishStreamEvent {
             topic: "events.session".to_owned(),
             payload: json!({
-                "__rpcEvent": event,
+                "serverEvent": event,
                 "sourceEventType": event_type,
             }),
             visibility: tron::engine::VisibilityScope::Session,

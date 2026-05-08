@@ -10,7 +10,7 @@ Tron now treats the server as a live capability fabric. The executable surface i
 the canonical engine catalog: `namespace::function` capabilities owned by live
 workers, invoked by triggers, and recorded through the engine ledger.
 
-JSON-RPC is not a domain API. It is a thin transport for five reserved engine
+JSON-RPC is not a domain API. It is one thin transport for five reserved engine
 meta-capabilities:
 
 - `engine.discover`
@@ -22,12 +22,11 @@ meta-capabilities:
 Dotted domain calls are not registered public methods on this branch. Clients
 and agents discover canonical ids and invoke them through `engine.invoke`.
 
-Inside the server, JSON-RPC is translated into a protocol-neutral
+The `/engine` WebSocket protocol is the engine-native sibling transport. Both
+JSON-RPC and `/engine` messages are translated into the same protocol-neutral
 `EngineTransportRequest` before trigger dispatch. That envelope carries the
 target function, trigger, actor, authority, trace, scope, payload, expected
-revision, and explicit idempotency key. A future custom engine WebSocket
-protocol should build the same envelope rather than introducing a second
-domain path.
+revision, and explicit idempotency key.
 
 ## First Principles
 
@@ -54,7 +53,10 @@ domain path.
 
 ```mermaid
 flowchart LR
-  Client["Client / Agent"] --> Transport["JSON-RPC engine.* transport"]
+  Client["Client / Agent"] --> JsonRpc["JSON-RPC engine.* transport"]
+  Client --> EngineWs["/engine WebSocket protocol"]
+  JsonRpc --> Transport["EngineTransportRequest"]
+  EngineWs --> Transport
   Transport --> Engine["EngineHost"]
   AgentTool["Agent engine tools"] --> Engine
   Worker["In-process / local worker"] --> Engine
@@ -76,14 +78,19 @@ The code layout follows the same boundary:
   capabilities.
 - `packages/agent/src/server/transport/json_rpc/`: JSON-RPC framing, registry,
   validation, and the five `engine.*` transport methods.
+- `packages/agent/src/server/transport/engine_ws.rs`: `/engine` WebSocket
+  protocol parsing, heartbeat, stream subscribe/poll/ack, and envelope
+  construction.
 - `packages/agent/src/server/transport/engine.rs`: protocol-neutral transport
-  envelope used by JSON-RPC and intended for future engine-native protocols.
+  envelope used by JSON-RPC and `/engine`.
 - `packages/agent/src/server/websocket/`: WebSocket delivery over engine stream
   records.
 
 ## Single-Shape Invariants
 
 - Public JSON-RPC registry contains exactly five `engine.*` methods.
+- Public `/engine` clients use the same envelope path and cannot invoke dotted
+  names or hidden/internal functions.
 - No executable or discoverable noncanonical transport namespace exists.
 - Domain dotted names are internal operation keys only, not public transport.
 - Production code does not implement method-specific canonical capability functions.

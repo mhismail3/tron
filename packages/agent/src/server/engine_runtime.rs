@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::engine::{EngineHostHandle, EngineQueueDrainer, StreamActorScope, StreamCursor};
 use crate::server::server::TronServer;
+use crate::server::services::events_wire::ServerEventPayload;
 use crate::server::shutdown::ShutdownCoordinator;
 use crate::server::transport::json_rpc::types::JsonRpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
@@ -260,9 +261,18 @@ enum StreamBroadcastTarget {
 fn stream_event_to_rpc_event(
     event: &crate::engine::EngineStreamEvent,
 ) -> (JsonRpcEvent, StreamBroadcastTarget) {
-    if let Some(wrapped) = event.payload.get("__rpcEvent")
-        && let Ok(rpc_event) = serde_json::from_value::<JsonRpcEvent>(wrapped.clone())
+    if let Some(wrapped) = event.payload.get("serverEvent")
+        && let Ok(mut server_event) = serde_json::from_value::<ServerEventPayload>(wrapped.clone())
     {
+        server_event.stream_cursor = Some(event.cursor.0);
+        if server_event.trace_id.is_none() {
+            server_event.trace_id = event.trace_id.as_ref().map(ToString::to_string);
+        }
+        if server_event.parent_invocation_id.is_none() {
+            server_event.parent_invocation_id =
+                event.parent_invocation_id.as_ref().map(ToString::to_string);
+        }
+        let rpc_event = server_event.to_json_rpc_event();
         let target = stream_broadcast_target(event, &rpc_event);
         return (rpc_event, target);
     }

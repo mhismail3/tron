@@ -2,8 +2,8 @@
 //!
 //! Axum HTTP + `WebSocket` server and event broadcasting.
 //!
-//! - HTTP endpoints: health check, metrics, WebSocket upgrade
-//! - `WebSocket` gateway: connection management, heartbeat, message dispatch
+//! - HTTP endpoints: health check, metrics, `/ws`, `/engine`, and `/engine/workers`
+//! - WebSocket transports: JSON-RPC `/ws`, engine protocol `/engine`, local workers
 //! - Event fan-out to connected clients via `BroadcastManager`
 //! - Graceful shutdown via `CancellationToken` coordination
 //!

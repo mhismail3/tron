@@ -387,7 +387,7 @@ pub fn public_json_rpc_specs(registered_methods: &[String]) -> EngineResult<Vec<
     Ok(specs)
 }
 
-pub(crate) fn public_json_rpc_spec_for_method(
+pub(crate) fn public_engine_transport_spec_for_method(
     method: &str,
 ) -> EngineResult<Option<CapabilitySpec>> {
     let Some(seed) = PUBLIC_JSON_RPC_METHODS
@@ -1230,6 +1230,25 @@ pub(crate) fn json_rpc_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     Ok(definition)
 }
 
+pub(crate) fn engine_ws_trigger_type() -> EngineResult<TriggerTypeDefinition> {
+    let mut definition = TriggerTypeDefinition::new(
+        TriggerTypeId::new("engine_ws")?,
+        worker_id("engine")?,
+        "Engine WebSocket transport dispatch into a canonical function",
+    );
+    definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
+    definition.visibility = VisibilityScope::Internal;
+    definition.config_schema = Some(json!({
+        "type": "object",
+        "required": ["messageType"],
+        "additionalProperties": false,
+        "properties": {
+            "messageType": {"type": "string"}
+        }
+    }));
+    Ok(definition)
+}
+
 pub(crate) fn manual_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     let mut definition = TriggerTypeDefinition::new(
         TriggerTypeId::new("manual")?,
@@ -1287,6 +1306,31 @@ pub(crate) fn json_rpc_trigger_for_spec(
 
 pub(crate) fn json_rpc_trigger_id_for_method(method: &str) -> EngineResult<TriggerId> {
     TriggerId::new(format!("json_rpc:{method}"))
+}
+
+pub(crate) fn engine_ws_trigger_for_spec(
+    spec: &CapabilitySpec,
+) -> EngineResult<Option<TriggerDefinition>> {
+    let mut trigger = TriggerDefinition::new(
+        engine_ws_trigger_id_for_method(spec.method)?,
+        worker_id("engine")?,
+        TriggerTypeId::new("engine_ws")?,
+        spec.function_id.clone(),
+        grant_id(SYSTEM_AUTHORITY_GRANT)?,
+    )
+    .with_delivery_mode(DeliveryMode::Sync);
+    trigger.config = json!({ "messageType": spec.method });
+    trigger.idempotency_key_strategy = if spec.effect_class.is_mutating() {
+        Some(IdempotencyKeySource::TriggerDerived)
+    } else {
+        None
+    };
+    trigger.visibility = VisibilityScope::Internal;
+    Ok(Some(trigger))
+}
+
+pub(crate) fn engine_ws_trigger_id_for_method(method: &str) -> EngineResult<TriggerId> {
+    TriggerId::new(format!("engine_ws:{method}"))
 }
 
 pub(crate) fn function_id_for_method(method: &str) -> EngineResult<FunctionId> {

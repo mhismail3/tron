@@ -1,8 +1,11 @@
 //! Server-local services used by canonical engine capabilities.
 //!
-//! These modules are runtime and domain helpers, not public transports. The
-//! JSON-RPC layer may depend on [`context`] to access shared server state, but
-//! executable behavior is owned by `server::capabilities` and these services.
+//! These modules are runtime and domain helpers, not public transports.
+//! Transport layers may depend on [`context`] to access shared server state,
+//! but executable behavior is owned by `server::capabilities` and these
+//! services. Event-producing services publish neutral `ServerEventPayload`
+//! values; `/ws` JSON-RPC event objects are created only at delivery
+//! boundaries.
 
 pub(crate) mod agent_commands;
 pub(crate) mod agent_runtime;

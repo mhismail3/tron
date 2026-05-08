@@ -1,5 +1,5 @@
 use crate::core::events::TronEvent;
-use crate::server::transport::json_rpc::types::JsonRpcEvent;
+use crate::server::services::events_wire::ServerEventPayload;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -11,7 +11,7 @@ pub(super) enum BroadcastScope {
 
 #[derive(Debug, Clone)]
 pub(super) struct ProjectedEvent {
-    pub(super) rpc_event: JsonRpcEvent,
+    pub(super) server_event: ServerEventPayload,
     pub(super) scope: BroadcastScope,
 }
 
@@ -22,20 +22,24 @@ pub(super) fn set_opt<T: Serialize>(data: &mut Value, key: &str, val: &Option<T>
     }
 }
 
-pub(super) fn make_rpc(event: &TronEvent, wire_type: &str, data: Option<Value>) -> JsonRpcEvent {
+pub(super) fn make_server_event(
+    event: &TronEvent,
+    wire_type: &str,
+    data: Option<Value>,
+) -> ServerEventPayload {
     let session_id = event.session_id();
-    JsonRpcEvent {
-        event_type: wire_type.to_string(),
-        session_id: if session_id.is_empty() {
-            None
-        } else {
-            Some(session_id.to_string())
-        },
-        timestamp: event.timestamp().to_string(),
-        data,
-        run_id: None,
-        sequence: event.sequence(),
+    let session_id = if session_id.is_empty() {
+        None
+    } else {
+        Some(session_id.to_string())
+    };
+    let mut payload = ServerEventPayload::new(wire_type.to_string(), session_id, data);
+    payload.timestamp = event.timestamp().to_string();
+    payload.sequence = event.sequence();
+    if let Some(sequence) = event.sequence() {
+        payload.source_sequence = Some(sequence);
     }
+    payload
 }
 
 pub(super) fn session_scope(session_id: &str) -> BroadcastScope {
@@ -53,7 +57,7 @@ pub(super) fn with_scope(
     scope: BroadcastScope,
 ) -> ProjectedEvent {
     ProjectedEvent {
-        rpc_event: make_rpc(event, wire_type, data),
+        server_event: make_server_event(event, wire_type, data),
         scope,
     }
 }

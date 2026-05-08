@@ -7,6 +7,8 @@ documentation describes the architecture that exists now.
 
 - Public JSON-RPC methods: `engine.discover`, `engine.inspect`,
   `engine.watch`, `engine.invoke`, `engine.promote`.
+- Public engine WebSocket endpoint: `/engine`, using the same canonical
+  transport envelope plus stream `subscribe`/`poll`/`ack`.
 - Removed dotted domain methods return `METHOD_NOT_FOUND`.
 - `engine.invoke` accepts canonical `namespace::function` ids only.
 - Mutating invocations require explicit idempotency in the payload.
@@ -19,6 +21,7 @@ documentation describes the architecture that exists now.
 - Domain behavior lives in `server/capabilities` and reusable helpers in
   `server/services`.
 - JSON-RPC transport code lives in `server/transport/json_rpc`.
+- Engine WebSocket protocol code lives in `server/transport/engine_ws.rs`.
 - WebSocket delivery is a pump over engine stream records.
 - Queue, approval, stream, state, lease, compensation, cron, tool, MCP, and
   local worker paths are engine primitives rather than separate harness layers.
@@ -46,5 +49,5 @@ client work should replace dotted method calls with:
 1. `engine.discover` for available capabilities;
 2. `engine.inspect` for contracts and schema details;
 3. `engine.invoke` for canonical function execution;
-4. `engine.watch` or stream subscriptions for live changes;
+4. `engine.watch` or `/engine` stream subscriptions for live changes;
 5. `engine.promote` for explicit promotion flows.

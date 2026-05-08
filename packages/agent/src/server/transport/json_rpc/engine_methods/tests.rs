@@ -238,6 +238,54 @@ fn domain_code_does_not_import_json_rpc_error_or_param_helpers() {
 }
 
 #[test]
+fn domain_and_service_code_do_not_import_json_rpc_wire_types() {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    rust_sources_under(&manifest.join("src/server/capabilities"), &mut files);
+    rust_sources_under(&manifest.join("src/server/services"), &mut files);
+
+    let forbidden = [
+        "JsonRpcRequest",
+        "JsonRpcResponse",
+        "JsonRpcErrorBody",
+        "JsonRpcEvent",
+        "server::transport::json_rpc::types",
+    ];
+    for file in files {
+        if file.ends_with("events_wire.rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&file).unwrap();
+        for needle in forbidden {
+            assert!(
+                !text.contains(needle),
+                "{} imports JSON-RPC wire type {needle}",
+                file.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn engine_stream_payloads_do_not_use_removed_rpc_event_wrapper() {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    rust_sources_under(&manifest.join("src/server"), &mut files);
+
+    for file in files {
+        if file.ends_with("events_wire.rs") || file.ends_with("engine_methods/tests.rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            !text.contains("__rpcEvent"),
+            "{} still references removed stream payload wrapper __rpcEvent",
+            file.display()
+        );
+    }
+}
+
+#[test]
 fn pure_architecture_docs_do_not_reference_removed_shapes() {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest

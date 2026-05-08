@@ -71,12 +71,16 @@ mutations, and approval-required autonomous writes before handler execution.
 JSON-RPC request ids are correlation ids. They do not become command ids or
 idempotency keys.
 
-The server translates each public `engine.*` JSON-RPC call into an internal
-`EngineTransportRequest` before dispatch. The envelope is protocol-neutral:
-it contains the target function, trigger, actor, authority grant/scopes, trace,
+The `/engine` WebSocket protocol exposes engine-native messages for `hello`,
+`discover`, `inspect`, `watch`, `invoke`, `promote`, `subscribe`, `poll`, `ack`,
+`heartbeat`, and `goodbye`. The `id` field is correlation-only, and mutating
+`invoke`/`promote` messages require explicit idempotency.
+
+The server translates both JSON-RPC and `/engine` messages into an internal
+`EngineTransportRequest` before dispatch. The envelope is protocol-neutral: it
+contains the target function, trigger, actor, authority grant/scopes, trace,
 parent invocation, session/workspace scope, payload, expected revision, and
-explicit idempotency key. Later custom engine WebSocket transport work should
-build this same envelope and call the same dispatch path.
+explicit idempotency key.
 
 ## Agent Semantics
 
@@ -130,6 +134,8 @@ exists to do so.
 - Tron domain capability handlers and specs belong in `server/capabilities`.
 - Reusable server-local dependencies belong in `server/services`.
 - JSON-RPC framing/validation/registry belongs in `server/transport/json_rpc`.
+- Engine WebSocket framing/validation/subscription state belongs in
+  `server/transport/engine_ws.rs`.
 - WebSocket owns delivery only; engine streams are the source for migrated live
   events.
 

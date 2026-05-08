@@ -32,6 +32,7 @@ use crate::server::config::ServerConfig;
 use crate::server::external_workers::{SharedExternalWorkerRuntime, run_external_worker_socket};
 use crate::server::health::{self, HealthResponse};
 use crate::server::shutdown::ShutdownCoordinator;
+use crate::server::transport::engine_ws::run_engine_ws_session;
 use crate::server::websocket::auth::{BearerTokenStore, verify_bearer_header};
 use crate::server::websocket::broadcast::BroadcastManager;
 use crate::server::websocket::session::run_ws_session;
@@ -144,6 +145,11 @@ impl TronServer {
                     .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
             )
             .route(
+                "/engine",
+                get(engine_upgrade_handler)
+                    .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
+            )
+            .route(
                 "/engine/workers",
                 get(engine_worker_upgrade_handler)
                     .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
@@ -224,6 +230,21 @@ impl TronServer {
     pub fn external_workers(&self) -> &SharedExternalWorkerRuntime {
         &self.external_workers
     }
+}
+
+/// GET /engine — public engine client WebSocket protocol.
+async fn engine_upgrade_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let client_id = uuid::Uuid::now_v7().to_string();
+    let ctx = state.capability_context;
+    let max_message_size = state.config.max_message_size;
+    Ok(ws
+        .max_message_size(max_message_size)
+        .on_upgrade(move |socket| async move {
+            run_engine_ws_session(socket, client_id, ctx).await;
+        }))
 }
 
 /// GET /engine/workers — local engine worker WebSocket upgrade handler.
@@ -383,10 +404,10 @@ mod tests {
         (server, dir, token)
     }
 
-    fn ws_upgrade_request(auth: Option<String>) -> Request<Body> {
+    fn ws_upgrade_request_to(path: &str, auth: Option<String>) -> Request<Body> {
         let mut builder = Request::builder()
             .method("GET")
-            .uri("/ws")
+            .uri(path)
             .header("connection", "upgrade")
             .header("upgrade", "websocket")
             .header("sec-websocket-version", "13")
@@ -395,6 +416,10 @@ mod tests {
             builder = builder.header("authorization", auth);
         }
         builder.body(Body::empty()).unwrap()
+    }
+
+    fn ws_upgrade_request(auth: Option<String>) -> Request<Body> {
+        ws_upgrade_request_to("/ws", auth)
     }
 
     #[tokio::test]
@@ -480,6 +505,20 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn engine_ws_endpoint_uses_same_bearer_auth_gate() {
+        let (server, _dir, token) = make_server_with_auth();
+        let app = server.router();
+
+        let missing = ws_upgrade_request_to("/engine", None);
+        let missing_resp = app.clone().oneshot(missing).await.unwrap();
+        assert_eq!(missing_resp.status(), StatusCode::UNAUTHORIZED);
+
+        let authorized = ws_upgrade_request_to("/engine", Some(format!("Bearer {token}")));
+        let authorized_resp = app.oneshot(authorized).await.unwrap();
+        assert_ne!(authorized_resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

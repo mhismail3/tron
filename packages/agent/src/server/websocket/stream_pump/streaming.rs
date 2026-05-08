@@ -115,7 +115,7 @@ mod tests {
             height: 720,
         };
         let projected = convert(&event).expect("should convert");
-        assert_eq!(projected.rpc_event.event_type, "display.frame");
+        assert_eq!(projected.server_event.event_type, "display.frame");
     }
 
     #[test]
@@ -130,7 +130,11 @@ mod tests {
             height: 720,
         };
         let projected = convert(&event).expect("should convert");
-        let data = projected.rpc_event.data.as_ref().expect("should have data");
+        let data = projected
+            .server_event
+            .data
+            .as_ref()
+            .expect("should have data");
         assert_eq!(data["streamId"], "stream-1");
         assert_eq!(data["toolCallId"], "call-1");
         assert_eq!(data["data"], "b64data");
@@ -151,7 +155,10 @@ mod tests {
             height: 480,
         };
         let projected = convert(&event).expect("should convert");
-        assert_eq!(projected.rpc_event.session_id.as_deref(), Some("sess-42"));
+        assert_eq!(
+            projected.server_event.session_id.as_deref(),
+            Some("sess-42")
+        );
     }
 
     #[test]
@@ -175,7 +182,7 @@ mod tests {
             tool_call_id: "tc-1".into(),
         };
         let projected = convert(&event).expect("should convert");
-        assert_eq!(projected.rpc_event.event_type, "process.spawned");
+        assert_eq!(projected.server_event.event_type, "process.spawned");
     }
 
     #[test]
@@ -189,7 +196,7 @@ mod tests {
             tool_call_id: "tc-42".into(),
         };
         let projected = convert(&event).expect("should convert");
-        let data = projected.rpc_event.data.as_ref().unwrap();
+        let data = projected.server_event.data.as_ref().unwrap();
         assert_eq!(data["processId"], "proc-abc");
         assert_eq!(data["label"], "npm test");
         assert_eq!(data["kind"], "shell");
@@ -208,7 +215,10 @@ mod tests {
             tool_call_id: "t".into(),
         };
         let projected = convert(&event).expect("should convert");
-        assert_eq!(projected.rpc_event.session_id.as_deref(), Some("sess-99"));
+        assert_eq!(
+            projected.server_event.session_id.as_deref(),
+            Some("sess-99")
+        );
     }
 
     #[test]
@@ -219,8 +229,8 @@ mod tests {
             status: "background".into(),
         };
         let projected = convert(&event).expect("should convert");
-        assert_eq!(projected.rpc_event.event_type, "process.status_update");
-        let data = projected.rpc_event.data.as_ref().unwrap();
+        assert_eq!(projected.server_event.event_type, "process.status_update");
+        let data = projected.server_event.data.as_ref().unwrap();
         assert_eq!(data["processId"], "proc-1");
         assert_eq!(data["status"], "background");
     }
@@ -240,7 +250,7 @@ mod tests {
             completed_at: "2026-03-29T12:00:00Z".into(),
         };
         let projected = convert(&event).expect("should convert");
-        assert_eq!(projected.rpc_event.event_type, "process.completed");
+        assert_eq!(projected.server_event.event_type, "process.completed");
     }
 
     #[test]
@@ -258,7 +268,7 @@ mod tests {
             completed_at: "2026-03-29T15:00:00Z".into(),
         };
         let projected = convert(&event).expect("should convert");
-        let data = projected.rpc_event.data.as_ref().unwrap();
+        let data = projected.server_event.data.as_ref().unwrap();
         assert_eq!(data["parentSessionId"], "sess-1");
         assert_eq!(data["processId"], "proc-abc");
         assert_eq!(data["label"], "npm test");
@@ -285,7 +295,7 @@ mod tests {
             completed_at: "2026-01-01T00:00:00Z".into(),
         };
         let projected = convert(&event).expect("should convert");
-        let data = projected.rpc_event.data.as_ref().unwrap();
+        let data = projected.server_event.data.as_ref().unwrap();
         assert!(data["exitCode"].is_null());
         assert!(data["blobId"].is_null());
     }

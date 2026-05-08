@@ -178,7 +178,7 @@ async fn publish_engine_stream_event(
         .publish_stream_event(PublishStreamEvent {
             topic: topic.to_owned(),
             payload: json!({
-                "__rpcEvent": event.clone(),
+                "serverEvent": event.clone(),
                 "__broadcastScope": event
                     .session_id
                     .as_ref()

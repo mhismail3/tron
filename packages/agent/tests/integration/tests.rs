@@ -28,6 +28,107 @@ async fn e2e_connect_and_ping() {
 }
 
 #[tokio::test]
+async fn e2e_engine_ws_hello_discover_invoke_and_stream_poll() {
+    let (url, server) = boot_server_without_deps().await;
+    let engine_url = engine_ws_url_for(&url);
+    let mut ws = connect(&engine_url).await;
+
+    ws.send(Message::text(
+        json!({
+            "type": "hello",
+            "id": "hello-1",
+            "protocolVersion": 1,
+            "sessionId": "engine-session"
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    let hello = read_json(&mut ws).await;
+    assert_eq!(hello["type"], "hello.ok");
+    assert_eq!(hello["id"], "hello-1");
+    assert_eq!(hello["protocolVersion"], 1);
+    assert!(hello["currentCatalogRevision"].is_number());
+
+    ws.send(Message::text(
+        json!({
+            "type": "discover",
+            "id": "discover-1",
+            "request": {"text": "system"}
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    let discover = read_json(&mut ws).await;
+    assert_eq!(discover["type"], "response");
+    assert_eq!(discover["id"], "discover-1");
+    assert_eq!(discover["ok"], true);
+    assert!(discover["result"].to_string().contains("system::ping"));
+
+    ws.send(Message::text(
+        json!({
+            "type": "invoke",
+            "id": "invoke-1",
+            "functionId": "system::ping",
+            "payload": ping_params()
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    let invoke = read_json(&mut ws).await;
+    assert_eq!(invoke["id"], "invoke-1");
+    assert_eq!(invoke["ok"], true);
+    assert_eq!(invoke["result"]["child"]["value"]["pong"], true);
+
+    ws.send(Message::text(
+        json!({
+            "type": "subscribe",
+            "id": "subscribe-1",
+            "topic": "events.session"
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    let subscribe = read_json(&mut ws).await;
+    assert_eq!(subscribe["ok"], true);
+    let subscription_id = subscribe["result"]["subscriptionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    publish_engine_session_event(
+        &server,
+        "engine-session",
+        "agent.ready",
+        json!({"ready": true}),
+    )
+    .await;
+    ws.send(Message::text(
+        json!({
+            "type": "poll",
+            "id": "poll-1",
+            "subscriptionId": subscription_id
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    let poll = read_json(&mut ws).await;
+    assert_eq!(poll["ok"], true);
+    assert_eq!(poll["result"]["events"][0]["topic"], "events.session");
+    assert_eq!(poll["result"]["events"][0]["event"]["type"], "agent.ready");
+    assert_eq!(
+        poll["result"]["events"][0]["event"]["sessionId"],
+        "engine-session"
+    );
+
+    server.shutdown().shutdown();
+}
+
+#[tokio::test]
 async fn e2e_session_lifecycle() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;

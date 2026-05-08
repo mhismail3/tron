@@ -1,10 +1,11 @@
-//! Engine stream event pump — converts `TronEvent`s from the Orchestrator broadcast into
-//! `JsonRpcEvent`s and routes them through WebSocket-compatible delivery.
+//! Engine stream event pump — projects `TronEvent`s into neutral server events and
+//! routes them through engine stream delivery.
 //!
 //! Migrated runtime event classes publish to the engine stream primitive
-//! (`events.session`). The stream pump then rebroadcasts the wrapped
-//! `JsonRpcEvent` shape, keeping WebSocket as delivery while engine streams
-//! remain the live/resumable source for runtime updates.
+//! (`events.session`). The stream pump then rebroadcasts the transport-specific
+//! `/ws` event shape from the neutral stream payload, keeping WebSocket as
+//! delivery while engine streams remain the live/resumable source for runtime
+//! updates.
 
 use std::sync::Arc;
 
@@ -74,7 +75,7 @@ impl EngineStreamEventPump {
     ///
     /// WebSocket remains the delivery transport: migrated event classes are
     /// published to `events.session`, and the server stream pump rebroadcasts
-    /// the wrapped [`JsonRpcEvent`] shape.
+    /// the current `/ws` shape from the neutral event payload.
     #[must_use]
     pub fn with_engine_streams(mut self, host: EngineHostHandle) -> Self {
         self.engine_streams = Some(host);
@@ -141,7 +142,7 @@ impl EngineStreamEventPump {
                 .publish_stream_event(PublishStreamEvent {
                     topic: "events.session".to_owned(),
                     payload: json!({
-                        "__rpcEvent": projected.rpc_event.clone(),
+                        "serverEvent": projected.server_event.clone(),
                         "__broadcastScope": broadcast_scope_payload(&projected.scope),
                         "sourceEventType": event.event_type(),
                         "sourceSequence": event.sequence(),
@@ -168,10 +169,14 @@ impl EngineStreamEventPump {
         }
 
         match projected.scope {
-            BroadcastScope::All => self.broadcast.broadcast_all(&projected.rpc_event).await,
+            BroadcastScope::All => {
+                self.broadcast
+                    .broadcast_all(&projected.server_event.to_json_rpc_event())
+                    .await;
+            }
             BroadcastScope::Session(session_id) => {
                 self.broadcast
-                    .broadcast_to_session(&session_id, &projected.rpc_event)
+                    .broadcast_to_session(&session_id, &projected.server_event.to_json_rpc_event())
                     .await;
             }
         }

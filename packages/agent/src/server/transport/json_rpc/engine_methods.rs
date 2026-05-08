@@ -82,6 +82,7 @@ fn register_engine_json_rpc(
         handle.register_worker_for_setup(worker, false)?;
     }
     handle.register_trigger_type_for_setup(catalog::json_rpc_trigger_type()?, false)?;
+    handle.register_trigger_type_for_setup(catalog::engine_ws_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(catalog::manual_trigger_type()?, false)?;
     handle.register_trigger_type_for_setup(catalog::cron_schedule_trigger_type()?, false)?;
     for spec in &canonical_specs {
@@ -117,6 +118,9 @@ fn register_engine_json_rpc(
     register_hidden_cron_schedule_function(handle, &deps)?;
     for spec in &public_transport_specs {
         if let Some(trigger) = catalog::json_rpc_trigger_for_spec(spec)? {
+            handle.register_trigger_for_setup(trigger, false)?;
+        }
+        if let Some(trigger) = catalog::engine_ws_trigger_for_spec(spec)? {
             handle.register_trigger_for_setup(trigger, false)?;
         }
     }

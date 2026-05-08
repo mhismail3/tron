@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::server::services::events_wire as rpc_events;
+use crate::server::services::events_wire as event_wire;
 
 pub(super) async fn handle(
     method: &str,
@@ -102,7 +102,7 @@ async fn events_get_history_value(
 
     let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
     let oldest_event_id = events.first().map(|e| e.id.clone());
-    let mut wire_events: Vec<Value> = events.iter().map(rpc_events::event_row_to_wire).collect();
+    let mut wire_events: Vec<Value> = events.iter().map(event_wire::event_row_to_wire).collect();
     crate::server::services::interactive_tool_enrichment::enrich_interactive_tool_statuses(
         &mut wire_events,
     );
@@ -140,7 +140,7 @@ async fn events_get_since_value(
     if let Some(l) = limit {
         events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
     }
-    let mut wire_events: Vec<Value> = events.iter().map(rpc_events::event_row_to_wire).collect();
+    let mut wire_events: Vec<Value> = events.iter().map(event_wire::event_row_to_wire).collect();
     crate::server::services::interactive_tool_enrichment::enrich_interactive_tool_statuses(
         &mut wire_events,
     );
@@ -187,7 +187,11 @@ async fn events_append_value(
         .engine_host
         .publish_stream_event(crate::engine::PublishStreamEvent {
             topic: "events.session".to_owned(),
-            payload: rpc_events::event_row_to_wire(&event),
+            payload: json!({
+                "serverEvent": event_wire::event_row_to_server_payload(&event),
+                "sourceEventType": event.event_type.clone(),
+                "sourceSequence": event.sequence,
+            }),
             visibility: crate::engine::VisibilityScope::Session,
             session_id: Some(session_id.clone()),
             workspace_id: invocation_workspace(params),
@@ -198,7 +202,7 @@ async fn events_append_value(
         .await;
 
     Ok(json!({
-        "event": rpc_events::event_row_to_wire(&event),
+        "event": event_wire::event_row_to_wire(&event),
         "newHeadEventId": new_head,
     }))
 }

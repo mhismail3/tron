@@ -72,7 +72,6 @@ pub(crate) fn request_schema_for_method(method: &str) -> Option<Value> {
             "type": "object",
             "required": [
                 "functionId",
-                "ownerWorker",
                 "targetVisibility",
                 "expectedFunctionRevision",
                 "idempotencyKey"

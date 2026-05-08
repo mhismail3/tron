@@ -30,10 +30,10 @@ async fn poll_test_stream_event(
             .await
             .unwrap();
         if let Some(event) = page.events.first() {
-            let rpc_event: JsonRpcEvent =
-                serde_json::from_value(event.payload["__rpcEvent"].clone()).unwrap();
+            let server_event: crate::server::services::events_wire::ServerEventPayload =
+                serde_json::from_value(event.payload["serverEvent"].clone()).unwrap();
             let scope = event.payload["__broadcastScope"].clone();
-            return (rpc_event, scope);
+            return (server_event.to_json_rpc_event(), scope);
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -1658,7 +1658,7 @@ async fn stream_pump_feeds_events_to_accumulator() {
 }
 
 #[tokio::test]
-async fn stream_first_runtime_events_publish_rpc_shape_to_engine_stream() {
+async fn stream_first_runtime_events_publish_neutral_shape_to_engine_stream() {
     let map = Arc::new(TurnAccumulatorMap::new());
     let (tx, _) = broadcast::channel(16);
     let bm = Arc::new(BroadcastManager::new());
@@ -1695,7 +1695,7 @@ async fn stream_first_runtime_events_publish_rpc_shape_to_engine_stream() {
         .await
         .unwrap();
     assert_eq!(page.events.len(), 1);
-    let wrapped = &page.events[0].payload["__rpcEvent"];
+    let wrapped = &page.events[0].payload["serverEvent"];
     assert_eq!(wrapped["type"], "agent.text_delta");
     assert_eq!(wrapped["sessionId"], "s1");
     assert_eq!(wrapped["data"]["delta"], "hello");

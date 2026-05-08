@@ -3,7 +3,7 @@ use serde_json::json;
 
 use super::hook;
 use super::message;
-use super::routed::{ProjectedEvent, make_rpc, session_scope};
+use super::routed::{ProjectedEvent, make_server_event, session_scope};
 use super::session;
 use super::streaming;
 use super::tool;
@@ -13,7 +13,9 @@ use super::turn;
 pub(super) fn tron_event_to_rpc(
     event: &TronEvent,
 ) -> crate::server::transport::json_rpc::types::JsonRpcEvent {
-    tron_event_to_projected(event).rpc_event
+    tron_event_to_projected(event)
+        .server_event
+        .to_json_rpc_event()
 }
 
 pub(super) fn tron_event_to_projected(event: &TronEvent) -> ProjectedEvent {
@@ -24,7 +26,7 @@ pub(super) fn tron_event_to_projected(event: &TronEvent) -> ProjectedEvent {
         .or_else(|| streaming::convert(event))
         .or_else(|| session::convert(event))
         .unwrap_or_else(|| ProjectedEvent {
-            rpc_event: make_rpc(event, event.event_type(), Some(json!({}))),
+            server_event: make_server_event(event, event.event_type(), Some(json!({}))),
             scope: session_scope(event.session_id()),
         })
 }
