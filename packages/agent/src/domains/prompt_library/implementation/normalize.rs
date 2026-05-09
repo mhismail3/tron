@@ -88,8 +88,8 @@ mod tests {
 
     #[test]
     fn nfkc_variants_remain_distinct() {
-        // Compatibility (NFKC) folds e.g. ﬁ ligature to fi; we use NFC,
-        // which preserves compatibility distinctions. This test pins
+        // NFKC folds e.g. ﬁ ligature to fi; we use NFC, which preserves
+        // canonical text distinctions. This test pins
         // that choice so the decision isn't silently changed later.
         let ligature = "of\u{fb01}ce"; // of + ﬁ + ce
         let plain = "office";
@@ -97,7 +97,7 @@ mod tests {
         let b = hash_hex(normalize_for_hash(plain).as_bytes());
         assert_ne!(
             a, b,
-            "NFC must NOT fold compatibility pairs; upgrade to NFKC requires an explicit decision"
+            "NFC must NOT fold NFKC pairs; upgrade to NFKC requires an explicit decision"
         );
     }
 

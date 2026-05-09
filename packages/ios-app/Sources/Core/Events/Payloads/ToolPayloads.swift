@@ -172,7 +172,7 @@ struct ToolErrorPayload {
 ///
 /// `category` is REQUIRED. The Rust schema is `deny_unknown_fields` and emits
 /// `"unknown"` literally when the classification layer couldn't narrow further
-/// (e.g. legacy imported api_error records). Missing category → decode fails
+/// (e.g. historical imported api_error records). Missing category → decode fails
 /// → event is dropped from reconstruction, never silently rendered as
 /// plain text.
 struct ProviderErrorPayload {

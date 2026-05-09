@@ -771,8 +771,8 @@ impl GitExecutor {
     /// Uses `git ls-files --unmerged -z` to determine which stages exist
     /// (1/2/3) and `git show :<stage>:<path>` to read each stage's blob.
     /// Binary detection: we run `git check-attr` — cheap, authoritative,
-    /// and respects `.gitattributes`. As a fallback we treat a NUL byte
-    /// in any stage as binary.
+    /// and respects `.gitattributes`. A NUL byte in any stage is also
+    /// considered binary.
     pub async fn conflict_sections(&self, dir: &Path, path: &str) -> Result<ConflictedFile> {
         // 1. Figure out which stages exist. Output from ls-files --unmerged:
         //    <mode> SP <sha> SP <stage>\t<path>\0
@@ -2026,8 +2026,8 @@ branch refs/heads/session/x
 // ══════════════════════════════════════════════════════════════════════
 //
 // These sit in a separate `#[cfg(test)]` module so they can reach the
-// shared fixtures at `crate::domains::worktree::test_fixtures::*` without needing
-// to import them into the legacy (inline) tests above.
+// shared fixtures at `crate::domains::worktree::test_fixtures::*` without
+// pulling those fixtures into the inline tests above.
 
 #[cfg(test)]
 mod phase1_tests {
@@ -2540,7 +2540,7 @@ mod phase1_tests {
         let git = init_repo(dir.path()).await;
         let base = git.head_commit(dir.path()).await.unwrap();
         add_commit(dir.path(), "a.txt", "a", "a").await;
-        // Move main backward with update-ref. symbolic-ref still points to
+        // Move main to the base commit with update-ref. symbolic-ref still points to
         // main, so `rev-parse refs/heads/main` should now return `base`.
         git.update_ref(dir.path(), "refs/heads/main", &base)
             .await

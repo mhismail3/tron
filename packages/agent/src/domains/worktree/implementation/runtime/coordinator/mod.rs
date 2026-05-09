@@ -191,7 +191,7 @@ impl CoordinatorState {
 /// INVARIANT: [`Self::maybe_acquire_with_override`]'s `use_worktree_override`
 /// takes precedence over the global [`crate::domains::settings::types::IsolationMode`]
 /// when set. `Some(true)` forces isolation in a git repo; `Some(false)` forces
-/// passthrough; `None` defers to the global mode (the legacy behavior).
+/// passthrough; `None` defers to the global worktree mode.
 /// The override is read from `sessions.use_worktree` (set at session.create
 /// time, immutable afterward).
 pub struct WorktreeCoordinator {

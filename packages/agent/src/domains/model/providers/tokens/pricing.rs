@@ -11,7 +11,7 @@ use super::types::PricingTier;
 /// Look up the pricing tier for a model identifier.
 ///
 /// Uses exact-match first, then prefix/pattern matching.
-/// Returns `None` for unknown models (no implicit fallback pricing).
+/// Returns `None` for unknown models (no implicit default pricing).
 #[must_use]
 pub fn get_pricing_tier(model: &str) -> Option<PricingTier> {
     // Exact match first
@@ -292,7 +292,7 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         // Kimi — K2 turbo ($1.15/$8.00)
         "kimi-k2-turbo-preview" | "kimi-k2-thinking-turbo" => kimi_tier(1.15, 8.00),
 
-        // Kimi — Moonshot V1 legacy
+        // Kimi — Moonshot V1 retired generation.
         "moonshot-v1-8k" => kimi_tier(0.20, 2.00),
         "moonshot-v1-32k" => kimi_tier(1.00, 3.00),
         "moonshot-v1-128k" => kimi_tier(2.00, 5.00),
@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn pricing_gpt_52_and_deprecated_alias() {
+    fn pricing_gpt_52_and_retired_alias() {
         let tier = get_pricing_tier("gpt-5.2").unwrap();
         assert_float_eq(tier.input_per_million, 1.75);
         assert_float_eq(tier.output_per_million, 14.0);

@@ -238,9 +238,9 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
         let sourcesRoot = iosRoot.appendingPathComponent("Sources")
         let forbiddenNeedles: [(String, String)] = [
-            ("if #available(iOS 26.0, *)", "runtime iOS 26 compatibility gate"),
-            ("ASPresentationAnchor(frame:", "deprecated presentation-anchor fallback"),
-            ("+ Text(", "deprecated Text concatenation"),
+            ("if #available(iOS 26.0, *)", "runtime iOS 26 availability gate"),
+            ("ASPresentationAnchor(frame:", "presentation-anchor workaround"),
+            ("+ Text(", "Text concatenation"),
         ]
         let chipStyleStrokeRegex = try NSRegularExpression(
             pattern: #"(?s)\.chipStyle\s*\([^)]*strokeOpacity\s*:"#,

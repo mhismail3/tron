@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(back, ReasoningEffort::Xhigh);
     }
 
-    /// R1: legacy `google` field was removed and `deny_unknown_fields` was
+    /// R1: retired `google` field was removed and `deny_unknown_fields` was
     /// added — any profile settings payload that still carries `google: {...}` must
     /// fail to load with an error naming the unknown field.
     #[test]
@@ -241,7 +241,7 @@ mod tests {
     }
 
     /// Companion to `google_field_rejected_on_load`: totally-unknown fields
-    /// also fail, guarding against future back-compat shims sneaking in.
+    /// also fail, guarding against future tolerant parser branches.
     #[test]
     fn unknown_provider_field_rejected() {
         let json = serde_json::json!({

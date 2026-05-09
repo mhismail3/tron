@@ -558,7 +558,7 @@ extension UnifiedEventTransformer {
     ) {
         // Every field we read below is non-optional on the corresponding
         // Rust payload (see `events/types/payloads/worktree.rs`). Missing
-        // any of them is a schema violation, not a legacy event — we drop
+        // any of them is a schema violation, not a historical event shape — we drop
         // the event from reconstruction with a warning rather than silently
         // rendering an empty-string commit or a nil worktree path.
         switch eventType {

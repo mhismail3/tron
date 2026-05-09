@@ -54,7 +54,7 @@ final class SessionEventForkableTests: XCTestCase {
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_stringContent_legacyFormat_isForkable() {
+    func testAssistant_stringContent_historicalFormat_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable("Plain string response"),
             "stopReason": AnyCodable("end_turn"),

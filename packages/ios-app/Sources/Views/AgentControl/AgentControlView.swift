@@ -90,7 +90,7 @@ struct AgentControlView: View {
     private var analyticsTotalTokens: Int {
         let bd = cachedAnalytics.costBreakdown
         return bd.baseInputTokens + bd.outputTokens + bd.cacheReadTokens
-            + bd.cacheWrite5mTokens + bd.cacheWrite1hTokens + bd.cacheWriteLegacyTokens
+            + bd.cacheWrite5mTokens + bd.cacheWrite1hTokens + bd.cacheWriteDefaultTtlTokens
     }
 
     // MARK: - Body

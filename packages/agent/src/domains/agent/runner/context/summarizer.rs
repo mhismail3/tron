@@ -1,7 +1,7 @@
 //! Summarizer trait and utilities for compaction.
 //!
 //! Defines the [`Summarizer`] trait used by the compaction engine, plus
-//! a [`KeywordSummarizer`] fallback and message serialization utilities
+//! a [`KeywordSummarizer`] recovery path and message serialization utilities
 //! for LLM-based summarization.
 //!
 //! The concrete LLM summarizer (which spawns a Haiku subagent) lives in
@@ -27,7 +27,7 @@ use super::types::{ExtractedData, KeyDecision, SummaryResult};
 ///
 /// Implementations include:
 /// - `LlmSummarizer` (in `llm_summarizer`) -- calls Haiku subagent
-/// - [`KeywordSummarizer`] -- fast fallback using keyword extraction
+/// - [`KeywordSummarizer`] -- fast recovery summarizer using keyword extraction
 #[async_trait::async_trait]
 pub trait Summarizer: Send + Sync {
     /// Summarize a sequence of messages into a structured result.
@@ -63,10 +63,10 @@ pub enum SummarizerError {
 }
 
 // =============================================================================
-// Keyword Summarizer (Fallback)
+// Keyword Summarizer
 // =============================================================================
 
-/// Fast fallback summarizer that extracts keywords from messages.
+/// Fast recovery summarizer that extracts keywords from messages.
 ///
 /// Used when the LLM summarizer fails (timeout, parse error, etc.).
 /// Produces a simple narrative by concatenating user messages and

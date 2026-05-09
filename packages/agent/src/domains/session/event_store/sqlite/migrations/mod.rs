@@ -2,7 +2,7 @@
 //!
 //! Tron ships a consolidated `v001_schema.sql` for fresh databases, plus
 //! small additive follow-up migrations for installs that already recorded v001.
-//! There are no table-rebuild migrations or backward-compat branches; each
+//! There are no table-rebuild migrations or historical-shape branches; each
 //! appended migration is idempotent and moves version N-1 to N.
 //!
 //! The `schema_version` table tracks which migrations have been applied.
@@ -579,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v1_tables_absent() {
+    fn retired_v1_tables_absent() {
         // Confirm removed tables from prior schema revisions don't leak back
         // through copy-paste.
         let conn = open_memory();
@@ -1257,7 +1257,7 @@ mod tests {
     /// Post-R5: `bundle_id` is NOT NULL — every registration carries its
     /// APNs topic. An INSERT that omits bundle_id must be rejected by the
     /// schema, so clients cannot register without a bundle and the send
-    /// path never needs a topic fallback.
+    /// path always uses the persisted topic.
     #[test]
     fn device_tokens_bundle_id_is_not_null() {
         let conn = open_memory();
@@ -1366,7 +1366,7 @@ mod tests {
         );
     }
 
-    /// The consolidated schema must NOT carry the legacy narrow
+    /// The consolidated schema must NOT carry the retired narrow
     /// UNIQUE(device_token, platform): two registrations with the same token
     /// and platform but distinct workspaces must both succeed.
     #[test]

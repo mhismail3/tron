@@ -7,7 +7,7 @@
 //!
 //! ## Algorithm
 //!
-//! 1. Walk backward counting real user turns (skip compaction summaries).
+//! 1. Walk toward the start counting real user turns (skip compaction summaries).
 //! 2. Stop when `preserve_recent_turns` reached or token budget exceeded.
 //! 3. Apply orphaned-ToolResult fixup at the split boundary.
 //! 4. Summarize older messages, replace with summary user + assistant ack.
@@ -91,9 +91,9 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     /// Messages `[0..split)` are summarized, messages `[split..]` are preserved verbatim.
     ///
     /// Algorithm:
-    /// 1. Walk backward from end counting real user turns (skip compaction summaries)
+    /// 1. Walk toward the start from the end counting real user turns (skip compaction summaries)
     /// 2. Stop when `preserve_recent_turns` reached OR token budget exceeded
-    /// 3. Apply orphaned-`ToolResult` fixup (walk backward past `ToolResult`s at boundary)
+    /// 3. Apply orphaned-`ToolResult` fixup (walk toward the start past `ToolResult`s at boundary)
     /// 4. Guarantee: if `preserve_recent_turns > 0` and there are messages,
     ///    preserve at least 1 complete turn
     fn compute_split_point(&self, messages: &[Message]) -> usize {
@@ -112,12 +112,12 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         let mut preserved_tokens: u64 = 0;
         let mut current_turn_tokens: u64 = 0;
 
-        // Walk backward through messages
+        // Walk toward the start through messages.
         for i in (0..messages.len()).rev() {
             let msg_tokens = self.deps.get_message_tokens(&messages[i]);
 
             if messages[i].is_real_user_turn() {
-                // This User message starts a new turn (going backward)
+                // This User message starts a new turn while scanning toward the start.
                 current_turn_tokens += msg_tokens;
 
                 // Check if this complete turn fits in the budget
@@ -158,7 +158,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         }
 
         // Orphaned ToolResult fixup: if split is within bounds and lands on a ToolResult,
-        // walk backward to include its preceding Assistant
+        // scan toward the start to include its preceding Assistant.
         if candidate_split < messages.len() {
             while candidate_split > 0 && messages[candidate_split].is_tool_result() {
                 candidate_split -= 1;

@@ -104,7 +104,6 @@
 		1B99987BB8D41C3393DF474D /* IBMPlexMono-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FC88FA734BC474DE77D840C7 /* IBMPlexMono-SemiBold.ttf */; };
 		1C3665C9D7CBAAE722B229E0 /* InputBarStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1794B8668C126DC00F5B37AA /* InputBarStateTests.swift */; };
 		1C3FC690D7AA2041C0376235 /* RecentWorkspacesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8548353C7D76178EEFD10906 /* RecentWorkspacesTests.swift */; };
-		1CB6632A703C236EB9CE68F6 /* ToolRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D30F8A47863EABE156AB1D2 /* ToolRegistryTests.swift */; };
 		1CC559D72247E843BBE33481 /* AgentClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F877AB5A7D88D1919F6395AE /* AgentClientTests.swift */; };
 		1D21C6872082D6DAAAB51DD1 /* PairingProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E7EAEAA6D948D27F3BA130 /* PairingProbeTests.swift */; };
 		1D664AC2865E3FC76868AEA6 /* EngineProtocolTypes+Diff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 630DD90FF9C9332CCF2F4F33 /* EngineProtocolTypes+Diff.swift */; };
@@ -621,6 +620,7 @@
 		B523893BDC7E79D4FBF86800 /* TronLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF550C99638AAC41D6ACAD87 /* TronLogger.swift */; };
 		B5B120E6C45CCBAF8C76572F /* GetConfirmationTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67D2BA3A87EF272E7303C546 /* GetConfirmationTypes.swift */; };
 		B5B3D42E595F1E3FA9717B71 /* PairingValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E34879EEBEB3E3ACB921B8 /* PairingValidationTests.swift */; };
+		B5BB2550108A7FAAB1EB69EB /* ToolDescriptorCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CA88127F4B5F7B34F83ABED /* ToolDescriptorCatalogTests.swift */; };
 		B5E89668A89E30FFD5CC1472 /* ToolKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD59D6ED1089F36BD289F7CC /* ToolKind.swift */; };
 		B6E4A15524ACB1AA05466D8B /* EngineProtocolTypesSystemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774BC25254B34D9AC6004935 /* EngineProtocolTypesSystemTests.swift */; };
 		B77FADD339F30EDF27379464 /* AskUserQuestionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637D018D17FB22BE188D582B /* AskUserQuestionState.swift */; };
@@ -1118,6 +1118,7 @@
 		3C6E6FFC4582D53935EF1C41 /* MessagePayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagePayloads.swift; sourceTree = "<group>"; };
 		3C9B14E52315013A746D7375 /* SyncRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRepository.swift; sourceTree = "<group>"; };
 		3CA1137C5C16D1F92D3D3ECF /* SheetReadOnlyPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetReadOnlyPolicy.swift; sourceTree = "<group>"; };
+		3CA88127F4B5F7B34F83ABED /* ToolDescriptorCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDescriptorCatalogTests.swift; sourceTree = "<group>"; };
 		3CAC66C78F305EFCD3BFA1D8 /* EngineProtocolTypes+Tool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+Tool.swift"; sourceTree = "<group>"; };
 		3CF2E3A05476BEE6B258A82B /* WorktreeStatusCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusCache.swift; sourceTree = "<group>"; };
 		3D919BCA3B9BD33019A1AA3D /* SessionEventSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEventSummaryTests.swift; sourceTree = "<group>"; };
@@ -1267,7 +1268,6 @@
 		6C1612AACC366E0C97BAEB4B /* CloneRepoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloneRepoSheet.swift; sourceTree = "<group>"; };
 		6C1651B2823641DFC3DD68AC /* GitTileGating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitTileGating.swift; sourceTree = "<group>"; };
 		6C6841F90EE852E5911F5AED /* SessionRefreshServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRefreshServiceTests.swift; sourceTree = "<group>"; };
-		6D30F8A47863EABE156AB1D2 /* ToolRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRegistryTests.swift; sourceTree = "<group>"; };
 		6D374F17AA0C1EB92727E011 /* GlobToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobToolDetailSheet.swift; sourceTree = "<group>"; };
 		6D7E75DA47909F7988485FFC /* CommandToolTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandToolTypes.swift; sourceTree = "<group>"; };
 		6D8CBB2F40BC6731211204E0 /* AsyncEventStreamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncEventStreamTests.swift; sourceTree = "<group>"; };
@@ -3886,7 +3886,7 @@
 				4DF0B010CB4A6D35E2CF4F16 /* SubagentTypesTests.swift */,
 				67AAAFBBBB189F7F66F3242A /* TokenRecordTests.swift */,
 				D19993C29EBF7852B5AA1669 /* TokenStateManagerTests.swift */,
-				6D30F8A47863EABE156AB1D2 /* ToolRegistryTests.swift */,
+				3CA88127F4B5F7B34F83ABED /* ToolDescriptorCatalogTests.swift */,
 				935B6A62320C390A09A2084C /* EngineProtocol */,
 			);
 			path = Models;
@@ -4877,12 +4877,12 @@
 				8A3F72C429CDC4BBF561211D /* TokenStateManagerTests.swift in Sources */,
 				327F1D26712E9C91C3AAA6A7 /* ToolArgumentExtractorTests.swift in Sources */,
 				DB319F1DCE74545D699AFB56 /* ToolArgumentParserTests.swift in Sources */,
+				B5BB2550108A7FAAB1EB69EB /* ToolDescriptorCatalogTests.swift in Sources */,
 				D80A41AD9F10A4CA2678E474 /* ToolEndPluginTests.swift in Sources */,
 				6B5AA7C596E4C1B5902B4D00 /* ToolEventCoordinatorTests.swift in Sources */,
 				0FCB41B96A3A96F7C99ABFBC /* ToolGeneratingPluginTests.swift in Sources */,
 				83E65C3B215059FD973798B2 /* ToolKindBadgeTests.swift in Sources */,
 				E9534EC415AB0BF59E6A5D01 /* ToolOutputPluginTests.swift in Sources */,
-				1CB6632A703C236EB9CE68F6 /* ToolRegistryTests.swift in Sources */,
 				4ABA7EF5C28D04DAF3C82F2E /* ToolResultParserNotifyAppTests.swift in Sources */,
 				0B0B9315A33A8820593FDF8D /* ToolSharedComponentsTests.swift in Sources */,
 				FFE8EE699BA7BFD96512E197 /* TranscriptionCoordinatorTests.swift in Sources */,

@@ -1,6 +1,6 @@
 //! `OpenAI` provider types, configuration, and model registry.
 //!
-//! Covers the Responses API types (not legacy Chat Completions).
+//! Covers the current Responses API types (not Chat Completions).
 //! The `OpenAI` provider uses auth-path-specific metadata: ChatGPT OAuth
 //! targets the Codex backend, while API keys target the OpenAI Platform API.
 //!
@@ -259,16 +259,16 @@ pub struct OpenAIModelInfo {
     pub sort_order: u16,
     /// Whether this model is recommended for new users.
     pub recommended: bool,
-    /// Whether this is a legacy/older generation model.
-    pub is_legacy: bool,
-    /// Whether this model has been retired by the provider. Deprecated models
+    /// Whether this is a retired/older generation model.
+    pub is_retired_generation: bool,
+    /// Whether this model has been retired by the provider. Retired models
     /// remain in the registry so existing sessions can still be rendered and
     /// their costs/capabilities resolved, but they are surfaced as unavailable
     /// in the iOS picker via `isDeprecated`.
-    pub is_deprecated: bool,
-    /// Retirement date (ISO-8601), if deprecated.
+    pub is_retired: bool,
+    /// Retirement date (ISO-8601), if retired.
     pub deprecation_date: Option<&'static str>,
-    /// Replacement model for deprecated aliases.
+    /// Replacement model for retired aliases.
     pub replacement_model: Option<&'static str>,
     /// Whether this model should be hidden from `model.list`.
     pub is_hidden: bool,
@@ -342,8 +342,8 @@ fn model(
     profiles: Vec<OpenAIModelProfile>,
     sort_order: u16,
     recommended: bool,
-    is_legacy: bool,
-    is_deprecated: bool,
+    is_retired_generation: bool,
+    is_retired: bool,
     deprecation_date: Option<&'static str>,
     replacement_model: Option<&'static str>,
     is_hidden: bool,
@@ -361,8 +361,8 @@ fn model(
         profiles,
         sort_order,
         recommended,
-        is_legacy,
-        is_deprecated,
+        is_retired_generation,
+        is_retired,
         deprecation_date,
         replacement_model,
         is_hidden,
@@ -1174,7 +1174,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5 Codex",
             "GPT-5",
             "flagship",
-            "Deprecated GPT-5 coding model optimized for agentic coding on the Platform API.",
+            "Retired GPT-5 coding model optimized for agentic coding on the Platform API.",
             &[],
             vec![platform_reasoning_profile(
                 400_000,
@@ -1209,7 +1209,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5.2",
             "GPT-5.2",
             "flagship",
-            "Deprecated GPT-5.2 Codex model; use gpt-5.2 for new work.",
+            "Retired GPT-5.2 Codex model; use gpt-5.2 for new work.",
             &[],
             vec![platform_reasoning_profile(
                 400_000,
@@ -1244,7 +1244,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5.1 Codex",
             "GPT-5.1",
             "flagship",
-            "Deprecated GPT-5.1 coding model optimized for agentic coding.",
+            "Retired GPT-5.1 coding model optimized for agentic coding.",
             &[],
             vec![platform_reasoning_profile(
                 400_000,
@@ -1279,7 +1279,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5.1 Max",
             "GPT-5.1",
             "flagship",
-            "Deprecated deep-reasoning Codex model; use gpt-5.2 or newer.",
+            "Retired deep-reasoning Codex model; use gpt-5.2 or newer.",
             &[],
             vec![platform_reasoning_profile(
                 400_000,
@@ -1314,7 +1314,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5.1 Mini",
             "GPT-5.1",
             "standard",
-            "Deprecated fast Codex model; use gpt-5.4-mini or newer.",
+            "Retired fast Codex model; use gpt-5.4-mini or newer.",
             &[],
             vec![platform_reasoning_profile(
                 400_000,
@@ -1349,7 +1349,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "Codex Mini",
             "Codex",
             "standard",
-            "Deprecated fast reasoning model optimized for the Codex CLI.",
+            "Retired fast reasoning model optimized for the Codex CLI.",
             &[],
             vec![platform_reasoning_profile(
                 200_000,
@@ -1446,7 +1446,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5.1 Chat",
             "GPT-5.1",
             "standard",
-            "Deprecated GPT-5.1 model used in ChatGPT, exposed for chat testing.",
+            "Retired GPT-5.1 model used in ChatGPT, exposed for chat testing.",
             &[],
             vec![platform_text_profile(
                 128_000,
@@ -1477,7 +1477,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5 Chat",
             "GPT-5",
             "standard",
-            "Deprecated GPT-5 model used in ChatGPT, exposed for chat testing.",
+            "Retired GPT-5 model used in ChatGPT, exposed for chat testing.",
             &[],
             vec![platform_text_profile(
                 128_000,
@@ -1696,7 +1696,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "o1 Mini",
             "o-series",
             "standard",
-            "Deprecated small o1 reasoning model.",
+            "Retired small o1 reasoning model.",
             &["o1-mini-2024-09-12"],
             vec![platform_text_profile(
                 128_000,
@@ -1727,7 +1727,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "o1 Preview",
             "o-series",
             "flagship",
-            "Deprecated research preview of the first o-series reasoning model.",
+            "Retired research preview of the first o-series reasoning model.",
             &["o1-preview-2024-09-12"],
             vec![platform_text_profile(
                 128_000,
@@ -1883,7 +1883,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-4o",
             "GPT-4o",
             "standard",
-            "Legacy GPT-4o multimodal model for Platform Responses compatibility.",
+            "Retired GPT-4o multimodal model for the Platform Responses path.",
             &[
                 "gpt-4o-2024-11-20",
                 "gpt-4o-2024-08-06",
@@ -1918,7 +1918,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-4o Mini",
             "GPT-4o",
             "standard",
-            "Small GPT-4o multimodal model for Platform Responses compatibility.",
+            "Small GPT-4o multimodal model for the Platform Responses path.",
             &["gpt-4o-mini-2024-07-18"],
             vec![platform_text_profile(
                 128_000,
@@ -1949,7 +1949,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-4.5 Preview",
             "GPT-4.5",
             "flagship",
-            "Deprecated GPT-4.5 preview model kept selectable while the Platform API still serves it.",
+            "Retired GPT-4.5 preview model kept selectable while the Platform API still serves it.",
             &["gpt-4.5-preview-2025-02-27"],
             vec![platform_text_profile(
                 128_000,
@@ -1980,7 +1980,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-4 Turbo",
             "GPT-4",
             "standard",
-            "Legacy GPT-4 Turbo vision model that still fits the streaming Platform Responses path.",
+            "Retired GPT-4 Turbo vision model that still fits the streaming Platform Responses path.",
             &["gpt-4-turbo-2024-04-09"],
             vec![platform_text_profile(
                 128_000,
@@ -2011,7 +2011,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-4 Turbo Preview",
             "GPT-4",
             "standard",
-            "Deprecated GPT-4 Turbo preview; hidden because it does not support streaming Responses.",
+            "Retired GPT-4 Turbo preview; hidden because it does not support streaming Responses.",
             &["gpt-4-0125-preview", "gpt-4-1106-preview"],
             vec![platform_non_streaming_profile(
                 128_000,
@@ -2043,7 +2043,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-4",
             "GPT-4",
             "standard",
-            "Legacy GPT-4 text model for compatibility with existing Platform sessions.",
+            "Retired GPT-4 text model for existing Platform sessions.",
             &["gpt-4-0613", "gpt-4-0314"],
             vec![platform_text_profile(
                 8_192, 8_192, false, false, 30.0, 60.0, None,
@@ -2068,7 +2068,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-3.5 Turbo",
             "GPT-3.5",
             "standard",
-            "Legacy GPT-3.5 chat model; hidden because it does not support streaming Responses.",
+            "Retired GPT-3.5 chat model; hidden because it does not support streaming Responses.",
             &["gpt-3.5-turbo-0125", "gpt-3.5-turbo-1106"],
             vec![platform_non_streaming_profile(
                 16_385,
@@ -2100,16 +2100,10 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "ChatGPT-4o",
             "GPT-4o",
             "standard",
-            "Deprecated ChatGPT-4o model snapshot exposed on the Platform API for compatibility testing.",
+            "Retired ChatGPT-4o model snapshot exposed on the Platform API for provider testing.",
             &[],
             vec![platform_text_profile(
-                128_000,
-                16_384,
-                false,
-                true,
-                5.0,
-                15.0,
-                None,
+                128_000, 16_384, false, true, 5.0, 15.0, None,
             )],
             77,
             false,
@@ -2215,8 +2209,8 @@ pub fn canonical_openai_model_id(model_id: &str) -> Option<&'static str> {
 /// Resolve the request model ID sent to OpenAI.
 ///
 /// Snapshot aliases are preserved so callers can intentionally pin behavior.
-/// Live deprecated model IDs are also preserved: entitlement, availability, and
-/// deprecation state are reported explicitly instead of silently downgrading.
+/// Live retired model IDs are also preserved: entitlement, availability, and
+/// retirement state are reported explicitly instead of silently downgrading.
 #[must_use]
 pub fn openai_request_model_id(model_id: &str) -> String {
     strip_openai_provider_prefix(model_id).to_string()
@@ -2285,7 +2279,7 @@ impl OpenAIModelInfo {
             "reasoningLevels": profile.reasoning_levels,
             "defaultReasoningLevel": profile.default_reasoning_level,
             "recommended": self.recommended,
-            "isLegacy": self.is_legacy,
+            "isLegacy": self.is_retired_generation,
             "sortOrder": self.sort_order,
             "apiEndpoint": profile.api_endpoint,
             "authPaths": [profile.auth_path.as_str()],
@@ -2325,7 +2319,7 @@ impl OpenAIModelInfo {
                 .unwrap()
                 .insert("aliasIds".into(), serde_json::json!(self.aliases));
         }
-        if self.is_deprecated {
+        if self.is_retired {
             let _ = obj
                 .as_object_mut()
                 .unwrap()
@@ -2858,7 +2852,7 @@ mod tests {
     }
 
     #[test]
-    fn model_gpt_51_codex_mini_compatibility_profile() {
+    fn model_gpt_51_codex_mini_platform_profile() {
         let m = get_openai_model("gpt-5.1-codex-mini").unwrap();
         let profile = m.default_profile();
         assert_eq!(m.tier, "standard");
@@ -2886,7 +2880,7 @@ mod tests {
     }
 
     #[test]
-    fn model_gpt_52_pricing_and_deprecated_alias_mapping() {
+    fn model_gpt_52_pricing_and_retired_alias_mapping() {
         let m = get_openai_model("gpt-5.2").unwrap();
         let profile = m.default_profile();
         assert_float_eq(profile.input_cost_per_million, 1.75);
@@ -2894,7 +2888,7 @@ mod tests {
         assert_eq!(profile.cache_read_cost_per_million, Some(0.175));
 
         let alias = get_openai_model("gpt-5.2-codex").unwrap();
-        assert!(alias.is_deprecated);
+        assert!(alias.is_retired);
         assert!(!alias.is_hidden);
         assert_eq!(alias.replacement_model, Some("gpt-5.2"));
         assert_eq!(
@@ -2964,8 +2958,8 @@ mod tests {
     }
 
     #[test]
-    fn to_api_json_not_deprecated_no_field() {
-        // Non-deprecated models must omit isDeprecated/deprecationDate so
+    fn to_api_json_not_retired_no_field() {
+        // Non-retired models must omit isDeprecated/deprecationDate so
         // the iOS client's default behavior (isDeprecatedModel == false)
         // remains a no-op.
         let m = get_openai_model("gpt-5.4").unwrap();
@@ -2975,9 +2969,9 @@ mod tests {
     }
 
     #[test]
-    fn gpt_52_codex_deprecated_2026_04_14() {
+    fn gpt_52_codex_retired_2026_04_14() {
         let m = get_openai_model("gpt-5.2-codex").unwrap();
-        assert!(m.is_deprecated);
+        assert!(m.is_retired);
         assert_eq!(m.deprecation_date, Some("2026-04-14"));
         let j = m.to_api_json(m.default_profile());
         assert_eq!(j["isDeprecated"], true);
@@ -2986,24 +2980,24 @@ mod tests {
     }
 
     #[test]
-    fn gpt_51_codex_max_deprecated_2026_04_14() {
+    fn gpt_51_codex_max_retired_2026_04_14() {
         let m = get_openai_model("gpt-5.1-codex-max").unwrap();
-        assert!(m.is_deprecated);
+        assert!(m.is_retired);
         assert_eq!(m.deprecation_date, Some("2026-04-14"));
     }
 
     #[test]
-    fn gpt_51_codex_mini_deprecated_2026_04_14() {
+    fn gpt_51_codex_mini_retired_2026_04_14() {
         let m = get_openai_model("gpt-5.1-codex-mini").unwrap();
-        assert!(m.is_deprecated);
+        assert!(m.is_retired);
         assert_eq!(m.deprecation_date, Some("2026-04-14"));
     }
 
     #[test]
-    fn gpt_53_codex_not_deprecated() {
+    fn gpt_53_codex_not_retired() {
         // Regression guard: supported models must not be flipped accidentally.
         let m = get_openai_model("gpt-5.3-codex").unwrap();
-        assert!(!m.is_deprecated);
+        assert!(!m.is_retired);
         assert_eq!(m.deprecation_date, None);
     }
 
@@ -3049,7 +3043,7 @@ mod tests {
     }
 
     #[test]
-    fn to_api_json_legacy_model() {
+    fn to_api_json_retired_generation_model() {
         let m = get_openai_model("gpt-5.3-codex").unwrap();
         let j = m.to_api_json(m.default_profile());
         assert_eq!(j["isLegacy"], true);

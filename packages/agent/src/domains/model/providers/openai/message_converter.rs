@@ -1,7 +1,7 @@
 //! # `OpenAI` Message Converter
 //!
 //! Converts between Tron message format and `OpenAI` Responses API format.
-//! Handles tool call ID remapping for cross-provider compatibility.
+//! Handles tool call ID remapping for cross-provider DTO parity.
 //!
 //! Key behaviors:
 //! - User messages → `input_text` / `input_image` content

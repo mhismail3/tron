@@ -16,15 +16,15 @@ struct ModelInfoComputedTests {
         supportsImages: Bool = false,
         supportsDocuments: Bool = false,
         tier: String = "sonnet",
-        isLegacy: Bool = false,
-        isDeprecated: Bool? = nil,
+        isRetiredGeneration: Bool = false,
+        isRetired: Bool? = nil,
         family: String? = "Claude 4.6",
         maxOutput: Int? = nil,
         maxOutputTokens: Int? = nil,
         inputCostPerMillion: Double? = nil,
         outputCostPerMillion: Double? = nil
     ) -> ModelInfo {
-        // I8: supportsThinking/Images/Documents, tier, and isLegacy are
+        // I8: supportsThinking/Images/Documents, tier, and isRetiredGeneration are
         // required on the wire — every provider registry emits them.
         // The fixture enforces the same contract.
         ModelInfo(
@@ -36,9 +36,9 @@ struct ModelInfoComputedTests {
             supportsImages: supportsImages,
             supportsDocuments: supportsDocuments,
             tier: tier,
-            isLegacy: isLegacy,
+            isRetiredGeneration: isRetiredGeneration,
             maxOutputTokens: maxOutputTokens,
-            isDeprecated: isDeprecated,
+            isRetired: isRetired,
             family: family,
             maxOutput: maxOutput,
             inputCostPerMillion: inputCostPerMillion,
@@ -237,21 +237,21 @@ struct ModelInfoComputedTests {
 
     // MARK: - Lifecycle Flags
 
-    @Test("isLatestGeneration false isLegacy returns true")
-    func testLatestGenFalse() { #expect(makeModel(isLegacy: false).isLatestGeneration == true) }
+    @Test("isLatestGeneration false isRetiredGeneration returns true")
+    func testLatestGenFalse() { #expect(makeModel(isRetiredGeneration: false).isLatestGeneration == true) }
 
-    @Test("isLatestGeneration true isLegacy returns false")
-    func testLatestGenTrue() { #expect(makeModel(isLegacy: true).isLatestGeneration == false) }
+    @Test("isLatestGeneration true isRetiredGeneration returns false")
+    func testLatestGenTrue() { #expect(makeModel(isRetiredGeneration: true).isLatestGeneration == false) }
 
-    @Test("isDeprecatedModel nil returns false")
-    func testDeprecatedNil() { #expect(makeModel(isDeprecated: nil).isDeprecatedModel == false) }
+    @Test("isRetiredModel nil returns false")
+    func testRetiredNil() { #expect(makeModel(isRetired: nil).isRetiredModel == false) }
 
-    @Test("isDeprecatedModel true returns true")
-    func testDeprecatedTrue() { #expect(makeModel(isDeprecated: true).isDeprecatedModel == true) }
+    @Test("isRetiredModel true returns true")
+    func testRetiredTrue() { #expect(makeModel(isRetired: true).isRetiredModel == true) }
 
-    @Test("deprecated models are disabled")
-    func testDeprecatedDisabled() {
-        #expect(makeModel(isDeprecated: true).isDisabled == true)
+    @Test("retired models are disabled")
+    func testRetiredDisabled() {
+        #expect(makeModel(isRetired: true).isDisabled == true)
     }
 
     @Test("isPreview")
@@ -265,8 +265,8 @@ struct ModelInfoComputedTests {
 //
 // Server contract: every provider registry (Anthropic, OpenAI, Google,
 // MiniMax, Kimi, Ollama) populates `supportsThinking`, `supportsImages`,
-// `supportsDocuments`, `tier`, and `isLegacy` unconditionally. A payload
-// missing any of these is a server bug, not a client fallback case.
+// `supportsDocuments`, `tier`, and `isRetiredGeneration` unconditionally. A payload
+// missing any of these is a server bug, not a client default case.
 
 @Suite("ModelInfo Strict Decode — I8")
 struct ModelInfoStrictDecodeTests {
@@ -300,7 +300,7 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.supportsImages == true)
         #expect(m.supportsDocuments == true)
         #expect(m.tier == "sonnet")
-        #expect(m.isLegacy == false)
+        #expect(m.isRetiredGeneration == false)
     }
 
     @Test("OpenAI endpoint-aware optional fields decode")
@@ -373,8 +373,8 @@ struct ModelInfoStrictDecodeTests {
         #expect(throws: DecodingError.self) { try decode(payload) }
     }
 
-    @Test("missing isLegacy fails decode")
-    func missingIsLegacy() {
+    @Test("missing isRetiredGeneration fails decode")
+    func missingIsRetired() {
         var payload = Self.validPayload()
         payload.removeValue(forKey: "isLegacy")
         #expect(throws: DecodingError.self) { try decode(payload) }
@@ -387,8 +387,8 @@ struct ModelInfoStrictDecodeTests {
         #expect(throws: DecodingError.self) { try decode(payload) }
     }
 
-    @Test("null isLegacy fails decode")
-    func nullIsLegacy() {
+    @Test("null isRetiredGeneration fails decode")
+    func nullIsRetired() {
         var payload = Self.validPayload()
         payload["isLegacy"] = NSNull()
         #expect(throws: DecodingError.self) { try decode(payload) }

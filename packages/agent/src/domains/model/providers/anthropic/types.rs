@@ -163,17 +163,17 @@ pub struct ClaudeModelInfo {
     pub description: &'static str,
     /// Whether this is the recommended model.
     pub recommended: bool,
-    /// Whether this is a legacy model.
-    pub legacy: bool,
+    /// Whether this is a retired-generation model.
+    pub retired_generation: bool,
     /// Model tier (e.g., "opus", "sonnet", "haiku").
     pub tier: &'static str,
     /// Display sort order within the provider (lower = higher priority).
     pub sort_order: u16,
     /// Release date (ISO-8601).
     pub release_date: &'static str,
-    /// Whether this model is deprecated.
-    pub is_deprecated: bool,
-    /// Deprecation date (ISO-8601), if deprecated.
+    /// Whether this model is retired by the provider.
+    pub is_retired: bool,
+    /// Retirement date (ISO-8601), if retired.
     pub deprecation_date: Option<&'static str>,
     /// Supported reasoning/effort levels (e.g., `["low", "medium", "high", "max"]`).
     /// `None` means the model does not support reasoning levels.
@@ -221,7 +221,7 @@ impl ClaudeModelInfo {
             "description": self.description,
             "supportsReasoning": self.reasoning_levels.is_some(),
             "recommended": self.recommended,
-            "isLegacy": self.legacy,
+            "isLegacy": self.retired_generation,
             "releaseDate": self.release_date,
             "sortOrder": self.sort_order,
         });
@@ -232,7 +232,7 @@ impl ClaudeModelInfo {
         if let Some(default) = self.default_reasoning_level {
             let _ = map.insert("defaultReasoningLevel".into(), serde_json::json!(default));
         }
-        if self.is_deprecated {
+        if self.is_retired {
             let _ = map.insert("isDeprecated".into(), serde_json::json!(true));
         }
         if let Some(date) = self.deprecation_date {
@@ -278,11 +278,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 0.5,
             description: "Most capable Claude model — xhigh effort, high-res vision",
             recommended: true,
-            legacy: false,
+            retired_generation: false,
             tier: "opus",
             sort_order: 0,
             release_date: "2026-04-16",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: Some(&["low", "medium", "high", "xhigh", "max"]),
             default_reasoning_level: Some("xhigh"),
@@ -310,11 +310,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 0.5,
             description: "Previous Opus — adaptive thinking, effort levels",
             recommended: false,
-            legacy: false,
+            retired_generation: false,
             tier: "opus",
             sort_order: 1,
             release_date: "2026-02-01",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: Some(&["low", "medium", "high", "max"]),
             default_reasoning_level: Some("high"),
@@ -342,11 +342,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 0.3,
             description: "Best combination of speed and intelligence — adaptive thinking",
             recommended: true,
-            legacy: false,
+            retired_generation: false,
             tier: "sonnet",
             sort_order: 2,
             release_date: "2026-02-17",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: Some(&["low", "medium", "high", "max"]),
             default_reasoning_level: Some("medium"),
@@ -374,11 +374,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 0.5,
             description: "Opus-tier intelligence with extended thinking",
             recommended: false,
-            legacy: false,
+            retired_generation: false,
             tier: "opus",
             sort_order: 3,
             release_date: "2025-11-01",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -405,11 +405,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 0.3,
             description: "Best balance of speed and intelligence",
             recommended: false,
-            legacy: true,
+            retired_generation: true,
             tier: "sonnet",
             sort_order: 4,
             release_date: "2025-09-29",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -436,11 +436,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 0.1,
             description: "Fast and affordable",
             recommended: true,
-            legacy: false,
+            retired_generation: false,
             tier: "haiku",
             sort_order: 5,
             release_date: "2025-10-01",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -448,7 +448,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         },
     );
 
-    // Claude 4.1 (Legacy — August 2025)
+    // Claude 4.1 (retired generation — August 2025)
     let _ = m.insert(
         "claude-opus-4-1-20250805",
         ClaudeModelInfo {
@@ -468,11 +468,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 1.5,
             description: "Previous Opus with enhanced agentic capabilities",
             recommended: false,
-            legacy: true,
+            retired_generation: true,
             tier: "opus",
             sort_order: 6,
             release_date: "2025-08-05",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -480,7 +480,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         },
     );
 
-    // Claude 4 (Legacy — May 2025)
+    // Claude 4 (retired generation — May 2025)
     let _ = m.insert(
         "claude-opus-4-20250514",
         ClaudeModelInfo {
@@ -500,11 +500,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 1.5,
             description: "Previous generation Opus",
             recommended: false,
-            legacy: true,
+            retired_generation: true,
             tier: "opus",
             sort_order: 7,
             release_date: "2025-05-14",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -531,11 +531,11 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             cache_read_cost_per_million: 0.3,
             description: "Fast and capable",
             recommended: false,
-            legacy: true,
+            retired_generation: true,
             tier: "sonnet",
             sort_order: 8,
             release_date: "2025-05-14",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -543,7 +543,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         },
     );
 
-    // Claude 3.7 (Deprecated — removed from model picker, kept for existing sessions)
+    // Claude 3.7 (retired — removed from model picker, kept for existing sessions)
     let _ = m.insert(
         "claude-3-7-sonnet-20250219",
         ClaudeModelInfo {
@@ -561,13 +561,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
             cache_read_cost_per_million: 0.3,
-            description: "Deprecated — use Sonnet 4 or newer",
+            description: "Retired — use Sonnet 4 or newer",
             recommended: false,
-            legacy: true,
+            retired_generation: true,
             tier: "sonnet",
             sort_order: 9,
             release_date: "2025-02-19",
-            is_deprecated: true,
+            is_retired: true,
             deprecation_date: Some("2025-10-01"),
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -575,7 +575,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         },
     );
 
-    // Claude 3 (Legacy — oldest)
+    // Claude 3 (retired generation — oldest)
     let _ = m.insert(
         "claude-3-haiku-20240307",
         ClaudeModelInfo {
@@ -593,13 +593,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             input_cost_per_million: 0.25,
             output_cost_per_million: 1.25,
             cache_read_cost_per_million: 0.025,
-            description: "Legacy — fast and affordable",
+            description: "Retired generation — fast and affordable",
             recommended: false,
-            legacy: true,
+            retired_generation: true,
             tier: "haiku",
             sort_order: 10,
             release_date: "2024-03-07",
-            is_deprecated: false,
+            is_retired: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
@@ -961,7 +961,7 @@ mod tests {
         assert!(info.supports_tools);
         // 4.6 is no longer the recommended Opus (4.7 took the spot).
         assert!(!info.recommended);
-        assert!(!info.legacy);
+        assert!(!info.retired_generation);
     }
 
     #[test]
@@ -979,7 +979,7 @@ mod tests {
         assert_float_eq(info.output_cost_per_million, 15.0);
         assert_float_eq(info.cache_read_cost_per_million, 0.3);
         assert!(info.recommended);
-        assert!(!info.legacy);
+        assert!(!info.retired_generation);
     }
 
     #[test]
@@ -1010,15 +1010,15 @@ mod tests {
         assert_eq!(info.short_name, "Opus 4.1");
         assert_eq!(info.max_output, 32_000);
         assert_float_eq(info.input_cost_per_million, 15.0);
-        assert!(info.legacy);
+        assert!(info.retired_generation);
     }
 
     #[test]
-    fn get_claude_model_haiku_3_legacy() {
+    fn get_claude_model_haiku_3_retired_generation() {
         let info = get_claude_model("claude-3-haiku-20240307").unwrap();
         assert_eq!(info.max_output, 4_096);
         assert!(!info.supports_thinking);
-        assert!(info.legacy);
+        assert!(info.retired_generation);
     }
 
     #[test]
@@ -1434,7 +1434,7 @@ mod tests {
     }
 
     #[test]
-    fn to_api_json_deprecated() {
+    fn to_api_json_retired() {
         let m = get_claude_model("claude-3-7-sonnet-20250219").unwrap();
         let j = m.to_api_json("claude-3-7-sonnet-20250219");
         assert_eq!(j["isDeprecated"], true);
@@ -1443,7 +1443,7 @@ mod tests {
     }
 
     #[test]
-    fn to_api_json_not_deprecated_no_field() {
+    fn to_api_json_not_retired_no_field() {
         let m = get_claude_model("claude-opus-4-6").unwrap();
         let j = m.to_api_json("claude-opus-4-6");
         assert!(j.get("isDeprecated").is_none());
@@ -1483,7 +1483,7 @@ mod tests {
         assert_eq!(info.input_cost_per_million, 5.0);
         assert_eq!(info.output_cost_per_million, 25.0);
         assert!(info.recommended);
-        assert!(!info.legacy);
+        assert!(!info.retired_generation);
         assert_eq!(info.sort_order, 0);
     }
 
@@ -1498,7 +1498,7 @@ mod tests {
 
     #[test]
     fn opus_4_6_has_no_thinking_display() {
-        // Regression guard: 4.6 must keep the legacy behavior (no display field).
+        // Regression guard: 4.6 must keep the current behavior (no display field).
         let info = get_claude_model("claude-opus-4-6").unwrap();
         assert_eq!(info.thinking_display, None);
     }

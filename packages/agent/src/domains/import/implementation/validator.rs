@@ -132,7 +132,7 @@ impl ImportWarning {
 pub struct ImportPreview {
     /// Session title (from a `custom-title` record, if present).
     pub title: Option<String>,
-    /// Primary model used (or the default fallback).
+    /// Primary model used, or the default model when absent.
     pub model: String,
     /// Number of conversation turns.
     pub turn_count: i64,

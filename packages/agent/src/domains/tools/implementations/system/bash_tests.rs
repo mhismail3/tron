@@ -455,7 +455,7 @@ async fn output_at_exact_threshold_not_blobbed() {
 }
 
 #[tokio::test]
-async fn blob_store_error_graceful_fallback() {
+async fn blob_store_error_uses_inline_recovery() {
     let store = Arc::new(MockBlobStore::failing());
     let tool = BashTool::new(
         Arc::new(MockRunner::sized_output(50_000)),
@@ -1077,14 +1077,14 @@ async fn bash_direct_run_returns_inline() {
 #[tokio::test]
 async fn bash_no_process_manager_falls_back_to_sync() {
     // When process_manager is None, async-first degrades to synchronous
-    let tool = BashTool::new(Arc::new(MockRunner::ok("fallback")), None);
+    let tool = BashTool::new(Arc::new(MockRunner::ok("secondary")), None);
     let ctx = make_ctx(); // process_manager is None
     let r = tool
-        .execute(json!({"command": "echo fallback"}), &ctx)
+        .execute(json!({"command": "echo secondary"}), &ctx)
         .await
         .unwrap();
     assert!(r.is_error.is_none());
-    assert!(extract_text(&r).contains("fallback"));
+    assert!(extract_text(&r).contains("secondary"));
 }
 
 #[tokio::test]

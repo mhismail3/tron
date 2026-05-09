@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_warning_preserves_legacy_success_text() {
+    async fn no_warning_preserves_current_success_text() {
         // Regression: adding the warning field must not change the
         // success text for the normal APNs-delivered path.
         let mock = Arc::new(MockNotify::success());

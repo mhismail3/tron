@@ -1,6 +1,6 @@
 -- v001: Complete fresh schema — single source of truth.
 --
--- This is the consolidated fresh-schema migration. Backward-compat stepping
+-- This is the consolidated fresh-schema migration. Historical-shape stepping
 -- through old experimental layouts has been removed; on a fresh DB the runner
 -- applies this file first, then any additive v002+ migrations.
 -- If you need to evolve the schema, add a v002 migration that runs on top —
@@ -22,7 +22,7 @@
 --   • events.CHECK(payload IS NOT NULL OR content_blob_id …)  — every event has content
 --   • sessions.CHECK(use_worktree IN (0, 1) OR IS NULL)       — tri-state integer guard
 --   • device_tokens: COALESCE-widened UNIQUE collapses NULL workspace/bundle
---     to a single canonical key so legacy pre-workspace rows can't duplicate.
+--     to a single canonical key so pre-workspace rows can't duplicate.
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Schema Version Tracking
@@ -215,7 +215,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_ios_client_dedup
 -- device and against distinct APNs bundles (com.tron.mobile vs
 -- com.tron.mobile.beta). `bundle_id` is NOT NULL — every client sends its
 -- bundle identifier at registration time so the send path can set the
--- correct `apns-topic` per row without a server-side fallback. The UNIQUE
+-- correct `apns-topic` per row from persisted data. The UNIQUE
 -- INDEX uses COALESCE on `workspace_id` only (workspace-less registrations
 -- remain legal, e.g. a user with no workspace ever selected); a workspace
 -- of NULL collapses to the canonical `''` so two (token, NULL, bundle)

@@ -31,9 +31,9 @@ impl WorktreeCoordinator {
     pub async fn list_local_branches(
         &self,
         session_id: &str,
-        fallback_dir: Option<&std::path::Path>,
+        working_dir: Option<&std::path::Path>,
     ) -> Result<Vec<String>> {
-        let repo_root = self.repo_root_or_cwd(session_id, fallback_dir).await?;
+        let repo_root = self.repo_root_or_cwd(session_id, working_dir).await?;
         let mut branches = self.git.list_branches_matching(&repo_root, "*").await?;
         let rank = |b: &str| -> u8 {
             if b == "main" || b == "master" {
@@ -63,9 +63,9 @@ impl WorktreeCoordinator {
         &self,
         session_id: &str,
         remote: Option<&str>,
-        fallback_dir: Option<&std::path::Path>,
+        working_dir: Option<&std::path::Path>,
     ) -> Result<Vec<String>> {
-        let repo_root = self.repo_root_or_cwd(session_id, fallback_dir).await?;
+        let repo_root = self.repo_root_or_cwd(session_id, working_dir).await?;
         let remote_name = remote.unwrap_or("origin");
         let mut branches = self
             .git

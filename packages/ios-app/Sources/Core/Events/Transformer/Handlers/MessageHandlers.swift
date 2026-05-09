@@ -26,9 +26,8 @@ enum MessageHandlers {
             return nil
         }
 
-        // Server-provided structured chip rendering (see
-        // `packages/agent/src/server/rpc/handlers/agent_confirmation.rs` and
-        // `interactive_tool_enrichment.rs`). No text scanning needed — the
+        // Server-provided structured chip rendering (see the tools domain
+        // interactive enrichment modules). No text scanning needed — the
         // server tags these messages with `messageKind` on the live path
         // and back-fills historical events during reconstruction.
         switch parsed.messageKind {

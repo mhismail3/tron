@@ -323,19 +323,19 @@ struct ComputerUseSummaryHelperTests {
     }
 }
 
-// MARK: - ToolRegistry ComputerUse Integration Tests
+// MARK: - ToolDescriptorCatalog ComputerUse Integration Tests
 
-@Suite("ToolRegistry ComputerUse")
-struct ToolRegistryComputerUseTests {
+@Suite("ToolDescriptorCatalog ComputerUse")
+struct ToolDescriptorCatalogComputerUseTests {
 
     @Test("ComputerUse is a command tool")
     func testIsCommandTool() {
-        #expect(ToolRegistry.isCommandTool("ComputerUse") == true)
+        #expect(ToolDescriptorCatalog.isCommandTool("ComputerUse") == true)
     }
 
     @Test("ComputerUse descriptor exists")
     func testDescriptorExists() {
-        let desc = ToolRegistry.descriptor(for: "ComputerUse")
+        let desc = ToolDescriptorCatalog.descriptor(for: "ComputerUse")
         #expect(desc.displayName == "Computer Use")
         #expect(desc.icon == "desktopcomputer")
         #expect(desc.completedDisplayName == "Used")
@@ -343,38 +343,38 @@ struct ToolRegistryComputerUseTests {
 
     @Test("ComputerUse summary extractor works for click")
     func testSummaryExtractorClick() {
-        let desc = ToolRegistry.descriptor(for: "ComputerUse")
+        let desc = ToolDescriptorCatalog.descriptor(for: "ComputerUse")
         let summary = desc.summaryExtractor("{\"action\": \"click\", \"x\": 100, \"y\": 200}")
         #expect(summary == "click (100, 200)")
     }
 
     @Test("ComputerUse summary extractor works for keypress")
     func testSummaryExtractorKeypress() {
-        let desc = ToolRegistry.descriptor(for: "ComputerUse")
+        let desc = ToolDescriptorCatalog.descriptor(for: "ComputerUse")
         let summary = desc.summaryExtractor("{\"action\": \"keypress\", \"keys\": [\"cmd\", \"v\"]}")
         #expect(summary == "Cmd+V")
     }
 
     @Test("ComputerUse summary extractor works for screenshot")
     func testSummaryExtractorScreenshot() {
-        let desc = ToolRegistry.descriptor(for: "ComputerUse")
+        let desc = ToolDescriptorCatalog.descriptor(for: "ComputerUse")
         let summary = desc.summaryExtractor("{\"action\": \"screenshot\"}")
         #expect(summary == "screenshot")
     }
 
     @Test("ComputerUse has viewer factory")
     func testHasViewerFactory() {
-        let desc = ToolRegistry.descriptor(for: "ComputerUse")
+        let desc = ToolDescriptorCatalog.descriptor(for: "ComputerUse")
         #expect(desc.viewerFactory != nil)
     }
 
     @Test("ComputerUse in commandToolNames set")
     func testInCommandToolNames() {
-        #expect(ToolRegistry.commandToolNames.contains("computeruse"))
+        #expect(ToolDescriptorCatalog.commandToolNames.contains("computeruse"))
     }
 
     @Test("ComputerUse NOT in specialToolNames set")
     func testNotInSpecialToolNames() {
-        #expect(!ToolRegistry.specialToolNames.contains("computeruse"))
+        #expect(!ToolDescriptorCatalog.specialToolNames.contains("computeruse"))
     }
 }

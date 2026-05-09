@@ -33,7 +33,7 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
     obj
 }
 
-/// Build the nested `tokenRecord` structure for iOS compatibility.
+/// Build the nested `tokenRecord` structure consumed by iOS event DTOs.
 ///
 /// Delegates to `crate::domains::model::providers::tokens::normalize_tokens()` for correct per-turn
 /// delta calculation using cross-turn baseline tracking.
@@ -139,7 +139,7 @@ mod tests {
         );
         assert!(
             json[0].get("input").is_none(),
-            "must not include legacy input key"
+            "must not include retired input key"
         );
         assert_eq!(json[0]["arguments"]["command"], "ls");
     }

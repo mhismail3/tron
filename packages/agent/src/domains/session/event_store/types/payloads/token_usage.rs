@@ -1,7 +1,7 @@
 //! Token usage tracking types.
 //!
 //! [`TokenUsage`] matches the TypeScript `TokenUsage` interface exactly,
-//! with `camelCase` field naming for wire compatibility.
+//! with `camelCase` field naming for DTO parity.
 
 use serde::{Deserialize, Serialize};
 

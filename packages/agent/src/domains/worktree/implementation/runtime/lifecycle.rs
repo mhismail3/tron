@@ -135,7 +135,7 @@ pub async fn remove(
                     error = %e,
                     "failed to remove worktree, trying force cleanup"
                 );
-                // Fallback: just delete the directory and prune
+                // Recovery path: delete the directory and prune the worktree metadata.
                 if info.worktree_path.exists() {
                     let _ = tokio::fs::remove_dir_all(&info.worktree_path).await;
                 }

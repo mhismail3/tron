@@ -403,7 +403,7 @@ fn kill_child(child: &mut tokio::process::Child) {
     }
     #[cfg(not(unix))]
     {
-        // Fallback: just kill the direct child
+        // Non-Unix cleanup path: kill the direct child.
         let _ = child.start_kill();
     }
 }

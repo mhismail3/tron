@@ -54,11 +54,11 @@ struct ModelPickerStateTests {
         id: String,
         name: String = "",
         contextWindow: Int = 200_000,
-        isLegacy: Bool = false,
+        isRetiredGeneration: Bool = false,
         sortOrder: Int? = nil
     ) -> ModelInfo {
         // I8: the five required fields (supportsThinking/Images/Documents,
-        // tier, isLegacy) have no defaults — callers pass them explicitly.
+        // tier, isRetiredGeneration) have no defaults — callers pass them explicitly.
         ModelInfo(
             id: id,
             name: name.isEmpty ? id : name,
@@ -68,7 +68,7 @@ struct ModelPickerStateTests {
             supportsImages: true,
             supportsDocuments: false,
             tier: "sonnet",
-            isLegacy: isLegacy,
+            isRetiredGeneration: isRetiredGeneration,
             maxOutputTokens: 8192,
             sortOrder: sortOrder
         )
@@ -359,17 +359,17 @@ struct ModelPickerStateTests {
         #expect(state.optimisticModelName == nil)
     }
 
-    // MARK: - isLatestGeneration Tests (isLegacy-driven)
+    // MARK: - isLatestGeneration Tests (isRetiredGeneration-driven)
 
-    @Test("isLegacy: false → isLatestGeneration: true")
-    func testIsLatestGeneration_notLegacy() {
-        let model = Self.makeModelInfo(id: "claude-opus-4-6", isLegacy: false)
+    @Test("isRetiredGeneration: false → isLatestGeneration: true")
+    func testIsLatestGeneration_notRetired() {
+        let model = Self.makeModelInfo(id: "claude-opus-4-6", isRetiredGeneration: false)
         #expect(model.isLatestGeneration == true)
     }
 
-    @Test("isLegacy: true → isLatestGeneration: false")
-    func testIsLatestGeneration_legacy() {
-        let model = Self.makeModelInfo(id: "claude-opus-4-5-20251101", isLegacy: true)
+    @Test("isRetiredGeneration: true → isLatestGeneration: false")
+    func testIsLatestGeneration_retired() {
+        let model = Self.makeModelInfo(id: "claude-opus-4-5-20251101", isRetiredGeneration: true)
         #expect(model.isLatestGeneration == false)
     }
 
@@ -385,7 +385,7 @@ struct ModelPickerStateTests {
             supportsImages: true,
             supportsDocuments: true,
             tier: "opus",
-            isLegacy: false,
+            isRetiredGeneration: false,
             maxOutputTokens: 128_000,
             supportsReasoning: true,
             reasoningLevels: ["low", "medium", "high", "max"],

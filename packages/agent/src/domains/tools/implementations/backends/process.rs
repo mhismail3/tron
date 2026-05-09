@@ -260,7 +260,7 @@ impl ProcessRunner for TokioProcessRunner {
         debug!(command, shell, working_dir = %opts.working_directory, "spawning process");
 
         let mut child = cmd.spawn().map_err(|e| {
-            // If the requested shell doesn't exist, try bash as fallback
+            // If the requested shell doesn't exist, try bash as the secondary shell.
             if shell != "bash" {
                 debug!(shell, error = %e, "shell not found, will try bash");
             }

@@ -274,15 +274,15 @@ private struct FamilySection: View {
             HStack(spacing: 8) {
                 Text(family.id)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(family.isDeprecated ? .tronTextMuted : .tronTextSecondary)
+                    .foregroundStyle(family.isRetired ? .tronTextMuted : .tronTextSecondary)
 
                 // Model count badge
                 Text("\(family.models.count)")
                     .font(TronTypography.pillValue)
                     .countBadge(providerColor)
 
-                if family.isDeprecated {
-                    Text("Deprecated")
+                if family.isRetired {
+                    Text("Retired")
                         .font(TronTypography.sans(size: TronTypography.sizeXS))
                         .foregroundStyle(.red)
                         .padding(.horizontal, 5)
@@ -386,8 +386,8 @@ private struct ModelCard: View {
                                 .clipShape(Capsule())
                         }
 
-                        if model.isDeprecatedModel {
-                            Text("Deprecated")
+                        if model.isRetiredModel {
+                            Text("Retired")
                                 .font(TronTypography.sans(size: TronTypography.sizeXS))
                                 .foregroundStyle(.red)
                                 .padding(.horizontal, 5)
@@ -479,9 +479,9 @@ private struct ModelCard: View {
                         }
                     }
 
-                    // Deprecation date
-                    if let depDate = model.deprecationDate {
-                        Text("Deprecated \(depDate)")
+                    // Retirement date
+                    if let depDate = model.retirementDate {
+                        Text("Retired \(depDate)")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.red.opacity(0.7))
                     }

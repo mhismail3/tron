@@ -431,7 +431,7 @@ fn emit_tool_results(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>) {
     }
 }
 
-/// Normalize an assistant content block for Tron compatibility.
+/// Normalize an assistant content block into Tron's current import schema.
 ///
 /// Claude Code stores tool_use blocks with `"input"` for arguments and an extra
 /// `"caller"` field. Tron's `AssistantContent::ToolUse` expects `"arguments"`

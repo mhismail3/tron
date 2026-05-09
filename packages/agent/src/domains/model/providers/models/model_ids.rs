@@ -41,7 +41,7 @@ pub const CLAUDE_SONNET_4: &str = "claude-sonnet-4-20250514";
 /// Claude 3.7 Sonnet.
 pub const CLAUDE_3_7_SONNET: &str = "claude-3-7-sonnet-20250219";
 
-/// Claude 3 Haiku (legacy).
+/// Claude 3 Haiku (retired generation).
 pub const CLAUDE_3_HAIKU: &str = "claude-3-haiku-20240307";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ pub const GPT_5_PRO: &str = "gpt-5-pro";
 /// GPT 5 Codex.
 pub const GPT_5_CODEX: &str = "gpt-5-codex";
 
-/// GPT 5.2 Codex — deprecated compatibility alias for GPT-5.2.
+/// GPT 5.2 Codex — retired provider alias for GPT-5.2.
 pub const GPT_5_2_CODEX: &str = "gpt-5.2-codex";
 
 /// GPT 5.1 Codex.
@@ -196,7 +196,7 @@ pub const GPT_OSS_20B: &str = "gpt-oss-20b";
 /// Gemini 3.1 Pro (preview) — latest Gemini.
 pub const GEMINI_3_1_PRO_PREVIEW: &str = "gemini-3.1-pro-preview";
 
-/// Gemini 3 Pro (preview) — deprecated 2026-03-09.
+/// Gemini 3 Pro (preview) — retired 2026-03-09.
 pub const GEMINI_3_PRO_PREVIEW: &str = "gemini-3-pro-preview";
 
 /// Gemini 3 Flash (preview).
@@ -264,13 +264,13 @@ pub const KIMI_K2_THINKING: &str = "kimi-k2-thinking";
 /// Kimi K2 Thinking Turbo — high-speed thinking model.
 pub const KIMI_K2_THINKING_TURBO: &str = "kimi-k2-thinking-turbo";
 
-/// Moonshot V1 8K (legacy).
+/// Moonshot V1 8K (retired generation).
 pub const MOONSHOT_V1_8K: &str = "moonshot-v1-8k";
 
-/// Moonshot V1 32K (legacy).
+/// Moonshot V1 32K (retired generation).
 pub const MOONSHOT_V1_32K: &str = "moonshot-v1-32k";
 
-/// Moonshot V1 128K (legacy).
+/// Moonshot V1 128K (retired generation).
 pub const MOONSHOT_V1_128K: &str = "moonshot-v1-128k";
 
 /// Default Kimi model.

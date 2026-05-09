@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_turn_fallback_even_after_many_turns() {
+    fn test_no_turn_count_recovery_even_after_many_turns() {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
         // Even after 100 turns at low ratio, should NOT trigger
         for _ in 0..100 {

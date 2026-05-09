@@ -593,11 +593,9 @@ mod tests {
     }
 
     /// Anchors the wire contract that `session.end` is an actively emitted
-    /// event — not a legacy shim. Historically the iOS side labelled the
-    /// classification "Session ended (legacy)"; this test guards against
-    /// any future change that accidentally stops emitting the event (e.g.
-    /// refactoring `end_session` to skip the append) because the iOS
-    /// display layer still treats the event as current.
+    /// event. This test guards against any future change that accidentally
+    /// stops emitting the event (e.g. refactoring `end_session` to skip
+    /// the append) because the iOS display layer treats the event as current.
     #[tokio::test]
     async fn end_session_emits_session_end_event() {
         use crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions;

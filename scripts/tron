@@ -172,10 +172,10 @@ run_coverage() {
 
 deploy_transcription_sidecar() {
     # Copies worker.py and requirements.txt from the repo into the canonical
-    # sidecar directory. The Rust agent (see src/core/foundation/paths.rs —
+    # sidecar directory. The Rust agent (see src/shared/foundation/paths.rs —
     # transcription_dir()) reads from the same path. Keep these in sync.
     local dst="$HOME/.tron/internal/transcription"
-    local src="$PROJECT_DIR/packages/agent/src/transcription/sidecar"
+    local src="$PROJECT_DIR/packages/agent/src/domains/transcription/implementation/sidecar"
     mkdir -p "$dst"
     cp "$src/worker.py" "$dst/"
     cp "$src/requirements.txt" "$dst/"

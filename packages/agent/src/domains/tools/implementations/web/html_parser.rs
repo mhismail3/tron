@@ -161,14 +161,14 @@ mod tests {
     }
 
     #[test]
-    fn og_title_fallback() {
+    fn og_title_secondary_source() {
         let html = r#"<html><head><meta property="og:title" content="OG Title"></head><body><h1>H1 Title</h1></body></html>"#;
         let r = parse_html(html, None);
         assert_eq!(r.title, "OG Title");
     }
 
     #[test]
-    fn h1_title_fallback() {
+    fn h1_title_secondary_source() {
         let html = r"<html><body><h1>H1 Title</h1></body></html>";
         let r = parse_html(html, None);
         assert_eq!(r.title, "H1 Title");
@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn description_og_fallback() {
+    fn description_og_secondary_source() {
         let html = r#"<html><head><meta property="og:description" content="OG desc"></head><body></body></html>"#;
         let r = parse_html(html, None);
         assert_eq!(r.description.unwrap(), "OG desc");

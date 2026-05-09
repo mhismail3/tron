@@ -524,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn test_display_name_fallback_to_folder_name() {
+    fn test_display_name_defaults_to_folder_name() {
         let tmp = TempDir::new().unwrap();
         create_skill(tmp.path(), "my-tool", "---\ndescription: A tool\n---\nBody");
 

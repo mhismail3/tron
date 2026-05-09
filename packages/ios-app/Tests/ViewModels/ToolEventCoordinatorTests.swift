@@ -725,7 +725,7 @@ final class MockToolEventContext: ToolEventContext {
 
 // MARK: - Test Helper Extensions
 
-/// Test-only initializer matching legacy ToolStartEvent constructor
+/// Test-only initializer matching the historical ToolStartEvent constructor.
 extension ToolStartPlugin.Result {
     init(toolName: String, toolCallId: String, arguments: [String: AnyCodable]?, formattedArguments: String) {
         // Parse formattedArguments back to arguments if arguments is nil
@@ -740,7 +740,7 @@ extension ToolStartPlugin.Result {
     }
 }
 
-/// Test-only initializer matching legacy ToolEndEvent constructor
+/// Test-only initializer matching the historical ToolEndEvent constructor.
 extension ToolEndPlugin.Result {
     init(toolCallId: String, success: Bool, displayResult: String, durationMs: Int?, details: ToolEndPlugin.EventData.ToolDetails?) {
         self.init(

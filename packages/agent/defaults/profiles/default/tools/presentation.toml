@@ -3,4 +3,4 @@ version = "1"
 [policy]
 toolDescriptionsAreContextBlocks = true
 secretValuesAreNeverRendered = true
-providerSpecificFormatting = "adapter"
+providerSpecificFormatting = "providerPayload"

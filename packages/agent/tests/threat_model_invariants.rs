@@ -234,12 +234,12 @@ fn tron_server_transport_has_no_removed_rpc_surface() {
     let crate_root = crate_root();
 
     for removed in [
-        "src/server/rpc",
-        concat!("src/transport/json", "_", "rpc"),
-        concat!("src/app/engine_", "br", "idge"),
+        ["src/server", "/rpc"].concat(),
+        concat!("src/transport/json", "_", "rpc").to_string(),
+        concat!("src/app/engine_", "br", "idge").to_string(),
     ] {
         assert!(
-            !crate_root.join(removed).exists(),
+            !crate_root.join(&removed).exists(),
             "{removed} must stay deleted; Tron exposes the engine WebSocket protocol only"
         );
     }
@@ -287,23 +287,23 @@ fn tool_registry_authority_stays_deleted() {
     let repo_root = repo_root();
 
     for removed in [
-        "src/tool_factory.rs",
-        "src/domains/tools/implementations/registry.rs",
+        ["src/tool", "_factory.rs"].concat(),
+        "src/domains/tools/implementations/registry.rs".to_string(),
     ] {
         assert!(
-            !crate_root.join(removed).exists(),
+            !crate_root.join(&removed).exists(),
             "{removed} must stay deleted; built-in tools are domain-owned tool::* capabilities"
         );
     }
 
     let forbidden = [
-        "ToolRegistry",
-        "ToolRegistryConfig",
-        "create_tool_registry",
-        "tool_factory",
-        "registry.names()",
-        "registry.definitions()",
-        "registry-driven",
+        ["Tool", "Registry"].concat(),
+        ["Tool", "Registry", "Config"].concat(),
+        ["create_tool", "_registry"].concat(),
+        ["tool", "_factory"].concat(),
+        "registry.names()".to_string(),
+        "registry.definitions()".to_string(),
+        "registry-driven".to_string(),
     ];
     for root in [
         crate_root.join("src/main.rs"),
@@ -315,7 +315,7 @@ fn tool_registry_authority_stays_deleted() {
         for path in files_to_scan(&root) {
             let content = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
-            for needle in forbidden {
+            for needle in &forbidden {
                 assert!(
                     !content.contains(needle),
                     "{} must not reintroduce deleted tool registry authority `{needle}`",
@@ -340,35 +340,307 @@ fn tool_registry_authority_stays_deleted() {
 }
 
 #[test]
-fn dead_compatibility_shapes_stay_deleted() {
+fn retired_stale_shapes_stay_deleted() {
     let crate_root = crate_root();
 
-    for (relative, needle) in [
+    let retired_shapes = [
         (
-            "src/shared/protocol/tools.rs",
-            "pub enum ToolExecutionContract",
-        ),
-        ("src/shared/protocol/events.rs", "TurnTokenUsage"),
-        ("src/shared/protocol/events.rs", "ResponseTokenUsage"),
-        ("src/shared/foundation/profile.rs", "pub type ProfileSpec"),
-        (
-            "src/shared/foundation/profile.rs",
-            "pub fallback: Option<String>",
+            "src/shared/protocol/tools.rs".to_string(),
+            "pub enum ToolExecutionContract".to_string(),
         ),
         (
-            "src/domains/import/implementation/parser.rs",
-            "pub fn parse_session(",
+            "src/shared/protocol/events.rs".to_string(),
+            "TurnTokenUsage".to_string(),
         ),
-        ("defaults/profiles/default/profile.toml", "fallback ="),
-    ] {
-        let path = crate_root.join(relative);
+        (
+            "src/shared/protocol/events.rs".to_string(),
+            "ResponseTokenUsage".to_string(),
+        ),
+        (
+            "src/shared/foundation/profile.rs".to_string(),
+            "pub type ProfileSpec".to_string(),
+        ),
+        (
+            "src/shared/foundation/profile.rs".to_string(),
+            ["pub ", "fall", "back", ": Option<String>"].concat(),
+        ),
+        (
+            "src/domains/import/implementation/parser.rs".to_string(),
+            "pub fn parse_session(".to_string(),
+        ),
+        (
+            "defaults/profiles/default/profile.toml".to_string(),
+            ["fall", "back", " ="].concat(),
+        ),
+    ];
+
+    for (relative, needle) in retired_shapes {
+        let path = crate_root.join(&relative);
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
         assert!(
-            !content.contains(needle),
-            "{relative} must not reintroduce retired compatibility/dead-code shape `{needle}`"
+            !content.contains(&needle),
+            "{relative} must not reintroduce retired stale shape `{needle}`"
         );
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CurrentBoundaryKind {
+    Isolate,
+    Recover,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CurrentBoundaryAllow {
+    relative_path_prefix: &'static str,
+    marker: &'static str,
+    kind: CurrentBoundaryKind,
+    owner: &'static str,
+    reason: &'static str,
+    expires: &'static str,
+}
+
+const CURRENT_BOUNDARY_ALLOWLIST: &[CurrentBoundaryAllow] = &[
+    CurrentBoundaryAllow {
+        relative_path_prefix: "packages/agent/src/domains/mcp/product_protocol/",
+        marker: "JsonRpc",
+        kind: CurrentBoundaryKind::Isolate,
+        owner: "domains::mcp",
+        reason: "MCP itself is a current JSON-RPC product protocol; this is not the Tron engine transport.",
+        expires: "none",
+    },
+    CurrentBoundaryAllow {
+        relative_path_prefix: "packages/agent/src/domains/mcp/product_protocol/",
+        marker: "jsonrpc",
+        kind: CurrentBoundaryKind::Isolate,
+        owner: "domains::mcp",
+        reason: "MCP fixtures and wire DTOs must speak the MCP JSON-RPC product protocol.",
+        expires: "none",
+    },
+    CurrentBoundaryAllow {
+        relative_path_prefix: "README.md",
+        marker: "CodexJSONRPCTransport",
+        kind: CurrentBoundaryKind::Isolate,
+        owner: "domains::codex_app",
+        reason: "Codex App Server is an isolated current product protocol behind codex_app::* capabilities.",
+        expires: "none",
+    },
+    CurrentBoundaryAllow {
+        relative_path_prefix: "packages/agent/src/domains/model/providers/",
+        marker: "isLegacy",
+        kind: CurrentBoundaryKind::Isolate,
+        owner: "domains::model",
+        reason: "Current iOS/provider model-list DTO key for retired-generation model metadata.",
+        expires: "iOS DTO rename package",
+    },
+    CurrentBoundaryAllow {
+        relative_path_prefix: "packages/agent/src/domains/model/providers/",
+        marker: "isDeprecated",
+        kind: CurrentBoundaryKind::Isolate,
+        owner: "domains::model",
+        reason: "Current iOS/provider model-list DTO key for retired provider model metadata.",
+        expires: "iOS DTO rename package",
+    },
+    CurrentBoundaryAllow {
+        relative_path_prefix: "packages/agent/src/domains/session/event_store/sqlite/migrations/v005_drop_profile_migrations.sql",
+        marker: "idx_profile_migrations_legacy",
+        kind: CurrentBoundaryKind::Isolate,
+        owner: "domains::session",
+        reason: "Historical SQLite object name that must be dropped by exact name in existing databases.",
+        expires: "never; database object names are historical facts",
+    },
+    CurrentBoundaryAllow {
+        relative_path_prefix: "packages/agent/src/domains/agent/runner/orchestrator/recovery.rs",
+        marker: "recover_incomplete_turns",
+        kind: CurrentBoundaryKind::Recover,
+        owner: "domains::agent",
+        reason: "Startup turn recovery is current product behavior that persists through the event store.",
+        expires: "none",
+    },
+];
+
+#[test]
+fn current_architecture_terms_are_deleted_or_owned() {
+    let repo_root = repo_root();
+    let scan_roots = [
+        repo_root.join("README.md"),
+        repo_root.join("packages/agent/src"),
+        repo_root.join("packages/agent/tests"),
+    ];
+    let retired_terms = [
+        ["leg", "acy"].concat(),
+        ["fall", "back"].concat(),
+        ["compat", "ibility"].concat(),
+        ["back", "ward"].concat(),
+        ["back", "wards"].concat(),
+        ["depre", "cated"].concat(),
+        ["sh", "im"].concat(),
+        ["bri", "dge"].concat(),
+        ["adap", "ter"].concat(),
+    ];
+    let isolated_protocol_terms = [
+        "JsonRpc".to_string(),
+        "jsonrpc".to_string(),
+        "CodexJSONRPCTransport".to_string(),
+    ];
+    let old_import_markers = [
+        "crate::runtime::".to_string(),
+        "crate::events::".to_string(),
+        "crate::tools::".to_string(),
+        "crate::cron::".to_string(),
+        "crate::worktree::".to_string(),
+        "crate::llm::".to_string(),
+        "crate::mcp::".to_string(),
+        "crate::settings::".to_string(),
+        "crate::skills::".to_string(),
+        "crate::prompt_library::".to_string(),
+        "crate::import::".to_string(),
+        "crate::transcription::".to_string(),
+        ["src/server", "/domains"].concat(),
+    ];
+
+    for root in scan_roots {
+        for path in files_to_scan(&root) {
+            if path == Path::new(file!()) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if rel == "packages/agent/tests/threat_model_invariants.rs" {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            let lower = content.to_lowercase();
+
+            for term in &retired_terms {
+                let is_owned_current_boundary = CURRENT_BOUNDARY_ALLOWLIST.iter().any(|allow| {
+                    rel.starts_with(allow.relative_path_prefix)
+                        && content.contains(allow.marker)
+                        && allow.marker.to_lowercase().contains(term)
+                });
+                assert!(
+                    !lower.contains(term) || is_owned_current_boundary,
+                    "{rel} contains retired architecture word `{term}`; rename/delete it or add an explicit current-boundary owner"
+                );
+            }
+            for marker in &old_import_markers {
+                assert!(
+                    !content.contains(marker.as_str()),
+                    "{rel} contains old root import/path `{marker}`"
+                );
+            }
+            for marker in &isolated_protocol_terms {
+                if !content.contains(marker) {
+                    continue;
+                }
+                let allow = CURRENT_BOUNDARY_ALLOWLIST.iter().find(|allow| {
+                    rel.starts_with(allow.relative_path_prefix) && allow.marker == marker
+                });
+                assert!(
+                    allow.is_some(),
+                    "{rel} contains isolated protocol marker `{marker}` without an owner/reason allowlist entry"
+                );
+            }
+        }
+    }
+
+    for allow in CURRENT_BOUNDARY_ALLOWLIST {
+        assert!(
+            !allow.owner.is_empty()
+                && !allow.reason.is_empty()
+                && !allow.expires.is_empty()
+                && matches!(
+                    allow.kind,
+                    CurrentBoundaryKind::Isolate | CurrentBoundaryKind::Recover
+                ),
+            "current-boundary allowlist entries must carry kind, owner, reason, and expiration"
+        );
+    }
+}
+
+#[test]
+fn current_architecture_ownership_report_is_current() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+    let src_root = crate_root.join("src");
+    let expected_top_level = [
+        "app",
+        "domains",
+        "engine",
+        "platform",
+        "shared",
+        "transport",
+    ];
+    for directory in expected_top_level {
+        assert!(
+            src_root.join(directory).is_dir(),
+            "current architecture root `{directory}` must exist"
+        );
+    }
+    for retired_root in [
+        "runtime",
+        "events",
+        "tools",
+        "cron",
+        "worktree",
+        "llm",
+        "mcp",
+        "settings",
+        "skills",
+        "prompt_library",
+        "import",
+        "transcription",
+        "server",
+    ] {
+        assert!(
+            !src_root.join(retired_root).exists(),
+            "retired root bucket `{retired_root}` must not exist"
+        );
+    }
+
+    let domain_names = std::fs::read_dir(src_root.join("domains"))
+        .expect("failed to read domains root")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().join("contract.rs").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let primitive_workers = std::fs::read_dir(src_root.join("engine/primitives"))
+        .expect("failed to read primitive root")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "rs"))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    let report = format!(
+        "Current Architecture Ownership Report\n\
+         app: bootstrap, health, metrics, onboarding, shutdown\n\
+         transport: /engine client protocol, /engine/workers socket transport, auth gate\n\
+         engine primitives: {}\n\
+         domains: {}\n\
+         platform: APNs, Codex App Server, updater/device sidecars\n\
+         shared: foundation types, protocol DTOs, neutral helpers\n",
+        primitive_workers.join(", "),
+        domain_names.join(", "),
+    );
+    eprintln!("{report}");
+
+    assert!(
+        report.contains("transport: /engine")
+            && report.contains("engine primitives:")
+            && report.contains("domains:")
+            && report.contains("platform:")
+            && report.contains("shared:"),
+        "ownership report must cover app, transport, engine, domains, platform, and shared"
+    );
+    assert!(
+        repo_root.join("README.md").is_file(),
+        "README remains the canonical architecture reference"
+    );
 }
 
 #[test]

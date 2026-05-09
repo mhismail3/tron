@@ -36,7 +36,7 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
 
 /// Compile context fields into typed Constitution context blocks.
 ///
-/// This is the provider-independent audit shape. Provider adapters may flatten
+/// This is the provider-independent audit shape. Provider payload builders may flatten
 /// the text, split by cache class, or apply provider-specific cache controls,
 /// but the compiled block identities and ordering stay stable.
 pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {

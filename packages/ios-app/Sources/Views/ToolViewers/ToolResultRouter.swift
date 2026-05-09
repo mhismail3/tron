@@ -1,14 +1,14 @@
 import SwiftUI
 
 // MARK: - Tool Result Router
-// Routes tool display through ToolRegistry — single source of truth for icon, name, summary, viewer.
+// Routes tool display through ToolDescriptorCatalog — single source of truth for icon, name, summary, viewer.
 
 struct ToolResultRouter: View {
     let tool: ToolUseData
     @State private var isExpanded = false
 
     private var descriptor: ToolDescriptor {
-        ToolRegistry.descriptor(for: tool.toolName)
+        ToolDescriptorCatalog.descriptor(for: tool.toolName)
     }
 
     var body: some View {

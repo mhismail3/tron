@@ -806,7 +806,7 @@ async fn screenshot_compression_skips_same_size_jpeg() {
 }
 
 #[tokio::test]
-async fn screenshot_compression_fallback_on_sips_failure() {
+async fn screenshot_compression_uses_png_on_sips_failure() {
     // sips fails → use PNG
     let t = tool_with_runner(screenshot_runner(1000, None), false);
     let r = t
@@ -1400,7 +1400,7 @@ async fn click_element_pressed() {
 }
 
 #[tokio::test]
-async fn click_element_clicked_fallback() {
+async fn click_element_clicked_recovery() {
     let runner = MockRunner::with_handler(|cmd| {
         if cmd.contains("swift") {
             ProcessOutput {
@@ -1558,7 +1558,7 @@ fn window_screenshot_runner(
                 interrupted: false,
             }
         } else if cmd.contains("sips") {
-            // sips fails in test (no real image) — fallback to PNG
+            // sips fails in test (no real image), so emit PNG bytes directly.
             ProcessOutput {
                 stdout: String::new(),
                 stderr: "not a valid image".into(),

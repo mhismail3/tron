@@ -74,8 +74,8 @@ pub struct MiniMaxModelInfo {
     pub sort_order: u16,
     /// Whether this model is recommended for new users.
     pub recommended: bool,
-    /// Whether this is a legacy/older generation model.
-    pub is_legacy: bool,
+    /// Whether this is a retired/older generation model.
+    pub is_retired_generation: bool,
 }
 
 static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyLock::new(|| {
@@ -97,7 +97,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             description: "MiniMax M2.7 — latest and most capable MiniMax model.",
             sort_order: 0,
             recommended: true,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -117,7 +117,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             description: "MiniMax M2.7 Highspeed — optimized for faster inference.",
             sort_order: 1,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -137,7 +137,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             description: "MiniMax M2.5 — capable general-purpose model.",
             sort_order: 2,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -157,7 +157,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             description: "MiniMax M2.5 Highspeed — optimized for faster inference.",
             sort_order: 3,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -177,7 +177,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             description: "MiniMax M2.1 — capable general-purpose model.",
             sort_order: 4,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -197,7 +197,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             description: "MiniMax M2.1 Highspeed — optimized for faster inference.",
             sort_order: 5,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -217,7 +217,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             description: "MiniMax M2 — foundation model.",
             sort_order: 6,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     m
@@ -254,7 +254,7 @@ impl MiniMaxModelInfo {
             "description": self.description,
             "supportsReasoning": false,
             "recommended": self.recommended,
-            "isLegacy": self.is_legacy,
+            "isLegacy": self.is_retired_generation,
             "sortOrder": self.sort_order,
         })
     }

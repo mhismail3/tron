@@ -2,7 +2,7 @@
 //!
 //! All types use `#[serde(rename_all = "camelCase")]` to match the TypeScript
 //! JSON wire format. Each type implements [`Default`] with the emergency
-//! fallback values that must stay in parity with the bundled default profile's
+//! default values that must stay in parity with the bundled default profile's
 //! `[settings]` table. Types marked with `#[serde(default)]`
 //! allow partial JSON — missing fields get their default value during
 //! deserialization.

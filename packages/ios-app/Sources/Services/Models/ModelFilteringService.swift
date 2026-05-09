@@ -16,10 +16,10 @@ struct FamilyGroup: Identifiable {
     let models: [ModelInfo]
     let isLatest: Bool       // expanded by default
 
-    /// A family is deprecated when every model it contains is deprecated.
-    /// Derived from per-model `isDeprecatedModel` — no separate server field.
-    var isDeprecated: Bool {
-        !models.isEmpty && models.allSatisfy { $0.isDeprecatedModel }
+    /// A family is retired when every model it contains is retired.
+    /// Derived from per-model `isRetiredModel` — no separate server field.
+    var isRetired: Bool {
+        !models.isEmpty && models.allSatisfy { $0.isRetiredModel }
     }
 }
 
@@ -49,7 +49,7 @@ enum ModelFilteringService {
     // MARK: - Categorization
 
     /// Categorize models into logical groups for UI display.
-    /// Uses server-provided `isLegacy` flag for categorization.
+    /// Uses server-provided `isRetiredGeneration` flag for categorization.
     static func categorize(_ models: [ModelInfo]) -> [ModelGroup] {
         guard !models.isEmpty else { return [] }
 
@@ -90,22 +90,22 @@ enum ModelFilteringService {
             groups.append(ModelGroup(tier: "Kimi", models: kimi))
         }
 
-        // Legacy: everything marked legacy + unknown providers
-        var legacyModels: [ModelInfo] = []
-        legacyModels.append(contentsOf: (models.filter { $0.isAnthropic && !$0.isLatestGeneration }
+        // Retired generations plus unknown providers.
+        var retiredGenerationModels: [ModelInfo] = []
+        retiredGenerationModels.append(contentsOf: (models.filter { $0.isAnthropic && !$0.isLatestGeneration }
             |> uniqueByFormattedName |> sortByTier))
-        legacyModels.append(contentsOf: (models.filter { $0.isCodex && !$0.isLatestGeneration }
+        retiredGenerationModels.append(contentsOf: (models.filter { $0.isCodex && !$0.isLatestGeneration }
             |> sortByTier))
-        legacyModels.append(contentsOf: (models.filter { $0.isGemini && !$0.isLatestGeneration }
+        retiredGenerationModels.append(contentsOf: (models.filter { $0.isGemini && !$0.isLatestGeneration }
             |> sortByTier))
-        legacyModels.append(contentsOf: (models.filter { $0.isKimi && !$0.isLatestGeneration }
+        retiredGenerationModels.append(contentsOf: (models.filter { $0.isKimi && !$0.isLatestGeneration }
             |> sortByTier))
-        legacyModels.append(contentsOf: models.filter {
+        retiredGenerationModels.append(contentsOf: models.filter {
             !$0.isAnthropic && !$0.isCodex && !$0.isGemini && !$0.isMiniMax && !$0.isKimi
         })
 
-        if !legacyModels.isEmpty {
-            groups.append(ModelGroup(tier: "Legacy", models: legacyModels))
+        if !retiredGenerationModels.isEmpty {
+            groups.append(ModelGroup(tier: "Retired", models: retiredGenerationModels))
         }
 
         return groups
@@ -133,7 +133,7 @@ enum ModelFilteringService {
         var groups: [ProviderGroup] = []
 
         for (providerId, providerModels) in sortedProviders {
-            // Use server-provided display name, fall back to provider ID
+            // Use server-provided display name, otherwise use provider ID.
             let displayName = providerModels.first?.providerDisplayName ?? providerId
             let (color, icon) = providerVisuals(providerId)
 
@@ -183,14 +183,14 @@ enum ModelFilteringService {
 
     // MARK: - Filtering
 
-    /// Filter to latest versions only (server-driven via isLegacy flag)
+    /// Filter to latest versions only (server-driven via retired-generation field)
     static func filterLatest(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.filter { !$0.isLegacy }
+        models.filter { !$0.isRetiredGeneration }
     }
 
-    /// Filter to legacy versions only (server-driven via isLegacy flag)
-    static func filterLegacy(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.filter { $0.isLegacy }
+    /// Filter to retired-generation versions only (server-driven).
+    static func filterRetiredGeneration(_ models: [ModelInfo]) -> [ModelInfo] {
+        models.filter { $0.isRetiredGeneration }
     }
 
     // MARK: - Sorting

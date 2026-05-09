@@ -1,6 +1,6 @@
 //! Core types for the skills system.
 //!
-//! All types use `camelCase` serde renaming for wire compatibility with the
+//! All types use `camelCase` serde renaming for DTO parity with the
 //! TypeScript server and iOS client.
 
 use serde::{Deserialize, Serialize};

@@ -363,14 +363,14 @@ fn compute_scope_dir(relative_path: &str, is_standalone: bool, agent_dir: Option
         } else if let Some(prefix) = without_file.strip_suffix(&format!("/{ad}")) {
             prefix.to_owned()
         } else {
-            // Fallback: go up one level
+            // Recovery path: go up one level.
             match without_file.rfind('/') {
                 Some(idx) => without_file[..idx].to_owned(),
                 None => String::new(),
             }
         }
     } else {
-        // Legacy path: go up two levels (past agent_dir/ and the filename)
+        // Repo-local path: go up two levels (past agent_dir/ and the filename).
         let agent_dir_path = match relative_path.rfind('/') {
             Some(idx) => &relative_path[..idx],
             None => return String::new(),

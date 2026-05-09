@@ -73,16 +73,16 @@ pub enum ResolvedCredential<'a> {
 /// Resolution order:
 /// 1. `credential_override` (for session pinning — keeps in-progress sessions stable)
 /// 2. `pa.active_credential` (user's explicit selection)
-/// 3. Fallback: `accounts[0]` → `api_keys[0]`
+/// 3. Default credential: `accounts[0]` → `api_keys[0]`
 ///
 /// If a referenced credential no longer exists (was deleted), falls through to
-/// the next level. This means a deleted pinned credential gracefully degrades
+/// the next level. This means a deleted pinned credential gracefully recovers
 /// to the user's active selection, then to the first available credential.
 pub fn resolve_credential<'a>(
     pa: &'a ProviderAuth,
     credential_override: Option<&ActiveCredential>,
 ) -> Option<ResolvedCredential<'a>> {
-    // Try override first, then active_credential, then fallback
+    // Try override first, then active_credential, then the default credential.
     for source in [credential_override, pa.active_credential.as_ref()] {
         if let Some(cred) = source {
             if let Some(resolved) = lookup_credential(pa, cred) {
@@ -92,7 +92,7 @@ pub fn resolve_credential<'a>(
         }
     }
 
-    // Fallback: first available account, then first available API key
+    // Default credential: first available account, then first available API key.
     if let Some(accounts) = &pa.accounts {
         if let Some(acct) = accounts.first() {
             return Some(ResolvedCredential::OAuthAccount(acct));
@@ -313,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_credential_accounts_before_api_keys_in_fallback() {
+    fn resolve_credential_accounts_before_api_keys_in_default_resolution() {
         let pa = ProviderAuth {
             accounts: Some(vec![make_account("a1")]),
             api_keys: Some(vec![make_api_key("k1")]),
@@ -322,7 +322,7 @@ mod tests {
         let resolved = resolve_credential(&pa, None).unwrap();
         match resolved {
             ResolvedCredential::OAuthAccount(acct) => assert_eq!(acct.label, "a1"),
-            _ => panic!("expected OAuthAccount over ApiKey in fallback"),
+            _ => panic!("expected OAuthAccount over ApiKey in default credential resolution"),
         }
     }
 
@@ -355,11 +355,11 @@ mod tests {
         let override_cred = ActiveCredential::ApiKey {
             label: "also-deleted".to_string(),
         };
-        // Both override and active point to deleted creds → fallback to first account
+        // Both override and active point to deleted creds → recover to first account.
         let resolved = resolve_credential(&pa, Some(&override_cred)).unwrap();
         match resolved {
             ResolvedCredential::OAuthAccount(acct) => assert_eq!(acct.label, "a1"),
-            _ => panic!("expected fallback to first account"),
+            _ => panic!("expected recovery to first account"),
         }
     }
 }

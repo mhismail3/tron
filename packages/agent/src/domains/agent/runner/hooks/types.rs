@@ -2,7 +2,7 @@
 //!
 //! Defines hook types, actions, results, execution modes, and context variants
 //! for the lifecycle hook system. All context types use `camelCase` serde
-//! renaming for wire compatibility with the TypeScript server and iOS client.
+//! renaming for the current TypeScript and iOS event DTOs.
 
 use serde::{Deserialize, Serialize};
 

@@ -842,7 +842,7 @@ impl ContextManager {
 }
 
 // =============================================================================
-// Snapshot deps adapter
+// Snapshot deps projection
 // =============================================================================
 
 /// Adapts `&ContextManager` to [`SnapshotDeps`].
@@ -920,7 +920,7 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
 }
 
 // =============================================================================
-// Compaction deps adapter
+// Compaction deps projection
 // =============================================================================
 
 /// Adapts context manager state for the compaction engine.

@@ -800,7 +800,7 @@ mod tests {
     #[test]
     fn version_mismatch_error() {
         let err = McpError {
-            server: "legacy".into(),
+            server: "unsupported-version-server".into(),
             kind: McpErrorKind::VersionMismatch("1.0.0".into()),
             message: "unsupported version".into(),
         };

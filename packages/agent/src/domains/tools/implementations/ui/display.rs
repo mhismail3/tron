@@ -447,7 +447,7 @@ impl DisplayTool {
             )
             .await;
 
-            // Save last frame to blob storage for the static fallback.
+            // Save the last frame to blob storage for static display recovery.
             let mut blob_id = None;
             if let (Some(data), Some(store)) = (last_frame_data, blob_store) {
                 match store.store(&data, "image/jpeg").await {

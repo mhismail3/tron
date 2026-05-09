@@ -245,7 +245,7 @@ pub trait Provider: Send + Sync {
     /// Provider request envelope for Constitution audit/replay.
     ///
     /// Providers override this when they can expose their exact wire payload.
-    /// The default is a provider-independent adapter-input snapshot so custom
+    /// The default is a provider-independent request-input snapshot so custom
     /// providers still produce an audit record instead of disappearing.
     fn audit_payload(
         &self,

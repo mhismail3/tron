@@ -180,7 +180,7 @@ fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
 }
 
 #[test]
-fn legacy_tron_home_paths_are_absent() {
+fn retired_tron_home_paths_are_absent() {
     let root = repo_root();
     let scan_roots = [
         root.join("AGENTS.md"),

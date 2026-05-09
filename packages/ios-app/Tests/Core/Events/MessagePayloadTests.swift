@@ -47,7 +47,7 @@ final class AssistantMessagePayloadTests: XCTestCase {
 
     func testNonArrayContentFailsDecode() {
         // Content as a plain string (not array) is not a valid shape.
-        // No legacy handling — init? returns nil.
+        // No historical-shape handling — init? returns nil.
         let payload: [String: AnyCodable] = [
             "content": AnyCodable("plain string"),
             "turn": AnyCodable(1),

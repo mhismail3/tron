@@ -219,7 +219,7 @@ pub struct DeviceTokenRow {
     pub environment: String,
     /// APNs bundle ID the token was registered against. NOT NULL — every
     /// client sends its bundle identifier at registration time so the send
-    /// path can set the correct `apns-topic` per row without a fallback.
+    /// path can set the correct `apns-topic` per row from persisted data.
     pub bundle_id: String,
     /// Creation timestamp.
     pub created_at: String,

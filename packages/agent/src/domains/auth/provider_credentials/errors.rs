@@ -32,7 +32,7 @@ pub enum AuthError {
     #[error("no auth configured for provider: {0}")]
     NotConfigured(String),
 
-    /// Stored provider auth carries unknown fields (e.g. legacy `endpoint`
+    /// Stored provider auth carries unknown fields (e.g. retired `endpoint`
     /// from the pre-CCA Google era). The user must re-authenticate so the
     /// stale shape is rewritten.
     #[error(
@@ -45,7 +45,7 @@ pub enum AuthError {
         details: String,
     },
 
-    /// The on-disk auth file failed top-level deserialization — a legacy
+    /// The on-disk auth file failed top-level deserialization — a retired
     /// single-field service shape (`services.x.apiKey: "k"` instead of the
     /// current `services.x.apiKeys: ["k"]`), a stray unknown key, or a
     /// version bump. The whole file is unusable until the user repairs it;

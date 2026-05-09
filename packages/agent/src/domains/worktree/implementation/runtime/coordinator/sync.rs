@@ -41,9 +41,9 @@ impl WorktreeCoordinator {
         fetch_timeout_ms: u64,
         prune: bool,
         dry_run: bool,
-        fallback_dir: Option<&Path>,
+        working_dir: Option<&Path>,
     ) -> Result<SyncOutcome> {
-        let repo_root = self.repo_root_or_cwd(session_id, fallback_dir).await?;
+        let repo_root = self.repo_root_or_cwd(session_id, working_dir).await?;
         let _guard = self
             .acquire_repo_lock(&repo_root, session_id, LockedOp::SyncMain)
             .await;
@@ -117,7 +117,7 @@ impl WorktreeCoordinator {
         Ok(outcome)
     }
 
-    /// Resolve a repo root for `session_id`, falling back to `fallback_dir`
+    /// Resolve a repo root for `session_id`, using `working_dir`
     /// when the session has no isolated worktree (passthrough case: the
     /// session runs directly on the repo's working dir, e.g. a fresh
     /// session on `main` or a post-finalize session that never rebranched).
@@ -127,12 +127,12 @@ impl WorktreeCoordinator {
     pub(super) async fn repo_root_or_cwd(
         &self,
         session_id: &str,
-        fallback_dir: Option<&Path>,
+        working_dir: Option<&Path>,
     ) -> Result<PathBuf> {
         if let Some(info) = self.state.lock().active_info(session_id) {
             return Ok(info.repo_root);
         }
-        if let Some(dir) = fallback_dir
+        if let Some(dir) = working_dir
             && self.git.is_git_repo(dir).await
             && let Ok(root) = self.git.repo_root(dir).await
         {

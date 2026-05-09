@@ -17,7 +17,7 @@ struct ModelNameFormatterThreadSafetyTests {
             supportsImages: false,
             supportsDocuments: false,
             tier: tier,
-            isLegacy: false
+            isRetiredGeneration: false
         )
     }
 
@@ -48,7 +48,7 @@ struct ModelNameFormatterThreadSafetyTests {
                             supportsImages: false,
                             supportsDocuments: false,
                             tier: "sonnet",
-                            isLegacy: false
+                            isRetiredGeneration: false
                         )
                     ]
                     ModelNameFormatter.updateFromServer(models)

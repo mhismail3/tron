@@ -1,7 +1,7 @@
 //! Typed payload definitions for each [`EventType`](super::EventType) variant.
 //!
 //! Each submodule defines the payload struct(s) for one domain of events.
-//! All payloads use `camelCase` field naming for wire compatibility with
+//! All payloads use `camelCase` field naming for DTO parity with
 //! TypeScript and iOS.
 
 pub mod compact;

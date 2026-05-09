@@ -3,7 +3,7 @@
 //! Normal Tron behavior is compiled by `ProfileRuntime` before context
 //! construction. This module only loads optional project/user prompt overlays
 //! such as `.tron/SYSTEM.md` and `~/.tron/profiles/user/prompts/core.md`; it
-//! does not resolve active profiles or embed normal prompt fallbacks.
+//! does not resolve active profiles or embed normal prompt defaults.
 
 use std::fs;
 use std::path::Path;

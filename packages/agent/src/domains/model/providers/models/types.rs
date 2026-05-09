@@ -91,9 +91,9 @@ pub struct ModelInfo {
     /// Whether this is the recommended model in its tier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommended: Option<bool>,
-    /// Whether this is a legacy model.
+    /// Whether this is a retired-generation model.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub legacy: Option<bool>,
+    pub retired_generation: Option<bool>,
     /// Whether this is a preview model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<bool>,
@@ -141,7 +141,7 @@ pub struct ModelCapabilities {
 /// Grouping of models by category for UI display.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelCategory {
-    /// Category name (e.g., `"Latest"`, `"Legacy"`).
+    /// Category name (e.g., `"Latest"`, `"Retired"`).
     pub name: String,
     /// Category description.
     pub description: String,
@@ -335,7 +335,7 @@ mod tests {
             cache_read_cost_per_million: Some(1.5),
             description: "Most capable".into(),
             recommended: Some(true),
-            legacy: None,
+            retired_generation: None,
             preview: None,
             release_date: Some("2025-01-01".into()),
         };
@@ -366,13 +366,13 @@ mod tests {
             cache_read_cost_per_million: None,
             description: "Test model".into(),
             recommended: None,
-            legacy: None,
+            retired_generation: None,
             preview: None,
             release_date: None,
         };
         let val = serde_json::to_value(&info).unwrap();
         assert!(val.get("cacheReadCostPerMillion").is_none());
         assert!(val.get("recommended").is_none());
-        assert!(val.get("legacy").is_none());
+        assert!(val.get("retiredGeneration").is_none());
     }
 }

@@ -8,10 +8,10 @@
 //! | `context_snapshot_builder` | Builds context snapshots (stable + volatile breakdown) via `SnapshotDeps` |
 //! | `compaction_engine` | Executes compaction: summarize old messages, trim context |
 //! | `llm_summarizer` | Subagent-based summarization for compaction |
-//! | `summarizer` | Summarizer trait and fallback implementations |
+//! | `summarizer` | Summarizer trait and recovery implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
 //! | `loader` | Loads project rules and global `~/.tron/memory/rules/{CLAUDE,AGENTS}.md` overlays |
-//! | `local_policy` | Profile-backed local-model policy adapter: provider ids, tool allow-list, rules truncation |
+//! | `local_policy` | Profile-backed local-model policy view: provider ids, tool allow-list, rules truncation |
 //! | `rules_discovery` | Finds path-scoped `CLAUDE.md` / `AGENTS.md` files in project agent dirs |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |
@@ -30,9 +30,9 @@
 //!
 //! All normal prompt text is resolved before `ContextManager` construction by
 //! `ProfileRuntime` session/process plans. Context state consumes that snapshot;
-//! it does not resolve active profile files or fall back to embedded behavior.
+//! it does not resolve active profile files or use embedded defaults.
 //! Compaction uses a multi-signal trigger (token threshold, progress signals,
-//! turn count fallback) to decide when to compact context.
+//! turn count recovery signal) to decide when to compact context.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;

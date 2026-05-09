@@ -10,7 +10,6 @@ interface Env {
   APNS_KEY_P8: string;
   APNS_KEY_ID: string;
   APNS_TEAM_ID: string;
-  APNS_BUNDLE_ID: string;
   TRON_RELAY_SECRET: string;
 }
 
@@ -27,12 +26,10 @@ interface PushRequest {
   };
   environment?: string;
   /**
-   * Optional APNs bundle ID (`apns-topic` header). When present and
-   * non-empty, overrides `env.APNS_BUNDLE_ID` for this request.
-   * Lets servers route sandbox-Beta (`com.tron.mobile.beta`) tokens to
-   * the right topic on the shared relay.
+   * Required APNs bundle ID (`apns-topic` header). Tron groups tokens by
+   * `(environment, bundle_id)` before calling the relay.
    */
-  bundle_id?: string | null;
+  bundle_id: string;
 }
 
 interface DeviceResult {
@@ -140,13 +137,10 @@ export default {
         ? "api.sandbox.push.apple.com"
         : "api.push.apple.com";
 
-    // Pick the APNs topic: per-request bundle_id wins; fall back to env.
-    // Treats null / undefined / "" all as "use default" so pre-fix servers
-    // and defensive clients keep working.
-    const bundleId =
-      typeof req.bundle_id === "string" && req.bundle_id.length > 0
-        ? req.bundle_id
-        : env.APNS_BUNDLE_ID;
+    if (typeof req.bundle_id !== "string" || req.bundle_id.length === 0) {
+      return json({ error: "bundle_id must be a non-empty string" }, 400);
+    }
+    const bundleId = req.bundle_id;
 
     // Build APNs payload
     const payload = buildApnsPayload(req.notification);
@@ -354,4 +348,3 @@ function base64url(input: string | Uint8Array): string {
       : btoa(String.fromCharCode(...input));
   return str.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-

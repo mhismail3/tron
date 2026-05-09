@@ -43,7 +43,7 @@ pub struct ProviderPayloadAudit<'a> {
     pub model: Option<&'a str>,
     /// Active instruction profile.
     pub profile: Option<&'a str>,
-    /// Final provider adapter payload.
+    /// Final provider payload snapshot.
     pub payload: &'a Value,
     /// Additional structured request metadata.
     pub metadata: Value,

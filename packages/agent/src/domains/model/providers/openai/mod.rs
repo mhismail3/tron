@@ -28,9 +28,9 @@
 //!   Codex backend.
 //! - Context-window, max-output, reasoning, and verbosity defaults are selected
 //!   from the active auth-path profile. The shared model-only registry is only
-//!   a conservative fallback for call sites without credential context.
+//!   a conservative default for call sites without credential context.
 //! - `model.list` surfaces streaming-capable models for the active auth path.
-//!   Deprecated OpenAI models stay visible with replacement metadata, but
+//!   Retired OpenAI models stay visible with replacement metadata, but
 //!   `model.switch` rejects them so users cannot newly select retired IDs.
 //!   Non-streaming Pro/preview records stay hidden and are rejected before a
 //!   request is sent.

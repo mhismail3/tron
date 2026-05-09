@@ -551,7 +551,7 @@ impl CodexAppServerManager {
                 runtime.last_error = Some(message.clone());
                 tracing::warn!(
                     error = %message,
-                    "managed Codex App Server compatibility check failed"
+                    "managed Codex App Server protocol check failed"
                 );
                 return Err(CodexAppServerError::new(message));
             }
@@ -565,7 +565,7 @@ impl CodexAppServerManager {
                 runtime.last_error = Some(message.clone());
                 tracing::warn!(
                     error = %message,
-                    "managed Codex App Server compatibility check failed"
+                    "managed Codex App Server protocol check failed"
                 );
                 return Err(CodexAppServerError::new(message));
             }

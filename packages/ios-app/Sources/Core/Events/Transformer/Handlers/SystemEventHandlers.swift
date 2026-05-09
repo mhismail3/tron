@@ -98,8 +98,8 @@ enum SystemEventHandlers {
     /// - `clearedSkills` is empty — the server never emits this shape, but
     ///   rendering an empty picker / banner would be dead UI.
     ///
-    /// Paired with M6 in the audit plan. The Rust emitter lives at
-    /// `packages/agent/src/server/rpc/handlers/agent_prompt_runtime.rs`.
+    /// Paired with M6 in the audit plan. The Rust emitter lives in the
+    /// agent domain runtime and publishes through engine streams.
     static func transformSkillsCleared(
         _ payload: [String: AnyCodable],
         timestamp: Date,

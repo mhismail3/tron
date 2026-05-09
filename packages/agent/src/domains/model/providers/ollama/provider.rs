@@ -88,7 +88,7 @@ impl OllamaProvider {
         })
     }
 
-    /// Calculate `max_tokens`: options → config → model registry fallback.
+    /// Calculate `max_tokens`: options → config → model registry default.
     fn calculate_max_tokens(&self, options: &ProviderStreamOptions) -> u32 {
         options.max_tokens.unwrap_or_else(|| {
             self.config.max_tokens.unwrap_or_else(|| {

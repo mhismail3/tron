@@ -137,7 +137,7 @@ fn local_session_excludes_job_results_from_current_tokens() {
 
 #[test]
 fn local_session_snapshot_and_get_current_tokens_agree() {
-    // Regression for a prior bug: the snapshot adapter gated
+    // Regression for a prior bug: the snapshot projection gated
     // volatile_job_results_tokens on is_local_model, but get_current_tokens
     // didn't — so for local sessions with a non-zero volatile job_results
     // estimate the two totals disagreed. After the fix, they must match

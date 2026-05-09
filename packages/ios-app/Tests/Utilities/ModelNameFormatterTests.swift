@@ -172,7 +172,7 @@ final class ModelNameFormatterTests: XCTestCase {
         provider: String,
         tier: String = "sonnet"
     ) -> ModelInfo {
-        // I8: tier/isLegacy/supportsThinking/Images/Documents are required.
+        // I8: tier/isRetiredGeneration/supportsThinking/Images/Documents are required.
         ModelInfo(
             id: id,
             name: name,
@@ -182,7 +182,7 @@ final class ModelNameFormatterTests: XCTestCase {
             supportsImages: false,
             supportsDocuments: false,
             tier: tier,
-            isLegacy: false
+            isRetiredGeneration: false
         )
     }
 }

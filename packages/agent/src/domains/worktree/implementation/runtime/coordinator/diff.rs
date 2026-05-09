@@ -45,7 +45,7 @@ impl WorktreeCoordinator {
             let repo_root = if let Some(root) = payload.get("repoRoot").and_then(|v| v.as_str()) {
                 PathBuf::from(root)
             } else {
-                // Fallback: scan workspaces
+                // Recovery path: scan workspaces.
                 match self.find_repo_for_branch(branch).await {
                     Some(root) => root,
                     None => return Ok(None),
@@ -59,7 +59,7 @@ impl WorktreeCoordinator {
                 .map(Some);
         }
 
-        // Fallback: scan workspaces for matching branch (for sessions before baseBranch was persisted)
+        // Recovery path: scan workspaces for matching branch when baseBranch is absent.
         let workspaces = self.event_store.list_workspaces().unwrap_or_default();
         for ws in &workspaces {
             let repo_root = PathBuf::from(&ws.path);

@@ -441,9 +441,9 @@ mod tests {
     }
 
     #[test]
-    fn from_str_rejects_legacy_spell_types() {
+    fn from_str_rejects_retired_spell_types() {
         // Post-removal invariant: the removed spell event-type strings must
-        // fail to parse. Legacy rows in existing DBs are filtered out by the
+        // fail to parse. Retired rows in existing DBs are filtered out by the
         // v003 migration, so this guards against regressions that reintroduce
         // the variants.
         assert!("spell.cast".parse::<EventType>().is_err());

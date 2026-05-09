@@ -955,7 +955,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fallback_to_raw_content_without_summarizer() {
+    async fn raw_content_without_summarizer() {
         let http = Arc::new(html_response(
             "<html><head><title>Page</title></head><body><p>Raw content</p></body></html>",
         ));
@@ -977,7 +977,7 @@ mod tests {
     #[tokio::test]
     async fn summarizer_error_falls_back_to_raw_content() {
         let http = Arc::new(html_response(
-            "<html><head><title>Fallback</title></head><body><p>Raw</p></body></html>",
+            "<html><head><title>Simplified</title></head><body><p>Raw</p></body></html>",
         ));
         let summarizer: Arc<dyn ContentSummarizer> = Arc::new(FailingSummarizer);
         let tool = WebFetchTool::new_with_summarizer(http, summarizer);
@@ -990,7 +990,7 @@ mod tests {
             .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
-        assert!(text.contains("# Fallback"));
+        assert!(text.contains("# Simplified"));
         assert!(text.contains("Raw"));
     }
 

@@ -113,7 +113,7 @@ struct SystemEventView: View {
             )
 
         case .subagentResultAvailable(let subagentSessionId, let taskPreview, let success):
-            // Legacy individual notification (from persisted events before consolidation)
+            // Historical individual notification from persisted events before consolidation.
             SubagentResultNotificationView(
                 results: [SubagentResultEntry(subagentSessionId: subagentSessionId, taskPreview: taskPreview, success: success)],
                 onTap: {

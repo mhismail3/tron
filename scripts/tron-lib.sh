@@ -461,7 +461,8 @@ PLIST
 
 # Sign an app bundle with the best available codesigning identity.
 # Priority: Developer ID Application > Apple Development > any valid cert > ad-hoc.
-# Uses hardened runtime + entitlements when possible, with tiered fallback.
+# Uses hardened runtime + entitlements when possible, then progressively
+# reduces signing requirements to match the available local certificate.
 codesign_bundle() {
     local bundle="$1"
     local identity entitlements

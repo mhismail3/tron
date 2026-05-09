@@ -78,7 +78,7 @@ impl DeviceTokenRepo {
     /// `bundle_id` is the APNs `apns-topic` this token was issued against
     /// (e.g., `com.tron.mobile` vs `com.tron.mobile.beta`). Required —
     /// every client sends its bundle identifier so the send path never
-    /// needs a topic fallback.
+    /// needs topic recovery.
     pub fn register(
         conn: &Connection,
         device_token: &str,

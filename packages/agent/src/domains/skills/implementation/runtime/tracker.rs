@@ -533,11 +533,11 @@ mod tests {
         assert!(tracker.removed_skill_names().contains("a"));
     }
 
-    // ── Legacy spell-event tolerance ────────────────────────────────
+    // ── Retired spell-event tolerance ────────────────────────────────
 
     #[test]
-    fn test_from_events_ignores_legacy_spell_events() {
-        // Post-removal invariant: legacy spell.cast / spell.consumed rows in
+    fn test_from_events_ignores_retired_spell_events() {
+        // Post-removal invariant: retired spell.cast / spell.consumed rows in
         // existing session DBs must not affect any tracker state.
         let events = vec![
             serde_json::json!({
@@ -558,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_spell_before_compact_boundary_preserves_flags() {
+    fn test_retired_spell_before_compact_boundary_preserves_flags() {
         use crate::domains::settings::types::CompactionPolicy;
         let events = vec![
             serde_json::json!({
@@ -574,7 +574,7 @@ mod tests {
             serde_json::json!({ "type": "compact.boundary", "id": "cb1", "payload": {} }),
         ];
         let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
-        // Compaction clears `browser`; legacy spell never mattered.
+        // Compaction clears `browser`; retired spell events never mattered.
         assert!(tracker.active_skill_names().is_empty());
         assert!(tracker.skills_cleared_by_compaction());
     }

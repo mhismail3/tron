@@ -1,7 +1,7 @@
 //! LLM-based summarizer.
 //!
 //! Spawns a subagent (Haiku) for intelligent context summarization.
-//! Falls back to [`KeywordSummarizer`] on any failure.
+//! Uses [`KeywordSummarizer`] as the recovery path on any failure.
 //!
 //! Uses [`serialize_messages`](crate::domains::agent::runner::summarizer::serialize_messages) and
 //! [`parse_summarizer_response`](crate::domains::agent::runner::summarizer::parse_summarizer_response)
@@ -48,10 +48,10 @@ pub trait SubsessionSpawner: Send + Sync {
 /// LLM-based summarizer that spawns a subagent for intelligent summaries.
 ///
 /// On any failure (subsession error, invalid JSON, missing narrative),
-/// falls back to [`KeywordSummarizer`].
+/// uses [`KeywordSummarizer`] as its recovery path.
 pub struct LlmSummarizer<S: SubsessionSpawner> {
     spawner: S,
-    fallback: KeywordSummarizer,
+    keyword_recovery: KeywordSummarizer,
 }
 
 impl<S: SubsessionSpawner> LlmSummarizer<S> {
@@ -59,7 +59,7 @@ impl<S: SubsessionSpawner> LlmSummarizer<S> {
     pub fn new(spawner: S) -> Self {
         Self {
             spawner,
-            fallback: KeywordSummarizer,
+            keyword_recovery: KeywordSummarizer,
         }
     }
 }
@@ -81,18 +81,18 @@ impl<S: SubsessionSpawner> Summarizer for LlmSummarizer<S> {
         let Some(output) = output else {
             warn!(
                 error = result.error.as_deref().unwrap_or("unknown"),
-                "LLM summarizer subagent failed, using fallback"
+                "LLM summarizer subagent failed, using keyword recovery"
             );
-            return self.fallback.summarize(messages).await;
+            return self.keyword_recovery.summarize(messages).await;
         };
         if let Ok(parsed) = parse_summarizer_response(&output) {
             Ok(parsed)
         } else {
             warn!(
                 output_length = output.len(),
-                "LLM summarizer returned invalid JSON, using fallback"
+                "LLM summarizer returned invalid JSON, using keyword recovery"
             );
-            self.fallback.summarize(messages).await
+            self.keyword_recovery.summarize(messages).await
         }
     }
 }
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llm_summarizer_fallback_on_failure() {
+    async fn llm_summarizer_uses_keyword_recovery_on_failure() {
         let spawner = MockSpawner {
             result: SubsessionResult {
                 success: false,
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llm_summarizer_fallback_on_invalid_json() {
+    async fn llm_summarizer_uses_keyword_recovery_on_invalid_json() {
         let spawner = MockSpawner {
             result: SubsessionResult {
                 success: true,
@@ -408,7 +408,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llm_summarizer_fallback_on_no_output() {
+    async fn llm_summarizer_uses_keyword_recovery_on_no_output() {
         let spawner = MockSpawner {
             result: SubsessionResult {
                 success: true,

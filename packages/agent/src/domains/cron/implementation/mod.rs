@@ -38,7 +38,7 @@
 //! - **DB-before-memory**: Runtime state updates always write to SQLite first. If
 //!   the DB write fails, the in-memory update is skipped to prevent divergence.
 //! - **Allowlist-only restrictions**: `ToolRestrictions` uses `deny_unknown_fields` —
-//!   legacy `deniedTools` JSON is rejected at parse time.
+//!   unknown `deniedTools` JSON is rejected at parse time.
 //! - **Full-file hashing**: The config watcher hashes the entire file, not a prefix.
 //! - **Minimum timeout**: Shell (1s–3600s) and webhook (1s–300s) payloads reject 0s timeout.
 //! - **Engine-attached fires**: In production, `main.rs` attaches the engine
@@ -49,10 +49,9 @@
 //!
 //! ## Module Boundaries
 //!
-//! Depends on `core`, `events`, `settings`.
-//! Does NOT depend on `runtime` or `llm` — agent execution is
-//! injected via the [`executor::AgentTurnExecutor`] trait, implemented
-//! in `main.rs`.
+//! Depends on shared clock/error/data helpers, the session event store, and
+//! settings domain values. Agent execution is injected via the
+//! [`executor::AgentTurnExecutor`] trait at app startup.
 
 #[path = "runtime/clock.rs"]
 pub mod clock;

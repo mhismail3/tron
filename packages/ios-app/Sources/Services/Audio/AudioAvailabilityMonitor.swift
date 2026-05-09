@@ -155,7 +155,7 @@ final class AudioAvailabilityMonitor {
         do {
             // Only set the category - do NOT activate the session
             // Activating would interrupt other apps' audio playback
-            // Use .allowBluetoothHFP instead of deprecated .allowBluetooth
+            // Use the modern hands-free profile Bluetooth option.
             try session.setCategory(.playAndRecord, mode: .default, options: AudioCaptureEngine.sessionOptions)
             return true
         } catch {

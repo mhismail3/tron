@@ -53,7 +53,7 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let descriptor = ToolRegistry.descriptor(for: name)
+        let descriptor = ToolDescriptorCatalog.descriptor(for: name)
         let argsJSON = Self.serializeArguments(arguments)
         let toolSummary = descriptor.summaryExtractor(argsJSON)
 
@@ -95,7 +95,7 @@ struct SessionStreamBuffer {
 
         // 3. Fallback: create a new toolEnd line if no matching toolStart found
         let toolName = name ?? "Tool"
-        let descriptor = ToolRegistry.descriptor(for: toolName)
+        let descriptor = ToolDescriptorCatalog.descriptor(for: toolName)
         let line = ActivityLine(
             kind: .toolEnd,
             text: toolName,
@@ -214,9 +214,9 @@ struct SessionStreamBuffer {
         }
     }
 
-    // MARK: - Tool Metadata (delegates to ToolRegistry)
+    // MARK: - Tool Metadata (delegates to ToolDescriptorCatalog)
 
-    /// Serialize AnyCodable arguments to JSON string for ToolRegistry's summaryExtractor.
+    /// Serialize AnyCodable arguments to JSON string for ToolDescriptorCatalog's summaryExtractor.
     static func serializeArguments(_ arguments: [String: AnyCodable]?) -> String {
         guard let args = arguments else { return "{}" }
         let dict = args.mapValues { $0.value }

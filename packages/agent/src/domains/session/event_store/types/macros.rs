@@ -35,7 +35,7 @@ macro_rules! define_events {
         /// authoritative count).
         ///
         /// Each variant serializes to its wire string (e.g. `"session.start"`)
-        /// for compatibility with TypeScript and iOS clients.
+        /// for TypeScript and iOS DTO parity.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
         pub enum EventType {
             $(

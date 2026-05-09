@@ -229,7 +229,7 @@ final class DefaultModelRepositoryTests: XCTestCase {
     // MARK: - Helpers
 
     private func createMockModel(id: String) -> ModelInfo {
-        // I8: supportsThinking/Images/Documents, tier, and isLegacy are
+        // I8: supportsThinking/Images/Documents, tier, and isRetiredGeneration are
         // required on the wire — the server emits them unconditionally.
         let json = """
         {

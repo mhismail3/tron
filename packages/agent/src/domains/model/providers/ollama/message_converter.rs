@@ -922,8 +922,8 @@ mod tests {
     }
 
     #[test]
-    fn tool_result_orphaned_id_fallback() {
-        // ToolResult with no matching assistant tool call → fallback to "unknown"
+    fn tool_result_orphaned_id_unknown_marker() {
+        // ToolResult with no matching assistant tool call → mark as "unknown".
         let messages = vec![Message::ToolResult {
             tool_call_id: "orphan_id".into(),
             content: ToolResultMessageContent::Text("result".into()),

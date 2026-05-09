@@ -3,9 +3,9 @@ import XCTest
 
 /// Tests for ErrorHandlers — focused on I6 (scorched-earth provider-error
 /// decoding). `category` is required on `error.provider` events; missing
-/// category drops the event entirely (no plain-text fallback). `"unknown"`
+/// category drops the event entirely (no plain-text recovery). `"unknown"`
 /// is a legitimate classification that routes through the generic-pill path,
-/// never the legacy error-text path (which has been deleted).
+/// never the retired error-text path (which has been deleted).
 final class ErrorHandlersTests: XCTestCase {
 
     private func timestamp() -> Date { Date(timeIntervalSince1970: 1_700_000_000) }
@@ -21,7 +21,7 @@ final class ErrorHandlersTests: XCTestCase {
             "retryable": AnyCodable(true),
         ]
         let msg = ErrorHandlers.transformProviderError(payload, timestamp: timestamp())
-        XCTAssertNil(msg, "missing category must drop the event, never fall back to plain text")
+        XCTAssertNil(msg, "missing category must drop the event, never render plain text")
     }
 
     func test_provider_error_with_real_category_renders_pill() {
@@ -50,7 +50,7 @@ final class ErrorHandlersTests: XCTestCase {
     func test_provider_error_unknown_category_renders_pill_with_generic_icon() {
         // "unknown" is a real classification emitted by the import transformer
         // and any other layer that couldn't narrow further. It MUST flow
-        // through the pill path (not the old plain-text fallback) — the
+        // through the pill path (not the old plain-text recovery) — the
         // ErrorCategoryDisplay.icon default case gives it a generic
         // exclamationmark.triangle.fill icon.
         let payload: [String: AnyCodable] = [
@@ -64,7 +64,7 @@ final class ErrorHandlersTests: XCTestCase {
             XCTFail("expected a rendered message")
             return
         }
-        XCTAssertEqual(msg.role, .system, "unknown category must still render as system pill, not legacy plain text")
+        XCTAssertEqual(msg.role, .system, "unknown category must still render as system pill, not retired plain text")
         if case .systemEvent(.providerError(let data)) = msg.content {
             XCTAssertEqual(data.category, "unknown")
             // Regression guard: the generic icon lookup must return the
@@ -96,10 +96,10 @@ final class ErrorHandlersTests: XCTestCase {
         XCTAssertNil(msg, "missing error must drop the event")
     }
 
-    // MARK: - No legacy plain-text fallback
+    // MARK: - No Retired Plain-Text Recovery
 
     /// Regression guard: this handler must never emit assistant-role plain
-    /// text for a well-formed payload. The "legacy fallback" branch is gone
+    /// text for a well-formed payload. The retired plain-text branch is gone
     /// — any category (including "unknown") routes through the pill.
     func test_no_plain_text_path_for_any_valid_category() {
         let categories = ["unknown", "rate_limit", "server", "authentication", "network", "random_new_category"]

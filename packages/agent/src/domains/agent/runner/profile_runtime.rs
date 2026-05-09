@@ -121,7 +121,7 @@ pub struct SessionExecutionPlan {
 }
 
 impl SessionExecutionPlan {
-    /// Runtime context adapter derived from this immutable session plan.
+    /// Runtime context view derived from this immutable session plan.
     #[must_use]
     pub fn runtime_context_policy(
         &self,
@@ -177,7 +177,7 @@ pub struct ProcessExecutionPlan {
 }
 
 impl ProcessExecutionPlan {
-    /// Runtime context adapter derived from this immutable process plan.
+    /// Runtime context view derived from this immutable process plan.
     #[must_use]
     pub fn runtime_context_policy(
         &self,

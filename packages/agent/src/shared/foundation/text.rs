@@ -25,7 +25,7 @@ pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
     }
     // `floor_char_boundary` is nightly-only, so implement it ourselves.
     let mut end = max_bytes;
-    // Walk backward to find a char boundary.
+    // Walk toward the start to find a char boundary.
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }

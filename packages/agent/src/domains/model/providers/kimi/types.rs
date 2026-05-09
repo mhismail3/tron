@@ -1,7 +1,7 @@
 //! Kimi model registry, auth, and config types.
 //!
 //! Kimi (Moonshot AI) uses an `OpenAI` chat completions-compatible API.
-//! Models: K2.5 (flagship), K2 variants, and legacy moonshot-v1.
+//! Models: K2.5 (flagship), K2 variants, and retired moonshot-v1.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -77,8 +77,8 @@ pub struct KimiModelInfo {
     pub sort_order: u16,
     /// Whether this model is recommended for new users.
     pub recommended: bool,
-    /// Whether this is a legacy/older generation model.
-    pub is_legacy: bool,
+    /// Whether this is a retired/older generation model.
+    pub is_retired_generation: bool,
 }
 
 // Note: Kimi K2.5 supports vision (supports_images: true), while older
@@ -104,7 +104,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             description: "Kimi K2.5 — flagship model with vision and thinking.",
             sort_order: 0,
             recommended: true,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -125,7 +125,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             description: "Kimi K2 0905 Preview — capable general-purpose model.",
             sort_order: 1,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -146,7 +146,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             description: "Kimi K2 0711 Preview — 128K context model.",
             sort_order: 2,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -167,7 +167,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             description: "Kimi K2 Turbo Preview — high-speed variant, 60-100 tok/s.",
             sort_order: 3,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -188,7 +188,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             description: "Kimi K2 Thinking — dedicated thinking model.",
             sort_order: 4,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -209,7 +209,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             description: "Kimi K2 Thinking Turbo — high-speed thinking model.",
             sort_order: 5,
             recommended: false,
-            is_legacy: false,
+            is_retired_generation: false,
         },
     );
     let _ = m.insert(
@@ -227,10 +227,10 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             input_cost_per_million: 0.20,
             output_cost_per_million: 2.00,
             cache_read_cost_per_million: None,
-            description: "Moonshot V1 8K — legacy model.",
+            description: "Moonshot V1 8K — retired model.",
             sort_order: 6,
             recommended: false,
-            is_legacy: true,
+            is_retired_generation: true,
         },
     );
     let _ = m.insert(
@@ -248,10 +248,10 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             input_cost_per_million: 1.00,
             output_cost_per_million: 3.00,
             cache_read_cost_per_million: None,
-            description: "Moonshot V1 32K — legacy model.",
+            description: "Moonshot V1 32K — retired model.",
             sort_order: 7,
             recommended: false,
-            is_legacy: true,
+            is_retired_generation: true,
         },
     );
     let _ = m.insert(
@@ -269,10 +269,10 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             input_cost_per_million: 2.00,
             output_cost_per_million: 5.00,
             cache_read_cost_per_million: None,
-            description: "Moonshot V1 128K — legacy long-context model.",
+            description: "Moonshot V1 128K — retired long-context model.",
             sort_order: 8,
             recommended: false,
-            is_legacy: true,
+            is_retired_generation: true,
         },
     );
     m
@@ -304,12 +304,12 @@ impl KimiModelInfo {
             "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
-            "tier": if self.is_legacy { "legacy" } else { "flagship" },
+            "tier": if self.is_retired_generation { "retired" } else { "flagship" },
             "family": self.family,
             "description": self.description,
             "supportsReasoning": false,
             "recommended": self.recommended,
-            "isLegacy": self.is_legacy,
+            "isLegacy": self.is_retired_generation,
             "sortOrder": self.sort_order,
         })
     }
@@ -342,7 +342,7 @@ mod tests {
         assert!(m.supports_images);
         assert!(m.supports_tools);
         assert!(m.recommended);
-        assert!(!m.is_legacy);
+        assert!(!m.is_retired_generation);
     }
 
     #[test]
@@ -392,7 +392,7 @@ mod tests {
         assert!(!m.supports_thinking);
         assert!(!m.supports_tools);
         assert!(!m.supports_images);
-        assert!(m.is_legacy);
+        assert!(m.is_retired_generation);
     }
 
     #[test]
@@ -400,7 +400,7 @@ mod tests {
         let m = get_kimi_model("moonshot-v1-32k").unwrap();
         assert_eq!(m.context_window, 32_768);
         assert_eq!(m.max_output, 4_096);
-        assert!(m.is_legacy);
+        assert!(m.is_retired_generation);
     }
 
     #[test]
@@ -408,7 +408,7 @@ mod tests {
         let m = get_kimi_model("moonshot-v1-128k").unwrap();
         assert_eq!(m.context_window, 131_072);
         assert_eq!(m.max_output, 4_096);
-        assert!(m.is_legacy);
+        assert!(m.is_retired_generation);
     }
 
     #[test]
@@ -463,13 +463,16 @@ mod tests {
     }
 
     #[test]
-    fn kimi_legacy_flag() {
+    fn kimi_retired_generation_flag() {
         for id in all_kimi_model_ids() {
             let m = get_kimi_model(id).unwrap();
             if id.starts_with("moonshot-") {
-                assert!(m.is_legacy, "{id} should be legacy");
+                assert!(m.is_retired_generation, "{id} should be retired-generation");
             } else {
-                assert!(!m.is_legacy, "{id} should not be legacy");
+                assert!(
+                    !m.is_retired_generation,
+                    "{id} should not be retired-generation"
+                );
             }
         }
     }
@@ -526,10 +529,10 @@ mod tests {
     }
 
     #[test]
-    fn to_api_json_legacy_tier() {
+    fn to_api_json_retired_tier() {
         let m = get_kimi_model("moonshot-v1-8k").unwrap();
         let j = m.to_api_json("moonshot-v1-8k");
-        assert_eq!(j["tier"], "legacy");
+        assert_eq!(j["tier"], "retired");
         assert_eq!(j["isLegacy"], true);
     }
 

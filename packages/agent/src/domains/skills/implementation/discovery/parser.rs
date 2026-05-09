@@ -685,8 +685,7 @@ This is the body.";
     #[test]
     fn empty_subagent_value_is_none_not_error() {
         // An absent or empty `subagent:` value is a reasonable "no preference"
-        // signal, not a typo. Keep it as Ok(None) for backwards compatibility
-        // with skills that omit the key.
+        // signal, not a typo. Keep it as Ok(None) for skills that omit the key.
         let content = "---\nsubagent:\n---\nBody";
         let result = parse_skill_md(content).unwrap();
         assert!(result.frontmatter.subagent.is_none());

@@ -24,7 +24,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let authPaths: [String]?
     /// Hidden aliases and snapshots accepted by the server.
     let aliasIds: [String]?
-    /// Replacement model for deprecated aliases.
+    /// Replacement model for retired aliases.
     let replacementModel: String?
     /// Whether the server hides this model from the default picker.
     let isHidden: Bool?
@@ -42,16 +42,15 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let supportsDocuments: Bool
     /// Server-authoritative tier classification ("opus", "sonnet",
     /// "flagship", "flash", "local", …). Required on the wire — decoding
-    /// a model payload without a tier is a server bug, not a client
-    /// fallback case.
+    /// a model payload without a tier is a server bug, not a client default.
     let tier: String
     /// Whether this model is a previous-generation release that the UI
     /// should de-prioritize. Required on the wire.
-    let isLegacy: Bool
-    /// Whether this model is deprecated and should not be selectable.
-    let isDeprecated: Bool?
-    /// Deprecation date (YYYY-MM-DD) for display
-    let deprecationDate: String?
+    let isRetiredGeneration: Bool
+    /// Whether this model is retired and should not be selectable.
+    let isRetired: Bool?
+    /// Retirement date (YYYY-MM-DD) for display.
+    let retirementDate: String?
     /// For models with reasoning capability (e.g., OpenAI)
     let supportsReasoning: Bool?
     /// Available reasoning effort levels (minimal, low, medium, high, xhigh)
@@ -108,8 +107,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, canonicalModelId, name, provider, apiEndpoint, authPaths, aliasIds
         case replacementModel, isHidden, contextWindow, maxContextWindow, maxOutputTokens
-        case supportsThinking, supportsImages, supportsDocuments, tier, isLegacy
-        case isDeprecated, deprecationDate
+        case supportsThinking, supportsImages, supportsDocuments, tier
+        case isRetiredGeneration = "isLegacy"
+        case isRetired = "isDeprecated"
+        case retirementDate = "deprecationDate"
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case supportsVerbosity, defaultVerbosity
         case supportsStreaming, supportsTools, supportsToolSearch, supportsComputerUse
@@ -123,7 +124,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Explicit initializer used by tests and non-wire construction sites.
     /// The five required metadata fields (`supportsThinking`,
-    /// `supportsImages`, `supportsDocuments`, `tier`, `isLegacy`) have no
+    /// `supportsImages`, `supportsDocuments`, `tier`, `isRetiredGeneration`) have no
     /// defaults — callers must pass them. Everything else is genuinely
     /// optional on the wire and defaults to nil here so test fixtures
     /// stay lean.
@@ -143,10 +144,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         supportsImages: Bool,
         supportsDocuments: Bool,
         tier: String,
-        isLegacy: Bool,
+        isRetiredGeneration: Bool,
         maxOutputTokens: Int? = nil,
-        isDeprecated: Bool? = nil,
-        deprecationDate: String? = nil,
+        isRetired: Bool? = nil,
+        retirementDate: String? = nil,
         supportsReasoning: Bool? = nil,
         reasoningLevels: [String]? = nil,
         defaultReasoningLevel: String? = nil,
@@ -187,9 +188,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.supportsImages = supportsImages
         self.supportsDocuments = supportsDocuments
         self.tier = tier
-        self.isLegacy = isLegacy
-        self.isDeprecated = isDeprecated
-        self.deprecationDate = deprecationDate
+        self.isRetiredGeneration = isRetiredGeneration
+        self.isRetired = isRetired
+        self.retirementDate = retirementDate
         self.supportsReasoning = supportsReasoning
         self.reasoningLevels = reasoningLevels
         self.defaultReasoningLevel = defaultReasoningLevel
@@ -259,14 +260,14 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Formatted model name for UI display (delegates to `displayName`)
     var formattedModelName: String { displayName }
 
-    /// Whether this is a latest generation model (server-driven via isLegacy flag)
+    /// Whether this is a latest generation model (server-driven via retired-generation field)
     var isLatestGeneration: Bool {
-        !isLegacy
+        !isRetiredGeneration
     }
 
-    /// Whether this model is deprecated.
-    var isDeprecatedModel: Bool {
-        isDeprecated ?? false
+    /// Whether this model is retired.
+    var isRetiredModel: Bool {
+        isRetired ?? false
     }
 
     /// Whether this model is unavailable (local provider not running or model not pulled)
@@ -281,7 +282,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Whether this model should be disabled in the picker.
     var isDisabled: Bool {
-        isDeprecatedModel || isUnavailable
+        isRetiredModel || isUnavailable
     }
 
     /// Whether this is an Anthropic model

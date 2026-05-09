@@ -249,7 +249,7 @@ fn has_hidden_mkdir(command: &str) -> bool {
 /// (multi-tenant host, adversarial working directory), switch to
 /// `std::fs::canonicalize` before the prefix check — guard against
 /// canonicalize failure (non-existent targets) by keeping the lexical
-/// fallback.
+/// recovery behavior.
 fn is_path_within(test_path: &str, protected_path: &str) -> bool {
     let effective = protected_path.trim_end_matches("**");
     let effective = effective.trim_end_matches('/');

@@ -75,7 +75,7 @@ struct ToolGridItem: View {
     let tool: ToolSummaryInfo
 
     private var descriptor: ToolDescriptor {
-        ToolRegistry.descriptor(for: tool.name)
+        ToolDescriptorCatalog.descriptor(for: tool.name)
     }
 
     var body: some View {

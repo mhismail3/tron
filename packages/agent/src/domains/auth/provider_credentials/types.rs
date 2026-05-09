@@ -75,7 +75,7 @@ pub struct ProviderAuth {
 /// Google-specific provider auth with Cloud Code Assist metadata.
 ///
 /// Serializes and deserializes through `GoogleProviderAuthWire`, which
-/// carries `#[serde(deny_unknown_fields)]`. A legacy `endpoint` field
+/// carries `#[serde(deny_unknown_fields)]`. A retired `endpoint` field
 /// (left over from the pre-CCA "antigravity" era) fails to load with an
 /// error naming the unknown field — users must re-authenticate via
 /// `tron auth google`.
@@ -241,7 +241,7 @@ impl AuthStorage {
     /// Get Google-specific provider auth. Returns `None` if no `google`
     /// block exists OR if it fails to deserialize.
     ///
-    /// For strict error surfacing (e.g. legacy `endpoint` field), prefer
+    /// For strict error surfacing (e.g. retired `endpoint` field), prefer
     /// [`Self::try_get_google_auth`], which returns the serde error.
     pub fn get_google_auth(&self) -> Option<GoogleProviderAuth> {
         self.providers
@@ -487,11 +487,11 @@ mod tests {
         assert_eq!(gpa.base.accounts.as_ref().unwrap()[0].label, "test");
     }
 
-    /// R3: legacy auth.json files carrying `endpoint: "antigravity"` (from
+    /// R3: retired auth.json files carrying `endpoint: "antigravity"` (from
     /// before the CCA migration) must fail to load with an error naming
     /// the unknown field. The user has to re-authenticate.
     #[test]
-    fn google_provider_auth_rejects_legacy_endpoint() {
+    fn google_provider_auth_rejects_retired_endpoint() {
         let json = r#"{
             "clientId": "cid",
             "endpoint": "antigravity",
@@ -501,12 +501,12 @@ mod tests {
         let msg = err.to_string();
         assert!(
             msg.contains("endpoint"),
-            "error should name the legacy `endpoint` field, got: {msg}"
+            "error should name the retired `endpoint` field, got: {msg}"
         );
     }
 
     /// R3 companion: completely unknown fields — not just `endpoint` — also
-    /// fail to load, so no other legacy shape can slip through.
+    /// fail to load, so no other retired shape can slip through.
     #[test]
     fn google_provider_auth_rejects_arbitrary_unknown_field() {
         let json = r#"{
@@ -541,12 +541,12 @@ mod tests {
         assert!(storage.get_service_api_keys("nonexistent").is_empty());
     }
 
-    /// R2: legacy `apiKey` single field is gone. An auth.json with only
+    /// R2: retired `apiKey` single field is gone. An auth.json with only
     /// `apiKey: "..."` fails to load with an error naming the unknown
     /// field. Users must rewrite their auth.json to `apiKeys: ["..."]`.
     #[test]
-    fn service_auth_rejects_legacy_api_key_field() {
-        let json = r#"{"apiKey":"sk-legacy"}"#;
+    fn service_auth_rejects_retired_api_key_field() {
+        let json = r#"{"apiKey":"sk-retired"}"#;
         let err = serde_json::from_str::<ServiceAuth>(json).unwrap_err();
         let msg = err.to_string();
         assert!(

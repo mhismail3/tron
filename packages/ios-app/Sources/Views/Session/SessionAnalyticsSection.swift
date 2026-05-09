@@ -14,7 +14,7 @@ struct SessionAnalyticsSection: View {
     private var totalTokens: Int {
         let bd = breakdown
         return bd.baseInputTokens + bd.outputTokens + bd.cacheReadTokens
-            + bd.cacheWrite5mTokens + bd.cacheWrite1hTokens + bd.cacheWriteLegacyTokens
+            + bd.cacheWrite5mTokens + bd.cacheWrite1hTokens + bd.cacheWriteDefaultTtlTokens
     }
 
     var body: some View {
@@ -74,8 +74,8 @@ struct SessionAnalyticsSection: View {
                 if breakdown.cacheWrite1hTokens > 0 {
                     categoryPill(label: "Cache 1h", tokens: breakdown.cacheWrite1hTokens)
                 }
-            } else if breakdown.cacheWriteLegacyTokens > 0 {
-                categoryPill(label: "Write", tokens: breakdown.cacheWriteLegacyTokens)
+            } else if breakdown.cacheWriteDefaultTtlTokens > 0 {
+                categoryPill(label: "Write", tokens: breakdown.cacheWriteDefaultTtlTokens)
             }
         }
     }

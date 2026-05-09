@@ -24,9 +24,9 @@ fn opus_4_7_cost() {
 }
 
 #[test]
-fn legacy_opus_cost() {
+fn opus_3_cost() {
     let cost = estimate_cost("claude-opus-4-20250514", &usage(1_000_000, 1_000_000));
-    // Legacy Opus tier: $15 input + $75 output = $90
+    // Opus 3 pricing tier: $15 input + $75 output = $90
     assert!((cost - 90.0).abs() < 0.001);
 }
 

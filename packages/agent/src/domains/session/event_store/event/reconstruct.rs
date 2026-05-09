@@ -905,7 +905,8 @@ mod tests {
     #[test]
     fn user_interrupt_injects_synthetic_tool_result() {
         // When user interrupts after tool calls, pending results are discarded
-        // but synthetic error results are injected to maintain provider compatibility.
+        // but synthetic error results are injected to keep provider tool-call
+        // state well-formed.
         let events = vec![
             session_start(),
             ev(
@@ -925,7 +926,7 @@ mod tests {
                 serde_json::json!({"toolCallId": "call_1", "content": "Result", "isError": false}),
             ),
             // User interrupts — pending tool results are discarded, but
-            // synthetic error results are injected for provider compatibility.
+            // synthetic error results keep provider tool-call state well-formed.
             ev(
                 EventType::MessageUser,
                 serde_json::json!({"content": "Actually, never mind"}),

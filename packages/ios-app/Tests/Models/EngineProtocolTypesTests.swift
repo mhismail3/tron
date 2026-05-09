@@ -519,14 +519,14 @@ final class SystemTypesTests: XCTestCase {
 @MainActor
 final class ModelTypesExtendedTests: XCTestCase {
 
-    func testModelInfoIsLatestGeneration_usesIsLegacyFlag() throws {
-        // isLegacy: false → isLatestGeneration: true
-        let latest = createModelInfo(id: "claude-opus-4-6", isLegacy: false)
+    func testModelInfoIsLatestGeneration_usesIsRetiredFlag() throws {
+        // isRetiredGeneration: false → isLatestGeneration: true
+        let latest = createModelInfo(id: "claude-opus-4-6", isRetiredGeneration: false)
         XCTAssertTrue(latest.isLatestGeneration)
 
-        // isLegacy: true → isLatestGeneration: false
-        let legacy = createModelInfo(id: "claude-sonnet-4-20250514", isLegacy: true)
-        XCTAssertFalse(legacy.isLatestGeneration)
+        // isRetiredGeneration: true → isLatestGeneration: false
+        let retired = createModelInfo(id: "claude-sonnet-4-20250514", isRetiredGeneration: true)
+        XCTAssertFalse(retired.isLatestGeneration)
 
         let currentOpenAI = createModelInfo(id: "gpt-5.5", provider: "openai-codex")
         XCTAssertTrue(currentOpenAI.isLatestGeneration)
@@ -603,11 +603,11 @@ final class ModelTypesExtendedTests: XCTestCase {
         name: String? = nil,
         tier: String = "sonnet",
         family: String? = nil,
-        isLegacy: Bool = false,
+        isRetiredGeneration: Bool = false,
         sortOrder: Int? = nil
     ) -> ModelInfo {
         // I8: the five required fields (supportsThinking/Images/Documents,
-        // tier, isLegacy) have no defaults. The server always emits them.
+        // tier, isRetiredGeneration) have no defaults. The server always emits them.
         ModelInfo(
             id: id,
             name: name ?? id,
@@ -617,7 +617,7 @@ final class ModelTypesExtendedTests: XCTestCase {
             supportsImages: false,
             supportsDocuments: false,
             tier: tier,
-            isLegacy: isLegacy,
+            isRetiredGeneration: isRetiredGeneration,
             family: family,
             sortOrder: sortOrder
         )

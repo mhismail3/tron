@@ -167,7 +167,7 @@ pub enum GoogleAuth {
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
     },
-    /// API key authentication (fallback).
+    /// API key authentication.
     ApiKey {
         /// The API key.
         api_key: String,
@@ -465,11 +465,11 @@ pub struct GeminiModelInfo {
     pub sort_order: u16,
     /// Whether this model is recommended for new users.
     pub recommended: bool,
-    /// Whether this is a legacy/older generation model.
-    pub is_legacy: bool,
-    /// Whether this model is deprecated.
-    pub is_deprecated: bool,
-    /// Deprecation date (ISO-8601), if deprecated.
+    /// Whether this is a retired/older generation model.
+    pub is_retired_generation: bool,
+    /// Whether this model is retired by the provider.
+    pub is_retired: bool,
+    /// Retirement date (ISO-8601), if retired.
     pub deprecation_date: Option<&'static str>,
     /// Supported thinking level names for the API response.
     pub supported_thinking_levels: &'static [&'static str],
@@ -500,8 +500,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             description: "Gemini 3.1 Pro (Preview) — optimized for software engineering and agentic workflows.",
             sort_order: 0,
             recommended: true,
-            is_legacy: false,
-            is_deprecated: false,
+            is_retired_generation: false,
+            is_retired: false,
             deprecation_date: None,
             supported_thinking_levels: &["low", "medium", "high"],
         },
@@ -522,11 +522,11 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             input_cost_per_million: 1.25,
             output_cost_per_million: 5.0,
             family: "Gemini 3",
-            description: "Gemini 3 Pro (Preview) — deprecated, replaced by Gemini 3.1 Pro.",
+            description: "Gemini 3 Pro (Preview) — retired, replaced by Gemini 3.1 Pro.",
             sort_order: 1,
             recommended: false,
-            is_legacy: false,
-            is_deprecated: true,
+            is_retired_generation: false,
+            is_retired: true,
             deprecation_date: Some("2026-03-09"),
             supported_thinking_levels: &["low", "medium", "high"],
         },
@@ -550,8 +550,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             description: "Gemini 3.1 Flash Lite (Preview) — cost-optimized for high-volume agentic tasks.",
             sort_order: 3,
             recommended: false,
-            is_legacy: false,
-            is_deprecated: false,
+            is_retired_generation: false,
+            is_retired: false,
             deprecation_date: None,
             supported_thinking_levels: &[],
         },
@@ -575,8 +575,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             description: "Gemini 3 Flash (Preview) — flash tier (preview)",
             sort_order: 2,
             recommended: false,
-            is_legacy: false,
-            is_deprecated: false,
+            is_retired_generation: false,
+            is_retired: false,
             deprecation_date: None,
             supported_thinking_levels: &[],
         },
@@ -600,8 +600,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             description: "Gemini 2.5 Pro — pro tier",
             sort_order: 4,
             recommended: false,
-            is_legacy: false,
-            is_deprecated: false,
+            is_retired_generation: false,
+            is_retired: false,
             deprecation_date: None,
             supported_thinking_levels: &["low", "medium", "high"],
         },
@@ -625,8 +625,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             description: "Gemini 2.5 Flash — flash tier",
             sort_order: 5,
             recommended: false,
-            is_legacy: false,
-            is_deprecated: false,
+            is_retired_generation: false,
+            is_retired: false,
             deprecation_date: None,
             supported_thinking_levels: &["minimal", "low", "medium", "high"],
         },
@@ -650,8 +650,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             description: "Gemini 2.5 Flash Lite — flash-lite tier",
             sort_order: 6,
             recommended: false,
-            is_legacy: false,
-            is_deprecated: false,
+            is_retired_generation: false,
+            is_retired: false,
             deprecation_date: None,
             supported_thinking_levels: &[],
         },
@@ -694,7 +694,7 @@ impl GeminiModelInfo {
             "family": self.family,
             "description": self.description,
             "recommended": self.recommended,
-            "isLegacy": self.is_legacy,
+            "isLegacy": self.is_retired_generation,
             "sortOrder": self.sort_order,
         });
         let map = obj.as_object_mut().unwrap();
@@ -713,7 +713,7 @@ impl GeminiModelInfo {
                 serde_json::json!(self.supported_thinking_levels),
             );
         }
-        if self.is_deprecated {
+        if self.is_retired {
             let _ = map.insert("isDeprecated".into(), serde_json::json!(true));
         }
         if let Some(date) = self.deprecation_date {
@@ -1162,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    fn to_api_json_gemini_deprecated() {
+    fn to_api_json_gemini_retired() {
         let m = get_gemini_model("gemini-3-pro-preview").unwrap();
         let j = m.to_api_json("gemini-3-pro-preview");
         assert_eq!(j["isDeprecated"], true);

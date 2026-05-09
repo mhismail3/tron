@@ -10,45 +10,45 @@ final class ModelFilteringServiceTests: XCTestCase {
         [
             // Anthropic latest models
             makeModel(id: "claude-opus-4-6", provider: "anthropic", name: "Opus 4.6",
-                      family: "Claude 4.6", tier: "opus", isLegacy: false, sortOrder: 0),
+                      family: "Claude 4.6", tier: "opus", isRetiredGeneration: false, sortOrder: 0),
             makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", name: "Opus 4.5",
-                      family: "Claude 4.5", tier: "opus", isLegacy: false, sortOrder: 2),
+                      family: "Claude 4.5", tier: "opus", isRetiredGeneration: false, sortOrder: 2),
             makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", name: "Sonnet 4.5",
-                      family: "Claude 4.5", tier: "sonnet", isLegacy: false, sortOrder: 3),
+                      family: "Claude 4.5", tier: "sonnet", isRetiredGeneration: false, sortOrder: 3),
             makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic", name: "Haiku 4.5",
-                      family: "Claude 4.5", tier: "haiku", isLegacy: false, sortOrder: 4),
+                      family: "Claude 4.5", tier: "haiku", isRetiredGeneration: false, sortOrder: 4),
 
-            // Anthropic legacy models
+            // Anthropic retired-generation models
             makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", name: "Sonnet 4",
-                      family: "Claude 4", tier: "sonnet", isLegacy: true, sortOrder: 7),
+                      family: "Claude 4", tier: "sonnet", isRetiredGeneration: true, sortOrder: 7),
             makeModel(id: "claude-3-5-sonnet-20241022", provider: "anthropic", name: "Sonnet 3.5",
-                      family: "Claude 3.5", tier: "sonnet", isLegacy: true, sortOrder: 10),
+                      family: "Claude 3.5", tier: "sonnet", isRetiredGeneration: true, sortOrder: 10),
             makeModel(id: "claude-3-haiku-20240307", provider: "anthropic", name: "Haiku 3",
-                      family: "Claude 3", tier: "haiku", isLegacy: true, sortOrder: 9),
+                      family: "Claude 3", tier: "haiku", isRetiredGeneration: true, sortOrder: 9),
 
             // OpenAI models
             makeModel(id: "gpt-5.5", provider: "openai-codex", name: "GPT-5.5",
-                      family: "GPT-5.5", tier: "flagship", isLegacy: false, sortOrder: 0),
+                      family: "GPT-5.5", tier: "flagship", isRetiredGeneration: false, sortOrder: 0),
             makeModel(id: "gpt-5.4", provider: "openai-codex", name: "GPT-5.4",
-                      family: "GPT-5.4", tier: "flagship", isLegacy: false, sortOrder: 2),
+                      family: "GPT-5.4", tier: "flagship", isRetiredGeneration: false, sortOrder: 2),
             makeModel(id: "gpt-5.4-mini", provider: "openai-codex", name: "GPT-5.4 Mini",
-                      family: "GPT-5.4", tier: "standard", isLegacy: false, sortOrder: 4),
+                      family: "GPT-5.4", tier: "standard", isRetiredGeneration: false, sortOrder: 4),
             makeModel(id: "gpt-5.3-codex", provider: "openai-codex", name: "GPT-5.3 Codex",
-                      family: "GPT-5.3", tier: "flagship", isLegacy: true, sortOrder: 6),
+                      family: "GPT-5.3", tier: "flagship", isRetiredGeneration: true, sortOrder: 6),
             makeModel(id: "gpt-5.2", provider: "openai-codex", name: "GPT-5.2",
-                      family: "GPT-5.2", tier: "flagship", isLegacy: true, sortOrder: 10),
+                      family: "GPT-5.2", tier: "flagship", isRetiredGeneration: true, sortOrder: 10),
 
             // Gemini models
             makeModel(id: "gemini-3-pro-preview", provider: "google", name: "Gemini 3 Pro",
-                      family: "Gemini 3", tier: "pro", isLegacy: false, sortOrder: 0),
+                      family: "Gemini 3", tier: "pro", isRetiredGeneration: false, sortOrder: 0),
             makeModel(id: "gemini-3-flash", provider: "google", name: "Gemini 3 Flash",
-                      family: "Gemini 3", tier: "flash", isLegacy: false, sortOrder: 1),
+                      family: "Gemini 3", tier: "flash", isRetiredGeneration: false, sortOrder: 1),
             makeModel(id: "gemini-3-flash-lite", provider: "google", name: "Gemini 3 Flash Lite",
-                      family: "Gemini 3", tier: "flash-lite", isLegacy: false, sortOrder: 2),
+                      family: "Gemini 3", tier: "flash-lite", isRetiredGeneration: false, sortOrder: 2),
             makeModel(id: "gemini-2.5-pro", provider: "google", name: "Gemini 2.5 Pro",
-                      family: "Gemini 2.5", tier: "pro", isLegacy: false, sortOrder: 3),
+                      family: "Gemini 2.5", tier: "pro", isRetiredGeneration: false, sortOrder: 3),
             makeModel(id: "gemini-2.5-flash", provider: "google", name: "Gemini 2.5 Flash",
-                      family: "Gemini 2.5", tier: "flash", isLegacy: false, sortOrder: 4),
+                      family: "Gemini 2.5", tier: "flash", isRetiredGeneration: false, sortOrder: 4),
         ]
     }
 
@@ -65,15 +65,15 @@ final class ModelFilteringServiceTests: XCTestCase {
         inputCostPerMillion: Double? = nil,
         outputCostPerMillion: Double? = nil,
         recommended: Bool? = nil,
-        isLegacy: Bool = false,
+        isRetiredGeneration: Bool = false,
         supportsThinking: Bool = false,
         supportsImages: Bool = false,
         supportsDocuments: Bool = false,
         sortOrder: Int? = nil,
-        isDeprecated: Bool? = nil,
-        deprecationDate: String? = nil
+        isRetired: Bool? = nil,
+        retirementDate: String? = nil
     ) -> ModelInfo {
-        // I8: tier, isLegacy, supportsThinking, supportsImages, and
+        // I8: tier, isRetiredGeneration, supportsThinking, supportsImages, and
         // supportsDocuments are required on the wire — the server (every
         // provider registry) always emits them. The fixture matches that.
         var json: [String: Any] = [
@@ -83,7 +83,7 @@ final class ModelFilteringServiceTests: XCTestCase {
             "contextWindow": contextWindow,
             "maxOutputTokens": maxOutputTokens as Any,
             "tier": tier,
-            "isLegacy": isLegacy,
+            "isLegacy": isRetiredGeneration,
             "supportsThinking": supportsThinking,
             "supportsImages": supportsImages,
             "supportsDocuments": supportsDocuments,
@@ -97,8 +97,8 @@ final class ModelFilteringServiceTests: XCTestCase {
         if let outputCostPerMillion { json["outputCostPerMillion"] = outputCostPerMillion }
         if let recommended { json["recommended"] = recommended }
         if let sortOrder { json["sortOrder"] = sortOrder }
-        if let isDeprecated { json["isDeprecated"] = isDeprecated }
-        if let deprecationDate { json["deprecationDate"] = deprecationDate }
+        if let isRetired { json["isDeprecated"] = isRetired }
+        if let retirementDate { json["deprecationDate"] = retirementDate }
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(ModelInfo.self, from: data)
     }
@@ -129,7 +129,7 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     // MARK: - Categorize Tests
 
-    func test_categorizeModels_separatesAnthropicByLegacyFlag() {
+    func test_categorizeModels_separatesAnthropicByRetiredGeneration() {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
@@ -142,7 +142,7 @@ final class ModelFilteringServiceTests: XCTestCase {
         }
     }
 
-    func test_categorizeModels_separatesCodexByLegacyFlag() {
+    func test_categorizeModels_separatesCodexByRetiredGeneration() {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
@@ -155,22 +155,22 @@ final class ModelFilteringServiceTests: XCTestCase {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
-        // All Gemini models in test data are isLegacy: false
+        // All Gemini models in test data are current generation.
         let geminiLatest = groups.first { $0.tier.contains("Gemini") }
         XCTAssertNotNil(geminiLatest)
         XCTAssertEqual(geminiLatest?.models.count, 5)
     }
 
-    func test_categorizeModels_groupsLegacyTogether() {
+    func test_categorizeModels_groupsRetiredGenerationTogether() {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
-        let legacy = groups.first { $0.tier == "Legacy" }
-        XCTAssertNotNil(legacy)
+        let retired = groups.first { $0.tier == "Retired" }
+        XCTAssertNotNil(retired)
 
-        let legacyModels = legacy!.models
-        XCTAssertTrue(legacyModels.contains { $0.id.contains("sonnet-4-20250514") })
-        XCTAssertTrue(legacyModels.contains { $0.id.contains("3-5-sonnet") })
+        let retiredGenerationModels = retired!.models
+        XCTAssertTrue(retiredGenerationModels.contains { $0.id.contains("sonnet-4-20250514") })
+        XCTAssertTrue(retiredGenerationModels.contains { $0.id.contains("3-5-sonnet") })
     }
 
     func test_categorizeModels_handlesEmptyArray() {
@@ -183,26 +183,26 @@ final class ModelFilteringServiceTests: XCTestCase {
         let groups = ModelFilteringService.categorize(models)
 
         XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups.first?.tier, "Legacy")
+        XCTAssertEqual(groups.first?.tier, "Retired")
     }
 
     // MARK: - Filter Tests
 
-    func test_filterLatest_returnsOnlyNonLegacyModels() {
+    func test_filterLatest_returnsOnlyCurrentGenerationModels() {
         let models = makeModels()
         let latest = ModelFilteringService.filterLatest(models)
 
         latest.forEach { model in
-            XCTAssertFalse(model.isLegacy, "Expected \(model.id) to not be legacy")
+            XCTAssertFalse(model.isRetiredGeneration, "Expected \(model.id) to be current generation")
         }
     }
 
-    func test_filterLegacy_returnsOnlyLegacyModels() {
+    func test_filterRetiredGeneration_returnsOnlyRetiredGenerationModels() {
         let models = makeModels()
-        let legacy = ModelFilteringService.filterLegacy(models)
+        let retired = ModelFilteringService.filterRetiredGeneration(models)
 
-        legacy.forEach { model in
-            XCTAssertTrue(model.isLegacy, "Expected \(model.id) to be legacy")
+        retired.forEach { model in
+            XCTAssertTrue(model.isRetiredGeneration, "Expected \(model.id) to be retired generation")
         }
     }
 
@@ -211,11 +211,11 @@ final class ModelFilteringServiceTests: XCTestCase {
     func test_sortByTier_usesSortOrder() {
         let models = [
             makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic",
-                      isLegacy: false, sortOrder: 4),
+                      isRetiredGeneration: false, sortOrder: 4),
             makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic",
-                      isLegacy: false, sortOrder: 2),
+                      isRetiredGeneration: false, sortOrder: 2),
             makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic",
-                      isLegacy: false, sortOrder: 3),
+                      isRetiredGeneration: false, sortOrder: 3),
         ]
 
         let sorted = ModelFilteringService.sortByTier(models)
@@ -269,9 +269,9 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     func test_categorizeModels_opus46InLatestSection() {
         let models = [
-            makeModel(id: "claude-opus-4-6", provider: "anthropic", isLegacy: false, sortOrder: 0),
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", isLegacy: false, sortOrder: 2),
-            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", isLegacy: true, sortOrder: 7),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", isRetiredGeneration: false, sortOrder: 0),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", isRetiredGeneration: false, sortOrder: 2),
+            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", isRetiredGeneration: true, sortOrder: 7),
         ]
 
         let groups = ModelFilteringService.categorize(models)
@@ -384,47 +384,47 @@ final class ModelFilteringServiceTests: XCTestCase {
         XCTAssertTrue(groups.isEmpty)
     }
 
-    // MARK: - FamilyGroup.isDeprecated Tests
+    // MARK: - FamilyGroup.isRetired Tests
 
-    func test_familyGroup_isDeprecated_whenAllModelsDeprecated() {
+    func test_familyGroup_isRetired_whenAllModelsRetired() {
         let models = [
             makeModel(id: "gpt-5.1-codex-max", provider: "openai-codex",
                       family: "GPT-5.1", sortOrder: 0,
-                      isDeprecated: true, deprecationDate: "2026-04-14"),
+                      isRetired: true, retirementDate: "2026-04-14"),
             makeModel(id: "gpt-5.1-codex-mini", provider: "openai-codex",
                       family: "GPT-5.1", sortOrder: 1,
-                      isDeprecated: true, deprecationDate: "2026-04-14"),
+                      isRetired: true, retirementDate: "2026-04-14"),
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
         let family = groups[0].families[0]
         XCTAssertEqual(family.id, "GPT-5.1")
-        XCTAssertTrue(family.isDeprecated)
+        XCTAssertTrue(family.isRetired)
     }
 
-    func test_familyGroup_isNotDeprecated_whenAnyModelStillSupported() {
+    func test_familyGroup_isNotRetired_whenAnyModelStillSupported() {
         let models = [
             makeModel(id: "gpt-5.3-codex", provider: "openai-codex",
                       family: "GPT-5.3", sortOrder: 0,
-                      isDeprecated: false),
+                      isRetired: false),
             makeModel(id: "gpt-5.3-codex-spark", provider: "openai-codex",
                       family: "GPT-5.3", sortOrder: 1,
-                      isDeprecated: true, deprecationDate: "2026-04-14"),
+                      isRetired: true, retirementDate: "2026-04-14"),
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
         let family = groups[0].families[0]
         XCTAssertEqual(family.id, "GPT-5.3")
-        XCTAssertFalse(family.isDeprecated,
+        XCTAssertFalse(family.isRetired,
                        "Family must remain active while any member is still supported")
     }
 
-    func test_familyGroup_isNotDeprecated_whenNoDeprecationFlags() {
+    func test_familyGroup_isNotRetired_whenNoDeprecationFlags() {
         let models = [
             makeModel(id: "claude-opus-4-7", provider: "anthropic",
                       family: "Claude 4.7", sortOrder: 0),
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
         let family = groups[0].families[0]
-        XCTAssertFalse(family.isDeprecated)
+        XCTAssertFalse(family.isRetired)
     }
 
     func test_organizeByProviderFamily_modelsSortedBySortOrder() {

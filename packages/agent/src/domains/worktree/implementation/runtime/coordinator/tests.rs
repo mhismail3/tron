@@ -1859,7 +1859,7 @@ async fn list_local_branches_falls_back_to_cwd_when_session_untracked() {
 }
 
 #[tokio::test]
-async fn list_local_branches_errors_without_fallback_for_untracked_session() {
+async fn list_local_branches_errors_without_working_dir_for_untracked_session() {
     let store = make_store();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 

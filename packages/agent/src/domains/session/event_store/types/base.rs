@@ -2,7 +2,7 @@
 //!
 //! Events are stored as a flat struct with base fields at the top level
 //! and a `payload` stored as opaque [`serde_json::Value`]. This matches
-//! the TypeScript storage format exactly for wire compatibility.
+//! the TypeScript storage format exactly for DTO parity.
 //!
 //! Typed access to the payload is opt-in via [`SessionEvent::typed_payload()`],
 //! which dispatches on [`EventType`] and deserializes into the appropriate
@@ -17,7 +17,7 @@ use super::generated::EventType;
 ///
 /// The canonical wire format has base fields (`id`, `parentId`, `sessionId`,
 /// etc.) at the top level and a `payload` JSON object. The payload is stored
-/// as opaque `serde_json::Value` for exact wire compatibility.
+/// as opaque `serde_json::Value` for exact DTO parity.
 ///
 /// Use [`typed_payload()`](Self::typed_payload) for compile-time-safe payload access.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

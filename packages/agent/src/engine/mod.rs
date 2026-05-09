@@ -47,7 +47,7 @@
 //! Production behavior must enter the fabric as a canonical engine function.
 //! The `/engine` protocol exposes discovery, inspection, watch, invocation,
 //! promotion, and stream subscription messages. Production engine modules must
-//! not call handler-shaped transport shims.
+//! not call handler-shaped transport shortcuts.
 //!
 //! ## Module Position
 //!

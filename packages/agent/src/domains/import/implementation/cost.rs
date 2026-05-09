@@ -23,7 +23,7 @@ fn pricing(model: &str) -> Option<Pricing> {
             cache_read: 0.5,
             cache_write: 6.25,
         }),
-        // Legacy Opus tier ($15/$75 per MTok)
+        // Opus 3 pricing tier ($15/$75 per MTok)
         "claude-opus-4-20250514" | "claude-3-opus-20240229" => Some(Pricing {
             input: 15.0,
             output: 75.0,

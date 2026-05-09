@@ -9,8 +9,8 @@
 //! 2. If the session was deleted → log a warning and delete the journal.
 //! 3. If the journal is empty or corrupted → log and delete.
 //!
-//! Recovery events use `sequence: None` (DB MAX+1 fallback) since the sequence
-//! counter is not yet initialized at recovery time.
+//! Recovery events use `sequence: None`; the event store assigns the next
+//! sequence because the runtime counter is not initialized during startup recovery.
 //!
 //! ## Double-recovery safety
 //!

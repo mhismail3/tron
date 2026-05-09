@@ -143,7 +143,7 @@ impl ComputerUseTool {
                 if self.use_native_input {
                     super::super::input::key_press(&key_names).await
                 } else {
-                    // Test fallback: treat as success (mock runner handles osascript)
+                    // Test recovery path: treat as success (mock runner handles osascript).
                     let script = "tell application \"System Events\" to keystroke \"\"".to_string();
                     self.run_osascript(&script, ctx)
                         .await

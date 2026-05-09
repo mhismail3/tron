@@ -51,7 +51,7 @@ struct ConsolidatedAnalytics {
         let cacheReadCost: Double
         let cacheWrite5mCost: Double
         let cacheWrite1hCost: Double
-        let cacheWriteLegacyCost: Double
+        let cacheWriteDefaultTtlCost: Double
         let totalCost: Double
 
         let baseInputTokens: Int
@@ -59,7 +59,7 @@ struct ConsolidatedAnalytics {
         let cacheReadTokens: Int
         let cacheWrite5mTokens: Int
         let cacheWrite1hTokens: Int
-        let cacheWriteLegacyTokens: Int
+        let cacheWriteDefaultTtlTokens: Int
 
         let hasPerTTLBreakdown: Bool
         let cacheSavings: Double
@@ -92,22 +92,22 @@ struct ConsolidatedAnalytics {
 
         let write5mCost: Double
         let write1hCost: Double
-        let writeLegacyCost: Double
-        let legacyTokens: Int
+        let writeDefaultTtlCost: Double
+        let defaultTtlTokens: Int
 
         if hasPerTTL {
             write5mCost = (Double(cache5m) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
             write1hCost = (Double(cache1h) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite1hMultiplier
-            writeLegacyCost = 0
-            legacyTokens = 0
+            writeDefaultTtlCost = 0
+            defaultTtlTokens = 0
         } else {
             write5mCost = 0
             write1hCost = 0
-            writeLegacyCost = (Double(cacheCreation) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
-            legacyTokens = cacheCreation
+            writeDefaultTtlCost = (Double(cacheCreation) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
+            defaultTtlTokens = cacheCreation
         }
 
-        let total = baseInputCost + outCost + cacheReadCost + write5mCost + write1hCost + writeLegacyCost
+        let total = baseInputCost + outCost + cacheReadCost + write5mCost + write1hCost + writeDefaultTtlCost
         let fullPriceCacheRead = (Double(cacheRead) / 1_000_000) * pricing.inputPerMillion
         let savings = fullPriceCacheRead - cacheReadCost
 
@@ -117,14 +117,14 @@ struct ConsolidatedAnalytics {
             cacheReadCost: cacheReadCost,
             cacheWrite5mCost: write5mCost,
             cacheWrite1hCost: write1hCost,
-            cacheWriteLegacyCost: writeLegacyCost,
+            cacheWriteDefaultTtlCost: writeDefaultTtlCost,
             totalCost: total,
             baseInputTokens: baseInput,
             outputTokens: outputTokens,
             cacheReadTokens: cacheRead,
             cacheWrite5mTokens: cache5m,
             cacheWrite1hTokens: cache1h,
-            cacheWriteLegacyTokens: legacyTokens,
+            cacheWriteDefaultTtlTokens: defaultTtlTokens,
             hasPerTTLBreakdown: hasPerTTL,
             cacheSavings: savings
         )

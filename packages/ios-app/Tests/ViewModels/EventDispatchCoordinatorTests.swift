@@ -171,7 +171,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
     }
 
     func testDispatch_error_callsHandleProviderError() {
-        // Given: An error result (legacy, no enrichment)
+        // Given: An error result with no enrichment.
         let result = ErrorPlugin.Result(
             code: "ERROR",
             message: "Something went wrong",

@@ -147,7 +147,7 @@ pub fn model_supports_documents(model_id: &str) -> DocumentSupport {
 /// `OpenAI` falls back to the conservative default profile because the real
 /// limit is auth-path-specific. Provider instances override this helper when
 /// auth is available.
-/// Unknown models default to 200,000 (Anthropic-equivalent fallback).
+/// Unknown models default to 200,000 (Anthropic-equivalent context).
 pub fn model_context_window(model_id: &str) -> u64 {
     let bare = strip_provider_prefix(model_id);
     if let Some(m) = get_claude_model(bare) {

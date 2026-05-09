@@ -155,7 +155,7 @@ pub fn is_oauth_token(token: &str) -> bool {
 /// Uses [`super::resolve_credential`] to determine which credential to use:
 /// 1. `credential_override` (session pinning)
 /// 2. `active_credential` (user selection)
-/// 3. Fallback: `accounts[0]` → `api_keys[0]`
+/// 3. Default credential: `accounts[0]` → `api_keys[0]`
 ///
 /// OAuth tokens are auto-refreshed if expired.
 #[tracing::instrument(skip_all, fields(provider = "anthropic"))]
@@ -410,7 +410,7 @@ mod tests {
         let auth = result.unwrap();
         assert_eq!(auth.token(), "sk-file-key");
 
-        // Save OAuth tokens too — OAuth takes priority over API key (accounts before api_keys in fallback)
+        // Save OAuth tokens too — OAuth takes priority over API key (accounts before api_keys).
         let tokens = OAuthTokens {
             access_token: "oauth-tok".to_string(),
             refresh_token: "ref".to_string(),
@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_server_auth_api_key_fallback() {
+    async fn load_server_auth_api_key_default() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
@@ -487,7 +487,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_server_auth_oauth_failure_does_not_fallback_to_api_key() {
+    async fn load_server_auth_oauth_failure_does_not_use_api_key_default() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
@@ -504,7 +504,7 @@ mod tests {
             &expired_tokens,
         )
         .unwrap();
-        // Also save an API key (should NOT be used as fallback)
+        // Also save an API key (should NOT be used as the default while OAuth is present).
         crate::domains::auth::provider_credentials::storage::save_named_api_key(
             &path,
             "anthropic",

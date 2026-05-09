@@ -12,8 +12,8 @@ struct ModelSwitchPayload {
     init?(from payload: [String: AnyCodable]) {
         // Both `previousModel` and `newModel` are required — the server
         // always emits both. The prior `payload.string("model") ?? ""`
-        // fallback was back-compat for a field that hasn't been emitted
-        // since pre-beta and is now forbidden by the no-legacy policy.
+        // recovery path accepted a field that hasn't been emitted since
+        // pre-beta and is now forbidden by the current-shape policy.
         guard
             let previousModel = payload.string("previousModel"),
             let newModel = payload.string("newModel")

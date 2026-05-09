@@ -641,7 +641,7 @@ fn build_request_gpt55_platform_preserves_none_and_platform_verbosity() {
 }
 
 #[test]
-fn build_request_deprecated_openai_model_preserves_exact_id() {
+fn build_request_retired_openai_model_preserves_exact_id() {
     let provider = OpenAIProvider::new(api_key_config("gpt-5.2-codex"));
     let request = provider.build_request(&Context::default(), &ProviderStreamOptions::default());
     assert_eq!(request.model, "gpt-5.2-codex");

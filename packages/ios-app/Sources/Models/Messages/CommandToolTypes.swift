@@ -130,20 +130,20 @@ struct CommandToolChipData: Equatable, Identifiable {
 // MARK: - Command Tool Registry
 
 /// Registry for tool configurations and routing.
-/// Delegates to ToolRegistry for icon/color/displayName.
-enum CommandToolRegistry {
+/// Delegates to ToolDescriptorCatalog for icon/color/displayName.
+enum CommandToolCatalog {
 
     /// All command tools that should be rendered as chips
-    static let allCommandTools: Set<String> = ToolRegistry.commandToolNames
+    static let allCommandTools: Set<String> = ToolDescriptorCatalog.commandToolNames
 
     /// Check if a tool should be rendered as a command tool chip
     static func isCommandTool(_ toolName: String) -> Bool {
-        ToolRegistry.isCommandTool(toolName)
+        ToolDescriptorCatalog.isCommandTool(toolName)
     }
 
     /// Get display configuration for a tool
     static func config(for toolName: String) -> (icon: String, color: Color, displayName: String) {
-        let d = ToolRegistry.descriptor(for: toolName)
+        let d = ToolDescriptorCatalog.descriptor(for: toolName)
         return (d.icon, d.iconColor, d.displayName)
     }
 }
@@ -154,7 +154,7 @@ extension CommandToolChipData {
 
     /// Create CommandToolChipData from a ToolUseData
     init(from tool: ToolUseData) {
-        let descriptor = ToolRegistry.descriptor(for: tool.toolName)
+        let descriptor = ToolDescriptorCatalog.descriptor(for: tool.toolName)
         let mappedStatus = Self.mapStatus(tool.status)
 
         // Truncate result if too large to prevent performance issues

@@ -260,7 +260,7 @@ impl SubagentManager {
     /// INVARIANT: If this setter is not called, `SubagentConfig.skills` is
     /// silently no-op'd (skills contribute no tool denials). This matches
     /// the `Option<SkillRegistry>` contract in [`compute_denied_tools`] and
-    /// preserves legacy behavior for callers that pre-date skill wiring.
+    /// keeps skill wiring opt-in for isolated tests and minimal runtimes.
     pub fn set_skill_registry(
         &self,
         registry: Arc<parking_lot::RwLock<crate::domains::skills::registry::SkillRegistry>>,

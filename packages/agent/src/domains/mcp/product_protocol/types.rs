@@ -333,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn mcp_settings_accept_legacy_snake_case_profile_keys() {
+    fn mcp_settings_accept_snake_case_profile_keys() {
         let json = json!({
             "schema_refresh_ttl_ms": 54_321,
             "servers": [{

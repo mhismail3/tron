@@ -19,7 +19,7 @@ final class NewSessionFlowTests: XCTestCase {
             supportsImages: false,
             supportsDocuments: false,
             tier: tier,
-            isLegacy: false,
+            isRetiredGeneration: false,
             recommended: recommended,
             available: available
         )
@@ -302,7 +302,7 @@ final class NewSessionFlowTests: XCTestCase {
             supportsImages: true,
             supportsDocuments: true,
             tier: "sonnet",
-            isLegacy: false
+            isRetiredGeneration: false
         )
 
         XCTAssertEqual(

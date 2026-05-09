@@ -8,7 +8,7 @@
 //! - How much of the rules content is included before truncation
 //! - Which provider types are considered "local"
 //!
-//! This module is a small runtime adapter over [`AgentExecutionSpec`], keeping
+//! This module is a small runtime view over [`AgentExecutionSpec`], keeping
 //! the existing call sites simple while avoiding scattered policy literals.
 //!
 //! ## Invariant

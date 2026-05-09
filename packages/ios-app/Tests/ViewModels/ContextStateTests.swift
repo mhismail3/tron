@@ -454,7 +454,7 @@ final class ContextStateTests: XCTestCase {
             supportsImages: false,
             supportsDocuments: false,
             tier: "sonnet",
-            isLegacy: false
+            isRetiredGeneration: false
         )
     }
 }

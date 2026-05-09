@@ -85,7 +85,7 @@ final class ModelInfoTests: XCTestCase {
         contextWindow: Int = 200_000
     ) -> ModelInfo {
         // I8: the five metadata fields (supportsThinking/Images/Documents,
-        // tier, isLegacy) are required — the server emits them
+        // tier, isRetiredGeneration) are required — the server emits them
         // unconditionally from every provider registry.
         return ModelInfo(
             id: id,
@@ -96,7 +96,7 @@ final class ModelInfoTests: XCTestCase {
             supportsImages: false,
             supportsDocuments: false,
             tier: "sonnet",
-            isLegacy: false
+            isRetiredGeneration: false
         )
     }
 }

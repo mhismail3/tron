@@ -62,8 +62,8 @@ impl EventStore {
     /// `bundle_id` is the APNs topic the token was issued against and is
     /// used as the `apns-topic` header at send time. Every client sends
     /// its bundle identifier on registration — the `device_tokens`
-    /// column is NOT NULL since the v001 consolidated schema, so there
-    /// is no fallback path.
+    /// column is NOT NULL since the v001 consolidated schema, so send
+    /// time always uses the stored topic.
     pub fn register_device_token(
         &self,
         device_token: &str,

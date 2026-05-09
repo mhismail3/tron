@@ -1,7 +1,7 @@
 import Foundation
 
 /// Lightweight server-side activity summary line.
-/// Enriched client-side with ToolRegistry for icons, colors, display names, and argument summaries.
+/// Enriched client-side with ToolDescriptorCatalog for icons, colors, display names, and argument summaries.
 struct ServerActivityLine: Decodable, Hashable, Sendable {
     let kind: String
     let text: String?
@@ -21,7 +21,7 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
             return ActivityLine(kind: .thinking, text: "Thinking")
         case "tool":
             let name = toolName ?? "unknown"
-            let descriptor = ToolRegistry.descriptor(for: name)
+            let descriptor = ToolDescriptorCatalog.descriptor(for: name)
             let argsJSON = serializeArgs(toolArgs)
             let summary = descriptor.summaryExtractor(argsJSON)
             let durationStr = durationMs.map { SessionStreamBuffer.formatDuration($0) }

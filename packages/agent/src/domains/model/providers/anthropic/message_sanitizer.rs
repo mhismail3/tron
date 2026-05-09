@@ -28,7 +28,7 @@ const CONTINUED_CONTENT: &str = "[Continued]";
 /// Sanitize messages to guarantee API compliance.
 ///
 /// Returns a new `Vec<Message>` with fixes applied:
-/// - Signed thinking blocks converted to text (cross-model signature compatibility)
+/// - Signed thinking blocks converted to text (cross-model signature normalization)
 /// - Empty messages filtered out
 /// - Thinking-only assistant messages (unsigned, display-only) filtered out
 /// - Duplicate `tool_use` IDs deduplicated

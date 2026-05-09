@@ -7,7 +7,7 @@
 //! - `response.output_item.added` (`function_call`) → `ToolCallStart`
 //! - `response.function_call_arguments.delta` → `ToolCallDelta`
 //! - `response.reasoning_text.delta` → `ThinkingStart` + `ThinkingDelta` (full reasoning)
-//! - `response.reasoning_summary_text.delta` → `ThinkingStart` + `ThinkingDelta` (summary fallback)
+//! - `response.reasoning_summary_text.delta` → `ThinkingStart` + `ThinkingDelta` (summary delta)
 //! - `response.completed` → `ThinkingEnd`, `TextEnd`, `ToolCallEnd`, `Done`
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
@@ -163,7 +163,7 @@ fn handle_reasoning_text_delta(
     events
 }
 
-/// Handle `response.reasoning_summary_text.delta` — fallback when full reasoning is unavailable.
+/// Handle `response.reasoning_summary_text.delta` when full reasoning is unavailable.
 fn handle_reasoning_summary_text_delta(
     event: &ResponsesSseEvent,
     state: &mut StreamState,

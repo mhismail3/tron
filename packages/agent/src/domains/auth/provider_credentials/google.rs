@@ -186,14 +186,14 @@ pub async fn load_server_auth(
 /// Uses [`super::resolve_credential`] to determine which credential to use:
 /// 1. `credential_override` (session pinning)
 /// 2. `active_credential` (user selection)
-/// 3. Fallback: `accounts[0]` → `api_keys[0]`
+/// 3. Default credential: `accounts[0]` → `api_keys[0]`
 #[tracing::instrument(skip_all, fields(provider = "google"))]
 pub async fn load_server_auth_with_client(
     auth_path: &std::path::Path,
     credential_override: Option<&super::types::ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    // Strict parse: a legacy `endpoint` field or any other unknown key
+    // Strict parse: a retired `endpoint` field or any other unknown key
     // surfaces as `AuthError::MalformedProviderAuth` with re-auth guidance.
     let gpa = super::storage::try_get_google_provider_auth(auth_path)?;
     let Some(ref gpa) = gpa else {
@@ -457,30 +457,30 @@ mod tests {
         );
     }
 
-    /// R3: legacy auth.json files with `endpoint: "antigravity"` (from the
+    /// R3: retired auth.json files with `endpoint: "antigravity"` (from the
     /// pre-CCA era) must fail to load. The strict `GoogleProviderAuth`
     /// deserializer rejects unknown fields, and `load_server_auth`
     /// surfaces that as `AuthError::MalformedProviderAuth` with re-auth
     /// guidance. The old "silently ignores endpoint and uses CCA anyway"
     /// behavior is gone.
     #[tokio::test]
-    async fn load_server_auth_rejects_legacy_antigravity_auth_json() {
+    async fn load_server_auth_rejects_retired_antigravity_auth_json() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Write a raw auth.json with the legacy antigravity shape. We
+        // Write a raw auth.json with the retired antigravity shape. We
         // can't go through `save_google_provider_auth` because that type
         // no longer serializes `endpoint`.
         let raw = serde_json::json!({
             "version": 1,
             "providers": {
                 "google": {
-                    "clientId": "legacy-client",
+                    "clientId": "retired-client",
                     "endpoint": "antigravity",
                     "accounts": [{
                         "label": "(test)",
                         "oauth": {
-                            "accessToken": "ya29.legacy",
+                            "accessToken": "ya29.retired",
                             "refreshToken": "ref",
                             "expiresAt": now_ms() + 3_600_000,
                         }
@@ -495,7 +495,7 @@ mod tests {
         let msg = err.to_string();
         assert!(
             msg.contains("endpoint"),
-            "error must name the legacy `endpoint` field, got: {msg}"
+            "error must name the retired `endpoint` field, got: {msg}"
         );
         assert!(
             msg.contains("tron auth google"),

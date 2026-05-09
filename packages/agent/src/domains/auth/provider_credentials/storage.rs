@@ -146,7 +146,7 @@ pub fn get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth
 }
 
 /// Strict Google provider auth getter — returns `Err` when the stored
-/// shape fails to deserialize (e.g. legacy `endpoint` field). Used by
+/// shape fails to deserialize (e.g. retired `endpoint` field). Used by
 /// `load_server_auth` to surface `MalformedProviderAuth` with re-auth
 /// guidance instead of silently falling back to "not configured".
 pub fn try_get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth>, AuthError> {
@@ -618,14 +618,14 @@ mod tests {
         assert_eq!(restored.api_keys.as_ref().unwrap()[0].key, "sk-123");
     }
 
-    /// Regression guard: a legacy `services.{name}.apiKey` shape (singular
+    /// Regression guard: a retired `services.{name}.apiKey` shape (singular
     /// string field) no longer silently wipes all configured providers — it
     /// produces a loud, actionable error naming the bad file. Prior to this
     /// change, R2 removed the singular field from `ServiceAuth` but
     /// `load_auth_storage` kept swallowing parse errors with a `warn!` and
     /// returning `None`, which made every provider appear unconfigured.
     #[test]
-    fn load_legacy_services_apikey_singular_shape_surfaces_error() {
+    fn load_retired_services_apikey_singular_shape_surfaces_error() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
         std::fs::write(
@@ -634,7 +634,7 @@ mod tests {
                 "version": 1,
                 "providers": {},
                 "services": {
-                    "brave": { "apiKey": "legacy-key-value" }
+                    "brave": { "apiKey": "retired-key-value" }
                 },
                 "lastUpdated": "2026-04-22T00:00:00Z"
             }"#,
@@ -642,7 +642,7 @@ mod tests {
         .unwrap();
 
         let err = load_auth_storage(&path).expect_err(
-            "legacy singular `apiKey` shape must surface as a hard error, \
+            "retired singular `apiKey` shape must surface as a hard error, \
              not silently wipe all providers",
         );
         assert!(matches!(err, AuthError::MalformedAuthFile { .. }));

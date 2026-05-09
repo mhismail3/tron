@@ -58,16 +58,16 @@ pub(crate) fn is_model_supported(model_id: &str) -> bool {
         || crate::domains::model::providers::ollama::types::get_ollama_model(bare).is_some()
 }
 
-pub(crate) fn is_model_deprecated(model_id: &str) -> bool {
+pub(crate) fn is_model_retired(model_id: &str) -> bool {
     let bare = strip_provider_prefix(model_id);
     if let Some(m) = get_claude_model(bare) {
-        return m.is_deprecated;
+        return m.is_retired;
     }
     if let Some(m) = get_openai_model(bare) {
-        return m.is_deprecated;
+        return m.is_retired;
     }
     if let Some(m) = get_gemini_model(bare) {
-        return m.is_deprecated;
+        return m.is_retired;
     }
     // MiniMax, Kimi, and Ollama models currently have no deprecation field.
     false
@@ -93,9 +93,9 @@ pub(crate) async fn switch_model(
         });
     }
 
-    if is_model_deprecated(&model) {
+    if is_model_retired(&model) {
         return Err(CapabilityError::InvalidParams {
-            message: format!("Model '{model}' is deprecated and cannot be selected"),
+            message: format!("Model '{model}' is retired and cannot be selected"),
         });
     }
 

@@ -253,7 +253,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             "toolCount": context.tools.as_ref().map_or(0, Vec::len),
             "toolCatalogRevision": tool_surface.catalog_revision.0,
             "streamOptions": &stream_options,
-            "providerSurface": "preAdapter",
+            "providerSurface": "preProjection",
                 "profileChain": resolved_profile.profile_chain.clone(),
                 "profileSpecHash": resolved_profile.spec_hash.clone(),
             "contextPolicy": context_policy_id,

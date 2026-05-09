@@ -749,12 +749,12 @@ allowAuthEscalation = false
 # Provider policies adapt the resolved context/prompt to provider-specific API
 # surfaces without changing semantic content.
 #
-# - systemPromptSurface = "providerDefault" lets the adapter use the provider's
+# - systemPromptSurface = "providerDefault" lets the provider payload use the provider's
 #   normal system/developer/instruction slot.
 # - systemPromptSurface = "toolClarification" adds provider-specific guidance
 #   for providers that need extra tool-use instruction text.
 # - allowDuplicateSystemPrompt must normally remain false; true is only for a
-#   provider adapter that intentionally needs duplicate system text.
+#   provider payload implementation that intentionally needs duplicate system text.
 [providerPolicies.default]
 systemPromptSurface = "providerDefault"
 cachePolicy = "default"
@@ -767,7 +767,7 @@ toolClarification = true
 cachePolicy = "default"
 allowDuplicateSystemPrompt = false
 
-# Cache policies are provider-independent intent. Provider adapters map these
+# Cache policies are provider-independent intent. Provider payload builders map these
 # values onto each provider's current capabilities. If a provider lacks an
 # equivalent cache feature, the payload content stays the same and only caching
 # becomes best-effort/uncached.

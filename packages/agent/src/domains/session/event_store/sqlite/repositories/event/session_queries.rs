@@ -86,7 +86,7 @@ impl EventRepo {
 
     /// Get events with sequence < `before_sequence`, returned in sequence ASC order.
     ///
-    /// Used for backward pagination in `session.reconstruct` (load-more).
+    /// Used for previous-page pagination in `session.reconstruct` (load-more).
     pub fn get_events_before(
         conn: &Connection,
         session_id: &str,

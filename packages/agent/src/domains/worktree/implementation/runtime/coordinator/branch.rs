@@ -124,7 +124,7 @@ impl WorktreeCoordinator {
             if let Err(e) = self.git.worktree_remove(repo_root, &wt_path, true).await {
                 if is_main {
                     // Git correctly refuses to remove the main worktree;
-                    // the `remove_dir_all` fallback below would wipe the
+                    // the `remove_dir_all` recovery path below would wipe the
                     // entire repo. Preflight should have caught this —
                     // log and bail.
                     warn!(

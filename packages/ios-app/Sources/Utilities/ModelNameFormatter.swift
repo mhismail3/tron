@@ -353,7 +353,7 @@ enum ModelNameFormatter {
         let lowered = modelId.lowercased()
 
         if lowered.hasPrefix("moonshot-") {
-            // Legacy moonshot models
+            // Retired moonshot models
             var ctx = ""
             if lowered.contains("128k") { ctx = "128K" }
             else if lowered.contains("32k") { ctx = "32K" }

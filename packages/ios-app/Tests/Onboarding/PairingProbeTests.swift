@@ -14,8 +14,8 @@ import Testing
 ///   1. `urlString(host:port:)` URL formatting (host with `:` for IPv6,
 ///      hostname vs IP, default port).
 ///   2. `pingRequestData(protocolVersion:clientVersion:)` JSON encoding
-///      (matches what the server's `PingHandler` consumes, lines 45–55 of
-///      `packages/agent/src/server/rpc/handlers/system.rs`).
+///      (matches what `system::ping` consumes in
+///      `packages/agent/src/domains/system/mod.rs`).
 ///   3. `classify(envelope:)` outcome mapping for the four shapes:
 ///      success / unauthorized / incompatible / unreachable.
 ///

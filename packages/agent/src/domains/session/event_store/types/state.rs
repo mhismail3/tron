@@ -1,6 +1,6 @@
 //! State types for sessions, workspaces, and branches.
 //!
-//! These match the TypeScript `state.ts` types for wire compatibility.
+//! These match the TypeScript `state.ts` DTOs.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

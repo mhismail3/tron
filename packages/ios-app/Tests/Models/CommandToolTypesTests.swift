@@ -143,11 +143,11 @@ struct CommandToolTypesTests {
         #expect(data.result == nil)
     }
 
-    // MARK: - CommandToolRegistry Tests
+    // MARK: - CommandToolCatalog Tests
 
     @Test("Registry returns correct config for Read tool")
     func testRegistryReadConfig() {
-        let config = CommandToolRegistry.config(for: "read")
+        let config = CommandToolCatalog.config(for: "read")
 
         #expect(config.icon == "doc.text")
         #expect(config.displayName == "Read")
@@ -155,7 +155,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for Write tool")
     func testRegistryWriteConfig() {
-        let config = CommandToolRegistry.config(for: "write")
+        let config = CommandToolCatalog.config(for: "write")
 
         #expect(config.icon == "doc.badge.plus")
         #expect(config.displayName == "Write")
@@ -163,7 +163,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for Edit tool")
     func testRegistryEditConfig() {
-        let config = CommandToolRegistry.config(for: "edit")
+        let config = CommandToolCatalog.config(for: "edit")
 
         #expect(config.icon == "pencil.line")
         #expect(config.displayName == "Edit")
@@ -171,7 +171,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for Bash tool")
     func testRegistryBashConfig() {
-        let config = CommandToolRegistry.config(for: "bash")
+        let config = CommandToolCatalog.config(for: "bash")
 
         #expect(config.icon == "terminal")
         #expect(config.displayName == "Bash")
@@ -179,7 +179,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for Glob tool")
     func testRegistryGlobConfig() {
-        let config = CommandToolRegistry.config(for: "glob")
+        let config = CommandToolCatalog.config(for: "glob")
 
         #expect(config.icon == "doc.text.magnifyingglass")
         #expect(config.displayName == "Glob")
@@ -187,7 +187,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for Find tool")
     func testRegistryFindConfig() {
-        let config = CommandToolRegistry.config(for: "find")
+        let config = CommandToolCatalog.config(for: "find")
 
         #expect(config.icon == "magnifyingglass")
         #expect(config.displayName == "Find")
@@ -195,7 +195,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for Search tool")
     func testRegistrySearchConfig() {
-        let config = CommandToolRegistry.config(for: "search")
+        let config = CommandToolCatalog.config(for: "search")
 
         #expect(config.icon == "doc.text.magnifyingglass")
         #expect(config.displayName == "File Search")
@@ -203,7 +203,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for WebFetch tool")
     func testRegistryWebFetchConfig() {
-        let config = CommandToolRegistry.config(for: "webfetch")
+        let config = CommandToolCatalog.config(for: "webfetch")
 
         #expect(config.icon == "arrow.down.doc")
         #expect(config.displayName == "Web Fetch")
@@ -211,7 +211,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns correct config for WebSearch tool")
     func testRegistryWebSearchConfig() {
-        let config = CommandToolRegistry.config(for: "websearch")
+        let config = CommandToolCatalog.config(for: "websearch")
 
         #expect(config.icon == "magnifyingglass.circle")
         #expect(config.displayName == "Web Search")
@@ -219,7 +219,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry returns fallback config for unknown tool")
     func testRegistryUnknownToolConfig() {
-        let config = CommandToolRegistry.config(for: "unknowntool")
+        let config = CommandToolCatalog.config(for: "unknowntool")
 
         #expect(config.icon == "gearshape")
         #expect(config.displayName == "Unknowntool")
@@ -227,9 +227,9 @@ struct CommandToolTypesTests {
 
     @Test("Registry is case-insensitive")
     func testRegistryCaseInsensitive() {
-        let config1 = CommandToolRegistry.config(for: "READ")
-        let config2 = CommandToolRegistry.config(for: "Read")
-        let config3 = CommandToolRegistry.config(for: "read")
+        let config1 = CommandToolCatalog.config(for: "READ")
+        let config2 = CommandToolCatalog.config(for: "Read")
+        let config3 = CommandToolCatalog.config(for: "read")
 
         #expect(config1.displayName == config2.displayName)
         #expect(config2.displayName == config3.displayName)
@@ -237,7 +237,7 @@ struct CommandToolTypesTests {
 
     @Test("Registry provides all command tool names")
     func testRegistryAllCommandTools() {
-        let commandTools = CommandToolRegistry.allCommandTools
+        let commandTools = CommandToolCatalog.allCommandTools
 
         // Should include all standard command tools
         #expect(commandTools.contains("read"))
@@ -253,19 +253,19 @@ struct CommandToolTypesTests {
 
     @Test("Registry isCommandTool returns true for command tools")
     func testRegistryIsCommandToolTrue() {
-        #expect(CommandToolRegistry.isCommandTool("read"))
-        #expect(CommandToolRegistry.isCommandTool("bash"))
-        #expect(CommandToolRegistry.isCommandTool("search"))
-        #expect(CommandToolRegistry.isCommandTool("edit"))
+        #expect(CommandToolCatalog.isCommandTool("read"))
+        #expect(CommandToolCatalog.isCommandTool("bash"))
+        #expect(CommandToolCatalog.isCommandTool("search"))
+        #expect(CommandToolCatalog.isCommandTool("edit"))
     }
 
     @Test("Registry isCommandTool returns false for special tools")
     func testRegistryIsCommandToolFalse() {
         // These are handled specially and should NOT be command tools
-        #expect(!CommandToolRegistry.isCommandTool("askuserquestion"))
-        #expect(!CommandToolRegistry.isCommandTool("spawnsubagent"))
-        #expect(!CommandToolRegistry.isCommandTool("waitforsubagent"))
-        #expect(!CommandToolRegistry.isCommandTool("notifyapp"))
+        #expect(!CommandToolCatalog.isCommandTool("askuserquestion"))
+        #expect(!CommandToolCatalog.isCommandTool("spawnsubagent"))
+        #expect(!CommandToolCatalog.isCommandTool("waitforsubagent"))
+        #expect(!CommandToolCatalog.isCommandTool("notifyapp"))
     }
 
     // MARK: - CommandToolChipData Factory Tests

@@ -21,7 +21,7 @@ struct ToolDescriptor: @unchecked Sendable {
 
 /// Single source of truth for tool UI configuration.
 /// Adding a new tool = one entry here.
-enum ToolRegistry {
+enum ToolDescriptorCatalog {
 
     /// Look up the descriptor for a given tool name (case-insensitive).
     static func descriptor(for toolName: String) -> ToolDescriptor {

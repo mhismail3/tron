@@ -20,7 +20,7 @@ impl WorktreeCoordinator {
     ///
     /// If `branch` is `None`, uses the session's current branch (resolved
     /// from the active worktree or, for passthrough sessions, from
-    /// `fallback_dir` via `git symbolic-ref HEAD`).
+    /// `working_dir` via `git symbolic-ref HEAD`).
     #[allow(clippy::too_many_arguments)]
     pub async fn push_branch(
         &self,
@@ -32,15 +32,15 @@ impl WorktreeCoordinator {
         dry_run: bool,
         protected_branches: &[String],
         override_protected: bool,
-        fallback_dir: Option<&Path>,
+        working_dir: Option<&Path>,
     ) -> Result<PushOutput> {
-        // Try the active worktree first; otherwise fall back to the
-        // session's working_dir (passthrough mode). Either way we need
+        // Try the active worktree first; otherwise use the session's
+        // working_dir (passthrough mode). Either way we need
         // a (repo_root, current_branch) pair before calling scm::push.
         let active = self.state.lock().active_info(session_id);
         let (repo_root, current_branch): (PathBuf, String) = if let Some(info) = active {
             (info.repo_root, info.branch)
-        } else if let Some(dir) = fallback_dir {
+        } else if let Some(dir) = working_dir {
             let root_str = self
                 .git
                 .repo_root(dir)

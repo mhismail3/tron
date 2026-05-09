@@ -4,7 +4,7 @@
 //! Handles:
 //! - User/assistant/tool-result message conversion
 //! - Thinking block signature handling (only include with signature)
-//! - Tool call ID remapping for cross-provider compatibility
+//! - Tool call ID remapping for cross-provider DTO parity
 //! - System prompt construction with cache breakpoints (all auth types)
 //! - Tool definitions with cache control
 
@@ -40,7 +40,7 @@ pub fn convert_context(
     Vec<AnthropicMessageParam>,
     Option<Vec<AnthropicTool>>,
 ) {
-    // Build tool call ID mapping for cross-provider compatibility
+    // Build tool call ID mapping for cross-provider DTO parity.
     let id_mapping = build_id_mapping(&context.messages);
 
     // Convert messages
@@ -55,7 +55,7 @@ pub fn convert_context(
     (system, messages, tools)
 }
 
-/// Build tool call ID mapping from messages for cross-provider compatibility.
+/// Build tool call ID mapping from messages for cross-provider DTO parity.
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
     let mut all_tool_calls = Vec::new();
     for msg in messages {

@@ -77,7 +77,7 @@ impl KimiProvider {
         Some(parts.join("\n\n"))
     }
 
-    /// Calculate `max_tokens`: options → config → model registry fallback.
+    /// Calculate `max_tokens`: options → config → model registry default.
     fn calculate_max_tokens(&self, options: &ProviderStreamOptions) -> u32 {
         options.max_tokens.unwrap_or_else(|| {
             self.config.max_tokens.unwrap_or_else(|| {
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn max_tokens_legacy_model() {
+    fn max_tokens_retired_generation_model() {
         let mut cfg = test_config();
         cfg.model = "moonshot-v1-8k".into();
         let provider = KimiProvider::new(cfg);
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn request_body_no_tools_for_legacy_model() {
+    fn request_body_no_tools_for_retired_generation_model() {
         let mut cfg = test_config();
         cfg.model = "moonshot-v1-8k".into();
         let provider = KimiProvider::new(cfg);

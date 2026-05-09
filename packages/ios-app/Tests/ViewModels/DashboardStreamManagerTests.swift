@@ -79,7 +79,7 @@ final class SessionStreamBufferTests: XCTestCase {
         buffer.addToolStart(name: "Bash", arguments: ["command": AnyCodable(longCommand)])
 
         XCTAssertNotNil(buffer.lines[0].summary)
-        // ToolRegistry uses ToolArgumentParser.truncate which appends "..."
+        // ToolDescriptorCatalog uses ToolArgumentParser.truncate which appends "..."
         XCTAssertTrue(buffer.lines[0].summary!.hasSuffix("..."))
     }
 
@@ -769,7 +769,7 @@ final class SessionStreamBufferToolMetaTests: XCTestCase {
         var buffer = SessionStreamBuffer()
         buffer.addToolStart(name: "SomeCustomMCPTool", arguments: nil)
 
-        // ToolRegistry default: gearshape icon, tronTextMuted color
+        // ToolDescriptorCatalog default: gearshape icon, tronTextMuted color
         XCTAssertEqual(buffer.lines[0].icon, "gearshape")
         XCTAssertEqual(buffer.lines[0].iconColor, .tronTextMuted)
     }
@@ -794,7 +794,7 @@ final class SessionStreamBufferToolMetaTests: XCTestCase {
 
     func testToolStartDisplayNameFromRegistry() {
         var buffer = SessionStreamBuffer()
-        // "WebSearch" → ToolRegistry displayName is "Web Search"
+        // "WebSearch" → ToolDescriptorCatalog displayName is "Web Search"
         buffer.addToolStart(name: "WebSearch", arguments: nil)
         XCTAssertEqual(buffer.lines[0].toolName, "WebSearch")
         XCTAssertEqual(buffer.lines[0].displayName, "Web Search")

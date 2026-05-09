@@ -99,15 +99,15 @@ struct CodexJSONRPCTests {
         #expect(clientInfo["version"] as? String == "1.2.3")
     }
 
-    @Test("approval policy codec uses current names and accepts legacy names")
-    func approvalPolicyCodecAcceptsLegacyNames() throws {
+    @Test("approval policy codec uses current names and product wire aliases")
+    func approvalPolicyCodecAcceptsProductWireAliases() throws {
         let encoded = try JSONEncoder().encode(CodexApprovalPolicy.onRequest)
         #expect(String(data: encoded, encoding: .utf8) == #""onRequest""#)
 
-        let legacy = try JSONDecoder().decode(CodexApprovalPolicy.self, from: Data(#""on-request""#.utf8))
+        let dashedAlias = try JSONDecoder().decode(CodexApprovalPolicy.self, from: Data(#""on-request""#.utf8))
         let oldUntrusted = try JSONDecoder().decode(CodexApprovalPolicy.self, from: Data(#""untrusted""#.utf8))
 
-        #expect(legacy == .onRequest)
+        #expect(dashedAlias == .onRequest)
         #expect(oldUntrusted == .unlessTrusted)
     }
 
