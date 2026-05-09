@@ -77,17 +77,16 @@ steps are:
 - `settings::init_settings()` receives the settings embedded in the compiled
   profile snapshot after sparse `profiles/user/profile.toml` settings and
   environment overrides have been applied.
-- `build_tool_factory()` creates a fresh `ToolRegistry` for each agent run. It
-  adds built-in tools, subagent/job tools, MCP tools, and an LLM-backed
-  `web_fetch` variant.
-- The ServerCapabilityContext holds shared services: `SessionManager`, `EventStore`,
-  `Orchestrator`, `ProviderFactory`, `SkillRegistry`, `MemoryRegistry`,
-  process/job managers, output buffers, and settings.
+- The agent turn runner builds provider-visible tools from the live engine
+  catalog. Built-ins, MCP tools, and local worker functions enter the model
+  surface only as canonical capabilities.
+- `ServerRuntimeContext` is setup-only. Domain runtime paths receive narrowed
+  deps, then invoke work through domain operations and engine primitives.
 
 ### Prompt Capability to Agent Construction
 
 The prompt path is centered on
-`packages/agent/src/server/services/agent_runtime`.
+`packages/agent/src/domains/agent/runtime/service`.
 
 - `agent::prompt` validates params, loads the session, records prompt history,
   starts a run, and spawns `execute_prompt_run`.
@@ -130,7 +129,7 @@ Before `TronAgent::run` starts:
 
 ### Turn Runner and Provider Request
 
-`packages/agent/src/runtime/agent/turn_runner.rs` is the single-turn center of
+`packages/agent/src/domains/agent/runner/agent/turn_runner.rs` is the single-turn center of
 gravity.
 
 - `ContextManager::begin_turn()` advances the per-turn generation used to catch
@@ -179,14 +178,14 @@ gravity.
 | Working directory | `AgentConfig`/`ContextManager` | Every turn | Session | Provider instructions | Session | `environment` bucket | Session working directory/worktree |
 | Message history | `ContextManager` `MessageStore`, reconstructed from events | Every turn | Turn/session history | Provider messages | Turn | `messages` bucket | Session events, compaction |
 | Current user prompt | `TronAgent::run`; optional multimodal override | Current turn | Turn | Provider message | Turn | `messages` bucket | engine prompt payload, hook AddContext |
-| Tool schemas | `ToolRegistry` definitions | Every turn; reduced for local models | Session | Provider tools | Session | `tools` bucket | Tool factory, denied tools, local policy |
+| Tool schemas | Live engine catalog entries | Every turn; reduced for local models | Session | Provider tools | Session | `tools` bucket | Tool capability specs, denied tools, local policy |
 | Tool results | Tool executor -> `ContextManager` messages | After tool execution, next provider request | Turn/history | Provider messages | Turn | `messages` bucket | Tool behavior and compaction |
 | Compaction summaries | `compaction_engine`/event reconstruction | After compaction boundaries | Session/history | Provider messages | Session | `messages` bucket | Context compactor settings/capabilities |
 | Hook AddContext | Hook engine `UserPromptSubmit` action | Hook returns non-empty context under budget | Turn | User message content | Turn | `messages` bucket | Hook files/settings |
 
 ### Canonical Context Block Order
 
-`packages/agent/src/llm/shared/context_composition.rs` currently emits these
+`packages/agent/src/domains/model/providers/shared/context_composition.rs` currently emits these
 prompt blocks in precedence order:
 
 | Precedence | Block id | Source home | Surface | Cache class |
@@ -332,7 +331,7 @@ These findings were the original audit gaps that drove the profile-first pass.
 | Finding | Why it matters | Evidence to inspect |
 | --- | --- | --- |
 | Seeded `context-blocks.toml` was incomplete | The default policy now names all emitted prompt blocks plus the audit-only tool/message blocks. | `packages/agent/defaults/profiles/default/context/context-blocks.toml`; `llm/shared/context_composition.rs` |
-| Google system prompt appeared duplicated | Google now uses only `compose_context_parts`, so `system.prompt` is included once. | `packages/agent/src/llm/google/provider.rs` |
+| Google system prompt appeared duplicated | Google now uses only `compose_context_parts`, so `system.prompt` is included once. | `packages/agent/src/domains/model/providers/google/provider.rs` |
 | Global rules path migration was uneven | Global rules route through `~/.tron/memory/rules`; global behavior routes through `~/.tron/profiles`. | `runtime/context/loader.rs`; `runtime/context/loader.rs`; `core/foundation/paths.rs`; `runtime/memory/registry.rs` |
 | `self-inspect` docs showed old home layout | Managed self-inspect docs now describe the five-root profile-first home. | `packages/agent/skills/self-inspect/SKILL.md`; `reference/schema.md` |
 | Audit persistence is load-bearing | If Constitution context or provider-payload audit writes fail, the turn fails before the model call. This improves replay integrity but makes audit storage availability part of the critical path. | `runtime/agent/turn_runner.rs` |
@@ -363,11 +362,11 @@ Current behavior:
 
 | Area | Files | What to read first |
 | --- | --- | --- |
-| Startup and service wiring | `packages/agent/src/main.rs` | `init_directories`, DB/settings init, `build_tool_factory`, `init_cron` |
-| Runtime module map | `packages/agent/src/runtime/mod.rs` | Module docs and exported runtime types |
-| Prompt orchestration | `server/services/agent_runtime` | `execute_prompt_run`, prompt bootstrap, skill/hook setup |
-| Agent construction | `runtime/agent/factory.rs`, `runtime/agent/tron_agent.rs` | `AgentConfig`, tool filtering, `TronAgent::run` |
-| Single-turn execution | `runtime/agent/turn_runner.rs` | `execute_turn`, `build_turn_context`, audit writes, stream/tool phases |
+| Startup and service wiring | `packages/agent/src/main.rs`, `packages/agent/src/app/` | DB/settings init, domain registration, cron startup |
+| Runtime module map | `packages/agent/src/domains/agent/runner/mod.rs` | Module docs and exported runtime types |
+| Prompt orchestration | `packages/agent/src/domains/agent/runtime/service/` | `execute_prompt_run`, prompt bootstrap, skill/hook setup |
+| Agent construction | `packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs`, `packages/agent/src/domains/agent/runner/agent/tron_agent.rs` | `AgentConfig`, tool filtering, `TronAgent::run` |
+| Single-turn execution | `packages/agent/src/domains/agent/runner/agent/turn_runner.rs` | `execute_turn`, `build_turn_context`, audit writes, stream/tool phases |
 | Context state | `runtime/context/context_manager.rs` | base context, snapshots, compaction triggers, volatile token generation |
 | Context composition | `llm/shared/context_composition.rs` | canonical block order and audit-only blocks |
 | Provider payloads | `llm/{anthropic,openai,google,kimi,minimax,ollama}` | provider-specific prompt/request adaptation and `audit_payload` |

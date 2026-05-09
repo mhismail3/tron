@@ -2648,7 +2648,7 @@ async fn e2e_context_snapshot_has_real_tokens() {
     // Context limit should match model
     assert_eq!(
         result["contextLimit"].as_u64().unwrap(),
-        tron::llm::model_context_window("claude-opus-4-6")
+        tron::domains::model::providers::model_context_window("claude-opus-4-6")
     );
     assert_eq!(result["thresholdLevel"], "normal");
 

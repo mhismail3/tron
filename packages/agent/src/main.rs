@@ -6,17 +6,12 @@
 //! ## Module Architecture
 //!
 //! ```text
-//! tron::core          Foundation types, errors, branded IDs, message model
-//! tron::settings      Settings schema, layered loading, global singleton
+//! tron::app           Bootstrap, HTTP shell, health, metrics, onboarding, shutdown
+//! tron::transport     /engine and /engine/workers protocol surfaces
 //! tron::engine        Live capability fabric, host lifecycle, engine ledger
-//! tron::events        SQLite event store, migrations, session reconstruction
-//! tron::llm           Provider trait, model registry, SSE streaming, auth
-//! tron::tools         Tool trait, canonical tool::* implementations
-//! tron::mcp           MCP router and always-on McpSearch/McpCall meta-tools
-//! tron::skills        SKILL.md parser, registry, context injection
-//! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
-//! tron::runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
-//! tron::server        Axum HTTP/WS, engine protocol, stream projection, APNS
+//! tron::domains       Worker-owned contracts, handlers, operations, services
+//! tron::platform      OS/vendor integrations, APNS, updater, device broker
+//! tron::shared        Foundation types, protocol DTOs, neutral helpers
 //! ```
 //!
 //! ## Data Path
@@ -47,33 +42,33 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use parking_lot::RwLock;
-use tron::events::{ConnectionConfig, EventStore};
-use tron::llm::factory as provider_factory;
-use tron::llm::provider::ProviderFactory;
-use tron::runtime::orchestrator::orchestrator::Orchestrator;
-use tron::runtime::orchestrator::session_manager::SessionManager;
-use tron::runtime::orchestrator::subagent_manager::SubagentManager;
-use tron::server::config::ServerConfig;
-use tron::server::runtime::streams::EngineStreamEventPump;
-use tron::server::server::TronServer;
-use tron::server::shared::context::{
+use tron::app::config::ServerConfig;
+use tron::app::server::TronServer;
+use tron::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
+use tron::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use tron::domains::agent::runner::orchestrator::subagent_manager::SubagentManager;
+use tron::domains::model::providers::factory as provider_factory;
+use tron::domains::model::providers::provider::ProviderFactory;
+use tron::domains::session::event_store::{ConnectionConfig, EventStore};
+use tron::domains::settings::db_path_policy::resolve_production_db_path;
+use tron::domains::skills::registry::SkillRegistry;
+use tron::shared::server::context::{
     AgentDeps, ServerRuntimeContext, ToolRuntimeConfig, register_blocking_supervisor_shutdown,
 };
-use tron::settings::db_path_policy::resolve_production_db_path;
-use tron::skills::registry::SkillRegistry;
+use tron::transport::runtime::streams::EngineStreamEventPump;
 
 /// Resolved push notification transport.
 #[cfg(feature = "apns")]
 #[derive(Clone)]
 enum PushService {
     /// Relay delivery via Cloudflare Worker.
-    Relay(Arc<tron::server::platform::apns::relay::RelayClient>),
+    Relay(Arc<tron::platform::apns::relay::RelayClient>),
 }
 
 #[cfg(feature = "apns")]
 impl PushService {
     /// Get a type-erased push sender for consumers that don't need to know the transport.
-    fn as_sender(&self) -> Arc<dyn tron::server::platform::apns::PushSender> {
+    fn as_sender(&self) -> Arc<dyn tron::platform::apns::PushSender> {
         match self {
             PushService::Relay(relay) => relay.clone(),
         }
@@ -164,8 +159,8 @@ fn run_subcommand(cmd: &Command) -> Result<()> {
 }
 
 fn rotate_bearer_token_cli() -> Result<()> {
-    let path = tron::server::onboarding::bearer_token_path();
-    let token = tron::server::onboarding::rotate_bearer_token(&path)
+    let path = tron::app::onboarding::bearer_token_path();
+    let token = tron::app::onboarding::rotate_bearer_token(&path)
         .with_context(|| format!("Failed to rotate bearer token at {}", path.display()))?;
     eprintln!("Bearer token rotated. All paired iOS devices must re-pair with the new token.");
     println!("{token}");
@@ -173,7 +168,7 @@ fn rotate_bearer_token_cli() -> Result<()> {
 }
 
 fn initialize_bearer_token_at(path: &Path) -> Result<String> {
-    tron::server::onboarding::load_or_create_bearer_token(path)
+    tron::app::onboarding::load_or_create_bearer_token(path)
         .with_context(|| format!("Failed to initialize bearer token at {}", path.display()))
 }
 
@@ -245,12 +240,12 @@ fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
 
 /// Resolve the auth file path (`~/.tron/profiles/auth.json`).
 fn auth_path() -> PathBuf {
-    tron::settings::loader::auth_path()
+    tron::domains::settings::loader::auth_path()
 }
 
 /// Ensure `~/.tron/` obeys the Tron Constitution.
-fn init_directories() -> Result<tron::core::constitution::SeedReport> {
-    tron::core::constitution::ensure_tron_home()
+fn init_directories() -> Result<tron::shared::constitution::SeedReport> {
+    tron::shared::constitution::ensure_tron_home()
         .context("Failed to initialize Tron Constitution home")
 }
 
@@ -260,7 +255,7 @@ fn init_database(
 ) -> Result<(
     r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     PathBuf,
-    tron::events::DatabaseLock,
+    tron::domains::session::event_store::DatabaseLock,
 )> {
     let db_path = resolve_production_db_path(db_path_override)?;
     ensure_parent_dir(&db_path)?;
@@ -269,23 +264,25 @@ fn init_database(
     // OS-level flock before opening the connection pool so a stray
     // `tron dev` alongside the launchd service aborts at startup
     // instead of silently racing on (session_id, sequence).
-    let db_lock = tron::events::acquire_database_lock(&db_path).map_err(|e| match e {
-        tron::events::LockError::AlreadyLocked {
-            db_path,
-            holder_pid,
-        } => anyhow::anyhow!(
-            "Another Tron process (PID {holder_pid}) is already using {}. \
+    let db_lock = tron::domains::session::event_store::acquire_database_lock(&db_path).map_err(
+        |e| match e {
+            tron::domains::session::event_store::LockError::AlreadyLocked {
+                db_path,
+                holder_pid,
+            } => anyhow::anyhow!(
+                "Another Tron process (PID {holder_pid}) is already using {}. \
              Stop it (e.g. `launchctl stop com.tron.server` or `kill {holder_pid}`) and retry.",
-            db_path.display()
-        ),
-        tron::events::LockError::Io { path, source } => anyhow::anyhow!(
-            "Failed to prepare database lock file at {}: {source}",
-            path.display()
-        ),
-    })?;
+                db_path.display()
+            ),
+            tron::domains::session::event_store::LockError::Io { path, source } => anyhow::anyhow!(
+                "Failed to prepare database lock file at {}: {source}",
+                path.display()
+            ),
+        },
+    )?;
 
     let db_str = db_path.to_string_lossy();
-    let pool = tron::events::new_file(&db_str, &ConnectionConfig::default())
+    let pool = tron::domains::session::event_store::new_file(&db_str, &ConnectionConfig::default())
         .context("Failed to open database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
@@ -294,11 +291,12 @@ fn init_database(
         // automatic WAL replay; if the WAL was corrupt we want to
         // know NOW, not after a session has been partially
         // reconstructed from damaged data.
-        tron::events::check_integrity(&conn).context(
+        tron::domains::session::event_store::check_integrity(&conn).context(
             "Database integrity check failed. The event store may be corrupt; \
              restore from a backup or investigate ~/.tron/internal/database/log.db.",
         )?;
-        let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
+        let _ = tron::domains::session::event_store::run_migrations(&conn)
+            .context("Failed to run migrations")?;
     }
     Ok((pool, db_path, db_lock))
 }
@@ -322,12 +320,12 @@ fn init_engine_host(db_path: &Path) -> Result<tron::engine::EngineHostHandle> {
 /// Initialize tracing with SQLite persistence and start the periodic flush task.
 fn init_logging(
     db_path: &std::path::Path,
-    settings: &tron::settings::TronSettings,
+    settings: &tron::domains::settings::TronSettings,
     log_level_override: Option<&str>,
     origin: &str,
     stderr_enabled: bool,
 ) -> Result<(
-    tron::core::logging::TransportHandle,
+    tron::shared::logging::TransportHandle,
     tokio::task::JoinHandle<()>,
 )> {
     // Dedicated connection, separate from pool. Must set WAL + busy_timeout to match
@@ -345,14 +343,14 @@ fn init_logging(
         .collect();
     let effective_log_level =
         log_level_override.unwrap_or_else(|| settings.logging.db_log_level.as_filter_str());
-    let log_handle = tron::core::logging::init_subscriber_with_sqlite(
+    let log_handle = tron::shared::logging::init_subscriber_with_sqlite(
         effective_log_level,
         &module_overrides,
         log_conn,
         Some(origin.to_owned()),
         stderr_enabled,
     );
-    let flush_task = tron::core::logging::spawn_flush_task(log_handle.clone());
+    let flush_task = tron::shared::logging::spawn_flush_task(log_handle.clone());
     Ok((log_handle, flush_task))
 }
 
@@ -362,7 +360,7 @@ fn init_logging(
 fn init_push() -> PushServiceOption {
     #[cfg(feature = "apns")]
     {
-        use tron::server::platform::apns::{PushConfig, load_push_config};
+        use tron::platform::apns::{PushConfig, load_push_config};
 
         match load_push_config() {
             PushConfig::Relay(config) => {
@@ -372,7 +370,7 @@ fn init_push() -> PushServiceOption {
                     "Push: relay mode"
                 );
                 Some(PushService::Relay(Arc::new(
-                    tron::server::platform::apns::relay::RelayClient::new(config),
+                    tron::platform::apns::relay::RelayClient::new(config),
                 )))
             }
             PushConfig::Disabled => {
@@ -389,7 +387,7 @@ fn init_push() -> PushServiceOption {
 
 /// MCP initialization result.
 struct McpState {
-    router: Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>,
+    router: Arc<tokio::sync::RwLock<tron::domains::mcp::router::McpRouter>>,
 }
 
 /// Create the MCP router and meta-tools.
@@ -398,7 +396,7 @@ struct McpState {
 /// `McpSearch`/`McpCall` in every session and lets settings updates add servers
 /// without requiring a daemon restart.
 async fn init_mcp(
-    settings: &tron::settings::TronSettings,
+    settings: &tron::domains::settings::TronSettings,
     settings_path: &std::path::Path,
 ) -> McpState {
     let mcp_configs = settings.mcp.servers.clone();
@@ -408,7 +406,7 @@ async fn init_mcp(
         tracing::info!(count = mcp_configs.len(), "starting MCP servers");
     }
 
-    let router = tron::mcp::router::McpRouter::new(
+    let router = tron::domains::mcp::router::McpRouter::new(
         mcp_configs,
         settings_path.to_owned(),
         settings.mcp.schema_refresh_ttl_ms,
@@ -417,7 +415,7 @@ async fn init_mcp(
     let statuses = router.status();
     let connected: Vec<_> = statuses
         .iter()
-        .filter(|s| s.health != tron::mcp::types::McpServerHealth::Failed)
+        .filter(|s| s.health != tron::domains::mcp::types::McpServerHealth::Failed)
         .map(|s| s.name.as_str())
         .collect();
     if !connected.is_empty() {
@@ -443,25 +441,26 @@ struct ServiceState {
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
-    memory_registry: Arc<parking_lot::Mutex<tron::runtime::memory::MemoryRegistry>>,
+    memory_registry: Arc<parking_lot::Mutex<tron::domains::agent::runner::memory::MemoryRegistry>>,
     engine_host: tron::engine::EngineHostHandle,
     agent_deps: Option<AgentDeps>,
     shared_subagent_manager: Option<Arc<SubagentManager>>,
-    hook_abort_tracker: Arc<tron::runtime::hooks::abort_tracker::HookAbortTracker>,
+    hook_abort_tracker: Arc<tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker>,
     push_service: PushServiceOption,
     tool_runtime: ToolRuntimeConfig,
-    process_manager: Arc<dyn tron::tools::traits::ProcessManagerOps>,
-    job_manager: Arc<dyn tron::tools::traits::JobManagerOps>,
-    output_buffer_registry: Arc<tron::runtime::orchestrator::output_buffer::OutputBufferRegistry>,
-    transcription_engine: Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>>,
-    codex_app_server: Arc<tron::server::platform::codex_app::CodexAppServerManager>,
+    process_manager: Arc<dyn tron::domains::tools::implementations::traits::ProcessManagerOps>,
+    job_manager: Arc<dyn tron::domains::tools::implementations::traits::JobManagerOps>,
+    output_buffer_registry:
+        Arc<tron::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
+    transcription_engine: Arc<std::sync::OnceLock<Arc<tron::domains::transcription::MlxEngine>>>,
+    codex_app_server: Arc<tron::platform::codex_app::CodexAppServerManager>,
 }
 
 /// Build core services: orchestrator, session manager, providers, tools, subagent manager.
 async fn init_services(
     event_store: Arc<EventStore>,
-    settings: &tron::settings::TronSettings,
-    profile_runtime: Arc<tron::runtime::ProfileRuntime>,
+    settings: &tron::domains::settings::TronSettings,
+    profile_runtime: Arc<tron::domains::agent::runner::ProfileRuntime>,
     engine_host: tron::engine::EngineHostHandle,
     origin: &str,
     push_service: PushServiceOption,
@@ -472,7 +471,9 @@ async fn init_services(
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
 
     // Crash recovery: recover partial LLM output from orphaned streaming journals
-    let recovered = tron::runtime::orchestrator::recovery::recover_incomplete_turns(&event_store);
+    let recovered = tron::domains::agent::runner::orchestrator::recovery::recover_incomplete_turns(
+        &event_store,
+    );
     if !recovered.is_empty() {
         tracing::info!(
             count = recovered.len(),
@@ -484,37 +485,41 @@ async fn init_services(
 
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
     let memory_registry = Arc::new(parking_lot::Mutex::new(
-        tron::runtime::memory::MemoryRegistry::new(),
+        tron::domains::agent::runner::memory::MemoryRegistry::new(),
     ));
 
     let (provider_factory, shared_http_client) = init_provider_factory(settings).await;
 
     // Process manager for background tool execution
-    let process_manager: Arc<dyn tron::tools::traits::ProcessManagerOps> = Arc::new(
-        tron::runtime::orchestrator::process_manager::ProcessManager::with_deps(
-            orchestrator.broadcast().clone(),
-            event_store.clone(),
-        ),
+    let process_manager: Arc<dyn tron::domains::tools::implementations::traits::ProcessManagerOps> =
+        Arc::new(
+            tron::domains::agent::runner::orchestrator::process_manager::ProcessManager::with_deps(
+                orchestrator.broadcast().clone(),
+                event_store.clone(),
+            ),
+        );
+    let output_buffer_registry = Arc::new(
+        tron::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry::new(),
     );
-    let output_buffer_registry =
-        Arc::new(tron::runtime::orchestrator::output_buffer::OutputBufferRegistry::new());
 
-    let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
+    let notify_delegate: Arc<dyn tron::domains::tools::implementations::traits::NotifyDelegate> = {
         #[cfg(feature = "apns")]
         {
             match &push_service {
                 Some(PushService::Relay(relay)) => Arc::new(
-                    tron::server::platform::apns::relay_delegate::RelayNotifyDelegate::new(
+                    tron::platform::apns::relay_delegate::RelayNotifyDelegate::new(
                         relay.clone(),
                         event_store.clone(),
                     ),
                 ),
-                None => Arc::new(tron::tools::backends::StubNotifyDelegate),
+                None => {
+                    Arc::new(tron::domains::tools::implementations::backends::StubNotifyDelegate)
+                }
             }
         }
         #[cfg(not(feature = "apns"))]
         {
-            Arc::new(tron::tools::backends::StubNotifyDelegate)
+            Arc::new(tron::domains::tools::implementations::backends::StubNotifyDelegate)
         }
     };
     let tool_runtime = ToolRuntimeConfig {
@@ -546,12 +551,15 @@ async fn init_services(
     subagent_manager.set_skill_registry(skill_registry.clone());
 
     // Unified job manager (processes + subagents)
-    let subagent_ops: Arc<dyn tron::tools::traits::SubagentOps> = subagent_manager.clone();
-    let job_manager: Arc<dyn tron::tools::traits::JobManagerOps> =
-        Arc::new(tron::runtime::orchestrator::job_manager::JobManager::new(
-            process_manager.clone(),
-            subagent_ops,
-        ));
+    let subagent_ops: Arc<dyn tron::domains::tools::implementations::traits::SubagentOps> =
+        subagent_manager.clone();
+    let job_manager: Arc<dyn tron::domains::tools::implementations::traits::JobManagerOps> =
+        Arc::new(
+            tron::domains::agent::runner::orchestrator::job_manager::JobManager::new(
+                process_manager.clone(),
+                subagent_ops,
+            ),
+        );
 
     subagent_manager.set_engine_host(engine_host.clone());
 
@@ -560,11 +568,12 @@ async fn init_services(
         guardrails: None,
     });
     let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
-    let hook_abort_tracker = Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
+    let hook_abort_tracker =
+        Arc::new(tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker::new());
 
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
     let codex_app_server = Arc::new(
-        tron::server::platform::codex_app::CodexAppServerManager::new(
+        tron::platform::codex_app::CodexAppServerManager::new(
             settings.server.codex_app_server.clone(),
         )
         .context("Failed to initialize Codex App Server lifecycle manager")?,
@@ -592,7 +601,7 @@ async fn init_services(
 
 /// Create provider factory and check startup auth availability.
 async fn init_provider_factory(
-    settings: &tron::settings::TronSettings,
+    settings: &tron::domains::settings::TronSettings,
 ) -> (Arc<dyn ProviderFactory>, reqwest::Client) {
     let default_factory = provider_factory::DefaultProviderFactory::new(settings);
     let shared_http_client = default_factory.http_client();
@@ -618,8 +627,8 @@ async fn init_provider_factory(
 /// Register transcription sidecar startup with graceful shutdown tracking.
 fn register_transcription_sidecar(
     enabled: bool,
-    shutdown: &Arc<tron::server::shutdown::ShutdownCoordinator>,
-    transcription_engine: Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>>,
+    shutdown: &Arc<tron::app::shutdown::ShutdownCoordinator>,
+    transcription_engine: Arc<std::sync::OnceLock<Arc<tron::domains::transcription::MlxEngine>>>,
 ) {
     if !enabled {
         tracing::info!("transcription sidecar disabled");
@@ -629,7 +638,7 @@ fn register_transcription_sidecar(
     let shutdown_token = shutdown.token();
     let handle = tokio::spawn(async move {
         tokio::select! {
-            engine = tron::transcription::MlxEngine::new() => {
+            engine = tron::domains::transcription::MlxEngine::new() => {
                 match engine {
                     Ok(engine) => {
                         let _ = cell.set(engine);
@@ -650,7 +659,7 @@ fn register_transcription_sidecar(
 
 /// Cron initialization result.
 struct CronState {
-    scheduler: Arc<tron::cron::CronScheduler>,
+    scheduler: Arc<tron::domains::cron::CronScheduler>,
     cancel: tokio_util::sync::CancellationToken,
 }
 
@@ -658,14 +667,14 @@ struct CronState {
 fn init_cron(
     services: &ServiceState,
     origin: &str,
-    profile_runtime: Arc<tron::runtime::ProfileRuntime>,
+    profile_runtime: Arc<tron::domains::agent::runner::ProfileRuntime>,
 ) -> CronState {
     let cancel = tokio_util::sync::CancellationToken::new();
-    let config_path = tron::core::paths::automations_path();
-    let backup_path = tron::core::paths::automations_backup_path();
+    let config_path = tron::shared::paths::automations_path();
+    let backup_path = tron::shared::paths::automations_backup_path();
 
     let agent_executor = services.agent_deps.as_ref().map(|deps| {
-        Arc::new(tron::cron::impls::CronAgentTurnExecutor::new(
+        Arc::new(tron::domains::cron::impls::CronAgentTurnExecutor::new(
             services.event_store.clone(),
             services.session_manager.clone(),
             deps.provider_factory.clone(),
@@ -675,19 +684,17 @@ fn init_cron(
             services.shared_subagent_manager.clone(),
         )) as _
     });
-    let deps = tron::cron::ExecutorDeps {
+    let deps = tron::domains::cron::ExecutorDeps {
         agent_executor,
         event_publisher: std::sync::OnceLock::new(), // set after engine startup
         push_notifier: {
             #[cfg(feature = "apns")]
             {
                 services.push_service.as_ref().map(|ps| {
-                    Arc::new(
-                        tron::server::domains::cron::callbacks::CronPushNotifier::new(
-                            ps.as_sender(),
-                            services.event_store.pool().clone(),
-                        ),
-                    ) as _
+                    Arc::new(tron::domains::cron::callbacks::CronPushNotifier::new(
+                        ps.as_sender(),
+                        services.event_store.pool().clone(),
+                    )) as _
                 })
             }
             #[cfg(not(feature = "apns"))]
@@ -695,15 +702,17 @@ fn init_cron(
                 None
             }
         },
-        event_injector: Some(Arc::new(tron::cron::impls::CronSystemEventInjector::new(
-            services.event_store.clone(),
-        )) as _),
+        event_injector: Some(
+            Arc::new(tron::domains::cron::impls::CronSystemEventInjector::new(
+                services.event_store.clone(),
+            )) as _,
+        ),
         http_client: services.tool_runtime.http_client.clone(),
         pool: services.event_store.pool().clone(),
     };
-    let scheduler = Arc::new(tron::cron::CronScheduler::new(
+    let scheduler = Arc::new(tron::domains::cron::CronScheduler::new(
         services.event_store.pool().clone(),
-        Arc::new(tron::cron::SystemClock),
+        Arc::new(tron::domains::cron::SystemClock),
         deps,
         config_path,
         backup_path,
@@ -716,15 +725,19 @@ fn init_cron(
 /// Initialize the worktree coordinator, rebuild state, and wire into session/subagent managers.
 async fn init_worktree(
     services: &ServiceState,
-    settings: &tron::settings::TronSettings,
-) -> Option<Arc<tron::worktree::WorktreeCoordinator>> {
-    let wt_config =
-        tron::worktree::WorktreeConfig::from_settings_with_git(&settings.session, &settings.git);
-    let coord = Arc::new(tron::worktree::WorktreeCoordinator::with_broadcast(
-        wt_config,
-        services.event_store.clone(),
-        services.orchestrator.broadcast().sender(),
-    ));
+    settings: &tron::domains::settings::TronSettings,
+) -> Option<Arc<tron::domains::worktree::WorktreeCoordinator>> {
+    let wt_config = tron::domains::worktree::WorktreeConfig::from_settings_with_git(
+        &settings.session,
+        &settings.git,
+    );
+    let coord = Arc::new(
+        tron::domains::worktree::WorktreeCoordinator::with_broadcast(
+            wt_config,
+            services.event_store.clone(),
+            services.orchestrator.broadcast().sender(),
+        ),
+    );
     // Rebuild active worktrees from persisted events, then recover orphans.
     coord.rebuild_from_events();
     let count = coord.recover_orphans().await;
@@ -754,11 +767,11 @@ fn build_server_runtime_context(
     services: ServiceState,
     engine_host: tron::engine::EngineHostHandle,
     settings_path: PathBuf,
-    profile_runtime: Arc<tron::runtime::ProfileRuntime>,
+    profile_runtime: Arc<tron::domains::agent::runner::ProfileRuntime>,
     origin: String,
     cron: &CronState,
-    worktree_coordinator: Option<Arc<tron::worktree::WorktreeCoordinator>>,
-    mcp_router: Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>,
+    worktree_coordinator: Option<Arc<tron::domains::worktree::WorktreeCoordinator>>,
+    mcp_router: Arc<tokio::sync::RwLock<tron::domains::mcp::router::McpRouter>>,
 ) -> ServerRuntimeContext {
     ServerRuntimeContext {
         orchestrator: services.orchestrator.clone(),
@@ -774,7 +787,7 @@ fn build_server_runtime_context(
         server_start_time: std::time::Instant::now(),
         transcription_engine: services.transcription_engine,
         subagent_manager: services.shared_subagent_manager,
-        health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin,
         cron_scheduler: Some(cron.scheduler.clone()),
@@ -782,7 +795,7 @@ fn build_server_runtime_context(
         worktree_coordinator,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::domains::session::context::ContextArtifactsService::new(),
+            tron::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: auth_path(),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -796,15 +809,15 @@ fn build_server_runtime_context(
         // actual `ServerConfig::port` and the canonical onboarded marker path
         // so handlers see the live values from the start of the first request.
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
-        onboarded_marker_path: tron::server::onboarding::onboarded_marker_path(),
+        onboarded_marker_path: tron::app::onboarding::onboarded_marker_path(),
         // User-mode updater wiring (Plan §H.2). Production uses the live
         // GitHub Releases fetcher; `main_tests.rs` and `tests/integration.rs`
         // construct their own `ServerRuntimeContext` directly and leave this `None`,
         // which short-circuits `system.checkForUpdates` + skips the
         // scheduler arm below. The state path is stable regardless so the
         // `system.getUpdateStatus` handler can still render defaults.
-        release_fetcher: Some(Arc::new(tron::server::updater::HttpReleaseFetcher::new())),
-        updater_state_path: tron::core::paths::updater_state_path(),
+        release_fetcher: Some(Arc::new(tron::platform::updater::HttpReleaseFetcher::new())),
+        updater_state_path: tron::shared::paths::updater_state_path(),
     }
 }
 
@@ -820,8 +833,9 @@ const IDLE_SESSION_CACHE_TTL: std::time::Duration = std::time::Duration::from_se
 /// still on the install step.
 fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronServer) {
     // Clean up stale sandbox directories from previous sessions (>24h old)
-    let sandbox_cleanup =
-        tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
+    let sandbox_cleanup = tokio::spawn(async {
+        tron::domains::tools::implementations::system::sandbox::cleanup_stale_sandboxes().await
+    });
     server.shutdown().register_task(sandbox_cleanup);
 
     // Periodic session cache eviction (prevents unbounded memory growth)
@@ -862,7 +876,7 @@ async fn main() -> Result<()> {
 
     // Phase 1: Pre-database filesystem operations
     init_directories()?;
-    let bearer_token_path = tron::server::onboarding::bearer_token_path();
+    let bearer_token_path = tron::app::onboarding::bearer_token_path();
     let _bearer_token = initialize_bearer_token_at(&bearer_token_path)?;
 
     // Phase 2: Database and logging
@@ -871,12 +885,12 @@ async fn main() -> Result<()> {
     // compilation fails if it's ever moved out without an equivalent guard.
     let (pool, db_path, _db_lock) = init_database(args.db_path)?;
     let profile_runtime = Arc::new(
-        tron::runtime::ProfileRuntime::load(tron::core::paths::tron_home())
+        tron::domains::agent::runner::ProfileRuntime::load(tron::shared::paths::tron_home())
             .context("Failed to load active profile runtime")?,
     );
-    let settings_path = tron::settings::loader::settings_path();
+    let settings_path = tron::domains::settings::loader::settings_path();
     let settings = profile_runtime.current().settings.clone();
-    tron::settings::init_settings(settings.clone());
+    tron::domains::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);
     let (log_handle, flush_task) = init_logging(
         &db_path,
@@ -897,7 +911,7 @@ async fn main() -> Result<()> {
             tokio::task::spawn_blocking(move || {
                 let age = (pl.history_max_age_days > 0).then_some(pl.history_max_age_days);
                 let cap = (pl.history_max_entries > 0).then_some(pl.history_max_entries);
-                match tron::prompt_library::store::prune_history(&pool, age, cap) {
+                match tron::domains::prompt_library::store::prune_history(&pool, age, cap) {
                     Ok(n) if n > 0 => {
                         tracing::debug!(deleted = n, "pruned prompt history on startup");
                     }
@@ -949,9 +963,9 @@ async fn main() -> Result<()> {
     // Phase 5: Build and start server
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
-    let metrics_handle = tron::server::metrics::install_recorder();
+    let metrics_handle = tron::app::metrics::install_recorder();
     let server = TronServer::new(config, runtime_context, metrics_handle);
-    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+    tron::transport::setup::register_server_domains_for_context(server.runtime_context())
         .context("Failed to register server domain workers")?;
     cron.scheduler
         .set_engine_host(server.runtime_context().engine_host.clone());
@@ -964,7 +978,7 @@ async fn main() -> Result<()> {
             );
         }
         server.shutdown().register_phase_hook(
-            tron::server::shutdown::ShutdownPhase::Tools,
+            tron::app::shutdown::ShutdownPhase::Tools,
             "codex-app-server",
             move || async move {
                 codex_app_server.stop().await;
@@ -981,7 +995,7 @@ async fn main() -> Result<()> {
     // standalone `ctrl_c` watcher in `init_mcp`, which raced with main's
     // shutdown path (both could call `router.shutdown_all()` concurrently).
     server.shutdown().register_phase_hook(
-        tron::server::shutdown::ShutdownPhase::Mcp,
+        tron::app::shutdown::ShutdownPhase::Mcp,
         "mcp",
         move || async move {
             mcp_router_for_shutdown.write().await.shutdown_all().await;
@@ -996,11 +1010,11 @@ async fn main() -> Result<()> {
         orchestrator_for_stream_events.turn_accumulators().clone(),
     );
     let stream_event_pump_handle = tokio::spawn(pump.run());
-    tron::server::runtime::EngineRuntimeServices::start(&server);
+    tron::transport::runtime::EngineRuntimeServices::start(&server);
 
     // Wire cron engine event publication and shutdown forwarding.
     cron.scheduler.set_event_publisher(Arc::new(
-        tron::server::domains::cron::callbacks::CronEventPublisher::new(
+        tron::domains::cron::callbacks::CronEventPublisher::new(
             server.runtime_context().engine_host.clone(),
         ),
     ));
@@ -1029,14 +1043,14 @@ async fn main() -> Result<()> {
     // and tests never set enabled.
     let updater_scheduler_handle =
         if let Some(fetcher) = server.runtime_context().release_fetcher.as_ref().cloned() {
-            let deps = tron::server::updater::SchedulerDeps {
+            let deps = tron::platform::updater::SchedulerDeps {
                 fetcher,
                 engine_host: server.runtime_context().engine_host.clone(),
                 state_path: server.runtime_context().updater_state_path.clone(),
-                pause_path: tron::server::updater::pause_sentinel_path(),
+                pause_path: tron::platform::updater::pause_sentinel_path(),
                 current_version: env!("CARGO_PKG_VERSION").to_string(),
             };
-            Some(tron::server::updater::scheduler::spawn(
+            Some(tron::platform::updater::scheduler::spawn(
                 deps,
                 server.shutdown().token(),
             ))

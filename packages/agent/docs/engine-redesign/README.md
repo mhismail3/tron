@@ -62,18 +62,17 @@ flowchart LR
 
 The code layout follows the same boundary:
 
-- `packages/agent/src/engine/`: generic engine primitives.
-- `packages/agent/src/server/capabilities/`: Tron domain capability handlers
-  and canonical specs.
-- `packages/agent/src/server/services/`: reusable server-local services used by
-  capabilities.
-- `packages/agent/src/server/transport/engine_ws.rs`: `/engine` WebSocket
-  protocol parsing, heartbeat, stream subscribe/poll/ack, and envelope
-  construction.
-- `packages/agent/src/server/transport/engine.rs`: protocol-neutral transport
-  envelope used by `/engine`.
-- `packages/agent/src/server/stream_pump.rs`: runtime event projection into
+- `packages/agent/src/engine/`: generic engine fabric and primitive workers.
+- `packages/agent/src/domains/`: Tron workers; each domain owns contracts,
+  deps, handlers, operations, services, stream publishers, and tests.
+- `packages/agent/src/transport/engine_ws.rs`: `/engine` WebSocket protocol
+  parsing, heartbeat, stream subscribe/poll/ack, and envelope construction.
+- `packages/agent/src/transport/engine.rs`: protocol-neutral transport envelope
+  used by `/engine`.
+- `packages/agent/src/transport/runtime/streams/`: runtime projection into
   engine stream records.
+- `packages/agent/src/app/`: bootstrap, health, metrics, onboarding, and
+  server shell.
 
 ## Single-Shape Invariants
 

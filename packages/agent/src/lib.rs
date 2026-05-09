@@ -1,30 +1,22 @@
 //! # tron
 //!
-//! Unified library crate for the Tron agent. Consolidates all previously
-//! separate library crates into a single compilation unit.
+//! Unified library crate for the Tron agent.
+//!
+//! The crate layout mirrors the pure engine architecture:
+//!
+//! - [`app`] owns binary/server bootstrap, health, metrics, onboarding, and shutdown.
+//! - [`transport`] owns `/engine` and `/engine/workers` protocol framing.
+//! - [`engine`] owns the live capability fabric and primitive workers.
+//! - [`domains`] owns every Tron worker, contract, handler, operation, and service.
+//! - [`platform`] owns OS/vendor integrations and sidecars.
+//! - [`shared`] owns foundation types, protocol DTOs, and cross-cutting helpers.
 
 #![deny(unsafe_code)]
 #![allow(clippy::unnecessary_literal_bound)]
 
-// Foundation (no internal deps)
-pub mod core;
-pub mod settings;
-pub mod skills;
-pub mod transcription;
-
-// Services (depend on core/settings)
-pub mod cron;
+pub mod app;
+pub mod domains;
 pub mod engine;
-pub mod events;
-pub mod import;
-pub mod llm;
-pub mod mcp;
-pub mod prompt_library;
-pub mod tools;
-pub mod worktree;
-
-// Orchestration (depends on services)
-pub mod runtime;
-
-// Interface (depends on everything)
-pub mod server;
+pub mod platform;
+pub mod shared;
+pub mod transport;

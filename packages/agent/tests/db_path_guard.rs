@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use tron::settings::db_path_policy::{
+use tron::domains::settings::db_path_policy::{
     PRODUCTION_DB_FILENAME, production_db_dir_from_home, resolve_production_db_path_for_home,
     validate_production_db_path_for_home,
 };
@@ -142,7 +142,7 @@ fn startup_migrations_only_touch_log_db() {
 
     let db_path = resolve_production_db_path_for_home(None, &home).unwrap();
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    tron::events::run_migrations(&conn).unwrap();
+    tron::domains::session::event_store::run_migrations(&conn).unwrap();
     drop(conn);
 
     let db_meta = std::fs::metadata(&db_path).unwrap();
@@ -255,11 +255,11 @@ fn legacy_tron_home_paths_are_absent() {
 fn runtime_does_not_use_global_active_profile_helpers() {
     let root = repo_root();
     let scan_roots = [
-        root.join("packages/agent/src/cron"),
-        root.join("packages/agent/src/llm"),
-        root.join("packages/agent/src/runtime"),
-        root.join("packages/agent/src/server"),
-        root.join("packages/agent/src/tools"),
+        root.join("packages/agent/src/domains/cron"),
+        root.join("packages/agent/src/domains/model/providers"),
+        root.join("packages/agent/src/domains/agent/runner"),
+        root.join("packages/agent/src/app"),
+        root.join("packages/agent/src/domains/tools"),
     ];
     let forbidden = [
         "active_execution_spec(",

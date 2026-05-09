@@ -1,0 +1,882 @@
+//! Hierarchical context file loader.
+//!
+//! Loads AGENTS.md / agents.md / CLAUDE.md / claude.md from project-level,
+//! directory-level, and `~/.tron/memory/rules/` global-rule locations. Project
+//! files merge in depth order and global rules are prepended when present.
+//! Supports caching with freshness validation.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// A loaded context file.
+#[derive(Clone, Debug)]
+pub struct ContextFile {
+    /// Absolute path.
+    pub path: PathBuf,
+    /// File content.
+    pub content: String,
+    /// Where the file was found.
+    pub level: ContextLevel,
+    /// Distance from project root (0 = project root).
+    pub depth: usize,
+}
+
+/// Where a context file was found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContextLevel {
+    /// Root-level file (`.claude/AGENTS.md` or similar).
+    Project,
+    /// Nested directory file.
+    Directory,
+}
+
+/// Result of loading context.
+#[derive(Clone, Debug)]
+pub struct LoadedContext {
+    /// Merged content from all files.
+    pub merged: String,
+    /// Individual files in depth order.
+    pub files: Vec<ContextFile>,
+}
+
+/// Configuration for the loader.
+#[derive(Clone, Debug)]
+pub struct ContextLoaderConfig {
+    /// Absolute path to project root.
+    pub project_root: PathBuf,
+    /// File names to search for (in priority order).
+    pub file_names: Vec<String>,
+    /// Agent directory names (`.claude`, `.tron`, `.agent`).
+    pub agent_dirs: Vec<String>,
+    /// Maximum directory traversal depth.
+    pub max_depth: usize,
+    /// Whether to discover standalone files (AGENTS.md, CLAUDE.md) at the
+    /// project root and directory level. When false, only files inside agent
+    /// directories (`.claude/`, `.tron/`, `.agent/`) are loaded.
+    pub discover_standalone_files: bool,
+}
+
+impl Default for ContextLoaderConfig {
+    fn default() -> Self {
+        Self {
+            project_root: PathBuf::from("."),
+            file_names: vec![
+                "AGENTS.md".into(),
+                "agents.md".into(),
+                "CLAUDE.md".into(),
+                "claude.md".into(),
+            ],
+            agent_dirs: vec![".claude".into(), ".tron".into(), ".agent".into()],
+            max_depth: 5,
+            discover_standalone_files: true,
+        }
+    }
+}
+
+// =============================================================================
+// ContextLoader
+// =============================================================================
+
+/// Loads and merges context files from a project hierarchy.
+pub struct ContextLoader {
+    config: ContextLoaderConfig,
+    cache: HashMap<PathBuf, CachedContext>,
+}
+
+/// Cached context with freshness tracking.
+#[derive(Clone, Debug)]
+struct CachedContext {
+    result: LoadedContext,
+    /// File paths and their modification times at load time.
+    file_mtimes: Vec<(PathBuf, std::time::SystemTime)>,
+}
+
+impl ContextLoader {
+    /// Create a new context loader with the given configuration.
+    pub fn new(config: ContextLoaderConfig) -> Self {
+        Self {
+            config,
+            cache: HashMap::new(),
+        }
+    }
+
+    /// Load context for a target directory.
+    ///
+    /// Checks the cache first. If stale or missing, performs a fresh load.
+    pub fn load(&mut self, target_dir: &Path) -> std::io::Result<LoadedContext> {
+        let target = target_dir.to_path_buf();
+
+        // Check cache freshness
+        if let Some(cached) = self.cache.get(&target)
+            && is_cache_fresh(&cached.file_mtimes)
+        {
+            return Ok(cached.result.clone());
+        }
+
+        let result = self.load_fresh(target_dir)?;
+
+        // Cache with mtime tracking
+        let file_mtimes: Vec<(PathBuf, std::time::SystemTime)> = result
+            .files
+            .iter()
+            .filter_map(|f| {
+                std::fs::metadata(&f.path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(|mtime| (f.path.clone(), mtime))
+            })
+            .collect();
+
+        let _ = self.cache.insert(
+            target,
+            CachedContext {
+                result: result.clone(),
+                file_mtimes,
+            },
+        );
+
+        Ok(result)
+    }
+
+    /// Load without caching.
+    fn load_fresh(&self, target_dir: &Path) -> std::io::Result<LoadedContext> {
+        let mut files = Vec::new();
+
+        // 1. Load project-level context
+        if let Some(project_file) = self.load_project_context()? {
+            files.push(project_file);
+        }
+
+        // 2. Load directory-level contexts (walk from root to target)
+        let dir_files = self.load_directory_contexts(target_dir)?;
+        files.extend(dir_files);
+
+        // 3. Merge
+        let merged = merge_contexts(&files);
+
+        Ok(LoadedContext { merged, files })
+    }
+
+    /// Find a context file at the project root.
+    ///
+    /// Search order:
+    /// 1. Agent dirs (`.claude/`, `.tron/`, `.agent/`) for each filename
+    /// 2. Project root for each filename
+    fn load_project_context(&self) -> std::io::Result<Option<ContextFile>> {
+        let root = &self.config.project_root;
+
+        // Check agent directories first
+        for dir_name in &self.config.agent_dirs {
+            let dir_path = root.join(dir_name);
+            if dir_path.is_dir() {
+                for file_name in &self.config.file_names {
+                    let file_path = dir_path.join(file_name);
+                    if file_path.is_file() {
+                        let content = std::fs::read_to_string(&file_path)?;
+                        return Ok(Some(ContextFile {
+                            path: file_path,
+                            content,
+                            level: ContextLevel::Project,
+                            depth: 0,
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Check project root directly (only if standalone discovery is enabled)
+        if self.config.discover_standalone_files {
+            for file_name in &self.config.file_names {
+                let file_path = root.join(file_name);
+                if file_path.is_file() {
+                    let content = std::fs::read_to_string(&file_path)?;
+                    return Ok(Some(ContextFile {
+                        path: file_path,
+                        content,
+                        level: ContextLevel::Project,
+                        depth: 0,
+                    }));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Load directory-level context files by walking from root to target.
+    fn load_directory_contexts(&self, target_dir: &Path) -> std::io::Result<Vec<ContextFile>> {
+        let root = &self.config.project_root;
+        let mut files = Vec::new();
+
+        // Build path segments from root to target
+        let relative = match target_dir.strip_prefix(root) {
+            Ok(rel) => rel.to_path_buf(),
+            Err(_) => return Ok(files), // target outside project root
+        };
+
+        let mut current = root.clone();
+        for (depth_offset, component) in relative.components().enumerate() {
+            current = current.join(component);
+            let depth = depth_offset + 1;
+
+            if depth > self.config.max_depth {
+                break;
+            }
+
+            if let Some(file) = self.find_context_file_in(&current, depth)? {
+                files.push(file);
+            }
+        }
+
+        Ok(files)
+    }
+
+    /// Search for a context file in a specific directory.
+    fn find_context_file_in(
+        &self,
+        dir: &Path,
+        depth: usize,
+    ) -> std::io::Result<Option<ContextFile>> {
+        // Check agent subdirectories
+        for agent_dir in &self.config.agent_dirs {
+            let agent_path = dir.join(agent_dir);
+            if agent_path.is_dir() {
+                for file_name in &self.config.file_names {
+                    let file_path = agent_path.join(file_name);
+                    if file_path.is_file() {
+                        let content = std::fs::read_to_string(&file_path)?;
+                        return Ok(Some(ContextFile {
+                            path: file_path,
+                            content,
+                            level: ContextLevel::Directory,
+                            depth,
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Check directory root (only if standalone discovery is enabled)
+        if self.config.discover_standalone_files {
+            for file_name in &self.config.file_names {
+                let file_path = dir.join(file_name);
+                if file_path.is_file() {
+                    let content = std::fs::read_to_string(&file_path)?;
+                    return Ok(Some(ContextFile {
+                        path: file_path,
+                        content,
+                        level: ContextLevel::Directory,
+                        depth,
+                    }));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Clear all cached contexts.
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
+
+    /// Invalidate cache for a specific directory.
+    pub fn invalidate_cache(&mut self, dir: &Path) {
+        let _ = self.cache.remove(dir);
+    }
+}
+
+// =============================================================================
+// Global rules
+// =============================================================================
+
+/// File names to search for global rules (in priority order).
+pub const GLOBAL_RULE_NAMES: &[&str] = &["CLAUDE.md", "claude.md", "AGENTS.md", "agents.md"];
+
+/// Load global rules from `~/.tron/memory/rules/` directory.
+///
+/// Searches for CLAUDE.md, claude.md, AGENTS.md, agents.md in priority order.
+/// Returns `None` if no file is found or all files are empty.
+pub fn load_global_rules(home_dir: &Path) -> Option<String> {
+    load_global_rules_with_path(home_dir).map(|(_, content)| content)
+}
+
+/// Load global rules and return the selected source path.
+pub fn load_global_rules_with_path(home_dir: &Path) -> Option<(PathBuf, String)> {
+    use crate::shared::paths::dirs;
+    let tron_dir = home_dir.join(".tron").join(dirs::MEMORY).join(dirs::RULES);
+    for name in GLOBAL_RULE_NAMES {
+        let path = tron_dir.join(name);
+        if path.is_file()
+            && let Ok(content) = std::fs::read_to_string(&path)
+            && !content.trim().is_empty()
+        {
+            return Some((path, content));
+        }
+    }
+    None
+}
+
+/// Merge global and project rules.
+///
+/// Global rules come first (higher precedence in context),
+/// separated by double newline. Returns `None` if both are `None`.
+pub fn merge_rules(global: Option<String>, project: Option<String>) -> Option<String> {
+    match (global, project) {
+        (Some(g), Some(p)) => Some(format!("{g}\n\n{p}")),
+        (Some(g), None) => Some(g),
+        (None, Some(p)) => Some(p),
+        (None, None) => None,
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Merge context files into a single string.
+///
+/// Files are in depth order (shallowest first). Each file is prefixed with
+/// a comment indicating its source.
+fn merge_contexts(files: &[ContextFile]) -> String {
+    let mut parts = Vec::with_capacity(files.len());
+    for file in files {
+        parts.push(file.content.clone());
+    }
+    parts.join("\n\n")
+}
+
+/// Check if a cache entry is still fresh by comparing file mtimes.
+fn is_cache_fresh(file_mtimes: &[(PathBuf, std::time::SystemTime)]) -> bool {
+    for (path, cached_mtime) in file_mtimes {
+        match std::fs::metadata(path) {
+            Ok(meta) => {
+                if let Ok(current_mtime) = meta.modified() {
+                    if current_mtime != *cached_mtime {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            Err(_) => return false, // File was deleted
+        }
+    }
+    true
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn create_temp_project() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tid = std::thread::current().id();
+        let dir = std::env::temp_dir().join(format!("tron-loader-{tid:?}-{id}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &Path) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn memory_rules_dir_for_test(home: &Path) -> PathBuf {
+        home.join(".tron")
+            .join(crate::shared::paths::dirs::MEMORY)
+            .join(crate::shared::paths::dirs::RULES)
+    }
+
+    // -- load_project_context --
+
+    #[test]
+    fn load_project_context_from_agent_dir() {
+        let root = create_temp_project();
+        let claude_dir = root.join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(claude_dir.join("AGENTS.md"), "# Project Rules").unwrap();
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load_project_context().unwrap().unwrap();
+        assert_eq!(result.content, "# Project Rules");
+        assert_eq!(result.level, ContextLevel::Project);
+        assert_eq!(result.depth, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn load_project_context_from_root() {
+        let root = create_temp_project();
+        fs::write(root.join("AGENTS.md"), "# Root Rules").unwrap();
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load_project_context().unwrap().unwrap();
+        assert_eq!(result.content, "# Root Rules");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn load_project_context_agent_dir_priority() {
+        let root = create_temp_project();
+        let claude_dir = root.join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(claude_dir.join("AGENTS.md"), "agent dir version").unwrap();
+        fs::write(root.join("AGENTS.md"), "root version").unwrap();
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load_project_context().unwrap().unwrap();
+        assert_eq!(result.content, "agent dir version");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn load_project_context_none_found() {
+        let root = create_temp_project();
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        assert!(loader.load_project_context().unwrap().is_none());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn load_project_context_file_name_priority() {
+        let root = create_temp_project();
+        fs::write(root.join("CLAUDE.md"), "claude").unwrap();
+        fs::write(root.join("AGENTS.md"), "agents").unwrap();
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        // AGENTS.md comes first in default file_names
+        let result = loader.load_project_context().unwrap().unwrap();
+        assert_eq!(result.content, "agents");
+
+        cleanup(&root);
+    }
+
+    // -- load_directory_contexts --
+
+    #[test]
+    fn load_directory_contexts_nested() {
+        let root = create_temp_project();
+        let subdir = root.join("packages").join("agent");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::write(root.join("packages").join("AGENTS.md"), "# Packages Rules").unwrap();
+        fs::write(subdir.join("AGENTS.md"), "# Agent Rules").unwrap();
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let files = loader.load_directory_contexts(&subdir).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].depth, 1);
+        assert_eq!(files[0].level, ContextLevel::Directory);
+        assert_eq!(files[1].depth, 2);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn load_directory_contexts_outside_root() {
+        let root = create_temp_project();
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let files = loader
+            .load_directory_contexts(Path::new("/totally/different"))
+            .unwrap();
+        assert!(files.is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn load_directory_contexts_max_depth() {
+        let root = create_temp_project();
+        let deep = root
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e")
+            .join("f");
+        fs::create_dir_all(&deep).unwrap();
+        // Write files at each level
+        for (i, name) in ["a", "b", "c", "d", "e", "f"].iter().enumerate() {
+            let mut path = root.clone();
+            for n in &["a", "b", "c", "d", "e", "f"][..=i] {
+                path = path.join(n);
+            }
+            fs::write(path.join("AGENTS.md"), format!("level {name}")).unwrap();
+        }
+
+        let loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            max_depth: 3,
+            ..ContextLoaderConfig::default()
+        });
+        let files = loader.load_directory_contexts(&deep).unwrap();
+        assert!(files.len() <= 3);
+
+        cleanup(&root);
+    }
+
+    // -- full load --
+
+    #[test]
+    fn load_merges_project_and_directory() {
+        let root = create_temp_project();
+        let claude_dir = root.join(".claude");
+        let subdir = root.join("src");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::create_dir_all(&subdir).unwrap();
+        fs::write(claude_dir.join("AGENTS.md"), "project rules").unwrap();
+        fs::write(subdir.join("AGENTS.md"), "src rules").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&subdir).unwrap();
+        assert_eq!(result.files.len(), 2);
+        assert!(result.merged.contains("project rules"));
+        assert!(result.merged.contains("src rules"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn load_empty_project() {
+        let root = create_temp_project();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&root).unwrap();
+        assert!(result.files.is_empty());
+        assert!(result.merged.is_empty());
+
+        cleanup(&root);
+    }
+
+    // -- caching --
+
+    #[test]
+    fn load_uses_cache() {
+        let root = create_temp_project();
+        fs::write(root.join("AGENTS.md"), "cached content").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+
+        let r1 = loader.load(&root).unwrap();
+        assert!(r1.merged.contains("cached content"));
+
+        // Modify file but cache should still return old content (same mtime on fast fs)
+        // We test by checking the cache exists
+        assert!(!loader.cache.is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn clear_cache() {
+        let root = create_temp_project();
+        fs::write(root.join("AGENTS.md"), "content").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let _ = loader.load(&root).unwrap();
+        assert!(!loader.cache.is_empty());
+
+        loader.clear_cache();
+        assert!(loader.cache.is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn invalidate_cache_specific() {
+        let root = create_temp_project();
+        let src = root.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(root.join("AGENTS.md"), "root").unwrap();
+        fs::write(src.join("AGENTS.md"), "src").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            ..ContextLoaderConfig::default()
+        });
+        let _ = loader.load(&root).unwrap();
+        let _ = loader.load(&src).unwrap();
+        assert_eq!(loader.cache.len(), 2);
+
+        loader.invalidate_cache(&src);
+        assert_eq!(loader.cache.len(), 1);
+
+        cleanup(&root);
+    }
+
+    // -- merge_contexts --
+
+    #[test]
+    fn merge_single_file() {
+        let files = vec![ContextFile {
+            path: "/f.md".into(),
+            content: "hello".into(),
+            level: ContextLevel::Project,
+            depth: 0,
+        }];
+        assert_eq!(merge_contexts(&files), "hello");
+    }
+
+    #[test]
+    fn merge_multiple_files() {
+        let files = vec![
+            ContextFile {
+                path: "/a.md".into(),
+                content: "first".into(),
+                level: ContextLevel::Project,
+                depth: 0,
+            },
+            ContextFile {
+                path: "/b.md".into(),
+                content: "second".into(),
+                level: ContextLevel::Directory,
+                depth: 1,
+            },
+        ];
+        let result = merge_contexts(&files);
+        assert!(result.contains("first"));
+        assert!(result.contains("second"));
+        // Project file comes first
+        assert!(result.find("first").unwrap() < result.find("second").unwrap());
+    }
+
+    #[test]
+    fn merge_empty() {
+        assert!(merge_contexts(&[]).is_empty());
+    }
+
+    // -- load_global_rules --
+
+    #[test]
+    fn load_global_rules_from_memory_rules_dir() {
+        let home = create_temp_project();
+        let tron_dir = memory_rules_dir_for_test(&home);
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("CLAUDE.md"), "# Global Rules").unwrap();
+
+        let result = load_global_rules(&home);
+        assert_eq!(result, Some("# Global Rules".into()));
+
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_none_if_missing() {
+        let home = create_temp_project();
+        assert!(load_global_rules(&home).is_none());
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_skips_empty_file() {
+        let home = create_temp_project();
+        let tron_dir = memory_rules_dir_for_test(&home);
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("CLAUDE.md"), "   \n  ").unwrap();
+
+        assert!(load_global_rules(&home).is_none());
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_priority_order() {
+        let home = create_temp_project();
+        let tron_dir = memory_rules_dir_for_test(&home);
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("CLAUDE.md"), "claude rules").unwrap();
+        fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
+
+        // CLAUDE.md has higher priority
+        let result = load_global_rules(&home).unwrap();
+        assert_eq!(result, "claude rules");
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_falls_back_to_agents() {
+        let home = create_temp_project();
+        let tron_dir = memory_rules_dir_for_test(&home);
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
+
+        let result = load_global_rules(&home).unwrap();
+        assert_eq!(result, "agents rules");
+        cleanup(&home);
+    }
+
+    // -- merge_rules --
+
+    #[test]
+    fn merge_rules_both_present() {
+        let result = merge_rules(Some("global".into()), Some("project".into()));
+        assert_eq!(result, Some("global\n\nproject".into()));
+    }
+
+    #[test]
+    fn merge_rules_global_only() {
+        let result = merge_rules(Some("global".into()), None);
+        assert_eq!(result, Some("global".into()));
+    }
+
+    #[test]
+    fn merge_rules_project_only() {
+        let result = merge_rules(None, Some("project".into()));
+        assert_eq!(result, Some("project".into()));
+    }
+
+    #[test]
+    fn merge_rules_both_none() {
+        assert!(merge_rules(None, None).is_none());
+    }
+
+    // -- discover_standalone_files --
+
+    #[test]
+    fn discover_standalone_false_skips_root_standalone() {
+        let root = create_temp_project();
+        fs::write(root.join("CLAUDE.md"), "standalone rules").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&root).unwrap();
+        assert!(
+            result.merged.is_empty(),
+            "standalone file should be skipped"
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_false_still_finds_agent_dir() {
+        let root = create_temp_project();
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        fs::write(root.join(".claude").join("CLAUDE.md"), "agent dir rules").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&root).unwrap();
+        assert!(
+            !result.merged.is_empty(),
+            "agent dir file should still be found"
+        );
+        assert!(result.merged.contains("agent dir rules"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_true_finds_both() {
+        let root = create_temp_project();
+        let subdir = root.join("src");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        fs::write(root.join(".claude").join("AGENTS.md"), "agent dir rules").unwrap();
+        fs::write(subdir.join("AGENTS.md"), "standalone dir rules").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: true,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&subdir).unwrap();
+        assert!(result.merged.contains("agent dir rules"));
+        assert!(result.merged.contains("standalone dir rules"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_false_skips_nested_standalone() {
+        let root = create_temp_project();
+        let subdir = root.join("src");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::write(subdir.join("AGENTS.md"), "nested standalone").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&subdir).unwrap();
+        assert!(
+            result.merged.is_empty(),
+            "nested standalone file should be skipped"
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_false_finds_nested_agent_dir() {
+        let root = create_temp_project();
+        let subdir = root.join("src");
+        fs::create_dir_all(subdir.join(".claude")).unwrap();
+        fs::write(subdir.join(".claude").join("AGENTS.md"), "nested agent dir").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&subdir).unwrap();
+        assert!(result.merged.contains("nested agent dir"));
+
+        cleanup(&root);
+    }
+}

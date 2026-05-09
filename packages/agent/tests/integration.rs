@@ -18,26 +18,26 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use tron::core::content::AssistantContent;
-use tron::core::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
-use tron::core::messages::TokenUsage;
+use tron::app::config::ServerConfig;
+use tron::app::server::TronServer;
+use tron::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
+use tron::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use tron::domains::model::providers::models::types::Provider as ProviderKind;
+use tron::domains::model::providers::provider::{
+    Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
+};
+use tron::domains::session::event_store::{ConnectionConfig, EventStore};
+use tron::domains::skills::registry::SkillRegistry;
 use tron::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass, FunctionDefinition,
     FunctionId, Invocation, Provenance, RiskLevel, TraceId, VisibilityScope, WorkerDefinition,
     WorkerInvocationResult, WorkerKind, WorkerProtocolMessage,
 };
-use tron::events::{ConnectionConfig, EventStore};
-use tron::llm::models::types::Provider as ProviderKind;
-use tron::llm::provider::{
-    Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
-};
-use tron::runtime::orchestrator::orchestrator::Orchestrator;
-use tron::runtime::orchestrator::session_manager::SessionManager;
-use tron::server::config::ServerConfig;
-use tron::server::runtime::streams::EngineStreamEventPump;
-use tron::server::server::TronServer;
-use tron::server::shared::context::{AgentDeps, ServerRuntimeContext};
-use tron::skills::registry::SkillRegistry;
+use tron::shared::content::AssistantContent;
+use tron::shared::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
+use tron::shared::messages::TokenUsage;
+use tron::shared::server::context::{AgentDeps, ServerRuntimeContext};
+use tron::transport::runtime::streams::EngineStreamEventPump;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -58,10 +58,10 @@ fn unique_test_path(name: &str, extension: &str) -> PathBuf {
 fn unique_settings_path() -> PathBuf {
     let dir = unique_test_path("tron-home", "dir");
     let home = dir.join(".tron");
-    tron::core::constitution::ensure_tron_home_at(&home).unwrap();
-    home.join(tron::core::paths::dirs::PROFILES)
-        .join(tron::core::profile::USER_PROFILE)
-        .join(tron::core::paths::files::PROFILE_TOML)
+    tron::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    home.join(tron::shared::paths::dirs::PROFILES)
+        .join(tron::shared::profile::USER_PROFILE)
+        .join(tron::shared::paths::files::PROFILE_TOML)
 }
 
 fn unique_runtime_path(name: &str, extension: &str) -> PathBuf {
@@ -74,21 +74,26 @@ fn unique_runtime_path(name: &str, extension: &str) -> PathBuf {
 
 fn unique_event_store() -> Arc<EventStore> {
     let db_path = unique_runtime_path("events", "db");
-    let pool = tron::events::new_file(&db_path.to_string_lossy(), &ConnectionConfig::default())
-        .unwrap_or_else(|error| panic!("failed to open {}: {error}", db_path.display()));
+    let pool = tron::domains::session::event_store::new_file(
+        &db_path.to_string_lossy(),
+        &ConnectionConfig::default(),
+    )
+    .unwrap_or_else(|error| panic!("failed to open {}: {error}", db_path.display()));
     {
         let conn = pool.get().unwrap();
-        let _ = tron::events::run_migrations(&conn).unwrap();
+        let _ = tron::domains::session::event_store::run_migrations(&conn).unwrap();
     }
     Arc::new(EventStore::new(pool))
 }
 
-fn profile_runtime_for_settings_path(path: &std::path::Path) -> Arc<tron::runtime::ProfileRuntime> {
+fn profile_runtime_for_settings_path(
+    path: &std::path::Path,
+) -> Arc<tron::domains::agent::runner::ProfileRuntime> {
     let home = path
         .ancestors()
         .nth(3)
         .expect("settings path must be profiles/user/profile.toml");
-    Arc::new(tron::runtime::ProfileRuntime::load(home).unwrap())
+    Arc::new(tron::domains::agent::runner::ProfileRuntime::load(home).unwrap())
 }
 
 /// Boot a test server and return the WS URL + shutdown handle.
@@ -99,7 +104,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
     let settings_path = unique_settings_path();
-    tron::settings::reload_settings_from_path(&settings_path).unwrap();
+    tron::domains::settings::reload_settings_from_path(&settings_path).unwrap();
 
     let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
@@ -108,16 +113,16 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry,
         memory_registry: Arc::new(parking_lot::Mutex::new(
-            tron::runtime::memory::MemoryRegistry::new(),
+            tron::domains::agent::runner::memory::MemoryRegistry::new(),
         )),
         profile_runtime: profile_runtime_for_settings_path(&settings_path),
         settings_path,
         agent_deps: None,
-        tool_runtime: tron::server::shared::context::ToolRuntimeConfig::default(),
+        tool_runtime: tron::shared::server::context::ToolRuntimeConfig::default(),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
-        health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
@@ -125,7 +130,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::domains::session::context::ContextArtifactsService::new(),
+            tron::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -134,7 +139,9 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
-        hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
+        hook_abort_tracker: Arc::new(
+            tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker::new(),
+        ),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
         onboarded_marker_path: unique_runtime_path("onboarded", "marker"),
         release_fetcher: None,
@@ -146,9 +153,9 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         .build_recorder()
         .handle();
     let server = Arc::new(TronServer::new(config, runtime_context, metrics_handle));
-    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+    tron::transport::setup::register_server_domains_for_context(server.runtime_context())
         .expect("integration engine protocol should register");
-    tron::server::runtime::EngineRuntimeServices::start(&server);
+    tron::transport::runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
@@ -193,7 +200,7 @@ impl Provider for TextOnlyProvider {
     }
     async fn stream(
         &self,
-        _c: &tron::core::messages::Context,
+        _c: &tron::shared::messages::Context,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         let text = self.text.clone();
@@ -238,7 +245,7 @@ impl Provider for LaggyTextProvider {
     }
     async fn stream(
         &self,
-        _c: &tron::core::messages::Context,
+        _c: &tron::shared::messages::Context,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         let text = self.text.clone();
@@ -269,7 +276,7 @@ impl Provider for ErrorProvider {
     }
     async fn stream(
         &self,
-        _c: &tron::core::messages::Context,
+        _c: &tron::shared::messages::Context,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         Err(ProviderError::Auth {
@@ -289,7 +296,7 @@ impl Provider for SlowProvider {
     }
     async fn stream(
         &self,
-        _c: &tron::core::messages::Context,
+        _c: &tron::shared::messages::Context,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         let s = async_stream::stream! {
@@ -334,7 +341,7 @@ impl Provider for PanicThenTextProvider {
 
     async fn stream(
         &self,
-        _c: &tron::core::messages::Context,
+        _c: &tron::shared::messages::Context,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         assert!(
@@ -384,7 +391,7 @@ async fn boot_server_with_provider_and_handles(
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
     let settings_path = unique_settings_path();
-    tron::settings::reload_settings_from_path(&settings_path).unwrap();
+    tron::domains::settings::reload_settings_from_path(&settings_path).unwrap();
 
     let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
@@ -393,7 +400,7 @@ async fn boot_server_with_provider_and_handles(
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry,
         memory_registry: Arc::new(parking_lot::Mutex::new(
-            tron::runtime::memory::MemoryRegistry::new(),
+            tron::domains::agent::runner::memory::MemoryRegistry::new(),
         )),
         profile_runtime: profile_runtime_for_settings_path(&settings_path),
         settings_path,
@@ -401,11 +408,11 @@ async fn boot_server_with_provider_and_handles(
             provider_factory: Arc::new(FixedProviderFactory(provider)),
             guardrails: None,
         }),
-        tool_runtime: tron::server::shared::context::ToolRuntimeConfig::default(),
+        tool_runtime: tron::shared::server::context::ToolRuntimeConfig::default(),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
-        health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
@@ -413,7 +420,7 @@ async fn boot_server_with_provider_and_handles(
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
-            tron::server::domains::session::context::ContextArtifactsService::new(),
+            tron::domains::session::context::ContextArtifactsService::new(),
         ),
         auth_path: unique_runtime_path("auth", "json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -422,7 +429,9 @@ async fn boot_server_with_provider_and_handles(
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
-        hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
+        hook_abort_tracker: Arc::new(
+            tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker::new(),
+        ),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
         onboarded_marker_path: unique_runtime_path("onboarded", "marker"),
         release_fetcher: None,
@@ -434,9 +443,9 @@ async fn boot_server_with_provider_and_handles(
         .build_recorder()
         .handle();
     let server = Arc::new(TronServer::new(config, runtime_context, metrics_handle));
-    tron::server::transport::setup::register_server_domains_for_context(server.runtime_context())
+    tron::transport::setup::register_server_domains_for_context(server.runtime_context())
         .expect("integration engine protocol should register");
-    tron::server::runtime::EngineRuntimeServices::start(&server);
+    tron::transport::runtime::EngineRuntimeServices::start(&server);
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
@@ -465,7 +474,7 @@ async fn connect(url: &str) -> WsStream {
         .get(url)
         .cloned()
         .expect("test server auth path should be registered before connect");
-    let token = tron::server::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
+    let token = tron::app::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
     let mut request = url.into_client_request().unwrap();
     request
         .headers_mut()
@@ -482,7 +491,7 @@ async fn connect_worker(engine_url: &str) -> WsStream {
         .get(engine_url)
         .cloned()
         .expect("test server auth path should be registered before worker connect");
-    let token = tron::server::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
+    let token = tron::app::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
     let mut request = worker_ws_url_for(engine_url).into_client_request().unwrap();
     request
         .headers_mut()
@@ -507,7 +516,7 @@ fn worker_ws_url_for(ws_url: &str) -> String {
 }
 
 fn register_server_auth_path(url: &str, auth_path: &std::path::Path) {
-    let _ = tron::server::onboarding::load_or_create_bearer_token(auth_path).unwrap();
+    let _ = tron::app::onboarding::load_or_create_bearer_token(auth_path).unwrap();
     TEST_SERVER_AUTH_PATHS
         .lock()
         .unwrap()

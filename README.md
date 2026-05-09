@@ -116,82 +116,41 @@ tron/
 
 ## Rust Modules
 
-The agent is a single `tron` crate (see `packages/agent/Cargo.toml`). What used to be a multi-crate workspace was consolidated into one compilation unit; the modules below sit inside `packages/agent/src/` and are wired up in `lib.rs`. Dependencies flow top-down; no cycles.
+The agent is a single `tron` crate (see `packages/agent/Cargo.toml`). The crate tree now mirrors the pure engine model: app/bootstrap, thin transports, the engine fabric, worker-owned domains, platform integrations, and shared foundation/protocol helpers. Dependencies flow inward: transports build engine requests, domains own behavior, and the engine owns policy/ledger/streams/queues/workers.
 
 ```
-core               Foundation: errors, IDs, paths, retry, text, content, ...
-  |
-  +-- settings         Settings schema, layered loading, global singleton
-  +-- skills           SKILL.md parser, registry, context injection
-  +-- transcription    Speech-to-text via parakeet-mlx Python sidecar (MLX backend)
-  |
-  +-- events           SQLite event store, migrations, reconstruction
-  +-- import           Claude Code session import (parse → linearize → assemble → transform → write)
-  +-- llm              Provider trait, model registry, SSE streaming, auth
-  |     +-- anthropic/   Claude (OAuth + API key, cache pruning)
-  |     +-- openai/      GPT/o-series (OAuth + API key)
-  |     +-- google/      Gemini (Cloud Code Assist OAuth + API key)
-  |     +-- minimax/     MiniMax (API key only)
-  |     +-- kimi/        Kimi/Moonshot (API key only)
-  |     +-- ollama/      Gemma 4 local inference (no auth, native /api/chat)
-  +-- mcp              Model Context Protocol client/server pump
-  +-- tools            Tool trait plus canonical tool::* implementations
-  +-- engine           Live capability catalog (workers, functions, triggers)
-  +-- cron             Scheduled job runner (automations)
-  +-- prompt_library   Persistent prompt history + user-authored snippets
-  +-- worktree         Git worktree management for isolated subagent runs
-  |
-  +-- runtime          Agent loop, context, hooks, orchestrator, tasks
-  |
-  +-- server           Axum HTTP/WS, pure engine transport, domains, runtime, APNS
-  |                    +-- domains         Domain-owned workers: contract/deps/bindings/operations/services
-  |                    +-- runtime         Queue drainers, stream projection, external workers
-  |                    +-- transport       /engine protocol parsing + EngineTransportRequest
-  |                    +-- platform        Codex App Server, APNS, device broker
-  |                    +-- shared          Transport-neutral context, errors, events, validation
-  |                    +-- updater         GitHub Releases poller + notify-only update state
-  |
-  +-- main.rs          Binary entry point: DB policy, CLI subcommands, startup
+app/        Binary/server bootstrap, health, metrics, onboarding, shutdown
+transport/  /engine client protocol, /engine/workers socket transport, auth gate
+engine/     Live capability fabric: catalog, workers, triggers, ledger, streams, queues
+domains/    Every Tron worker: contracts, deps, handlers, operations, local services, tests
+platform/   OS/vendor integrations: APNS, Codex App Server, device broker, updater
+shared/     Foundation IDs/errors/paths, protocol DTOs, server-neutral helper types
+main.rs     Thin CLI/startup entry point
 ```
 
 | Module | Purpose | Key Types |
 |--------|---------|-----------|
-| `core` | Shared vocabulary, paths, errors, message model | `Message`, `TronError`, `StreamEvent`, `TronEvent`, `SessionId`, `paths::*` |
-| `settings` | Layered config (defaults + file + env) | `TronSettings`, `get_settings()`, `reload_settings_from_path()` |
-| `skills` | Skill loading + injection | `SkillRegistry`, `process_prompt_for_skills()` |
-| `transcription` | Speech-to-text via MLX sidecar | `MlxEngine`, `TranscriptionResult`, `TranscriptionError` |
-| `events` | Event sourcing + SQLite | `EventStore`, `EventType`, `SessionEvent` |
-| `import` | Claude Code session import | `import_session()`, `ImportResult`, `ClaudeProject`, `ClaudeSessionMeta` |
-| `llm` | LLM abstraction + model registry | `Provider` trait, `ProviderFactory`, `ProviderStreamOptions` |
-| `mcp` | Model Context Protocol integration | MCP client/server types |
-| `tools` | Tool implementation bodies used by canonical `tool::*` capabilities | `TronTool` trait, per-tool structs |
+| `app` | Startup/bootstrap + HTTP shell | `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
+| `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
-| `cron` | Automation scheduler | Cron job runner, schedule parser |
-| `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
-| `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
-| `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
-| `server` | HTTP/WS + pure engine protocol | `TronServer`, `ServerRuntimeContext`, `EngineStreamEventPump` |
-| `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
-| `server::domains` | Domain-owned worker/function surface | `registration::register_domain_workers_for_context()`, `worker::DomainWorkerModule`, per-domain `contract.rs`, `deps.rs`, declarative `handlers.rs` binding tables, operation workflow modules, typed stream publishers |
-| `server::runtime` | Engine runtime services | `EngineRuntimeServices`, `EngineStreamEventPump`, queue drainers |
-| `server::platform::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
-| `server::shared` | Transport-neutral server helpers | `ServerRuntimeContext`, `CapabilityError`, `ServerEventPayload` |
-| `server::transport` | `/engine` client protocol, worker auth, transport envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
-| `server::updater` | GitHub Releases checks + update notifications | `SchedulerDeps`, `UpdaterState`, `UpdateDecision` |
+| `domains` | Worker-owned Tron behavior and implementation code | `registration::register_domain_workers_for_context()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
+| `platform` | OS/vendor/product-protocol integrations | `CodexAppServerManager`, APNS senders, updater scheduler |
+| `shared` | Foundation vocabulary and neutral helper types | `Message`, `TronError`, `StreamEvent`, `SessionId`, `ServerRuntimeContext`, `CapabilityError` |
 
-The server package is intentionally vertical by domain. A domain root is only
-docs, exports, and worker registration. Shared worker registration types live in
-`server::domains::worker`; the startup aggregator in `server::domains::registration`
+The domain package is intentionally vertical. A domain root is only docs,
+exports, and worker registration. Shared worker registration types live in
+`domains::worker`; the startup aggregator in `domains::registration`
 iterates each domain's `worker_module(...)`. `contract.rs` owns the canonical
 function ids, schemas, authority, idempotency, risk, leases, compensation, and
 declared stream topics; `deps.rs` narrows setup into the handles that domain
 uses; `handlers.rs` binds operation keys to local handler structs; `operations/`
 contains executable operation bodies. Runtime support is split the same way in
-domain-owned folders such as `agent/runtime/service/*`, `agent/runtime/runtime/*`,
-`session/context/*`, and `context/queries/*`; `stream.rs` publishes only that
-domain's declared topics. Cross-domain access goes through explicit domain
-services or shared DTOs, so an engineer can follow a capability by reading one
-domain folder instead of a central dispatch table.
+domain-owned folders such as `domains/agent/runner/*`,
+`domains/agent/runtime/*`, `domains/session/event_store/*`,
+`domains/tools/implementations/*`, and `domains/worktree/implementation/*`.
+`stream.rs` publishes only that domain's declared topics. Cross-domain access
+goes through explicit domain services or shared DTOs, so an engineer can follow
+a capability by reading one domain folder instead of a central dispatch table.
 
 ---
 
@@ -312,7 +271,7 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 ## Tools
 
-Tools are registered by the `server::domains::tools` worker as canonical `tool::*` capabilities. Each built-in tool has a tools-domain capability spec with model-facing schema metadata, authority/risk/idempotency policy, and a local handler binding. At model-call time, provider-facing tool schemas are projected from the live engine catalog, so built-ins, engine meta-tools, and eligible live MCP capabilities are filtered by current visibility, health, authority, and schema metadata before being sent to the model.
+Tools are registered by the `domains::tools` worker as canonical `tool::*` capabilities. Each built-in tool has a tools-domain capability spec with model-facing schema metadata, authority/risk/idempotency policy, and a local handler binding. At model-call time, provider-facing tool schemas are projected from the live engine catalog, so built-ins, engine meta-tools, and eligible live MCP capabilities are filtered by current visibility, health, authority, and schema metadata before being sent to the model.
 
 ### Always-on (22)
 
@@ -427,7 +386,7 @@ entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.
 
 The event store uses an immutable, append-only log with **80 typed event variants**. Sessions are tree-structured, supporting fork and rewind. State is always reconstructed from events; no mutable session state is stored outside the log.
 
-The canonical event list is generated by the `define_events!` macro in `packages/agent/src/events/types/macros.rs`, invoked from `events/types/generated.rs`. Adding a new event means editing `generated.rs` and adding a payload type — the macro generates the `EventType` enum, wire-format helpers, and `ALL_EVENT_TYPES` automatically.
+The canonical event list is generated by the `define_events!` macro in `packages/agent/src/domains/session/event_store/types/macros.rs`, invoked from `events/types/generated.rs`. Adding a new event means editing `generated.rs` and adding a payload type — the macro generates the `EventType` enum, wire-format helpers, and `ALL_EVENT_TYPES` automatically.
 
 ### Event Categories
 
@@ -491,7 +450,7 @@ Settings are server-authoritative. Engine-native clients read the current valid 
 
 The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If the managed default is missing or corrupt, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
 
-The schema is defined in `packages/agent/src/settings/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
+The schema is defined in `packages/agent/src/domains/settings/implementation/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 
 ### Key Configuration
 
@@ -593,7 +552,7 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
 
 **Storage:** `~/.tron/profiles/auth.json` (mode 600)
 
-The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/llm/auth/types.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
+The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/provider_credentials/types.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
 Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That sentinel is valid only as pristine install state: first server boot materializes it through the normal atomic `0o600` auth writer into `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten.
 
@@ -645,7 +604,7 @@ Rotation is serialized through a process-wide mutex and the on-disk write is ato
 
 The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported via the `paired` field of the canonical `system::get_info` capability (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
-See [`packages/agent/src/server/onboarding/mod.rs`](packages/agent/src/server/onboarding/mod.rs) for the full token + sentinel lifecycle.
+See [`packages/agent/src/app/onboarding/mod.rs`](packages/agent/src/app/onboarding/mod.rs) for the full token + sentinel lifecycle.
 
 ---
 
@@ -699,7 +658,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
+Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
 The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, worker/sandbox lifecycle stream records, and compensation audit records; live catalog definitions are still in memory. The observability worker reads this ledger as local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`.
 
@@ -1033,7 +992,7 @@ Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_I
 
 ### User-mode Update Checks
 
-For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/server/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`. After app replacement, the wrapper syncs bundled managed skills into `~/.tron/skills/` the next time the menu-bar app opens or starts the helper.
+For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/platform/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`. After app replacement, the wrapper syncs bundled managed skills into `~/.tron/skills/` the next time the menu-bar app opens or starts the helper.
 
 | Phase | Action | Effect |
 |-------|--------|--------|
