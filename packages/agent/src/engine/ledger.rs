@@ -581,6 +581,8 @@ impl SqliteEngineLedgerStore {
             "compensation_status",
             "TEXT",
         )?;
+        ensure_column(&self.conn, "engine_invocations", "session_id", "TEXT")?;
+        ensure_column(&self.conn, "engine_invocations", "workspace_id", "TEXT")?;
         Ok(())
     }
 
@@ -780,12 +782,13 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                    (invocation_id, function_id, worker_id, function_revision,
                     catalog_revision, actor_id, actor_kind_json, authority_grant_id,
                     authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
-                    delivery_mode_json, idempotency_scope_kind, idempotency_scope_value,
-                    resource_lease_ids_json, compensation_status,
-                    idempotency_key, replayed_from, succeeded, result_json,
-                    error_json, timestamp)
+                    session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
+                    idempotency_scope_value, resource_lease_ids_json, compensation_status,
+                    idempotency_key, replayed_from, succeeded, result_json, error_json,
+                    timestamp)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
+                         ?24, ?25)",
                 params![
                     record.invocation_id.as_str(),
                     record.function_id.as_str(),
@@ -805,6 +808,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                         .as_ref()
                         .map(InvocationId::as_str),
                     record.trigger_id.as_ref().map(TriggerId::as_str),
+                    record.session_id.as_deref(),
+                    record.workspace_id.as_deref(),
                     to_json_string("append_invocation.delivery_mode", &record.delivery_mode)?,
                     record
                         .idempotency_scope
@@ -838,10 +843,10 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                 "SELECT invocation_id, function_id, worker_id, function_revision,
                         catalog_revision, actor_id, actor_kind_json, authority_grant_id,
                         authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
-                        delivery_mode_json, idempotency_scope_kind, idempotency_scope_value,
-                        resource_lease_ids_json, compensation_status,
-                        idempotency_key, replayed_from, succeeded, result_json,
-                        error_json, timestamp
+                        session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
+                        idempotency_scope_value, resource_lease_ids_json, compensation_status,
+                        idempotency_key, replayed_from, succeeded, result_json, error_json,
+                        timestamp
                  FROM engine_invocations
                  ORDER BY rowid ASC",
             )
@@ -873,32 +878,36 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                 trace_id: row.get(9).map_err(|err| sqlite_err("inv.trace", err))?,
                 parent_invocation_id: row.get(10).map_err(|err| sqlite_err("inv.parent", err))?,
                 trigger_id: row.get(11).map_err(|err| sqlite_err("inv.trigger", err))?,
-                delivery_mode_json: row.get(12).map_err(|err| sqlite_err("inv.delivery", err))?,
-                idempotency_scope_kind: row
+                session_id: row.get(12).map_err(|err| sqlite_err("inv.session", err))?,
+                workspace_id: row
                     .get(13)
+                    .map_err(|err| sqlite_err("inv.workspace", err))?,
+                delivery_mode_json: row.get(14).map_err(|err| sqlite_err("inv.delivery", err))?,
+                idempotency_scope_kind: row
+                    .get(15)
                     .map_err(|err| sqlite_err("inv.scope_kind", err))?,
                 idempotency_scope_value: row
-                    .get(14)
+                    .get(16)
                     .map_err(|err| sqlite_err("inv.scope_value", err))?,
                 resource_lease_ids_json: row
-                    .get(15)
+                    .get(17)
                     .map_err(|err| sqlite_err("inv.resource_leases", err))?,
                 compensation_status: row
-                    .get(16)
+                    .get(18)
                     .map_err(|err| sqlite_err("inv.compensation_status", err))?,
                 idempotency_key: row
-                    .get(17)
+                    .get(19)
                     .map_err(|err| sqlite_err("inv.idempotency_key", err))?,
                 replayed_from: row
-                    .get(18)
+                    .get(20)
                     .map_err(|err| sqlite_err("inv.replayed_from", err))?,
                 succeeded: row
-                    .get(19)
+                    .get(21)
                     .map_err(|err| sqlite_err("inv.succeeded", err))?,
-                result_json: row.get(20).map_err(|err| sqlite_err("inv.result", err))?,
-                error_json: row.get(21).map_err(|err| sqlite_err("inv.error", err))?,
+                result_json: row.get(22).map_err(|err| sqlite_err("inv.result", err))?,
+                error_json: row.get(23).map_err(|err| sqlite_err("inv.error", err))?,
                 timestamp: row
-                    .get(22)
+                    .get(24)
                     .map_err(|err| sqlite_err("inv.timestamp", err))?,
             })?);
         }
@@ -1042,6 +1051,8 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   trace_id                 TEXT NOT NULL,
   parent_invocation_id     TEXT,
   trigger_id               TEXT,
+  session_id               TEXT,
+  workspace_id             TEXT,
   delivery_mode_json       TEXT NOT NULL,
   idempotency_scope_kind   TEXT,
   idempotency_scope_value  TEXT,
@@ -1108,6 +1119,8 @@ struct RawInvocationRow {
     trace_id: String,
     parent_invocation_id: Option<String>,
     trigger_id: Option<String>,
+    session_id: Option<String>,
+    workspace_id: Option<String>,
     delivery_mode_json: String,
     idempotency_scope_kind: Option<String>,
     idempotency_scope_value: Option<String>,
@@ -1183,6 +1196,8 @@ fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationRecord> {
             .map(InvocationId::new)
             .transpose()?,
         trigger_id: row.trigger_id.map(TriggerId::new).transpose()?,
+        session_id: row.session_id,
+        workspace_id: row.workspace_id,
         delivery_mode: from_json_string::<DeliveryMode>(
             "invocation.delivery_mode",
             &row.delivery_mode_json,

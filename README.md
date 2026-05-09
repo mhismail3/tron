@@ -362,7 +362,10 @@ Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, and `approval::*` preserve the runtime semantics for delivery,
 state, queued handoff, and human approval. `catalog::*`, `worker::*`, and
 `observability::*` expose live catalog snapshots, worker health/lifecycle, trace
-spans/logs, and metrics through the same canonical invocation path. Query
+summaries, spans, structured log projections, and metrics through the same
+canonical invocation path. A practical debugging trace includes invocation
+records, stream publications, approvals, resource leases, and compensation
+records, all tied together by `traceId` plus `parentInvocationId`. Query
 response shaping for these privileged primitive workers lives under
 `packages/agent/src/engine/primitives/runtime.rs`; `EngineHost` coordinates
 catalog, ledger, stream, lease, approval, and compensation access without owning
@@ -660,7 +663,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
-The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, worker/sandbox lifecycle stream records, and compensation audit records; live catalog definitions are still in memory. The observability worker reads this ledger as local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`.
+The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records with trace, parent, session, and workspace scope, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, worker/sandbox lifecycle stream records, and compensation audit records; live catalog definitions are still in memory. The observability worker reads this ledger as local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`.
 
 ### Tables
 

@@ -330,7 +330,13 @@ fn engine_ledger_contract(store: &mut dyn EngineLedgerStore) {
         vec![change]
     );
 
-    let invocation = Invocation::new_sync(fid("alpha::read"), json!({"x": 1}), causal());
+    let invocation = Invocation::new_sync(
+        fid("alpha::read"),
+        json!({"x": 1}),
+        causal()
+            .with_session_id("session-a")
+            .with_workspace_id("workspace-a"),
+    );
     let result = super::invocation::InvocationResult::success(
         &invocation,
         wid("w1"),
@@ -343,6 +349,8 @@ fn engine_ledger_contract(store: &mut dyn EngineLedgerStore) {
     let records = store.list_invocations().unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].invocation_id, invocation.id);
+    assert_eq!(records[0].session_id.as_deref(), Some("session-a"));
+    assert_eq!(records[0].workspace_id.as_deref(), Some("workspace-a"));
     assert_eq!(records[0].result_value, Some(json!({"ok": true})));
 
     let key = IdempotencyKey {
@@ -2219,6 +2227,16 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
         ))
         .await;
     assert_eq!(trace_get.error, None);
+    assert!(
+        trace_get.value.as_ref().unwrap()["summary"]["streamCount"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+    assert_eq!(
+        trace_get.value.as_ref().unwrap()["summary"]["leaseCount"],
+        1
+    );
     let invocations = trace_get.value.as_ref().unwrap()["invocations"]
         .as_array()
         .unwrap();
@@ -2257,6 +2275,37 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
             .iter()
             .any(|span| span["functionId"] == "worker::list")
     );
+    assert!(
+        spans.value.as_ref().unwrap()["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|span| span["kind"] == "stream" && span["topic"] == "test.observability")
+    );
+    assert!(
+        spans.value.as_ref().unwrap()["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|span| span["kind"] == "resource_lease"
+                && span["resourceId"] == "primitive-trace-resource")
+    );
+
+    let stream_logs = handle
+        .invoke(host_invocation(
+            "observability::log_query",
+            json!({"traceId": "primitive-trace", "text": "stream"}),
+            system_context("observability-query", "observability.read"),
+        ))
+        .await;
+    assert_eq!(stream_logs.error, None);
+    let logs = stream_logs.value.as_ref().unwrap()["logs"]
+        .as_array()
+        .unwrap();
+    assert!(
+        logs.iter()
+            .any(|log| log["kind"] == "stream" && log["topic"] == "test.observability")
+    );
 
     let metrics = handle
         .invoke(host_invocation(
@@ -2268,6 +2317,12 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
     assert_eq!(metrics.error, None);
     assert!(
         metrics.value.as_ref().unwrap()["metrics"]["workers"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+    assert!(
+        metrics.value.as_ref().unwrap()["metrics"]["traces"]
             .as_u64()
             .unwrap()
             >= 1

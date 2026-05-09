@@ -300,6 +300,10 @@ pub struct InvocationRecord {
     pub parent_invocation_id: Option<InvocationId>,
     /// Trigger id.
     pub trigger_id: Option<TriggerId>,
+    /// Session scope active when the invocation completed.
+    pub session_id: Option<String>,
+    /// Workspace scope active when the invocation completed.
+    pub workspace_id: Option<String>,
     /// Delivery mode.
     pub delivery_mode: DeliveryMode,
     /// Idempotency key.
@@ -343,6 +347,8 @@ impl InvocationRecord {
             trace_id: invocation.causal_context.trace_id.clone(),
             parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
             trigger_id: invocation.causal_context.trigger_id.clone(),
+            session_id: invocation.causal_context.session_id.clone(),
+            workspace_id: invocation.causal_context.workspace_id.clone(),
             delivery_mode: invocation.delivery_mode,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
             idempotency_scope,

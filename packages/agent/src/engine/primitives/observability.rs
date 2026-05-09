@@ -26,10 +26,11 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             trace_get_schema(),
             json!({
                 "type": "object",
-                "required": ["traceId", "invocations", "catalogChanges", "streams", "approvals", "leases", "compensation"],
+                "required": ["traceId", "summary", "invocations", "catalogChanges", "streams", "approvals", "leases", "compensation"],
                 "additionalProperties": false,
                 "properties": {
                     "traceId": {"type": "string"},
+                    "summary": {"type": "object"},
                     "invocations": {"type": "array"},
                     "catalogChanges": {"type": "array"},
                     "streams": {"type": "array"},

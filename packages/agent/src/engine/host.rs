@@ -1956,10 +1956,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
         self.catalog.trigger_types().len()
     }
 
-    fn invocation_count(&self) -> usize {
-        self.catalog.invocations().len()
-    }
-
     fn catalog_change_count(&self) -> usize {
         self.catalog.changes().len()
     }

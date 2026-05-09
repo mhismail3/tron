@@ -19,6 +19,26 @@ use crate::engine::types::{
     VisibilityScope, WorkerDefinition,
 };
 
+struct TraceComponents {
+    invocations: Vec<InvocationRecord>,
+    catalog_changes: Vec<CatalogChange>,
+    approvals: Vec<EngineApprovalRecord>,
+    streams: Vec<EngineStreamEvent>,
+    leases: Vec<EngineResourceLease>,
+    compensation: Vec<Value>,
+}
+
+#[derive(Default)]
+struct TraceAccumulator {
+    invocation_count: usize,
+    failed_invocations: usize,
+    first_timestamp: Option<String>,
+    last_timestamp: Option<String>,
+    root_invocation_id: Option<String>,
+    session_id: Option<String>,
+    workspace_id: Option<String>,
+}
+
 /// Narrow host interface required by host-dispatched primitive workers.
 pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn catalog_revision(&self) -> CatalogRevision;
@@ -41,7 +61,6 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn function_count(&self) -> usize;
     fn trigger_count(&self) -> usize;
     fn trigger_type_count(&self) -> usize;
-    fn invocation_count(&self) -> usize;
     fn catalog_change_count(&self) -> usize;
 }
 
@@ -205,109 +224,185 @@ fn worker_disconnect(
 
 fn trace_get(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
     let trace_id = required_str(&invocation.payload, "traceId")?;
-    let invocations = host
-        .invocations()
-        .into_iter()
-        .filter(|record| record.trace_id.as_str() == trace_id)
-        .map(|record| invocation_record_value(&record))
-        .collect::<Vec<_>>();
-    let catalog_changes = host
-        .ledger_catalog_changes()?
-        .into_iter()
-        .filter(|change| change.id.contains(trace_id) || change.subject_id.as_str() == trace_id)
-        .map(|change| catalog_change_value(&change))
-        .collect::<Vec<_>>();
-    let approvals = host
-        .approval_records_for_trace(trace_id)?
-        .into_iter()
-        .map(|record| json!(record))
-        .collect::<Vec<_>>();
-    let streams = host
-        .stream_records_for_trace(trace_id)?
-        .into_iter()
-        .map(|record| json!(record))
-        .collect::<Vec<_>>();
+    let trace = trace_components(host, trace_id)?;
     Ok(json!({
         "traceId": trace_id,
-        "invocations": invocations,
-        "catalogChanges": catalog_changes,
-        "streams": streams,
-        "approvals": approvals,
-        "leases": host.resource_leases_for_trace(trace_id)?,
-        "compensation": host.compensation_records_for_trace(trace_id)?,
+        "summary": trace_summary(trace_id, &trace),
+        "invocations": trace.invocations.iter().map(invocation_record_value).collect::<Vec<_>>(),
+        "catalogChanges": trace.catalog_changes.iter().map(catalog_change_value).collect::<Vec<_>>(),
+        "streams": trace.streams.iter().map(|record| json!(record)).collect::<Vec<_>>(),
+        "approvals": trace.approvals.iter().map(|record| json!(record)).collect::<Vec<_>>(),
+        "leases": trace.leases,
+        "compensation": trace.compensation,
     }))
 }
 
 fn trace_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
     let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-    let mut traces = std::collections::BTreeMap::<String, usize>::new();
+    let session_id = optional_string(invocation.payload.get("sessionId"))?;
+    let workspace_id = optional_string(invocation.payload.get("workspaceId"))?;
+    let mut traces = std::collections::BTreeMap::<String, TraceAccumulator>::new();
     for record in host.invocations() {
-        *traces.entry(record.trace_id.to_string()).or_insert(0) += 1;
+        if session_id
+            .as_deref()
+            .is_some_and(|wanted| record.session_id.as_deref() != Some(wanted))
+        {
+            continue;
+        }
+        if workspace_id
+            .as_deref()
+            .is_some_and(|wanted| record.workspace_id.as_deref() != Some(wanted))
+        {
+            continue;
+        }
+        let entry = traces.entry(record.trace_id.to_string()).or_default();
+        entry.invocation_count += 1;
+        if !record.succeeded {
+            entry.failed_invocations += 1;
+        }
+        if entry.session_id.is_none() {
+            entry.session_id.clone_from(&record.session_id);
+        }
+        if entry.workspace_id.is_none() {
+            entry.workspace_id.clone_from(&record.workspace_id);
+        }
+        if record.parent_invocation_id.is_none() && entry.root_invocation_id.is_none() {
+            entry.root_invocation_id = Some(record.invocation_id.to_string());
+        }
+        observe_timestamp(entry, record.timestamp.to_rfc3339());
     }
-    let traces = traces
+    let mut traces = traces
         .into_iter()
-        .rev()
-        .take(limit.min(500))
-        .map(|(trace_id, invocation_count)| {
+        .map(|(trace_id, summary)| {
             json!({
                 "traceId": trace_id,
-                "invocationCount": invocation_count,
+                "invocationCount": summary.invocation_count,
+                "failedInvocations": summary.failed_invocations,
+                "status": if summary.failed_invocations > 0 { "error" } else { "ok" },
+                "rootInvocationId": summary.root_invocation_id,
+                "sessionId": summary.session_id,
+                "workspaceId": summary.workspace_id,
+                "firstTimestamp": summary.first_timestamp,
+                "lastTimestamp": summary.last_timestamp,
             })
         })
         .collect::<Vec<_>>();
+    traces.sort_by(|left, right| {
+        right["lastTimestamp"]
+            .as_str()
+            .cmp(&left["lastTimestamp"].as_str())
+    });
+    traces.truncate(limit.min(500));
     Ok(json!({ "traces": traces }))
 }
 
 fn span_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
     let trace_id = required_str(&invocation.payload, "traceId")?;
-    let spans = host
-        .invocations()
-        .into_iter()
-        .filter(|record| record.trace_id.as_str() == trace_id)
+    let trace = trace_components(host, trace_id)?;
+    let mut spans = trace
+        .invocations
+        .iter()
         .map(|record| {
             json!({
                 "spanId": record.invocation_id.as_str(),
                 "parentSpanId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
+                "kind": "invocation",
                 "functionId": record.function_id.as_str(),
                 "workerId": record.worker_id.as_str(),
                 "triggerId": record.trigger_id.as_ref().map(TriggerId::as_str),
+                "sessionId": record.session_id.as_deref(),
+                "workspaceId": record.workspace_id.as_deref(),
+                "status": if record.succeeded { "ok" } else { "error" },
                 "succeeded": record.succeeded,
                 "timestamp": record.timestamp.to_rfc3339(),
             })
         })
         .collect::<Vec<_>>();
+    spans.extend(trace.streams.iter().map(|record| {
+        json!({
+            "spanId": format!("stream:{}", record.cursor.0),
+            "parentSpanId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
+            "kind": "stream",
+            "topic": record.topic,
+            "producer": record.producer,
+            "status": "published",
+            "timestamp": record.created_at.to_rfc3339(),
+        })
+    }));
+    spans.extend(trace.approvals.iter().map(|record| {
+        json!({
+            "spanId": format!("approval:{}", record.approval_id),
+            "parentSpanId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
+            "kind": "approval",
+            "functionId": record.function_id.as_str(),
+            "status": record.status.as_str(),
+            "timestamp": record.updated_at.to_rfc3339(),
+        })
+    }));
+    spans.extend(trace.leases.iter().map(|record| {
+        json!({
+            "spanId": format!("lease:{}", record.lease_id),
+            "parentSpanId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
+            "kind": "resource_lease",
+            "functionId": record.function_id.as_str(),
+            "resourceKind": record.resource_kind,
+            "resourceId": record.resource_id,
+            "status": serde_json::to_value(&record.status).unwrap_or(Value::Null),
+            "timestamp": record.acquired_at.to_rfc3339(),
+        })
+    }));
+    spans.extend(trace.compensation.iter().map(|record| {
+        json!({
+            "spanId": record.get("compensationId").and_then(Value::as_str).map(|id| format!("compensation:{id}")),
+            "parentSpanId": record.get("parentInvocationId").and_then(Value::as_str),
+            "kind": "compensation",
+            "functionId": record.get("functionId").and_then(Value::as_str),
+            "status": record.get("status"),
+            "timestamp": record.get("createdAt").and_then(Value::as_str),
+        })
+    }));
+    spans.sort_by(|left, right| left["timestamp"].as_str().cmp(&right["timestamp"].as_str()));
     Ok(json!({ "traceId": trace_id, "spans": spans }))
 }
 
 fn log_query(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
     let trace_id = optional_string(invocation.payload.get("traceId"))?;
     let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-    let logs = host
-        .invocations()
-        .into_iter()
-        .filter(|record| {
-            trace_id
-                .as_ref()
-                .map(|trace_id| record.trace_id.as_str() == trace_id)
-                .unwrap_or(true)
-        })
-        .take(limit.min(500))
-        .map(|record| {
-            json!({
-                "timestamp": record.timestamp.to_rfc3339(),
-                "traceId": record.trace_id.as_str(),
-                "invocationId": record.invocation_id.as_str(),
-                "functionId": record.function_id.as_str(),
-                "level": if record.succeeded { "info" } else { "error" },
-                "message": if record.succeeded { "engine invocation succeeded" } else { "engine invocation failed" },
-                "error": record.error.as_ref().map(error_value),
-            })
-        })
-        .collect::<Vec<_>>();
+    let text = optional_string(invocation.payload.get("text"))?;
+    let mut logs = Vec::new();
+    match trace_id.as_deref() {
+        Some(trace_id) => {
+            let trace = trace_components(host, trace_id)?;
+            logs.extend(trace.invocations.iter().map(invocation_log_value));
+            logs.extend(trace.streams.iter().map(stream_log_value));
+            logs.extend(trace.approvals.iter().map(approval_log_value));
+            logs.extend(trace.leases.iter().map(lease_log_value));
+            logs.extend(trace.compensation.iter().map(compensation_log_value));
+        }
+        None => {
+            logs.extend(host.invocations().iter().map(invocation_log_value));
+        }
+    }
+    if let Some(text) = text {
+        let needle = text.to_lowercase();
+        logs.retain(|log| log_matches(log, &needle));
+    }
+    logs.sort_by(|left, right| left["timestamp"].as_str().cmp(&right["timestamp"].as_str()));
+    logs.truncate(limit.min(500));
     Ok(json!({ "logs": logs }))
 }
 
 fn metrics_snapshot(host: &dyn PrimitiveRuntimeHost) -> Result<Value> {
+    let invocations = host.invocations();
+    let failed_invocations = invocations
+        .iter()
+        .filter(|record| !record.succeeded)
+        .count();
+    let trace_count = invocations
+        .iter()
+        .map(|record| record.trace_id.to_string())
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
     Ok(json!({
         "metrics": {
             "catalogRevision": host.catalog_revision().0,
@@ -315,10 +410,210 @@ fn metrics_snapshot(host: &dyn PrimitiveRuntimeHost) -> Result<Value> {
             "functions": host.function_count(),
             "triggers": host.trigger_count(),
             "triggerTypes": host.trigger_type_count(),
-            "invocations": host.invocation_count(),
+            "invocations": invocations.len(),
+            "succeededInvocations": invocations.len().saturating_sub(failed_invocations),
+            "failedInvocations": failed_invocations,
+            "traces": trace_count,
             "catalogChanges": host.catalog_change_count(),
         }
     }))
+}
+
+fn trace_components(host: &dyn PrimitiveRuntimeHost, trace_id: &str) -> Result<TraceComponents> {
+    Ok(TraceComponents {
+        invocations: host
+            .invocations()
+            .into_iter()
+            .filter(|record| record.trace_id.as_str() == trace_id)
+            .collect(),
+        catalog_changes: host
+            .ledger_catalog_changes()?
+            .into_iter()
+            .filter(|change| change.id.contains(trace_id) || change.subject_id.as_str() == trace_id)
+            .collect(),
+        approvals: host.approval_records_for_trace(trace_id)?,
+        streams: host.stream_records_for_trace(trace_id)?,
+        leases: host.resource_leases_for_trace(trace_id)?,
+        compensation: host.compensation_records_for_trace(trace_id)?,
+    })
+}
+
+fn trace_summary(trace_id: &str, trace: &TraceComponents) -> Value {
+    let failed_invocations = trace
+        .invocations
+        .iter()
+        .filter(|record| !record.succeeded)
+        .count();
+    let pending_approvals = trace
+        .approvals
+        .iter()
+        .filter(|record| matches!(record.status.as_str(), "pending" | "approved"))
+        .count();
+    let failed_approvals = trace
+        .approvals
+        .iter()
+        .filter(|record| matches!(record.status.as_str(), "denied" | "failed"))
+        .count();
+    let mut timestamps = trace_timestamps(trace);
+    timestamps.sort();
+    let root_invocation_id = trace
+        .invocations
+        .iter()
+        .find(|record| record.parent_invocation_id.is_none())
+        .or_else(|| trace.invocations.first())
+        .map(|record| record.invocation_id.as_str());
+    json!({
+        "traceId": trace_id,
+        "status": if failed_invocations > 0 || failed_approvals > 0 {
+            "error"
+        } else if pending_approvals > 0 {
+            "pending"
+        } else {
+            "ok"
+        },
+        "rootInvocationId": root_invocation_id,
+        "invocationCount": trace.invocations.len(),
+        "failedInvocations": failed_invocations,
+        "catalogChangeCount": trace.catalog_changes.len(),
+        "streamCount": trace.streams.len(),
+        "approvalCount": trace.approvals.len(),
+        "pendingApprovalCount": pending_approvals,
+        "leaseCount": trace.leases.len(),
+        "compensationCount": trace.compensation.len(),
+        "firstTimestamp": timestamps.first(),
+        "lastTimestamp": timestamps.last(),
+    })
+}
+
+fn trace_timestamps(trace: &TraceComponents) -> Vec<String> {
+    let mut timestamps = Vec::new();
+    timestamps.extend(
+        trace
+            .invocations
+            .iter()
+            .map(|record| record.timestamp.to_rfc3339()),
+    );
+    timestamps.extend(
+        trace
+            .catalog_changes
+            .iter()
+            .map(|record| record.timestamp.to_rfc3339()),
+    );
+    timestamps.extend(
+        trace
+            .streams
+            .iter()
+            .map(|record| record.created_at.to_rfc3339()),
+    );
+    timestamps.extend(
+        trace
+            .approvals
+            .iter()
+            .map(|record| record.updated_at.to_rfc3339()),
+    );
+    timestamps.extend(
+        trace
+            .leases
+            .iter()
+            .map(|record| record.acquired_at.to_rfc3339()),
+    );
+    timestamps.extend(trace.compensation.iter().filter_map(|record| {
+        record
+            .get("createdAt")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    }));
+    timestamps
+}
+
+fn observe_timestamp(summary: &mut TraceAccumulator, timestamp: String) {
+    match summary.first_timestamp.as_ref() {
+        Some(existing) if existing <= &timestamp => {}
+        _ => summary.first_timestamp = Some(timestamp.clone()),
+    }
+    match summary.last_timestamp.as_ref() {
+        Some(existing) if existing >= &timestamp => {}
+        _ => summary.last_timestamp = Some(timestamp),
+    }
+}
+
+fn invocation_log_value(record: &InvocationRecord) -> Value {
+    json!({
+        "timestamp": record.timestamp.to_rfc3339(),
+        "traceId": record.trace_id.as_str(),
+        "invocationId": record.invocation_id.as_str(),
+        "kind": "invocation",
+        "functionId": record.function_id.as_str(),
+        "workerId": record.worker_id.as_str(),
+        "level": if record.succeeded { "info" } else { "error" },
+        "message": if record.succeeded { "engine invocation succeeded" } else { "engine invocation failed" },
+        "error": record.error.as_ref().map(error_value),
+    })
+}
+
+fn stream_log_value(record: &EngineStreamEvent) -> Value {
+    json!({
+        "timestamp": record.created_at.to_rfc3339(),
+        "traceId": record.trace_id.as_ref().map(|id| id.as_str()),
+        "kind": "stream",
+        "level": "info",
+        "topic": record.topic,
+        "producer": record.producer,
+        "message": "engine stream event published",
+        "cursor": record.cursor.0,
+    })
+}
+
+fn approval_log_value(record: &EngineApprovalRecord) -> Value {
+    json!({
+        "timestamp": record.updated_at.to_rfc3339(),
+        "traceId": record.trace_id.as_str(),
+        "kind": "approval",
+        "level": if matches!(record.status.as_str(), "failed" | "denied") { "error" } else { "info" },
+        "approvalId": record.approval_id,
+        "functionId": record.function_id.as_str(),
+        "message": format!("engine approval {}", record.status.as_str()),
+        "error": record.error.as_ref().map(|error| json!(error)),
+    })
+}
+
+fn lease_log_value(record: &EngineResourceLease) -> Value {
+    json!({
+        "timestamp": record.acquired_at.to_rfc3339(),
+        "traceId": record.trace_id.as_str(),
+        "kind": "resource_lease",
+        "level": "info",
+        "leaseId": record.lease_id,
+        "functionId": record.function_id.as_str(),
+        "resourceKind": record.resource_kind,
+        "resourceId": record.resource_id,
+        "message": "engine resource lease recorded",
+    })
+}
+
+fn compensation_log_value(record: &Value) -> Value {
+    json!({
+        "timestamp": record.get("createdAt").and_then(Value::as_str),
+        "traceId": record.get("traceId").and_then(Value::as_str),
+        "kind": "compensation",
+        "level": if record.get("succeeded").and_then(Value::as_bool).unwrap_or(true) { "info" } else { "error" },
+        "compensationId": record.get("compensationId").and_then(Value::as_str),
+        "functionId": record.get("functionId").and_then(Value::as_str),
+        "message": "engine compensation record written",
+        "error": record.get("error"),
+    })
+}
+
+fn log_matches(log: &Value, needle: &str) -> bool {
+    fn contains(value: &Value, needle: &str) -> bool {
+        match value {
+            Value::String(value) => value.to_lowercase().contains(needle),
+            Value::Array(values) => values.iter().any(|value| contains(value, needle)),
+            Value::Object(values) => values.values().any(|value| contains(value, needle)),
+            _ => false,
+        }
+    }
+    contains(log, needle)
 }
 
 fn actor_context(context: &CausalContext) -> ActorContext {
@@ -400,6 +695,8 @@ fn invocation_record_value(record: &InvocationRecord) -> Value {
         "traceId": record.trace_id.as_str(),
         "parentInvocationId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
         "triggerId": record.trigger_id.as_ref().map(TriggerId::as_str),
+        "sessionId": record.session_id.as_deref(),
+        "workspaceId": record.workspace_id.as_deref(),
         "deliveryMode": record.delivery_mode.as_str(),
         "idempotencyKey": record.idempotency_key.as_deref(),
         "idempotencyScope": record.idempotency_scope.as_ref().map(|scope| {

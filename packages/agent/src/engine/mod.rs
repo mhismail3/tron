@@ -10,8 +10,9 @@
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;
 //! - mutating capabilities require idempotency metadata;
-//! - invocations carry actor, authority, catalog revision, trace, idempotency,
-//!   and optional parent/trigger context into a pluggable engine ledger;
+//! - invocations carry actor, authority, catalog revision, trace, session,
+//!   workspace, idempotency, and optional parent/trigger context into a
+//!   pluggable engine ledger;
 //! - declared request/response schemas are enforced before/after handlers;
 //! - session capabilities can be explicitly promoted to workspace/system scope;
 //! - `EngineHost` exposes privileged `engine::*` meta-capabilities for live
