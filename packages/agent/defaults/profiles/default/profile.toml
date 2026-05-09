@@ -109,8 +109,6 @@
 #   "compactionSummary", "memoryRetention", or "toolAnswer".
 # - resultInjection ids currently used by runtime: "nextParentTurn" and
 #   "automationLedger".
-# - fallback labels currently used by runtime: "keyword", "none", "toolError",
-#   and "abortMerge".
 # - first-party tool ids include Read, Write, Edit, Bash, Search, Find,
 #   AskUserQuestion, GetConfirmation, NotifyApp, WebFetch, WebSearch, Display,
 #   ComputerUse, SpawnSubagent, ManageJob, Wait, McpSearch, and McpCall.
@@ -449,7 +447,6 @@ auditPolicy = "default"
 # - deniedTools: denylist after inheritance/registration.
 # - workingDirectory: optional process cwd override.
 # - resultInjection: how results re-enter parent/workspace state.
-# - fallback: runtime fallback behavior label.
 # - audit: per-process audit switch; auditPolicy still defines what to record.
 [processes.compaction]
 kind = "summarizer"
@@ -467,7 +464,6 @@ maxTurns = 1
 maxDepth = 0
 inheritTools = false
 reasoning = "medium"
-fallback = "keyword"
 audit = true
 
 [processes.memoryRetain]
@@ -486,7 +482,6 @@ maxTurns = 1
 maxDepth = 0
 inheritTools = false
 reasoning = "medium"
-fallback = "none"
 audit = true
 
 [processes.webFetchSummarizer]
@@ -505,7 +500,6 @@ maxTurns = 1
 maxDepth = 0
 inheritTools = false
 workingDirectory = "/tmp"
-fallback = "toolError"
 audit = true
 
 [processes.conflictResolver]
@@ -523,7 +517,6 @@ maxTurns = 40
 maxDepth = 0
 inheritTools = true
 allowedTools = ["Read", "Edit", "Write", "Bash"]
-fallback = "abortMerge"
 audit = true
 
 [processes."spawnSubagent.inProcess"]
@@ -786,7 +779,7 @@ turn = "noCache"
 none = "noCache"
 
 # Output contracts name the result shape expected from a process. `required`
-# means invalid/missing output is treated as a process failure or fallback path.
+# means invalid/missing output is treated as a process failure.
 [outputContracts.plainText]
 kind = "plainText"
 required = true

@@ -172,10 +172,6 @@ pub struct ParseWarning {
 }
 
 /// Detailed parse result: both the records and the warnings.
-///
-/// `parse_session` keeps the original API by discarding warnings. Callers
-/// that want dry-run visibility (the validator, the `import.previewSession`
-/// engine capability) use [`parse_session_detailed`] directly.
 #[derive(Debug)]
 pub struct ParseOutcome {
     /// Records that parsed successfully.
@@ -184,15 +180,6 @@ pub struct ParseOutcome {
     pub warnings: Vec<ParseWarning>,
     /// Total non-blank lines inspected (parsed + skipped).
     pub total_non_blank_lines: usize,
-}
-
-/// Parse a full session file into records, discarding parse warnings.
-///
-/// Skips lines that fail to parse (handles partial writes at tail of
-/// in-progress sessions). For the dry-run API that surfaces those skips,
-/// call [`parse_session_detailed`] instead.
-pub fn parse_session(path: &Path) -> Result<Vec<ClaudeRecord>, ImportError> {
-    Ok(parse_session_detailed(path)?.records)
 }
 
 /// Parse a full session file, tracking line numbers and collecting a
@@ -273,7 +260,7 @@ fn count_jsonl_files(dir: &Path) -> usize {
 }
 
 fn extract_session_meta(path: &Path, session_uuid: &str) -> Result<ClaudeSessionMeta, ImportError> {
-    let records = parse_session(path)?;
+    let records = parse_session_detailed(path)?.records;
 
     let mut title = None;
     let mut slug = None;

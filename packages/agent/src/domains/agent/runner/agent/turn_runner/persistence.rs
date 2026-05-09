@@ -3,8 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::domains::session::event_store::EventType;
 use crate::shared::events::{
-    ActivatedRuleInfo, AssistantMessage, BaseEvent, ResponseTokenUsage, ToolCallSummary, TronEvent,
-    TurnTokenUsage,
+    ActivatedRuleInfo, AssistantMessage, BaseEvent, ToolCallSummary, TronEvent,
 };
 use crate::shared::messages::{Provider, TokenUsage};
 use serde_json::{Value, json};
@@ -163,18 +162,15 @@ pub(super) fn emit_response_complete(
     model_name: &str,
     sequence_counter: Option<&AtomicI64>,
 ) {
-    let response_token_usage = stream_result
-        .token_usage
-        .as_ref()
-        .map(|u| ResponseTokenUsage {
-            input_tokens: u.input_tokens,
-            output_tokens: u.output_tokens,
-            cache_read_tokens: u.cache_read_tokens,
-            cache_creation_tokens: u.cache_creation_tokens,
-            cache_creation_5m_tokens: u.cache_creation_5m_tokens,
-            cache_creation_1h_tokens: u.cache_creation_1h_tokens,
-            provider_type: None,
-        });
+    let response_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        cache_read_tokens: u.cache_read_tokens,
+        cache_creation_tokens: u.cache_creation_tokens,
+        cache_creation_5m_tokens: u.cache_creation_5m_tokens,
+        cache_creation_1h_tokens: u.cache_creation_1h_tokens,
+        provider_type: None,
+    });
 
     emit_maybe_sequenced(
         emitter,
@@ -413,12 +409,12 @@ pub(super) async fn emit_turn_end(
         }
     }
 
-    let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TurnTokenUsage {
+    let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         cache_read_tokens: u.cache_read_tokens,
         cache_creation_tokens: u.cache_creation_tokens,
-        ..TurnTokenUsage::default()
+        ..TokenUsage::default()
     });
 
     emit_maybe_sequenced(

@@ -17,7 +17,7 @@
 //! ## Data Path
 //!
 //! 1. Client connects to `/engine` and sends engine protocol messages
-//! 2. `server` translates each message into the engine transport envelope
+//! 2. `transport` translates each message into the engine transport envelope
 //! 3. Canonical `namespace::function` capabilities call domain services
 //! 4. Engine streams publish live events and `/engine` subscriptions deliver them
 //!

@@ -124,7 +124,7 @@ fn parse_session_skips_malformed_lines() {
     writeln!(f, "NOT VALID JSON").unwrap();
     writeln!(f, r#"{{"type":"assistant","uuid":"a1","timestamp":"2026-01-01T00:00:01Z","message":{{"role":"assistant","content":[{{"type":"text","text":"hi"}}]}}}}"#).unwrap();
 
-    let records = parse_session(&file).unwrap();
+    let records = parse_session_detailed(&file).unwrap().records;
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].record_type, "user");
     assert_eq!(records[1].record_type, "assistant");
@@ -136,13 +136,13 @@ fn parse_session_empty_file() {
     let file = dir.path().join("empty.jsonl");
     fs::File::create(&file).unwrap();
 
-    let records = parse_session(&file).unwrap();
+    let records = parse_session_detailed(&file).unwrap().records;
     assert!(records.is_empty());
 }
 
 #[test]
 fn parse_session_file_not_found() {
-    let result = parse_session(Path::new("/nonexistent/file.jsonl"));
+    let result = parse_session_detailed(Path::new("/nonexistent/file.jsonl"));
     assert!(matches!(result, Err(ImportError::SessionNotFound { .. })));
 }
 
@@ -165,7 +165,7 @@ fn parse_session_skips_blank_lines() {
     )
     .unwrap();
 
-    let records = parse_session(&file).unwrap();
+    let records = parse_session_detailed(&file).unwrap().records;
     assert_eq!(records.len(), 2);
 }
 
@@ -230,24 +230,4 @@ fn parse_session_detailed_warning_snippet_truncates_long_lines() {
     );
     // The truncation includes 120 x's plus the ellipsis.
     assert!(w.snippet.len() < garbage.len());
-}
-
-#[test]
-fn parse_session_wrapper_discards_warnings() {
-    // Regression guard: the legacy `parse_session` API must remain a thin
-    // wrapper that drops warnings; callers that want warnings use
-    // `parse_session_detailed`.
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("mixed.jsonl");
-    let mut f = fs::File::create(&file).unwrap();
-    writeln!(f, "NOT JSON").unwrap();
-    writeln!(
-        f,
-        r#"{{"type":"user","uuid":"u1","message":{{"role":"user","content":"ok"}}}}"#
-    )
-    .unwrap();
-
-    let records = parse_session(&file).unwrap();
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].record_type, "user");
 }

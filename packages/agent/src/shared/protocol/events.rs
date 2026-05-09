@@ -8,7 +8,7 @@
 //!   (agent start/end, turn boundaries, tool execution, hooks, compaction).
 //!
 //! `StreamEvent` is purely in-memory (never persisted). `TronEvent` is
-//! broadcast over WebSocket and may be recorded as session events.
+//! published through engine streams and may be recorded as session events.
 //!
 //! ## Size note
 //!
@@ -199,15 +199,6 @@ impl BaseEvent {
     }
 }
 
-// `TurnTokenUsage` and `ResponseTokenUsage` were consolidated into
-// `crate::shared::messages::TokenUsage` — all extra fields are `Option` with
-// `skip_serializing_if`, so the wire format is identical when unset.
-
-/// Backward-compatible alias for turn-end events.
-pub type TurnTokenUsage = crate::shared::messages::TokenUsage;
-/// Backward-compatible alias for response-complete events.
-pub type ResponseTokenUsage = crate::shared::messages::TokenUsage;
-
 /// Tool call summary in a batch event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallSummary {
@@ -285,7 +276,7 @@ macro_rules! tron_events {
     ),* $(,)?) => {
         /// High-level agent event with session context.
         ///
-        /// These events are broadcast over WebSocket and may be persisted as
+        /// These events are published through engine streams and may be persisted as
         /// session events. iOS relies on exact type strings and field names.
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         #[serde(tag = "type")]
@@ -383,7 +374,7 @@ tron_events! {
         turn: u32,
         duration: u64,
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
-        token_usage: Option<TurnTokenUsage>,
+        token_usage: Option<TokenUsage>,
         #[serde(rename = "tokenRecord", skip_serializing_if = "Option::is_none")]
         token_record: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -415,7 +406,7 @@ tron_events! {
         #[serde(rename = "stopReason")]
         stop_reason: String,
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
-        token_usage: Option<ResponseTokenUsage>,
+        token_usage: Option<TokenUsage>,
         #[serde(rename = "hasToolCalls")]
         has_tool_calls: bool,
         #[serde(rename = "toolCallCount")]
@@ -1636,12 +1627,12 @@ mod tests {
             base: BaseEvent::now("s1"),
             turn: 1,
             duration: 5000,
-            token_usage: Some(TurnTokenUsage {
+            token_usage: Some(TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
                 cache_read_tokens: Some(20),
                 cache_creation_tokens: None,
-                ..TurnTokenUsage::default()
+                ..TokenUsage::default()
             }),
             token_record: None,
             cost: Some(0.005),

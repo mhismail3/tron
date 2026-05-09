@@ -252,9 +252,9 @@ mod tests {
     fn filter_by_target() {
         let (logs, _guard) = capture_logs();
         tracing::info!(target: "tron::domains::agent::runner::agent", "agent event");
-        tracing::info!(target: "tron::app::ws", "ws event");
+        tracing::info!(target: "tron::app::server", "app event");
 
-        let agent_events = logs.events_for_target("tron::runtime");
+        let agent_events = logs.events_for_target("tron::domains::agent");
         assert_eq!(agent_events.len(), 1);
         assert!(agent_events[0].message.contains("agent event"));
     }

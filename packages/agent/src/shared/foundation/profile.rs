@@ -78,9 +78,6 @@ pub struct ProfileDocument {
     pub auth: AuthSpec,
 }
 
-/// Compatibility name used by older tests and schema helpers.
-pub type ProfileSpec = ProfileDocument;
-
 /// Prompt, provider, context, or tool file compiled into the runtime spec.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledProfileFile {
@@ -211,8 +208,6 @@ pub struct ProcessSpec {
     pub working_directory: Option<String>,
     /// How process results are injected back into parent context.
     pub result_injection: Option<String>,
-    /// Fallback behavior id/label.
-    pub fallback: Option<String>,
     /// Whether this process is audited.
     pub audit: Option<bool>,
 }
@@ -870,7 +865,7 @@ fn agent_execution_spec_hash(raw_string: &str, spec: &AgentExecutionSpec) -> Str
     hex::encode(hasher.finalize())
 }
 
-fn validate_profile(home: &Path, name: &str, spec: &ProfileSpec) -> io::Result<()> {
+fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Result<()> {
     if spec.version != CURRENT_PROFILE_VERSION {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,

@@ -110,10 +110,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     }
 }
 
-fn insert_token_usage(
-    data: &mut Value,
-    token_usage: Option<&crate::shared::events::TurnTokenUsage>,
-) {
+fn insert_token_usage(data: &mut Value, token_usage: Option<&crate::shared::messages::TokenUsage>) {
     if let Some(usage) = token_usage {
         data["tokenUsage"] = serde_json::to_value(usage).unwrap_or_default();
     }

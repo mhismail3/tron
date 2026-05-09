@@ -340,6 +340,38 @@ fn tool_registry_authority_stays_deleted() {
 }
 
 #[test]
+fn dead_compatibility_shapes_stay_deleted() {
+    let crate_root = crate_root();
+
+    for (relative, needle) in [
+        (
+            "src/shared/protocol/tools.rs",
+            "pub enum ToolExecutionContract",
+        ),
+        ("src/shared/protocol/events.rs", "TurnTokenUsage"),
+        ("src/shared/protocol/events.rs", "ResponseTokenUsage"),
+        ("src/shared/foundation/profile.rs", "pub type ProfileSpec"),
+        (
+            "src/shared/foundation/profile.rs",
+            "pub fallback: Option<String>",
+        ),
+        (
+            "src/domains/import/implementation/parser.rs",
+            "pub fn parse_session(",
+        ),
+        ("defaults/profiles/default/profile.toml", "fallback ="),
+    ] {
+        let path = crate_root.join(relative);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        assert!(
+            !content.contains(needle),
+            "{relative} must not reintroduce retired compatibility/dead-code shape `{needle}`"
+        );
+    }
+}
+
+#[test]
 fn primitive_workers_are_owned_outside_host_bucket() {
     let crate_root = crate_root();
     let primitives_root = crate_root.join("src/engine/primitives");

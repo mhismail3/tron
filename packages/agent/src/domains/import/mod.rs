@@ -101,7 +101,9 @@ async fn preview_session(payload: &Value, _deps: &Deps) -> Result<Value, Capabil
     let session_path = require_string_param(Some(payload), "sessionPath")?;
     run_blocking_task("import::preview_session", move || {
             let path = PathBuf::from(&session_path);
-            let records = crate::domains::import::parser::parse_session(&path).map_err(map_import_error)?;
+            let records = crate::domains::import::parser::parse_session_detailed(&path)
+                .map_err(map_import_error)?
+                .records;
             let linear = crate::domains::import::tree::linearize(records);
             let assembled = crate::domains::import::assembler::assemble(linear);
             let result = crate::domains::import::transformer::transform(assembled);

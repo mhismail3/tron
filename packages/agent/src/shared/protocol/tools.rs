@@ -90,16 +90,6 @@ pub enum ToolCategory {
     Custom,
 }
 
-/// Execution contract: how the tool expects to be invoked.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolExecutionContract {
-    /// Legacy: `execute(tool_call_id, params, signal)`.
-    Contextual,
-    /// Structured: `execute(params, options)`.
-    Options,
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Factory helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,18 +242,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ToolCategory::Shell).unwrap(),
             "\"shell\""
-        );
-    }
-
-    #[test]
-    fn tool_execution_contract_serde() {
-        assert_eq!(
-            serde_json::to_string(&ToolExecutionContract::Contextual).unwrap(),
-            "\"contextual\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ToolExecutionContract::Options).unwrap(),
-            "\"options\""
         );
     }
 }
