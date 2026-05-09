@@ -39,7 +39,8 @@ use super::registry::{
     PreparedSyncInvocationDecision,
 };
 use super::streams::{
-    EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,
+    EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, PublishStreamEvent,
+    StreamActorScope, StreamCursor,
 };
 use super::types::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CompensationContract,
@@ -1425,7 +1426,7 @@ impl EngineHost {
             }
         };
 
-        let value = self.dispatch_host_dispatched_primitive(&invocation);
+        let value = primitives::runtime::dispatch(self, &invocation);
         self.finish_meta_invocation(invocation, function, value, idempotency)
     }
 
@@ -1797,334 +1798,6 @@ impl EngineHost {
         }))
     }
 
-    fn dispatch_host_dispatched_primitive(&mut self, invocation: &Invocation) -> Result<Value> {
-        match invocation.function_id.as_str() {
-            primitives::catalog::LIST_FUNCTION => self.primitive_catalog_list(invocation),
-            primitives::catalog::INSPECT_FUNCTION => self.primitive_catalog_inspect(invocation),
-            primitives::catalog::WATCH_SNAPSHOT_FUNCTION => {
-                self.primitive_catalog_watch_snapshot(invocation)
-            }
-            primitives::worker::LIST_FUNCTION => self.primitive_worker_list(invocation),
-            primitives::worker::GET_FUNCTION => self.primitive_worker_get(invocation),
-            primitives::worker::HEALTH_FUNCTION => self.primitive_worker_health(invocation),
-            primitives::worker::DISCONNECT_FUNCTION => self.primitive_worker_disconnect(invocation),
-            primitives::observability::TRACE_GET_FUNCTION => self.primitive_trace_get(invocation),
-            primitives::observability::TRACE_LIST_FUNCTION => self.primitive_trace_list(invocation),
-            primitives::observability::SPAN_LIST_FUNCTION => self.primitive_span_list(invocation),
-            primitives::observability::LOG_QUERY_FUNCTION => self.primitive_log_query(invocation),
-            primitives::observability::METRICS_SNAPSHOT_FUNCTION => {
-                self.primitive_metrics_snapshot()
-            }
-            _ => Err(EngineError::NotFound {
-                kind: "function",
-                id: invocation.function_id.to_string(),
-            }),
-        }
-    }
-
-    fn primitive_catalog_list(&self, invocation: &Invocation) -> Result<Value> {
-        let actor = actor_context(&invocation.causal_context);
-        let query = FunctionQuery {
-            actor: Some(actor.clone()),
-            visibility: optional_visibility(invocation.payload.get("visibility"))?,
-            namespace_prefix: optional_string(invocation.payload.get("namespacePrefix"))?,
-            text: None,
-            effect_class: None,
-            max_risk: None,
-            health: None,
-            include_internal: invocation
-                .payload
-                .get("includeInternal")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        };
-        Ok(json!({
-            "catalogRevision": self.catalog.revision().0,
-            "functions": self.catalog.discover_functions(&query),
-            "workers": self.visible_workers(&actor),
-            "triggers": self.visible_triggers(&actor),
-            "triggerTypes": self.visible_trigger_types(&actor),
-        }))
-    }
-
-    fn primitive_catalog_inspect(&self, invocation: &Invocation) -> Result<Value> {
-        self.meta_inspect(invocation)
-    }
-
-    fn primitive_catalog_watch_snapshot(&self, invocation: &Invocation) -> Result<Value> {
-        let response = self.meta_watch(invocation)?;
-        let actor = actor_context(&invocation.causal_context);
-        let query = FunctionQuery {
-            actor: Some(actor.clone()),
-            visibility: None,
-            namespace_prefix: None,
-            text: None,
-            effect_class: None,
-            max_risk: None,
-            health: None,
-            include_internal: false,
-        };
-        Ok(json!({
-            "changes": response.get("changes").cloned().unwrap_or_else(|| json!([])),
-            "snapshot": {
-                "functions": self.catalog.discover_functions(&query),
-                "workers": self.visible_workers(&actor),
-                "triggers": self.visible_triggers(&actor),
-                "triggerTypes": self.visible_trigger_types(&actor),
-            },
-            "currentRevision": response.get("currentRevision").cloned().unwrap_or(Value::Null),
-            "nextRevision": response.get("nextRevision").cloned().unwrap_or(Value::Null),
-            "hasMore": response.get("hasMore").cloned().unwrap_or(Value::Bool(false)),
-        }))
-    }
-
-    fn primitive_worker_list(&self, invocation: &Invocation) -> Result<Value> {
-        let actor = actor_context(&invocation.causal_context);
-        Ok(json!({
-            "catalogRevision": self.catalog.revision().0,
-            "workers": self.visible_workers(&actor),
-        }))
-    }
-
-    fn primitive_worker_get(&self, invocation: &Invocation) -> Result<Value> {
-        let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
-        let actor = actor_context(&invocation.causal_context);
-        let worker = self.catalog.inspect_worker(&id)?;
-        if !is_visibility_visible(
-            &worker.visibility,
-            worker.provenance.session_id.as_deref(),
-            worker.provenance.workspace_id.as_deref(),
-            &actor,
-        ) {
-            return Err(EngineError::PolicyViolation(format!(
-                "worker {id} is not visible"
-            )));
-        }
-        Ok(json!({ "worker": worker }))
-    }
-
-    fn primitive_worker_health(&self, invocation: &Invocation) -> Result<Value> {
-        let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
-        let worker = self.catalog.inspect_worker(&id)?;
-        let functions = self
-            .catalog
-            .discover_functions(&FunctionQuery {
-                actor: Some(actor_context(&invocation.causal_context)),
-                visibility: None,
-                namespace_prefix: None,
-                text: None,
-                effect_class: None,
-                max_risk: None,
-                health: None,
-                include_internal: true,
-            })
-            .into_iter()
-            .filter(|function| function.owner_worker == id)
-            .collect::<Vec<_>>();
-        let triggers = self
-            .catalog
-            .triggers()
-            .into_iter()
-            .filter(|trigger| trigger.owner_worker == id)
-            .collect::<Vec<_>>();
-        let health = if functions
-            .iter()
-            .any(|function| !function.health.is_routable())
-        {
-            "unhealthy"
-        } else {
-            "healthy"
-        };
-        Ok(json!({
-            "worker": worker,
-            "functions": functions,
-            "triggers": triggers,
-            "health": health,
-        }))
-    }
-
-    fn primitive_worker_disconnect(&mut self, invocation: &Invocation) -> Result<Value> {
-        let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
-        if self.catalog.worker_is_volatile(&id) != Some(true) {
-            return Err(EngineError::PolicyViolation(format!(
-                "worker::disconnect can only disconnect volatile workers ({id})"
-            )));
-        }
-        let owner_actor = self
-            .catalog
-            .worker(&id)
-            .map(|worker| worker.owner_actor.to_string())
-            .ok_or_else(|| EngineError::NotFound {
-                kind: "worker",
-                id: id.to_string(),
-            })?;
-        self.catalog.unregister_worker(&id, &owner_actor)?;
-        Ok(json!({ "disconnected": true }))
-    }
-
-    fn primitive_trace_get(&self, invocation: &Invocation) -> Result<Value> {
-        let trace_id = required_str(&invocation.payload, "traceId")?;
-        let invocations = self
-            .catalog
-            .invocations()
-            .iter()
-            .filter(|record| record.trace_id.as_str() == trace_id)
-            .map(invocation_record_value)
-            .collect::<Vec<_>>();
-        let catalog_changes = self
-            .catalog
-            .ledger_catalog_changes()?
-            .into_iter()
-            .filter(|change| change.id.contains(trace_id) || change.subject_id.as_str() == trace_id)
-            .map(|change| catalog_change_value(&change))
-            .collect::<Vec<_>>();
-        let approvals = self
-            .list_approval_records_for_trace(trace_id)?
-            .into_iter()
-            .map(|record| json!(record))
-            .collect::<Vec<_>>();
-        Ok(json!({
-            "traceId": trace_id,
-            "invocations": invocations,
-            "catalogChanges": catalog_changes,
-            "streams": self.list_stream_records_for_trace(trace_id)?,
-            "approvals": approvals,
-            "leases": self.list_resource_leases_for_trace(trace_id)?,
-            "compensation": self.list_compensation_records_for_trace(trace_id)?,
-        }))
-    }
-
-    fn primitive_trace_list(&self, invocation: &Invocation) -> Result<Value> {
-        let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-        let mut traces = std::collections::BTreeMap::<String, usize>::new();
-        for record in self.catalog.invocations() {
-            *traces.entry(record.trace_id.to_string()).or_insert(0) += 1;
-        }
-        let traces = traces
-            .into_iter()
-            .rev()
-            .take(limit.min(500))
-            .map(|(trace_id, invocation_count)| {
-                json!({
-                    "traceId": trace_id,
-                    "invocationCount": invocation_count,
-                })
-            })
-            .collect::<Vec<_>>();
-        Ok(json!({ "traces": traces }))
-    }
-
-    fn primitive_span_list(&self, invocation: &Invocation) -> Result<Value> {
-        let trace_id = required_str(&invocation.payload, "traceId")?;
-        let spans = self
-            .catalog
-            .invocations()
-            .iter()
-            .filter(|record| record.trace_id.as_str() == trace_id)
-            .map(|record| {
-                json!({
-                    "spanId": record.invocation_id.as_str(),
-                    "parentSpanId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
-                    "functionId": record.function_id.as_str(),
-                    "workerId": record.worker_id.as_str(),
-                    "triggerId": record.trigger_id.as_ref().map(TriggerId::as_str),
-                    "succeeded": record.succeeded,
-                    "timestamp": record.timestamp.to_rfc3339(),
-                })
-            })
-            .collect::<Vec<_>>();
-        Ok(json!({ "traceId": trace_id, "spans": spans }))
-    }
-
-    fn primitive_log_query(&self, invocation: &Invocation) -> Result<Value> {
-        let trace_id = optional_string(invocation.payload.get("traceId"))?;
-        let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-        let logs = self
-            .catalog
-            .invocations()
-            .iter()
-            .filter(|record| {
-                trace_id
-                    .as_ref()
-                    .map(|trace_id| record.trace_id.as_str() == trace_id)
-                    .unwrap_or(true)
-            })
-            .take(limit.min(500))
-            .map(|record| {
-                json!({
-                    "timestamp": record.timestamp.to_rfc3339(),
-                    "traceId": record.trace_id.as_str(),
-                    "invocationId": record.invocation_id.as_str(),
-                    "functionId": record.function_id.as_str(),
-                    "level": if record.succeeded { "info" } else { "error" },
-                    "message": if record.succeeded { "engine invocation succeeded" } else { "engine invocation failed" },
-                    "error": record.error.as_ref().map(error_value),
-                })
-            })
-            .collect::<Vec<_>>();
-        Ok(json!({ "logs": logs }))
-    }
-
-    fn primitive_metrics_snapshot(&self) -> Result<Value> {
-        Ok(json!({
-            "metrics": {
-                "catalogRevision": self.catalog.revision().0,
-                "workers": self.catalog.workers().len(),
-                "functions": self.catalog.discover_functions(&FunctionQuery::default()).len(),
-                "triggers": self.catalog.triggers().len(),
-                "triggerTypes": self.catalog.trigger_types().len(),
-                "invocations": self.catalog.invocations().len(),
-                "catalogChanges": self.catalog.changes().len(),
-            }
-        }))
-    }
-
-    fn list_approval_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineApprovalRecord>> {
-        self.primitives
-            .approvals
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
-            .list(None, None, 500)
-            .map(|records| {
-                records
-                    .into_iter()
-                    .filter(|record| record.trace_id.as_str() == trace_id)
-                    .collect()
-            })
-    }
-
-    fn list_stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {
-        self.primitives
-            .streams
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
-            .list_by_trace(trace_id, 500)
-            .map(|events| events.into_iter().map(|event| json!(event)).collect())
-    }
-
-    fn list_resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>> {
-        self.primitives
-            .leases
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
-            .list_by_trace(trace_id, 500)
-    }
-
-    fn list_compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {
-        self.primitives
-            .compensation
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))?
-            .list()
-            .map(|records| {
-                records
-                    .into_iter()
-                    .filter(|record| record.trace_id.as_str() == trace_id)
-                    .map(|record| json!(record))
-                    .collect()
-            })
-    }
-
     fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition> {
         self.catalog
             .workers()
@@ -2168,6 +1841,127 @@ impl EngineHost {
                 )
             })
             .collect()
+    }
+}
+
+impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
+    fn catalog_revision(&self) -> CatalogRevision {
+        self.catalog.revision()
+    }
+
+    fn discover_functions(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
+        self.catalog.discover_functions(query)
+    }
+
+    fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition> {
+        EngineHost::visible_workers(self, actor)
+    }
+
+    fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition> {
+        EngineHost::visible_triggers(self, actor)
+    }
+
+    fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition> {
+        EngineHost::visible_trigger_types(self, actor)
+    }
+
+    fn inspect_catalog_item(&self, invocation: &Invocation) -> Result<Value> {
+        self.meta_inspect(invocation)
+    }
+
+    fn watch_catalog_snapshot_base(&self, invocation: &Invocation) -> Result<Value> {
+        self.meta_watch(invocation)
+    }
+
+    fn inspect_worker(&self, id: &WorkerId) -> Result<WorkerDefinition> {
+        self.catalog.inspect_worker(id)
+    }
+
+    fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool> {
+        self.catalog.worker_is_volatile(id)
+    }
+
+    fn unregister_worker(&mut self, id: &WorkerId, owner_actor: &str) -> Result<()> {
+        self.catalog.unregister_worker(id, owner_actor)
+    }
+
+    fn invocations(&self) -> Vec<super::invocation::InvocationRecord> {
+        self.catalog.invocations().to_vec()
+    }
+
+    fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
+        self.catalog.ledger_catalog_changes()
+    }
+
+    fn approval_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineApprovalRecord>> {
+        self.primitives
+            .approvals
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
+            .list(None, None, 500)
+            .map(|records| {
+                records
+                    .into_iter()
+                    .filter(|record| record.trace_id.as_str() == trace_id)
+                    .collect()
+            })
+    }
+
+    fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>> {
+        self.primitives
+            .streams
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .list_by_trace(trace_id, 500)
+    }
+
+    fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>> {
+        self.primitives
+            .leases
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+            .list_by_trace(trace_id, 500)
+    }
+
+    fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {
+        self.primitives
+            .compensation
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))?
+            .list()
+            .map(|records| {
+                records
+                    .into_iter()
+                    .filter(|record| record.trace_id.as_str() == trace_id)
+                    .map(|record| json!(record))
+                    .collect()
+            })
+    }
+
+    fn worker_count(&self) -> usize {
+        self.catalog.workers().len()
+    }
+
+    fn function_count(&self) -> usize {
+        self.catalog
+            .discover_functions(&FunctionQuery::default())
+            .len()
+    }
+
+    fn trigger_count(&self) -> usize {
+        self.catalog.triggers().len()
+    }
+
+    fn trigger_type_count(&self) -> usize {
+        self.catalog.trigger_types().len()
+    }
+
+    fn invocation_count(&self) -> usize {
+        self.catalog.invocations().len()
+    }
+
+    fn catalog_change_count(&self) -> usize {
+        self.catalog.changes().len()
     }
 }
 
@@ -2408,35 +2202,6 @@ fn invocation_result_value(result: &InvocationResult) -> Value {
         "value": result.value.as_ref(),
         "error": result.error.as_ref().map(error_value),
         "replayedFrom": result.replayed_from.as_ref().map(InvocationId::as_str),
-    })
-}
-
-fn invocation_record_value(record: &super::invocation::InvocationRecord) -> Value {
-    json!({
-        "invocationId": record.invocation_id.as_str(),
-        "functionId": record.function_id.as_str(),
-        "workerId": record.worker_id.as_str(),
-        "functionRevision": record.function_revision.0,
-        "catalogRevision": record.catalog_revision.0,
-        "actorId": record.actor_id.as_str(),
-        "actorKind": &record.actor_kind,
-        "authorityGrantId": record.authority_grant_id.as_str(),
-        "authorityScopes": &record.authority_scopes,
-        "traceId": record.trace_id.as_str(),
-        "parentInvocationId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
-        "triggerId": record.trigger_id.as_ref().map(TriggerId::as_str),
-        "deliveryMode": record.delivery_mode.as_str(),
-        "idempotencyKey": record.idempotency_key.as_deref(),
-        "idempotencyScope": record.idempotency_scope.as_ref().map(|scope| {
-            json!({"kind": scope.kind.as_str(), "value": scope.value.as_str()})
-        }),
-        "resourceLeaseIds": &record.resource_lease_ids,
-        "compensationStatus": record.compensation_status.as_deref(),
-        "replayedFrom": record.replayed_from.as_ref().map(InvocationId::as_str),
-        "succeeded": record.succeeded,
-        "result": record.result_value.as_ref(),
-        "error": record.error.as_ref().map(error_value),
-        "timestamp": record.timestamp.to_rfc3339(),
     })
 }
 

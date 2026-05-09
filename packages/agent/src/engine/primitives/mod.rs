@@ -2,8 +2,9 @@
 //!
 //! Primitive workers are built into the engine, but they still follow the same
 //! worker/function contract shape as domain workers. The host coordinates
-//! locking, ledger completion, and privileged meta-capabilities; this module
-//! owns primitive worker definitions, schemas, and handler bindings.
+//! locking and ledger completion; this module owns primitive worker definitions,
+//! schemas, handler bindings, and privileged query response shaping through the
+//! local `runtime` module.
 
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -42,6 +43,7 @@ pub(crate) mod approval;
 pub(crate) mod catalog;
 pub(crate) mod observability;
 pub(crate) mod queue;
+pub(in crate::engine) mod runtime;
 pub(crate) mod state;
 pub(crate) mod stream;
 pub(crate) mod worker;

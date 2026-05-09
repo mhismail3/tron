@@ -5,7 +5,9 @@
 //! protocol, and delegates lifecycle policy to [`EngineExternalWorkerRuntime`]:
 //! volatile registrations are removed on disconnect/heartbeat timeout, durable
 //! local registrations are marked unhealthy, and worker stream publication goes
-//! through `stream::publish`.
+//! through `stream::publish`. Connection, registration, timeout, disconnect,
+//! unregister, and health-change events are also published through the stream
+//! primitive on `worker.lifecycle`.
 
 use std::sync::Arc;
 use std::time::Duration;

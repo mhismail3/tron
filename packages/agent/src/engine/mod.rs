@@ -116,8 +116,8 @@ pub use ledger::{
 pub use protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,
     WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
-    WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerProtocolMessage,
-    WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
+    WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
+    WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
 pub use queue::{
     EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime, EnqueueInvocation,

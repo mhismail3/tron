@@ -21,6 +21,11 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tron::core::content::AssistantContent;
 use tron::core::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
 use tron::core::messages::TokenUsage;
+use tron::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass, FunctionDefinition,
+    FunctionId, Invocation, Provenance, RiskLevel, TraceId, VisibilityScope, WorkerDefinition,
+    WorkerInvocationResult, WorkerKind, WorkerProtocolMessage,
+};
 use tron::events::{ConnectionConfig, EventStore};
 use tron::llm::models::types::Provider as ProviderKind;
 use tron::llm::provider::{
@@ -469,12 +474,36 @@ async fn connect(url: &str) -> WsStream {
     ws
 }
 
+/// Connect to the loopback `/engine/workers` protocol for integration workers.
+async fn connect_worker(engine_url: &str) -> WsStream {
+    let auth_path = TEST_SERVER_AUTH_PATHS
+        .lock()
+        .unwrap()
+        .get(engine_url)
+        .cloned()
+        .expect("test server auth path should be registered before worker connect");
+    let token = tron::server::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
+    let mut request = worker_ws_url_for(engine_url).into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    let (ws, _) = connect_async(request).await.unwrap();
+    ws
+}
+
 fn engine_ws_url_for(ws_url: &str) -> String {
     if ws_url.ends_with("/engine") {
         ws_url.to_owned()
     } else {
         format!("{}/engine", ws_url.trim_end_matches('/'))
     }
+}
+
+fn worker_ws_url_for(ws_url: &str) -> String {
+    format!(
+        "{}/engine/workers",
+        ws_url.trim_end_matches("/engine").trim_end_matches('/')
+    )
 }
 
 fn register_server_auth_path(url: &str, auth_path: &std::path::Path) {

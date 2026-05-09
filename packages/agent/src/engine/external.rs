@@ -19,16 +19,18 @@ use serde_json::Value;
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::host::EngineHostHandle;
-use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, WorkerId};
+use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, WorkerId};
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation};
 use super::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use super::protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION,
     WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
-    WorkerInvocationResult, WorkerInvoke, WorkerProtocolMessage, WorkerRegistrationMode,
-    WorkerStreamPublish, WorkerVisibility,
+    WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent, WorkerProtocolMessage,
+    WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
-use super::types::{DeliveryMode, FunctionHealth, WorkerLifecycleState};
+use super::types::{DeliveryMode, FunctionHealth, VisibilityScope, WorkerLifecycleState};
+
+const WORKER_LIFECYCLE_TOPIC: &str = "worker.lifecycle";
 
 /// Transport client used to invoke a connected local external worker.
 #[async_trait]
@@ -152,7 +154,16 @@ impl EngineExternalWorkerRuntime {
                 triggers: BTreeSet::new(),
             },
         );
-        Ok(self.catalog_snapshot_for(&worker_id).await)
+        let snapshot = self.catalog_snapshot_for(&worker_id).await;
+        let connection = self.connection_mut(&worker_id)?.clone();
+        self.publish_lifecycle_event(
+            "worker.connected",
+            &connection,
+            None,
+            self.host.catalog_revision().await.0,
+        )
+        .await?;
+        Ok(snapshot)
     }
 
     /// Handle a protocol message.
@@ -242,6 +253,14 @@ impl EngineExternalWorkerRuntime {
         self.connection_mut(&worker_id)?
             .functions
             .insert(id.clone());
+        let connection = self.connection_mut(&worker_id)?.clone();
+        self.publish_lifecycle_event(
+            "worker.function_registered",
+            &connection,
+            None,
+            self.host.catalog_revision().await.0,
+        )
+        .await?;
         Ok(WorkerCatalogChange {
             subject_id: id,
             owner_worker: worker_id,
@@ -265,6 +284,14 @@ impl EngineExternalWorkerRuntime {
             )
             .await?;
         self.connection_mut(&worker_id)?.triggers.insert(id.clone());
+        let connection = self.connection_mut(&worker_id)?.clone();
+        self.publish_lifecycle_event(
+            "worker.trigger_registered",
+            &connection,
+            None,
+            self.host.catalog_revision().await.0,
+        )
+        .await?;
         Ok(WorkerCatalogChange {
             subject_id: id,
             owner_worker: worker_id,
@@ -399,8 +426,43 @@ impl EngineExternalWorkerRuntime {
             self.host
                 .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())
                 .await?;
+            let event_type = if disconnect.reason == "heartbeat timeout" {
+                "worker.heartbeat_timeout"
+            } else {
+                "worker.disconnected"
+            };
+            self.publish_lifecycle_event(
+                event_type,
+                &connection,
+                Some(disconnect.reason.as_str()),
+                self.host.catalog_revision().await.0,
+            )
+            .await?;
+            self.publish_lifecycle_event(
+                "worker.unregistered",
+                &connection,
+                Some(disconnect.reason.as_str()),
+                self.host.catalog_revision().await.0,
+            )
+            .await?;
         } else {
             self.mark_durable_worker_disconnected(&connection).await?;
+            self.publish_lifecycle_event(
+                "worker.disconnected",
+                &connection,
+                Some(disconnect.reason.as_str()),
+                self.host.catalog_revision().await.0,
+            )
+            .await?;
+            let mut health_changed = connection.clone();
+            health_changed.health = WorkerHealth::Disconnected;
+            self.publish_lifecycle_event(
+                "worker.health_changed",
+                &health_changed,
+                Some(disconnect.reason.as_str()),
+                self.host.catalog_revision().await.0,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -433,6 +495,73 @@ impl EngineExternalWorkerRuntime {
         last_heartbeat_at: DateTime<Utc>,
     ) -> Result<()> {
         self.connection_mut(worker_id)?.last_heartbeat_at = last_heartbeat_at;
+        Ok(())
+    }
+
+    async fn publish_lifecycle_event(
+        &self,
+        event_type: &str,
+        connection: &ExternalWorkerConnection,
+        reason: Option<&str>,
+        catalog_revision: u64,
+    ) -> Result<()> {
+        let trace_id = TraceId::generate();
+        let event = WorkerLifecycleEvent {
+            event_type: event_type.to_owned(),
+            worker_id: connection.worker_id.clone(),
+            registration_mode: connection.registration_mode.clone(),
+            visibility: connection.default_visibility.clone(),
+            session_id: connection.session_id.clone(),
+            workspace_id: connection.workspace_id.clone(),
+            health: connection.health.clone(),
+            reason: reason.map(ToOwned::to_owned),
+            functions: connection.functions.iter().cloned().collect(),
+            triggers: connection.triggers.iter().cloned().collect(),
+            catalog_revision,
+            trace_id: trace_id.clone(),
+            timestamp: Utc::now().to_rfc3339(),
+        };
+        let mut context = CausalContext::new(
+            ActorId::new("worker-runtime")?,
+            ActorKind::System,
+            AuthorityGrantId::new("worker-runtime")?,
+            trace_id,
+        )
+        .with_scope("stream.write")
+        .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+        .with_idempotency_key(format!(
+            "worker-lifecycle:{event_type}:{}:{catalog_revision}:{}",
+            connection.worker_id,
+            InvocationId::generate()
+        ));
+        if let Some(session_id) = connection.session_id.clone() {
+            context = context.with_session_id(session_id);
+        }
+        if let Some(workspace_id) = connection.workspace_id.clone() {
+            context = context.with_workspace_id(workspace_id);
+        }
+        let mut payload = serde_json::json!({
+            "topic": WORKER_LIFECYCLE_TOPIC,
+            "payload": event,
+            "visibility": lifecycle_visibility(connection).as_str(),
+            "producer": "worker-runtime",
+        });
+        if let Some(session_id) = connection.session_id.clone() {
+            payload["sessionId"] = serde_json::Value::String(session_id);
+        }
+        if let Some(workspace_id) = connection.workspace_id.clone() {
+            payload["workspaceId"] = serde_json::Value::String(workspace_id);
+        }
+        let result = self
+            .host
+            .invoke(
+                Invocation::new_sync(FunctionId::new("stream::publish")?, payload, context)
+                    .with_delivery_mode(DeliveryMode::Sync),
+            )
+            .await;
+        if let Some(error) = result.error {
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -484,6 +613,14 @@ impl EngineExternalWorkerRuntime {
         worker.lifecycle = WorkerLifecycleState::Stopped;
         self.host.register_worker(worker, false).await?;
         Ok(())
+    }
+}
+
+fn lifecycle_visibility(connection: &ExternalWorkerConnection) -> VisibilityScope {
+    match connection.default_visibility {
+        WorkerVisibility::Session if connection.session_id.is_none() => VisibilityScope::System,
+        WorkerVisibility::Workspace if connection.workspace_id.is_none() => VisibilityScope::System,
+        _ => connection.default_visibility.as_visibility_scope(),
     }
 }
 

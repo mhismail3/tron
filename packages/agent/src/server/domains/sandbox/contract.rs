@@ -57,6 +57,24 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"worker:{workerId}","kind":"sandbox-worker","reason":"serializes lifecycle operations for one sandbox-created worker","required":true,"ttlMs":300000},"rollbackOrCompensation":"failed launches kill the process and unregister partial volatile catalog entries; successful workers can be disconnected with worker::disconnect","streamTopics": STREAM_TOPICS,"version":1}))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
+        CapabilityContract::new("sandbox::list_spawned_workers", "sandbox", EffectClass::PureRead, RiskLevel::Low, Some("sandbox.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"workers":{"type":"array"}},"required":["workers"],"type":"object"}))
+            .build()?,
+        CapabilityContract::new("sandbox::get_spawned_worker", "sandbox", EffectClass::PureRead, RiskLevel::Low, Some("sandbox.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"workerId":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["workerId"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"worker":{"type":["object","null"]}},"required":["worker"],"type":"object"}))
+            .build()?,
+        CapabilityContract::new("sandbox::stop_spawned_worker", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("sandbox.write"))
+            .approval_required(true)
+            .request_schema(json!({"additionalProperties":false,"properties":{"workerId":{"type":"string"},"reason":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["workerId"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"worker":{"type":"object"},"catalogRevision":{"type":"integer"},"stopped":{"type":"boolean"},"streamTopic":{"type":"string"}},"required":["worker","catalogRevision","stopped","streamTopic"],"type":"object"}))
+            .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox-worker", "worker:{workerId}", 300000))
+            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "stop kills the sandbox-created process and unregisters volatile catalog entries through worker::disconnect; manual cleanup may be required if the process cannot be signaled"))
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"worker:{workerId}","kind":"sandbox-worker","reason":"serializes lifecycle operations for one sandbox-created worker","required":true,"ttlMs":300000},"rollbackOrCompensation":"manual process cleanup may be required if the worker process cannot be signaled","streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
+            .build()?,
         CapabilityContract::new("sandbox::start_container", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("sandbox.write"))
             .approval_required(true)
             .request_schema(json!({"additionalProperties":false,"properties":{"name":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["name"],"type":"object"}))

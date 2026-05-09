@@ -1,8 +1,10 @@
 //! sandbox domain worker.
 //!
-//! This module owns canonical function execution for the sandbox namespace and keeps
-//! domain contracts, services, sandbox-created worker launch, and tests beside
-//! the worker that uses them.
+//! This module owns canonical function execution for the sandbox namespace and
+//! keeps domain contracts, services, sandbox-created worker launch/stop
+//! lifecycle, and tests beside the worker that uses them. Spawned workers are
+//! local `/engine/workers` participants; cleanup routes through `worker::disconnect`
+//! and lifecycle events publish to `sandbox.lifecycle`.
 
 use std::time::{Duration, Instant};
 
@@ -16,11 +18,15 @@ use serde_json::json;
 use tokio::process::Command;
 use tokio::time::sleep;
 
-use crate::engine::{ActorContext, ActorKind, FunctionId, Invocation, WorkerId};
+use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::{
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, FunctionId,
+    Invocation, TraceId, WorkerId,
+};
 use crate::server::domains::worker::DomainRegistrationContext;
 use crate::server::domains::worker::DomainWorkerModule;
 use crate::server::shared::context::run_blocking_task;
-use crate::server::shared::errors::CapabilityError;
+use crate::server::shared::errors::{CapabilityError, NOT_FOUND};
 use crate::server::shared::params::{opt_array, opt_string, opt_u64};
 
 pub(crate) fn worker_module(
@@ -69,6 +75,46 @@ async fn list_containers(_deps: &Deps) -> Result<Value, CapabilityError> {
 async fn run_container_command(action: &str, payload: &Value) -> Result<Value, CapabilityError> {
     let name = require_string_param(Some(payload), "name")?;
     sandbox_service::run_container_command(action, &name).await
+}
+
+async fn list_spawned_workers(deps: &Deps) -> Result<Value, CapabilityError> {
+    Ok(json!({ "workers": deps.worker_processes.list().await }))
+}
+
+async fn get_spawned_worker(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let worker_id = require_string_param(Some(&invocation.payload), "workerId")?;
+    Ok(json!({ "worker": deps.worker_processes.get(&worker_id).await }))
+}
+
+async fn stop_spawned_worker(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let worker_id = require_string_param(Some(&invocation.payload), "workerId")?;
+    let reason =
+        opt_string(Some(&invocation.payload), "reason").unwrap_or_else(|| "requested".into());
+    let mut record = deps
+        .worker_processes
+        .stop(&worker_id, Some(reason.as_str()))
+        .await
+        .ok_or_else(|| CapabilityError::NotFound {
+            code: NOT_FOUND.into(),
+            message: format!("sandbox worker not found: {worker_id}"),
+        })?;
+
+    disconnect_worker_via_engine(deps, invocation, &worker_id, &reason).await?;
+    record.catalog_revision = deps.engine_host.catalog_revision().await.0;
+    publish_sandbox_lifecycle_event(deps, invocation, "sandbox.worker_stopped", &record).await?;
+
+    Ok(json!({
+        "worker": record,
+        "catalogRevision": deps.engine_host.catalog_revision().await.0,
+        "stopped": true,
+        "streamTopic": contract::STREAM_TOPICS[0],
+    }))
 }
 
 async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
@@ -161,7 +207,26 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
         }
     };
 
-    deps.worker_processes.insert(worker_id.clone(), child).await;
+    let record = sandbox_service::SandboxWorkerRecord {
+        worker_id: worker_id.clone(),
+        process_id,
+        command: command.clone(),
+        args: args.clone(),
+        working_directory: working_directory.clone(),
+        visibility: visibility.clone(),
+        session_id: session_id.clone(),
+        workspace_id: workspace_id.clone(),
+        expected_function_ids: expected_function_ids.clone(),
+        registered_function_ids: registered_function_ids.clone(),
+        catalog_revision,
+        worker_endpoint: endpoint.clone(),
+        status: "running".to_owned(),
+        started_at: chrono::Utc::now(),
+        stopped_at: None,
+        last_error: None,
+    };
+    deps.worker_processes.insert(record.clone(), child).await;
+    publish_sandbox_lifecycle_event(deps, invocation, "sandbox.worker_spawned", &record).await?;
     Ok(json!({
         "workerId": worker_id,
         "processId": process_id,
@@ -266,12 +331,152 @@ async fn sandbox_worker_function_ids(deps: &Deps, worker_id: &WorkerId) -> Vec<F
 async fn cleanup_partial_worker_registration(deps: &Deps, worker_id: &str) {
     if let Ok(id) = WorkerId::new(worker_id.to_owned()) {
         deps.worker_processes.kill(worker_id).await;
-        if let Ok(worker) = deps.engine_host.inspect_worker(&id).await {
-            let _ = deps
-                .engine_host
-                .unregister_worker(&id, worker.owner_actor.as_str())
-                .await;
+        let _ = disconnect_worker_id_via_engine(deps, &id, "spawn cleanup").await;
+    }
+}
+
+async fn disconnect_worker_via_engine(
+    deps: &Deps,
+    invocation: &Invocation,
+    worker_id: &str,
+    reason: &str,
+) -> Result<(), CapabilityError> {
+    let worker_id = WorkerId::new(worker_id.to_owned()).map_err(engine_invalid_params)?;
+    disconnect_worker_id_with_context(deps, Some(invocation), &worker_id, reason).await
+}
+
+async fn disconnect_worker_id_via_engine(
+    deps: &Deps,
+    worker_id: &WorkerId,
+    reason: &str,
+) -> Result<(), CapabilityError> {
+    disconnect_worker_id_with_context(deps, None, worker_id, reason).await
+}
+
+async fn disconnect_worker_id_with_context(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+    worker_id: &WorkerId,
+    reason: &str,
+) -> Result<(), CapabilityError> {
+    let trace_id = parent
+        .map(|invocation| invocation.causal_context.trace_id.clone())
+        .unwrap_or_else(TraceId::generate);
+    let mut context = CausalContext::new(
+        ActorId::new("sandbox-lifecycle").map_err(engine_internal)?,
+        ActorKind::System,
+        AuthorityGrantId::new("sandbox-lifecycle").map_err(engine_internal)?,
+        trace_id,
+    )
+    .with_scope("worker.write")
+    .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+    .with_idempotency_key(format!(
+        "sandbox-worker-disconnect:{worker_id}:{}",
+        parent
+            .map(|invocation| invocation.id.as_str().to_owned())
+            .unwrap_or_else(|| reason.to_owned())
+    ));
+    if let Some(parent) = parent {
+        context = context.with_parent_invocation(parent.id.clone());
+        if let Some(session_id) = parent.causal_context.session_id.clone() {
+            context = context.with_session_id(session_id);
         }
+        if let Some(workspace_id) = parent.causal_context.workspace_id.clone() {
+            context = context.with_workspace_id(workspace_id);
+        }
+    }
+    let result = deps
+        .engine_host
+        .invoke(
+            Invocation::new_sync(
+                FunctionId::new("worker::disconnect").map_err(engine_internal)?,
+                json!({"workerId": worker_id.as_str(), "reason": reason}),
+                context,
+            )
+            .with_delivery_mode(DeliveryMode::Sync),
+        )
+        .await;
+    if let Some(error) = result.error {
+        return Err(engine_internal(error));
+    }
+    Ok(())
+}
+
+async fn publish_sandbox_lifecycle_event(
+    deps: &Deps,
+    invocation: &Invocation,
+    event_type: &str,
+    record: &sandbox_service::SandboxWorkerRecord,
+) -> Result<(), CapabilityError> {
+    let mut context = CausalContext::new(
+        ActorId::new("sandbox-lifecycle").map_err(engine_internal)?,
+        ActorKind::System,
+        AuthorityGrantId::new("sandbox-lifecycle").map_err(engine_internal)?,
+        invocation.causal_context.trace_id.clone(),
+    )
+    .with_scope("stream.write")
+    .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+    .with_parent_invocation(invocation.id.clone())
+    .with_idempotency_key(format!(
+        "sandbox-lifecycle:{event_type}:{}:{}",
+        record.worker_id,
+        invocation.id.as_str()
+    ));
+    if let Some(session_id) = record
+        .session_id
+        .clone()
+        .or_else(|| invocation.causal_context.session_id.clone())
+    {
+        context = context.with_session_id(session_id);
+    }
+    if let Some(workspace_id) = record
+        .workspace_id
+        .clone()
+        .or_else(|| invocation.causal_context.workspace_id.clone())
+    {
+        context = context.with_workspace_id(workspace_id);
+    }
+    let mut payload = json!({
+        "topic": contract::STREAM_TOPICS[0],
+        "payload": {
+            "eventType": event_type,
+            "worker": record,
+        },
+        "visibility": record.visibility.clone(),
+        "producer": "sandbox",
+    });
+    if let Some(session_id) = record.session_id.clone() {
+        payload["sessionId"] = Value::String(session_id);
+    }
+    if let Some(workspace_id) = record.workspace_id.clone() {
+        payload["workspaceId"] = Value::String(workspace_id);
+    }
+    let result = deps
+        .engine_host
+        .invoke(
+            Invocation::new_sync(
+                FunctionId::new("stream::publish").map_err(engine_internal)?,
+                payload,
+                context,
+            )
+            .with_delivery_mode(DeliveryMode::Sync),
+        )
+        .await;
+    if let Some(error) = result.error {
+        return Err(engine_internal(error));
+    }
+    Ok(())
+}
+
+fn engine_invalid_params(error: crate::engine::EngineError) -> CapabilityError {
+    CapabilityError::InvalidParams {
+        message: error.to_string(),
+    }
+}
+
+fn engine_internal(error: crate::engine::EngineError) -> CapabilityError {
+    CapabilityError::Internal {
+        message: error.to_string(),
     }
 }
 

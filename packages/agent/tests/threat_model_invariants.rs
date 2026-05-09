@@ -336,6 +336,7 @@ fn primitive_workers_are_owned_outside_host_bucket() {
         "catalog.rs",
         "worker.rs",
         "observability.rs",
+        "runtime.rs",
     ] {
         assert!(
             primitives_root.join(primitive).is_file(),
@@ -355,10 +356,31 @@ fn primitive_workers_are_owned_outside_host_bucket() {
         "fn queue_enqueue_schema",
         "fn approval_request_schema",
         "fn primitive_function(",
+        "fn primitive_catalog_",
+        "fn primitive_worker_",
+        "fn primitive_trace_",
+        "fn primitive_log_query",
+        "fn primitive_metrics_snapshot",
+        "dispatch_host_dispatched_primitive",
     ] {
         assert!(
             !host.contains(removed),
-            "EngineHost must coordinate primitive execution without owning primitive contract/handler bucket `{removed}`"
+            "EngineHost must coordinate primitive execution without owning primitive contract, query, or response bucket `{removed}`"
+        );
+    }
+
+    let primitive_runtime = std::fs::read_to_string(primitives_root.join("runtime.rs"))
+        .expect("failed to read primitive runtime");
+    for required in [
+        "PrimitiveRuntimeHost",
+        "catalog_list",
+        "worker_list",
+        "trace_get",
+        "metrics_snapshot",
+    ] {
+        assert!(
+            primitive_runtime.contains(required),
+            "primitive query response shaping must live in src/engine/primitives/runtime.rs; missing `{required}`"
         );
     }
 }
@@ -374,6 +396,7 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
         "WorkerRegistrationMode",
         "WorkerVisibility",
         "WorkerHealth",
+        "WorkerLifecycleEvent",
         "WorkerStreamPublish",
         "PublishStream",
     ] {
@@ -389,6 +412,9 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
         "register_function",
         "register_trigger",
         "publish_stream",
+        "publish_lifecycle_event",
+        "worker.lifecycle",
+        "external workers are loopback-only",
         "disconnect_timed_out",
         "mark_durable_worker_disconnected",
     ] {
@@ -403,6 +429,9 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
             .expect("failed to read sandbox contract");
     for required in [
         "sandbox::spawn_worker",
+        "sandbox::list_spawned_workers",
+        "sandbox::get_spawned_worker",
+        "sandbox::stop_spawned_worker",
         "sandbox-worker",
         "approvalRequiredForAgentVisibility",
         "worker:{workerId}",
@@ -412,6 +441,15 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
             "sandbox::spawn_worker must stay a high-risk domain-owned capability with complete engine metadata; missing `{required}`"
         );
     }
+
+    let sandbox = std::fs::read_to_string(crate_root.join("src/server/domains/sandbox/mod.rs"))
+        .expect("failed to read sandbox domain");
+    assert!(
+        sandbox.contains("\"worker::disconnect\"")
+            && sandbox.contains("\"stream::publish\"")
+            && !sandbox.contains(".unregister_worker("),
+        "sandbox worker cleanup must route through engine worker/stream primitives, not direct catalog cleanup"
+    );
 }
 
 #[test]

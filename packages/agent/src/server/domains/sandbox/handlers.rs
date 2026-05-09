@@ -1,7 +1,7 @@
 //! Operation binding for the sandbox worker.
 
-use super::spawn_worker;
-use super::{Deps, list_containers, remove_container, run_container_command};
+use super::{Deps, get_spawned_worker, list_containers, list_spawned_workers, remove_container};
+use super::{run_container_command, spawn_worker, stop_spawned_worker};
 use crate::server::domains::bindings::operation_bindings;
 
 operation_bindings! {
@@ -13,6 +13,15 @@ operation_bindings! {
         },
         "spawn_worker" => |invocation, deps| {
             spawn_worker(invocation, deps).await
+        },
+        "list_spawned_workers" => |_invocation, deps| {
+            list_spawned_workers(deps).await
+        },
+        "get_spawned_worker" => |invocation, deps| {
+            get_spawned_worker(invocation, deps).await
+        },
+        "stop_spawned_worker" => |invocation, deps| {
+            stop_spawned_worker(invocation, deps).await
         },
         "start_container" => |invocation, _deps| {
             run_container_command("start", &invocation.payload).await

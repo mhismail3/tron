@@ -395,13 +395,19 @@ removed on disconnect or missed heartbeat. Durable local worker entries stay in
 the catalog but are marked unhealthy when the worker disconnects, so invocation
 fails closed until the worker reconnects and re-registers. Workers publish
 events by asking the engine to invoke `stream::publish`; there is no direct
-socket event bypass.
+socket event bypass. Worker connect/register/disconnect/heartbeat-timeout
+events are stored on `worker.lifecycle` through the stream primitive and are
+visible in `observability::trace_get`.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, and `approval::*` preserve the runtime semantics for delivery,
 state, queued handoff, and human approval. `catalog::*`, `worker::*`, and
 `observability::*` expose live catalog snapshots, worker health/lifecycle, trace
-spans/logs, and metrics through the same canonical invocation path.
+spans/logs, and metrics through the same canonical invocation path. Query
+response shaping for these privileged primitive workers lives under
+`packages/agent/src/engine/primitives/runtime.rs`; `EngineHost` coordinates
+catalog, ledger, stream, lease, approval, and compensation access without owning
+primitive response contracts.
 
 Sandbox-created capabilities enter through the high-risk
 `sandbox::spawn_worker` capability. It requires explicit idempotency,
@@ -410,7 +416,10 @@ lease, and compensation notes. The capability starts a local worker process with
 scoped `/engine/workers` environment, waits for the expected registration, and
 returns the worker id, registered functions, catalog revision, visibility, and
 process metadata. Session visibility is the default; workspace/system promotion
-is still only `engine::promote`.
+is still only `engine::promote`. `sandbox::list_spawned_workers`,
+`sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
+local process lifecycle; stop kills the process, unregisters volatile catalog
+entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.
 
 ---
 
@@ -692,7 +701,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
-The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, and compensation audit records; live catalog definitions are still in memory. The observability worker reads this ledger as local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`.
+The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, worker/sandbox lifecycle stream records, and compensation audit records; live catalog definitions are still in memory. The observability worker reads this ledger as local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`.
 
 ### Tables
 

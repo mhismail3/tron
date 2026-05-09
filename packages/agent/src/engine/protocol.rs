@@ -150,6 +150,38 @@ impl Default for WorkerHealth {
     }
 }
 
+/// Worker lifecycle payload stored on `worker.lifecycle`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerLifecycleEvent {
+    /// Lifecycle event type, for example `worker.connected`.
+    pub event_type: String,
+    /// Worker id.
+    pub worker_id: WorkerId,
+    /// Registration durability mode.
+    pub registration_mode: WorkerRegistrationMode,
+    /// Worker visibility scope.
+    pub visibility: WorkerVisibility,
+    /// Session scope, when present.
+    pub session_id: Option<String>,
+    /// Workspace scope, when present.
+    pub workspace_id: Option<String>,
+    /// Worker health after the event.
+    pub health: WorkerHealth,
+    /// Optional lifecycle reason.
+    pub reason: Option<String>,
+    /// Function ids owned by the worker at event time.
+    pub functions: Vec<String>,
+    /// Trigger ids owned by the worker at event time.
+    pub triggers: Vec<String>,
+    /// Catalog revision observed after the lifecycle change.
+    pub catalog_revision: u64,
+    /// Trace id assigned to this lifecycle event.
+    pub trace_id: TraceId,
+    /// Event timestamp.
+    pub timestamp: String,
+}
+
 /// Worker hello/handshake.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

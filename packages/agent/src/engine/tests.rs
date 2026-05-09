@@ -4101,6 +4101,98 @@ async fn local_external_worker_runtime_registers_session_functions_and_disconnec
     ));
 }
 
+#[tokio::test]
+async fn local_external_worker_lifecycle_events_publish_through_streams_and_traces() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let subscribe = handle
+        .invoke(host_invocation(
+            "stream::subscribe",
+            json!({
+                "subscriptionId": "worker-lifecycle-sub",
+                "topic": "worker.lifecycle",
+                "sessionId": "session-a"
+            }),
+            mutating_causal("worker-lifecycle-subscribe").with_scope("stream.write"),
+        ))
+        .await;
+    assert_eq!(subscribe.error, None);
+
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("local-lifecycle-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("lifecycle_local");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.session_id = Some("session-a".to_owned());
+    runtime.hello(hello).await.unwrap();
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: FunctionDefinition::new(
+                fid("lifecycle_local::echo"),
+                worker_id.clone(),
+                "lifecycle external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )
+            .with_provenance(Provenance::system().with_session_id("session-a")),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+    runtime
+        .disconnect(super::WorkerDisconnect {
+            worker_id: worker_id.clone(),
+            reason: "test complete".to_owned(),
+        })
+        .await
+        .unwrap();
+
+    let poll = handle
+        .invoke(host_invocation(
+            "stream::poll",
+            json!({"subscriptionId": "worker-lifecycle-sub", "limit": 10}),
+            causal()
+                .with_scope("stream.read")
+                .with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(poll.error, None);
+    let events = poll.value.as_ref().unwrap()["events"].as_array().unwrap();
+    let event_types = events
+        .iter()
+        .map(|event| event["payload"]["eventType"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        event_types,
+        vec![
+            "worker.connected",
+            "worker.function_registered",
+            "worker.disconnected",
+            "worker.unregistered",
+        ]
+    );
+    let trace_id = events[0]["payload"]["traceId"].as_str().unwrap();
+    let trace = handle
+        .invoke(host_invocation(
+            "observability::trace_get",
+            json!({"traceId": trace_id}),
+            causal().with_scope("observability.read"),
+        ))
+        .await;
+    assert_eq!(trace.error, None);
+    assert!(
+        trace.value.as_ref().unwrap()["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|stream| stream["topic"] == "worker.lifecycle")
+    );
+}
+
 struct EchoExternalInvoker;
 
 #[async_trait]

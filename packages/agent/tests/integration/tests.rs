@@ -132,6 +132,188 @@ async fn e2e_engine_ws_hello_discover_invoke_and_stream_poll() {
 }
 
 #[tokio::test]
+async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
+    let (url, server) = boot_server_without_deps().await;
+    let engine_url = engine_ws_url_for(&url);
+    let mut engine_ws = connect(&engine_url).await;
+    let mut worker_ws = connect_worker(&engine_url).await;
+
+    engine_ws
+        .send(Message::text(
+            json!({
+                "type": "hello",
+                "id": "hello-worker-test",
+                "protocolVersion": 1,
+                "sessionId": "worker-session"
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let hello = read_json(&mut engine_ws).await;
+    assert_eq!(hello["type"], "hello.ok");
+
+    let worker = WorkerDefinition::new(
+        tron::engine::WorkerId::new("integration-worker").unwrap(),
+        WorkerKind::External,
+        ActorId::new("integration-worker-owner").unwrap(),
+        AuthorityGrantId::new("integration-worker-grant").unwrap(),
+    )
+    .with_namespace_claim("demo");
+    let mut worker_hello = tron::engine::WorkerHello::loopback(worker);
+    worker_hello.session_id = Some("worker-session".to_owned());
+    worker_ws
+        .send(Message::text(
+            serde_json::to_string(&WorkerProtocolMessage::Hello(worker_hello)).unwrap(),
+        ))
+        .await
+        .unwrap();
+    let snapshot = read_json(&mut worker_ws).await;
+    assert_eq!(snapshot["type"], "catalog_snapshot");
+
+    let function = FunctionDefinition::new(
+        FunctionId::new("demo::echo").unwrap(),
+        tron::engine::WorkerId::new("integration-worker").unwrap(),
+        "deterministic integration worker echo",
+        VisibilityScope::Session,
+        EffectClass::PureRead,
+    )
+    .with_risk(RiskLevel::Low)
+    .with_provenance(Provenance::system().with_session_id("worker-session"));
+    worker_ws
+        .send(Message::text(
+            serde_json::to_string(&WorkerProtocolMessage::RegisterFunction(Box::new(
+                tron::engine::RegisterFunction {
+                    definition: function,
+                    default_visibility: VisibilityScope::Session,
+                },
+            )))
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    let catalog_change = read_json(&mut worker_ws).await;
+    assert_eq!(catalog_change["type"], "catalog_change");
+    assert_eq!(catalog_change["subjectId"], "demo::echo");
+
+    let (catalog, _) = raw_rpc_call_with_interleaved_events(
+        &mut engine_ws,
+        3001,
+        "discover",
+        Some(json!({
+            "request": {"namespacePrefix": "demo"},
+            "context": {"sessionId": "worker-session"}
+        })),
+    )
+    .await;
+    assert_eq!(catalog["ok"], true, "discover failed: {catalog}");
+    assert!(
+        catalog["result"].to_string().contains("demo::echo"),
+        "discover result did not include demo::echo: {catalog}"
+    );
+
+    engine_ws
+        .send(Message::text(
+            json!({
+                "type": "invoke",
+                "id": "invoke-demo-echo",
+                "functionId": "demo::echo",
+                "payload": {"message": "hello from engine"},
+                "context": {"sessionId": "worker-session"}
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let worker_invoke = read_json(&mut worker_ws).await;
+    let worker_invoke: WorkerProtocolMessage = serde_json::from_value(worker_invoke).unwrap();
+    let WorkerProtocolMessage::Invoke(invoke) = worker_invoke else {
+        panic!("expected worker invocation");
+    };
+    assert_eq!(invoke.function_id.as_str(), "demo::echo");
+    assert_eq!(invoke.payload["message"], "hello from engine");
+    assert_eq!(invoke.session_id.as_deref(), Some("worker-session"));
+    let trace_id = invoke.trace_id.to_string();
+    worker_ws
+        .send(Message::text(
+            serde_json::to_string(&WorkerProtocolMessage::Result(WorkerInvocationResult {
+                invocation_id: invoke.invocation_id,
+                result: Some(json!({
+                    "echo": invoke.payload,
+                    "traceId": trace_id,
+                })),
+                error: None,
+            }))
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    let invoke_response = read_json(&mut engine_ws).await;
+    assert_eq!(invoke_response["type"], "response");
+    assert_eq!(invoke_response["ok"], true);
+    assert_eq!(
+        invoke_response["result"]["child"]["value"]["echo"]["message"],
+        "hello from engine"
+    );
+
+    let trace = server
+        .runtime_context()
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("observability::trace_get").unwrap(),
+            json!({"traceId": trace_id}),
+            CausalContext::new(
+                ActorId::new("integration-observer").unwrap(),
+                ActorKind::System,
+                AuthorityGrantId::new("integration-observer").unwrap(),
+                TraceId::new("integration-observability-trace").unwrap(),
+            )
+            .with_scope("observability.read"),
+        ))
+        .await;
+    assert_eq!(trace.error, None);
+    assert!(
+        trace.value.as_ref().unwrap()["invocations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|span| span["functionId"] == "demo::echo")
+    );
+
+    worker_ws
+        .send(Message::text(
+            serde_json::to_string(&WorkerProtocolMessage::Disconnect(
+                tron::engine::WorkerDisconnect {
+                    worker_id: tron::engine::WorkerId::new("integration-worker").unwrap(),
+                    reason: "integration complete".to_owned(),
+                },
+            ))
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (removed, _) = raw_rpc_call_with_interleaved_events(
+        &mut engine_ws,
+        3003,
+        "discover",
+        Some(json!({
+            "request": {"namespacePrefix": "demo"},
+            "context": {"sessionId": "worker-session"}
+        })),
+    )
+    .await;
+    assert_eq!(removed["ok"], true);
+    assert!(
+        !removed["result"].to_string().contains("demo::echo"),
+        "demo::echo should disappear after worker disconnect: {removed}"
+    );
+
+    server.shutdown().shutdown();
+}
+
+#[tokio::test]
 async fn e2e_session_lifecycle() {
     let (url, server) = boot_server().await;
     let mut ws = connect(&url).await;
