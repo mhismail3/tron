@@ -30,7 +30,12 @@ final class NotificationClient: EngineDomainClient {
         _ = try requireTransport().requireConnection()
         if let sessionId {
             let params = NotificationMarkAllReadParams(sessionId: sessionId)
-            return try await invokeWrite("notifications::mark_all_read", params, idempotencyKey: idempotencyKey)
+            return try await invokeWrite(
+                "notifications::mark_all_read",
+                params,
+                idempotencyKey: idempotencyKey,
+                context: sessionInvocationContext(sessionId)
+            )
         }
         return try await invokeWrite("notifications::mark_all_read", EmptyParams(), idempotencyKey: idempotencyKey)
     }

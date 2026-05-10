@@ -13,6 +13,17 @@ class EngineDomainClient {
     /// Optional access to the underlying transport (e.g. for reading currentSessionId).
     var currentTransport: (any EngineTransport)? { transport }
 
+    /// Engine writes whose idempotency is scoped to a session must carry the
+    /// same session in the invocation envelope. The server rejects scoped
+    /// writes before handler execution when this context is absent.
+    func sessionInvocationContext(_ sessionId: String) -> EngineInvocationContext {
+        EngineInvocationContext(sessionId: sessionId)
+    }
+
+    func optionalSessionInvocationContext(_ sessionId: String?) -> EngineInvocationContext? {
+        sessionId.map { EngineInvocationContext(sessionId: $0) }
+    }
+
     /// Access transport safely, throwing if deallocated during server change.
     func requireTransport() throws -> any EngineTransport {
         guard let transport else { throw EngineClientError.connectionNotEstablished }

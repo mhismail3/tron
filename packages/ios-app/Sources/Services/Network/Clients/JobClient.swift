@@ -21,7 +21,8 @@ final class JobClient: EngineDomainClient {
         let _: Result = try await invokeWrite(
             "job::background",
             Params(jobId: jobId, sessionId: sessionId),
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
     }
 
@@ -42,7 +43,8 @@ final class JobClient: EngineDomainClient {
         let _: Result = try await invokeWrite(
             "job::cancel",
             Params(jobId: jobId, sessionId: sessionId),
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
     }
 
@@ -63,7 +65,8 @@ final class JobClient: EngineDomainClient {
         let _: Result = try await invokeWrite(
             "job::subscribe",
             Params(jobId: jobId, sessionId: sessionId),
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
     }
 

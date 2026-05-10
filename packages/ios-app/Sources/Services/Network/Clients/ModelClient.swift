@@ -34,7 +34,8 @@ final class ModelClient: EngineDomainClient, ModelClientProtocol {
         let result: ModelSwitchResult = try await invokeWrite(
             "model::switch",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
 
         if currentTransport?.currentSessionId == sessionId {
@@ -84,7 +85,8 @@ final class ModelClient: EngineDomainClient, ModelClientProtocol {
         return try await invokeWrite(
             "config::set_reasoning_level",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
     }
 

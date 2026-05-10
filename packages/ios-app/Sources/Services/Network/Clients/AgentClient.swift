@@ -26,7 +26,8 @@ final class AgentClient: EngineDomainClient {
         let result: AgentPromptResult = try await invokeWrite(
             "agent::prompt",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
 
         if !result.acknowledged {
@@ -39,13 +40,23 @@ final class AgentClient: EngineDomainClient {
     func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = SkillActivateParams(sessionId: sessionId, skillName: skillName)
-        return try await invokeWrite("skills::activate", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "skills::activate",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = SkillDeactivateParams(sessionId: sessionId, skillName: skillName)
-        return try await invokeWrite("skills::deactivate", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "skills::deactivate",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     func activeSkills() async throws -> SkillActiveResult {
@@ -61,21 +72,36 @@ final class AgentClient: EngineDomainClient {
     func queuePrompt(_ text: String, idempotencyKey: EngineIdempotencyKey) async throws -> PendingQueueItem {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = QueuePromptParams(sessionId: sessionId, prompt: text)
-        return try await invokeWrite("agent::queue_prompt", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "agent::queue_prompt",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Cancel a specific queued prompt by its queue ID.
     func dequeuePrompt(_ queueId: String, idempotencyKey: EngineIdempotencyKey) async throws {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = DequeuePromptParams(sessionId: sessionId, queueId: queueId)
-        let _: DequeueResult = try await invokeWrite("agent::dequeue_prompt", params, idempotencyKey: idempotencyKey)
+        let _: DequeueResult = try await invokeWrite(
+            "agent::dequeue_prompt",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Clear all queued prompts for the current session.
     func clearQueue(idempotencyKey: EngineIdempotencyKey) async throws {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = ClearQueueParams(sessionId: sessionId)
-        let _: ClearQueueResult = try await invokeWrite("agent::clear_queue", params, idempotencyKey: idempotencyKey)
+        let _: ClearQueueResult = try await invokeWrite(
+            "agent::clear_queue",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     // MARK: - Subagent Result Delivery
@@ -85,7 +111,12 @@ final class AgentClient: EngineDomainClient {
     func deliverSubagentResults(idempotencyKey: EngineIdempotencyKey) async throws -> DeliverSubagentResultsResponse {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = DeliverSubagentResultsParams(sessionId: sessionId)
-        return try await invokeWrite("agent::deliver_subagent_results", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "agent::deliver_subagent_results",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     // MARK: - Confirmation/Answer Submission
@@ -105,7 +136,12 @@ final class AgentClient: EngineDomainClient {
             decision: decision,
             note: note
         )
-        return try await invokeWrite("agent::submit_confirmation", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "agent::submit_confirmation",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Submit answers for an AskUserQuestion tool call.
@@ -116,14 +152,24 @@ final class AgentClient: EngineDomainClient {
     ) async throws -> SubmitAnswersResponse {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = SubmitAnswersParams(sessionId: sessionId, questions: questions)
-        return try await invokeWrite("agent::submit_answers", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "agent::submit_answers",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     func abort(idempotencyKey: EngineIdempotencyKey) async throws {
         guard let (_, sessionId) = try? requireTransport().requireSession() else { return }
 
         let params = AgentAbortParams(sessionId: sessionId)
-        let _: EmptyParams = try await invokeWrite("agent::abort", params, idempotencyKey: idempotencyKey)
+        let _: EmptyParams = try await invokeWrite(
+            "agent::abort",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
         logger.info("Aborted agent", category: .chat)
     }
 
@@ -134,7 +180,12 @@ final class AgentClient: EngineDomainClient {
     func abortTool(toolCallId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = AgentAbortToolParams(sessionId: sessionId, toolCallId: toolCallId)
-        let result: AgentAbortToolResult = try await invokeWrite("agent::abort_tool", params, idempotencyKey: idempotencyKey)
+        let result: AgentAbortToolResult = try await invokeWrite(
+            "agent::abort_tool",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
         logger.info(
             "Aborted tool call \(toolCallId): aborted=\(result.aborted)",
             category: .chat
@@ -158,7 +209,8 @@ final class AgentClient: EngineDomainClient {
         let response: ToolResultResponse = try await invokeWrite(
             "tool::result",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
 
         logger.info("[TOOL_RESULT] Tool result sent successfully: success=\(response.success)", category: .session)

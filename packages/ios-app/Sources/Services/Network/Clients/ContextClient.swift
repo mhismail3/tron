@@ -36,7 +36,8 @@ final class ContextClient: EngineDomainClient {
         return try await invokeWrite(
             "context::clear",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
     }
 
@@ -49,6 +50,7 @@ final class ContextClient: EngineDomainClient {
             "context::compact",
             params,
             idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId),
             timeout: 60.0
         )
     }

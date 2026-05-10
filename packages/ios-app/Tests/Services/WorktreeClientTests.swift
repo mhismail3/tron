@@ -33,6 +33,27 @@ struct WorktreeClientTests {
         }
     }
 
+    @Test("commit sends session invocation context")
+    func commitSendsSessionContext() async throws {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://127.0.0.1:9847/engine")!)
+        transport.connectionState = .connected
+        let client = WorktreeClient(transport: transport)
+        transport.writeHandler = { functionId, payload, _, options in
+            #expect(functionId.rawValue == "worktree::commit")
+            #expect((payload as? WorktreeCommitParams)?.sessionId == "session-123")
+            #expect(options.context?.sessionId == "session-123")
+            return WorktreeCommitResult(commitHash: "abc1234", filesChanged: [], insertions: 0, deletions: 0)
+        }
+
+        _ = try await client.commit(
+            sessionId: "session-123",
+            message: "test commit",
+            stageAll: true,
+            idempotencyKey: .userAction("worktree.commit.test")
+        )
+    }
+
     @Test("listSessionBranches throws when engineConnection is nil")
     func listSessionBranchesNoConnection() async {
         let transport = MockEngineTransport()

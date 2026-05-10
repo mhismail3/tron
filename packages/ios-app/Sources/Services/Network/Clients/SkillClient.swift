@@ -30,8 +30,14 @@ final class SkillClient: EngineDomainClient {
     func refresh(sessionId: String? = nil, idempotencyKey: EngineIdempotencyKey) async throws -> SkillRefreshResponse {
         _ = try requireTransport().requireConnection()
 
-        let params = SkillRefreshParams(sessionId: sessionId ?? currentTransport?.currentSessionId)
-        return try await invokeWrite("skills::refresh", params, idempotencyKey: idempotencyKey)
+        let effectiveSessionId = sessionId ?? currentTransport?.currentSessionId
+        let params = SkillRefreshParams(sessionId: effectiveSessionId)
+        return try await invokeWrite(
+            "skills::refresh",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: optionalSessionInvocationContext(effectiveSessionId)
+        )
     }
 
     /// Remove a skill from session context
@@ -46,7 +52,8 @@ final class SkillClient: EngineDomainClient {
         let result: SkillDeactivateResult = try await invokeWrite(
             "skills::deactivate",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
         return SkillRemoveResponse(success: result.success, error: nil)
     }

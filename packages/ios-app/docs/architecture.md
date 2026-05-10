@@ -303,10 +303,18 @@ timeouts. While foregrounded, the WebSocket heartbeat pings every five seconds
 with the same bounded verification timeout, and URLSession's WebSocket close
 delegate feeds remote closes into the reconnect state machine. Failed WebSocket
 upgrade completions also resume the open wait immediately, leaving the 10-second
-open timeout as a fallback instead of the primary failure signal. If a failed
+open timeout as a secondary guard instead of the primary failure signal. If a failed
 open leaves an `engineClient` wrapper with a disconnected transport, the next
 `connect()` discards that stale transport instead of treating it as an active
 connection.
+
+Session-scoped writes are intentionally thin-client calls: iOS includes the
+active `sessionId` in both the request payload and the engine invocation context,
+then the server owns idempotency, authorization, leases, ledger attempts, and
+stream publication. Source-control repo metadata follows the same shape: iOS
+first reads `worktree::get_status` and only asks repo capabilities for
+divergence or sibling-session data when the server reports an active worktree
+with a repo root.
 `ConnectionToastPolicy` bridges app-level connection state into the global
 toast banner stack: when an active paired server becomes disconnected,
 reconnecting, failed, or unauthorized, a deduplicated compact pill appears near

@@ -114,6 +114,18 @@ struct AgentClientTests {
         )
     }
 
+    private func makeConnectedTransport(sessionId: String = "session-123") -> MockEngineTransport {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://127.0.0.1:9847/engine")!)
+        transport.connectionState = .connected
+        transport.currentSessionId = sessionId
+        return transport
+    }
+
+    nonisolated private static func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+        try JSONDecoder().decode(type, from: Data(json.utf8))
+    }
+
     // MARK: - Send Prompt Tests
 
     @Test("Send prompt with minimal parameters")
@@ -152,6 +164,94 @@ struct AgentClientTests {
         await #expect(throws: MockAgentClient.TestError.self) {
             try await mock.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
         }
+    }
+
+    @Test("Real agent session writes carry session invocation context")
+    func realAgentSessionWritesCarryContext() async throws {
+        let sessionId = "session-123"
+        let transport = makeConnectedTransport(sessionId: sessionId)
+        let client = AgentClient(transport: transport)
+        var seenFunctions: [String] = []
+
+        transport.writeHandler = { functionId, payload, _, options in
+            let rawFunctionId = functionId.rawValue
+            seenFunctions.append(rawFunctionId)
+            #expect(options.context?.sessionId == sessionId)
+
+            switch rawFunctionId {
+            case "agent::prompt":
+                #expect((payload as? AgentPromptParams)?.sessionId == sessionId)
+                return AgentPromptResult(acknowledged: true)
+            case "skills::activate":
+                #expect((payload as? SkillActivateParams)?.sessionId == sessionId)
+                return try Self.decode(SkillActivateResult.self, #"{"success":true,"skill":{"name":"browser","source":"global","service":"tron"}}"#)
+            case "skills::deactivate":
+                #expect((payload as? SkillDeactivateParams)?.sessionId == sessionId)
+                return try Self.decode(SkillDeactivateResult.self, #"{"success":true,"deactivatedSkill":"browser"}"#)
+            case "agent::queue_prompt":
+                #expect((payload as? QueuePromptParams)?.sessionId == sessionId)
+                return PendingQueueItem(queueId: "queue-1", text: "queued", position: 1, timestamp: "2026-05-10T00:00:00Z")
+            case "agent::dequeue_prompt":
+                #expect((payload as? DequeuePromptParams)?.sessionId == sessionId)
+                return DequeueResult(ok: true)
+            case "agent::clear_queue":
+                #expect((payload as? ClearQueueParams)?.sessionId == sessionId)
+                return ClearQueueResult(cleared: 1)
+            case "agent::deliver_subagent_results":
+                #expect((payload as? DeliverSubagentResultsParams)?.sessionId == sessionId)
+                return DeliverSubagentResultsResponse(acknowledged: true, queued: false, subagentCount: 0, runId: nil)
+            case "agent::submit_confirmation":
+                #expect((payload as? SubmitConfirmationParams)?.sessionId == sessionId)
+                return SubmitConfirmationResponse(acknowledged: true, queued: false, runId: nil)
+            case "agent::submit_answers":
+                #expect((payload as? SubmitAnswersParams)?.sessionId == sessionId)
+                return SubmitAnswersResponse(acknowledged: true, queued: false, runId: nil)
+            case "agent::abort":
+                #expect((payload as? AgentAbortParams)?.sessionId == sessionId)
+                return EmptyParams()
+            case "agent::abort_tool":
+                #expect((payload as? AgentAbortToolParams)?.sessionId == sessionId)
+                return AgentAbortToolResult(aborted: true)
+            case "tool::result":
+                #expect((payload as? ToolResultParams)?.sessionId == sessionId)
+                return ToolResultResponse(success: true)
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+
+        try await client.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
+        _ = try await client.activateSkill("browser", idempotencyKey: .userAction("skills.activate.test"))
+        _ = try await client.deactivateSkill("browser", idempotencyKey: .userAction("skills.deactivate.test"))
+        _ = try await client.queuePrompt("queued", idempotencyKey: .userAction("agent.queuePrompt.test"))
+        try await client.dequeuePrompt("queue-1", idempotencyKey: .userAction("agent.dequeuePrompt.test"))
+        try await client.clearQueue(idempotencyKey: .userAction("agent.clearQueue.test"))
+        _ = try await client.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults.test"))
+        _ = try await client.submitConfirmation(action: "write", decision: "approve", note: nil, idempotencyKey: .userAction("agent.submitConfirmation.test"))
+        _ = try await client.submitAnswers(questions: [], idempotencyKey: .userAction("agent.submitAnswers.test"))
+        try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
+        _ = try await client.abortTool(toolCallId: "tool-1", idempotencyKey: .userAction("agent.abortTool.test"))
+        try await client.sendToolResult(
+            sessionId: sessionId,
+            toolCallId: "tool-2",
+            result: Self.makeTestResult(),
+            idempotencyKey: .userAction("tool.result.test")
+        )
+
+        #expect(seenFunctions == [
+            "agent::prompt",
+            "skills::activate",
+            "skills::deactivate",
+            "agent::queue_prompt",
+            "agent::dequeue_prompt",
+            "agent::clear_queue",
+            "agent::deliver_subagent_results",
+            "agent::submit_confirmation",
+            "agent::submit_answers",
+            "agent::abort",
+            "agent::abort_tool",
+            "tool::result"
+        ])
     }
 
     // MARK: - Skill Activation Tests

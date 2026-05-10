@@ -57,6 +57,17 @@ struct WorktreeGetStatusParams: Encodable {
 struct WorktreeGetStatusResult: Decodable {
     let hasWorktree: Bool
     let worktree: WorktreeInfo?
+
+    /// Repo-scoped source-control capabilities require a server-known
+    /// worktree and repository root. The client uses this only to avoid
+    /// sending calls the server will reject as outside the active domain.
+    var canQueryRepoMetadata: Bool {
+        guard hasWorktree else { return false }
+        guard let repoRoot = worktree?.repoRoot?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return !repoRoot.isEmpty
+    }
 }
 
 /// Quick check: is the given absolute path a git repository?

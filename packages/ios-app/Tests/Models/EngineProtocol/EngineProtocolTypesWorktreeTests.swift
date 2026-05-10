@@ -146,6 +146,70 @@ struct WorktreeInfoTests {
         let info = worktree(branch: "abc1234", baseBranch: nil, isolated: false)
         #expect(info.isOnBaseBranch == true)
     }
+
+    @Test("canQueryRepoMetadata requires server-owned worktree and repo root")
+    func canQueryRepoMetadataRequiresWorktreeRepoRoot() {
+        let info = WorktreeInfo(
+            isolated: true,
+            branch: "session/sess_abc12345",
+            baseCommit: "abc",
+            path: "/tmp/session",
+            baseBranch: "main",
+            repoRoot: "/tmp/repo",
+            hasUncommittedChanges: nil,
+            commitCount: nil,
+            isMerged: nil
+        )
+        #expect(WorktreeGetStatusResult(hasWorktree: true, worktree: info).canQueryRepoMetadata == true)
+        #expect(WorktreeGetStatusResult(hasWorktree: false, worktree: info).canQueryRepoMetadata == false)
+
+        let missingRepo = WorktreeInfo(
+            isolated: true,
+            branch: "session/sess_abc12345",
+            baseCommit: "abc",
+            path: "/tmp/session",
+            baseBranch: "main",
+            repoRoot: nil,
+            hasUncommittedChanges: nil,
+            commitCount: nil,
+            isMerged: nil
+        )
+        #expect(WorktreeGetStatusResult(hasWorktree: true, worktree: missingRepo).canQueryRepoMetadata == false)
+
+        let emptyRepo = WorktreeInfo(
+            isolated: true,
+            branch: "session/sess_abc12345",
+            baseCommit: "abc",
+            path: "/tmp/session",
+            baseBranch: "main",
+            repoRoot: "   ",
+            hasUncommittedChanges: nil,
+            commitCount: nil,
+            isMerged: nil
+        )
+        #expect(WorktreeGetStatusResult(hasWorktree: true, worktree: emptyRepo).canQueryRepoMetadata == false)
+    }
+}
+
+@Suite("RepoDivergence Tests")
+struct RepoDivergenceTests {
+
+    @Test("hasOrigin is required by the current engine contract")
+    func hasOriginIsRequired() {
+        let missingHasOrigin = Data(#"{"aheadMain":0,"behindMain":0,"aheadOrigin":0,"behindOrigin":0}"#.utf8)
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(RepoDivergence.self, from: missingHasOrigin)
+        }
+    }
+
+    @Test("hasOrigin decodes explicit false")
+    func hasOriginExplicitFalse() throws {
+        let data = Data(#"{"aheadMain":0,"behindMain":0,"aheadOrigin":null,"behindOrigin":null,"hasOrigin":false}"#.utf8)
+        let divergence = try JSONDecoder().decode(RepoDivergence.self, from: data)
+        #expect(divergence.hasOrigin == false)
+        #expect(divergence.aheadOrigin == nil)
+        #expect(divergence.behindOrigin == nil)
+    }
 }
 
 @Suite("SessionBranchInfo Tests")

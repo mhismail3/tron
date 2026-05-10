@@ -71,7 +71,8 @@ final class MiscClient: EngineDomainClient {
         let result: MessageDeleteResult = try await invokeWrite(
             "message::delete",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
 
         logger.info("[DELETE] Delete succeeded: deletionEventId=\(result.deletionEventId), targetType=\(result.targetType)", category: .session)
@@ -85,7 +86,12 @@ final class MiscClient: EngineDomainClient {
         _ = try requireTransport().requireConnection()
 
         let params = MemoryRetainParams(sessionId: sessionId)
-        return try await invokeWrite("memory::retain", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "memory::retain",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     // MARK: - Device Token Methods (Push Notifications)
@@ -126,7 +132,8 @@ final class MiscClient: EngineDomainClient {
         let result: DeviceTokenRegisterResult = try await invokeWrite(
             "device::register",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: optionalSessionInvocationContext(effectiveSessionId)
         )
 
         logger.info(

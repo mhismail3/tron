@@ -49,7 +49,8 @@ struct SourceControlSheet: View {
     @State private var isAbortingConflict = false
 
     // Server-sourced defaults for git sub-sheets. Fetched once in `.task`;
-    // fall back to hard-coded defaults if the engine protocol fails.
+    // if settings are temporarily unavailable, the local initial values keep
+    // the sheet usable without authorizing protected-branch pushes.
     @State private var defaultMergeStrategy: String = "merge"
     @State private var defaultSessionBranchPolicy: String = "keep"
     @State private var defaultAutoSetUpstream: Bool = true
@@ -104,9 +105,9 @@ struct SourceControlSheet: View {
                                     onAbort: { origin in
                                         // `nil` ⇒ pending-merge banner (server's
                                         // `pending_merge_detected` event has no
-                                        // origin field yet — fall back to
-                                        // `.finalize`). Live conflict banners
-                                        // pass the actual origin.
+                                        // origin field yet, so `.finalize`
+                                        // remains the current product default).
+                                        // Live conflict banners pass the actual origin.
                                         pendingAbortOrigin = origin ?? .finalize
                                     }
                                 )
@@ -142,6 +143,7 @@ struct SourceControlSheet: View {
                         Task {
                             isReloading = true
                             await loadData()
+                            await loadDivergence()
                             isReloading = false
                         }
                     } label: {
@@ -164,15 +166,16 @@ struct SourceControlSheet: View {
             .tronErrorAlert(message: $errorMessage)
             .task {
                 // Pre-populate from parent's data, then refresh in background.
-                // Run the three loaders in parallel so late-arriving pills
-                // (divergence chips, Sessions tile) settle in a single batch
-                // rather than popping in one at a time.
+                // Diff/status and settings can load independently. Repo
+                // metadata depends on the server-reported worktree status, so
+                // it runs after `loadData()` has established whether a repo
+                // owner exists for this session.
                 diffResult = initialDiffResult
                 worktreeStatus = initialWorktreeStatus
                 async let data: Void = loadData()
-                async let divergenceLoad: Void = loadDivergence()
                 async let defaults: Void = loadGitDefaults()
-                _ = await (data, divergenceLoad, defaults)
+                _ = await (data, defaults)
+                await loadDivergence()
             }
             // Sibling-session main advances / local finalize|sync|push all
             // bump the tick — re-pull divergence chips so they stay fresh.
@@ -416,6 +419,14 @@ struct SourceControlSheet: View {
     }
 
     private func loadDivergence() async {
+        guard worktreeStatus?.canQueryRepoMetadata == true else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                divergence = nil
+                repoSessionCount = 0
+            }
+            return
+        }
+
         // Resolve both engine protocols in parallel, then flush to state once with a
         // coordinated animation so chips + Sessions tile fade in together.
         async let d = engineClient.repo.getDivergence(sessionId: sessionId)
@@ -454,8 +465,8 @@ struct SourceControlSheet: View {
     }
 
     /// Fetch `git.*` defaults from server settings so sub-sheets reflect the
-    /// user's preferences (strategy, branch policy, upstream behavior) instead
-    /// of the hard-coded fallbacks. Failure silently keeps the defaults.
+    /// user's preferences (strategy, branch policy, upstream behavior). If
+    /// the read fails, the local initial values remain in place.
     private func loadGitDefaults() async {
         guard let settings = try? await engineClient.settings.get() else { return }
         defaultMergeStrategy = settings.gitMergeStrategy

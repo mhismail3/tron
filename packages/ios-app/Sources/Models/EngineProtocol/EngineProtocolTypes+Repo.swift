@@ -72,9 +72,7 @@ struct RepoDivergence: Decodable, Equatable {
         self.behindMain = try c.decodeIfPresent(UInt64.self, forKey: .behindMain)
         self.aheadOrigin = try c.decodeIfPresent(UInt64.self, forKey: .aheadOrigin)
         self.behindOrigin = try c.decodeIfPresent(UInt64.self, forKey: .behindOrigin)
-        // Older servers didn't send `hasOrigin`; fall back to "present ⇒ true".
-        self.hasOrigin = try c.decodeIfPresent(Bool.self, forKey: .hasOrigin)
-            ?? (self.aheadOrigin != nil || self.behindOrigin != nil)
+        self.hasOrigin = try c.decode(Bool.self, forKey: .hasOrigin)
     }
 
     private enum CodingKeys: String, CodingKey {

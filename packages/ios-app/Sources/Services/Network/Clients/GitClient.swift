@@ -27,7 +27,12 @@ final class GitClient: EngineDomainClient {
             prune: prune,
             dryRun: dryRun
         )
-        return try await invokeWrite("git::sync_main", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "git::sync_main",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// List every local branch in the session's repo (mainline first,
@@ -74,6 +79,11 @@ final class GitClient: EngineDomainClient {
             overrideProtected: overrideProtected,
             protectedBranches: protectedBranches
         )
-        return try await invokeWrite("git::push", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "git::push",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 }

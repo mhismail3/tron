@@ -56,7 +56,8 @@ final class WorktreeClient: EngineDomainClient {
         let result: WorktreeCommitResult = try await invokeWrite(
             "worktree::commit",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
         logger.info("Committed worktree changes: \(result.commitHash ?? "nothing-to-commit")", category: .session)
         return result
@@ -79,14 +80,24 @@ final class WorktreeClient: EngineDomainClient {
     func deleteBranch(sessionId: String, branch: String, idempotencyKey: EngineIdempotencyKey) async throws -> DeleteBranchResult {
         _ = try requireTransport().requireConnection()
         let params = DeleteBranchParams(sessionId: sessionId, branch: branch)
-        return try await invokeWrite("worktree::delete_branch", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::delete_branch",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Prune all inactive session branches
     func pruneBranches(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws -> PruneBranchesResult {
         _ = try requireTransport().requireConnection()
         let params = PruneBranchesParams(sessionId: sessionId)
-        return try await invokeWrite("worktree::prune_branches", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::prune_branches",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     // MARK: - Diffs
@@ -114,21 +125,36 @@ final class WorktreeClient: EngineDomainClient {
     func stageFiles(sessionId: String, paths: [String], idempotencyKey: EngineIdempotencyKey) async throws -> WorktreeFileOperationResult {
         _ = try requireTransport().requireConnection()
         let params = WorktreeStageFilesParams(sessionId: sessionId, paths: paths)
-        return try await invokeWrite("worktree::stage_files", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::stage_files",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Unstage files from the index
     func unstageFiles(sessionId: String, paths: [String], idempotencyKey: EngineIdempotencyKey) async throws -> WorktreeFileOperationResult {
         _ = try requireTransport().requireConnection()
         let params = WorktreeUnstageFilesParams(sessionId: sessionId, paths: paths)
-        return try await invokeWrite("worktree::unstage_files", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::unstage_files",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Discard file changes (tracked: restore from HEAD, untracked: delete)
     func discardFiles(sessionId: String, paths: [String], idempotencyKey: EngineIdempotencyKey) async throws -> WorktreeFileOperationResult {
         _ = try requireTransport().requireConnection()
         let params = WorktreeDiscardFilesParams(sessionId: sessionId, paths: paths)
-        return try await invokeWrite("worktree::discard_files", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::discard_files",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     // MARK: - Git Workflow Suite
@@ -156,7 +182,12 @@ final class WorktreeClient: EngineDomainClient {
             preserveOld: preserveOld,
             rebranch: rebranch
         )
-        return try await invokeWrite("worktree::finalize_session", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::finalize_session",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Rebase-on-main: pull main's commits forward into the session's
@@ -181,7 +212,12 @@ final class WorktreeClient: EngineDomainClient {
             mainBranch: mainBranch,
             strategy: strategy
         )
-        return try await invokeWrite("worktree::rebase_on_main", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::rebase_on_main",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Probe current conflicts from `.git/MERGE_HEAD`. Idempotent — safe to
@@ -204,7 +240,12 @@ final class WorktreeClient: EngineDomainClient {
     ) async throws -> WorktreeAbortMergeResult {
         _ = try requireTransport().requireConnection()
         let params = WorktreeAbortMergeParams(sessionId: sessionId, reason: reason)
-        return try await invokeWrite("worktree::abort_merge", params, idempotencyKey: idempotencyKey)
+        return try await invokeWrite(
+            "worktree::abort_merge",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
+        )
     }
 
     /// Spawn the `conflict-resolver` subagent to drive resolution.
@@ -222,7 +263,8 @@ final class WorktreeClient: EngineDomainClient {
         return try await invokeWrite(
             "worktree::resolve_conflicts_with_subagent",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionInvocationContext(sessionId)
         )
     }
 }

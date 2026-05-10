@@ -29,6 +29,7 @@ final class MediaClient: EngineDomainClient {
             "transcription::audio",
             params,
             idempotencyKey: idempotencyKey,
+            context: optionalSessionInvocationContext(params.sessionId),
             timeout: 360.0
         )
     }
