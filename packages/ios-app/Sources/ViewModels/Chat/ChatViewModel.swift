@@ -452,10 +452,16 @@ final class ChatViewModel {
         eventTask?.cancel()
         eventTask = Task { [weak self] in
             guard let self else { return }
+            logger.info("[LIVE] Starting engine event stream for session \(sessionId)", category: .events)
             for await event in engineClient.events(for: sessionId) {
                 guard !Task.isCancelled else { break }
+                logger.verbose(
+                    "[LIVE] ChatViewModel received event \(event.eventType) session=\(event.sessionId ?? "nil") seq=\(event.sequence?.description ?? "nil")",
+                    category: .events
+                )
                 handleEventV2(event)
             }
+            logger.info("[LIVE] Engine event stream ended for session \(sessionId), cancelled=\(Task.isCancelled)", category: .events)
         }
     }
 
@@ -491,6 +497,10 @@ final class ChatViewModel {
             eventBuffer.append(event)
             return
         }
+        logger.verbose(
+            "[LIVE] Dispatching event \(event.eventType) seq=\(event.sequence?.description ?? "nil") watermark=\(sequenceHighWaterMark)",
+            category: .events
+        )
         dispatchEvent(event)
     }
 

@@ -57,4 +57,73 @@ struct EngineClientObservationTests {
             state: .connected
         ) == false)
     }
+
+    @Test("Stream subscriptions are per socket and clear on disconnect")
+    func testStreamSubscriptionPolicyClearsOnDisconnect() {
+        #expect(EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
+            previous: .connected,
+            next: .reconnecting(attempt: 1, nextRetrySeconds: 0)
+        ))
+        #expect(EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
+            previous: .connected,
+            next: .failed(reason: "closed")
+        ))
+        #expect(!EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
+            previous: .disconnected,
+            next: .connecting
+        ))
+    }
+
+    @Test("Stream subscriptions resubscribe current session after reconnect")
+    func testStreamSubscriptionPolicyResubscribesAfterReconnect() {
+        #expect(EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+            previous: .reconnecting(attempt: 1, nextRetrySeconds: 0),
+            next: .connected,
+            hasCurrentSession: true
+        ))
+        #expect(!EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+            previous: .reconnecting(attempt: 1, nextRetrySeconds: 0),
+            next: .connected,
+            hasCurrentSession: false
+        ))
+        #expect(!EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+            previous: .connected,
+            next: .connected,
+            hasCurrentSession: true
+        ))
+    }
+
+    @Test("Stream ACK coalescer sends only latest cursor per subscription")
+    func testStreamAckCoalescerKeepsLatestCursor() {
+        var coalescer = EngineStreamAckCoalescer()
+        let initialSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 10))
+        let laterCursorSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 11))
+        let olderCursorSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 9))
+        #expect(initialSchedule)
+        #expect(!laterCursorSchedule)
+        #expect(!olderCursorSchedule)
+        let cursor = coalescer.takeForFlush(subscriptionId: "sub-1")
+        let needsReschedule = coalescer.completeFlush(subscriptionId: "sub-1")
+        #expect(cursor == EngineStreamCursor(rawValue: 11))
+        #expect(!needsReschedule)
+        let nextSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 12))
+        #expect(nextSchedule)
+    }
+
+    @Test("Stream ACK coalescer reschedules when events arrive during flush")
+    func testStreamAckCoalescerReschedulesDuringFlush() {
+        var coalescer = EngineStreamAckCoalescer()
+        let initialSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 20))
+        #expect(initialSchedule)
+        let firstCursor = coalescer.takeForFlush(subscriptionId: "sub-1")
+        #expect(firstCursor == EngineStreamCursor(rawValue: 20))
+        let inFlightSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 21))
+        #expect(!inFlightSchedule)
+        let needsReschedule = coalescer.completeFlush(subscriptionId: "sub-1")
+        #expect(needsReschedule)
+        let nextSchedule = coalescer.record(subscriptionId: "sub-1", cursor: EngineStreamCursor(rawValue: 22))
+        #expect(nextSchedule)
+        let secondCursor = coalescer.takeForFlush(subscriptionId: "sub-1")
+        #expect(secondCursor == EngineStreamCursor(rawValue: 22))
+    }
 }

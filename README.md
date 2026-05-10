@@ -273,6 +273,12 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 Tools are registered by the `domains::tools` worker as canonical `tool::*` capabilities. Each built-in tool has a tools-domain capability spec with model-facing schema metadata, authority/risk/idempotency policy, and a local handler binding. At model-call time, provider-facing tool schemas are projected from the live engine catalog, so built-ins, engine meta-tools, and eligible live MCP capabilities are filtered by current visibility, health, authority, and schema metadata before being sent to the model.
 
+The names in the table below are provider-facing model tool names. Their
+execution path is still canonical engine invocation: `Bash` resolves to
+`tool::bash`, `Read` resolves to `tool::read`, `engine_discover` resolves to
+`tool::engine_discover`, and so on. There is no separate production tool
+registry path.
+
 ### Always-on (22)
 
 | Tool | Description |
@@ -285,13 +291,13 @@ Tools are registered by the `domains::tools` worker as canonical `tool::*` capab
 | `Bash` | Execute shell commands with configurable timeout. Supports backgrounding, blob storage for large output, and an optional sandbox image. |
 | `AskUserQuestion` | Prompt the user for input with structured options. |
 | `GetConfirmation` | Ask the user to confirm a high-stakes action before proceeding. |
-| `NotifyApp` | Send a push notification to iOS through the Cloudflare relay, or use the stub delegate when relay config is absent. |
+| `NotifyApp` | Send a push notification to iOS through the Cloudflare relay; if relay config or active device tokens are missing, return an explicit warning while foreground iOS refreshes notification inbox state from engine stream events. |
 | `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
 | `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/profiles/auth.json`. |
 | `Display` | Render rich content (images, streams) for iOS clients via blob storage and `DisplayFrame` events. |
 | `ComputerUse` | Screenshot, click, type, keypress, scroll, window management. |
-| `engine_discover` | Search the live canonical engine capability catalog visible to the current agent/session. |
-| `engine_inspect` | Inspect an engine capability contract, schemas, risk, authority, health, and provenance. |
+| `engine_discover` | Search the live canonical engine capability catalog visible to the current agent/session; natural query terms such as `sandbox spawn worker` match canonical ids like `sandbox::spawn_worker`. |
+| `engine_inspect` | Inspect an engine capability contract with model-readable request/response schemas, risk, authority, idempotency, approval, lease, stream, health, compensation, and provenance metadata. |
 | `engine_watch` | Poll live catalog changes after a catalog revision cursor. |
 | `engine_invoke` | Invoke canonical engine functions directly, with explicit idempotency required for writes and structured approval-required responses for high-risk capabilities. |
 | `McpSearch` | Meta-tool that searches across all configured MCP server tool catalogs by keyword. Registered with an empty result set when no MCP servers are configured. |
@@ -342,7 +348,10 @@ The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
 `promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`. Every request
 translates into an internal `EngineTransportRequest`, carrying actor,
 authority, trace, scope, payload, expected revision, and explicit idempotency.
-Correlation ids are never command ids or idempotency keys.
+Correlation ids are never command ids or idempotency keys. Stream clients should
+persist delivered cursors locally and ACK the latest delivered cursor per
+subscription, not every event in a burst; ACK responses use normal engine
+backpressure so catch-up traffic does not become a socket-fatal overload.
 
 `/engine/workers` is the local-first worker protocol. A worker performs a
 versioned hello with `WorkerIdentity`, auth policy, registration mode, visibility
@@ -357,6 +366,19 @@ events by asking the engine to invoke `stream::publish`; there is no direct
 socket event bypass. Worker connect/register/disconnect/heartbeat-timeout
 events are stored on `worker.lifecycle` through the stream primitive and are
 visible in `observability::trace_get`.
+
+Agents do not need to inspect Tron source to create a local worker.
+`worker::protocol_guide` is a canonical read-only worker primitive that returns
+the current `/engine/workers` message flow, required environment variables, JSON
+field casing, enum values, and a standard-library Python worker template. It
+accepts common JavaScript/TypeScript language aliases as a request affordance,
+but still returns the current Python template so the agent receives executable
+guidance instead of searching source after a schema rejection. The intended loop
+is: discover/inspect `worker::protocol_guide`, write the worker script from that
+template, invoke `sandbox::spawn_worker` with expected function ids and a stable
+idempotency key, observe the catalog revision through `engine_watch` or
+`catalog::list`, invoke the new `namespace::function`, then stop it with
+`sandbox::stop_spawned_worker`.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, and `approval::*` preserve the runtime semantics for delivery,
@@ -731,6 +753,7 @@ packages/ios-app/Sources/
 - **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; engine-native clients discover the live endpoint by invoking `codex_app::status` and do not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
+- **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription from the stored cursor after reconnect, and coalesces stream ACKs to the latest cursor so large turn catch-up bursts stay inside the engine stream protocol.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.

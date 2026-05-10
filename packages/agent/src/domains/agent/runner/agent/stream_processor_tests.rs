@@ -625,9 +625,11 @@ fn finalize_tool_call_with_empty_string() {
 
     finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
 
-    assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0].name, "write");
-    assert!(tool_calls[0].arguments.is_empty());
+    assert!(
+        tool_calls.is_empty(),
+        "empty partial arguments are ignored because providers may send the final tool-call arguments on the done item"
+    );
+    assert!(args.is_empty());
 }
 
 #[test]

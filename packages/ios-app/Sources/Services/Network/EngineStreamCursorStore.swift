@@ -51,3 +51,37 @@ final class EngineStreamCursorStore: @unchecked Sendable {
             .replacingOccurrences(of: "/", with: "%2F")
     }
 }
+
+/// Coalesces stream acknowledgements per subscription.
+///
+/// Live session streams can deliver hundreds of small turn events in one
+/// catch-up burst. The server only needs the highest delivered cursor for a
+/// subscription, so the thin client records every cursor locally and sends a
+/// bounded, coalesced ACK back to the engine.
+struct EngineStreamAckCoalescer {
+    private var latestBySubscription: [String: EngineStreamCursor] = [:]
+    private var scheduledSubscriptions: Set<String> = []
+
+    mutating func record(subscriptionId: String, cursor: EngineStreamCursor) -> Bool {
+        if let existing = latestBySubscription[subscriptionId] {
+            latestBySubscription[subscriptionId] = max(existing, cursor)
+        } else {
+            latestBySubscription[subscriptionId] = cursor
+        }
+        return scheduledSubscriptions.insert(subscriptionId).inserted
+    }
+
+    mutating func takeForFlush(subscriptionId: String) -> EngineStreamCursor? {
+        latestBySubscription.removeValue(forKey: subscriptionId)
+    }
+
+    mutating func completeFlush(subscriptionId: String) -> Bool {
+        scheduledSubscriptions.remove(subscriptionId)
+        return latestBySubscription[subscriptionId] != nil
+    }
+
+    mutating func removeAll() {
+        latestBySubscription.removeAll()
+        scheduledSubscriptions.removeAll()
+    }
+}

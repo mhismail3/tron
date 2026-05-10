@@ -11,7 +11,7 @@ iOS App -> Tron Server -> Cloudflare Worker relay -> api.push.apple.com
                              (owns APNs signing credentials)
 ```
 
-The local server never reads Apple `.p8` keys and never creates an APNs config directory under `~/.tron/internal/`. If relay config is absent, `NotifyApp` falls back to the stub delegate and reports that push delivery is disabled.
+The local server never reads Apple `.p8` keys and never creates an APNs config directory under `~/.tron/internal/`. If relay config is absent, `NotifyApp` uses the stub delegate and reports that push delivery is disabled. If relay config is present but no active device token is registered, `NotifyApp` returns a warning instead of claiming delivery.
 
 ## Relay Configuration
 
@@ -53,6 +53,8 @@ Each iOS scheme has its own bundle ID: `com.tron.mobile` for production and `com
 Every `NotifyApp` call fans out to all active device tokens for the user. A user with the same app on multiple devices should receive the same notification everywhere. Routing by environment and bundle ID prevents beta/prod cross-delivery.
 
 Tokens that return `DeviceTokenNotForTopic`, `BadDeviceToken`, or `Unregistered` are deactivated so the database self-heals; the iOS app re-registers on next launch.
+
+Foreground iOS notification state is also driven by `/engine` stream events. When a `NotifyApp` tool completion arrives over the active engine stream, the app refreshes the notification inbox through `notifications::list`; APNs remains the background delivery transport.
 
 ## iOS Implementation
 
@@ -96,6 +98,8 @@ Payload shape:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
+| `Push service is not configured` | Local server was built or launched without `TRON_RELAY_URL` / `TRON_RELAY_SECRET` | Configure relay env vars before building or launching the server |
+| `no active iOS device tokens are registered` | APNs relay exists, but the iOS app has not granted notification permission or has not registered a token with the server | Open the iOS app, grant notification permission, connect to the server, and confirm `device_tokens` has an active row |
 | `BadDeviceToken` | Token invalid or wrong environment | Auto-deactivated; app re-registers on next launch |
 | `DeviceTokenNotForTopic` | Token bundle does not match `apns-topic` | Auto-deactivated; app re-registers with current bundle |
 | `TopicDisallowed` | Worker APNs credentials do not own the bundle | Check Cloudflare APNs secrets and Apple key permissions |

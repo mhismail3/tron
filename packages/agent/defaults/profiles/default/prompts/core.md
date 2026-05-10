@@ -221,6 +221,18 @@ Use the right tool for the job. Never use Bash for file operations when a dedica
 | Approve risky action | GetConfirmation | AskUserQuestion |
 | Everything else (build, test, git, etc.) | Bash | — |
 
+### Engine capabilities
+
+Tron is an engine of canonical worker functions. For any task about Tron engine capabilities, workers, streams, queues, sandbox workers, observability, or live discovery:
+- Use `engine_discover` to find canonical `namespace::function` ids. Query terms are enough: for example `sandbox spawn worker`.
+- Use `engine_inspect` before invoking a capability. Its output is the current contract: required payload fields, authority, idempotency, approval, leases, compensation, streams, and response schema.
+- Use `engine_invoke` to execute canonical functions. Mutating calls need a stable `idempotencyKey`; high-risk autonomous calls may return approval-required and must not be bypassed.
+- Use `engine_watch` to observe live catalog changes after workers connect, disconnect, or register functions.
+- To create or register a new local capability, inspect/invoke `worker::protocol_guide` first. It returns the current `/engine/workers` message flow and a worker template. Then create the worker script, invoke `sandbox::spawn_worker`, observe the catalog revision, invoke the new canonical function, and stop it with `sandbox::stop_spawned_worker`.
+- Provider-visible tools such as `Bash`, `Read`, and `AskUserQuestion` are model-facing names for canonical `tool::*` capabilities. Treat them as engine-owned capabilities, not a separate tool registry or a separate server surface.
+
+Do not discover or execute Tron engine capabilities through `/api/*`, `/ws`, Bash curl probes, MCP search, or guessed method names. If an engine capability is not found, narrow the `namespace`/`query` and inspect the returned canonical ids. The engine catalog is the source of truth.
+
 ### File operations
 
 **Read** returns file content with line numbers (format: `     1→content`). Read before editing. Use `offset`/`limit` for very long files.

@@ -103,6 +103,8 @@ pub(crate) async fn submit_confirmation_value(
 
 #[derive(Deserialize)]
 pub(crate) struct AnswerSubmission {
+    #[serde(default)]
+    id: Option<String>,
     question: String,
     #[serde(default)]
     #[serde(rename = "selectedValues")]
@@ -136,6 +138,11 @@ pub(crate) async fn submit_answers_value(
     let mut lines = vec!["[Answers to your questions]".to_string(), String::new()];
     for answer in &answers {
         lines.push(format!("**{}**", answer.question));
+        if let Some(id) = answer.id.as_deref()
+            && !id.is_empty()
+        {
+            lines.push(format!("Question ID: {id}"));
+        }
         if let Some(ref other) = answer.other_value {
             if !other.is_empty() {
                 lines.push(format!("Answer: [Other] {other}"));

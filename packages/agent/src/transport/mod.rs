@@ -6,6 +6,9 @@
 //! policy, metrics, subscription cursor state, and wire error sanitization.
 //! They do not own domain behavior. Executable behavior lives in
 //! `domains::*` and engine primitives.
+//! Filtered stream subscriptions still advance across scanned-but-undelivered
+//! records so a session-specific `/engine` subscriber cannot starve behind
+//! older events from other sessions.
 //!
 //! | Module | Purpose |
 //! |--------|---------|

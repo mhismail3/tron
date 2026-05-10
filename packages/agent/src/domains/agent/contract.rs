@@ -74,7 +74,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("agent::submit_answers", "agent", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("agent.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"questions":{"items":{"additionalProperties":false,"properties":{"otherValue":{"type":"string"},"question":{"type":"string"},"selectedValues":{"items":{"type":"string"},"type":"array"}},"required":["question"],"type":"object"},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","questions"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"questions":{"items":{"additionalProperties":false,"properties":{"id":{"type":"string"},"otherValue":{"type":"string"},"question":{"type":"string"},"selectedValues":{"items":{"type":"string"},"type":"array"}},"required":["question"],"type":"object"},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","questions"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
@@ -198,4 +198,27 @@ fn agent_prompt_queue_drain_response_schema() -> serde_json::Value {
             "reason": {"type": ["string", "null"]}
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn submit_answers_contract_accepts_client_question_id() {
+        let specs = capabilities().expect("agent contracts");
+        let submit = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "agent::submit_answers")
+            .expect("submit answers contract");
+        let id_property = submit
+            .request_schema
+            .as_ref()
+            .and_then(|schema| schema.pointer("/properties/questions/items/properties/id"));
+
+        assert_eq!(
+            id_property.and_then(|value| value.get("type")),
+            Some(&json!("string"))
+        );
+    }
 }

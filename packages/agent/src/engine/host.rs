@@ -513,6 +513,22 @@ impl EngineHostHandle {
         function_revision: FunctionRevision,
         error: EngineError,
     ) -> InvocationResult {
+        self.record_policy_stopped_invocation(invocation, worker_id, function_revision, error)
+            .await
+    }
+
+    /// Record an invocation that policy stopped before handler execution.
+    ///
+    /// Approval-required autonomous writes still need a durable target
+    /// invocation row so observability can show which canonical capability was
+    /// attempted, even though the domain handler never ran.
+    pub async fn record_policy_stopped_invocation(
+        &self,
+        invocation: Invocation,
+        worker_id: WorkerId,
+        function_revision: FunctionRevision,
+        error: EngineError,
+    ) -> InvocationResult {
         let mut host = self.inner.lock().await;
         let result = InvocationResult::error(
             &invocation,
@@ -720,6 +736,19 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
             .poll(subscription_id, after, limit, actor)
+    }
+
+    /// Acknowledge delivered stream events and persist the subscription cursor.
+    pub async fn acknowledge_stream(
+        &self,
+        subscription_id: &str,
+        cursor: StreamCursor,
+    ) -> Result<EngineStreamSubscription> {
+        let store = self.inner.lock().await.primitives.streams.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .acknowledge(subscription_id, cursor)
     }
 
     /// Unsubscribe directly from the engine stream store.

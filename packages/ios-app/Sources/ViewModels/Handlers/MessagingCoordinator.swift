@@ -39,6 +39,10 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
         idempotencyKey: EngineIdempotencyKey
     ) async throws
 
+    /// Ensure this view is actively subscribed to the current session's engine
+    /// event stream before a prompt starts producing output.
+    func ensureLiveEventSubscription()
+
     /// Activate a skill in the current session (server-owned state)
     func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws
 
@@ -122,6 +126,7 @@ final class MessagingCoordinator {
         }
 
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
+        context.ensureLiveEventSubscription()
 
         // Confirmation/answer submissions and subagent results are delivered via
         // dedicated engine protocols, not through sendMessage. Any regular user message sent here

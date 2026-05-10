@@ -3,6 +3,10 @@
 //! Streams are resumable cursor views over engine-visible change records. They
 //! are not a transport: engine clients, agent tools, and external workers can
 //! all poll the same stream cursor model.
+//!
+//! INVARIANT: stream polling advances over scanned rows even when visibility
+//! removes them from the returned page. A session subscription that starts from
+//! cursor zero must not starve behind older rows owned by other sessions.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -227,6 +231,29 @@ impl InMemoryEngineStreamStore {
         Ok(was_active)
     }
 
+    /// Advance a subscription cursor after client delivery.
+    pub fn acknowledge(
+        &mut self,
+        subscription_id: &str,
+        cursor: StreamCursor,
+    ) -> Result<EngineStreamSubscription> {
+        let Some(subscription) = self.subscriptions.get_mut(subscription_id) else {
+            return Err(EngineError::NotFound {
+                kind: "stream_subscription",
+                id: subscription_id.to_owned(),
+            });
+        };
+        if !subscription.active {
+            return Err(EngineError::PolicyViolation(format!(
+                "stream subscription {subscription_id} is inactive"
+            )));
+        }
+        if subscription.cursor < cursor {
+            subscription.cursor = cursor;
+        }
+        Ok(subscription.clone())
+    }
+
     /// Poll a subscription after a cursor.
     pub fn poll(
         &self,
@@ -263,26 +290,31 @@ impl InMemoryEngineStreamStore {
             )));
         }
         let after = after.unwrap_or(subscription.cursor);
-        let mut matching = self
+        let limit = limit.min(500);
+        let mut scanned = self
             .events
             .iter()
             .filter(|event| event.topic == subscription.topic)
             .filter(|event| event.cursor > after)
-            .filter(|event| {
+            .cloned()
+            .collect::<Vec<_>>();
+        scanned.sort_by_key(|event| event.cursor);
+        let has_more = scanned.len() > limit;
+        let mut next_cursor = after;
+        let events = scanned
+            .into_iter()
+            .take(limit)
+            .filter_map(|event| {
+                next_cursor = event.cursor;
                 stream_scope_visible(
                     &event.visibility,
                     event.session_id.as_deref(),
                     event.workspace_id.as_deref(),
                     actor,
                 )
+                .then_some(event)
             })
-            .cloned()
             .collect::<Vec<_>>();
-        matching.sort_by_key(|event| event.cursor);
-        let limit = limit.min(500);
-        let has_more = matching.len() > limit;
-        let events = matching.into_iter().take(limit).collect::<Vec<_>>();
-        let next_cursor = events.last().map_or(after, |event| event.cursor);
         Ok(EngineStreamPage {
             events,
             next_cursor,
@@ -459,6 +491,29 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
         Ok(changed > 0)
     }
 
+    /// Advance a subscription cursor after client delivery.
+    pub fn acknowledge(
+        &mut self,
+        subscription_id: &str,
+        cursor: StreamCursor,
+    ) -> Result<EngineStreamSubscription> {
+        let subscription = self.subscription(subscription_id)?;
+        if !subscription.active {
+            return Err(EngineError::PolicyViolation(format!(
+                "stream subscription {subscription_id} is inactive"
+            )));
+        }
+        self.conn
+            .execute(
+                "UPDATE engine_stream_subscriptions
+                 SET cursor = CASE WHEN cursor < ?2 THEN ?2 ELSE cursor END
+                 WHERE subscription_id = ?1 AND active = 1",
+                params![subscription_id, cursor.0 as i64],
+            )
+            .map_err(|err| sqlite_err("stream.acknowledge", err.to_string()))?;
+        self.subscription(subscription_id)
+    }
+
     /// Poll a subscription after a cursor.
     pub fn poll(
         &self,
@@ -510,9 +565,17 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                 row_to_stream_event,
             )
             .map_err(|err| sqlite_err("stream.poll.query", err.to_string()))?;
+        let limit = limit.min(500);
         let mut events = Vec::new();
-        for row in rows {
+        let mut next_cursor = after;
+        let mut has_more = false;
+        for (index, row) in rows.enumerate() {
             let event = row.map_err(|err| sqlite_err("stream.poll.row", err.to_string()))?;
+            if index >= limit {
+                has_more = true;
+                break;
+            }
+            next_cursor = event.cursor;
             if stream_scope_visible(
                 &event.visibility,
                 event.session_id.as_deref(),
@@ -522,10 +585,6 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                 events.push(event);
             }
         }
-        let limit = limit.min(500);
-        let has_more = events.len() > limit;
-        events.truncate(limit);
-        let next_cursor = events.last().map_or(after, |event| event.cursor);
         Ok(EngineStreamPage {
             events,
             next_cursor,

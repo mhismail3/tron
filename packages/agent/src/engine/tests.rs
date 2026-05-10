@@ -745,6 +745,31 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
 }
 
 #[test]
+fn discovery_text_query_matches_tokens_across_canonical_id() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("sandbox", "sandbox"), true)
+        .unwrap();
+    catalog
+        .register_function(
+            read_function("sandbox::spawn_worker", "sandbox"),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+
+    let agent = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"));
+    let filtered = catalog.discover_functions(&FunctionQuery {
+        text: Some("sandbox spawn worker".to_owned()),
+        actor: Some(agent),
+        ..FunctionQuery::default()
+    });
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id.as_str(), "sandbox::spawn_worker");
+}
+
+#[test]
 fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
     let mut catalog = LiveCatalog::new();
     catalog
@@ -2188,6 +2213,51 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
             .any(|worker| worker["id"] == "observability")
     );
 
+    let guide = handle
+        .invoke(host_invocation(
+            "worker::protocol_guide",
+            json!({
+                "functionId": "demo::echo",
+                "workerId": "demo-echo-worker",
+                "language": "python"
+            }),
+            system_context("primitive-trace", "worker.read"),
+        ))
+        .await;
+    assert_eq!(guide.error, None);
+    let guide_value = guide.value.as_ref().unwrap();
+    assert_eq!(guide_value["protocolVersion"], 1);
+    assert_eq!(
+        guide_value["environment"]["TRON_ENGINE_BEARER_TOKEN"],
+        "Bearer token injected by sandbox::spawn_worker; send it as Authorization: Bearer <token>"
+    );
+    let template = guide_value["pythonTemplate"].as_str().unwrap();
+    assert!(template.contains("Authorization: Bearer"));
+    assert!(template.contains("\"type\": \"register_function\""));
+    assert!(template.contains("demo::echo"));
+
+    let node_guide = handle
+        .invoke(host_invocation(
+            "worker::protocol_guide",
+            json!({
+                "functionId": "demo::echo",
+                "workerId": "demo-echo-worker",
+                "language": "node"
+            }),
+            system_context("primitive-trace-node", "worker.read"),
+        ))
+        .await;
+    assert_eq!(node_guide.error, None);
+    let node_guide_value = node_guide.value.as_ref().unwrap();
+    assert_eq!(node_guide_value["requestedLanguage"], "node");
+    assert_eq!(node_guide_value["templateLanguage"], "python");
+    assert!(
+        node_guide_value["pythonTemplate"]
+            .as_str()
+            .unwrap()
+            .contains("demo::echo")
+    );
+
     let trace_id = trace("primitive-trace");
     let parent_invocation_id = InvocationId::generate();
     let lease = handle
@@ -3255,6 +3325,84 @@ async fn stream_primitive_subscribe_poll_and_unsubscribe_are_scoped() {
     assert_eq!(unsubscribe.value.as_ref().unwrap()["unsubscribed"], true);
 }
 
+async fn assert_stream_poll_reaches_visible_event_after_invisible_prefix(handle: EngineHostHandle) {
+    let target_session = "session-visible";
+    for index in 0..4 {
+        handle
+            .publish_stream_event(super::PublishStreamEvent {
+                topic: "events.session".to_owned(),
+                payload: json!({"visible": false, "index": index}),
+                visibility: VisibilityScope::Session,
+                session_id: Some("session-hidden".to_owned()),
+                workspace_id: None,
+                producer: "test".to_owned(),
+                trace_id: None,
+                parent_invocation_id: None,
+            })
+            .await
+            .unwrap();
+    }
+    let target_cursor = handle
+        .publish_stream_event(super::PublishStreamEvent {
+            topic: "events.session".to_owned(),
+            payload: json!({"visible": true}),
+            visibility: VisibilityScope::Session,
+            session_id: Some(target_session.to_owned()),
+            workspace_id: None,
+            producer: "test".to_owned(),
+            trace_id: None,
+            parent_invocation_id: None,
+        })
+        .await
+        .unwrap();
+
+    handle
+        .subscribe_stream(
+            "sub-visible".to_owned(),
+            "events.session".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some(target_session.to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
+    let actor = StreamActorScope::scoped(Some(target_session.to_owned()), None);
+    let mut after = StreamCursor(0);
+    for _ in 0..4 {
+        let page = handle
+            .poll_stream("sub-visible", Some(after), 2, &actor)
+            .await
+            .unwrap();
+        if let Some(event) = page.events.first() {
+            assert_eq!(event.cursor, target_cursor);
+            assert_eq!(event.payload, json!({"visible": true}));
+            assert!(page.next_cursor >= target_cursor);
+            return;
+        }
+        assert!(
+            page.next_cursor > after,
+            "empty stream pages must still advance past visibility-filtered rows"
+        );
+        after = page.next_cursor;
+    }
+    panic!("stream poll did not reach visible event after invisible prefix");
+}
+
+#[tokio::test]
+async fn stream_poll_advances_past_visibility_filtered_rows_in_memory() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    assert_stream_poll_reaches_visible_event_after_invisible_prefix(handle).await;
+}
+
+#[tokio::test]
+async fn stream_poll_advances_past_visibility_filtered_rows_in_sqlite() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("engine-ledger.sqlite");
+    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
+    assert_stream_poll_reaches_visible_event_after_invisible_prefix(handle).await;
+}
+
 #[tokio::test]
 async fn state_primitive_revisions_cas_list_and_delete_are_idempotent() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
@@ -3923,6 +4071,31 @@ async fn agent_high_risk_invocation_creates_pending_approval_and_stream_event() 
         page.events[0].payload["approval"]["approvalId"],
         approval_id
     );
+
+    let trace = handle
+        .invoke(host_invocation(
+            "observability::trace_get",
+            json!({"traceId": record.trace_id.as_str()}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("system-grant"),
+                trace("approval-observe"),
+            )
+            .with_scope("observability.read"),
+        ))
+        .await;
+    assert_eq!(trace.error, None);
+    let invocations = trace.value.as_ref().unwrap()["invocations"]
+        .as_array()
+        .unwrap();
+    assert!(invocations.iter().any(|invocation| {
+        invocation["functionId"] == "danger::delete"
+            && invocation["succeeded"] == false
+            && invocation["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("APPROVAL_REQUIRED"))
+    }));
 }
 
 #[tokio::test]

@@ -117,14 +117,23 @@ fn handle_output_item_added(
                 let name = item.name.clone().unwrap_or_default();
                 let initial_args = item.arguments.clone().unwrap_or_default();
                 let is_new = !state.tool_calls.contains_key(call_id.as_str());
-                let _ = state.tool_calls.insert(
-                    call_id.clone(),
-                    ToolCallState {
-                        id: call_id.clone(),
-                        name: name.clone(),
-                        args: initial_args,
-                    },
-                );
+                if let Some(existing) = state.tool_calls.get_mut(call_id.as_str()) {
+                    if existing.name.is_empty() {
+                        existing.name.clone_from(&name);
+                    }
+                    if existing.args.is_empty() && !initial_args.is_empty() {
+                        existing.args = initial_args;
+                    }
+                } else {
+                    let _ = state.tool_calls.insert(
+                        call_id.clone(),
+                        ToolCallState {
+                            id: call_id.clone(),
+                            name: name.clone(),
+                            args: initial_args,
+                        },
+                    );
+                }
                 if is_new {
                     events.push(StreamEvent::ToolCallStart {
                         tool_call_id: call_id.clone(),
@@ -187,9 +196,15 @@ fn handle_function_call_args_delta(
     state: &mut StreamState,
 ) -> Vec<StreamEvent> {
     let mut events = Vec::new();
-    if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta)
-        && let Some(tc) = state.tool_calls.get_mut(call_id.as_str())
-    {
+    if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta) {
+        let tc = state
+            .tool_calls
+            .entry(call_id.clone())
+            .or_insert_with(|| ToolCallState {
+                id: call_id.clone(),
+                name: String::new(),
+                args: String::new(),
+            });
         tc.args.push_str(delta);
         events.push(StreamEvent::ToolCallDelta {
             tool_call_id: call_id.clone(),
@@ -213,6 +228,14 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     let Some(item) = &event.item else {
         return events;
     };
+    if item.item_type == OutputItemType::FunctionCall {
+        merge_function_call_item(item, state);
+        if let Some(tool_call) = tool_call_from_item_state(item, state) {
+            events.push(StreamEvent::ToolCallEnd { tool_call });
+        }
+        return events;
+    }
+
     // Only process reasoning items with summary content not already streamed.
     if item.item_type != OutputItemType::Reasoning
         || item.summary.is_none()
@@ -236,6 +259,27 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
         }
     }
     events
+}
+
+fn tool_call_from_item_state(
+    item: &super::types::ResponsesOutputItem,
+    state: &StreamState,
+) -> Option<crate::shared::messages::ToolCall> {
+    let call_id = item.call_id.as_ref()?;
+    let tc = state.tool_calls.get(call_id.as_str())?;
+    if tc.id.is_empty() || tc.name.is_empty() {
+        return None;
+    }
+    let ctx = ToolCallContext {
+        tool_call_id: Some(tc.id.clone()),
+        tool_name: Some(tc.name.clone()),
+        provider: Some("openai".into()),
+    };
+    Some(crate::shared::messages::ToolCall::new(
+        tc.id.clone(),
+        tc.name.clone(),
+        parse_tool_call_arguments(Some(&tc.args), Some(&ctx)),
+    ))
 }
 
 /// Process the `response.completed` event and emit final events.
@@ -615,13 +659,20 @@ mod tests {
     }
 
     #[test]
-    fn ignores_args_delta_for_unknown_call_id() {
+    fn accumulates_args_delta_before_added_event() {
         let mut state = create_stream_state();
         let events = process_stream_event(
-            &function_args_delta_event("call_unknown", "data"),
+            &function_args_delta_event("call_late", r#"{"command":"date"}"#),
             &mut state,
         );
+        assert_eq!(events.len(), 1);
+        assert_eq!(state.tool_calls["call_late"].args, r#"{"command":"date"}"#);
+
+        let events =
+            process_stream_event(&function_call_added_event("call_late", "Bash"), &mut state);
         assert!(events.is_empty());
+        assert_eq!(state.tool_calls["call_late"].name, "Bash");
+        assert_eq!(state.tool_calls["call_late"].args, r#"{"command":"date"}"#);
     }
 
     // ── Reasoning streaming ────────────────────────────────────────
@@ -804,6 +855,40 @@ mod tests {
             .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
             assert_eq!(stop_reason, "tool_use");
+        }
+    }
+
+    #[test]
+    fn output_item_done_emits_toolcall_end_with_arguments() {
+        let mut state = create_stream_state();
+        let _ = process_stream_event(&function_call_added_event("call_abc", "Bash"), &mut state);
+
+        let event = ResponsesSseEvent {
+            event_type: SseEventType::OutputItemDone,
+            item: Some(ResponsesOutputItem {
+                item_type: OutputItemType::FunctionCall,
+                call_id: Some("call_abc".into()),
+                name: Some("Bash".into()),
+                arguments: Some(r#"{"command":"date"}"#.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let events = process_stream_event(&event, &mut state);
+        let tool_end = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
+        assert!(tool_end.is_some());
+        if let Some(StreamEvent::ToolCallEnd { tool_call }) = tool_end {
+            assert_eq!(tool_call.name, "Bash");
+            assert_eq!(
+                tool_call
+                    .arguments
+                    .get("command")
+                    .and_then(|value| value.as_str()),
+                Some("date")
+            );
         }
     }
 

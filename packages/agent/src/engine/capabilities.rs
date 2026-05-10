@@ -105,16 +105,16 @@ impl AgentCapabilityClient {
                 error,
             );
         }
+        let mut context = self.causal_context(idempotency_key);
+        if let Some(parent) = parent_invocation_id {
+            context = context.with_parent_invocation(parent);
+        }
         let inspected = self.inspect(&function_id).await;
         if let Ok(function) = inspected
             && function.required_authority.approval_required
             && function.risk_level >= RiskLevel::High
         {
-            let invocation = Invocation::new_sync(
-                function_id.clone(),
-                payload.clone(),
-                self.causal_context(idempotency_key),
-            );
+            let invocation = Invocation::new_sync(function_id.clone(), payload.clone(), context);
             let approval = self
                 .handle
                 .request_approval(EngineApprovalRequest {
@@ -138,25 +138,24 @@ impl AgentCapabilityClient {
                     "error": error.to_string(),
                 }),
             };
-            return InvocationResult::error(
-                &invocation,
-                function.owner_worker,
-                function.revision,
-                super::types::CatalogRevision(0),
-                EngineError::DomainFailure {
-                    domain: "approval".to_owned(),
-                    code: "APPROVAL_REQUIRED".to_owned(),
-                    message: format!(
-                        "approval required before agent invocation of {}",
-                        invocation.function_id
-                    ),
-                    details: Some(details),
-                },
-            );
-        }
-        let mut context = self.causal_context(idempotency_key);
-        if let Some(parent) = parent_invocation_id {
-            context = context.with_parent_invocation(parent);
+            let error = EngineError::DomainFailure {
+                domain: "approval".to_owned(),
+                code: "APPROVAL_REQUIRED".to_owned(),
+                message: format!(
+                    "approval required before agent invocation of {}",
+                    invocation.function_id
+                ),
+                details: Some(details),
+            };
+            return self
+                .handle
+                .record_policy_stopped_invocation(
+                    invocation,
+                    function.owner_worker,
+                    function.revision,
+                    error,
+                )
+                .await;
         }
         self.handle
             .invoke(Invocation::new_sync(function_id, payload, context))
@@ -220,10 +219,11 @@ impl AgentCapabilityClient {
 }
 
 fn reject_noncanonical_namespace(function_id: &FunctionId) -> Result<()> {
-    if function_id.namespace() == "rpc" {
-        return Err(EngineError::PolicyViolation(
-            "agents must invoke canonical domain function ids".to_owned(),
-        ));
+    let namespace = function_id.namespace();
+    if namespace == "rpc" {
+        return Err(EngineError::PolicyViolation(format!(
+            "agent capability client refuses non-canonical namespace {namespace}"
+        )));
     }
     Ok(())
 }

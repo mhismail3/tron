@@ -12,7 +12,8 @@ use crate::domains::tools::implementations::traits::{ToolContext, TronTool};
 use crate::domains::tools::implementations::utils::schema::ToolSchemaBuilder;
 use crate::engine::{
     ActorId, AgentCapabilityClient, AuthorityGrantId, CatalogChangeClass, CatalogChangeKind,
-    CatalogRevision, EngineHostHandle, EngineWatchRequest, FunctionId, FunctionQuery, InvocationId,
+    CatalogRevision, EngineHostHandle, EngineWatchRequest, FunctionDefinition, FunctionId,
+    FunctionQuery, InvocationId,
 };
 use crate::shared::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
@@ -83,11 +84,11 @@ impl TronTool for EngineDiscoverTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             self.name(),
-            "Search the live canonical engine capability catalog visible to this agent.",
+            "Search the live canonical engine capability catalog visible to this agent. Use this before probing Tron internals with Bash, HTTP, or MCP.",
         )
         .property(
             "query",
-            json!({"type": "string", "description": "Optional substring to match against function ids or descriptions"}),
+            json!({"type": "string", "description": "Optional natural-language or canonical-id search. Terms such as 'sandbox spawn worker' match sandbox::spawn_worker."}),
         )
         .property(
             "namespace",
@@ -107,7 +108,7 @@ impl TronTool for EngineDiscoverTool {
         let client = agent_client(&self.host, ctx)?;
         let functions = client.discover(query).await;
         Ok(json_result(
-            format!("Found {} visible engine capabilities.", functions.len()),
+            format_discover_result(&functions),
             json!({ "functions": functions }),
         ))
     }
@@ -126,7 +127,7 @@ impl TronTool for EngineInspectTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             self.name(),
-            "Inspect the live contract, authority, effect, risk, schema, health, and provenance of one canonical engine function.",
+            "Inspect one canonical engine function and return model-readable schema, authority, idempotency, approval, lease, stream, and compensation metadata.",
         )
         .required_property(
             "functionId",
@@ -140,7 +141,7 @@ impl TronTool for EngineInspectTool {
         let client = agent_client(&self.host, ctx)?;
         match client.inspect(&function_id).await {
             Ok(function) => Ok(json_result(
-                format!("Inspected engine capability {function_id}."),
+                format_inspect_result(&function_id, &function),
                 json!({ "function": function }),
             )),
             Err(error) => Ok(error_result(error.to_string())),
@@ -161,7 +162,7 @@ impl TronTool for EngineWatchTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             self.name(),
-            "Poll live catalog changes visible to this agent after a catalog revision cursor.",
+            "Poll live catalog changes visible to this agent after a catalog revision cursor. Use this to notice newly connected or disconnected workers.",
         )
         .property(
             "afterRevision",
@@ -190,15 +191,24 @@ impl TronTool for EngineWatchTool {
         let request = watch_request_from_params(&params)?;
         let client = agent_client(&self.host, ctx)?;
         match client.watch(request).await {
-            Ok(page) => Ok(json_result(
-                format!("Returned {} live catalog change(s).", page.changes.len()),
-                json!({
+            Ok(page) => {
+                let change_preview = serde_json::to_value(&page.changes).unwrap_or(Value::Null);
+                Ok(json_result(
+                    format_watch_result(
+                        page.changes.len(),
+                        page.current_revision.0,
+                        page.next_revision.0,
+                        page.has_more,
+                        &change_preview,
+                    ),
+                    json!({
                     "changes": page.changes,
                     "currentRevision": page.current_revision.0,
                     "nextRevision": page.next_revision.0,
                     "hasMore": page.has_more,
-                }),
-            )),
+                    }),
+                ))
+            }
             Err(error) => Ok(error_result(error.to_string())),
         }
     }
@@ -217,7 +227,7 @@ impl TronTool for EngineInvokeTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             self.name(),
-            "Invoke a canonical engine function. Mutating functions require an explicit idempotency key.",
+            "Invoke a canonical engine function through the engine policy/ledger path. Mutating functions require an explicit idempotency key and may pause for approval.",
         )
         .required_property(
             "functionId",
@@ -271,8 +281,14 @@ impl TronTool for EngineInvokeTool {
                 crate::engine::EngineError::DomainFailure { details, .. } => details.clone(),
                 _ => None,
             };
+            let message = error.to_string();
             return Ok(json_error_result(
-                error.to_string(),
+                format_engine_error_result(
+                    &function_id,
+                    &result.invocation_id,
+                    &message,
+                    engine_details.as_ref(),
+                ),
                 json!({
                     "invocationId": result.invocation_id,
                     "functionId": function_id,
@@ -280,13 +296,19 @@ impl TronTool for EngineInvokeTool {
                 }),
             ));
         }
+        let result_value = result.value.unwrap_or(Value::Null);
         Ok(json_result(
-            format!("Invoked engine capability {function_id}."),
+            format_invoke_result(
+                &function_id,
+                &result.invocation_id,
+                result.replayed_from.as_ref(),
+                Some(&result_value),
+            ),
             json!({
                 "invocationId": result.invocation_id,
                 "functionId": function_id,
                 "replayedFrom": result.replayed_from,
-                "result": result.value.unwrap_or(Value::Null),
+                "result": result_value,
             }),
         ))
     }
@@ -307,8 +329,9 @@ fn agent_client(
     Ok(client)
 }
 
-fn agent_authority_scopes() -> [&'static str; 34] {
-    [
+fn agent_authority_scopes() -> Vec<&'static str> {
+    vec![
+        "catalog.read",
         "engine.read",
         "system.read",
         "model.read",
@@ -343,7 +366,315 @@ fn agent_authority_scopes() -> [&'static str; 34] {
         "queue.admin",
         "approval.read",
         "approval.request",
+        "worker.read",
+        "worker.write",
+        "sandbox.read",
+        "sandbox.write",
+        "observability.read",
+        "tool.read",
+        "tool.write",
+        "tool.invoke",
     ]
+}
+
+fn format_discover_result(functions: &[FunctionDefinition]) -> String {
+    if functions.is_empty() {
+        return "Found 0 visible engine capabilities. Try a namespace filter such as `sandbox`, `catalog`, `worker`, `observability`, or a shorter query. Do not probe Tron engine capabilities through Bash, HTTP, or MCP when this tool returns no matches.".to_owned();
+    }
+
+    let mut lines = vec![
+        format!("Found {} visible engine capabilities.", functions.len()),
+        "Use canonical function ids with `engine_inspect` for full contract details, then `engine_invoke` for execution.".to_owned(),
+        "For Tron engine capability work, stay on these engine tools instead of `/api/*`, `/ws`, Bash curl probes, or MCP search.".to_owned(),
+        "For worker creation or on-the-fly capability registration, inspect and invoke `worker::protocol_guide`; it returns the current /engine/workers handshake and an executable local worker template.".to_owned(),
+        String::new(),
+    ];
+    for function in functions.iter().take(40) {
+        lines.push(format_function_summary(function));
+    }
+    if functions.len() > 40 {
+        lines.push(format!(
+            "... {} more omitted; refine with `namespace` or `query`.",
+            functions.len() - 40
+        ));
+    }
+    lines.join("\n")
+}
+
+fn format_function_summary(function: &FunctionDefinition) -> String {
+    let required = required_schema_fields(function.request_schema.as_ref());
+    let properties = schema_property_names(function.request_schema.as_ref());
+    let mut parts = vec![
+        format!(
+            "- `{}` — {} [worker={}, effect={:?}, risk={:?}, visibility={:?}, health={:?}]",
+            function.id,
+            function.description,
+            function.owner_worker,
+            function.effect_class,
+            function.risk_level,
+            function.visibility,
+            function.health
+        ),
+        format!("  authority: {}", authority_summary(function)),
+    ];
+    if let Some(idempotency) = &function.idempotency {
+        parts.push(format!(
+            "  idempotency: {:?}, scope={:?}, replay={}, ledger={:?}",
+            idempotency.key_source,
+            idempotency.dedupe_scope,
+            idempotency.replay_behavior.as_str(),
+            idempotency.ledger_kind
+        ));
+    }
+    if !required.is_empty() {
+        parts.push(format!("  request required: {}", required.join(", ")));
+    }
+    if !properties.is_empty() {
+        parts.push(format!("  request fields: {}", properties.join(", ")));
+    }
+    let topics = declared_stream_topics(function);
+    if !topics.is_empty() {
+        parts.push(format!("  stream topics: {}", topics.join(", ")));
+    }
+    if function.id.as_str() == "sandbox::spawn_worker" {
+        parts.push("  agent guidance: first invoke `worker::protocol_guide`, write the returned worker template, then call this function with expectedFunctionIds and a stable idempotencyKey.".to_owned());
+    } else if function.id.as_str() == "worker::protocol_guide" {
+        parts.push("  agent guidance: use this before writing or registering a sandbox worker; do not search Tron source for the worker protocol.".to_owned());
+    }
+    parts.join("\n")
+}
+
+fn format_inspect_result(function_id: &FunctionId, function: &FunctionDefinition) -> String {
+    let mut lines = vec![
+        format!("Engine capability `{function_id}`"),
+        "This is the canonical contract to follow. Invoke it only through `engine_invoke` unless the user explicitly asks for direct server debugging.".to_owned(),
+        String::new(),
+        format!("Owner worker: {}", function.owner_worker),
+        format!("Description: {}", function.description),
+        format!("Revision: {}", function.revision.0),
+        format!("Visibility: {:?}", function.visibility),
+        format!("Effect/Risk/Health: {:?} / {:?} / {:?}", function.effect_class, function.risk_level, function.health),
+        format!("Authority: {}", authority_summary(function)),
+    ];
+
+    if let Some(idempotency) = &function.idempotency {
+        lines.push(format!(
+            "Idempotency: key={:?}, scope={:?}, replay={}, ledger={:?}",
+            idempotency.key_source,
+            idempotency.dedupe_scope,
+            idempotency.replay_behavior.as_str(),
+            idempotency.ledger_kind
+        ));
+    } else if function.effect_class.is_mutating() {
+        lines.push(
+            "Idempotency: missing from contract; mutating invocation will fail closed.".to_owned(),
+        );
+    } else {
+        lines.push("Idempotency: not required for this read/compute capability.".to_owned());
+    }
+
+    if let Some(lease) = &function.resource_lease {
+        lines.push(format!(
+            "Resource lease: kind={}, idTemplate={}, ttlMs={}, exclusive={}, topic={}",
+            lease.resource_kind,
+            lease.resource_id_template,
+            lease.ttl_ms,
+            lease.exclusive,
+            lease.stream_topic
+        ));
+    }
+    if let Some(compensation) = &function.compensation {
+        lines.push(format!(
+            "Compensation: {:?} — {}",
+            compensation.kind, compensation.notes
+        ));
+    }
+    let topics = declared_stream_topics(function);
+    if !topics.is_empty() {
+        lines.push(format!("Declared stream topics: {}", topics.join(", ")));
+    }
+    let guidance = agent_guidance(function_id, function);
+    if !guidance.is_empty() {
+        lines.push(String::new());
+        lines.push("Agent guidance:".to_owned());
+        lines.extend(guidance.into_iter().map(|item| format!("- {item}")));
+    }
+    lines.push(String::new());
+    lines.push("Request schema:".to_owned());
+    lines.push(json_preview(
+        function.request_schema.as_ref().unwrap_or(&Value::Null),
+        12_000,
+    ));
+    lines.push(String::new());
+    lines.push("Response schema:".to_owned());
+    lines.push(json_preview(
+        function.response_schema.as_ref().unwrap_or(&Value::Null),
+        8_000,
+    ));
+    if !function.metadata.is_null() {
+        lines.push(String::new());
+        lines.push("Contract metadata:".to_owned());
+        lines.push(json_preview(&function.metadata, 8_000));
+    }
+    lines.join("\n")
+}
+
+fn agent_guidance(function_id: &FunctionId, function: &FunctionDefinition) -> Vec<String> {
+    let mut guidance = function
+        .metadata
+        .get("agentGuidance")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if function_id.as_str() == "sandbox::spawn_worker" {
+        guidance.push(
+            "To create a new capability: invoke `worker::protocol_guide` first, save the returned template in the requested working directory, then invoke `sandbox::spawn_worker` with that command, expectedFunctionIds, visibility, and a stable idempotencyKey.".to_owned(),
+        );
+        guidance.push(
+            "After spawn succeeds, use `engine_watch` or `catalog::list` to observe the catalog revision, invoke the new canonical function through `engine_invoke`, then stop it with `sandbox::stop_spawned_worker`.".to_owned(),
+        );
+    }
+    guidance
+}
+
+fn format_watch_result(
+    change_count: usize,
+    current_revision: u64,
+    next_revision: u64,
+    has_more: bool,
+    changes: &Value,
+) -> String {
+    let mut lines = vec![
+        format!("Returned {change_count} live catalog change(s)."),
+        format!(
+            "Catalog revisions: current={current_revision}, next={next_revision}, hasMore={has_more}"
+        ),
+        "Use changed function ids with `engine_inspect`; refresh provider tools after catalog revision changes.".to_owned(),
+    ];
+    if change_count > 0 {
+        lines.push(String::new());
+        lines.push(json_preview(changes, 12_000));
+    }
+    lines.join("\n")
+}
+
+fn format_invoke_result(
+    function_id: &FunctionId,
+    invocation_id: &InvocationId,
+    replayed_from: Option<&InvocationId>,
+    value: Option<&Value>,
+) -> String {
+    let mut lines = vec![
+        format!("Invoked engine capability `{function_id}` through the engine path."),
+        format!("Invocation id: {invocation_id}"),
+    ];
+    if let Some(replayed) = replayed_from {
+        lines.push(format!("Idempotency replayed from invocation: {replayed}"));
+    }
+    if let Some(value) = value {
+        lines.push(String::new());
+        lines.push("Result:".to_owned());
+        lines.push(json_preview(value, 12_000));
+    }
+    lines.join("\n")
+}
+
+fn format_engine_error_result(
+    function_id: &FunctionId,
+    invocation_id: &InvocationId,
+    error: &str,
+    engine_details: Option<&Value>,
+) -> String {
+    let mut lines = vec![
+        format!("Engine invocation `{function_id}` failed through the engine path."),
+        format!("Invocation id: {invocation_id}"),
+        format!("Error: {error}"),
+    ];
+    if let Some(details) = engine_details {
+        lines.push(String::new());
+        lines.push("Engine details:".to_owned());
+        lines.push(json_preview(details, 8_000));
+        if details
+            .get("code")
+            .and_then(Value::as_str)
+            .is_some_and(|code| code == "APPROVAL_REQUIRED")
+        {
+            lines.push("Approval is required before this autonomous agent invocation can run. Do not bypass with Bash or direct HTTP.".to_owned());
+        }
+    }
+    lines.join("\n")
+}
+
+fn authority_summary(function: &FunctionDefinition) -> String {
+    let scopes = if function.required_authority.scopes.is_empty() {
+        "none".to_owned()
+    } else {
+        function.required_authority.scopes.join(", ")
+    };
+    format!(
+        "scopes=[{}], approvalRequired={}",
+        scopes, function.required_authority.approval_required
+    )
+}
+
+fn required_schema_fields(schema: Option<&Value>) -> Vec<String> {
+    schema
+        .and_then(|schema| schema.get("required"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn schema_property_names(schema: Option<&Value>) -> Vec<String> {
+    let mut names = schema
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+        .map(|properties| properties.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+fn declared_stream_topics(function: &FunctionDefinition) -> Vec<String> {
+    fn from_array(value: Option<&Value>) -> Vec<String> {
+        value
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+    let mut topics = from_array(function.metadata.get("streamTopics"));
+    if topics.is_empty() {
+        topics = from_array(function.metadata.pointer("/highRiskContract/streamTopics"));
+    }
+    topics.sort();
+    topics.dedup();
+    topics
+}
+
+fn json_preview(value: &Value, max_bytes: usize) -> String {
+    let rendered = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    truncate_chars(&rendered, max_bytes)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_owned();
+    }
+    let mut truncated = value.chars().take(max_chars).collect::<String>();
+    truncated.push_str("\n... truncated; refine the query or inspect a narrower function.");
+    truncated
 }
 
 fn required_function_id(params: &Value) -> Result<FunctionId, ToolError> {
@@ -531,6 +862,8 @@ mod tests {
         let tool = EngineDiscoverTool::new(host);
         let result = tool.execute(json!({}), &make_ctx()).await.unwrap();
         assert!(!extract_text(&result).contains(&format!("{}::", "rpc")));
+        assert!(extract_text(&result).contains("alpha::echo"));
+        assert!(extract_text(&result).contains("Use canonical function ids"));
         let functions = result.details.unwrap()["functions"]
             .as_array()
             .unwrap()
@@ -539,6 +872,109 @@ mod tests {
             functions
                 .iter()
                 .any(|function| function["id"] == "alpha::echo")
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_points_worker_registration_queries_to_protocol_guide() {
+        let host = EngineHostHandle::new_in_memory().unwrap();
+        let tool = EngineDiscoverTool::new(host);
+        let result = tool
+            .execute(
+                json!({"query": "worker protocol register capabilities"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let text = extract_text(&result);
+
+        assert!(text.contains("worker::protocol_guide"));
+        assert!(text.contains("invoke `worker::protocol_guide`"));
+    }
+
+    #[tokio::test]
+    async fn inspect_returns_model_readable_contract() {
+        let host = host_with_capability(EffectClass::IdempotentWrite).await;
+        let tool = EngineInspectTool::new(host);
+        let result = tool
+            .execute(json!({"functionId": "alpha::echo"}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&result);
+
+        assert!(text.contains("Engine capability `alpha::echo`"));
+        assert!(text.contains("Authority: scopes=[state.write]"));
+        assert!(text.contains("Idempotency: key=Caller"));
+        assert!(text.contains("Request schema:"));
+    }
+
+    #[tokio::test]
+    async fn invoke_protocol_guide_returns_executable_worker_recipe() {
+        let host = EngineHostHandle::new_in_memory().unwrap();
+        let tool = EngineInvokeTool::new(host);
+        let result = tool
+            .execute(
+                json!({
+                    "functionId": "worker::protocol_guide",
+                    "payload": {
+                        "functionId": "demo::echo",
+                        "workerId": "demo-echo-worker",
+                        "language": "python"
+                    }
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let details = result.details.unwrap();
+        let recipe = &details["result"];
+
+        assert!(result.is_error.is_none());
+        assert_eq!(recipe["endpoint"], "/engine/workers");
+        assert_eq!(recipe["protocolVersion"], 1);
+        assert!(
+            recipe["pythonTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("demo::echo")
+        );
+        assert!(
+            recipe["pythonTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("Authorization: Bearer")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_protocol_guide_accepts_common_language_aliases() {
+        let host = EngineHostHandle::new_in_memory().unwrap();
+        let tool = EngineInvokeTool::new(host);
+        let result = tool
+            .execute(
+                json!({
+                    "functionId": "worker::protocol_guide",
+                    "payload": {
+                        "functionId": "demo::echo",
+                        "workerId": "demo-echo-worker",
+                        "language": "node"
+                    }
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let details = result.details.unwrap();
+        let recipe = &details["result"];
+
+        assert!(result.is_error.is_none());
+        assert_eq!(recipe["requestedLanguage"], "node");
+        assert_eq!(recipe["templateLanguage"], "python");
+        assert!(
+            recipe["pythonTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("demo::echo")
         );
     }
 
@@ -554,6 +990,7 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_error.is_none());
+        assert!(extract_text(&result).contains("through the engine path"));
         assert_eq!(
             result.details.unwrap()["result"]["payload"],
             json!({"ok": true})
@@ -591,5 +1028,17 @@ mod tests {
                 .iter()
                 .any(|change| change["subject_id"] == "alpha::echo")
         );
+    }
+
+    #[test]
+    fn agent_engine_tools_can_use_worker_sandbox_and_observability_scopes() {
+        let scopes = agent_authority_scopes();
+
+        assert!(scopes.contains(&"sandbox.write"));
+        assert!(scopes.contains(&"sandbox.read"));
+        assert!(scopes.contains(&"worker.read"));
+        assert!(scopes.contains(&"worker.write"));
+        assert!(scopes.contains(&"catalog.read"));
+        assert!(scopes.contains(&"observability.read"));
     }
 }

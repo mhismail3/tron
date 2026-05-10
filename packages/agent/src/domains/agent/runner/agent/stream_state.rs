@@ -552,6 +552,10 @@ pub(super) fn finalize_tool_call(
     current_args: &mut String,
 ) {
     if let (Some(id), Some(name)) = (current_id.take(), current_name.take()) {
+        if current_args.trim().is_empty() {
+            current_args.clear();
+            return;
+        }
         let arguments: Map<String, serde_json::Value> = match serde_json::from_str(current_args) {
             Ok(map) => map,
             Err(e) => {

@@ -96,7 +96,6 @@ struct TranscribeAudioParams: Encodable {
     let sessionId: String?
     let audioBase64: String
     let mimeType: String?
-    let fileName: String?
 }
 
 struct TranscribeAudioResult: Decodable {

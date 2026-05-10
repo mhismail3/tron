@@ -60,6 +60,18 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.lastSentText, "Hello, world!")
     }
 
+    func testSendMessageEnsuresLiveEventSubscriptionBeforePrompt() async {
+        // Given: Valid text input
+        mockContext.inputText = "Stream the response live"
+
+        // When: Sending message
+        await coordinator.sendMessage(context: mockContext)
+
+        // Then: The chat view is subscribed before server output starts.
+        XCTAssertTrue(mockContext.ensureLiveEventSubscriptionCalled)
+        XCTAssertTrue(mockContext.sendPromptCalled)
+    }
+
     func testSendMessageWithAttachmentsOnlySendsToServer() async {
         // Given: No text but has attachments
         mockContext.inputText = ""
@@ -636,6 +648,7 @@ final class MockMessagingContext: MessagingContext {
     var finalizeStreamingMessageCalled = false
     var cancelActiveDeviceRequestsCalled = false
     var showErrorCalled = false
+    var ensureLiveEventSubscriptionCalled = false
 
     // MARK: - Test Configuration
     var sendPromptShouldFail = false
@@ -657,6 +670,10 @@ final class MockMessagingContext: MessagingContext {
         if sendPromptShouldFail {
             throw MessagingTestError.serverError
         }
+    }
+
+    func ensureLiveEventSubscription() {
+        ensureLiveEventSubscriptionCalled = true
     }
 
     var activateSkillOnServerCallCount = 0

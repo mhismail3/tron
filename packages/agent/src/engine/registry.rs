@@ -617,15 +617,12 @@ impl LiveCatalog {
                     }
                 }
                 if let Some(text) = &query.text {
-                    let text = text.to_lowercase();
-                    if !function.id.as_str().to_lowercase().contains(&text)
-                        && !function.description.to_lowercase().contains(&text)
-                        && !function
-                            .tags
-                            .iter()
-                            .any(|tag| tag.to_lowercase().contains(&text))
-                    {
-                        return false;
+                    let tokens = search_tokens(text);
+                    if !tokens.is_empty() {
+                        let haystack = function_search_haystack(function);
+                        if !tokens.iter().all(|token| haystack.contains(token)) {
+                            return false;
+                        }
                     }
                 }
                 true
@@ -1345,6 +1342,40 @@ fn validate_reserved_function_namespace(definition: &FunctionDefinition) -> Resu
     Err(EngineError::PolicyViolation(
         "reserved engine namespace can only be registered by the system engine worker".to_owned(),
     ))
+}
+
+fn search_tokens(text: &str) -> Vec<String> {
+    normalize_search_text(text)
+        .split_whitespace()
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn function_search_haystack(function: &FunctionDefinition) -> String {
+    let mut parts = vec![
+        function.id.as_str().to_owned(),
+        normalize_search_text(function.id.as_str()),
+        function.description.clone(),
+    ];
+    parts.extend(function.tags.iter().cloned());
+    if !function.metadata.is_null()
+        && let Ok(metadata) = serde_json::to_string(&function.metadata)
+    {
+        parts.push(metadata);
+    }
+    normalize_search_text(&parts.join(" "))
+}
+
+fn normalize_search_text(text: &str) -> String {
+    text.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect()
 }
 
 fn worker_change_subject(definition: &WorkerDefinition) -> CatalogChangeSubject {

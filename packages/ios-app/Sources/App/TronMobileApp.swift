@@ -297,6 +297,11 @@ struct TronMobileApp: App {
         container.pushNotificationService.registerIfAuthorized()
         if let token = container.pushNotificationService.deviceToken {
             await registerDeviceToken(token)
+        } else {
+            TronLogger.shared.debug(
+                "No APNs device token available yet after authorization check; server registration will retry when APNs returns one",
+                category: .notification
+            )
         }
     }
 

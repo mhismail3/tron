@@ -3,9 +3,11 @@
 //! This module owns canonical function execution for the sandbox namespace and
 //! keeps domain contracts, services, sandbox-created worker launch/stop
 //! lifecycle, and tests beside the worker that uses them. Spawned workers are
-//! local `/engine/workers` participants; cleanup routes through `worker::disconnect`
-//! and lifecycle events publish to `sandbox.lifecycle`.
+//! local `/engine/workers` participants with a scoped endpoint/token
+//! environment; cleanup routes through `worker::disconnect` and lifecycle
+//! events publish to `sandbox.lifecycle`.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub(crate) mod contract;
@@ -161,14 +163,24 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
     }
 
     let endpoint = sandbox_service::worker_endpoint_from_origin(&deps.origin);
+    let auth_path = deps.auth_path.clone();
+    let bearer_token = run_blocking_task("sandbox.spawn_worker.load_worker_token", move || {
+        read_worker_bearer_token(&auth_path)
+    })
+    .await?;
     let mut command_builder = Command::new(&command);
     command_builder
         .args(&args)
         .kill_on_drop(true)
         .env("TRON_ENGINE_WORKER_ENDPOINT", &endpoint)
+        .env("TRON_ENGINE_BEARER_TOKEN", &bearer_token)
         .env("TRON_ENGINE_WORKER_ID", &worker_id)
         .env("TRON_ENGINE_WORKER_VISIBILITY", &visibility)
-        .env("TRON_ENGINE_WORKER_AUTH_POLICY", "loopback_bearer");
+        .env("TRON_ENGINE_WORKER_AUTH_POLICY", "loopback_bearer")
+        .env(
+            "TRON_ENGINE_WORKER_PROTOCOL_VERSION",
+            crate::engine::protocol::WORKER_PROTOCOL_VERSION.to_string(),
+        );
     if let Some(session_id) = &session_id {
         command_builder.env("TRON_ENGINE_SESSION_ID", session_id);
     }
@@ -239,6 +251,26 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
         "workerEndpoint": endpoint,
         "streamTopic": contract::STREAM_TOPICS[0],
     }))
+}
+
+fn read_worker_bearer_token(path: &Path) -> Result<String, CapabilityError> {
+    let text = std::fs::read_to_string(path).map_err(|error| CapabilityError::NotAvailable {
+        message: format!(
+            "sandbox worker auth token is unavailable at {}: {error}",
+            path.display()
+        ),
+    })?;
+    let value: Value = serde_json::from_str(&text).map_err(|error| CapabilityError::Internal {
+        message: format!("sandbox worker auth token file is invalid JSON: {error}"),
+    })?;
+    let token = value
+        .get("bearerToken")
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| CapabilityError::NotAvailable {
+            message: "sandbox worker auth token file does not contain bearerToken".to_owned(),
+        })?;
+    Ok(token.to_owned())
 }
 
 async fn remove_container(payload: &Value, _deps: &Deps) -> Result<Value, CapabilityError> {
@@ -498,4 +530,32 @@ fn string_array(payload: &Value, key: &str) -> Result<Vec<String>, CapabilityErr
                 .collect()
         })
         .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_bearer_token_is_loaded_from_auth_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+        std::fs::write(
+            &path,
+            r#"{"version":1,"bearerToken":"worker-token","providers":{},"services":{}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(read_worker_bearer_token(&path).unwrap(), "worker-token");
+    }
+
+    #[test]
+    fn worker_bearer_token_requires_current_token_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+        std::fs::write(&path, r#"{"version":1}"#).unwrap();
+
+        let error = read_worker_bearer_token(&path).unwrap_err();
+        assert!(error.to_string().contains("bearerToken"));
+    }
 }

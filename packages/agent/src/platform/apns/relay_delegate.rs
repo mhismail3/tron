@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::domains::session::event_store::{ConnectionPool, EventStore};
 use crate::domains::tools::implementations::errors::ToolError;
@@ -12,6 +12,10 @@ use crate::domains::tools::implementations::traits::{NotifyDelegate, NotifyResul
 
 use super::push_helpers;
 use super::sender::{ApnsBatch, PushSender};
+
+/// User/agent-visible warning returned when APNs is configured but no iOS
+/// device has registered an active token with the server.
+pub const NO_ACTIVE_DEVICE_TOKENS_WARNING: &str = "Push service is configured, but no active iOS device tokens are registered. Open the iOS app, grant notification permission, and keep it connected long enough to register its APNs token.";
 
 /// Relay-backed notification delegate.
 pub struct RelayNotifyDelegate {
@@ -45,13 +49,13 @@ impl NotifyDelegate for RelayNotifyDelegate {
         let device_tokens = push_helpers::active_tokens(&self.pool)?;
 
         if device_tokens.is_empty() {
-            debug!("No active device tokens — skipping relay send");
+            warn!("NotifyApp requested but no active device tokens are registered");
             return Ok(NotifyResult {
-                success: true,
+                success: false,
                 message: None,
                 success_count: 0,
                 total_count: 0,
-                warning: None,
+                warning: Some(NO_ACTIVE_DEVICE_TOKENS_WARNING.to_string()),
             });
         }
 
@@ -232,15 +236,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_tokens_returns_success_with_zero_count() {
+    async fn empty_tokens_returns_warning_with_zero_count() {
         let store = event_store_with_schema();
         let mock = Arc::new(MockPushSender::succeeding());
         let delegate = RelayNotifyDelegate::new(mock.clone(), store);
 
         let result = delegate.send_notification(&notif()).await.unwrap();
-        assert!(result.success);
+        assert!(!result.success);
         assert_eq!(result.total_count, 0);
         assert_eq!(result.success_count, 0);
+        assert_eq!(
+            result.warning.as_deref(),
+            Some(NO_ACTIVE_DEVICE_TOKENS_WARNING)
+        );
         assert_eq!(mock.calls.lock().unwrap().len(), 0);
     }
 

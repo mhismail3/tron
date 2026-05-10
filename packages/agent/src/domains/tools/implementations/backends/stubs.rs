@@ -4,6 +4,7 @@
 //! returning "not available" errors at execution time.
 
 use async_trait::async_trait;
+use tracing::warn;
 
 use crate::domains::tools::implementations::errors::ToolError;
 use crate::domains::tools::implementations::traits::{
@@ -58,8 +59,13 @@ pub const STUB_NOTIFY_WARNING: &str = "Push service is not configured on this se
 impl NotifyDelegate for StubNotifyDelegate {
     async fn send_notification(
         &self,
-        _notification: &Notification,
+        notification: &Notification,
     ) -> Result<NotifyResult, ToolError> {
+        warn!(
+            title = %notification.title,
+            priority = %notification.priority,
+            "NotifyApp requested but push service is not configured"
+        );
         Ok(NotifyResult {
             success: false,
             message: None,

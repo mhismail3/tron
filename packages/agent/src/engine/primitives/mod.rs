@@ -120,6 +120,17 @@ impl StreamStoreBackend {
         }
     }
 
+    pub(in crate::engine) fn acknowledge(
+        &mut self,
+        subscription_id: &str,
+        cursor: StreamCursor,
+    ) -> Result<EngineStreamSubscription> {
+        match self {
+            Self::InMemory(store) => store.acknowledge(subscription_id, cursor),
+            Self::Sqlite(store) => store.acknowledge(subscription_id, cursor),
+        }
+    }
+
     pub(in crate::engine) fn poll(
         &self,
         subscription_id: &str,

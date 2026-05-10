@@ -31,6 +31,20 @@ enum EngineClientConnectionPolicy {
     }
 }
 
+enum EngineClientStreamSubscriptionPolicy {
+    static func shouldClearSubscriptions(previous: ConnectionState, next: ConnectionState) -> Bool {
+        previous.isConnected && !next.isConnected
+    }
+
+    static func shouldResubscribe(
+        previous: ConnectionState,
+        next: ConnectionState,
+        hasCurrentSession: Bool
+    ) -> Bool {
+        !previous.isConnected && next.isConnected && hasCurrentSession
+    }
+}
+
 // MARK: - Engine Client
 
 @Observable
@@ -44,6 +58,8 @@ final class EngineClient: EngineTransport {
     private let streamCursorStore: EngineStreamCursorStore
     private var streamSubscriptions: [EngineStreamCursorKey: EngineSubscription] = [:]
     private var streamSubscriptionKeysById: [String: EngineStreamCursorKey] = [:]
+    private var streamAckCoalescer = EngineStreamAckCoalescer()
+    private var streamAckTasks: [String: Task<Void, Never>] = [:]
 
     // MARK: - Domain Clients
 
@@ -184,6 +200,9 @@ final class EngineClient: EngineTransport {
     deinit {
         MainActor.assumeIsolated {
             observationTask?.cancel()
+            for var task in streamAckTasks.values {
+                task.cancel()
+            }
         }
     }
 
@@ -246,8 +265,7 @@ final class EngineClient: EngineTransport {
         observationTask?.cancel()
         observationTask = nil
         currentSessionId = nil
-        streamSubscriptions.removeAll()
-        streamSubscriptionKeysById.removeAll()
+        clearActiveStreamSubscriptions(reason: "explicit disconnect")
         engineConnection?.disconnect()
         engineConnection = nil
         // Explicitly reset state to allow future connections.
@@ -268,7 +286,22 @@ final class EngineClient: EngineTransport {
                 // This prevents missing the initial .connecting → .connected transition
                 // when ws.connect() completes before this Task starts executing.
                 guard !Task.isCancelled, let self, let ws = self.engineConnection else { return }
-                self.connectionState = ws.connectionState
+                let previousState = self.connectionState
+                let nextState = ws.connectionState
+                self.connectionState = nextState
+                if EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
+                    previous: previousState,
+                    next: nextState
+                ) {
+                    self.clearActiveStreamSubscriptions(reason: "engine transport left connected state")
+                }
+                if EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+                    previous: previousState,
+                    next: nextState,
+                    hasCurrentSession: self.currentSessionId != nil
+                ), let currentSessionId = self.currentSessionId {
+                    await self.subscribeToSessionEvents(sessionId: currentSessionId, workspaceId: nil)
+                }
 
                 await withCheckedContinuation { cont in
                     withObservationTracking {
@@ -282,6 +315,7 @@ final class EngineClient: EngineTransport {
     }
 
     private func installEngineConnection() -> EngineConnection {
+        clearActiveStreamSubscriptions(reason: "installing a new engine transport")
         let ws = EngineConnection(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
         self.engineConnection = ws
 
@@ -329,6 +363,10 @@ final class EngineClient: EngineTransport {
 
     private func handleEventDelivery(_ delivery: EngineEventDelivery) {
         let eventType = delivery.event.type
+        logger.debug(
+            "Engine stream event delivered: type=\(eventType) topic=\(delivery.topic ?? "nil") subscription=\(delivery.subscriptionId ?? "nil") cursor=\(delivery.cursor?.rawValue.description ?? "nil") session=\(delivery.event.sessionId ?? "nil")",
+            category: .events
+        )
 
         // Parse event using plugin system (no re-parsing of JSON for type extraction)
         guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: delivery.eventData) else {
@@ -358,6 +396,21 @@ final class EngineClient: EngineTransport {
         // Handle MCP status changed — notify observers so MCP servers page refreshes
         if eventType == MCPStatusChangedPlugin.eventType {
             NotificationCenter.default.post(name: .mcpStatusChanged, object: nil)
+        }
+
+        // NotifyApp is a normal engine tool capability. When its tool
+        // completion event arrives over `/engine`, refresh the inbox through
+        // the same thin-client notification path APNs uses. APNs is still the
+        // background transport; this foreground path keeps the notification
+        // bell current without adding a second server API.
+        if eventType == ToolEndPlugin.eventType,
+           let result = eventV2.getResult() as? ToolEndPlugin.Result,
+           result.toolName?.lowercased() == "notifyapp" {
+            logger.info(
+                "NotifyApp tool completion received from engine stream; refreshing notification inbox",
+                category: .notification
+            )
+            NotificationCenter.default.post(name: .notificationReceived, object: nil)
         }
 
         // Publish event to async stream
@@ -405,6 +458,7 @@ final class EngineClient: EngineTransport {
     }
 
     func setCurrentSessionId(_ id: String?) {
+        logger.info("Setting current engine session id to \(id ?? "nil")", category: .events)
         currentSessionId = id
         guard connectionState.isConnected, let id else { return }
         Task { @MainActor [weak self] in
@@ -425,7 +479,13 @@ final class EngineClient: EngineTransport {
             workspaceId: workspaceId,
             filterHash: Self.sessionEventFilterHash(sessionId: sessionId, workspaceId: workspaceId)
         )
-        guard streamSubscriptions[key] == nil else { return }
+        if let existing = streamSubscriptions[key] {
+            logger.debug(
+                "Session event stream already subscribed for session \(sessionId): \(existing.subscriptionId)",
+                category: .events
+            )
+            return
+        }
         do {
             let cursor = streamCursorStore.cursor(for: key)
             let subscription = try await ws.subscribe(
@@ -471,12 +531,61 @@ final class EngineClient: EngineTransport {
             )
         streamCursorStore.save(cursor, for: key)
         guard let subscriptionId = delivery.subscriptionId else { return }
-        Task { @MainActor [weak self] in
-            do {
-                try await self?.engineConnection?.ack(subscriptionId: subscriptionId, cursor: cursor)
-            } catch {
-                logger.debug("Engine stream ack failed for \(subscriptionId)@\(cursor.rawValue): \(error.localizedDescription)", category: .events)
-            }
+        scheduleStreamAck(subscriptionId: subscriptionId, cursor: cursor)
+    }
+
+    private func scheduleStreamAck(subscriptionId: String, cursor: EngineStreamCursor) {
+        guard streamAckCoalescer.record(subscriptionId: subscriptionId, cursor: cursor) else {
+            logger.verbose(
+                "Coalesced engine stream ack for \(subscriptionId) through cursor \(cursor.rawValue)",
+                category: .events
+            )
+            return
+        }
+        streamAckTasks[subscriptionId] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            await self?.flushStreamAck(subscriptionId: subscriptionId)
+        }
+    }
+
+    private func flushStreamAck(subscriptionId: String) async {
+        guard let cursor = streamAckCoalescer.takeForFlush(subscriptionId: subscriptionId) else {
+            streamAckTasks[subscriptionId] = nil
+            return
+        }
+        do {
+            try await engineConnection?.ack(subscriptionId: subscriptionId, cursor: cursor)
+            logger.verbose(
+                "Acked engine stream \(subscriptionId) through cursor \(cursor.rawValue)",
+                category: .events
+            )
+        } catch {
+            logger.debug(
+                "Engine stream coalesced ack failed for \(subscriptionId)@\(cursor.rawValue): \(error.localizedDescription)",
+                category: .events
+            )
+        }
+        streamAckTasks[subscriptionId] = nil
+        if streamAckCoalescer.completeFlush(subscriptionId: subscriptionId) {
+            scheduleStreamAck(subscriptionId: subscriptionId, cursor: cursor)
+        }
+    }
+
+    private func clearActiveStreamSubscriptions(reason: String) {
+        let subscriptionCount = streamSubscriptions.count
+        let ackTaskCount = streamAckTasks.count
+        for var task in streamAckTasks.values {
+            task.cancel()
+        }
+        streamAckTasks.removeAll()
+        streamAckCoalescer.removeAll()
+        streamSubscriptions.removeAll()
+        streamSubscriptionKeysById.removeAll()
+        if subscriptionCount > 0 || ackTaskCount > 0 {
+            logger.info(
+                "Cleared active engine stream state: subscriptions=\(subscriptionCount), pendingAckTasks=\(ackTaskCount), reason=\(reason)",
+                category: .events
+            )
         }
     }
 

@@ -9,7 +9,6 @@ final class MediaClient: EngineDomainClient {
     func transcribeAudio(
         audioData: Data,
         mimeType: String = "audio/wav",
-        fileName: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> TranscribeAudioResult {
         _ = try requireTransport().requireConnection()
@@ -21,8 +20,7 @@ final class MediaClient: EngineDomainClient {
         let params = TranscribeAudioParams(
             sessionId: currentTransport?.currentSessionId,
             audioBase64: audioBase64,
-            mimeType: mimeType,
-            fileName: fileName
+            mimeType: mimeType
         )
 
         return try await invokeWrite(

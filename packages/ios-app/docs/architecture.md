@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-04 (Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-10 (engine thin-client boundary, live session stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -148,8 +148,18 @@ carry an explicit `EngineInvocationContext` when the capability is scoped to a
 session or workspace, and live session subscriptions send explicit stream
 filters (`sessionId` and, when known, `workspaceId`) so the server can enforce
 visibility with its engine stream primitives. The client stores cursors locally
-only to resume delivery; catalog, ledger, idempotency, approval, lease, and
-worker ownership stay server-side.
+only to resume delivery; ACKs are coalesced to the latest cursor per
+subscription so catch-up bursts do not turn into one engine request per event.
+Active subscription ids are per WebSocket, so they are cleared whenever the
+transport leaves `.connected` and recreated from the stored cursor after
+reconnect. Catalog, ledger, idempotency, approval, lease, and worker ownership
+stay server-side. Before sending a prompt, the chat view sets the active session
+on `EngineClient`, which ensures the `events.session` subscription exists before
+agent output begins; any missed output is recovered through the same stream
+cursor and reconstruction path rather than a client-side capability shortcut.
+Foreground notification inbox updates follow the same thin-client rule:
+`NotifyApp` tool completions delivered over `/engine` refresh the inbox, while
+APNs remains the background device-delivery transport.
 
 ## Data Flow
 

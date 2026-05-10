@@ -18,7 +18,6 @@ extension ChatViewModel: TranscriptionContext {
         let result = try await engineClient.media.transcribeAudio(
             audioData: data,
             mimeType: mimeType,
-            fileName: fileName,
             idempotencyKey: .userAction("transcription.audio")
         )
         return result.text

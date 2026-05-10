@@ -20,6 +20,7 @@ final class PushNotificationService {
 
     init() {
         setupObservers()
+        TronLogger.shared.debug("PushNotificationService initialized; checking authorization status", category: .notification)
         Task {
             await checkAuthorizationStatus()
         }
@@ -37,8 +38,8 @@ final class PushNotificationService {
             await checkAuthorizationStatus()
 
             if granted {
+                TronLogger.shared.info("Push notification authorization granted; registering for remote notifications", category: .notification)
                 UIApplication.shared.registerForRemoteNotifications()
-                TronLogger.shared.info("Push notification authorization granted", category: .notification)
             } else {
                 TronLogger.shared.info("Push notification authorization denied", category: .notification)
             }
@@ -64,12 +65,22 @@ final class PushNotificationService {
         @unknown default:
             isAuthorized = false
         }
+        TronLogger.shared.debug(
+            "Push notification authorization status=\(settings.authorizationStatus) authorized=\(isAuthorized)",
+            category: .notification
+        )
     }
 
     /// Register for remote notifications if authorized
     func registerIfAuthorized() {
         if isAuthorized {
+            TronLogger.shared.info("Registering for remote notifications with APNs", category: .notification)
             UIApplication.shared.registerForRemoteNotifications()
+        } else {
+            TronLogger.shared.debug(
+                "Skipping APNs registration because notification authorization status=\(authorizationStatus)",
+                category: .notification
+            )
         }
     }
 
@@ -79,11 +90,16 @@ final class PushNotificationService {
     func handleTokenUpdate(_ token: String) {
         deviceToken = token
         lastErrorMessage = nil
+        TronLogger.shared.info(
+            "APNs device token updated: prefix=\(token.prefix(8))… length=\(token.count)",
+            category: .notification
+        )
     }
 
     /// Called when registration fails
     func handleRegistrationError(_ message: String) {
         lastErrorMessage = message
+        TronLogger.shared.error("APNs device token registration failed: \(message)", category: .notification)
     }
 
     // MARK: - Private

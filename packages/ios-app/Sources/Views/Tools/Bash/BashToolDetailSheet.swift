@@ -143,16 +143,25 @@ struct BashToolDetailSheet: View {
     }
 
     private func subscribeToOutputIfNeeded() {
-        guard let processId, let engineClient, let sessionId, isJobActive else { return }
+        guard let processId, let engineClient, let sessionId, isBackgroundedProcess else { return }
         Task {
-            try? await engineClient.job.subscribe(jobId: processId, sessionId: sessionId, idempotencyKey: .userAction("job.subscribe"))
+            do {
+                TronLogger.shared.debug("Subscribing to background Bash output for job \(processId)", category: .engine)
+                try await engineClient.job.subscribe(jobId: processId, sessionId: sessionId, idempotencyKey: .userAction("job.subscribe"))
+            } catch {
+                TronLogger.shared.warning("Background Bash output subscription failed for job \(processId): \(error.localizedDescription)", category: .engine)
+            }
         }
     }
 
     private func unsubscribeFromOutput() {
-        guard let processId, let engineClient else { return }
+        guard let processId, let engineClient, isBackgroundedProcess else { return }
         Task {
-            try? await engineClient.job.unsubscribe(jobId: processId, idempotencyKey: .userAction("job.unsubscribe"))
+            do {
+                try await engineClient.job.unsubscribe(jobId: processId, idempotencyKey: .userAction("job.unsubscribe"))
+            } catch {
+                TronLogger.shared.debug("Background Bash output unsubscribe failed for job \(processId): \(error.localizedDescription)", category: .engine)
+            }
         }
     }
 
