@@ -36,6 +36,8 @@ pub(super) fn make_server_event(
     let mut payload = ServerEventPayload::new(wire_type.to_string(), session_id, data);
     payload.timestamp = event.timestamp().to_string();
     payload.sequence = event.sequence();
+    payload.trace_id = event.trace_id().map(ToOwned::to_owned);
+    payload.parent_invocation_id = event.parent_invocation_id().map(ToOwned::to_owned);
     if let Some(sequence) = event.sequence() {
         payload.source_sequence = Some(sequence);
     }

@@ -178,6 +178,12 @@ pub struct BaseEvent {
     /// Monotonic per-session sequence number, assigned at emission time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sequence: Option<i64>,
+    /// Engine trace id for events emitted inside an engine invocation chain.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Parent engine invocation id for events emitted by a child invocation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_invocation_id: Option<String>,
 }
 
 impl BaseEvent {
@@ -188,6 +194,8 @@ impl BaseEvent {
             session_id: session_id.into(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             sequence: None,
+            trace_id: None,
+            parent_invocation_id: None,
         }
     }
 
@@ -195,6 +203,18 @@ impl BaseEvent {
     #[must_use]
     pub fn with_sequence(mut self, seq: i64) -> Self {
         self.sequence = Some(seq);
+        self
+    }
+
+    /// Attach engine trace context.
+    #[must_use]
+    pub fn with_trace_context(
+        mut self,
+        trace_id: Option<String>,
+        parent_invocation_id: Option<String>,
+    ) -> Self {
+        self.trace_id = trace_id;
+        self.parent_invocation_id = parent_invocation_id;
         self
     }
 }
@@ -1291,6 +1311,18 @@ impl TronEvent {
     #[must_use]
     pub fn sequence(&self) -> Option<i64> {
         self.base().sequence
+    }
+
+    /// Get the engine trace id, if this event was emitted under one.
+    #[must_use]
+    pub fn trace_id(&self) -> Option<&str> {
+        self.base().trace_id.as_deref()
+    }
+
+    /// Get the parent engine invocation id, if this event was emitted under one.
+    #[must_use]
+    pub fn parent_invocation_id(&self) -> Option<&str> {
+        self.base().parent_invocation_id.as_deref()
     }
 
     /// Whether this is a tool execution event.

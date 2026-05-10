@@ -14,6 +14,18 @@ use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::runner::pipeline::persistence;
 use crate::domains::agent::runner::types::StreamResult;
+use crate::engine::{InvocationId, TraceId};
+
+fn base_event(
+    session_id: &str,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+) -> BaseEvent {
+    BaseEvent::now(session_id).with_trace_context(
+        trace_id.map(|id| id.as_str().to_owned()),
+        parent_invocation_id.map(|id| id.as_str().to_owned()),
+    )
+}
 
 /// Emit an event, using sequenced emission when a counter is available.
 fn emit_maybe_sequenced(emitter: &EventEmitter, event: TronEvent, counter: Option<&AtomicI64>) {
@@ -29,6 +41,19 @@ fn next_seq(counter: Option<&AtomicI64>) -> Option<i64> {
     counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1)
 }
 
+fn advance_counter_at_least(counter: Option<&AtomicI64>, floor: i64) {
+    let Some(counter) = counter else {
+        return;
+    };
+    let mut current = counter.load(Ordering::SeqCst);
+    while current < floor {
+        match counter.compare_exchange(current, floor, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+}
+
 /// Persist a `stream.turn_start` event, then broadcast the matching
 /// `TurnStart` over the emitter.
 ///
@@ -36,32 +61,45 @@ fn next_seq(counter: Option<&AtomicI64>) -> Option<i64> {
 /// succeeds. If persistence fails, no subscriber sees the event, so iOS
 /// and the DB cannot diverge — a reconnecting client that reconstructs
 /// from the DB will see the same set of events as a live subscriber.
+/// The persisted and broadcast events share the same sequence; when a
+/// resumed session's in-memory counter is behind the DB, the DB allocator
+/// wins and the counter is advanced before any later pre-assigned events.
 pub(super) async fn emit_turn_start(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
     session_id: &str,
     turn: u32,
     sequence_counter: Option<&AtomicI64>,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
 ) {
     if let Some(persister) = persister {
-        let seq = next_seq(sequence_counter);
-        if let Err(error) = persister
-            .append_with_sequence(
+        let row = match persister
+            .append(
                 session_id,
                 EventType::StreamTurnStart,
                 json!({ "turn": turn }),
-                seq,
             )
             .await
         {
-            warn!(session_id, turn, error = %error, "failed to persist turn-start event; skipping broadcast");
-            return;
-        }
+            Ok(row) => row,
+            Err(error) => {
+                warn!(session_id, turn, error = %error, "failed to persist turn-start event; skipping broadcast");
+                return;
+            }
+        };
+        advance_counter_at_least(sequence_counter, row.sequence);
+        let _ = emitter.emit(TronEvent::TurnStart {
+            base: base_event(session_id, trace_id, parent_invocation_id)
+                .with_sequence(row.sequence),
+            turn,
+        });
+        return;
     }
     emit_maybe_sequenced(
         emitter,
         TronEvent::TurnStart {
-            base: BaseEvent::now(session_id),
+            base: base_event(session_id, trace_id, parent_invocation_id),
             turn,
         },
         sequence_counter,
@@ -161,6 +199,8 @@ pub(super) fn emit_response_complete(
     token_record_json: Option<Value>,
     model_name: &str,
     sequence_counter: Option<&AtomicI64>,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
 ) {
     let response_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
         input_tokens: u.input_tokens,
@@ -175,7 +215,7 @@ pub(super) fn emit_response_complete(
     emit_maybe_sequenced(
         emitter,
         TronEvent::ResponseComplete {
-            base: BaseEvent::now(session_id),
+            base: base_event(session_id, trace_id, parent_invocation_id),
             turn,
             stop_reason: stream_result.stop_reason.clone(),
             token_usage: response_token_usage,
@@ -366,6 +406,8 @@ pub(super) async fn emit_turn_end(
     context_limit: u64,
     model_name: &str,
     sequence_counter: Option<&AtomicI64>,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
 ) {
     if let Some(persister) = persister {
         let mut token_usage_object = json!({
@@ -420,7 +462,7 @@ pub(super) async fn emit_turn_end(
     emit_maybe_sequenced(
         emitter,
         TronEvent::TurnEnd {
-            base: BaseEvent::now(session_id),
+            base: base_event(session_id, trace_id, parent_invocation_id),
             turn,
             duration: duration_ms,
             token_usage: turn_token_usage,
@@ -439,6 +481,8 @@ pub(super) fn emit_tool_use_batch(
     session_id: &str,
     tool_calls: &[crate::shared::messages::ToolCall],
     sequence_counter: Option<&AtomicI64>,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
 ) {
     let summaries: Vec<ToolCallSummary> = tool_calls
         .iter()
@@ -452,7 +496,7 @@ pub(super) fn emit_tool_use_batch(
     emit_maybe_sequenced(
         emitter,
         TronEvent::ToolUseBatch {
-            base: BaseEvent::now(session_id),
+            base: base_event(session_id, trace_id, parent_invocation_id),
             tool_calls: summaries,
         },
         sequence_counter,
@@ -468,12 +512,12 @@ mod tests {
     //! reconnect would diverge from what live clients already rendered.
     use super::*;
     use crate::domains::agent::runner::types::StreamResult;
-    use crate::domains::session::event_store::EventStore;
     use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
     use crate::domains::session::event_store::sqlite::migrations::run_migrations;
     use crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions;
+    use crate::domains::session::event_store::{AppendOptions, EventStore};
     use std::sync::Arc;
-    use std::sync::atomic::AtomicI64;
+    use std::sync::atomic::{AtomicI64, Ordering};
 
     struct Harness {
         emitter: Arc<EventEmitter>,
@@ -527,6 +571,8 @@ mod tests {
             &h.session_id,
             1,
             Some(&h.counter),
+            None,
+            None,
         )
         .await;
 
@@ -542,12 +588,51 @@ mod tests {
         let persisted = persisted_events(&h.store, &h.session_id, "stream.turn_start");
 
         assert_eq!(persisted.len(), 1, "one stream.turn_start row expected");
-        assert!(
-            persisted[0] < broadcast_seq,
-            "persist (seq {}) must precede broadcast (seq {})",
-            persisted[0],
-            broadcast_seq
+        assert_eq!(
+            persisted[0], broadcast_seq,
+            "persisted and broadcast turn-start events must share a sequence"
         );
+    }
+
+    #[tokio::test]
+    async fn emit_turn_start_advances_stale_sequence_counter_from_db() {
+        let mut h = harness().await;
+        let inserted = h
+            .store
+            .append(&AppendOptions {
+                session_id: &h.session_id,
+                event_type: EventType::MetadataUpdate,
+                payload: json!({"kind": "preexisting"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        assert_eq!(inserted.sequence, 1);
+        assert_eq!(
+            h.counter.load(Ordering::SeqCst),
+            0,
+            "test setup keeps the runtime counter stale"
+        );
+
+        emit_turn_start(
+            &h.emitter,
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            Some(&h.counter),
+            None,
+            None,
+        )
+        .await;
+
+        let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
+            .await
+            .expect("broadcast should arrive")
+            .expect("broadcast channel alive");
+        let persisted = persisted_events(&h.store, &h.session_id, "stream.turn_start");
+        assert_eq!(persisted, vec![2]);
+        assert_eq!(broadcast.sequence(), Some(2));
+        assert_eq!(h.counter.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -557,7 +642,16 @@ mod tests {
         // emitter-only callers.
         let mut h = harness().await;
 
-        emit_turn_start(&h.emitter, None, &h.session_id, 1, Some(&h.counter)).await;
+        emit_turn_start(
+            &h.emitter,
+            None,
+            &h.session_id,
+            1,
+            Some(&h.counter),
+            None,
+            None,
+        )
+        .await;
 
         let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
             .await
@@ -580,6 +674,8 @@ mod tests {
             &h.session_id,
             1,
             Some(&h.counter),
+            None,
+            None,
         )
         .await;
 
@@ -624,6 +720,8 @@ mod tests {
             25_000,
             "m",
             Some(&h.counter),
+            None,
+            None,
         )
         .await;
 
@@ -664,6 +762,8 @@ mod tests {
             25_000,
             "m",
             Some(&h.counter),
+            None,
+            None,
         )
         .await;
 

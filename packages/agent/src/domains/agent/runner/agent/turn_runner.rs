@@ -42,6 +42,19 @@ use crate::domains::agent::runner::orchestrator::streaming_journal::StreamingJou
 use crate::domains::agent::runner::orchestrator::tool_abort_registry::ToolAbortRegistry;
 use crate::domains::agent::runner::types::{RunContext, TurnResult};
 
+fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
+    BaseEvent::now(session_id).with_trace_context(
+        run_context
+            .engine_trace_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned()),
+        run_context
+            .parent_invocation_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned()),
+    )
+}
+
 /// Parameters for a single turn of the agent loop.
 pub struct TurnParams<'a> {
     /// Current turn number (1-indexed).
@@ -176,7 +189,16 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
 
     // 2. Emit TurnStart and persist (TS persists stream.turn_start events)
-    emit_turn_start(emitter, persister, session_id, turn, sequence_counter).await;
+    emit_turn_start(
+        emitter,
+        persister,
+        session_id,
+        turn,
+        sequence_counter,
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
+    )
+    .await;
     debug!(session_id, turn, "turn started");
 
     let resolved_profile = run_context
@@ -203,7 +225,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             let error_msg = format!("failed to resolve live engine tool surface: {error}");
             error!(session_id, turn, error = %error_msg);
             let _ = emitter.emit(TronEvent::TurnFailed {
-                base: BaseEvent::now(session_id),
+                base: run_base(session_id, run_context),
                 turn,
                 error: error_msg.clone(),
                 code: Some("ENGINE_TOOL_SURFACE_FAILED".into()),
@@ -274,7 +296,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 let error_msg = format!("failed to audit Constitution context resolution: {error}");
                 error!(session_id, turn, error = %error_msg);
                 let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: BaseEvent::now(session_id),
+                    base: run_base(session_id, run_context),
                     turn,
                     error: error_msg.clone(),
                     code: Some("CONSTITUTION_AUDIT_FAILED".into()),
@@ -297,7 +319,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 let error_msg = format!("failed to build provider payload audit: {error}");
                 error!(session_id, turn, error = %error_msg);
                 let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: BaseEvent::now(session_id),
+                    base: run_base(session_id, run_context),
                     turn,
                     error: error_msg.clone(),
                     code: Some("PROVIDER_PAYLOAD_AUDIT_FAILED".into()),
@@ -335,7 +357,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             let error_msg = format!("failed to audit Constitution provider payload: {error}");
             error!(session_id, turn, error = %error_msg);
             let _ = emitter.emit(TronEvent::TurnFailed {
-                base: BaseEvent::now(session_id),
+                base: run_base(session_id, run_context),
                 turn,
                 error: error_msg.clone(),
                 code: Some("PROVIDER_PAYLOAD_AUDIT_FAILED".into()),
@@ -381,7 +403,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             if let Some(counter) = sequence_counter {
                 let _ = emitter.emit_sequenced(
                     TronEvent::TurnFailed {
-                        base: BaseEvent::now(session_id),
+                        base: run_base(session_id, run_context),
                         turn,
                         error: error_msg.clone(),
                         code: None,
@@ -393,7 +415,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 );
             } else {
                 let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: BaseEvent::now(session_id),
+                    base: run_base(session_id, run_context),
                     turn,
                     error: error_msg.clone(),
                     code: None,
@@ -429,7 +451,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             );
             error!(session_id, turn, error = %error_msg);
             let _ = emitter.emit(TronEvent::TurnFailed {
-                base: BaseEvent::now(session_id),
+                base: run_base(session_id, run_context),
                 turn,
                 error: error_msg.clone(),
                 code: Some("JOURNAL_CREATE_FAILED".into()),
@@ -447,7 +469,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     };
 
     // 7. Process stream (drain after turn-stopping tools to capture token usage cleanly)
-    let stream_result = match stream_processor::process_stream(
+    let stream_result = match stream_processor::process_stream_with_trace(
         stream,
         session_id,
         emitter,
@@ -455,6 +477,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         &tool_surface.turn_stopping_tools,
         sequence_counter,
         journal.as_mut(),
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
     )
     .await
     {
@@ -475,7 +499,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             if let Some(counter) = sequence_counter {
                 let _ = emitter.emit_sequenced(
                     TronEvent::TurnFailed {
-                        base: BaseEvent::now(session_id),
+                        base: run_base(session_id, run_context),
                         turn,
                         error: error_msg.clone(),
                         code: None,
@@ -487,7 +511,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 );
             } else {
                 let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: BaseEvent::now(session_id),
+                    base: run_base(session_id, run_context),
                     turn,
                     error: error_msg.clone(),
                     code: None,
@@ -603,7 +627,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         let error_msg = format!("failed to persist assistant message: {error}");
         error!(session_id, turn, error = %error_msg);
         let _ = emitter.emit(TronEvent::TurnFailed {
-            base: BaseEvent::now(session_id),
+            base: run_base(session_id, run_context),
             turn,
             error: error_msg.clone(),
             code: Some("ASSISTANT_PERSIST_FAILED".into()),
@@ -630,6 +654,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         token_record_json.clone(),
         &model_name,
         sequence_counter,
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
     );
 
     // Finalize journal — assistant message was persisted successfully
@@ -697,7 +723,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             if let Some(counter) = sequence_counter {
                 let _ = emitter.emit_sequenced(
                     TronEvent::RulesActivated {
-                        base: BaseEvent::now(session_id),
+                        base: run_base(session_id, run_context),
                         rules: tool_phase.activated_rules.clone(),
                         total_activated: total,
                     },
@@ -705,7 +731,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 );
             } else {
                 let _ = emitter.emit(TronEvent::RulesActivated {
-                    base: BaseEvent::now(session_id),
+                    base: run_base(session_id, run_context),
                     rules: tool_phase.activated_rules.clone(),
                     total_activated: total,
                 });
@@ -727,6 +753,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         context_manager.get_context_limit(),
         &model_name,
         sequence_counter,
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
     )
     .await;
 

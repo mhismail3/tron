@@ -17,8 +17,9 @@ use crate::domains::agent::runner::errors::RuntimeError;
 use crate::domains::agent::runner::orchestrator::streaming_journal::StreamingJournal;
 use crate::domains::agent::runner::types::StreamResult;
 use crate::domains::model::providers::provider::{ProviderError, StreamEventStream};
+use crate::engine::{InvocationId, TraceId};
 
-use super::stream_state::{StreamAction, StreamState};
+use super::stream_state::{StreamAction, StreamState, StreamTraceContext};
 
 /// Process an LLM stream, accumulating content and emitting events.
 ///
@@ -29,6 +30,32 @@ use super::stream_state::{StreamAction, StreamState};
 /// accumulators (which contain only pre-drain content), not from the
 /// provider's final message.
 pub async fn process_stream(
+    stream: StreamEventStream,
+    session_id: &str,
+    emitter: &Arc<EventEmitter>,
+    cancel: &CancellationToken,
+    turn_stopping_tools: &HashSet<String>,
+    sequence_counter: Option<&AtomicI64>,
+    journal: Option<&mut StreamingJournal>,
+) -> Result<StreamResult, RuntimeError> {
+    process_stream_with_trace(
+        stream,
+        session_id,
+        emitter,
+        cancel,
+        turn_stopping_tools,
+        sequence_counter,
+        journal,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Process an LLM stream with inherited engine trace context for every emitted
+/// runtime event.
+#[allow(clippy::too_many_arguments)]
+pub async fn process_stream_with_trace(
     mut stream: StreamEventStream,
     session_id: &str,
     emitter: &Arc<EventEmitter>,
@@ -36,9 +63,15 @@ pub async fn process_stream(
     turn_stopping_tools: &HashSet<String>,
     sequence_counter: Option<&AtomicI64>,
     mut journal: Option<&mut StreamingJournal>,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
 ) -> Result<StreamResult, RuntimeError> {
     let mut state = StreamState::new();
     let (stop_reason, final_message);
+    let trace_context = StreamTraceContext {
+        trace_id,
+        parent_invocation_id,
+    };
 
     loop {
         // biased: prefer cancellation when both a stream event and cancel are ready
@@ -64,7 +97,13 @@ pub async fn process_stream(
             }
             Some(Ok(stream_event)) => {
                 let action = if state.draining {
-                    state.handle_drain_event(stream_event, session_id, emitter, sequence_counter)
+                    state.handle_drain_event(
+                        stream_event,
+                        session_id,
+                        emitter,
+                        sequence_counter,
+                        trace_context,
+                    )
                 } else {
                     state.handle_normal_event(
                         stream_event,
@@ -73,6 +112,7 @@ pub async fn process_stream(
                         sequence_counter,
                         turn_stopping_tools,
                         &mut journal,
+                        trace_context,
                     )
                 };
                 match action {

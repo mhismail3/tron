@@ -181,22 +181,33 @@ impl TronAgent {
             timestamp: None,
         });
 
+        let run_base = |session_id: &str| {
+            BaseEvent::now(session_id).with_trace_context(
+                ctx.engine_trace_id
+                    .as_ref()
+                    .map(|id| id.as_str().to_owned()),
+                ctx.parent_invocation_id
+                    .as_ref()
+                    .map(|id| id.as_str().to_owned()),
+            )
+        };
+
         // Emit AgentStart
         if let Some(ref counter) = self.sequence_counter {
             let _ = self.emitter.emit_sequenced(
                 TronEvent::AgentStart {
-                    base: BaseEvent::now(&self.session_id),
+                    base: run_base(&self.session_id),
                 },
                 counter,
             );
         } else {
             let _ = self.emitter.emit(TronEvent::AgentStart {
-                base: BaseEvent::now(&self.session_id),
+                base: run_base(&self.session_id),
             });
         }
         // Global broadcast for dashboard: this session is now processing
         let _ = self.emitter.emit(TronEvent::SessionProcessingChanged {
-            base: BaseEvent::now(&self.session_id),
+            base: run_base(&self.session_id),
             is_processing: true,
         });
 
@@ -348,21 +359,21 @@ impl TronAgent {
         if let Some(ref counter) = self.sequence_counter {
             let _ = self.emitter.emit_sequenced(
                 TronEvent::AgentEnd {
-                    base: BaseEvent::now(&self.session_id),
+                    base: run_base(&self.session_id),
                     error: error.clone(),
                 },
                 counter,
             );
         } else {
             let _ = self.emitter.emit(TronEvent::AgentEnd {
-                base: BaseEvent::now(&self.session_id),
+                base: run_base(&self.session_id),
                 error: error.clone(),
             });
         }
 
         // Global broadcast for dashboard: this session stopped processing
         let _ = self.emitter.emit(TronEvent::SessionProcessingChanged {
-            base: BaseEvent::now(&self.session_id),
+            base: run_base(&self.session_id),
             is_processing: false,
         });
 

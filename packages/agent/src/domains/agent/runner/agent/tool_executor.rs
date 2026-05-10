@@ -49,6 +49,17 @@ fn duration_ceil_ms(d: Duration) -> u64 {
     micros.div_ceil(1000) as u64
 }
 
+fn traced_base(
+    session_id: &str,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+) -> BaseEvent {
+    BaseEvent::now(session_id).with_trace_context(
+        trace_id.map(|id| id.as_str().to_owned()),
+        parent_invocation_id.map(|id| id.as_str().to_owned()),
+    )
+}
+
 /// Shared dependencies for tool execution (extracted to reduce parameter count).
 pub struct ToolExecutionContext<'a> {
     /// Live engine-catalog tool surface resolved for this turn.
@@ -215,7 +226,7 @@ pub async fn execute_tool(
         if let Some(counter) = ctx.sequence_counter {
             let _ = ctx.emitter.emit_sequenced(
                 TronEvent::HookTriggered {
-                    base: BaseEvent::now(session_id),
+                    base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                     hook_names: vec![],
                     hook_event: "PreToolUse".into(),
                     tool_name: Some(tool_name.clone()),
@@ -225,7 +236,7 @@ pub async fn execute_tool(
             );
         } else {
             let _ = ctx.emitter.emit(TronEvent::HookTriggered {
-                base: BaseEvent::now(session_id),
+                base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                 hook_names: vec![],
                 hook_event: "PreToolUse".into(),
                 tool_name: Some(tool_name.clone()),
@@ -244,7 +255,7 @@ pub async fn execute_tool(
         if let Some(counter) = ctx.sequence_counter {
             let _ = ctx.emitter.emit_sequenced(
                 TronEvent::HookCompleted {
-                    base: BaseEvent::now(session_id),
+                    base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                     hook_names: vec![],
                     hook_event: "PreToolUse".into(),
                     result: event_result,
@@ -257,7 +268,7 @@ pub async fn execute_tool(
             );
         } else {
             let _ = ctx.emitter.emit(TronEvent::HookCompleted {
-                base: BaseEvent::now(session_id),
+                base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                 hook_names: vec![],
                 hook_event: "PreToolUse".into(),
                 result: event_result,
@@ -299,7 +310,7 @@ pub async fn execute_tool(
     if let Some(counter) = ctx.sequence_counter {
         let _ = ctx.emitter.emit_sequenced(
             TronEvent::ToolExecutionStart {
-                base: BaseEvent::now(session_id),
+                base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                 tool_call_id: tool_call_id.clone(),
                 tool_name: tool_name.clone(),
                 arguments: effective_args.as_object().cloned(),
@@ -308,7 +319,7 @@ pub async fn execute_tool(
         );
     } else {
         let _ = ctx.emitter.emit(TronEvent::ToolExecutionStart {
-            base: BaseEvent::now(session_id),
+            base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
             arguments: effective_args.as_object().cloned(),
@@ -358,10 +369,15 @@ pub async fn execute_tool(
     let stream_emitter = ctx.emitter.clone();
     let stream_tool_call_id = tool_call_id.clone();
     let stream_session_id = session_id.to_owned();
+    let stream_trace_id = ctx.trace_id.map(|id| id.as_str().to_owned());
+    let stream_parent_invocation_id = ctx.parent_invocation_id.map(|id| id.as_str().to_owned());
     let stream_handle = tokio::spawn(async move {
         while let Some(chunk) = output_rx.recv().await {
             let _ = stream_emitter.emit(TronEvent::ToolExecutionUpdate {
-                base: BaseEvent::now(&stream_session_id),
+                base: BaseEvent::now(&stream_session_id).with_trace_context(
+                    stream_trace_id.clone(),
+                    stream_parent_invocation_id.clone(),
+                ),
                 tool_call_id: stream_tool_call_id.clone(),
                 update: chunk,
             });
@@ -415,7 +431,7 @@ pub async fn execute_tool(
     if let Some(counter) = ctx.sequence_counter {
         let _ = ctx.emitter.emit_sequenced(
             TronEvent::ToolExecutionEnd {
-                base: BaseEvent::now(session_id),
+                base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                 tool_call_id: tool_call_id.clone(),
                 tool_name: tool_name.clone(),
                 duration: duration_ms,
@@ -426,7 +442,7 @@ pub async fn execute_tool(
         );
     } else {
         let _ = ctx.emitter.emit(TronEvent::ToolExecutionEnd {
-            base: BaseEvent::now(session_id),
+            base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
             duration: duration_ms,
@@ -449,7 +465,7 @@ pub async fn execute_tool(
         if let Some(counter) = ctx.sequence_counter {
             let _ = ctx.emitter.emit_sequenced(
                 TronEvent::HookTriggered {
-                    base: BaseEvent::now(session_id),
+                    base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                     hook_names: vec![],
                     hook_event: "PostToolUse".into(),
                     tool_name: Some(tool_name.clone()),
@@ -459,7 +475,7 @@ pub async fn execute_tool(
             );
         } else {
             let _ = ctx.emitter.emit(TronEvent::HookTriggered {
-                base: BaseEvent::now(session_id),
+                base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                 hook_names: vec![],
                 hook_event: "PostToolUse".into(),
                 tool_name: Some(tool_name.clone()),
@@ -472,6 +488,8 @@ pub async fn execute_tool(
         let sid = session_id.to_owned();
         let tn = tool_name.clone();
         let tcid = tool_call_id.clone();
+        let hook_trace_id = ctx.trace_id.map(|id| id.as_str().to_owned());
+        let hook_parent_invocation_id = ctx.parent_invocation_id.map(|id| id.as_str().to_owned());
         let _handle = tokio::spawn(async move {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(30),
@@ -489,7 +507,8 @@ pub async fn execute_tool(
                         HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
                     };
                     let _ = emitter_bg.emit(TronEvent::HookCompleted {
-                        base: BaseEvent::now(&sid),
+                        base: BaseEvent::now(&sid)
+                            .with_trace_context(hook_trace_id, hook_parent_invocation_id),
                         hook_names: vec![],
                         hook_event: "PostToolUse".into(),
                         result: event_result,

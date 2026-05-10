@@ -131,6 +131,8 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         params.session_id,
         &params.stream_result.tool_calls,
         params.sequence_counter,
+        params.trace_id,
+        params.parent_invocation_id,
     );
 
     let waves = build_execution_waves(&params.stream_result.tool_calls, params.tool_surface);

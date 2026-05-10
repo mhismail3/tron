@@ -7,11 +7,15 @@
 //! Event projection is split by source family under `session/` so the pump stays
 //! a runtime primitive: it owns delivery policy and stream records, while domain
 //! folders own capability behavior.
+//! Engine trace context carried by the source `TronEvent` is copied into both
+//! the persisted engine stream row and the neutral payload so observability can
+//! follow an agent turn through streamed UI events, tool execution, queues, and
+//! downstream capabilities.
 
 use std::sync::Arc;
 
 use crate::domains::agent::runner::orchestrator::turn_accumulator::TurnAccumulatorMap;
-use crate::engine::{EngineHostHandle, PublishStreamEvent, VisibilityScope};
+use crate::engine::{EngineHostHandle, InvocationId, PublishStreamEvent, TraceId, VisibilityScope};
 use crate::shared::events::TronEvent;
 use serde_json::json;
 use tokio::sync::broadcast;
@@ -106,6 +110,13 @@ impl EngineStreamEventPump {
                 (VisibilityScope::Session, Some(session_id.clone()))
             }
         };
+        let trace_id = event
+            .trace_id()
+            .and_then(|id| TraceId::new(id.to_owned()).ok());
+        let parent_invocation_id = event
+            .parent_invocation_id()
+            .and_then(|id| InvocationId::new(id.to_owned()).ok());
+
         if let Err(error) = self
             .engine_streams
             .publish_stream_event(PublishStreamEvent {
@@ -120,8 +131,8 @@ impl EngineStreamEventPump {
                 session_id,
                 workspace_id: None,
                 producer: "agent-runtime".to_owned(),
-                trace_id: None,
-                parent_invocation_id: None,
+                trace_id,
+                parent_invocation_id,
             })
             .await
         {

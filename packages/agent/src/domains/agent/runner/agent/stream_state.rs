@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use serde_json::Map;
 
+use crate::engine::{InvocationId, TraceId};
 use crate::shared::content::AssistantContent;
 use crate::shared::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
 use crate::shared::messages::{TokenUsage, ToolCall};
@@ -33,6 +34,21 @@ pub(super) enum StreamAction {
     },
     /// An unrecoverable error occurred.
     Err(RuntimeError),
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct StreamTraceContext<'a> {
+    pub(super) trace_id: Option<&'a TraceId>,
+    pub(super) parent_invocation_id: Option<&'a InvocationId>,
+}
+
+impl StreamTraceContext<'_> {
+    fn base_event(&self, session_id: &str) -> BaseEvent {
+        BaseEvent::now(session_id).with_trace_context(
+            self.trace_id.map(|id| id.as_str().to_owned()),
+            self.parent_invocation_id.map(|id| id.as_str().to_owned()),
+        )
+    }
 }
 
 pub(super) struct StreamState {
@@ -81,20 +97,21 @@ impl StreamState {
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
+        trace_context: StreamTraceContext<'_>,
     ) {
         self.record_ttft();
         self.text_acc.push_str(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::MessageUpdate {
-                    base: BaseEvent::now(session_id),
+                    base: trace_context.base_event(session_id),
                     content: delta,
                 },
                 counter,
             );
         } else {
             let _ = emitter.emit(TronEvent::MessageUpdate {
-                base: BaseEvent::now(session_id),
+                base: trace_context.base_event(session_id),
                 content: delta,
             });
         }
@@ -106,20 +123,21 @@ impl StreamState {
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
+        trace_context: StreamTraceContext<'_>,
     ) {
         self.record_ttft();
         self.thinking_acc.push_str(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::ThinkingDelta {
-                    base: BaseEvent::now(session_id),
+                    base: trace_context.base_event(session_id),
                     delta,
                 },
                 counter,
             );
         } else {
             let _ = emitter.emit(TronEvent::ThinkingDelta {
-                base: BaseEvent::now(session_id),
+                base: trace_context.base_event(session_id),
                 delta,
             });
         }
@@ -132,20 +150,21 @@ impl StreamState {
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
+        trace_context: StreamTraceContext<'_>,
     ) {
         self.thinking_acc.clone_from(&thinking);
         self.thinking_signature = signature;
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::ThinkingEnd {
-                    base: BaseEvent::now(session_id),
+                    base: trace_context.base_event(session_id),
                     thinking,
                 },
                 counter,
             );
         } else {
             let _ = emitter.emit(TronEvent::ThinkingEnd {
-                base: BaseEvent::now(session_id),
+                base: trace_context.base_event(session_id),
                 thinking,
             });
         }
@@ -158,6 +177,7 @@ impl StreamState {
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
+        trace_context: StreamTraceContext<'_>,
     ) {
         finalize_tool_call(
             &mut self.tool_calls,
@@ -173,7 +193,7 @@ impl StreamState {
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::ToolCallGenerating {
-                    base: BaseEvent::now(session_id),
+                    base: trace_context.base_event(session_id),
                     tool_call_id,
                     tool_name: name,
                 },
@@ -181,7 +201,7 @@ impl StreamState {
             );
         } else {
             let _ = emitter.emit(TronEvent::ToolCallGenerating {
-                base: BaseEvent::now(session_id),
+                base: trace_context.base_event(session_id),
                 tool_call_id,
                 tool_name: name,
             });
@@ -195,12 +215,13 @@ impl StreamState {
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
+        trace_context: StreamTraceContext<'_>,
     ) {
         self.current_tool_args.push_str(&arguments_delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::ToolCallArgumentDelta {
-                    base: BaseEvent::now(session_id),
+                    base: trace_context.base_event(session_id),
                     tool_call_id,
                     tool_name: self.current_tool_name.clone(),
                     arguments_delta,
@@ -209,7 +230,7 @@ impl StreamState {
             );
         } else {
             let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
-                base: BaseEvent::now(session_id),
+                base: trace_context.base_event(session_id),
                 tool_call_id,
                 tool_name: self.current_tool_name.clone(),
                 arguments_delta,
@@ -295,6 +316,7 @@ impl StreamState {
         session_id: &str,
         emitter: &EventEmitter,
         sequence_counter: Option<&AtomicI64>,
+        trace_context: StreamTraceContext<'_>,
     ) -> StreamAction {
         match stream_event {
             StreamEvent::Done { message, .. } => {
@@ -321,7 +343,7 @@ impl StreamState {
                 if let Some(counter) = sequence_counter {
                     let _ = emitter.emit_sequenced(
                         TronEvent::ApiRetry {
-                            base: BaseEvent::now(session_id),
+                            base: trace_context.base_event(session_id),
                             attempt,
                             max_retries,
                             delay_ms,
@@ -332,7 +354,7 @@ impl StreamState {
                     );
                 } else {
                     let _ = emitter.emit(TronEvent::ApiRetry {
-                        base: BaseEvent::now(session_id),
+                        base: trace_context.base_event(session_id),
                         attempt,
                         max_retries,
                         delay_ms,
@@ -359,6 +381,7 @@ impl StreamState {
         sequence_counter: Option<&AtomicI64>,
         turn_stopping_tools: &HashSet<String>,
         journal: &mut Option<&mut StreamingJournal>,
+        trace_context: StreamTraceContext<'_>,
     ) -> StreamAction {
         match stream_event {
             StreamEvent::TextDelta { delta } => {
@@ -367,7 +390,7 @@ impl StreamState {
                         tracing::warn!(session_id, error = %e, "journal write failed for text delta");
                     }
                 }
-                self.handle_text_delta(delta, session_id, emitter, sequence_counter);
+                self.handle_text_delta(delta, session_id, emitter, sequence_counter, trace_context);
             }
 
             StreamEvent::Start | StreamEvent::TextStart | StreamEvent::TextEnd { .. } => {}
@@ -377,13 +400,13 @@ impl StreamState {
                 if let Some(counter) = sequence_counter {
                     let _ = emitter.emit_sequenced(
                         TronEvent::ThinkingStart {
-                            base: BaseEvent::now(session_id),
+                            base: trace_context.base_event(session_id),
                         },
                         counter,
                     );
                 } else {
                     let _ = emitter.emit(TronEvent::ThinkingStart {
-                        base: BaseEvent::now(session_id),
+                        base: trace_context.base_event(session_id),
                     });
                 }
             }
@@ -394,7 +417,13 @@ impl StreamState {
                         tracing::warn!(session_id, error = %e, "journal write failed for thinking delta");
                     }
                 }
-                self.handle_thinking_delta(delta, session_id, emitter, sequence_counter);
+                self.handle_thinking_delta(
+                    delta,
+                    session_id,
+                    emitter,
+                    sequence_counter,
+                    trace_context,
+                );
             }
 
             StreamEvent::ThinkingEnd {
@@ -412,6 +441,7 @@ impl StreamState {
                     session_id,
                     emitter,
                     sequence_counter,
+                    trace_context,
                 );
             }
 
@@ -422,6 +452,7 @@ impl StreamState {
                     session_id,
                     emitter,
                     sequence_counter,
+                    trace_context,
                 );
             }
 
@@ -435,6 +466,7 @@ impl StreamState {
                     session_id,
                     emitter,
                     sequence_counter,
+                    trace_context,
                 );
             }
 
@@ -477,7 +509,7 @@ impl StreamState {
                 if let Some(counter) = sequence_counter {
                     let _ = emitter.emit_sequenced(
                         TronEvent::ApiRetry {
-                            base: BaseEvent::now(session_id),
+                            base: trace_context.base_event(session_id),
                             attempt,
                             max_retries,
                             delay_ms,
@@ -488,7 +520,7 @@ impl StreamState {
                     );
                 } else {
                     let _ = emitter.emit(TronEvent::ApiRetry {
-                        base: BaseEvent::now(session_id),
+                        base: trace_context.base_event(session_id),
                         attempt,
                         max_retries,
                         delay_ms,
