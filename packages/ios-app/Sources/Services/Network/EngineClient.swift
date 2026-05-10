@@ -418,11 +418,12 @@ final class EngineClient: EngineTransport {
 
     private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async {
         guard let ws = engineConnection, connectionState.isConnected else { return }
+        let filters = Self.sessionEventFilters(sessionId: sessionId, workspaceId: workspaceId)
         let key = streamKey(
             topic: "events.session",
             sessionId: sessionId,
             workspaceId: workspaceId,
-            filterHash: "none"
+            filterHash: Self.sessionEventFilterHash(sessionId: sessionId, workspaceId: workspaceId)
         )
         guard streamSubscriptions[key] == nil else { return }
         do {
@@ -430,6 +431,7 @@ final class EngineClient: EngineTransport {
             let subscription = try await ws.subscribe(
                 topic: key.topic,
                 cursor: cursor,
+                filters: filters,
                 context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
             )
             streamSubscriptions[key] = subscription
@@ -441,6 +443,21 @@ final class EngineClient: EngineTransport {
         } catch {
             logger.warning("Failed to subscribe to session events: \(error.localizedDescription)", category: .events)
         }
+    }
+
+    static func sessionEventFilters(sessionId: String, workspaceId: String?) -> [String: AnyCodable] {
+        var filters: [String: AnyCodable] = ["sessionId": AnyCodable(sessionId)]
+        if let workspaceId {
+            filters["workspaceId"] = AnyCodable(workspaceId)
+        }
+        return filters
+    }
+
+    static func sessionEventFilterHash(sessionId: String, workspaceId: String?) -> String {
+        if let workspaceId {
+            return "sessionId=\(sessionId);workspaceId=\(workspaceId)"
+        }
+        return "sessionId=\(sessionId)"
     }
 
     private func recordAndAck(_ delivery: EngineEventDelivery) {

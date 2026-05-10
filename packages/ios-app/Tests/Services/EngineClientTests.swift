@@ -52,6 +52,35 @@ final class ConnectionStateTests: XCTestCase {
     }
 }
 
+// MARK: - Stream Subscription Scope Tests
+
+@MainActor
+final class EngineStreamScopeTests: XCTestCase {
+
+    func testSessionEventFiltersUseExplicitSessionScope() {
+        let filters = EngineClient.sessionEventFilters(sessionId: "session-123", workspaceId: "workspace-456")
+
+        XCTAssertEqual(filters["sessionId"]?.stringValue, "session-123")
+        XCTAssertEqual(filters["workspaceId"]?.stringValue, "workspace-456")
+        XCTAssertEqual(
+            EngineClient.sessionEventFilterHash(sessionId: "session-123", workspaceId: "workspace-456"),
+            "sessionId=session-123;workspaceId=workspace-456"
+        )
+    }
+}
+
+// MARK: - Notification Refresh Tests
+
+@MainActor
+final class NotificationStoreConnectionTests: XCTestCase {
+
+    func testRefreshOnlyRunsWhenEngineIsConnected() {
+        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .disconnected))
+        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .connecting))
+        XCTAssertTrue(NotificationStore.shouldRefreshFromServer(connectionState: .connected))
+    }
+}
+
 // MARK: - Model Info Tests
 
 @MainActor

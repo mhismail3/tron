@@ -47,11 +47,23 @@ pub(crate) async fn session_list_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let include_archived = opt_bool(params, "includeArchived").unwrap_or(false);
+    let working_directory = opt_string(params, "workingDirectory");
     let limit = params
         .and_then(|p| p.get("limit"))
         .and_then(Value::as_u64)
         .map(|value| value as usize);
-    crate::domains::session::queries::SessionQueryService::list(deps, include_archived, limit).await
+    let offset = params
+        .and_then(|p| p.get("offset"))
+        .and_then(Value::as_u64)
+        .map(|value| value as usize);
+    crate::domains::session::queries::SessionQueryService::list(
+        deps,
+        include_archived,
+        limit,
+        working_directory,
+        offset,
+    )
+    .await
 }
 
 pub(crate) async fn session_get_head_value(

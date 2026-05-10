@@ -138,6 +138,35 @@ fn installed_pre_commit_hook_enforces_rustfmt_and_personal_info_guard() {
 }
 
 #[test]
+fn tron_dev_background_start_is_file_logged_and_health_checked() {
+    let script_path = repo_root().join("scripts").join("tron");
+    let content = std::fs::read_to_string(&script_path)
+        .unwrap_or_else(|e| panic!("failed to read {script_path:?}: {e}"));
+    let background_start = content
+        .split("dev_start_background()")
+        .nth(1)
+        .and_then(|tail| tail.split("dev_stop()").next())
+        .expect("scripts/tron must contain dev_start_background before dev_stop");
+
+    assert!(
+        background_start.contains("tron-dev-background.log"),
+        "background dev startup must preserve server stdout/stderr in a file log"
+    );
+    assert!(
+        background_start.contains("http://127.0.0.1:$PROD_PORT/health"),
+        "background dev startup must wait for /health, not just a live pid"
+    );
+    assert!(
+        background_start.contains("tail -n 80 \"$dev_log\""),
+        "background dev startup failure must print the recent server log tail"
+    );
+    assert!(
+        !background_start.contains(">/dev/null 2>&1 &"),
+        "background dev startup must not discard pre-database startup failures"
+    );
+}
+
+#[test]
 fn lower_layers_do_not_depend_on_server_transport_modules() {
     let crate_root = crate_root();
     for dir in [

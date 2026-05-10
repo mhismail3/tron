@@ -412,7 +412,7 @@ cmd_dev() {
                 echo "Options:"
                 echo "  -b, --build       Build before starting (dev-server profile)"
                 echo "  -t, --test        Run tests before starting"
-                echo "  -d, --background  Run in background (logs to database only)"
+                echo "  -d, --background  Run in background (logs to database and $RUN_DIR/tron-dev-background.log)"
                 echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
                 echo "  --stop            Stop dev server and restart the installed service"
                 echo "  --log             Tail the server log"
@@ -535,26 +535,63 @@ dev_start_background() {
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"
 
+    local dev_log="$RUN_DIR/tron-dev-background.log"
+    local dev_pid_file="$RUN_DIR/tron-dev-background.pid"
+    mkdir -p "$RUN_DIR"
+    {
+        echo "=== tron dev background start $(date -u +"%Y-%m-%dT%H:%M:%SZ") ==="
+        echo "binary=$DEV_BINARY"
+        echo "port=$PROD_PORT"
+        echo "rust_log=${RUST_LOG:-debug,ort=error}"
+    } > "$dev_log"
+
     RUST_LOG="${RUST_LOG:-debug,ort=error}" nohup "$DEV_BINARY" \
         --port "$PROD_PORT" --quiet ${log_level:+--log-level "$log_level"} \
-        >/dev/null 2>&1 &
+        >>"$dev_log" 2>&1 &
 
     local pid=$!
+    echo "$pid" > "$dev_pid_file"
     disown "$pid" 2>/dev/null || true
-    sleep 2
 
-    if kill -0 "$pid" 2>/dev/null; then
+    local health_ok=false
+    local attempt
+    for attempt in {1..20}; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            break
+        fi
+        if curl -fsS --max-time 1 "http://127.0.0.1:$PROD_PORT/health" >/dev/null 2>&1; then
+            health_ok=true
+            break
+        fi
+        sleep 0.5
+    done
+
+    if [ "$health_ok" = true ]; then
         echo ""
         echo -e "${CYAN}Tron Dev Server (background)${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "  Server:  http://localhost:$PROD_PORT"
+        echo "  Health:  http://localhost:$PROD_PORT/health"
         echo "  PID:     $pid"
-        echo "  Logs:    tron logs"
+        echo "  Logs:    $dev_log"
         echo ""
         echo -e "${YELLOW}Use 'tron dev --stop' to stop dev and restart the installed service.${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     else
-        print_error "Dev server failed to start. Check: tron logs -l error"
+        if kill -0 "$pid" 2>/dev/null; then
+            print_warning "Dev server process stayed alive but did not pass /health; stopping it before restoring the installed service."
+            kill "$pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+        rm -f "$dev_pid_file"
+        print_error "Dev server failed to start or become healthy."
+        if [ -s "$dev_log" ]; then
+            print_status "Last dev server log lines ($dev_log):"
+            tail -n 80 "$dev_log" >&2 || true
+        else
+            print_warning "Dev server log was empty: $dev_log"
+        fi
         print_status "Restarting installed service..."
         if ensure_restartable_prod_server; then
             launchd_start "$PLIST_NAME"
@@ -583,6 +620,7 @@ dev_stop() {
             kill -9 "$pid" 2>/dev/null || true
         fi
         print_success "Dev server stopped"
+        rm -f "$RUN_DIR/tron-dev-background.pid"
         # The EXIT trap in the dev process should restart the installed helper.
         # If it was kill -9, restart manually:
         sleep 1

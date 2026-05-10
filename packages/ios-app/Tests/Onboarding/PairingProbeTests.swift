@@ -70,6 +70,28 @@ struct PairingProbeTests {
         #expect(payload?["clientVersion"] as? String == "1.2.3")
     }
 
+    @Test("engine probe requests are sent as WebSocket text frames")
+    func probeMessagesUseTextFrames() throws {
+        let data = URLSessionPairingProbe.helloRequestData(
+            protocolVersion: 1,
+            clientVersion: "1.2.3",
+            requestId: "hello-1"
+        )
+
+        let frame = URLSessionPairingProbe.engineTextMessage(from: data)
+
+        switch frame {
+        case .string(let text):
+            let parsed = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+            #expect(parsed?["type"] as? String == "hello")
+            #expect(parsed?["id"] as? String == "hello-1")
+        case .data:
+            Issue.record("pairing probe JSON must be sent as a WebSocket text frame")
+        @unknown default:
+            Issue.record("unexpected WebSocket frame type")
+        }
+    }
+
     // MARK: - Classification
 
     @Test("classify(): success result with serverVersion → .ok")

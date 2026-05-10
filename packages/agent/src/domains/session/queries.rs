@@ -34,12 +34,16 @@ impl SessionQueryService {
         deps: &Deps,
         include_archived: bool,
         limit: Option<usize>,
+        working_directory: Option<String>,
+        offset: Option<usize>,
     ) -> Result<Value, CapabilityError> {
         let filter = crate::domains::agent::runner::SessionFilter {
+            workspace_path: working_directory,
             include_archived,
             exclude_subagents: true,
             user_only: true,
             limit,
+            offset,
             ..Default::default()
         };
         let session_manager = deps.session_manager.clone();
@@ -460,5 +464,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["session"]["id"].as_str().unwrap(), subagent);
+    }
+
+    #[tokio::test]
+    async fn list_accepts_ios_dashboard_pagination_payload() {
+        let ctx = make_test_context();
+        let first = ctx
+            .session_manager
+            .create_session("m", "/tmp/a", Some("a"), None)
+            .unwrap();
+        let second = ctx
+            .session_manager
+            .create_session("m", "/tmp/b", Some("b"), None)
+            .unwrap();
+
+        let result = SessionQueryService::list(
+            &Deps::from_test_context(&ctx),
+            false,
+            Some(1),
+            None,
+            Some(0),
+        )
+        .await
+        .unwrap();
+        let sessions = result["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+
+        let filtered = SessionQueryService::list(
+            &Deps::from_test_context(&ctx),
+            false,
+            None,
+            Some("/tmp/a".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+        let sessions = filtered["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["sessionId"].as_str().unwrap(), first);
+        assert_ne!(sessions[0]["sessionId"].as_str().unwrap(), second);
     }
 }

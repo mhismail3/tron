@@ -73,6 +73,8 @@ pub struct SessionFilter {
     pub user_only: bool,
     /// Maximum number of results.
     pub limit: Option<usize>,
+    /// Skip results.
+    pub offset: Option<usize>,
 }
 
 /// Session manager.
@@ -356,6 +358,7 @@ impl SessionManager {
         use crate::domains::session::event_store::sqlite::repositories::session::ListSessionsOptions;
         let opts = ListSessionsOptions {
             workspace_id: None,
+            working_directory: filter.workspace_path.as_deref(),
             ended: if filter.include_archived {
                 None
             } else {
@@ -368,7 +371,8 @@ impl SessionManager {
             },
             #[allow(clippy::cast_possible_wrap)]
             limit: filter.limit.map(|l| l as i64),
-            offset: None,
+            #[allow(clippy::cast_possible_wrap)]
+            offset: filter.offset.map(|o| o as i64),
             origin: self.origin.as_deref(),
             user_only: if filter.user_only { Some(true) } else { None },
         };
@@ -745,6 +749,40 @@ mod tests {
 
         let sessions = mgr.list_sessions(&SessionFilter::default()).unwrap();
         assert_eq!(sessions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_filters_by_workspace_path_and_offset() {
+        let mgr = make_manager();
+        let first = mgr
+            .create_session("model-a", "/tmp/a", Some("s1"), None)
+            .unwrap();
+        let second = mgr
+            .create_session("model-b", "/tmp/b", Some("s2"), None)
+            .unwrap();
+
+        let filtered = mgr
+            .list_sessions(&SessionFilter {
+                workspace_path: Some("/tmp/a".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, first);
+
+        let paged = mgr
+            .list_sessions(&SessionFilter {
+                limit: Some(1),
+                offset: Some(1),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(paged.len(), 1);
+        assert!(
+            paged
+                .iter()
+                .all(|session| session.id == first || session.id == second)
+        );
     }
 
     #[tokio::test]

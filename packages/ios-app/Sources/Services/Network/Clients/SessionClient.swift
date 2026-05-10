@@ -70,7 +70,8 @@ final class SessionClient: EngineDomainClient {
         let result: SessionResumeResult = try await invokeWrite(
             "session::resume",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionContext(sessionId)
         )
 
         currentTransport?.setCurrentSessionId(result.sessionId)
@@ -82,7 +83,12 @@ final class SessionClient: EngineDomainClient {
         _ = try requireTransport().requireConnection()
 
         let params = SessionArchiveParams(sessionId: sessionId)
-        let _: EmptyParams = try await invokeWrite("session::archive", params, idempotencyKey: idempotencyKey)
+        let _: EmptyParams = try await invokeWrite(
+            "session::archive",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionContext(sessionId)
+        )
 
         if currentTransport?.currentSessionId == sessionId {
             currentTransport?.setCurrentSessionId(nil)
@@ -94,7 +100,12 @@ final class SessionClient: EngineDomainClient {
         _ = try requireTransport().requireConnection()
 
         let params = SessionUnarchiveParams(sessionId: sessionId)
-        let _: EmptyParams = try await invokeWrite("session::unarchive", params, idempotencyKey: idempotencyKey)
+        let _: EmptyParams = try await invokeWrite(
+            "session::unarchive",
+            params,
+            idempotencyKey: idempotencyKey,
+            context: sessionContext(sessionId)
+        )
 
         logger.info("Unarchived session: \(sessionId)", category: .session)
     }
@@ -159,10 +170,15 @@ final class SessionClient: EngineDomainClient {
         let result: SessionForkResult = try await invokeWrite(
             "session::fork",
             params,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: sessionContext(sessionId)
         )
 
         logger.info("[FORK] Fork succeeded: newSessionId=\(result.newSessionId), forkedFromEventId=\(result.forkedFromEventId ?? "unknown"), rootEventId=\(result.rootEventId ?? "unknown")", category: .session)
         return result
+    }
+
+    private func sessionContext(_ sessionId: String) -> EngineInvocationContext {
+        EngineInvocationContext(sessionId: sessionId)
     }
 }

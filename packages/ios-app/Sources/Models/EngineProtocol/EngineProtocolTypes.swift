@@ -187,8 +187,7 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case idempotencyConflict = "IDEMPOTENCY_CONFLICT"
     case internalError = "INTERNAL_ERROR"
 
-    // Typed git workflow errors — mirror the constants in
-    // `packages/agent/src/server/capabilities/errors.rs`.
+    // Typed git workflow errors — mirror the current server error-code constants.
     case protectedBranch = "PROTECTED_BRANCH"
     case noRemote = "NO_REMOTE"
     case nonFastForward = "NON_FAST_FORWARD"
@@ -203,12 +202,12 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case notGitRepo = "NOT_GIT_REPO"
     case gitError = "GIT_ERROR"
 
-    // Typed event-store errors — mirror `map_event_store_error`.
+    // Typed event-store errors — mirror the server's event-store error mapping.
     case eventNotFound = "EVENT_NOT_FOUND"
     case workspaceNotFound = "WORKSPACE_NOT_FOUND"
     case blobNotFound = "BLOB_NOT_FOUND"
 
-    // Typed cron errors — mirror `map_cron_error`.
+    // Typed cron errors — mirror the server's cron error mapping.
     case cronNotFound = "CRON_NOT_FOUND"
     case cronDuplicateName = "CRON_DUPLICATE_NAME"
     case cronInvalidExpression = "CRON_INVALID_EXPRESSION"
@@ -216,7 +215,7 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case cronTimedOut = "CRON_TIMED_OUT"
     case cronCancelled = "CRON_CANCELLED"
 
-    // Typed auth errors — mirror `map_auth_error`.
+    // Typed auth errors — mirror the server's auth error mapping.
     case authNotConfigured = "AUTH_NOT_CONFIGURED"
     case authTokenExpired = "AUTH_TOKEN_EXPIRED"
     case authOauthError = "AUTH_OAUTH_ERROR"
@@ -238,6 +237,94 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
 
     /// Typed error code (nil for unknown codes)
     var errorCode: EngineErrorCode? { EngineErrorCode(rawValue: code) }
+
+    /// Redacted one-line diagnostic for logs. This keeps client logs useful for
+    /// server-contract failures without dumping request payloads or credentials.
+    var diagnosticSummary: String {
+        guard let details, !details.isEmpty else {
+            return "\(code): \(message)"
+        }
+
+        let renderedDetails = Self.renderDetails(details, depth: 0)
+        guard !renderedDetails.isEmpty else {
+            return "\(code): \(message)"
+        }
+
+        let summary = "\(code): \(message) details={\(renderedDetails)}"
+        if summary.count > 800 {
+            return "\(summary.prefix(800))..."
+        }
+        return summary
+    }
+
+    private static func renderDetails(_ details: [String: AnyCodable], depth: Int) -> String {
+        guard depth < 2 else { return "..." }
+
+        return details.keys.sorted().prefix(12).compactMap { key in
+            guard let value = details[key] else { return nil }
+            return "\(key)=\(renderedValue(for: key, value: value, depth: depth))"
+        }.joined(separator: " ")
+    }
+
+    private static func renderedValue(for key: String, value: AnyCodable, depth: Int) -> String {
+        if shouldRedact(key) {
+            return "redacted"
+        }
+        if let string = value.stringValue {
+            return sanitized(string)
+        }
+        if let int = value.intValue {
+            return "\(int)"
+        }
+        if let double = value.doubleValue {
+            return "\(double)"
+        }
+        if let bool = value.boolValue {
+            return "\(bool)"
+        }
+        if let dictionary = value.dictionaryValue {
+            let nested = dictionary.mapValues { AnyCodable($0) }
+            let rendered = renderDetails(nested, depth: depth + 1)
+            return "{\(rendered)}"
+        }
+        if let array = value.arrayValue {
+            let simple = array.compactMap { item -> String? in
+                switch item {
+                case let string as String: sanitized(string)
+                case let int as Int: "\(int)"
+                case let double as Double: "\(double)"
+                case let bool as Bool: "\(bool)"
+                default: nil
+                }
+            }
+            if simple.count == array.count, !simple.isEmpty {
+                return "[\(simple.prefix(6).joined(separator: ","))]"
+            }
+            return "[\(array.count) items]"
+        }
+        return "null"
+    }
+
+    private static func shouldRedact(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        return normalized.contains("payload")
+            || normalized.contains("argument")
+            || normalized.contains("input")
+            || normalized.contains("request")
+            || normalized.contains("response")
+            || normalized.contains("authorization")
+            || normalized.contains("token")
+            || normalized.contains("secret")
+            || normalized.contains("api_key")
+            || normalized == "key"
+            || normalized == "value"
+    }
+
+    private static func sanitized(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+    }
 }
 
 /// Empty params for methods that don't require parameters

@@ -62,6 +62,7 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac
     postBuildScripts:
       - name: Copy Bundled Login Item
+        basedOnDependencyAnalysis: false
         script: |
           set -euo pipefail
           SRC="$SRCROOT/Sources/Resources/Library"
@@ -70,7 +71,7 @@ targets:
           rm -rf "$DST"
           mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
           ditto "$SRC" "$DST"
-          TRANSCRIPTION_SRC="$SRCROOT/../agent/src/transcription/sidecar"
+          TRANSCRIPTION_SRC="$SRCROOT/../agent/src/domains/transcription/implementation/sidecar"
           TRANSCRIPTION_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Transcription"
           test -f "$TRANSCRIPTION_SRC/worker.py" || { echo "Missing transcription worker at $TRANSCRIPTION_SRC/worker.py" >&2; exit 1; }
           test -f "$TRANSCRIPTION_SRC/requirements.txt" || { echo "Missing transcription requirements at $TRANSCRIPTION_SRC/requirements.txt" >&2; exit 1; }

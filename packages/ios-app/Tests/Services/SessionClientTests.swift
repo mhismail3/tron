@@ -221,6 +221,56 @@ struct SessionClientTests {
         }
     }
 
+    @Test("Real session resume sends session-scoped engine context")
+    func testRealResume_sendsSessionContext() async throws {
+        let transport = makeConnectedTransport()
+        transport.writeHandler = { functionId, _, _, options in
+            #expect(functionId.rawValue == "session::resume")
+            #expect(options.context?.sessionId == "session-123")
+            return SessionResumeResult(
+                sessionId: "session-123",
+                model: "claude-sonnet-4-6",
+                messageCount: 0,
+                lastActivity: "2026-05-10T00:00:00Z"
+            )
+        }
+        let client = SessionClient(transport: transport)
+
+        try await client.resume(sessionId: "session-123", idempotencyKey: "idem")
+
+        #expect(transport.lastSetSessionId == "session-123")
+        #expect(transport.lastSetModel == "claude-sonnet-4-6")
+    }
+
+    @Test("Real session mutations send target session context")
+    func testRealSessionMutations_sendTargetSessionContext() async throws {
+        let transport = makeConnectedTransport()
+        let client = SessionClient(transport: transport)
+
+        transport.writeHandler = { functionId, _, _, options in
+            #expect(options.context?.sessionId == "session-123")
+            switch functionId.rawValue {
+            case "session::archive", "session::unarchive":
+                return EmptyParams()
+            case "session::fork":
+                return SessionForkResult(
+                    newSessionId: "forked-session",
+                    forkedFromEventId: nil,
+                    forkedFromSessionId: "session-123",
+                    rootEventId: nil,
+                    worktree: nil
+                )
+            default:
+                Issue.record("unexpected function id \(functionId.rawValue)")
+                return EmptyParams()
+            }
+        }
+
+        try await client.archive("session-123", idempotencyKey: "archive-idem")
+        try await client.unarchive("session-123", idempotencyKey: "unarchive-idem")
+        _ = try await client.fork("session-123", idempotencyKey: "fork-idem")
+    }
+
     // MARK: - Fork Tests
 
     @Test("Fork session from HEAD")
@@ -320,5 +370,12 @@ struct SessionClientTests {
 
         #expect(mock.unarchiveCallCount == 1)
         #expect(mock.unarchiveSessionId == "session-123")
+    }
+
+    private func makeConnectedTransport() -> MockEngineTransport {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://127.0.0.1:9847/engine")!)
+        transport.connectionState = .connected
+        return transport
     }
 }

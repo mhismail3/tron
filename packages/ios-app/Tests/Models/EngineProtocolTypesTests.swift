@@ -694,4 +694,25 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         XCTAssertEqual(error.message, "Session not found")
         XCTAssertEqual(error.errorDescription, "Session not found")
     }
+
+    func testEngineErrorDiagnosticSummaryIncludesContractContextAndRedactsPayload() throws {
+        let error = EngineProtocolError(
+            code: "INVALID_PARAMS",
+            message: "additional property is not allowed",
+            details: [
+                "direction": AnyCodable("request"),
+                "functionId": AnyCodable("session::list"),
+                "property": AnyCodable("workingDirectory"),
+                "payload": AnyCodable(["workingDirectory": "/Users/example/project"]),
+            ]
+        )
+
+        let summary = error.diagnosticSummary
+
+        XCTAssertTrue(summary.contains("INVALID_PARAMS"))
+        XCTAssertTrue(summary.contains("functionId=session::list"))
+        XCTAssertTrue(summary.contains("property=workingDirectory"))
+        XCTAssertTrue(summary.contains("payload=redacted"))
+        XCTAssertFalse(summary.contains("/Users/example/project"))
+    }
 }

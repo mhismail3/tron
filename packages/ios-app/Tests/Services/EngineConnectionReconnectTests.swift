@@ -43,6 +43,12 @@ struct EngineConnectionReconnectTests {
         #expect(EngineConnection.connectionOpenTimeout < 30.0)
     }
 
+    @Test("manual retry uses the full open timeout")
+    func manualRetryUsesFullOpenTimeout() {
+        #expect(EngineConnection.manualRetryOpenTimeout == EngineConnection.connectionOpenTimeout)
+        #expect(EngineConnection.manualRetryOpenTimeout > EngineConnection.automaticReconnectProbeTimeout)
+    }
+
     @Test("foreground heartbeat detects idle disconnects quickly")
     func foregroundHeartbeatDetectsIdleDisconnectsQuickly() {
         #expect(EngineConnection.heartbeatInterval == 5.0)

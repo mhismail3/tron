@@ -1496,7 +1496,13 @@ impl EngineHost {
                 ));
             }
         };
-        let child = self.catalog.prepare_sync_invocation(child);
+        let child = if is_host_dispatched_primitive_namespace(child.function_id.namespace()) {
+            PreparedSyncInvocationDecision::Finished(Box::new(
+                self.invoke_sync_host_dispatched_primitive(child),
+            ))
+        } else {
+            self.catalog.prepare_sync_invocation(child)
+        };
         PreparedDelegatedInvocationDecision::Execute(Box::new(PreparedDelegatedInvocation {
             meta_invocation: invocation,
             meta_function: function,
@@ -1704,7 +1710,12 @@ impl EngineHost {
 
     async fn meta_invoke_child(&mut self, invocation: &Invocation) -> Result<Value> {
         let child = delegated_child_invocation(invocation)?;
-        let child_result = self.catalog.invoke_sync(child).await;
+        let child_result = if is_host_dispatched_primitive_namespace(child.function_id.namespace())
+        {
+            self.invoke_sync_host_dispatched_primitive(child)
+        } else {
+            self.catalog.invoke_sync(child).await
+        };
         Ok(delegated_invoke_value(
             self.catalog.revision(),
             &child_result,

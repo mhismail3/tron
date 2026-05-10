@@ -2,6 +2,8 @@
 //!
 //! Normal runtime code reads the five constitutional roots only:
 //! `internal/`, `skills/`, `profiles/`, `memory/`, and `workspace/`.
+//! Managed defaults are repaired from the compiled bundle when they are
+//! missing, malformed, or stale relative to the current strict profile schema.
 
 use std::fs;
 use std::io;
@@ -334,6 +336,9 @@ fn managed_default_valid(path: &Path, kind: DefaultKind) -> bool {
                 && [DEFAULT_PROFILE, NORMAL_PROFILE, CHAT_PROFILE, LOCAL_PROFILE]
                     .contains(&profile_name)
             {
+                if toml::from_str::<super::profile::ProfileDocument>(&content).is_err() {
+                    return false;
+                }
                 return value
                     .get("name")
                     .and_then(toml::Value::as_str)
@@ -508,6 +513,32 @@ mod tests {
         assert!(!home.join(dirs::WORKSPACE).join("exports").exists());
         assert!(!home.join("instructions").exists());
         assert!(!home.join("settings").exists());
+    }
+
+    #[test]
+    fn seeding_repairs_schema_stale_managed_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        ensure_tron_home_at(&home).unwrap();
+
+        let default_profile = home
+            .join(dirs::PROFILES)
+            .join(DEFAULT_PROFILE)
+            .join(files::PROFILE_TOML);
+        let stale = fs::read_to_string(&default_profile).unwrap().replace(
+            "reasoning = \"medium\"\naudit = true",
+            "reasoning = \"medium\"\nremovedProcessMode = \"keyword\"\naudit = true",
+        );
+        fs::write(&default_profile, stale).unwrap();
+
+        let report = ensure_tron_home_at(&home).unwrap();
+        assert!(
+            report.repaired.contains(&default_profile),
+            "schema-stale managed profile should be repaired from bundled defaults"
+        );
+        let repaired = fs::read_to_string(&default_profile).unwrap();
+        assert!(!repaired.contains("removedProcessMode ="));
+        crate::shared::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
     }
 
     #[test]

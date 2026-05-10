@@ -28,7 +28,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("session::list", "session", EffectClass::PureRead, RiskLevel::Low, Some("session.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"includeArchived":{"type":"boolean"},"limit":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"includeArchived":{"type":"boolean"},"limit":{"type":"integer"},"offset":{"type":"integer"},"sessionId":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
         CapabilityContract::new("session::delete", "session", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("session.write"))

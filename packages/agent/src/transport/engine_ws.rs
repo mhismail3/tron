@@ -1078,12 +1078,12 @@ fn stream_event_matches_filters(
         return false;
     };
     if let Some(session_id) = object.get("sessionId").and_then(Value::as_str)
-        && event.session_id.as_deref() != Some(session_id)
+        && stream_event_session_id(event).as_deref() != Some(session_id)
     {
         return false;
     }
     if let Some(workspace_id) = object.get("workspaceId").and_then(Value::as_str)
-        && event.workspace_id.as_deref() != Some(workspace_id)
+        && stream_event_workspace_id(event).as_deref() != Some(workspace_id)
     {
         return false;
     }
@@ -1097,6 +1097,24 @@ fn stream_event_matches_filters(
             .any(|value| value.as_str() == Some(event_type.as_str()));
     }
     true
+}
+
+fn stream_event_session_id(event: &crate::engine::EngineStreamEvent) -> Option<String> {
+    event.session_id.clone().or_else(|| {
+        server_payload_from_stream_event(event)
+            .session_id
+            .as_ref()
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn stream_event_workspace_id(event: &crate::engine::EngineStreamEvent) -> Option<String> {
+    event.workspace_id.clone().or_else(|| {
+        server_payload_from_stream_event(event)
+            .workspace_id
+            .as_ref()
+            .map(ToOwned::to_owned)
+    })
 }
 
 fn protocol_error(
@@ -1169,6 +1187,37 @@ mod tests {
             message.context.unwrap().authority_scopes,
             vec!["system.read".to_owned()]
         );
+    }
+
+    #[test]
+    fn stream_filters_match_neutral_server_event_scope() {
+        let event = crate::engine::EngineStreamEvent {
+            cursor: StreamCursor(7),
+            topic: "events.session".to_owned(),
+            payload: json!({
+                "serverEvent": ServerEventPayload::new(
+                    "session.created",
+                    Some("session-a".to_owned()),
+                    Some(json!({"title": "Test Session"}))
+                )
+            }),
+            visibility: VisibilityScope::System,
+            session_id: None,
+            workspace_id: None,
+            producer: "test".to_owned(),
+            trace_id: None,
+            parent_invocation_id: None,
+            created_at: chrono::Utc::now(),
+        };
+
+        assert!(stream_event_matches_filters(
+            &event,
+            Some(&json!({"sessionId": "session-a"}))
+        ));
+        assert!(!stream_event_matches_filters(
+            &event,
+            Some(&json!({"sessionId": "session-b"}))
+        ));
     }
 
     #[tokio::test]

@@ -20,6 +20,10 @@ final class MockEngineTransport: EngineTransport {
 
     var setModelCallCount = 0
     var lastSetModel: String?
+    var lastWriteFunctionId: EngineFunctionId?
+    var lastWriteIdempotencyKey: EngineIdempotencyKey?
+    var lastWriteOptions: EngineInvocationOptions?
+    var writeHandler: ((EngineFunctionId, Any, EngineIdempotencyKey, EngineInvocationOptions) throws -> Any)?
 
     func setCurrentSessionId(_ id: String?) {
         setSessionIdCallCount += 1
@@ -49,6 +53,15 @@ final class MockEngineTransport: EngineTransport {
         options: EngineInvocationOptions
     ) async throws -> R {
         _ = try requireConnection()
+        lastWriteFunctionId = functionId
+        lastWriteIdempotencyKey = idempotencyKey
+        lastWriteOptions = options
+        if let writeHandler {
+            guard let response = try writeHandler(functionId, payload, idempotencyKey, options) as? R else {
+                throw EngineConnectionError.invalidResponse
+            }
+            return response
+        }
         throw EngineConnectionError.invalidResponse
     }
 }

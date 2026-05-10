@@ -81,6 +81,31 @@ struct WebSocketAuthTests {
         #expect(request.timeoutInterval == 30)
     }
 
+    @Test("engine protocol requests are sent as WebSocket text frames")
+    func engineMessagesUseTextFrames() throws {
+        let data = try #require(#"{"type":"hello","id":"req-1"}"#.data(using: .utf8))
+
+        let frame = EngineConnection.engineTextMessage(from: data)
+
+        switch frame {
+        case .string(let text):
+            #expect(text == #"{"type":"hello","id":"req-1"}"#)
+        case .data:
+            Issue.record("engine protocol JSON must be sent as a WebSocket text frame")
+        @unknown default:
+            Issue.record("unexpected WebSocket frame type")
+        }
+    }
+
+    @Test("URLSession WebSocket delegate exposes the open and close selectors")
+    func webSocketDelegateSelectorsMatchURLSession() {
+        let ws = EngineConnection(serverURL: makeURL())
+        let delegate = EngineConnectionSessionDelegate(owner: ws)
+
+        #expect(delegate.responds(to: #selector(URLSessionWebSocketDelegate.urlSession(_:webSocketTask:didOpenWithProtocol:))))
+        #expect(delegate.responds(to: #selector(URLSessionWebSocketDelegate.urlSession(_:webSocketTask:didCloseWith:reason:))))
+    }
+
     // MARK: - .unauthorized state machine
 
     @Test("markUnauthorized parks state in .unauthorized with the supplied reason")

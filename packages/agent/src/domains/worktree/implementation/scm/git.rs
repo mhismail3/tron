@@ -40,7 +40,7 @@ impl GitExecutor {
 
     /// Check if a path is inside a git repository.
     pub async fn is_git_repo(&self, path: &Path) -> bool {
-        self.run(path, &["rev-parse", "--git-dir"]).await.is_ok()
+        self.run_status(path, &["rev-parse", "--git-dir"]).await
     }
 
     /// Get the root of the repository containing `path`.

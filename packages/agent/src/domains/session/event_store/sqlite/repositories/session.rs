@@ -58,6 +58,8 @@ pub struct CreateSessionOptions<'a> {
 pub struct ListSessionsOptions<'a> {
     /// Filter by workspace.
     pub workspace_id: Option<&'a str>,
+    /// Filter by workspace filesystem path.
+    pub working_directory: Option<&'a str>,
     /// Filter by ended state.
     pub ended: Option<bool>,
     /// Exclude subagent sessions.
@@ -278,6 +280,10 @@ impl SessionRepo {
             let _ = write!(sql, " AND workspace_id = ?{}", param_values.len() + 1);
             param_values.push(Box::new(ws_id.to_string()));
         }
+        if let Some(working_directory) = opts.working_directory {
+            let _ = write!(sql, " AND working_directory = ?{}", param_values.len() + 1);
+            param_values.push(Box::new(working_directory.to_string()));
+        }
         if let Some(ended) = opts.ended {
             if ended {
                 sql.push_str(" AND ended_at IS NOT NULL");
@@ -298,6 +304,8 @@ impl SessionRepo {
         sql.push_str(" ORDER BY last_activity_at DESC");
         if let Some(limit) = opts.limit {
             let _ = write!(sql, " LIMIT {limit}");
+        } else if opts.offset.is_some() {
+            sql.push_str(" LIMIT -1");
         }
         if let Some(offset) = opts.offset {
             let _ = write!(sql, " OFFSET {offset}");
@@ -1025,6 +1033,73 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sessions.len(), 1);
+    }
+
+    #[test]
+    fn list_by_working_directory_and_offset() {
+        let (conn, ws_id) = setup();
+        create_default_session(&conn, &ws_id);
+
+        let ws2 = WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions {
+                path: "/tmp/other",
+                name: None,
+            },
+        )
+        .unwrap();
+        SessionRepo::create(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws2.id,
+                model: "claude-3",
+                working_directory: "/tmp/other",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: None,
+                profile: None,
+                source: None,
+                use_worktree: None,
+            },
+        )
+        .unwrap();
+
+        let filtered = SessionRepo::list(
+            &conn,
+            &ListSessionsOptions {
+                working_directory: Some("/tmp/other"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].working_directory, "/tmp/other");
+
+        let paged = SessionRepo::list(
+            &conn,
+            &ListSessionsOptions {
+                limit: Some(1),
+                offset: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(paged.len(), 1);
+
+        let offset_without_limit = SessionRepo::list(
+            &conn,
+            &ListSessionsOptions {
+                offset: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(offset_without_limit.len(), 1);
     }
 
     #[test]

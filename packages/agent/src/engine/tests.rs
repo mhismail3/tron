@@ -2327,6 +2327,26 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
             .unwrap()
             >= 1
     );
+
+    let delegated_metrics = handle
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({
+                "functionId": "observability::metrics_snapshot",
+                "payload": {},
+            }),
+            system_context("observability-query-delegated", "observability.read"),
+        ))
+        .await;
+    assert_eq!(delegated_metrics.error, None);
+    let delegated_child = &delegated_metrics.value.as_ref().unwrap()["child"];
+    assert_eq!(delegated_child["error"], Value::Null);
+    assert!(
+        delegated_child["value"]["metrics"]["workers"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
 }
 
 #[tokio::test]

@@ -7,6 +7,8 @@
 //! nearby and take the narrowed `SessionDeps` bundle. `commands/` is split by
 //! lifecycle action, and `context/` owns session-context artifact caching,
 //! dynamic rule tracking, rule loading, and DTOs used by agent/context domains.
+//! `session::list` is the server-owned dashboard query for clients and supports
+//! domain-local filtering and pagination through the session event store.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

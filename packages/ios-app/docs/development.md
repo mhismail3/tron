@@ -19,9 +19,27 @@ open TronMobile.xcodeproj
 
 ### Server Connection
 
-The app connects to the Tron server:
-- **Beta**: `localhost:8082` (run `tron start beta` or `tron dev`)
-- **Production**: `localhost:8080` (run `tron start`)
+The app connects to the Tron engine over `/engine`. Physical device testing
+uses the Mac pairing QR code, which carries the Mac's trusted local or Tailscale
+address, port, bearer token, and label. The iOS app declares local-network use
+so iOS can prompt for permission when a direct Mac/Tailscale connection needs it.
+Engine protocol envelopes are JSON WebSocket text frames; the client accepts
+text or binary responses for diagnostics, but outbound engine requests stay text
+so they match the server protocol.
+
+If pairing times out before showing an authorization error, verify that
+Tailscale is connected on both devices, accept the iOS local-network permission
+prompt if it appears, and confirm the Mac can serve
+`http://<tailscale-ip>:9847/health`.
+
+The iOS engine transport logs redacted connection diagnostics under the
+`[WebSocket]` category for each `/engine` upgrade: host/path, timeout budget,
+Authorization header presence, URLSession task metrics, HTTP upgrade status
+when available, and NSError domain/code/underlying details. Tokens and URL
+queries are not logged. When physical-device pairing fails, copy the
+`[WebSocket]` lines from Xcode first; they should identify whether the failure
+is local-network permission, Tailscale reachability, HTTP auth, or engine
+protocol response handling.
 
 ### Codex App Server Mode
 

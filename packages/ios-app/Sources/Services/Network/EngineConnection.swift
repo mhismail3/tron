@@ -152,6 +152,7 @@ final class EngineConnection {
     private let requestTimeout: TimeInterval = 30.0
     nonisolated static let connectionVerificationTimeout: TimeInterval = 3.0
     nonisolated static let connectionOpenTimeout: TimeInterval = 10.0
+    nonisolated static let manualRetryOpenTimeout: TimeInterval = connectionOpenTimeout
     nonisolated static let automaticReconnectProbeTimeout: TimeInterval = ReconnectProbePolicy().probeTimeout
     nonisolated static let heartbeatInterval: TimeInterval = 5.0
     nonisolated static let failedAfterExhaustionReason = "Connection lost — tap to retry"
@@ -308,6 +309,7 @@ final class EngineConnection {
         urlSession = session
 
         let request = makeUpgradeRequest()
+        logger.info("WebSocket upgrade request: \(NetworkDiagnosticsFormatter.requestSummary(request))", category: .websocket)
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
         let task = session.webSocketTask(with: request)
@@ -365,7 +367,7 @@ final class EngineConnection {
         openTimeoutTask = nil
         openContinuation?.resume()
         openContinuation = nil
-        logger.debug("WebSocket upgrade opened", category: .websocket)
+        logger.debug("WebSocket upgrade opened: \(NetworkDiagnosticsFormatter.redactedURLSummary(serverURL))", category: .websocket)
     }
 
     func markWebSocketClosed(_ task: URLSessionWebSocketTask, closeCode: URLSessionWebSocketTask.CloseCode) async {
@@ -380,11 +382,30 @@ final class EngineConnection {
               openContinuation != nil else {
             return
         }
-        logger.warning("WebSocket open failed: \(error.localizedDescription)", category: .websocket)
+        logger.warning("WebSocket open failed: \(NetworkDiagnosticsFormatter.errorSummary(error))", category: .websocket)
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
         openContinuation?.resume(throwing: error)
         openContinuation = nil
+    }
+
+    func markWebSocketOpenTimedOut(timeout: TimeInterval) {
+        logger.warning(
+            "WebSocket open timed out after \(String(format: "%.1fs", timeout)): \(NetworkDiagnosticsFormatter.redactedURLSummary(serverURL))",
+            category: .websocket
+        )
+    }
+
+    func logWebSocketTaskMetrics(_ metrics: URLSessionTaskMetrics) {
+        logger.debug("WebSocket URLSession metrics: \(NetworkDiagnosticsFormatter.metricsSummary(metrics))", category: .websocket)
+    }
+
+    func logWebSocketUpgradeResponse(_ response: URLResponse) {
+        logger.info("WebSocket upgrade response: \(NetworkDiagnosticsFormatter.responseSummary(response))", category: .websocket)
+    }
+
+    func logWebSocketTaskCompletionError(_ error: Error) {
+        logger.warning("WebSocket task completed with error: \(NetworkDiagnosticsFormatter.errorSummary(error))", category: .websocket)
     }
 
     func disconnect() {
@@ -509,12 +530,17 @@ final class EngineConnection {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let box = SingleResumeContinuationBox(continuation)
             openContinuation = box
+            logger.debug(
+                "Waiting for WebSocket upgrade to open: timeout=\(String(format: "%.1fs", timeout)) url=\(NetworkDiagnosticsFormatter.redactedURLSummary(serverURL))",
+                category: .websocket
+            )
             openTimeoutTask?.cancel()
             openTimeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(timeout))
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard let self, self.openContinuation === box else { return }
+                    self.markWebSocketOpenTimedOut(timeout: timeout)
                     self.openContinuation = nil
                     self.openTimeoutTask = nil
                     box.resume(throwing: EngineConnectionError.timeout)
@@ -655,7 +681,7 @@ final class EngineConnection {
                 message: error.details?["message"]?.stringValue ?? error.message ?? "Engine invocation failed",
                 details: error.details?["details"]?.dictionaryValue?.mapValues { AnyCodable($0) } ?? error.details
             )
-            logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: protocolError.message)
+            logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: protocolError.diagnosticSummary)
             throw protocolError
         }
         guard let value = envelope.child.value else {
@@ -727,7 +753,7 @@ final class EngineConnection {
         logger.logWebSocketMessage(direction: "→ SEND", type: operation, size: data.count, preview: String(data: data, encoding: .utf8))
         #endif
 
-        let socketMessage = URLSessionWebSocketTask.Message.data(data)
+        let socketMessage = Self.engineTextMessage(from: data)
         do {
             try await task.send(socketMessage)
             logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
@@ -758,6 +784,10 @@ final class EngineConnection {
             }
             timeoutTasks[requestId] = timeoutTask
         }
+    }
+
+    nonisolated static func engineTextMessage(from data: Data) -> URLSessionWebSocketTask.Message {
+        .string(String(decoding: data, as: UTF8.self))
     }
 
     // MARK: - Receive Loop
@@ -1060,7 +1090,9 @@ final class EngineConnection {
         }
     }
 
-    /// Manual retry triggered from UI — runs one short connection probe.
+    /// Manual retry triggered from UI — use the normal open timeout, not the
+    /// short automatic reconnect probe, so cold Tailscale/device routes have
+    /// enough time to establish before we park in `.failed`.
     func manualRetry() async {
         guard !isConnectedFlag && !isConnectionInProgress else {
             logger.debug("Manual retry ignored - already connected or connecting", category: .websocket)
@@ -1079,7 +1111,7 @@ final class EngineConnection {
         logger.info("Manual retry triggered", category: .websocket)
 
         await connect(
-            openTimeout: reconnectPolicy.probeTimeout,
+            openTimeout: Self.manualRetryOpenTimeout,
             stateOnStart: .connecting,
             stateOnFailure: .failed(reason: Self.failedAfterExhaustionReason)
         )
@@ -1186,22 +1218,22 @@ final class EngineConnectionSessionDelegate: NSObject, URLSessionWebSocketDelega
 
     func urlSession(
         _ session: URLSession,
-        engineConnectionTask: URLSessionWebSocketTask,
+        webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol protocol: String?
     ) {
         Task { @MainActor in
-            owner()?.markWebSocketOpened(engineConnectionTask)
+            owner()?.markWebSocketOpened(webSocketTask)
         }
     }
 
     func urlSession(
         _ session: URLSession,
-        engineConnectionTask: URLSessionWebSocketTask,
+        webSocketTask: URLSessionWebSocketTask,
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
         Task { @MainActor in
-            await owner()?.markWebSocketClosed(engineConnectionTask, closeCode: closeCode)
+            await owner()?.markWebSocketClosed(webSocketTask, closeCode: closeCode)
         }
     }
 
@@ -1214,8 +1246,14 @@ final class EngineConnectionSessionDelegate: NSObject, URLSessionWebSocketDelega
         task: URLSessionTask,
         didFinishCollecting metrics: URLSessionTaskMetrics
     ) {
+        Task { @MainActor in
+            owner()?.logWebSocketTaskMetrics(metrics)
+        }
         for transaction in metrics.transactionMetrics {
             if let response = transaction.response {
+                Task { @MainActor in
+                    owner()?.logWebSocketUpgradeResponse(response)
+                }
                 record(response: response)
             }
         }
@@ -1225,10 +1263,14 @@ final class EngineConnectionSessionDelegate: NSObject, URLSessionWebSocketDelega
     /// keep this as a second chance after metrics collection.
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let response = task.response {
+            Task { @MainActor in
+                owner()?.logWebSocketUpgradeResponse(response)
+            }
             record(response: response)
         }
         guard let error else { return }
         Task { @MainActor in
+            owner()?.logWebSocketTaskCompletionError(error)
             owner()?.markWebSocketOpenFailed(task, error: error)
         }
     }

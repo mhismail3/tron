@@ -37,6 +37,19 @@ enum PairingProbeOutcome: Equatable, Sendable {
             ))
         }
     }
+
+    var logSummary: String {
+        switch self {
+        case .ok(let serverVersion):
+            return "ok serverVersion=\(serverVersion ?? "unknown")"
+        case .unauthorized:
+            return "unauthorized"
+        case .incompatible(let serverVersion):
+            return "incompatible serverVersion=\(serverVersion)"
+        case .unreachable(let reason):
+            return "unreachable reason=\(reason)"
+        }
+    }
 }
 
 /// Probe contract used by the onboarding PairingStep to verify a (host,
@@ -79,9 +92,11 @@ final class URLSessionPairingProbe: PairingProbing {
             return .unreachable(reason: "Invalid host or port")
         }
 
+        logger.info("Pairing probe starting: \(NetworkDiagnosticsFormatter.redactedURLSummary(url))", category: .websocket)
         var request = URLRequest(url: url)
         request.timeoutInterval = probeTimeout
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        logger.debug("Pairing probe upgrade request: \(NetworkDiagnosticsFormatter.requestSummary(request))", category: .websocket)
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = probeTimeout
@@ -99,6 +114,7 @@ final class URLSessionPairingProbe: PairingProbing {
 
         let task = session.webSocketTask(with: request)
         task.resume()
+        logger.debug("Pairing probe WebSocket task resumed", category: .websocket)
 
         let helloId = UUID().uuidString
         let helloPayload = Self.helloRequestData(
@@ -108,10 +124,11 @@ final class URLSessionPairingProbe: PairingProbing {
         )
 
         do {
-            try await task.send(.data(helloPayload))
+            try await task.send(Self.engineTextMessage(from: helloPayload))
+            logger.debug("Pairing probe sent hello id=\(helloId)", category: .websocket)
         } catch {
             // Most likely a connection-refused or 401 — drain the delegate.
-            return await Self.classifyTransportError(error, delegate: delegate)
+            return await Self.classifyTransportError(error, delegate: delegate, phase: "hello-send")
         }
 
         let requestId = UUID().uuidString
@@ -122,19 +139,22 @@ final class URLSessionPairingProbe: PairingProbing {
         )
 
         do {
-            try await task.send(.data(payload))
+            try await task.send(Self.engineTextMessage(from: payload))
+            logger.debug("Pairing probe sent system::ping id=\(requestId)", category: .websocket)
         } catch {
-            return await Self.classifyTransportError(error, delegate: delegate)
+            return await Self.classifyTransportError(error, delegate: delegate, phase: "ping-send")
         }
 
         do {
-            return try await Self.receivePingResponseWithTimeout(
+            let outcome = try await Self.receivePingResponseWithTimeout(
                 task: task,
                 requestId: requestId,
                 seconds: probeTimeout
             )
+            logger.info("Pairing probe completed: \(outcome.logSummary)", category: .websocket)
+            return outcome
         } catch {
-            return await Self.classifyTransportError(error, delegate: delegate)
+            return await Self.classifyTransportError(error, delegate: delegate, phase: "receive-ping")
         }
     }
 
@@ -190,6 +210,10 @@ final class URLSessionPairingProbe: PairingProbing {
         ]
         // Force-try is safe: every value is a JSON-serializable primitive.
         return try! JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    nonisolated static func engineTextMessage(from data: Data) -> URLSessionWebSocketTask.Message {
+        .string(String(decoding: data, as: UTF8.self))
     }
 
     /// Map the raw engine response envelope bytes to a
@@ -273,15 +297,19 @@ final class URLSessionPairingProbe: PairingProbing {
     /// will have observed it; otherwise we treat as `.unreachable`.
     nonisolated private static func classifyTransportError(
         _ error: Error,
-        delegate: ProbeSessionDelegate
+        delegate: ProbeSessionDelegate,
+        phase: String
     ) async -> PairingProbeOutcome {
         if await delegate.waitForUnauthorized(timeout: .milliseconds(250)) {
+            logger.warning("Pairing probe unauthorized during \(phase)", category: .websocket)
             return .unauthorized
         }
         let nsError = error as NSError
         if nsError.code == NSURLErrorUserAuthenticationRequired {
+            logger.warning("Pairing probe unauthorized during \(phase): \(NetworkDiagnosticsFormatter.errorSummary(error))", category: .websocket)
             return .unauthorized
         }
+        logger.warning("Pairing probe failed during \(phase): \(NetworkDiagnosticsFormatter.errorSummary(error))", category: .websocket)
         return .unreachable(reason: nsError.localizedDescription)
     }
 
@@ -379,8 +407,10 @@ final class ProbeSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchec
         task: URLSessionTask,
         didFinishCollecting metrics: URLSessionTaskMetrics
     ) {
+        logger.debug("Pairing probe URLSession metrics: \(NetworkDiagnosticsFormatter.metricsSummary(metrics))", category: .websocket)
         for transaction in metrics.transactionMetrics {
             if let response = transaction.response {
+                logger.info("Pairing probe upgrade response: \(NetworkDiagnosticsFormatter.responseSummary(response))", category: .websocket)
                 record(response: response)
             }
         }
@@ -388,7 +418,11 @@ final class ProbeSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchec
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let response = task.response {
+            logger.info("Pairing probe task response: \(NetworkDiagnosticsFormatter.responseSummary(response))", category: .websocket)
             record(response: response)
+        }
+        if let error {
+            logger.warning("Pairing probe task completed with error: \(NetworkDiagnosticsFormatter.errorSummary(error))", category: .websocket)
         }
     }
 

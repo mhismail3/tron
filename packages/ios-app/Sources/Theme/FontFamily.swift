@@ -107,7 +107,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     /// PostScript name used for CGFont registration verification
     var fontName: String {
         switch self {
-        case .recursive: "Recursive"
+        case .recursive: "RecursiveSansLnr-Regular"
         case .alanSans: "AlanSans-Light"
         case .comme: "Comme-Regular"
         case .donegalOne: "DonegalOne-Regular"

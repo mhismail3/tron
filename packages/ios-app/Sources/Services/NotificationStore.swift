@@ -20,6 +20,11 @@ final class NotificationStore {
 
     /// Refresh the notification list from the server.
     func refresh() async {
+        guard Self.shouldRefreshFromServer(connectionState: engineClient.connectionState) else {
+            TronLogger.shared.debug("Skipping notification refresh until the engine connection is established", category: .notification)
+            return
+        }
+
         isLoading = true
         defer { isLoading = false }
 
@@ -109,6 +114,10 @@ final class NotificationStore {
         } catch {
             TronLogger.shared.warning("Failed to mark all notifications as read: \(error)", category: .notification)
         }
+    }
+
+    static func shouldRefreshFromServer(connectionState: ConnectionState) -> Bool {
+        connectionState.isConnected
     }
 
     /// Clear the app badge count after server confirms no unread notifications.

@@ -32,8 +32,8 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":false,"properties":{"catalogRevision":{"type":"integer"},"functions":{"items":{"type":"object"},"type":"array"}},"required":["functions","catalogRevision"],"type":"object"}))
             .build()?,
         public_spec("inspect", "engine::inspect", EffectClass::PureRead, RiskLevel::Low)
-            .request_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"includeHidden":{"type":"boolean"}},"required":["functionId"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"function":{"type":"object"}},"required":["function"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"id":{"type":"string"},"kind":{"enum":["function","worker","trigger_type","trigger"],"type":"string"}},"required":["kind","id"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"catalogRevision":{"type":"integer"},"definition":{"type":"object"},"kind":{"type":"string"}},"required":["catalogRevision","kind","definition"],"type":"object"}))
             .build()?,
         public_spec("watch", "engine::watch", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"cursor":{"type":"integer"},"topic":{"type":"string"}},"type":"object"}))

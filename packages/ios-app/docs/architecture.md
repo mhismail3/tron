@@ -140,6 +140,17 @@ final class SubagentState {
 | `Services/CodexApp/CodexJSONRPCTransport.swift` | Direct Codex App Server JSON-RPC transport |
 | `ViewModels/CodexApp/CodexAppViewModel.swift` | Codex mode setup, connection, thread, turn, and approval state |
 
+## Engine Client Boundary
+
+The iOS app is a thin `/engine` client. It never owns Tron capability routing,
+tool execution, session mutation policy, or stream delivery rules. Write calls
+carry an explicit `EngineInvocationContext` when the capability is scoped to a
+session or workspace, and live session subscriptions send explicit stream
+filters (`sessionId` and, when known, `workspaceId`) so the server can enforce
+visibility with its engine stream primitives. The client stores cursors locally
+only to resume delivery; catalog, ledger, idempotency, approval, lease, and
+worker ownership stay server-side.
+
 ## Data Flow
 
 ### Codex App Server Mode
@@ -309,7 +320,7 @@ All connection banners clear as soon as the active server reconnects or no
 active server remains, and reconnecting countdown ticks keep the same semantic
 banner so they do not reset the auto-dismiss timer.
 
-`SessionRefreshService` is the gatekeeper for `session.list` refreshes. It
+`SessionRefreshService` is the gatekeeper for `session::list` refreshes. It
 debounces foreground refreshes, re-checks connectivity after the debounce, and
 registers a single reconnect hook through `ConnectionManager` when refresh work
 finds the socket offline or reconnecting. Native URLSession/POSIX transport
@@ -317,7 +328,9 @@ errors such as `NSURLErrorNetworkConnectionLost` or `ECONNABORTED` are
 classified by `ConnectionErrorClassifier` and deferred to the reconnect flow
 instead of being shown as session-refresh error banners. Non-transport
 application errors still flow through `ErrorHandler` so real failures remain
-visible.
+visible. The server owns the dashboard query contract: iOS may pass
+`workingDirectory`, `limit`, `offset`, and `includeArchived`, then caches only
+the returned server-authoritative metadata for the active paired origin.
 
 ## File Placement Guidelines
 

@@ -23,6 +23,11 @@ struct FontFamilyTests {
         #expect(FontFamily.geistMono.displayName == "Geist Mono")
     }
 
+    @Test func recursiveUsesConcretePostScriptFaceName() {
+        #expect(FontFamily.recursive.fontName == "RecursiveSansLnr-Regular")
+        #expect(FontFamily.recursive.fontName != FontFamily.recursive.displayName)
+    }
+
     @Test func rawValueRoundTrip() {
         for family in FontFamily.allCases {
             let parsed = FontFamily(rawValue: family.rawValue)

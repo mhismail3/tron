@@ -6,7 +6,7 @@
 //!
 //! 1. If the session still exists in the DB → persist recovered content as a partial
 //!    assistant message and a turn-end event, then delete the journal.
-//! 2. If the session was deleted → log a warning and delete the journal.
+//! 2. If the session was deleted → log cleanup details and delete the journal.
 //! 3. If the journal is empty or corrupted → log and delete.
 //!
 //! Recovery events use `sequence: None`; the event store assigns the next
@@ -95,9 +95,9 @@ fn recover_single_turn(
     // Check if session still exists
     let session_exists = event_store.get_session(session_id)?.is_some();
     if !session_exists {
-        warn!(
+        info!(
             session_id,
-            turn, "session no longer exists, deleting orphaned journal"
+            turn, "removed orphaned journal for deleted session"
         );
         fs::remove_file(&journal_path)?;
         cleanup_empty_session_dir(&journal_path);
