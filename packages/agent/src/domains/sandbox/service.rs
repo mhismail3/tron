@@ -8,6 +8,7 @@ use tokio::process::Child;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{debug, warn};
+use url::Url;
 
 use crate::shared::server::errors::CapabilityError;
 
@@ -278,15 +279,25 @@ pub(crate) async fn remove_container_runtime_best_effort(name: &str) {
 }
 
 pub(crate) fn worker_endpoint_from_origin(origin: &str) -> String {
-    let origin = origin.trim_end_matches('/');
+    let origin = origin.trim().trim_end_matches('/');
     let websocket_origin = if let Some(rest) = origin.strip_prefix("https://") {
         format!("wss://{rest}")
     } else if let Some(rest) = origin.strip_prefix("http://") {
         format!("ws://{rest}")
-    } else {
+    } else if origin.starts_with("ws://") || origin.starts_with("wss://") {
         origin.to_owned()
+    } else {
+        format!("ws://{origin}")
     };
-    format!("{websocket_origin}/engine/workers")
+    match Url::parse(&websocket_origin) {
+        Ok(mut url) => {
+            url.set_path("/engine/workers");
+            url.set_query(None);
+            url.set_fragment(None);
+            url.to_string()
+        }
+        Err(_) => format!("{websocket_origin}/engine/workers"),
+    }
 }
 
 #[cfg(test)]
@@ -321,7 +332,19 @@ mod tests {
             "ws://127.0.0.1:49134/engine/workers"
         );
         assert_eq!(
+            worker_endpoint_from_origin("localhost:9847"),
+            "ws://localhost:9847/engine/workers"
+        );
+        assert_eq!(
             worker_endpoint_from_origin("https://tron.local/"),
+            "wss://tron.local/engine/workers"
+        );
+        assert_eq!(
+            worker_endpoint_from_origin("ws://127.0.0.1:9847/engine"),
+            "ws://127.0.0.1:9847/engine/workers"
+        );
+        assert_eq!(
+            worker_endpoint_from_origin("wss://tron.local/engine/workers"),
             "wss://tron.local/engine/workers"
         );
     }

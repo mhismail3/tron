@@ -2235,6 +2235,8 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
     assert!(template.contains("Authorization: Bearer"));
     assert!(template.contains("\"type\": \"register_function\""));
     assert!(template.contains("demo::echo"));
+    assert!(template.contains("endpoint = \"ws://\" + endpoint"));
+    assert!(template.contains("must target /engine/workers"));
 
     let node_guide = handle
         .invoke(host_invocation(

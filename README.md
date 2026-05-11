@@ -372,11 +372,14 @@ the current `/engine/workers` message flow, required environment variables, JSON
 field casing, enum values, and a standard-library Python worker template. It
 accepts common JavaScript/TypeScript language aliases as a request affordance,
 but still returns the current Python template so the agent receives executable
-guidance instead of searching source after a schema rejection. The intended loop
-is: discover/inspect `worker::protocol_guide`, write the worker script from that
-template, invoke `sandbox::spawn_worker` with expected function ids and a stable
-idempotency key, observe the catalog revision through `engine_watch` or
-`catalog::list`, invoke the new `namespace::function`, then stop it with
+guidance instead of searching source after a schema rejection.
+`sandbox::spawn_worker` injects `TRON_ENGINE_WORKER_ENDPOINT` as a complete
+`ws://` or `wss://` URL ending in `/engine/workers`, so generated workers do not
+derive socket paths from client URLs. The intended loop is: discover/inspect
+`worker::protocol_guide`, write the worker script from that template, invoke
+`sandbox::spawn_worker` with expected function ids and a stable idempotency key,
+observe the catalog revision through `engine_watch` or `catalog::list`, invoke
+the new `namespace::function`, then stop it with
 `sandbox::stop_spawned_worker`.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,

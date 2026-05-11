@@ -993,6 +993,12 @@ mod tests {
                 .unwrap()
                 .contains("Authorization: Bearer")
         );
+        assert!(
+            recipe["pythonTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("endpoint = \"ws://\" + endpoint")
+        );
     }
 
     #[tokio::test]

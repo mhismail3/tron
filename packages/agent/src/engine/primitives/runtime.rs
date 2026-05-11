@@ -260,7 +260,7 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
         "templateLanguage": "python",
         "templateLanguageReason": "The current local sandbox worker template is Python because it runs with the standard library only and needs no package install step. JavaScript/TypeScript requests receive this Python template intentionally.",
         "environment": {
-            "TRON_ENGINE_WORKER_ENDPOINT": "WebSocket endpoint injected by sandbox::spawn_worker, for example ws://127.0.0.1:9847/engine/workers",
+            "TRON_ENGINE_WORKER_ENDPOINT": "Absolute WebSocket endpoint injected by sandbox::spawn_worker, for example ws://127.0.0.1:9847/engine/workers",
             "TRON_ENGINE_BEARER_TOKEN": "Bearer token injected by sandbox::spawn_worker; send it as Authorization: Bearer <token>",
             "TRON_ENGINE_WORKER_ID": "Stable worker id injected by sandbox::spawn_worker",
             "TRON_ENGINE_WORKER_VISIBILITY": "session, workspace, or system",
@@ -430,10 +430,19 @@ WORKER_VISIBILITY = {"session": "session", "workspace": "workspace", "system": "
 
 
 def connect_websocket():
-    url = urllib.parse.urlparse(ENDPOINT)
+    endpoint = ENDPOINT.strip()
+    if "://" not in endpoint:
+        endpoint = "ws://" + endpoint
+    url = urllib.parse.urlparse(endpoint)
+    if url.scheme not in ("ws", "wss"):
+        raise RuntimeError("TRON_ENGINE_WORKER_ENDPOINT must use ws:// or wss://")
     host = url.hostname or "127.0.0.1"
     port = url.port or (443 if url.scheme == "wss" else 80)
     path = url.path or "/engine/workers"
+    if path.rstrip("/") == "/engine":
+        path = "/engine/workers"
+    elif path.rstrip("/") != "/engine/workers":
+        raise RuntimeError(f"TRON_ENGINE_WORKER_ENDPOINT must target /engine/workers, got {path}")
     if url.query:
         path += "?" + url.query
     raw = socket.create_connection((host, port), timeout=10)
