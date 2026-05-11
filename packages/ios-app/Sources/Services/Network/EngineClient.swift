@@ -130,6 +130,10 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var notifications: NotificationClient = NotificationClient(transport: self)
 
+    /// Engine approval primitive client.
+    @ObservationIgnored
+    lazy var approval: ApprovalClient = ApprovalClient(transport: self)
+
     /// Auth/provider operations client (API keys, OAuth tokens)
     @ObservationIgnored
     lazy var auth: AuthClient = AuthClient(transport: self)
@@ -487,7 +491,9 @@ final class EngineClient: EngineTransport {
     @discardableResult
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
         currentSessionId = sessionId
-        return try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
+        let sessionSubscription = try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
+        _ = try await subscribeToSessionApprovals(sessionId: sessionId, workspaceId: workspaceId)
+        return sessionSubscription
     }
 
     private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
@@ -528,6 +534,62 @@ final class EngineClient: EngineTransport {
             return subscription
         } catch {
             logger.warning("Failed to subscribe to session events: \(error.localizedDescription)", category: .events)
+            throw error
+        }
+    }
+
+    private func subscribeToSessionApprovals(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
+        try await subscribeToSessionScopedTopic(
+            topic: "approvals",
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            description: "engine approvals"
+        )
+    }
+
+    private func subscribeToSessionScopedTopic(
+        topic: String,
+        sessionId: String,
+        workspaceId: String?,
+        description: String
+    ) async throws -> EngineSubscription {
+        guard let ws = engineConnection else { throw EngineClientError.connectionNotEstablished }
+        guard connectionState.isConnected else { throw EngineConnectionError.notConnected }
+        let filters = Self.sessionEventFilters(sessionId: sessionId, workspaceId: workspaceId)
+        let key = streamKey(
+            topic: topic,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            filterHash: Self.sessionEventFilterHash(sessionId: sessionId, workspaceId: workspaceId)
+        )
+        if let existing = streamSubscriptions[key] {
+            logger.debug(
+                "\(description.capitalized) stream already subscribed for session \(sessionId): \(existing.subscriptionId)",
+                category: .events
+            )
+            return existing
+        }
+        do {
+            let cursor = EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
+                stored: streamCursorStore.cursor(for: key)
+            )
+            let subscription = try await ws.subscribe(
+                topic: key.topic,
+                cursor: cursor,
+                filters: filters,
+                context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
+            )
+            let subscribedCursor = EngineStreamCursor(rawValue: subscription.cursor)
+            streamCursorStore.save(subscribedCursor, for: key)
+            streamSubscriptions[key] = subscription
+            streamSubscriptionKeysById[subscription.subscriptionId] = key
+            logger.info(
+                "Subscribed to \(key.topic) \(description) for session \(sessionId) from live tail \(subscribedCursor.rawValue)",
+                category: .events
+            )
+            return subscription
+        } catch {
+            logger.warning("Failed to subscribe to \(description): \(error.localizedDescription)", category: .events)
             throw error
         }
     }

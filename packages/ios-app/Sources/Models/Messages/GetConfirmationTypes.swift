@@ -53,6 +53,10 @@ struct GetConfirmationResult: Codable, Equatable {
 struct GetConfirmationToolData: Equatable {
     /// The tool call ID from the agent
     let toolCallId: String
+    /// Engine approval id when this chip represents an approval primitive event.
+    let engineApprovalId: String?
+    /// Canonical engine function whose pending approval produced this chip.
+    let engineFunctionId: String?
     /// The confirmation parameters (set to placeholder during .generating, updated on tool_start)
     var params: GetConfirmationParams
     /// Current status
@@ -63,4 +67,24 @@ struct GetConfirmationToolData: Equatable {
     var note: String?
     /// Final result (set when submitted)
     var result: GetConfirmationResult?
+
+    init(
+        toolCallId: String,
+        params: GetConfirmationParams,
+        status: GetConfirmationStatus,
+        decision: ConfirmationDecision? = nil,
+        note: String? = nil,
+        result: GetConfirmationResult? = nil,
+        engineApprovalId: String? = nil,
+        engineFunctionId: String? = nil
+    ) {
+        self.toolCallId = toolCallId
+        self.engineApprovalId = engineApprovalId
+        self.engineFunctionId = engineFunctionId
+        self.params = params
+        self.status = status
+        self.decision = decision
+        self.note = note
+        self.result = result
+    }
 }

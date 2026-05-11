@@ -1,5 +1,13 @@
 import SwiftUI
 
+struct PendingGetConfirmationSubmission {
+    let action: String
+    let decision: String
+    let note: String?
+    let engineApprovalId: String?
+    let engineFunctionId: String?
+}
+
 /// Manages GetConfirmation tool state for ChatViewModel
 @Observable
 @MainActor
@@ -18,7 +26,7 @@ final class GetConfirmationState {
 
     /// Pending confirmation submission to send after sheet dismissal completes.
     /// Set during prepareSubmission(), consumed by executePendingSubmission().
-    var pendingSubmission: (action: String, decision: String, note: String?)?
+    var pendingSubmission: PendingGetConfirmationSubmission?
 
     init() {}
 

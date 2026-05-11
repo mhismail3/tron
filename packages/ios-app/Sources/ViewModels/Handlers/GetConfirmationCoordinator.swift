@@ -101,10 +101,12 @@ final class GetConfirmationCoordinator {
         )
 
         // Store structured submission data for deferred send via engine protocol
-        context.getConfirmationState.pendingSubmission = (
+        context.getConfirmationState.pendingSubmission = PendingGetConfirmationSubmission(
             action: data.params.action,
             decision: decision.rawValue,
-            note: note
+            note: note,
+            engineApprovalId: data.engineApprovalId,
+            engineFunctionId: data.engineFunctionId
         )
 
         // Track decision for MessagingCoordinator chip
@@ -132,16 +134,34 @@ final class GetConfirmationCoordinator {
         context.appendMessage(confirmChip)
         context.currentTurn += 1
 
-        // Submit via server engine protocol (server constructs the agent prompt)
+        // Submit via server engine protocol. Engine approval chips resolve the
+        // approval primitive directly; model-level GetConfirmation chips still
+        // submit a normal agent confirmation response.
         Task {
             do {
-                _ = try await context.engineClient.agent.submitConfirmation(
-                    action: submission.action,
-                    decision: submission.decision,
-                    note: submission.note,
-                    idempotencyKey: .userAction("agent.submitConfirmation")
-                )
-                context.logInfo("GetConfirmation decision submitted via engine")
+                if let approvalId = submission.engineApprovalId {
+                    let decision = submission.decision == ConfirmationDecision.approved.rawValue
+                        ? EngineApprovalDecision.approve
+                        : EngineApprovalDecision.deny
+                    _ = try await context.engineClient.approval.resolve(
+                        approvalId: approvalId,
+                        decision: decision,
+                        idempotencyKey: EngineIdempotencyKey(
+                            rawValue: "ios:approval.resolve:\(approvalId):\(decision.rawValue)"
+                        )
+                    )
+                    context.logInfo(
+                        "Engine approval \(approvalId) for \(submission.engineFunctionId ?? "unknown") resolved through approval::resolve"
+                    )
+                } else {
+                    _ = try await context.engineClient.agent.submitConfirmation(
+                        action: submission.action,
+                        decision: submission.decision,
+                        note: submission.note,
+                        idempotencyKey: .userAction("agent.submitConfirmation")
+                    )
+                    context.logInfo("GetConfirmation decision submitted via agent::submit_confirmation")
+                }
             } catch {
                 context.logError("Failed to submit confirmation: \(error.localizedDescription)")
                 context.showError("Failed to submit confirmation: \(error.localizedDescription)")

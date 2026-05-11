@@ -99,6 +99,16 @@ import Foundation
     func handleQueuedMessageSent(_ result: QueuedMessageSentPlugin.Result)
 }
 
+@MainActor protocol ApprovalEventHandler: AnyObject {
+    func handleApprovalPending(_ result: ApprovalPendingPlugin.Result)
+    func handleApprovalResolved(_ result: ApprovalResolvedPlugin.Result)
+}
+
+extension ApprovalEventHandler {
+    func handleApprovalPending(_ result: ApprovalPendingPlugin.Result) {}
+    func handleApprovalResolved(_ result: ApprovalResolvedPlugin.Result) {}
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -113,5 +123,4 @@ import Foundation
     ContextEventHandler, SubagentEventHandler, MemoryEventHandler,
     ServerEventHandler, WorktreeEventHandler, RepoEventHandler,
     DisplayStreamEventHandler, ProcessEventHandler, HookEventHandler,
-    QueueEventHandler, EventDispatchLogger {}
-
+    QueueEventHandler, ApprovalEventHandler, EventDispatchLogger {}

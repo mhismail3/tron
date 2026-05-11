@@ -188,9 +188,7 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
     // MARK: - Execute Pending Submission Tests (Phase 2: after sheet dismiss)
 
     func testExecutePendingAppendsConfirmChip() {
-        // Given: A pending submission was stored during prepare
-        mockContext.getConfirmationState.pendingSubmission = (action: "Install ffmpeg", decision: "Approved", note: nil)
-        mockContext.getConfirmationState.lastDecisionWasApproval = true
+        preparePendingSubmission()
 
         // When: Executing pending submission
         coordinator.executePendingSubmission(context: mockContext)
@@ -200,8 +198,7 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
     }
 
     func testExecutePendingClearsPendingStateAndCurrentData() {
-        mockContext.getConfirmationState.pendingSubmission = (action: "Install ffmpeg", decision: "Approved", note: nil)
-        mockContext.getConfirmationState.currentData = makeToolData(status: .approved)
+        preparePendingSubmission()
 
         coordinator.executePendingSubmission(context: mockContext)
 
@@ -251,7 +248,7 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
     }
 
     func testClearAllClearsPendingSubmission() {
-        mockContext.getConfirmationState.pendingSubmission = (action: "Install ffmpeg", decision: "Approved", note: nil)
+        preparePendingSubmission()
 
         mockContext.getConfirmationState.clearAll()
 
@@ -319,6 +316,13 @@ final class GetConfirmationCoordinatorTests: XCTestCase {
         mockContext.messages.append(
             ChatMessage(role: .assistant, content: .getConfirmation(data))
         )
+    }
+
+    private func preparePendingSubmission() {
+        let data = makeToolData(status: .pending)
+        mockContext.getConfirmationState.currentData = data
+        addConfirmationMessage(data: data)
+        coordinator.prepareSubmission(.approved, note: nil, context: mockContext)
     }
 }
 

@@ -162,6 +162,34 @@ final class EventPluginTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(EventRegistry.shared.pluginCount, 27)
     }
 
+    func testApprovalPendingPluginParsesEngineStreamPayload() {
+        EventRegistry.shared.registerAll()
+
+        let json = """
+        {
+            "type": "approval.pending",
+            "sessionId": "session-1",
+            "timestamp": "2026-05-10T00:00:00Z",
+            "data": {
+                "type": "approval.pending",
+                "approval": {
+                    "approvalId": "approval-1",
+                    "functionId": "sandbox::spawn_worker",
+                    "payload": {"workerId": "demo-worker"},
+                    "status": "pending",
+                    "sessionId": "session-1",
+                    "traceId": "trace-1"
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "approval.pending", data: json)
+        XCTAssertEqual(result?.eventType, "approval.pending")
+        XCTAssertEqual(result?.sessionId, "session-1")
+        XCTAssertNotNil(result?.getResult())
+    }
+
     // MARK: - Session Archive/Unarchive Plugin Tests
 
     func testSessionArchivedPlugin_parsesFromTopLevelSessionId() {

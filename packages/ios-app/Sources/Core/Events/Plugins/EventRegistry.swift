@@ -116,6 +116,10 @@ final class EventRegistry: @unchecked Sendable {
         register(TurnFailedPlugin.self)
         register(RulesActivatedPlugin.self)
 
+        // Engine approval primitive events
+        register(ApprovalPendingPlugin.self)
+        register(ApprovalResolvedPlugin.self)
+
         // Session events
         register(ConnectedPlugin.self)
         register(SessionCreatedPlugin.self)

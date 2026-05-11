@@ -290,7 +290,7 @@ registry path.
 | `Search` | Full-text content search built on ripgrep (regex, glob filters, multiple output modes). |
 | `Bash` | Execute shell commands with configurable timeout. Supports backgrounding, blob storage for large output, and an optional sandbox image. |
 | `AskUserQuestion` | Prompt the user for input with structured options. |
-| `GetConfirmation` | Ask the user to confirm a high-stakes action before proceeding. |
+| `GetConfirmation` | Ask the user to answer a model-level product confirmation. Engine policy approvals are separate canonical `approval::*` capabilities and resolve through `approval::resolve`. |
 | `NotifyApp` | Send a push notification to iOS through the Cloudflare relay; if relay config or active device tokens are missing, return an explicit warning while foreground iOS refreshes notification inbox state from engine stream events. |
 | `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
 | `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/profiles/auth.json`. |
@@ -451,7 +451,7 @@ TronAgent (run loop)  ->  EventEmitter  ->  Runtime event bus
 EngineStreamEventPump  <------------------------------------------+
     |
     v
-Engine stream (`events.session`, `catalog`, `jobs`, ...)
+Engine stream (`events.session`, `approvals`, `catalog`, `jobs`, ...)
     |
     v
 /engine subscriptions -> Per-connection WebSocket writers
@@ -464,6 +464,12 @@ records. Stateless stream polling and non-session catch-up remain explicit curso
 operations. Stream polling applies engine visibility before pagination, so a
 session subscriber is never blocked behind older stream rows owned by unrelated
 sessions.
+
+High-risk engine capabilities publish `approval.pending` records to the
+`approvals` stream. Thin clients render those records and resolve them by
+invoking the canonical `approval::resolve` primitive; the decision, resumed child
+invocation, ledger entry, and `approval.resolved` stream event all remain
+engine-owned.
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` tool frames when iOS clients are subscribed.
 

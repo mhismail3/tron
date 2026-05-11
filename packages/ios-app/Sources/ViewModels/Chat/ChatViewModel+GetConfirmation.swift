@@ -15,6 +15,50 @@ extension ChatViewModel {
         getConfirmationCoordinator.openSheet(for: data, context: self)
     }
 
+    func handleApprovalPending(_ result: ApprovalPendingPlugin.Result) {
+        let data = GetConfirmationToolData(
+            toolCallId: result.toolCallId,
+            params: GetConfirmationParams(
+                action: result.actionText,
+                reason: result.reasonText,
+                riskLevel: .high
+            ),
+            status: .pending,
+            engineApprovalId: result.approvalId,
+            engineFunctionId: result.functionId
+        )
+
+        if let index = MessageFinder.lastIndexOfGetConfirmation(toolCallId: data.toolCallId, in: messages) {
+            messages[index].content = .getConfirmation(data)
+            logInfo("Updated engine approval chip for \(result.functionId) approvalId=\(result.approvalId)")
+        } else {
+            appendToMessages(ChatMessage(role: .assistant, content: .getConfirmation(data)))
+            logInfo("Added engine approval chip for \(result.functionId) approvalId=\(result.approvalId)")
+        }
+
+        openGetConfirmationSheet(for: data)
+    }
+
+    func handleApprovalResolved(_ result: ApprovalResolvedPlugin.Result) {
+        guard let index = MessageFinder.lastIndexOfGetConfirmation(toolCallId: result.toolCallId, in: messages),
+              case .getConfirmation(var data) = messages[index].content else {
+            logDebug("Approval resolved with no visible chip approvalId=\(result.approvalId)")
+            return
+        }
+
+        let approved = result.approval.status != .denied
+        let decision: ConfirmationDecision = approved ? .approved : .denied
+        data.status = approved ? .approved : .denied
+        data.decision = decision
+        data.result = GetConfirmationResult(
+            decision: decision,
+            note: nil,
+            submittedAt: result.approval.decidedAt ?? DateParser.now
+        )
+        messages[index].content = .getConfirmation(data)
+        logInfo("Engine approval resolved approvalId=\(result.approvalId) status=\(result.approval.status.rawValue)")
+    }
+
     /// Dismiss GetConfirmation sheet without submitting
     func dismissGetConfirmationSheet() {
         getConfirmationCoordinator.dismissSheet(context: self)

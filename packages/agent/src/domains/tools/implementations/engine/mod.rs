@@ -605,7 +605,9 @@ fn format_engine_error_result(
             .and_then(Value::as_str)
             .is_some_and(|code| code == "APPROVAL_REQUIRED")
         {
-            lines.push("Approval is required before this autonomous agent invocation can run. Do not bypass with Bash or direct HTTP.".to_owned());
+            lines.push(
+                "Approval is required before this autonomous agent invocation can run. The engine has published an `approval.pending` stream event for the user client to resolve through canonical `approval::resolve`. Stop and wait for that engine approval; do not bypass with Bash, direct HTTP, or the model-level GetConfirmation tool.".to_owned(),
+            );
         }
     }
     lines.join("\n")

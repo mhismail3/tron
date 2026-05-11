@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-10 (engine thin-client boundary, live session stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-10 (engine thin-client boundary, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -136,6 +136,7 @@ final class SubagentState {
 | `Models/UnifiedEventTransformer.swift` | History reconstruction |
 | `ViewModels/Chat/ChatViewModel.swift` | Main chat state |
 | `Services/Network/EngineClient.swift` | /engine client protocol, canonical invoke, and stream subscriptions |
+| `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `Services/CodexApp/CodexJSONRPCTransport.swift` | Direct Codex App Server JSON-RPC transport |
 | `ViewModels/CodexApp/CodexAppViewModel.swift` | Codex mode setup, connection, thread, turn, and approval state |
@@ -151,8 +152,12 @@ visibility with its engine stream primitives. Session history is reconstructed
 with `session::reconstruct`; `events.session` subscriptions are live-tail only
 and never replay a stored cursor into the view state machine. The client records
 delivered cursors for ACK coalescing and diagnostics, not as the source of
-session catch-up. ACKs are coalesced to the latest cursor per
-subscription so bursts do not turn into one engine request per event.
+session catch-up. The same session-scoped subscription setup also subscribes to
+the engine `approvals` topic so high-risk capability gates surface from the
+approval primitive worker instead of through a separate UI-only approval path.
+User decisions invoke canonical `approval::resolve`; iOS does not mutate approval
+state locally. ACKs are coalesced to the latest cursor per subscription so
+bursts do not turn into one engine request per event.
 Active subscription ids are per WebSocket, so they are cleared whenever the
 transport leaves `.connected` and recreated at the engine topic tail after
 reconnect. Catalog, ledger, idempotency, approval, lease, stream visibility, and

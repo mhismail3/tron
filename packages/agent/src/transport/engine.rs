@@ -88,6 +88,7 @@ pub fn build_engine_transport_request(
     let mut causal_context = transport_causal_context_for_method(
         spec.operation_key.as_str(),
         domain_authority_scope,
+        &input.params_payload,
         &input.context,
     )?;
     if spec.operation_key.as_str() == "promote" {
@@ -171,17 +172,10 @@ pub async fn dispatch_engine_transport_request(
 fn transport_causal_context_for_method(
     method: &str,
     scope: &str,
+    payload: &Value,
     context: &EngineTransportContext,
 ) -> Result<CausalContext, CapabilityError> {
-    let actor_kind = if method == "promote" {
-        ActorKind::User
-    } else {
-        ActorKind::Client
-    };
-    let actor_id = match method == "promote" {
-        true => "engine-user",
-        false => "engine-client",
-    };
+    let (actor_kind, actor_id) = transport_actor_for_method(method, payload);
     let trace_id = match context.trace_id.as_deref() {
         Some(id) if !id.trim().is_empty() => {
             TraceId::new(id).map_err(engine_error_to_capability_error)?
@@ -220,6 +214,18 @@ fn transport_causal_context_for_method(
         );
     }
     Ok(causal_context)
+}
+
+fn transport_actor_for_method(method: &str, payload: &Value) -> (ActorKind, &'static str) {
+    if method == "promote" {
+        return (ActorKind::User, "engine-user");
+    }
+    if method == "invoke"
+        && extract_string(payload, "functionId").as_deref() == Some("approval::resolve")
+    {
+        return (ActorKind::User, "engine-user");
+    }
+    (ActorKind::Client, "engine-client")
 }
 
 fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), CapabilityError> {
@@ -290,4 +296,53 @@ fn extract_string(payload: &Value, key: &str) -> Option<String> {
         .get(key)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn build_invoke(function_id: &str) -> EngineTransportRequest {
+        build_engine_transport_request(EngineTransportBuildRequest {
+            correlation_id: "request-1".to_owned(),
+            public_method: "invoke".to_owned(),
+            params_payload: json!({
+                "functionId": function_id,
+                "payload": {"approvalId": "approval-1", "decision": "approve"},
+                "idempotencyKey": "idem-1",
+                "context": {"sessionId": "session-1"}
+            }),
+            context: EngineTransportContext {
+                session_id: Some("session-1".to_owned()),
+                ..EngineTransportContext::default()
+            },
+        })
+        .expect("transport envelope builds")
+        .expect("invoke maps to engine transport")
+    }
+
+    #[test]
+    fn approval_resolve_invoke_is_a_user_authorized_engine_action() {
+        let envelope = build_invoke("approval::resolve");
+
+        assert_eq!(envelope.causal_context.actor_kind, ActorKind::User);
+        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-user");
+        assert!(
+            envelope
+                .causal_context
+                .authority_scopes
+                .iter()
+                .any(|scope| scope == "approval.resolve")
+        );
+    }
+
+    #[test]
+    fn ordinary_client_invoke_remains_client_actor() {
+        let envelope = build_invoke("system::ping");
+
+        assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
+        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-client");
+    }
 }
