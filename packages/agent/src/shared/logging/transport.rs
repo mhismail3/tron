@@ -386,6 +386,7 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
         )?;
 
         for entry in entries {
+            let data = compact_log_data(&tx, entry);
             let _ = stmt.execute(rusqlite::params![
                 entry.timestamp,
                 entry.level,
@@ -399,7 +400,7 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
                 entry.trace_id,
                 entry.parent_trace_id,
                 entry.depth.unwrap_or(0),
-                entry.data,
+                data,
                 entry.error_message,
                 entry.error_stack,
                 entry.origin,
@@ -409,6 +410,47 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
 
     tx.commit()?;
     Ok(())
+}
+
+fn compact_log_data(conn: &Connection, entry: &PendingEntry) -> Option<String> {
+    let data = entry.data.as_deref()?;
+    let retention_class =
+        if entry.level.eq_ignore_ascii_case("trace") || entry.level.eq_ignore_ascii_case("debug") {
+            "diagnostic_verbose"
+        } else {
+            "diagnostic_normal"
+        };
+    let expires_at = (retention_class == "diagnostic_verbose").then(|| {
+        (chrono::Utc::now()
+            + chrono::Duration::days(crate::shared::storage::DEFAULT_VERBOSE_RETENTION_DAYS))
+        .to_rfc3339()
+    });
+    crate::shared::storage::store_json_bytes(
+        conn,
+        data.as_bytes(),
+        &crate::shared::storage::StorePayloadOptions::new(
+            "log_entry",
+            format!("log_entry_{}", uuid::Uuid::now_v7()),
+            "data",
+            retention_class,
+        )
+        .with_scope(
+            entry.trace_id.clone(),
+            entry.session_id.clone(),
+            entry.workspace_id.clone(),
+        )
+        .with_expires_at(expires_at)
+        .with_redaction_level("structured-log"),
+    )
+    .ok()
+    .or_else(|| {
+        serde_json::to_string(&serde_json::json!({
+            "payloadPreview": data.chars().take(512).collect::<String>(),
+            "payloadSizeBytes": data.len(),
+            "payloadBlobUnavailable": true,
+        }))
+        .ok()
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -440,6 +482,17 @@ mod tests {
                 error_message TEXT,
                 error_stack TEXT,
                 origin TEXT
+            );
+            CREATE TABLE blobs (
+                id TEXT PRIMARY KEY,
+                hash TEXT NOT NULL UNIQUE,
+                content BLOB NOT NULL,
+                mime_type TEXT NOT NULL DEFAULT 'text/plain',
+                size_original INTEGER NOT NULL,
+                size_compressed INTEGER NOT NULL,
+                compression TEXT NOT NULL DEFAULT 'none',
+                created_at TEXT NOT NULL,
+                ref_count INTEGER NOT NULL DEFAULT 1
             );",
         )
         .unwrap();
@@ -517,6 +570,43 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn write_batch_blobs_large_structured_data() {
+        let conn = create_test_db();
+        let mut entry = make_entry("debug", 20, "Engine", "large data");
+        entry.data = Some(
+            serde_json::json!({
+                "items": vec!["same payload"; 2048],
+            })
+            .to_string(),
+        );
+        write_batch(&conn, &[entry]).unwrap();
+
+        let data: String = conn
+            .query_row("SELECT data FROM logs WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+        let data: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let payload_ref = &data[crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY];
+        assert!(payload_ref["payloadBlobId"].as_str().is_some());
+        assert!(payload_ref["payloadPreview"].as_str().is_some());
+        assert_eq!(
+            payload_ref["retentionClass"].as_str(),
+            Some("diagnostic_verbose")
+        );
+        let expires_at: Option<String> = conn
+            .query_row(
+                "SELECT expires_at FROM storage_payload_refs WHERE owner_kind = 'log_entry'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(expires_at.is_some());
+        let blob_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(blob_count, 1);
     }
 
     #[test]

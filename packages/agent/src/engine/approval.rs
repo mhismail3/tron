@@ -415,7 +415,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
             .query_row(
                 "SELECT * FROM engine_approvals WHERE approval_id = ?1",
                 params![approval_id],
-                row_to_record,
+                |row| row_to_record(&self.conn, row),
             )
             .optional()
             .map_err(|err| sqlite_err("approval.get", err.to_string()))
@@ -426,7 +426,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
             .query_row(
                 "SELECT * FROM engine_approvals WHERE idempotency_key = ?1",
                 params![key],
-                row_to_record,
+                |row| row_to_record(&self.conn, row),
             )
             .optional()
             .map_err(|err| sqlite_err("approval.get_by_key", err.to_string()))
@@ -449,7 +449,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
             .prepare("SELECT * FROM engine_approvals ORDER BY created_at ASC")
             .map_err(|err| sqlite_err("approval.list.prepare", err.to_string()))?;
         let rows = stmt
-            .query_map([], row_to_record)
+            .query_map([], |row| row_to_record(&self.conn, row))
             .map_err(|err| sqlite_err("approval.list", err.to_string()))?;
         let mut out = Vec::new();
         for row in rows {
@@ -539,7 +539,22 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
                 params![
                     record.approval_id.as_str(),
                     record.function_id.as_str(),
-                    serde_json::to_string(&record.payload).map_err(json_err)?,
+                    crate::shared::storage::store_json_value(
+                        &self.conn,
+                        &record.payload,
+                        &crate::shared::storage::StorePayloadOptions::new(
+                            "engine_approval",
+                            record.approval_id.clone(),
+                            "payload",
+                            "audit",
+                        )
+                        .with_scope(
+                            Some(record.trace_id.to_string()),
+                            record.session_id.clone(),
+                            record.workspace_id.clone(),
+                        ),
+                    )
+                    .map_err(storage_err)?,
                     record.payload_fingerprint.as_str(),
                     record.actor_id.as_str(),
                     format!("{:?}", record.actor_kind),
@@ -558,15 +573,50 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
                     record
                         .result
                         .as_ref()
-                        .map(serde_json::to_string)
+                        .map(|value| {
+                            crate::shared::storage::store_json_value(
+                                &self.conn,
+                                value,
+                                &crate::shared::storage::StorePayloadOptions::new(
+                                    "engine_approval",
+                                    record.approval_id.clone(),
+                                    "result",
+                                    "audit",
+                                )
+                                .with_scope(
+                                    Some(record.trace_id.to_string()),
+                                    record.session_id.clone(),
+                                    record.workspace_id.clone(),
+                                ),
+                            )
+                            .map_err(storage_err)
+                        })
                         .transpose()
-                        .map_err(json_err)?,
+                        ?,
                     record
                         .error
                         .as_ref()
-                        .map(serde_json::to_string)
+                        .map(|value| {
+                            let json = serde_json::to_value(value).map_err(json_err)?;
+                            crate::shared::storage::store_json_value(
+                                &self.conn,
+                                &json,
+                                &crate::shared::storage::StorePayloadOptions::new(
+                                    "engine_approval",
+                                    record.approval_id.clone(),
+                                    "error",
+                                    "audit",
+                                )
+                                .with_scope(
+                                    Some(record.trace_id.to_string()),
+                                    record.session_id.clone(),
+                                    record.workspace_id.clone(),
+                                ),
+                            )
+                            .map_err(storage_err)
+                        })
                         .transpose()
-                        .map_err(json_err)?,
+                        ?,
                     record.created_at.to_rfc3339(),
                     record.updated_at.to_rfc3339(),
                 ],
@@ -576,14 +626,27 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
     }
 }
 
-fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineApprovalRecord> {
+fn row_to_record(
+    conn: &Connection,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<EngineApprovalRecord> {
     let actor_kind: String = row.get("actor_kind")?;
     let delivery_mode: String = row.get("delivery_mode")?;
     let status: String = row.get("status")?;
     let payload_json: String = row.get("payload_json")?;
+    let payload_json = crate::shared::storage::resolve_stored_json_string(conn, &payload_json)
+        .map_err(storage_to_sql_err)?;
     let authority_scopes_json: String = row.get("authority_scopes_json")?;
-    let result_json: Option<String> = row.get("result_json")?;
-    let error_json: Option<String> = row.get("error_json")?;
+    let result_json: Option<String> = row
+        .get::<_, Option<String>>("result_json")?
+        .map(|json| crate::shared::storage::resolve_stored_json_string(conn, &json))
+        .transpose()
+        .map_err(storage_to_sql_err)?;
+    let error_json: Option<String> = row
+        .get::<_, Option<String>>("error_json")?
+        .map(|json| crate::shared::storage::resolve_stored_json_string(conn, &json))
+        .transpose()
+        .map_err(storage_to_sql_err)?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let decided_at: Option<String> = row.get("decided_at")?;
@@ -704,4 +767,15 @@ fn json_err(err: serde_json::Error) -> EngineError {
         operation: "approval.json",
         message: err.to_string(),
     }
+}
+
+fn storage_err(err: anyhow::Error) -> EngineError {
+    EngineError::LedgerFailure {
+        operation: "approval.storage",
+        message: err.to_string(),
+    }
+}
+
+fn storage_to_sql_err(err: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
 }

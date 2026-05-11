@@ -73,6 +73,15 @@ final class SettingsState {
     /// older than this TTL, detecting drift and rebuilding the tool index.
     var mcpSchemaRefreshTtlMs: UInt64 = 30_000
 
+    // MARK: - Observability And Storage
+
+    var observabilityLogLevel: String = "info"
+    var observabilityPayloadCapture: String = "normal"
+    var observabilityVerboseRetentionDays: UInt64 = 7
+    var observabilityMaxInlinePayloadBytes: UInt64 = 8192
+    var storageRetentionEnabled: Bool = true
+    var storageMaxDatabaseMb: UInt64 = 512
+
     // MARK: - Transcription
 
     /// Whether the Mac server loads the local MLX transcription sidecar.
@@ -238,6 +247,12 @@ final class SettingsState {
         promptHistoryAutoPrune = settings.promptHistoryAutoPrune
 
         mcpSchemaRefreshTtlMs = settings.mcpSchemaRefreshTtlMs
+        observabilityLogLevel = settings.observabilityLogLevel
+        observabilityPayloadCapture = settings.observabilityPayloadCapture
+        observabilityVerboseRetentionDays = settings.observabilityVerboseRetentionDays
+        observabilityMaxInlinePayloadBytes = settings.observabilityMaxInlinePayloadBytes
+        storageRetentionEnabled = settings.storageRetentionEnabled
+        storageMaxDatabaseMb = settings.storageMaxDatabaseMb
         transcriptionEnabled = settings.transcriptionEnabled
         codexAppServerEnabled = settings.codexAppServerEnabled
         codexAppServerPort = settings.codexAppServerPort

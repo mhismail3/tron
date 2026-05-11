@@ -62,7 +62,7 @@ fn collect_text_files(path: &Path, files: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn accepts_default_log_db() {
+fn accepts_default_tron_sqlite() {
     let (_tmp, home) = setup_home();
     let expected_dir = production_db_dir_from_home(&home);
     std::fs::create_dir_all(&expected_dir).unwrap();
@@ -131,7 +131,7 @@ fn rejected_path_does_not_create_or_modify_db_files() {
 }
 
 #[test]
-fn startup_migrations_only_touch_log_db() {
+fn startup_migrations_only_touch_tron_sqlite() {
     let (_tmp, home) = setup_home();
     let expected_dir = production_db_dir_from_home(&home);
     std::fs::create_dir_all(&expected_dir).unwrap();
@@ -148,7 +148,7 @@ fn startup_migrations_only_touch_log_db() {
     let db_meta = std::fs::metadata(&db_path).unwrap();
     assert!(
         db_meta.len() > 0,
-        "log.db should contain schema after migration"
+        "tron.sqlite should contain schema after migration"
     );
     assert_eq!(untouched_before, file_signature(&untouched));
 }

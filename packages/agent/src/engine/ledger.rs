@@ -621,8 +621,16 @@ impl SqliteEngineLedgerStore {
                     status_json: row.get(7)?,
                     first_invocation_id: row.get(8)?,
                     latest_invocation_id: row.get(9)?,
-                    outcome_value_json: row.get(10)?,
-                    outcome_error_json: row.get(11)?,
+                    outcome_value_json: resolve_optional_stored_json_string(
+                        &self.conn,
+                        row.get(10)?,
+                    )
+                    .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
+                    outcome_error_json: resolve_optional_stored_json_string(
+                        &self.conn,
+                        row.get(11)?,
+                    )
+                    .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
                     created_at: row.get(12)?,
                     updated_at: row.get(13)?,
                 })
@@ -827,8 +835,25 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                     record.idempotency_key.as_deref(),
                     record.replayed_from.as_ref().map(InvocationId::as_str),
                     i64::from(record.succeeded),
-                    optional_json_string("append_invocation.result", &record.result_value)?,
-                    optional_stored_error_json("append_invocation.error", record.error.as_ref())?,
+                    optional_stored_json_string(
+                        &self.conn,
+                        "engine_invocation",
+                        record.invocation_id.as_str(),
+                        "result",
+                        &record.result_value,
+                        Some(record.trace_id.to_string()),
+                        record.session_id.clone(),
+                        record.workspace_id.clone(),
+                    )?,
+                    optional_stored_error_json(
+                        &self.conn,
+                        "engine_invocation",
+                        record.invocation_id.as_str(),
+                        record.error.as_ref(),
+                        Some(record.trace_id.to_string()),
+                        record.session_id.clone(),
+                        record.workspace_id.clone(),
+                    )?,
                     record.timestamp.to_rfc3339(),
                 ],
             )
@@ -904,8 +929,14 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                 succeeded: row
                     .get(21)
                     .map_err(|err| sqlite_err("inv.succeeded", err))?,
-                result_json: row.get(22).map_err(|err| sqlite_err("inv.result", err))?,
-                error_json: row.get(23).map_err(|err| sqlite_err("inv.error", err))?,
+                result_json: resolve_optional_stored_json_string(
+                    &self.conn,
+                    row.get(22).map_err(|err| sqlite_err("inv.result", err))?,
+                )?,
+                error_json: resolve_optional_stored_json_string(
+                    &self.conn,
+                    row.get(23).map_err(|err| sqlite_err("inv.error", err))?,
+                )?,
                 timestamp: row
                     .get(24)
                     .map_err(|err| sqlite_err("inv.timestamp", err))?,
@@ -1004,8 +1035,38 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                     key.key,
                     to_json_string("complete_idempotency.status", &IdempotencyStatus::Completed)?,
                     invocation_id.as_str(),
-                    optional_json_string("complete_idempotency.value", &outcome.value)?,
-                    optional_json_string("complete_idempotency.error", &outcome.error)?,
+                    optional_stored_json_string(
+                        &self.conn,
+                        "engine_idempotency",
+                        &format!(
+                            "{}:{}:{}:{}",
+                            key.function_id.as_str(),
+                            key.scope.kind,
+                            key.scope.value,
+                            key.key
+                        ),
+                        "outcome_value",
+                        &outcome.value,
+                        None,
+                        None,
+                        None,
+                    )?,
+                    optional_stored_json_string(
+                        &self.conn,
+                        "engine_idempotency",
+                        &format!(
+                            "{}:{}:{}:{}",
+                            key.function_id.as_str(),
+                            key.scope.kind,
+                            key.scope.value,
+                            key.key
+                        ),
+                        "outcome_error",
+                        &outcome.error,
+                        None,
+                        None,
+                        None,
+                    )?,
                     Utc::now().to_rfc3339(),
                 ],
             )
@@ -1249,23 +1310,76 @@ fn raw_idempotency_entry(row: RawIdempotencyRow) -> Result<IdempotencyEntry> {
 }
 
 fn optional_stored_error_json(
-    operation: &'static str,
+    conn: &rusqlite::Connection,
+    owner_kind: &str,
+    owner_id: &str,
     error: Option<&EngineError>,
+    trace_id: Option<String>,
+    session_id: Option<String>,
+    workspace_id: Option<String>,
 ) -> Result<Option<String>> {
-    error
-        .map(StoredEngineError::from_engine_error)
-        .as_ref()
-        .map(|stored| to_json_string(operation, stored))
-        .transpose()
+    let stored = error.map(StoredEngineError::from_engine_error);
+    optional_stored_json_string(
+        conn,
+        owner_kind,
+        owner_id,
+        "error",
+        &stored,
+        trace_id,
+        session_id,
+        workspace_id,
+    )
 }
 
-fn optional_json_string<T: Serialize>(
-    operation: &'static str,
+fn optional_stored_json_string<T: Serialize>(
+    conn: &rusqlite::Connection,
+    owner_kind: &str,
+    owner_id: &str,
+    field_name: &str,
     value: &Option<T>,
+    trace_id: Option<String>,
+    session_id: Option<String>,
+    workspace_id: Option<String>,
+) -> Result<Option<String>> {
+    let Some(value) = value.as_ref() else {
+        return Ok(None);
+    };
+    let json = serde_json::to_value(value).map_err(|err| EngineError::LedgerFailure {
+        operation: "stored_json_value",
+        message: err.to_string(),
+    })?;
+    crate::shared::storage::store_json_value(
+        conn,
+        &json,
+        &crate::shared::storage::StorePayloadOptions::new(
+            owner_kind.to_owned(),
+            owner_id.to_owned(),
+            field_name.to_owned(),
+            "audit",
+        )
+        .with_scope(trace_id, session_id, workspace_id),
+    )
+    .map(Some)
+    .map_err(|err| EngineError::LedgerFailure {
+        operation: "stored_json_value",
+        message: err.to_string(),
+    })
+}
+
+fn resolve_optional_stored_json_string(
+    conn: &rusqlite::Connection,
+    value: Option<String>,
 ) -> Result<Option<String>> {
     value
-        .as_ref()
-        .map(|value| to_json_string(operation, value))
+        .as_deref()
+        .map(|value| {
+            crate::shared::storage::resolve_stored_json_string(conn, value).map_err(|err| {
+                EngineError::LedgerFailure {
+                    operation: "resolve_stored_json",
+                    message: err.to_string(),
+                }
+            })
+        })
         .transpose()
 }
 

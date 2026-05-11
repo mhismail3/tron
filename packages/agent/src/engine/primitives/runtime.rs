@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 
-use super::{catalog, observability, worker};
+use super::{catalog, observability, storage, worker};
 use crate::engine::approval::EngineApprovalRecord;
 use crate::engine::discovery::{ActorContext, FunctionQuery};
 use crate::engine::errors::{EngineError, Result};
@@ -18,6 +18,7 @@ use crate::engine::types::{
     CatalogChange, CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition,
     VisibilityScope, WorkerDefinition,
 };
+use crate::shared::logging::{LogLevel, LogQueryOptions, SortOrder};
 
 struct TraceComponents {
     invocations: Vec<InvocationRecord>,
@@ -62,6 +63,22 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn trigger_count(&self) -> usize;
     fn trigger_type_count(&self) -> usize;
     fn catalog_change_count(&self) -> usize;
+    fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport>;
+    fn storage_checkpoint(&self) -> Result<crate::shared::storage::StorageCheckpointReport>;
+    fn storage_export_snapshot(
+        &self,
+        snapshot_path: &str,
+    ) -> Result<crate::shared::storage::StorageExportReport>;
+    fn storage_retention_run(
+        &self,
+        dry_run: bool,
+        verbose_retention_days: u64,
+    ) -> Result<crate::shared::storage::StorageRetentionReport>;
+    fn stored_log_values(
+        &self,
+        query: &LogQueryOptions,
+        include_full_payloads: bool,
+    ) -> Result<Vec<Value>>;
 }
 
 pub(in crate::engine) fn dispatch(
@@ -82,6 +99,10 @@ pub(in crate::engine) fn dispatch(
         observability::SPAN_LIST_FUNCTION => span_list(host, invocation),
         observability::LOG_QUERY_FUNCTION => log_query(host, invocation),
         observability::METRICS_SNAPSHOT_FUNCTION => metrics_snapshot(host),
+        storage::STATS_FUNCTION => storage_stats(host),
+        storage::CHECKPOINT_FUNCTION => storage_checkpoint(host),
+        storage::EXPORT_SNAPSHOT_FUNCTION => storage_export_snapshot(host, invocation),
+        storage::RETENTION_RUN_FUNCTION => storage_retention_run(host, invocation),
         _ => Err(EngineError::NotFound {
             kind: "function",
             id: invocation.function_id.to_string(),
@@ -331,16 +352,53 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
 
 fn trace_get(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
     let trace_id = required_str(&invocation.payload, "traceId")?;
+    let include_full_payloads = invocation
+        .payload
+        .get("includeFullPayloads")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let trace = trace_components(host, trace_id)?;
     Ok(json!({
         "traceId": trace_id,
         "summary": trace_summary(trace_id, &trace),
-        "invocations": trace.invocations.iter().map(invocation_record_value).collect::<Vec<_>>(),
+        "invocations": trace.invocations.iter().map(|record| invocation_record_value(record, include_full_payloads)).collect::<Vec<_>>(),
         "catalogChanges": trace.catalog_changes.iter().map(catalog_change_value).collect::<Vec<_>>(),
         "streams": trace.streams.iter().map(|record| json!(record)).collect::<Vec<_>>(),
         "approvals": trace.approvals.iter().map(|record| json!(record)).collect::<Vec<_>>(),
         "leases": trace.leases,
         "compensation": trace.compensation,
+    }))
+}
+
+fn storage_stats(host: &dyn PrimitiveRuntimeHost) -> Result<Value> {
+    Ok(json!({ "stats": host.storage_stats()? }))
+}
+
+fn storage_checkpoint(host: &dyn PrimitiveRuntimeHost) -> Result<Value> {
+    Ok(json!({ "checkpoint": host.storage_checkpoint()? }))
+}
+
+fn storage_export_snapshot(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &Invocation,
+) -> Result<Value> {
+    let snapshot_path = required_str(&invocation.payload, "snapshotPath")?;
+    Ok(json!({ "export": host.storage_export_snapshot(snapshot_path)? }))
+}
+
+fn storage_retention_run(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &Invocation,
+) -> Result<Value> {
+    let dry_run = invocation
+        .payload
+        .get("dryRun")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let verbose_retention_days =
+        optional_u64(invocation.payload.get("verboseRetentionDays"))?.unwrap_or(7);
+    Ok(json!({
+        "retention": host.storage_retention_run(dry_run, verbose_retention_days)?
     }))
 }
 
@@ -708,7 +766,32 @@ fn log_query(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
     let trace_id = optional_string(invocation.payload.get("traceId"))?;
     let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
     let text = optional_string(invocation.payload.get("text"))?;
+    let session_id = optional_string(invocation.payload.get("sessionId"))?;
+    let workspace_id = optional_string(invocation.payload.get("workspaceId"))?;
+    let origin = optional_string(invocation.payload.get("origin"))?;
+    let component = optional_string(invocation.payload.get("component"))?;
+    let min_level = optional_string(invocation.payload.get("minLevel"))?
+        .map(|level| LogLevel::from_str_lossy(&level).as_num());
+    let include_full_payloads = invocation
+        .payload
+        .get("includeFullPayloads")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let mut logs = Vec::new();
+    logs.extend(host.stored_log_values(
+        &LogQueryOptions {
+            session_id,
+            workspace_id,
+            min_level,
+            components: component.map(|component| vec![component]),
+            trace_id: trace_id.clone(),
+            limit: Some(limit.min(500)),
+            offset: None,
+            order: Some(SortOrder::Asc),
+            origin,
+        },
+        include_full_payloads,
+    )?);
     match trace_id.as_deref() {
         Some(trace_id) => {
             let trace = trace_components(host, trace_id)?;
@@ -1020,8 +1103,8 @@ fn catalog_change_value(change: &CatalogChange) -> Value {
     })
 }
 
-fn invocation_record_value(record: &InvocationRecord) -> Value {
-    json!({
+fn invocation_record_value(record: &InvocationRecord, include_full_payloads: bool) -> Value {
+    let mut value = json!({
         "invocationId": record.invocation_id.as_str(),
         "functionId": record.function_id.as_str(),
         "workerId": record.worker_id.as_str(),
@@ -1045,10 +1128,18 @@ fn invocation_record_value(record: &InvocationRecord) -> Value {
         "compensationStatus": record.compensation_status.as_deref(),
         "replayedFrom": record.replayed_from.as_ref().map(InvocationId::as_str),
         "succeeded": record.succeeded,
-        "result": record.result_value.as_ref(),
         "error": record.error.as_ref().map(error_value),
         "timestamp": record.timestamp.to_rfc3339(),
-    })
+    });
+    if include_full_payloads {
+        value["result"] = record.result_value.as_ref().cloned().unwrap_or(Value::Null);
+    } else if let Some(result) = &record.result_value {
+        let serialized = serde_json::to_string(result).unwrap_or_default();
+        value["resultPreview"] = Value::String(compact_preview(&serialized, 512));
+        value["resultSizeBytes"] = Value::Number(serde_json::Number::from(serialized.len() as u64));
+        value["resultOmitted"] = Value::Bool(true);
+    }
+    value
 }
 
 fn error_value(error: &EngineError) -> Value {
@@ -1056,6 +1147,14 @@ fn error_value(error: &EngineError) -> Value {
         "message": error.to_string(),
         "kind": format!("{error:?}"),
     })
+}
+
+fn compact_preview(value: &str, max_chars: usize) -> String {
+    let mut preview = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        preview.push_str("...");
+    }
+    preview
 }
 
 fn change_kind_str(kind: &crate::engine::types::CatalogChangeKind) -> &'static str {

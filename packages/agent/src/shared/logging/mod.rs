@@ -96,6 +96,7 @@ pub fn init_subscriber_with_sqlite(
     };
 
     let config = TransportConfig {
+        min_level: LogLevel::from_str_lossy(level).as_num(),
         origin,
         ..Default::default()
     };

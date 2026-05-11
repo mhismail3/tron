@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-10 (engine thin-client boundary, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-11 (engine thin-client boundary, server-owned storage/observability settings, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -13,6 +13,8 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A separate Codex mode that connects directly to a Tron-managed `codex app-server` on the active paired machine without using Tron agent sessions
+
+The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
 
 ## Directory Structure
 

@@ -200,9 +200,6 @@ struct AgentClientTests {
             case "agent::deliver_subagent_results":
                 #expect((payload as? DeliverSubagentResultsParams)?.sessionId == sessionId)
                 return DeliverSubagentResultsResponse(acknowledged: true, queued: false, subagentCount: 0, runId: nil)
-            case "agent::submit_confirmation":
-                #expect((payload as? SubmitConfirmationParams)?.sessionId == sessionId)
-                return SubmitConfirmationResponse(acknowledged: true, queued: false, runId: nil)
             case "agent::submit_answers":
                 #expect((payload as? SubmitAnswersParams)?.sessionId == sessionId)
                 return SubmitAnswersResponse(acknowledged: true, queued: false, runId: nil)
@@ -227,7 +224,6 @@ struct AgentClientTests {
         try await client.dequeuePrompt("queue-1", idempotencyKey: .userAction("agent.dequeuePrompt.test"))
         try await client.clearQueue(idempotencyKey: .userAction("agent.clearQueue.test"))
         _ = try await client.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults.test"))
-        _ = try await client.submitConfirmation(action: "write", decision: "approve", note: nil, idempotencyKey: .userAction("agent.submitConfirmation.test"))
         _ = try await client.submitAnswers(questions: [], idempotencyKey: .userAction("agent.submitAnswers.test"))
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
         _ = try await client.abortTool(toolCallId: "tool-1", idempotencyKey: .userAction("agent.abortTool.test"))
@@ -238,7 +234,7 @@ struct AgentClientTests {
             idempotencyKey: .userAction("tool.result.test")
         )
 
-        #expect(transport.ensureSessionEventSubscriptionCallCount == 8)
+        #expect(transport.ensureSessionEventSubscriptionCallCount == 7)
         #expect(transport.operationOrder.prefix(2) == [
             "subscribe:\(sessionId)",
             "write:agent::prompt"
@@ -251,7 +247,6 @@ struct AgentClientTests {
             "agent::dequeue_prompt",
             "agent::clear_queue",
             "agent::deliver_subagent_results",
-            "agent::submit_confirmation",
             "agent::submit_answers",
             "agent::abort",
             "agent::abort_tool",

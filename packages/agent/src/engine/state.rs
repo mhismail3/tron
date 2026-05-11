@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS engine_state_entries (
                  FROM engine_state_entries
                  WHERE scope_kind = ?1 AND scope_value = ?2 AND namespace = ?3 AND key = ?4",
                 params![scope.kind(), scope.value(), namespace, key],
-                row_to_state_entry,
+                |row| row_to_state_entry(&self.conn, row),
             )
             .optional()
             .map_err(|err| sqlite_err("state.get", err.to_string()))
@@ -241,8 +241,18 @@ CREATE TABLE IF NOT EXISTS engine_state_entries (
         let existing = self.get(scope.clone(), &namespace, &key)?;
         let revision = existing.map_or(1, |entry| entry.revision.saturating_add(1));
         let updated_at = Utc::now();
-        let value_json = serde_json::to_string(&value)
-            .map_err(|err| sqlite_err("state.value", err.to_string()))?;
+        let owner_id = format!("{}:{}:{}", scope.kind(), scope.value(), namespace);
+        let value_json = crate::shared::storage::store_json_value(
+            &self.conn,
+            &value,
+            &crate::shared::storage::StorePayloadOptions::new(
+                "engine_state_entry",
+                owner_id,
+                key.clone(),
+                "runtime",
+            ),
+        )
+        .map_err(|err| sqlite_err("state.value", err.to_string()))?;
         self.conn
             .execute(
                 "INSERT INTO engine_state_entries
@@ -345,7 +355,7 @@ CREATE TABLE IF NOT EXISTS engine_state_entries (
                     pattern,
                     limit.min(500) as i64
                 ],
-                row_to_state_entry,
+                |row| row_to_state_entry(&self.conn, row),
             )
             .map_err(|err| sqlite_err("state.list.query", err.to_string()))?;
         rows.map(|row| row.map_err(|err| sqlite_err("state.list.row", err.to_string())))
@@ -376,7 +386,10 @@ fn validate_namespace_key(namespace: &str, key: &str) -> Result<()> {
     Ok(())
 }
 
-fn row_to_state_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineStateEntry> {
+fn row_to_state_entry(
+    conn: &Connection,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<EngineStateEntry> {
     let scope_kind: String = row.get(0)?;
     let scope_value: String = row.get(1)?;
     let value_json: String = row.get(4)?;
@@ -388,7 +401,8 @@ fn row_to_state_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineStateEn
         },
         namespace: row.get(2)?,
         key: row.get(3)?,
-        value: serde_json::from_str(&value_json).unwrap_or(Value::Null),
+        value: crate::shared::storage::resolve_stored_json_value(conn, &value_json)
+            .unwrap_or(Value::Null),
         revision: row.get::<_, i64>(5)? as u64,
         updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
             .map(|dt| dt.with_timezone(&Utc))

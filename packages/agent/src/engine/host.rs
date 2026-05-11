@@ -14,6 +14,8 @@ use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
 
+use crate::shared::logging::{LogQueryOptions, LogStore};
+
 use super::approval::{
     ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
 };
@@ -79,6 +81,7 @@ enum PreparedDelegatedInvocationDecision {
 pub struct EngineHost {
     catalog: LiveCatalog,
     primitives: PrimitiveStores,
+    storage_path: Option<PathBuf>,
 }
 
 /// Cloneable owner for the live capability engine host.
@@ -1042,15 +1045,6 @@ impl EngineHostHandle {
     }
 }
 
-/// Engine ledger path colocated with the resolved event database.
-#[must_use]
-pub fn engine_ledger_path_for_event_db(event_db_path: &Path) -> PathBuf {
-    event_db_path.parent().map_or_else(
-        || PathBuf::from("engine-ledger.sqlite"),
-        |parent| parent.join("engine-ledger.sqlite"),
-    )
-}
-
 fn release_after_primary(
     release: Result<Option<EngineResourceLease>>,
     primary: Result<Value>,
@@ -1234,11 +1228,19 @@ impl EngineHost {
     /// Open a host whose ledger and primitive stores share one SQLite file.
     pub fn open_sqlite(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
+        let storage_runtime = crate::shared::storage::StorageRuntime::new(path.to_path_buf());
+        storage_runtime
+            .prepare_for_startup()
+            .map_err(storage_error)?;
+        drop(storage_runtime.open_connection().map_err(storage_error)?);
+        let _startup_checkpoint = storage_runtime.checkpoint().map_err(storage_error)?;
         let ledger = SqliteEngineLedgerStore::open(path)?;
-        Self::from_catalog_and_primitives(
+        let mut host = Self::from_catalog_and_primitives(
             LiveCatalog::with_ledger_store(Box::new(ledger)),
             PrimitiveStores::sqlite(path)?,
-        )
+        )?;
+        host.storage_path = Some(path.to_path_buf());
+        Ok(host)
     }
 
     /// Wrap an existing catalog and bootstrap engine meta-capabilities.
@@ -1253,6 +1255,7 @@ impl EngineHost {
         let mut host = Self {
             catalog,
             primitives,
+            storage_path: None,
         };
         host.bootstrap_meta_capabilities()?;
         Ok(host)
@@ -2020,6 +2023,84 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
     fn catalog_change_count(&self) -> usize {
         self.catalog.changes().len()
     }
+
+    fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport> {
+        self.storage_runtime()?.stats().map_err(storage_error)
+    }
+
+    fn storage_checkpoint(&self) -> Result<crate::shared::storage::StorageCheckpointReport> {
+        self.storage_runtime()?.checkpoint().map_err(storage_error)
+    }
+
+    fn storage_export_snapshot(
+        &self,
+        snapshot_path: &str,
+    ) -> Result<crate::shared::storage::StorageExportReport> {
+        self.storage_runtime()?
+            .export_snapshot(snapshot_path)
+            .map_err(storage_error)
+    }
+
+    fn storage_retention_run(
+        &self,
+        dry_run: bool,
+        verbose_retention_days: u64,
+    ) -> Result<crate::shared::storage::StorageRetentionReport> {
+        self.storage_runtime()?
+            .retention_run(dry_run, verbose_retention_days)
+            .map_err(storage_error)
+    }
+
+    fn stored_log_values(
+        &self,
+        query: &LogQueryOptions,
+        include_full_payloads: bool,
+    ) -> Result<Vec<Value>> {
+        let Some(path) = &self.storage_path else {
+            return Ok(Vec::new());
+        };
+        let runtime = crate::shared::storage::StorageRuntime::new(path.clone());
+        let conn = runtime.open_connection().map_err(storage_error)?;
+        let store = LogStore::new(&conn);
+        let mut values = Vec::new();
+        for entry in store.query(query) {
+            let mut value = json!(entry);
+            if include_full_payloads
+                && let Some(data) = value.get("data").cloned()
+                && data
+                    .get(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
+                    .is_some()
+            {
+                let stored = serde_json::to_string(&data).map_err(|error| {
+                    EngineError::HandlerFailed(format!(
+                        "storage log payload expansion failed: {error}"
+                    ))
+                })?;
+                if let Ok(expanded) =
+                    crate::shared::storage::resolve_stored_json_value(&conn, &stored)
+                {
+                    value["data"] = expanded;
+                }
+            }
+            values.push(value);
+        }
+        Ok(values)
+    }
+}
+
+impl EngineHost {
+    fn storage_runtime(&self) -> Result<crate::shared::storage::StorageRuntime> {
+        let Some(path) = &self.storage_path else {
+            return Err(EngineError::PolicyViolation(
+                "storage primitives require a SQLite-backed engine host".to_owned(),
+            ));
+        };
+        Ok(crate::shared::storage::StorageRuntime::new(path.clone()))
+    }
+}
+
+fn storage_error(error: anyhow::Error) -> EngineError {
+    EngineError::HandlerFailed(format!("storage primitive failed: {error:#}"))
 }
 
 fn engine_worker() -> WorkerDefinition {
@@ -2616,5 +2697,8 @@ fn grant_id(value: &str) -> Result<AuthorityGrantId> {
 }
 
 fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
-    matches!(namespace, "catalog" | "worker" | "observability")
+    matches!(
+        namespace,
+        "catalog" | "worker" | "observability" | "storage"
+    )
 }

@@ -210,11 +210,18 @@ maxTurns = 250
 subagentMaxDepth = 3
 subagentModel = "claude-haiku-4-5-20251001"
 
-[settings.logging]
-dbLogLevel = "info"
-
 [settings.logging.moduleOverrides]
 ort = "error"
+
+[settings.observability]
+logLevel = "info"
+payloadCapture = "normal"
+verboseRetentionDays = 7
+maxInlinePayloadBytes = 8192
+
+[settings.storage]
+retentionEnabled = true
+maxDatabaseMb = 512
 
 [settings.hooks]
 defaultTimeoutMs = 5000

@@ -1,7 +1,9 @@
 use super::*;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
-use crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions;
+use crate::domains::session::event_store::sqlite::repositories::event::{
+    EventRepo, ListEventsOptions,
+};
 use crate::domains::session::event_store::sqlite::repositories::session::ListSessionsOptions;
 
 fn setup() -> EventStore {
@@ -1683,6 +1685,53 @@ fn get_messages_at_head_basic() {
     assert_eq!(result.messages_with_event_ids[0].message.role, "user");
     assert_eq!(result.messages_with_event_ids[1].message.role, "assistant");
     assert_eq!(result.turn_count, 1);
+}
+
+#[test]
+fn get_messages_at_head_resolves_blob_backed_event_payloads() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .unwrap();
+    let content = "large message ".repeat(1024);
+    let event = store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::MessageUser,
+            payload: serde_json::json!({"content": content}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    assert!(
+        event
+            .payload
+            .contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
+    );
+
+    let result = store.get_messages_at_head(&cr.session.id).unwrap();
+    assert_eq!(result.messages_with_event_ids.len(), 1);
+    assert_eq!(
+        result.messages_with_event_ids[0].message.content,
+        serde_json::Value::String(content)
+    );
+    let conn = store.pool().get().unwrap();
+    let refs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM storage_payload_refs", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let blobs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
+        .unwrap();
+    let fetched = EventRepo::get_by_id(&conn, &event.id).unwrap().unwrap();
+    assert!(
+        fetched
+            .payload
+            .contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
+    );
+    assert!(refs >= 1);
+    assert_eq!(blobs, 1);
 }
 
 #[test]

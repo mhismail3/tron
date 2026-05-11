@@ -5,6 +5,8 @@
 //! locking and ledger completion; this module owns primitive worker definitions,
 //! schemas, handler bindings, and privileged query response shaping through the
 //! local `runtime` module.
+//! `storage::*` is the system primitive surface for the unified `tron.sqlite`
+//! runtime: stats, retention, checkpoints, and portable snapshot export.
 
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -45,6 +47,7 @@ pub(crate) mod observability;
 pub(crate) mod queue;
 pub(in crate::engine) mod runtime;
 pub(crate) mod state;
+pub(crate) mod storage;
 pub(crate) mod stream;
 pub(crate) mod worker;
 
@@ -55,6 +58,7 @@ pub(crate) const APPROVAL_WORKER_ID: &str = "approval";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const OBSERVABILITY_WORKER_ID: &str = "observability";
+pub(crate) const STORAGE_WORKER_ID: &str = "storage";
 const ENGINE_OWNER_ACTOR: &str = "system";
 const ENGINE_AUTHORITY_GRANT: &str = "engine-system";
 
@@ -529,6 +533,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(OBSERVABILITY_WORKER_ID, WorkerKind::System)?,
+        primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
     ])
 }
 
@@ -543,6 +548,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(catalog::registrations()?);
     registrations.extend(worker::registrations()?);
     registrations.extend(observability::registrations()?);
+    registrations.extend(storage::registrations()?);
     Ok(registrations)
 }
 

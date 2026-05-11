@@ -330,7 +330,7 @@ mod tests {
     #[test]
     fn test_is_path_within_child() {
         assert!(is_path_within(
-            "/Users/test/.tron/internal/database/log.db",
+            "/Users/test/.tron/internal/database/tron.sqlite",
             "/Users/test/.tron/internal"
         ));
     }
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn test_is_path_within_glob() {
         assert!(is_path_within(
-            "/Users/test/.tron/internal/database/log.db",
+            "/Users/test/.tron/internal/database/tron.sqlite",
             "/Users/test/.tron/internal/**"
         ));
     }

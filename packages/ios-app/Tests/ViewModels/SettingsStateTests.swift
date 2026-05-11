@@ -22,6 +22,12 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.codexAppServerPreferredModel, "")
         XCTAssertEqual(state.codexAppServerApprovalPolicy, "onRequest")
         XCTAssertEqual(state.codexAppServerSandboxMode, "workspaceWrite")
+        XCTAssertEqual(state.observabilityLogLevel, "info")
+        XCTAssertEqual(state.observabilityPayloadCapture, "normal")
+        XCTAssertEqual(state.observabilityVerboseRetentionDays, 7)
+        XCTAssertEqual(state.observabilityMaxInlinePayloadBytes, 8192)
+        XCTAssertTrue(state.storageRetentionEnabled)
+        XCTAssertEqual(state.storageMaxDatabaseMb, 512)
     }
 
     // MARK: - Display Helpers
@@ -78,6 +84,33 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.codexAppServerPreferredModel, "gpt-5.4")
         XCTAssertEqual(state.codexAppServerApprovalPolicy, "never")
         XCTAssertEqual(state.codexAppServerSandboxMode, "dangerFullAccess")
+    }
+
+    func testApplyServerSettingsLoadsDiagnosticsFields() throws {
+        let state = SettingsState()
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data("""
+        {
+          "observability": {
+            "logLevel": "debug",
+            "payloadCapture": "trace",
+            "verboseRetentionDays": 3,
+            "maxInlinePayloadBytes": 4096
+          },
+          "storage": {
+            "retentionEnabled": false,
+            "maxDatabaseMb": 256
+          }
+        }
+        """.utf8))
+
+        state.applyServerSettings(settings)
+
+        XCTAssertEqual(state.observabilityLogLevel, "debug")
+        XCTAssertEqual(state.observabilityPayloadCapture, "trace")
+        XCTAssertEqual(state.observabilityVerboseRetentionDays, 3)
+        XCTAssertEqual(state.observabilityMaxInlinePayloadBytes, 4096)
+        XCTAssertFalse(state.storageRetentionEnabled)
+        XCTAssertEqual(state.storageMaxDatabaseMb, 256)
     }
 
     // MARK: - Server Switching

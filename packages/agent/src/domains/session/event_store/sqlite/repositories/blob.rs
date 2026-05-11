@@ -5,10 +5,8 @@
 //! increments the reference count instead of creating a duplicate row.
 
 use rusqlite::{Connection, OptionalExtension, params};
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
-use crate::domains::session::event_store::errors::Result;
+use crate::domains::session::event_store::errors::{EventStoreError, Result};
 use crate::domains::session::event_store::sqlite::row_types::BlobRow;
 
 /// Blob repository — stateless, every method takes `&Connection`.
@@ -29,48 +27,35 @@ impl BlobRepo {
     /// If identical content already exists, increments the reference count
     /// and returns the existing blob ID. Otherwise creates a new blob.
     pub fn store(conn: &Connection, content: &[u8], mime_type: &str) -> Result<String> {
-        let hash = hex_sha256(content);
-
-        // Check for existing blob with same hash
-        let existing: Option<String> = conn
-            .query_row(
-                "SELECT id FROM blobs WHERE hash = ?1",
-                params![hash],
-                |row| row.get(0),
-            )
-            .optional()?;
-
-        if let Some(id) = existing {
-            let _ = conn.execute(
-                "UPDATE blobs SET ref_count = ref_count + 1 WHERE id = ?1",
-                params![id],
-            )?;
-            return Ok(id);
-        }
-
-        let id = format!("blob_{}", Uuid::now_v7());
-        let now = chrono::Utc::now().to_rfc3339();
-        let size = i64::try_from(content.len()).unwrap_or(i64::MAX);
-
-        let _ = conn.execute(
-            "INSERT INTO blobs (id, hash, content, mime_type, size_original, size_compressed, compression, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'none', ?7)",
-            params![id, hash, content, mime_type, size, size, now],
-        )?;
-
-        Ok(id)
+        let blob_id = crate::shared::storage::store_content_blob(conn, content, mime_type)
+            .map_err(|error| {
+                EventStoreError::Internal(format!("failed to store blob: {error:#}"))
+            })?;
+        crate::shared::storage::register_existing_blob_owner(
+            conn,
+            &blob_id,
+            "domain_blob",
+            "content",
+            "audit",
+        )
+        .map_err(|error| {
+            EventStoreError::Internal(format!("failed to record blob owner: {error:#}"))
+        })?;
+        Ok(blob_id)
     }
 
     /// Get blob content by ID.
     pub fn get_content(conn: &Connection, blob_id: &str) -> Result<Option<Vec<u8>>> {
-        let content: Option<Vec<u8>> = conn
+        let content: Option<(Vec<u8>, String, i64)> = conn
             .query_row(
-                "SELECT content FROM blobs WHERE id = ?1",
+                "SELECT content, compression, size_original FROM blobs WHERE id = ?1",
                 params![blob_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
-        Ok(content)
+        content.map_or(Ok(None), |(content, compression, original_size)| {
+            decode_content(&content, &compression, original_size).map(Some)
+        })
     }
 
     /// Get full blob record by ID.
@@ -126,12 +111,30 @@ impl BlobRepo {
             "UPDATE blobs SET ref_count = ref_count - 1 WHERE id = ?1 AND ref_count > 0",
             params![blob_id],
         )?;
-        Self::get_ref_count(conn, blob_id)
+        let count = Self::get_ref_count(conn, blob_id)?;
+        if count == Some(0) {
+            let _ = conn.execute(
+                "DELETE FROM storage_payload_refs
+                 WHERE owner_kind = 'domain_blob'
+                   AND owner_id = ?1
+                   AND field_name = 'content'",
+                params![blob_id],
+            )?;
+        }
+        Ok(count)
     }
 
     /// Delete all blobs with zero references. Returns count deleted.
     pub fn delete_unreferenced(conn: &Connection) -> Result<usize> {
-        let changed = conn.execute("DELETE FROM blobs WHERE ref_count <= 0", [])?;
+        let changed = conn.execute(
+            "DELETE FROM blobs
+             WHERE ref_count <= 0
+               AND NOT EXISTS (
+                 SELECT 1 FROM storage_payload_refs refs
+                 WHERE refs.payload_blob_id = blobs.id
+               )",
+            [],
+        )?;
         Ok(changed)
     }
 
@@ -158,7 +161,7 @@ impl BlobRepo {
         Ok(BlobRow {
             id: row.get(0)?,
             hash: row.get(1)?,
-            content: row.get(2)?,
+            content: decode_content_for_row(row.get(2)?, &row.get::<_, String>(6)?, row.get(4)?)?,
             mime_type: row.get(3)?,
             size_original: row.get(4)?,
             size_compressed: row.get(5)?,
@@ -169,10 +172,19 @@ impl BlobRepo {
     }
 }
 
-fn hex_sha256(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
+fn decode_content(content: &[u8], compression: &str, original_size: i64) -> Result<Vec<u8>> {
+    crate::shared::storage::decode_blob_content(content, compression, original_size)
+        .map_err(|error| EventStoreError::Internal(format!("failed to decode blob: {error:#}")))
+}
+
+fn decode_content_for_row(
+    content: Vec<u8>,
+    compression: &str,
+    original_size: i64,
+) -> rusqlite::Result<Vec<u8>> {
+    decode_content(&content, compression, original_size).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Blob, Box::new(error))
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,6 +196,7 @@ fn hex_sha256(data: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+    use sha2::{Digest, Sha256};
 
     fn setup() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -191,6 +204,12 @@ mod tests {
             .unwrap();
         run_migrations(&conn).unwrap();
         conn
+    }
+
+    fn hex_sha256(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
     }
 
     #[test]
@@ -213,6 +232,18 @@ mod tests {
         // Ref count should be 2
         let count = BlobRepo::get_ref_count(&conn, &id1).unwrap().unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn large_blob_compresses_but_reads_original_content() {
+        let conn = setup();
+        let content = "engine payload ".repeat(2048).into_bytes();
+        let id = BlobRepo::store(&conn, &content, "application/json").unwrap();
+
+        let blob = BlobRepo::get_by_id(&conn, &id).unwrap().unwrap();
+        assert_eq!(blob.content, content);
+        assert_eq!(blob.compression, "zstd");
+        assert!(blob.size_compressed < blob.size_original);
     }
 
     #[test]

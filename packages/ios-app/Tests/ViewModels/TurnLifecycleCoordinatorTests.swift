@@ -533,7 +533,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var currentToolMessages: [UUID: ChatMessage] = [:]
     var currentTurnToolCalls: [ToolCallRecord] = []
     var askUserQuestionCalledInTurn: Bool = false
-    var getConfirmationCalledInTurn: Bool = false
     var thinkingMessageId: UUID?
     var turnStartMessageIndex: Int?
     var firstTextMessageIdForTurn: UUID?
@@ -641,4 +640,3 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     func logError(_ message: String) {}
     func showError(_ message: String) {}
 }
-

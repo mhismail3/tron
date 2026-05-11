@@ -71,13 +71,13 @@ struct DiagnosticsRedactorTests {
         #expect(redacted.contains("[redacted:path]"))
     }
 
-    @Test("redacts workspace log-db paths to placeholder")
+    @Test("redacts workspace storage paths to placeholder")
     func stripsWorkspacePath() {
         let redactor = DiagnosticsRedactor()
-        let input = "SQLite open failed: /Users/bob/.tron/internal/database/log.db row not found"
+        let input = "SQLite open failed: /Users/bob/.tron/internal/database/tron.sqlite row not found"
         let redacted = redactor.redactMessage(input)
         #expect(!redacted.contains("/Users/bob"))
-        #expect(!redacted.contains(".tron/internal/database/log.db"))
+        #expect(!redacted.contains(".tron/internal/database/tron.sqlite"))
         #expect(redacted.contains("[redacted:path]"))
     }
 

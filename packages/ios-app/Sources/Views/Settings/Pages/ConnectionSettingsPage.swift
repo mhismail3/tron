@@ -257,6 +257,8 @@ struct ConnectionSettingsPage: View {
             transcriptionSection
         case .updates:
             updatesSection
+        case .diagnostics:
+            diagnosticsSection
         }
     }
 
@@ -436,6 +438,130 @@ struct ConnectionSettingsPage: View {
                 frequencyCard
                 manualCheckCard
             }
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.diagnostics.title)
+
+            SettingsCard {
+                SettingsRow(icon: "waveform.path.ecg", label: "Log level") {
+                    SettingsCycleToggle(
+                        options: [
+                            ("info", "Info"),
+                            ("debug", "Debug"),
+                            ("trace", "Trace"),
+                            ("warn", "Warn"),
+                            ("error", "Error"),
+                        ],
+                        current: settingsState.observabilityLogLevel
+                    ) { newValue in
+                        settingsState.observabilityLogLevel = newValue
+                        updateServerSetting {
+                            var update = ServerSettingsUpdate()
+                            update.observability = .init(logLevel: newValue)
+                            return update
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "doc.zipper", label: "Payloads") {
+                    SettingsCycleToggle(
+                        options: [
+                            ("normal", "Normal"),
+                            ("debug", "Debug"),
+                            ("trace", "Trace"),
+                        ],
+                        current: settingsState.observabilityPayloadCapture
+                    ) { newValue in
+                        settingsState.observabilityPayloadCapture = newValue
+                        updateServerSetting {
+                            var update = ServerSettingsUpdate()
+                            update.observability = .init(payloadCapture: newValue)
+                            return update
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "calendar", label: "Verbose days") {
+                    Stepper(value: Binding(
+                        get: { Int(settingsState.observabilityVerboseRetentionDays) },
+                        set: { newValue in
+                            let clamped = UInt64(min(max(newValue, 1), 90))
+                            settingsState.observabilityVerboseRetentionDays = clamped
+                            updateServerSetting {
+                                var update = ServerSettingsUpdate()
+                                update.observability = .init(verboseRetentionDays: clamped)
+                                return update
+                            }
+                        }
+                    ), in: 1...90) {
+                        Text("\(settingsState.observabilityVerboseRetentionDays)d")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "text.badge.checkmark", label: "Inline bytes") {
+                    Stepper(value: Binding(
+                        get: { Int(settingsState.observabilityMaxInlinePayloadBytes) },
+                        set: { newValue in
+                            let clamped = UInt64(min(max(newValue, 1024), 65_536))
+                            settingsState.observabilityMaxInlinePayloadBytes = clamped
+                            updateServerSetting {
+                                var update = ServerSettingsUpdate()
+                                update.observability = .init(maxInlinePayloadBytes: clamped)
+                                return update
+                            }
+                        }
+                    ), in: 1024...65_536, step: 1024) {
+                        Text("\(settingsState.observabilityMaxInlinePayloadBytes / 1024) KB")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "externaldrive", label: "Retention") {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { settingsState.storageRetentionEnabled },
+                            set: { newValue in
+                                settingsState.storageRetentionEnabled = newValue
+                                updateServerSetting {
+                                    var update = ServerSettingsUpdate()
+                                    update.storage = .init(retentionEnabled: newValue)
+                                    return update
+                                }
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .tint(.tronEmerald)
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "internaldrive", label: "Storage cap") {
+                    Stepper(value: Binding(
+                        get: { Int(settingsState.storageMaxDatabaseMb) },
+                        set: { newValue in
+                            let clamped = UInt64(min(max(newValue, 64), 8192))
+                            settingsState.storageMaxDatabaseMb = clamped
+                            updateServerSetting {
+                                var update = ServerSettingsUpdate()
+                                update.storage = .init(maxDatabaseMb: clamped)
+                                return update
+                            }
+                        }
+                    ), in: 64...8192, step: 64) {
+                        Text("\(settingsState.storageMaxDatabaseMb) MB")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                }
+            }
+
+            SettingsCaption(text: "The server owns trace detail, payload capture, retention, compression, and storage cleanup. iOS only requests the policy.")
         }
     }
 

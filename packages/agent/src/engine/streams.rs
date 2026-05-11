@@ -409,6 +409,13 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
             .map_err(|err| sqlite_err("stream.init", err.to_string()))
     }
 
+    /// Borrow the underlying connection for focused tests.
+    #[cfg(test)]
+    #[must_use]
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     /// Publish one event and return its cursor.
     pub fn publish(&mut self, event: PublishStreamEvent) -> Result<StreamCursor> {
         if event.topic.trim().is_empty() {
@@ -416,8 +423,23 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                 "stream topic must not be empty".to_owned(),
             ));
         }
-        let payload = serde_json::to_string(&event.payload)
-            .map_err(|err| sqlite_err("stream.event.payload", err.to_string()))?;
+        let owner_id = format!("stream_event_{}", uuid::Uuid::now_v7());
+        let payload = crate::shared::storage::store_json_value(
+            &self.conn,
+            &event.payload,
+            &crate::shared::storage::StorePayloadOptions::new(
+                "engine_stream_event",
+                owner_id,
+                "payload",
+                "runtime",
+            )
+            .with_scope(
+                event.trace_id.as_ref().map(ToString::to_string),
+                event.session_id.clone(),
+                event.workspace_id.clone(),
+            ),
+        )
+        .map_err(|err| sqlite_err("stream.event.payload", err.to_string()))?;
         self.conn
             .execute(
                 "INSERT INTO engine_stream_events
@@ -604,7 +626,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                     if actor.admin { 1_i64 } else { 0_i64 },
                     limit.min(500) as i64 + 1
                 ],
-                row_to_stream_event,
+                |row| row_to_stream_event(&self.conn, row),
             )
             .map_err(|err| sqlite_err("stream.poll.query", err.to_string()))?;
         let limit = limit.min(500);
@@ -648,10 +670,9 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
             )
             .map_err(|err| sqlite_err("stream.list_by_trace.prepare", err.to_string()))?;
         let rows = stmt
-            .query_map(
-                params![trace_id, limit.min(500) as i64],
-                row_to_stream_event,
-            )
+            .query_map(params![trace_id, limit.min(500) as i64], |row| {
+                row_to_stream_event(&self.conn, row)
+            })
             .map_err(|err| sqlite_err("stream.list_by_trace.query", err.to_string()))?;
         let mut events = Vec::new();
         for row in rows {
@@ -689,14 +710,19 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
     }
 }
 
-fn row_to_stream_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineStreamEvent> {
+fn row_to_stream_event(
+    conn: &rusqlite::Connection,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<EngineStreamEvent> {
     let payload_json: String = row.get(2)?;
+    let payload = crate::shared::storage::resolve_stored_json_value(conn, &payload_json)
+        .map_err(storage_to_sql_err)?;
     let trace_id: Option<String> = row.get(7)?;
     let parent_invocation_id: Option<String> = row.get(8)?;
     Ok(EngineStreamEvent {
         cursor: StreamCursor(row.get::<_, i64>(0)? as u64),
         topic: row.get(1)?,
-        payload: serde_json::from_str(&payload_json).unwrap_or(Value::Null),
+        payload,
         visibility: visibility_from_str(&row.get::<_, String>(3)?),
         session_id: row.get(4)?,
         workspace_id: row.get(5)?,
@@ -745,6 +771,10 @@ fn parse_time(value: String) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(&value)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now())
+}
+
+fn storage_to_sql_err(error: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error.to_string())))
 }
 
 fn sqlite_err(operation: &'static str, message: impl Into<String>) -> EngineError {

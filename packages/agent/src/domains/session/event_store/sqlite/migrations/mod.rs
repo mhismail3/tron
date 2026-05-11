@@ -109,6 +109,12 @@ pub fn run_migrations(conn: &Connection) -> Result<MigrationResult> {
         info!(applied, "migrations complete");
     }
 
+    crate::shared::storage::ensure_storage_schema(conn).map_err(|error| {
+        EventStoreError::Migration {
+            message: format!("failed to ensure unified storage payload schema: {error:#}"),
+        }
+    })?;
+
     Ok(MigrationResult {
         applied,
         max_version_applied,

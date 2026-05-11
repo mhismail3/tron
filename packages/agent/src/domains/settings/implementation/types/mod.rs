@@ -70,6 +70,10 @@ pub struct TronSettings {
     pub agent: AgentRuntimeSettings,
     /// Logging configuration.
     pub logging: LoggingSettings,
+    /// Engine observability and payload-capture settings.
+    pub observability: ObservabilitySettings,
+    /// Unified storage retention and size settings.
+    pub storage: StorageSettings,
     /// Hook system configuration.
     pub hooks: HookSettings,
     /// Server network settings.
@@ -107,6 +111,8 @@ impl Default for TronSettings {
             context: ContextSettings::default(),
             agent: AgentRuntimeSettings::default(),
             logging: LoggingSettings::default(),
+            observability: ObservabilitySettings::default(),
+            storage: StorageSettings::default(),
             hooks: HookSettings::default(),
             server: ServerSettings::default(),
             tmux: TmuxSettings::default(),

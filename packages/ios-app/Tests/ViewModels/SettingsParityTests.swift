@@ -52,6 +52,13 @@ final class SettingsParityTests: XCTestCase {
         "promptHistoryAutoPrune",
         // MCP
         "mcpSchemaRefreshTtlMs",
+        // Engine diagnostics
+        "observabilityLogLevel",
+        "observabilityPayloadCapture",
+        "observabilityVerboseRetentionDays",
+        "observabilityMaxInlinePayloadBytes",
+        "storageRetentionEnabled",
+        "storageMaxDatabaseMb",
         // Transcription (ConnectionSettingsPage.swift)
         "transcriptionEnabled",
         // Codex App Server (ConnectionSettingsPage.swift)

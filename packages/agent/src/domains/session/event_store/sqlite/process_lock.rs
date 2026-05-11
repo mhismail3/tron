@@ -3,7 +3,7 @@
 //! A single Tron installation must not be driven by two processes at once.
 //! The in-process `with_session_write_lock` serializes writers within a single
 //! daemon, but two daemons (e.g. a stray `tron dev` alongside the launchd
-//! service) can both connect to the same `~/.tron/internal/database/log.db`,
+//! service) can both connect to the same `~/.tron/internal/database/tron.sqlite`,
 //! each believing it is the sole writer. SQLite's own locking serializes the
 //! individual writes but does NOT prevent both processes from independently
 //! allocating the same `(session_id, sequence)` and racing on the UNIQUE
@@ -172,13 +172,13 @@ mod tests {
     use tempfile::TempDir;
 
     fn db_path(dir: &TempDir) -> PathBuf {
-        dir.path().join("log.db")
+        dir.path().join("tron.sqlite")
     }
 
     #[test]
     fn lock_path_derives_from_db_filename() {
-        let p = lock_path_for(Path::new("/a/b/log.db"));
-        assert_eq!(p, PathBuf::from("/a/b/log.db.lock"));
+        let p = lock_path_for(Path::new("/a/b/tron.sqlite"));
+        assert_eq!(p, PathBuf::from("/a/b/tron.sqlite.lock"));
     }
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
         // which would also need the dir to exist).
         let dir = TempDir::new().unwrap();
         let nested = dir.path().join("a").join("b").join("c");
-        let db = nested.join("log.db");
+        let db = nested.join("tron.sqlite");
         // Don't create the nested dirs — let acquire_database_lock do it.
         let _lock = acquire_database_lock(&db).unwrap();
         assert!(nested.exists());

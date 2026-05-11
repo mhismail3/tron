@@ -114,7 +114,10 @@ fn trace_get_schema() -> Value {
         "type": "object",
         "required": ["traceId"],
         "additionalProperties": false,
-        "properties": {"traceId": {"type": "string"}}
+        "properties": {
+            "traceId": {"type": "string"},
+            "includeFullPayloads": {"type": "boolean"}
+        }
     })
 }
 
@@ -136,8 +139,14 @@ fn log_query_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "traceId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "component": {"type": "string"},
+            "origin": {"type": "string"},
+            "minLevel": {"type": "string", "enum": ["trace", "debug", "info", "warn", "warning", "error", "fatal"]},
             "limit": {"type": "integer"},
-            "text": {"type": "string"}
+            "text": {"type": "string"},
+            "includeFullPayloads": {"type": "boolean"}
         }
     })
 }

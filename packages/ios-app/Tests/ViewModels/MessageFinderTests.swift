@@ -39,10 +39,10 @@ final class MessageFinderTests: XCTestCase {
         )))
     }
 
-    private func makeGetConfirmationMessage(toolCallId: String) -> ChatMessage {
-        ChatMessage(role: .assistant, content: .getConfirmation(GetConfirmationToolData(
+    private func makeEngineApprovalMessage(toolCallId: String) -> ChatMessage {
+        ChatMessage(role: .assistant, content: .engineApproval(EngineApprovalToolData(
             toolCallId: toolCallId,
-            params: GetConfirmationParams(action: "Delete file", reason: "Cleanup", riskLevel: .low),
+            params: EngineApprovalParams(action: "Delete file", reason: "Cleanup", riskLevel: .low),
             status: .pending
         )))
     }
@@ -135,8 +135,8 @@ final class MessageFinderTests: XCTestCase {
         XCTAssertTrue(MessageFinder.hasToolMessage(toolCallId: "tc-1", in: [makeAskUserQuestionMessage(toolCallId: "tc-1")]))
     }
 
-    func testHasToolMessageForGetConfirmation() {
-        XCTAssertTrue(MessageFinder.hasToolMessage(toolCallId: "tc-1", in: [makeGetConfirmationMessage(toolCallId: "tc-1")]))
+    func testHasToolMessageForEngineApproval() {
+        XCTAssertTrue(MessageFinder.hasToolMessage(toolCallId: "tc-1", in: [makeEngineApprovalMessage(toolCallId: "tc-1")]))
     }
 
     func testHasToolMessageReturnsFalseForText() {
@@ -162,15 +162,15 @@ final class MessageFinderTests: XCTestCase {
         XCTAssertNil(MessageFinder.lastIndexOfAskUserQuestion(toolCallId: "tc-x", in: [makeTextMessage()]))
     }
 
-    // MARK: - lastIndexOfGetConfirmation
+    // MARK: - lastIndexOfEngineApproval
 
-    func testLastIndexOfGetConfirmationFound() {
-        let messages = [makeGetConfirmationMessage(toolCallId: "tc-1")]
-        XCTAssertEqual(MessageFinder.lastIndexOfGetConfirmation(toolCallId: "tc-1", in: messages), 0)
+    func testLastIndexOfEngineApprovalFound() {
+        let messages = [makeEngineApprovalMessage(toolCallId: "tc-1")]
+        XCTAssertEqual(MessageFinder.lastIndexOfEngineApproval(toolCallId: "tc-1", in: messages), 0)
     }
 
-    func testLastIndexOfGetConfirmationNotFound() {
-        XCTAssertNil(MessageFinder.lastIndexOfGetConfirmation(toolCallId: "tc-x", in: [makeTextMessage()]))
+    func testLastIndexOfEngineApprovalNotFound() {
+        XCTAssertNil(MessageFinder.lastIndexOfEngineApproval(toolCallId: "tc-x", in: [makeTextMessage()]))
     }
 
     // MARK: - indexBySubagentSessionId

@@ -27,7 +27,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = event_rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
         Ok(reconstruct_from_events(&events))
     }
 
@@ -41,7 +41,7 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = event_rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
         Ok(reconstruct_from_events(&events))
     }
 
@@ -57,7 +57,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = event_rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, head_id, reconstruction))
     }
@@ -71,7 +71,7 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = event_rows_to_session_events(&ancestors);
+        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, event_id, reconstruction))
     }
@@ -88,6 +88,22 @@ impl EventStore {
 /// as [`EventType::SessionStart`], which would cause reconstruction to fake a new
 /// session boundary at an arbitrary point.
 pub fn event_rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
+    event_rows_to_session_events_inner(None, rows)
+}
+
+/// Convert event rows and resolve blob-backed payload-ref envelopes through
+/// the given SQLite connection.
+pub fn event_rows_to_session_events_with_conn(
+    conn: &rusqlite::Connection,
+    rows: &[EventRow],
+) -> Vec<SessionEvent> {
+    event_rows_to_session_events_inner(Some(conn), rows)
+}
+
+fn event_rows_to_session_events_inner(
+    conn: Option<&rusqlite::Connection>,
+    rows: &[EventRow],
+) -> Vec<SessionEvent> {
     rows.iter()
         .filter_map(|row| {
             let event_type: EventType = match row.event_type.parse() {
@@ -102,6 +118,25 @@ pub fn event_rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
                     return None;
                 }
             };
+            let payload = match conn {
+                Some(conn) => crate::shared::storage::resolve_stored_json_value(conn, &row.payload)
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(
+                            event_id = %row.id,
+                            error = %error,
+                            "stored event payload could not be resolved, defaulting to null"
+                        );
+                        Value::Null
+                    }),
+                None => serde_json::from_str(&row.payload).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        event_id = %row.id,
+                        error = %error,
+                        "corrupt event payload, defaulting to null"
+                    );
+                    Value::Null
+                }),
+            };
             Some(SessionEvent {
                 id: row.id.clone(),
                 parent_id: row.parent_id.clone(),
@@ -111,14 +146,7 @@ pub fn event_rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
                 event_type,
                 sequence: row.sequence,
                 checksum: row.checksum.clone(),
-                payload: serde_json::from_str(&row.payload).unwrap_or_else(|error| {
-                    tracing::warn!(
-                        event_id = %row.id,
-                        error = %error,
-                        "corrupt event payload, defaulting to null"
-                    );
-                    Value::Null
-                }),
+                payload,
             })
         })
         .collect()

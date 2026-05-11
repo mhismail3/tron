@@ -88,8 +88,18 @@ struct ServerSettings: Decodable {
     /// drift and rebuilding the tool index.
     let mcpSchemaRefreshTtlMs: UInt64
 
+    // MARK: - Observability And Storage
+
+    let observabilityLogLevel: String
+    let observabilityPayloadCapture: String
+    let observabilityVerboseRetentionDays: UInt64
+    let observabilityMaxInlinePayloadBytes: UInt64
+    let storageRetentionEnabled: Bool
+    let storageMaxDatabaseMb: UInt64
+
     private enum CodingKeys: String, CodingKey {
         case server, context, session, hooks, skills, memory, git, promptLibrary, mcp
+        case observability, storage
     }
 
     private enum GitKeys: String, CodingKey {
@@ -104,6 +114,14 @@ struct ServerSettings: Decodable {
 
     private enum McpKeys: String, CodingKey {
         case schemaRefreshTtlMs
+    }
+
+    private enum ObservabilityKeys: String, CodingKey {
+        case logLevel, payloadCapture, verboseRetentionDays, maxInlinePayloadBytes
+    }
+
+    private enum StorageKeys: String, CodingKey {
+        case retentionEnabled, maxDatabaseMb
     }
 
     private enum SkillsKeys: String, CodingKey {
@@ -299,6 +317,28 @@ struct ServerSettings: Decodable {
             mcpSchemaRefreshTtlMs = (try? mcpContainer.decodeIfPresent(UInt64.self, forKey: .schemaRefreshTtlMs)) ?? 30_000
         } else {
             mcpSchemaRefreshTtlMs = 30_000
+        }
+
+        // observability.*
+        if let observabilityContainer = try? container.nestedContainer(keyedBy: ObservabilityKeys.self, forKey: .observability) {
+            observabilityLogLevel = (try? observabilityContainer.decodeIfPresent(String.self, forKey: .logLevel)) ?? "info"
+            observabilityPayloadCapture = (try? observabilityContainer.decodeIfPresent(String.self, forKey: .payloadCapture)) ?? "normal"
+            observabilityVerboseRetentionDays = (try? observabilityContainer.decodeIfPresent(UInt64.self, forKey: .verboseRetentionDays)) ?? 7
+            observabilityMaxInlinePayloadBytes = (try? observabilityContainer.decodeIfPresent(UInt64.self, forKey: .maxInlinePayloadBytes)) ?? 8192
+        } else {
+            observabilityLogLevel = "info"
+            observabilityPayloadCapture = "normal"
+            observabilityVerboseRetentionDays = 7
+            observabilityMaxInlinePayloadBytes = 8192
+        }
+
+        // storage.*
+        if let storageContainer = try? container.nestedContainer(keyedBy: StorageKeys.self, forKey: .storage) {
+            storageRetentionEnabled = (try? storageContainer.decodeIfPresent(Bool.self, forKey: .retentionEnabled)) ?? true
+            storageMaxDatabaseMb = (try? storageContainer.decodeIfPresent(UInt64.self, forKey: .maxDatabaseMb)) ?? 512
+        } else {
+            storageRetentionEnabled = true
+            storageMaxDatabaseMb = 512
         }
     }
 
@@ -569,6 +609,22 @@ struct ServerSettingsUpdate: Encodable {
     }
 
     var mcp: McpUpdate?
+
+    struct ObservabilityUpdate: Encodable {
+        var logLevel: String?
+        var payloadCapture: String?
+        var verboseRetentionDays: UInt64?
+        var maxInlinePayloadBytes: UInt64?
+    }
+
+    var observability: ObservabilityUpdate?
+
+    struct StorageUpdate: Encodable {
+        var retentionEnabled: Bool?
+        var maxDatabaseMb: UInt64?
+    }
+
+    var storage: StorageUpdate?
 }
 
 /// Enable/disable toggle for a built-in hook.

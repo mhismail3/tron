@@ -138,23 +138,10 @@ fn ensure_parent_dir_creates_nested() {
     assert!(path.parent().unwrap().exists());
 }
 
-#[test]
-fn engine_ledger_path_is_derived_from_resolved_event_db_path() {
-    let dir = tempfile::tempdir().unwrap();
-    let event_db = dir.path().join("system").join("database").join("log.db");
-    assert_eq!(
-        init_engine_ledger_path(&event_db),
-        dir.path()
-            .join("system")
-            .join("database")
-            .join("engine-ledger.sqlite")
-    );
-}
-
 #[tokio::test]
 async fn init_engine_host_bootstraps_sqlite_host() {
     let dir = tempfile::tempdir().unwrap();
-    let event_db = dir.path().join("database").join("log.db");
+    let event_db = dir.path().join("database").join("tron.sqlite");
     ensure_parent_dir(&event_db).unwrap();
     let handle = init_engine_host(&event_db).unwrap();
     let host = handle.lock().await;
@@ -163,22 +150,22 @@ async fn init_engine_host_bootstraps_sqlite_host() {
             .function(&tron::engine::FunctionId::new("engine::discover").unwrap())
             .is_some()
     );
-    assert!(init_engine_ledger_path(&event_db).exists());
+    assert!(event_db.exists());
 }
 
 #[test]
-fn init_engine_host_fails_when_ledger_parent_is_not_directory() {
+fn init_engine_host_fails_when_storage_parent_is_not_directory() {
     let dir = tempfile::tempdir().unwrap();
     let not_dir = dir.path().join("database");
     std::fs::write(&not_dir, b"not a directory").unwrap();
-    let event_db = not_dir.join("log.db");
+    let event_db = not_dir.join("tron.sqlite");
     let err = match init_engine_host(&event_db) {
         Ok(_) => panic!("engine host init should fail"),
         Err(err) => err,
     };
     assert!(
         err.to_string()
-            .contains("Failed to initialize engine host ledger"),
+            .contains("Failed to initialize engine host storage"),
         "{err:#}"
     );
 }
@@ -451,7 +438,7 @@ async fn server_auth_maps_to_api_key_auth() {
 #[tokio::test]
 async fn server_boots_and_responds() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("log.db");
+    let db_path = dir.path().join("tron.sqlite");
     let home = test_tron_home(&dir);
     let settings_path = test_settings_path(&home);
 
@@ -554,7 +541,7 @@ fn server_creates_db_on_first_run() {
 #[test]
 fn server_runs_migrations() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("log.db");
+    let db_path = dir.path().join("tron.sqlite");
     let db_str = db_path.to_string_lossy();
     let pool = tron::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     let conn = pool.get().unwrap();

@@ -33,7 +33,17 @@ struct ServerSettingsTests {
             },
             "hooks": { "llmModel": "claude-opus-4-6", "builtinHooks": [{"id":"h1","enabled":true}] },
             "skills": { "compactionPolicy": "preserveAll", "showIndex": "never" },
-            "memory": { "autoRetainInterval": 25, "retainModel": "claude-opus-4-6" }
+            "memory": { "autoRetainInterval": 25, "retainModel": "claude-opus-4-6" },
+            "observability": {
+                "logLevel": "debug",
+                "payloadCapture": "trace",
+                "verboseRetentionDays": 3,
+                "maxInlinePayloadBytes": 4096
+            },
+            "storage": {
+                "retentionEnabled": false,
+                "maxDatabaseMb": 256
+            }
         }
         """
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
@@ -56,6 +66,12 @@ struct ServerSettingsTests {
         #expect(settings.skillsShowIndex == "never")
         #expect(settings.autoRetainInterval == 25)
         #expect(settings.retainModel == "claude-opus-4-6")
+        #expect(settings.observabilityLogLevel == "debug")
+        #expect(settings.observabilityPayloadCapture == "trace")
+        #expect(settings.observabilityVerboseRetentionDays == 3)
+        #expect(settings.observabilityMaxInlinePayloadBytes == 4096)
+        #expect(settings.storageRetentionEnabled == false)
+        #expect(settings.storageMaxDatabaseMb == 256)
     }
 
     // MARK: - All Defaults
@@ -83,6 +99,12 @@ struct ServerSettingsTests {
         #expect(settings.skillsShowIndex == "always")
         #expect(settings.autoRetainInterval == 10)
         #expect(settings.retainModel == "claude-sonnet-4-6")
+        #expect(settings.observabilityLogLevel == "info")
+        #expect(settings.observabilityPayloadCapture == "normal")
+        #expect(settings.observabilityVerboseRetentionDays == 7)
+        #expect(settings.observabilityMaxInlinePayloadBytes == 8192)
+        #expect(settings.storageRetentionEnabled == true)
+        #expect(settings.storageMaxDatabaseMb == 512)
     }
 
     // MARK: - Partial Nesting
@@ -173,6 +195,8 @@ struct ServerSettingsTests {
         var update = ServerSettingsUpdate()
         update.server = .init(defaultModel: "claude-opus-4-6")
         update.session = .init(queueDrainMode: .batched)
+        update.observability = .init(payloadCapture: "debug")
+        update.storage = .init(retentionEnabled: false)
 
         let data = try JSONEncoder().encode(update)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -182,6 +206,12 @@ struct ServerSettingsTests {
 
         let session = json["session"] as? [String: Any]
         #expect(session?["queueDrainMode"] as? String == "batched")
+
+        let observability = json["observability"] as? [String: Any]
+        #expect(observability?["payloadCapture"] as? String == "debug")
+
+        let storage = json["storage"] as? [String: Any]
+        #expect(storage?["retentionEnabled"] as? Bool == false)
     }
 
     // MARK: - Type-safe settings enum round-trips

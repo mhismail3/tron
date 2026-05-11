@@ -593,6 +593,66 @@ fn current_architecture_terms_are_deleted_or_owned() {
 }
 
 #[test]
+fn unified_storage_has_no_active_old_database_paths() {
+    let repo_root = repo_root();
+    let scan_roots = [
+        repo_root.join("README.md"),
+        repo_root.join("packages/agent/src"),
+        repo_root.join("packages/agent/tests"),
+        repo_root.join("packages/ios-app/Sources"),
+        repo_root.join("packages/ios-app/Tests"),
+        repo_root.join("packages/ios-app/docs"),
+    ];
+    let old_database_markers = ["log.db", "engine-ledger.sqlite", "tron.db", "log.db.lock"];
+    for root in scan_roots {
+        for path in files_to_scan(&root) {
+            let rel = path
+                .strip_prefix(&repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if rel == "packages/agent/src/shared/storage.rs"
+                || rel == "packages/agent/tests/threat_model_invariants.rs"
+            {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            for marker in old_database_markers {
+                assert!(
+                    !content.contains(marker),
+                    "{rel} contains retired active database path `{marker}`; use tron.sqlite or isolate it in shared::storage archive policy"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn blobs_are_owned_through_storage_payload_refs() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+    for path in rust_files_under(&crate_root.join("src")) {
+        let rel = path
+            .strip_prefix(&repo_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        if !content.contains("store_content_blob(") {
+            continue;
+        }
+        assert!(
+            rel == "packages/agent/src/shared/storage.rs"
+                || rel
+                    == "packages/agent/src/domains/session/event_store/sqlite/repositories/blob.rs",
+            "{rel} calls store_content_blob directly; use store_json_value/store_json_bytes so every blob has a storage_payload_refs owner"
+        );
+    }
+}
+
+#[test]
 fn current_architecture_ownership_report_is_current() {
     let repo_root = repo_root();
     let crate_root = crate_root();

@@ -636,11 +636,13 @@ enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
     case codexAppServer
     case transcriptionSidecar
     case updates
+    case diagnostics
 
     static let loadedOrder: [Self] = [
         .codexAppServer,
         .transcriptionSidecar,
         .updates,
+        .diagnostics,
     ]
 
     var title: String {
@@ -651,6 +653,8 @@ enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
             return SettingsLabels.transcriptionSidecar
         case .updates:
             return SettingsLabels.updates
+        case .diagnostics:
+            return "Engine Diagnostics"
         }
     }
 }

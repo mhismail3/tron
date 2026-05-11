@@ -48,7 +48,7 @@ pub(super) fn append_event_in_tx(
     //   1. `EventStore::append` holds the per-session in-process write
     //      lock (`with_session_write_lock`) for the entire read→insert
     //      critical section.
-    //   2. C3's `AgentDbLock` flock on `log.db.lock` guarantees that only
+    //   2. C3's `AgentDbLock` flock on `tron.sqlite.lock` guarantees that only
     //      one `tron` process at a time has write access to this database,
     //      so no sibling daemon can allocate the same sequence.
     //   3. SQLite's `UNIQUE(session_id, sequence)` constraint acts as the

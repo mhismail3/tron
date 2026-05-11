@@ -1,4 +1,4 @@
-//! # runtime/pipeline — turn-execution helpers
+//! # agent/runner/pipeline -- turn-execution helpers
 //!
 //! Data transformations applied inside the agent turn loop, primarily
 //! to reshape LLM stream output into persistable events. The module
@@ -9,11 +9,11 @@
 //!
 //! | Module          | Content |
 //! |-----------------|---------|
-//! | [`persistence`] | Accumulate `StreamEvent`s during a turn and emit the final persisted payload (assistant message, tool calls) in the shape [`crate::events`] expects |
+//! | [`persistence`] | Accumulate `StreamEvent`s during a turn and emit the final persisted payload (assistant message, tool calls) in the session event DTO shape |
 //!
 //! ## Module Position
 //!
-//! Depends on: `core`, `events`, `llm`.
-//! Depended on by: `runtime::agent::turn_runner`.
+//! Depends on: `shared`, `domains::model`, and session event DTOs.
+//! Depended on by: `domains::agent::runner::agent::turn_runner`.
 
 pub mod persistence;

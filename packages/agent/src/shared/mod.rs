@@ -48,6 +48,7 @@ pub mod profile;
 #[path = "foundation/retry.rs"]
 pub mod retry;
 pub mod server;
+pub mod storage;
 #[path = "foundation/text.rs"]
 pub mod text;
 #[path = "protocol/tools.rs"]

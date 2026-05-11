@@ -84,10 +84,10 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.activeSheet, .askUserQuestion)
     }
 
-    func testShowGetConfirmation() {
+    func testShowEngineApproval() {
         let coordinator = SheetCoordinator()
-        coordinator.showGetConfirmation()
-        XCTAssertEqual(coordinator.activeSheet, .getConfirmation)
+        coordinator.showEngineApproval()
+        XCTAssertEqual(coordinator.activeSheet, .engineApproval)
     }
 
     func testShowSubagentDetail() {

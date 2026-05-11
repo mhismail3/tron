@@ -428,7 +428,7 @@ fn in_memory_and_sqlite_ledgers_share_storage_contract() {
 #[test]
 fn sqlite_engine_ledger_persists_records_across_reopen() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("engine-ledger.sqlite");
+    let db_path = dir.path().join("tron.sqlite");
 
     {
         let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
@@ -465,6 +465,147 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
         IdempotencyReservationOutcome::Existing(entry)
             if entry.status == IdempotencyStatus::Completed
     ));
+}
+
+#[test]
+fn sqlite_engine_ledger_blobs_large_results_but_replays_public_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("tron.sqlite");
+    let large = json!({"items": vec!["same payload"; 2048]});
+    let invocation = Invocation::new_sync(
+        fid("alpha::large"),
+        json!({}),
+        causal()
+            .with_session_id("session-large")
+            .with_workspace_id("workspace-large"),
+    );
+    let result = super::invocation::InvocationResult::success(
+        &invocation,
+        wid("w1"),
+        FunctionRevision(1),
+        CatalogRevision(1),
+        large.clone(),
+    );
+    let record = super::invocation::InvocationRecord::from_result(&invocation, &result, None);
+
+    {
+        let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+        store.append_invocation(&record).unwrap();
+        let stored: String = store
+            .connection()
+            .query_row(
+                "SELECT result_json FROM engine_invocations WHERE invocation_id = ?1",
+                [invocation.id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(stored.contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY));
+    }
+
+    let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    let records = store.list_invocations().unwrap();
+    assert_eq!(records[0].result_value, Some(large));
+    let refs: i64 = store
+        .connection()
+        .query_row("SELECT COUNT(*) FROM storage_payload_refs", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let blobs: i64 = store
+        .connection()
+        .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(refs, 1);
+    assert_eq!(blobs, 1);
+}
+
+#[test]
+fn sqlite_queue_blobs_large_payload_but_claim_returns_original_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("tron.sqlite");
+    let large = json!({"items": vec!["queued"; 2048]});
+    let mut store = super::queue::SqliteEngineQueueStore::open(&db_path).unwrap();
+    let item = store
+        .enqueue(super::queue::EnqueueInvocation {
+            queue: "agent".to_owned(),
+            function_id: fid("agent::run_turn"),
+            target_revision: Some(FunctionRevision(1)),
+            payload: large.clone(),
+            actor_id: actor("agent"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: grant("grant"),
+            authority_scopes: vec!["agent.run".to_owned()],
+            trace_id: TraceId::generate(),
+            parent_invocation_id: None,
+            trigger_id: None,
+            session_id: Some("session-queue".to_owned()),
+            workspace_id: Some("workspace-queue".to_owned()),
+            idempotency_key: Some("queue-key".to_owned()),
+        })
+        .unwrap();
+    let stored: String = store
+        .connection()
+        .query_row(
+            "SELECT payload_json FROM engine_queue_items WHERE receipt_id = ?1",
+            [item.receipt_id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(stored.contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY));
+    let claimed = store.claim("agent", "test", 1000).unwrap().unwrap();
+    assert_eq!(claimed.payload, large);
+}
+
+#[test]
+fn sqlite_stream_blobs_large_payload_but_poll_returns_original_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("tron.sqlite");
+    let large = json!({"items": vec!["streamed"; 2048]});
+    let mut store = super::streams::SqliteEngineStreamStore::open(&db_path).unwrap();
+    store
+        .publish(super::streams::PublishStreamEvent {
+            topic: "agent.runtime".to_owned(),
+            payload: large.clone(),
+            visibility: VisibilityScope::Session,
+            session_id: Some("session-stream".to_owned()),
+            workspace_id: Some("workspace-stream".to_owned()),
+            producer: "agent".to_owned(),
+            trace_id: Some(TraceId::generate()),
+            parent_invocation_id: None,
+        })
+        .unwrap();
+    let stored: String = store
+        .connection()
+        .query_row(
+            "SELECT payload_json FROM engine_stream_events WHERE cursor = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(stored.contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY));
+    store
+        .subscribe(
+            "sub".to_owned(),
+            "agent.runtime".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-stream".to_owned()),
+            Some("workspace-stream".to_owned()),
+        )
+        .unwrap();
+    let page = store
+        .poll(
+            "sub",
+            None,
+            10,
+            &StreamActorScope {
+                session_id: Some("session-stream".to_owned()),
+                workspace_id: Some("workspace-stream".to_owned()),
+                admin: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(page.events[0].payload, large);
 }
 
 #[test]
@@ -1067,7 +1208,7 @@ async fn idempotency_reject_and_noop_policies_are_enforced() {
 #[tokio::test]
 async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_handler() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("engine-ledger.sqlite");
+    let db_path = dir.path().join("tron.sqlite");
     let calls = Arc::new(AtomicUsize::new(0));
 
     {
@@ -1978,23 +2119,10 @@ async fn engine_host_handle_records_panics_and_replays_panic_errors() {
     ));
 }
 
-#[test]
-fn engine_ledger_path_is_sibling_of_event_database() {
-    let db_path = std::path::Path::new("/tmp/tron/internal/database/log.db");
-    assert_eq!(
-        super::host::engine_ledger_path_for_event_db(db_path),
-        std::path::PathBuf::from("/tmp/tron/internal/database/engine-ledger.sqlite")
-    );
-    assert_eq!(
-        super::host::engine_ledger_path_for_event_db(std::path::Path::new("log.db")),
-        std::path::PathBuf::from("engine-ledger.sqlite")
-    );
-}
-
 #[tokio::test]
 async fn sqlite_engine_host_handle_reopens_watchable_catalog_changes() {
     let dir = tempfile::tempdir().unwrap();
-    let ledger_path = dir.path().join("engine-ledger.sqlite");
+    let ledger_path = dir.path().join("tron.sqlite");
     {
         let handle = super::host::EngineHostHandle::open_sqlite(&ledger_path).unwrap();
         let mut host = handle.lock().await;
@@ -2007,7 +2135,7 @@ async fn sqlite_engine_host_handle_reopens_watchable_catalog_changes() {
     let host = reopened.lock().await;
     let changes = host
         .catalog()
-        .catalog_changes_after(CatalogRevision(0), 100)
+        .catalog_changes_after(CatalogRevision(0), 500)
         .unwrap();
     assert!(
         changes
@@ -2015,6 +2143,138 @@ async fn sqlite_engine_host_handle_reopens_watchable_catalog_changes() {
             .any(|change| change.subject_id == "engine::discover")
     );
     assert!(changes.iter().any(|change| change.subject_id == "w1"));
+}
+
+#[tokio::test]
+async fn storage_primitives_report_and_checkpoint_unified_sqlite_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tron.sqlite");
+    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
+
+    let stats = handle
+        .invoke(Invocation::new_sync(
+            fid("storage::stats"),
+            json!({}),
+            causal().with_scope("storage.read"),
+        ))
+        .await;
+    assert_eq!(stats.error, None);
+    assert_eq!(
+        stats.value.as_ref().unwrap()["stats"]["databasePath"],
+        path.to_string_lossy().as_ref()
+    );
+
+    let checkpoint = handle
+        .invoke(Invocation::new_sync(
+            fid("storage::checkpoint"),
+            json!({}),
+            causal()
+                .with_scope("storage.write")
+                .with_session_id("session-a")
+                .with_idempotency_key("storage-checkpoint-test"),
+        ))
+        .await;
+    assert_eq!(checkpoint.error, None);
+    assert_eq!(
+        checkpoint.value.as_ref().unwrap()["checkpoint"]["databasePath"],
+        path.to_string_lossy().as_ref()
+    );
+}
+
+#[tokio::test]
+async fn observability_log_query_reads_storage_logs_and_expands_payloads_only_when_requested() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tron.sqlite");
+    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
+    {
+        let runtime = crate::shared::storage::StorageRuntime::new(&path);
+        let conn = runtime.open_connection().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE logs (
+                id INTEGER PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                level_num INTEGER NOT NULL,
+                component TEXT NOT NULL DEFAULT '',
+                message TEXT DEFAULT '',
+                session_id TEXT,
+                workspace_id TEXT,
+                event_id TEXT,
+                turn INTEGER,
+                trace_id TEXT,
+                parent_trace_id TEXT,
+                depth INTEGER,
+                data TEXT,
+                error_message TEXT,
+                error_stack TEXT,
+                origin TEXT
+            );",
+        )
+        .unwrap();
+        let data = crate::shared::storage::store_json_bytes(
+            &conn,
+            serde_json::json!({"items": vec!["logged"; 2048]})
+                .to_string()
+                .as_bytes(),
+            &crate::shared::storage::StorePayloadOptions::new(
+                "log_entry",
+                "log-query-row",
+                "data",
+                "diagnostic_verbose",
+            )
+            .with_scope(
+                Some("trace-log".to_owned()),
+                Some("session-log".to_owned()),
+                Some("workspace-log".to_owned()),
+            )
+            .with_inline_threshold(1),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logs (
+                timestamp, level, level_num, component, message, session_id,
+                workspace_id, trace_id, data, origin
+             ) VALUES (?1, 'debug', 20, 'StorageTest', 'large log payload',
+                       'session-log', 'workspace-log', 'trace-log', ?2, 'test')",
+            rusqlite::params![chrono::Utc::now().to_rfc3339(), data],
+        )
+        .unwrap();
+    }
+
+    let compact = handle
+        .invoke(Invocation::new_sync(
+            fid("observability::log_query"),
+            json!({"traceId": "trace-log", "includeFullPayloads": false}),
+            causal().with_scope("observability.read"),
+        ))
+        .await;
+    assert_eq!(compact.error, None);
+    let compact_logs = compact.value.as_ref().unwrap()["logs"].as_array().unwrap();
+    assert_eq!(compact_logs.len(), 1);
+    assert!(
+        compact_logs[0]["data"]
+            .get(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
+            .is_some()
+    );
+
+    let expanded = handle
+        .invoke(Invocation::new_sync(
+            fid("observability::log_query"),
+            json!({"traceId": "trace-log", "includeFullPayloads": true}),
+            causal().with_scope("observability.read"),
+        ))
+        .await;
+    assert_eq!(expanded.error, None);
+    let expanded_logs = expanded.value.as_ref().unwrap()["logs"].as_array().unwrap();
+    assert_eq!(expanded_logs.len(), 1);
+    assert_eq!(
+        expanded_logs[0]["data"]["items"]
+            .as_array()
+            .unwrap()
+            .first()
+            .and_then(Value::as_str),
+        Some("logged")
+    );
 }
 
 #[test]
@@ -2534,7 +2794,7 @@ async fn engine_watch_filters_catalog_changes_without_leaking_hidden_scopes() {
 #[test]
 fn sqlite_ledger_reopen_preserves_watch_scope_metadata() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("engine-ledger.sqlite");
+    let db_path = dir.path().join("tron.sqlite");
     {
         let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
         let mut host = EngineHost::with_ledger_store(Box::new(store)).unwrap();
@@ -3460,7 +3720,7 @@ async fn stream_poll_advances_past_visibility_filtered_rows_in_memory() {
 #[tokio::test]
 async fn stream_poll_advances_past_visibility_filtered_rows_in_sqlite() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("engine-ledger.sqlite");
+    let path = dir.path().join("tron.sqlite");
     let handle = EngineHostHandle::open_sqlite(&path).unwrap();
     assert_stream_poll_reaches_visible_event_after_invisible_prefix(handle).await;
 }
@@ -3636,7 +3896,7 @@ async fn resource_lease_acquire_release_conflict_and_stream_records() {
 #[tokio::test]
 async fn resource_lease_expiry_and_sqlite_reopen_preserve_records() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("engine-ledger.sqlite");
+    let path = dir.path().join("tron.sqlite");
     let handle = EngineHostHandle::open_sqlite(&path).unwrap();
     let first = handle
         .acquire_resource_lease(lease_request("import", "session.json", 1))
@@ -3666,7 +3926,7 @@ async fn resource_lease_expiry_and_sqlite_reopen_preserve_records() {
 #[tokio::test]
 async fn host_invocation_enforces_resource_lease_and_records_compensation() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("engine-ledger.sqlite");
+    let path = dir.path().join("tron.sqlite");
     let handle = EngineHostHandle::open_sqlite(&path).unwrap();
     handle
         .register_worker_for_setup(worker("alpha", "alpha"), false)
@@ -3874,7 +4134,7 @@ async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
 #[tokio::test]
 async fn sqlite_primitive_stores_persist_stream_state_and_queue_records() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("engine-ledger.sqlite");
+    let path = dir.path().join("tron.sqlite");
     let handle = EngineHostHandle::open_sqlite(&path).unwrap();
 
     let state_set = handle

@@ -290,8 +290,6 @@ impl LogLevel {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LoggingSettings {
-    /// Minimum log level written to the database.
-    pub db_log_level: LogLevel,
     /// Per-module log level overrides. Keys are Rust module/crate names.
     /// Example: `{"ort": "warn"}` suppresses ONNX Runtime info spam.
     pub module_overrides: HashMap<String, LogLevel>,
@@ -300,8 +298,64 @@ pub struct LoggingSettings {
 impl Default for LoggingSettings {
     fn default() -> Self {
         Self {
-            db_log_level: LogLevel::Info,
             module_overrides: HashMap::from([("ort".to_string(), LogLevel::Error)]),
+        }
+    }
+}
+
+/// How much structured payload detail observability stores.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PayloadCaptureLevel {
+    /// Store compact summaries and error details only.
+    #[default]
+    Normal,
+    /// Store previews and selected request/response details.
+    Debug,
+    /// Store full payloads through blob refs with short retention.
+    Trace,
+}
+
+/// Engine observability configuration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct ObservabilitySettings {
+    /// Minimum observability verbosity for structured engine diagnostics.
+    pub log_level: LogLevel,
+    /// Payload capture policy. Full capture must use blob-backed storage.
+    pub payload_capture: PayloadCaptureLevel,
+    /// Retention window for verbose diagnostics.
+    pub verbose_retention_days: u64,
+    /// Maximum inline payload bytes before blob-backed storage is required.
+    pub max_inline_payload_bytes: usize,
+}
+
+impl Default for ObservabilitySettings {
+    fn default() -> Self {
+        Self {
+            log_level: LogLevel::Info,
+            payload_capture: PayloadCaptureLevel::Normal,
+            verbose_retention_days: 7,
+            max_inline_payload_bytes: crate::shared::storage::DEFAULT_MAX_INLINE_PAYLOAD_BYTES,
+        }
+    }
+}
+
+/// Unified SQLite storage policy.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct StorageSettings {
+    /// Whether automatic retention may prune low-signal diagnostics.
+    pub retention_enabled: bool,
+    /// Soft cap used by retention reports and future background compaction.
+    pub max_database_mb: u64,
+}
+
+impl Default for StorageSettings {
+    fn default() -> Self {
+        Self {
+            retention_enabled: true,
+            max_database_mb: 512,
         }
     }
 }

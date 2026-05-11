@@ -203,8 +203,20 @@ CREATE INDEX IF NOT EXISTS idx_engine_compensation_invocation
                     to_json("compensation.contract", &record.contract)?,
                     record.status.as_str(),
                     i64::from(record.succeeded),
-                    optional_json("compensation.result", &record.result)?,
-                    optional_json("compensation.error", &record.error)?,
+                    optional_stored_json(
+                        &self.conn,
+                        &record.compensation_id,
+                        "result",
+                        &record.result,
+                        Some(record.trace_id.to_string()),
+                    )?,
+                    optional_stored_json(
+                        &self.conn,
+                        &record.compensation_id,
+                        "error",
+                        &record.error,
+                        Some(record.trace_id.to_string()),
+                    )?,
                     record.created_at.to_rfc3339(),
                 ],
             )
@@ -218,7 +230,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_compensation_invocation
             .query_row(
                 "SELECT * FROM engine_compensation_records WHERE compensation_id = ?1",
                 params![compensation_id],
-                row_to_record,
+                |row| row_to_record(&self.conn, row),
             )
             .optional()
             .map_err(|err| sqlite_err("compensation.get", err))
@@ -231,7 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_compensation_invocation
             .prepare("SELECT * FROM engine_compensation_records ORDER BY rowid ASC")
             .map_err(|err| sqlite_err("compensation.list.prepare", err))?;
         let records = stmt
-            .query_map([], row_to_record)
+            .query_map([], |row| row_to_record(&self.conn, row))
             .map_err(|err| sqlite_err("compensation.list.query", err))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|err| sqlite_err("compensation.list.rows", err))?;
@@ -246,7 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_compensation_invocation
             .query_row(
                 "SELECT * FROM engine_compensation_records WHERE invocation_id = ?1",
                 params![invocation_id.as_str()],
-                row_to_record,
+                |row| row_to_record(&self.conn, row),
             )
             .optional()
             .map_err(|err| sqlite_err("compensation.by_invocation", err))
@@ -283,12 +295,23 @@ pub fn compensation_record(
     }
 }
 
-fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineCompensationRecord> {
+fn row_to_record(
+    conn: &Connection,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<EngineCompensationRecord> {
     let parent: Option<String> = row.get("parent_invocation_id")?;
     let resource_lease_ids_json: String = row.get("resource_lease_ids")?;
     let contract_json: String = row.get("contract_json")?;
-    let result_json: Option<String> = row.get("result_json")?;
-    let error_json: Option<String> = row.get("error_json")?;
+    let result_json: Option<String> = row
+        .get::<_, Option<String>>("result_json")?
+        .map(|json| crate::shared::storage::resolve_stored_json_string(conn, &json))
+        .transpose()
+        .map_err(storage_to_sql_err)?;
+    let error_json: Option<String> = row
+        .get::<_, Option<String>>("error_json")?
+        .map(|json| crate::shared::storage::resolve_stored_json_string(conn, &json))
+        .transpose()
+        .map_err(storage_to_sql_err)?;
     let created_at: String = row.get("created_at")?;
     Ok(EngineCompensationRecord {
         compensation_id: row.get("compensation_id")?,
@@ -316,14 +339,36 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineCompensation
     })
 }
 
-fn optional_json<T: Serialize>(
-    operation: &'static str,
+fn optional_stored_json<T: Serialize>(
+    conn: &Connection,
+    owner_id: &str,
+    field_name: &str,
     value: &Option<T>,
+    trace_id: Option<String>,
 ) -> Result<Option<String>> {
-    value
-        .as_ref()
-        .map(|value| to_json(operation, value))
-        .transpose()
+    let Some(value) = value.as_ref() else {
+        return Ok(None);
+    };
+    let json = serde_json::to_value(value).map_err(|err| EngineError::LedgerFailure {
+        operation: "compensation.json",
+        message: err.to_string(),
+    })?;
+    crate::shared::storage::store_json_value(
+        conn,
+        &json,
+        &crate::shared::storage::StorePayloadOptions::new(
+            "engine_compensation",
+            owner_id.to_owned(),
+            field_name.to_owned(),
+            "audit",
+        )
+        .with_scope(trace_id, None, None),
+    )
+    .map(Some)
+    .map_err(|err| EngineError::LedgerFailure {
+        operation: "compensation.storage",
+        message: err.to_string(),
+    })
 }
 
 fn optional_from_json<T: for<'de> Deserialize<'de>>(
@@ -368,4 +413,8 @@ fn sqlite_err(operation: &'static str, err: rusqlite::Error) -> EngineError {
 
 fn to_sql_err(error: EngineError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}
+
+fn storage_to_sql_err(error: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error.to_string())))
 }

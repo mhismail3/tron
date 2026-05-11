@@ -30,7 +30,34 @@ impl EventRepo {
         let provider_type = extract_str(&event.payload, "providerType");
         let cost = event.payload.get("cost").and_then(Value::as_f64);
 
-        let payload_str = serde_json::to_string(&event.payload)?;
+        let payload_str = crate::shared::storage::store_json_value(
+            conn,
+            &event.payload,
+            &crate::shared::storage::StorePayloadOptions::new(
+                "session_event",
+                event.id.clone(),
+                "payload",
+                "audit",
+            )
+            .with_scope(
+                None,
+                Some(event.session_id.clone()),
+                Some(event.workspace_id.clone()),
+            ),
+        )
+        .map_err(|error| {
+            let message = format!("failed to store session event payload: {error:#}");
+            if message.contains("database is locked")
+                || message.contains("Cannot promote read transaction")
+            {
+                crate::domains::session::event_store::errors::EventStoreError::Busy {
+                    operation: "session event payload storage",
+                    attempts: 1,
+                }
+            } else {
+                crate::domains::session::event_store::errors::EventStoreError::Internal(message)
+            }
+        })?;
 
         let sql = format!(
             "INSERT INTO events ({EVENT_COLUMNS})

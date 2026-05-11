@@ -462,6 +462,13 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
             .map_err(|err| sqlite_err("queue.init", err.to_string()))
     }
 
+    /// Borrow the underlying connection for focused tests.
+    #[cfg(test)]
+    #[must_use]
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     /// Enqueue one invocation.
     pub fn enqueue(&mut self, request: EnqueueInvocation) -> Result<EngineQueueItem> {
         validate_queue(&request.queue)?;
@@ -519,7 +526,7 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
                  ORDER BY created_at ASC
                  LIMIT 1",
                 params![queue, now.to_rfc3339()],
-                row_to_queue_item,
+                |row| row_to_queue_item(&self.conn, row),
             )
             .optional()
             .map_err(|err| sqlite_err("queue.claim.select", err.to_string()))?;
@@ -605,7 +612,7 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
             .query_row(
                 "SELECT * FROM engine_queue_items WHERE receipt_id = ?1",
                 params![receipt_id],
-                row_to_queue_item,
+                |row| row_to_queue_item(&self.conn, row),
             )
             .optional()
             .map_err(|err| sqlite_err("queue.get", err.to_string()))
@@ -624,7 +631,9 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
             .prepare("SELECT * FROM engine_queue_items WHERE queue = ?1 ORDER BY created_at ASC LIMIT ?2")
             .map_err(|err| sqlite_err("queue.list.prepare", err.to_string()))?;
         let rows = stmt
-            .query_map(params![queue, limit.min(500) as i64], row_to_queue_item)
+            .query_map(params![queue, limit.min(500) as i64], |row| {
+                row_to_queue_item(&self.conn, row)
+            })
             .map_err(|err| sqlite_err("queue.list.query", err.to_string()))?;
         rows.map(|row| row.map_err(|err| sqlite_err("queue.list.row", err.to_string())))
             .collect()
@@ -636,7 +645,7 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
                 "INSERT INTO engine_queue_items
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                          ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
-                item_params(item),
+                item_params(&self.conn, item)?,
             )
             .map_err(|err| sqlite_err("queue.insert", err.to_string()))?;
         Ok(())
@@ -668,7 +677,7 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
                    created_at = ?21,
                    updated_at = ?22
                  WHERE receipt_id = ?1",
-                item_params(item),
+                item_params(&self.conn, item)?,
             )
             .map_err(|err| sqlite_err("queue.update", err.to_string()))?;
         Ok(())
@@ -686,11 +695,32 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
     }
 }
 
-fn item_params(item: &EngineQueueItem) -> rusqlite::ParamsFromIter<Vec<rusqlite::types::Value>> {
+fn item_params(
+    conn: &Connection,
+    item: &EngineQueueItem,
+) -> Result<rusqlite::ParamsFromIter<Vec<rusqlite::types::Value>>> {
     use rusqlite::types::Value as SqlValue;
-    let payload = serde_json::to_string(&item.payload).unwrap_or_else(|_| "null".to_owned());
+    let payload = crate::shared::storage::store_json_value(
+        conn,
+        &item.payload,
+        &crate::shared::storage::StorePayloadOptions::new(
+            "engine_queue_item",
+            item.receipt_id.clone(),
+            "payload",
+            "runtime",
+        )
+        .with_scope(
+            Some(item.trace_id.to_string()),
+            item.session_id.clone(),
+            item.workspace_id.clone(),
+        ),
+    )
+    .map_err(|err| EngineError::LedgerFailure {
+        operation: "queue.store_payload",
+        message: err.to_string(),
+    })?;
     let scopes = serde_json::to_string(&item.authority_scopes).unwrap_or_else(|_| "[]".to_owned());
-    params_from_vec(vec![
+    Ok(params_from_vec(vec![
         SqlValue::Text(item.receipt_id.clone()),
         SqlValue::Text(item.queue.clone()),
         SqlValue::Text(item.function_id.to_string()),
@@ -735,7 +765,7 @@ fn item_params(item: &EngineQueueItem) -> rusqlite::ParamsFromIter<Vec<rusqlite:
         SqlValue::Text(item.not_before.to_rfc3339()),
         SqlValue::Text(item.created_at.to_rfc3339()),
         SqlValue::Text(item.updated_at.to_rfc3339()),
-    ])
+    ]))
 }
 
 fn params_from_vec(
@@ -744,8 +774,13 @@ fn params_from_vec(
     rusqlite::params_from_iter(values)
 }
 
-fn row_to_queue_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineQueueItem> {
+fn row_to_queue_item(
+    conn: &Connection,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<EngineQueueItem> {
     let payload_json: String = row.get(4)?;
+    let payload = crate::shared::storage::resolve_stored_json_value(conn, &payload_json)
+        .map_err(storage_to_sql_err)?;
     let scopes_json: String = row.get(8)?;
     let target_revision: Option<i64> = row.get(3)?;
     let parent_invocation_id: Option<String> = row.get(10)?;
@@ -756,7 +791,7 @@ fn row_to_queue_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineQueueIte
         function_id: FunctionId::new(row.get::<_, String>(2)?)
             .expect("stored queue function id should be valid"),
         target_revision: target_revision.map(|value| FunctionRevision(value as u64)),
-        payload: serde_json::from_str(&payload_json).unwrap_or(Value::Null),
+        payload,
         actor_id: ActorId::new(row.get::<_, String>(5)?)
             .expect("stored queue actor id should be valid"),
         actor_kind: actor_kind_from_str(&row.get::<_, String>(6)?),
@@ -810,6 +845,10 @@ fn actor_kind_from_str(value: &str) -> ActorKind {
         "Admin" => ActorKind::Admin,
         _ => ActorKind::System,
     }
+}
+
+fn storage_to_sql_err(error: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error.to_string())))
 }
 
 fn parse_time(value: &str) -> Option<DateTime<Utc>> {

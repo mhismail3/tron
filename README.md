@@ -124,7 +124,7 @@ transport/  /engine client protocol, /engine/workers socket transport, auth gate
 engine/     Live capability fabric: catalog, workers, triggers, ledger, streams, queues
 domains/    Every Tron worker: contracts, deps, handlers, operations, local services, tests
 platform/   OS/vendor integrations: APNS, Codex App Server, device broker, updater
-shared/     Foundation IDs/errors/paths, protocol DTOs, server-neutral helper types
+shared/     Foundation IDs/errors/paths, protocol DTOs, unified storage helpers
 main.rs     Thin CLI/startup entry point
 ```
 
@@ -135,7 +135,7 @@ main.rs     Thin CLI/startup entry point
 | `engine` | Live capability fabric, primitive workers, local worker protocol | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
 | `domains` | Worker-owned Tron behavior and implementation code | `registration::register_domain_workers_for_context()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor/product-protocol integrations | `CodexAppServerManager`, APNS senders, updater scheduler |
-| `shared` | Foundation vocabulary and neutral helper types | `Message`, `TronError`, `StreamEvent`, `SessionId`, `ServerRuntimeContext`, `CapabilityError` |
+| `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
 The domain package is intentionally vertical. A domain root is only docs,
 exports, and worker registration. Shared worker registration types live in
@@ -387,7 +387,8 @@ Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 state, queued handoff, and human approval. `catalog::*`, `worker::*`, and
 `observability::*` expose live catalog snapshots, worker health/lifecycle, trace
 summaries, spans, structured log projections, and metrics through the same
-canonical invocation path. A practical debugging trace includes invocation
+canonical invocation path. `storage::*` owns stats, retention, checkpoints, and
+portable snapshot export for the unified engine database. A practical debugging trace includes invocation
 records, stream publications, approvals, resource leases, and compensation
 records, all tied together by `traceId` plus `parentInvocationId`. Query
 response shaping for these privileged primitive workers lives under
@@ -563,6 +564,18 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
     "retainModel": "claude-sonnet-4-6"          // Model used by the retain summarizer subagent.
   },
 
+  "observability": {
+    "logLevel": "info",                         // "trace" | "debug" | "info" | "warn" | "error"
+    "payloadCapture": "normal",                 // "normal" | "debug" | "trace"; full payloads use blob refs
+    "verboseRetentionDays": 7,                  // Short retention window for verbose diagnostics
+    "maxInlinePayloadBytes": 8192               // Larger payloads store a preview + blob ref
+  },
+
+  "storage": {
+    "retentionEnabled": true,                   // Startup/manual retention may prune low-signal diagnostics
+    "maxDatabaseMb": 512                        // Soft cap surfaced by storage reports
+  },
+
   "retry":  { "maxRetries": 1 },
   "hooks":  { "defaultTimeoutMs": 5000, "discoveryTimeoutMs": 10000, "extensions": [".prompt", ".ts", ".js", ".mjs", ".sh"] },
 
@@ -704,9 +717,11 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
+All active server storage lives in `~/.tron/internal/database/tron.sqlite`. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "payload-ref-v2"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/payload-ref-v2-*` and starts fresh. Retired pre-unified database artifacts are archived the same way and are never read as active storage.
 
-The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by the engine primitive stores (`packages/agent/src/engine/ledger.rs`, `streams.rs`, `state.rs`, `queue.rs`, `approvals.rs`, `leases.rs`, and `compensation.rs`), not by the event-store migration runner. It stores invocation records with trace, parent, session, and workspace scope, idempotency reservations/results, catalog-change audit records, approval requests, stream/state/queue primitive state, high-risk resource leases, worker/sandbox lifecycle stream records, and compensation audit records; live catalog definitions are still in memory. The observability worker reads this ledger as local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`.
+The unified database has one migration surface for session/log/blob tables and engine-owned stores for primitive state. Fresh databases start from consolidated `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`; additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql` are registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
+
+Engine ledger rows, streams, state, queues, approvals, resource leases, compensation records, worker lifecycle records, bounded server/iOS logs, and compressed content-addressed blobs share that same file. Large correctness and audit payloads flow through `StoredPayloadRef`: primary rows keep compact inline JSON only below the configured threshold, otherwise they store an internal payload-ref envelope while the full bytes live once in `blobs` and are owned by `storage_payload_refs`. Retention operates from `storage_payload_refs`, so blobs are deleted only when no live owner remains. Startup enforces `storage.max_database_mb` as a soft budget: when the active DB plus WAL/SHM sidecars exceed it, the server records a warning, runs only safe verbose-log/blob retention, and checkpoints the WAL; audit-critical rows and owner refs are not automatically deleted. `storage::stats`, `storage::retention_run`, `storage::checkpoint`, and `storage::export_snapshot` are canonical system capabilities; the observability worker reads the same local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`. Trace and log queries return previews/refs by default; callers must explicitly request full payload expansion through blob refs.
 
 ### Tables
 
@@ -716,9 +731,16 @@ The engine host owns a separate SQLite ledger at `~/.tron/internal/database/engi
 | `workspaces` | Project/directory contexts (id, path, name, timestamps) |
 | `sessions` | Session metadata: head pointer, title, model, execution `profile`, token counts, tags, fork lineage, spawn metadata, optional `use_worktree` per-session worktree override |
 | `events` | Immutable append-only event log. Denormalized columns (`role`, `tool_name`, `tool_call_id`, `turn`, token counts, `model`, `latency_ms`, `stop_reason`, `provider_type`, `cost`, ...) extracted from payloads for indexed queries |
-| `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, ref count) |
+| `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, size/compression metadata) |
 | `branches` | Named positions in the event tree (root + head pointer per branch) |
 | `logs` | Application logs (level, component, message, error fields, trace IDs, origin) |
+| `engine_invocations` | Engine invocation ledger: function, worker, trace, parent, idempotency, status, result/error summaries |
+| `engine_stream_events` | Engine stream publication history with cursor, topic, visibility, trace, and compact payload |
+| `engine_catalog_changes` | Live catalog audit trail for worker/function/trigger registration, health, visibility, and lifecycle changes |
+| `engine_idempotency_entries` | Durable idempotency reservations and replay records |
+| `engine_state_entries`, `engine_queue_items`, `engine_approvals`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
+| `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
+| `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 | `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row; `bundle_id` lets the relay send Beta-scheme tokens to the correct APNs topic) |
 | `notification_read_state` | Per-event read receipts for client notifications |
 | `cron_jobs` | Cron job definitions: schedule, payload, delivery, overlap/misfire policies, runtime state (next/last run, consecutive failures) |
@@ -878,10 +900,10 @@ The wrapper coexists with local Release testing, Xcode Debug UI dogfood, an isol
 
 Mutual exclusion:
 - Duplicate wrappers of the same bundle ID — guarded by `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`). Release and Debug companion wrappers intentionally use different lock files so their menu icons can coexist.
-- Production agents — guarded by `~/.tron/internal/database/log.db.lock` (cross-process exclusive `flock`).
+- Production agents — guarded by `~/.tron/internal/database/tron.sqlite.lock` (cross-process exclusive `flock`).
 - LaunchAgent ownership — installed Release is authoritative for `com.tron.server` and repairs stale Debug/DerivedData registrations before restart; default Xcode Debug is companion-only. The `TronMac Isolated Install` scheme owns `com.tron.server.dev` on port `9848` with `TRON_HOME_NAME=.tron-dev`.
 - Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the installed helper is paused while dev-mode runs.
-- Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `internal/database/log.db.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
+- Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `internal/database/tron.sqlite.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
 
 A contributor can have the DMG installed AND run the default Xcode Debug wrapper for menu/wizard UI work; both menu icons can coexist and both observe the production server. Running `tron dev` is still the explicit server-takeover path for Rust-agent iteration: the wrapper's menu bar keeps pinging port 9847, reports the `Tron-Dev.app` PID/uptime, and shows `Dev Server active` while dev owns the port. Quitting `tron dev` restarts the installed helper by invoking `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which re-enters the same `SMAppService` registration path used by the app. Pre-onboarding production cleanup uses the installed app's paired internal command `--tron-uninstall-and-quit` so stale Login Item registrations are removed by `SMAppService.unregister` instead of only being booted out of launchd; Debug companion command mode refuses to uninstall production. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
 
@@ -974,10 +996,10 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Skill-owned local fast secret storage
 +-- internal/                     Tron-owned runtime machinery
-    +-- database/                  SQLite event store and audit records
-    |   +-- log.db                 Events, sessions, tasks, journals, automation state, profile/context audit
-    |   +-- log.db.lock            OS-level flock sidecar; one Tron process owns it while running
-    |   +-- engine-ledger.sqlite   Engine invocations, idempotency, catalog, streams, state, queues, approvals, resource leases, and compensation records
+    +-- database/                  Unified SQLite engine storage and archives
+    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, approvals, leases, compensation, workers
+    |   +-- tron.sqlite.lock       OS-level flock sidecar; one Tron process owns it while running
+    |   +-- archive/               One-way archive of retired or incompatible storage generations
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts
     |   +-- auth.lock              Auth-file refresh lock
@@ -1113,9 +1135,9 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 7. **Hook drain ordering**: Background hooks are drained before accepting a new prompt (pre-run) and before session reconstruction (resume). Prevents stale hook state from interfering.
 
-8. **Production DB guard**: Startup validates the database path is `~/.tron/internal/database/log.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
+8. **Production DB guard**: Startup validates the database path is `~/.tron/internal/database/tron.sqlite` only. Rejects alternate filenames, wrong directories, and symlinked paths.
 
-9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `log.db.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `events/sqlite/process_lock.rs::acquire_database_lock` called from `init_database` in `main.rs`.
+9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `tron.sqlite.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `events/sqlite/process_lock.rs::acquire_database_lock` called from `init_database` in `main.rs`.
 
 ---
 

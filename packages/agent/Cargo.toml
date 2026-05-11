@@ -41,6 +41,7 @@ eventsource-stream = "0.2"
 rusqlite = { version = "0.32", features = ["bundled", "serde_json", "functions"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
+zstd = "0.13"
 
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }

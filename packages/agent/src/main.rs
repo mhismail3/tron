@@ -29,7 +29,7 @@
 //! 4. Session writes are serialized per-session via in-process locks
 //! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
-//! 7. Production DB target is strictly `~/.tron/internal/database/log.db`
+//! 7. Production DB target is strictly `~/.tron/internal/database/tron.sqlite`
 //! 8. Server shutdown is signal-owned (`SIGINT`/`SIGTERM` on Unix) so managed
 //!    children such as `codex app-server` are stopped before Tron exits.
 
@@ -259,6 +259,20 @@ fn init_database(
 )> {
     let db_path = resolve_production_db_path(db_path_override)?;
     ensure_parent_dir(&db_path)?;
+    let archive_report =
+        tron::shared::storage::prepare_active_database(&db_path).with_context(|| {
+            format!(
+                "Failed to prepare unified database files for {}",
+                db_path.display()
+            )
+        })?;
+    if archive_report.moved_any() {
+        tracing::info!(
+            archive_dir = ?archive_report.archive_dir,
+            files = archive_report.files.len(),
+            "archived retired or incompatible database files before unified storage startup"
+        );
+    }
 
     // INVARIANT: A single process owns the event-store DB. Take the
     // OS-level flock before opening the connection pool so a stray
@@ -292,27 +306,23 @@ fn init_database(
         // know NOW, not after a session has been partially
         // reconstructed from damaged data.
         tron::domains::session::event_store::check_integrity(&conn).context(
-            "Database integrity check failed. The event store may be corrupt; \
-             restore from a backup or investigate ~/.tron/internal/database/log.db.",
+            "Database integrity check failed. The unified engine store may be corrupt; \
+             restore from a backup or investigate ~/.tron/internal/database/tron.sqlite.",
         )?;
         let _ = tron::domains::session::event_store::run_migrations(&conn)
             .context("Failed to run migrations")?;
+        tron::shared::storage::ensure_storage_schema(&conn)
+            .context("Failed to initialize storage metadata schema")?;
     }
     Ok((pool, db_path, db_lock))
 }
 
-/// Resolve the engine ledger path from the event-store database path.
-fn init_engine_ledger_path(event_db_path: &Path) -> PathBuf {
-    tron::engine::engine_ledger_path_for_event_db(event_db_path)
-}
-
 /// Initialize the server-owned live capability engine host.
 fn init_engine_host(db_path: &Path) -> Result<tron::engine::EngineHostHandle> {
-    let engine_ledger_path = init_engine_ledger_path(db_path);
-    tron::engine::EngineHostHandle::open_sqlite(&engine_ledger_path).with_context(|| {
+    tron::engine::EngineHostHandle::open_sqlite(db_path).with_context(|| {
         format!(
-            "Failed to initialize engine host ledger at {}",
-            engine_ledger_path.display()
+            "Failed to initialize engine host storage at {}",
+            db_path.display()
         )
     })
 }
@@ -332,8 +342,7 @@ fn init_logging(
     // pool connections — without busy_timeout, concurrent writes cause SQLITE_BUSY errors.
     let log_conn =
         rusqlite::Connection::open(db_path).context("Failed to open logging DB connection")?;
-    log_conn
-        .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
+    tron::shared::storage::apply_runtime_pragmas(&log_conn)
         .context("Failed to set logging connection pragmas")?;
     let module_overrides: Vec<(String, &str)> = settings
         .logging
@@ -342,7 +351,7 @@ fn init_logging(
         .map(|(m, lvl)| (m.clone(), lvl.as_filter_str()))
         .collect();
     let effective_log_level =
-        log_level_override.unwrap_or_else(|| settings.logging.db_log_level.as_filter_str());
+        log_level_override.unwrap_or_else(|| settings.observability.log_level.as_filter_str());
     let log_handle = tron::shared::logging::init_subscriber_with_sqlite(
         effective_log_level,
         &module_overrides,
@@ -899,6 +908,48 @@ async fn main() -> Result<()> {
         &origin,
         !args.quiet,
     )?;
+    if settings.storage.retention_enabled {
+        match tron::shared::storage::StorageRuntime::new(db_path.clone())
+            .retention_run(false, settings.observability.verbose_retention_days)
+        {
+            Ok(report) => tracing::debug!(
+                rows_deleted = report.rows_deleted,
+                blobs_deleted = report.blobs_deleted,
+                verbose_retention_days = report.verbose_retention_days,
+                "storage retention completed on startup"
+            ),
+            Err(error) => tracing::warn!(error = %error, "storage retention failed on startup"),
+        }
+    }
+    if settings.storage.max_database_mb > 0 {
+        match tron::shared::storage::StorageRuntime::new(db_path.clone()).enforce_size_budget(
+            settings.storage.max_database_mb,
+            settings.observability.verbose_retention_days,
+        ) {
+            Ok(report) if report.over_limit => tracing::warn!(
+                max_database_bytes = report.max_database_bytes,
+                before_total_bytes = report.before_total_bytes,
+                after_total_bytes = report.after_total_bytes,
+                retention_rows_deleted = report
+                    .retention
+                    .as_ref()
+                    .map(|retention| retention.rows_deleted)
+                    .unwrap_or_default(),
+                retention_blobs_deleted = report
+                    .retention
+                    .as_ref()
+                    .map(|retention| retention.blobs_deleted)
+                    .unwrap_or_default(),
+                "storage soft size budget exceeded; safe retention and checkpoint completed"
+            ),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                error = %error,
+                max_database_mb = settings.storage.max_database_mb,
+                "storage soft size budget check failed"
+            ),
+        }
+    }
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = init_engine_host(&db_path)?;
 
@@ -1087,6 +1138,14 @@ async fn main() -> Result<()> {
     // Flush remaining logs to SQLite and stop the periodic flush task
     flush_task.abort();
     log_handle.flush();
+    match tron::shared::storage::StorageRuntime::new(db_path.clone()).checkpoint() {
+        Ok(report) => tracing::debug!(
+            wal_bytes = report.wal_bytes,
+            checkpointed_pages = report.checkpointed_pages,
+            "storage checkpoint completed on shutdown"
+        ),
+        Err(error) => tracing::warn!(error = %error, "storage checkpoint failed on shutdown"),
+    }
 
     tracing::info!("Shutdown complete");
     Ok(())

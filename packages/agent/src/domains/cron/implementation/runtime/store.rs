@@ -1,7 +1,7 @@
 //! `SQLite` repository for cron jobs and runs.
 //!
 //! Handles CRUD operations, runtime state management, and garbage collection.
-//! All operations use the shared `log.db` connection pool.
+//! All operations use the shared `tron.sqlite` connection pool.
 
 use crate::domains::session::event_store::ConnectionPool;
 use chrono::{DateTime, Utc};
