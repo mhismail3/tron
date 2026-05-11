@@ -113,6 +113,13 @@ impl StreamStoreBackend {
         }
     }
 
+    pub(in crate::engine) fn latest_cursor(&self, topic: &str) -> Result<StreamCursor> {
+        match self {
+            Self::InMemory(store) => Ok(store.latest_cursor(topic)),
+            Self::Sqlite(store) => store.latest_cursor(topic),
+        }
+    }
+
     pub(in crate::engine) fn unsubscribe(&mut self, subscription_id: &str) -> Result<bool> {
         match self {
             Self::InMemory(store) => store.unsubscribe(subscription_id),

@@ -4,8 +4,10 @@ import Foundation
 ///
 /// Cursors are keyed by the server origin, stream topic, optional
 /// session/workspace scope, and filter hash. The server keeps connection-local
-/// ack state; this store lets the app resume from the last dispatched event
-/// after reconnect or app restart.
+/// ack state; this store records delivered positions for diagnostics and ACK
+/// coalescing. Session history is never restored from this store: the thin
+/// client reconstructs session state with `session::reconstruct`, then uses
+/// `events.session` only as a live future-event lane.
 struct EngineStreamCursorKey: Hashable, Sendable {
     let serverOrigin: String
     let topic: String

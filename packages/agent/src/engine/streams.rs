@@ -4,9 +4,13 @@
 //! are not a transport: engine clients, agent tools, and external workers can
 //! all poll the same stream cursor model.
 //!
-//! INVARIANT: stream polling advances over scanned rows even when visibility
-//! removes them from the returned page. A session subscription that starts from
-//! cursor zero must not starve behind older rows owned by other sessions.
+//! INVARIANT: live subscriptions that omit an explicit cursor start at the
+//! topic tail. Historical replay is explicit (`afterCursor` / `cursor`) and
+//! belongs to callers that are intentionally catching up.
+//!
+//! INVARIANT: stream polling applies engine visibility before pagination. A
+//! session subscriber must never wait behind older rows owned by other
+//! sessions.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -221,6 +225,17 @@ impl InMemoryEngineStreamStore {
         Ok(subscription)
     }
 
+    /// Return the latest cursor assigned for a topic.
+    #[must_use]
+    pub fn latest_cursor(&self, topic: &str) -> StreamCursor {
+        self.events
+            .iter()
+            .rev()
+            .find(|event| event.topic == topic)
+            .map(|event| event.cursor)
+            .unwrap_or_default()
+    }
+
     /// Mark a subscription inactive.
     pub fn unsubscribe(&mut self, subscription_id: &str) -> Result<bool> {
         let Some(subscription) = self.subscriptions.get_mut(subscription_id) else {
@@ -291,28 +306,30 @@ impl InMemoryEngineStreamStore {
         }
         let after = after.unwrap_or(subscription.cursor);
         let limit = limit.min(500);
-        let mut scanned = self
+        let mut visible = self
             .events
             .iter()
             .filter(|event| event.topic == subscription.topic)
             .filter(|event| event.cursor > after)
-            .cloned()
-            .collect::<Vec<_>>();
-        scanned.sort_by_key(|event| event.cursor);
-        let has_more = scanned.len() > limit;
-        let mut next_cursor = after;
-        let events = scanned
-            .into_iter()
-            .take(limit)
-            .filter_map(|event| {
-                next_cursor = event.cursor;
+            .filter(|event| {
                 stream_scope_visible(
                     &event.visibility,
                     event.session_id.as_deref(),
                     event.workspace_id.as_deref(),
                     actor,
                 )
-                .then_some(event)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        visible.sort_by_key(|event| event.cursor);
+        let has_more = visible.len() > limit;
+        let mut next_cursor = after;
+        let events = visible
+            .into_iter()
+            .take(limit)
+            .map(|event| {
+                next_cursor = event.cursor;
+                event
             })
             .collect::<Vec<_>>();
         Ok(EngineStreamPage {
@@ -478,6 +495,21 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
         })
     }
 
+    /// Return the latest cursor assigned for a topic.
+    pub fn latest_cursor(&self, topic: &str) -> Result<StreamCursor> {
+        let cursor = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(cursor), 0)
+                 FROM engine_stream_events
+                 WHERE topic = ?1",
+                params![topic],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|err| sqlite_err("stream.latest_cursor", err.to_string()))?;
+        Ok(StreamCursor(cursor as u64))
+    }
+
     /// Mark a subscription inactive.
     pub fn unsubscribe(&mut self, subscription_id: &str) -> Result<bool> {
         let changed = self
@@ -550,9 +582,16 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                 "SELECT cursor, topic, payload_json, visibility, session_id, workspace_id,
                         producer, trace_id, parent_invocation_id, created_at
                  FROM engine_stream_events
-                 WHERE topic = ?1 AND cursor > ?2
+                 WHERE topic = ?1
+                   AND cursor > ?2
+                   AND (
+                     ?5 = 1
+                     OR visibility IN ('system', 'agent', 'client')
+                     OR (visibility = 'session' AND session_id = ?3)
+                     OR (visibility = 'workspace' AND workspace_id = ?4)
+                   )
                  ORDER BY cursor ASC
-                 LIMIT ?3",
+                 LIMIT ?6",
             )
             .map_err(|err| sqlite_err("stream.poll.prepare", err.to_string()))?;
         let rows = stmt
@@ -560,6 +599,9 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                 params![
                     subscription.topic,
                     after.0 as i64,
+                    actor.session_id.as_deref(),
+                    actor.workspace_id.as_deref(),
+                    if actor.admin { 1_i64 } else { 0_i64 },
                     limit.min(500) as i64 + 1
                 ],
                 row_to_stream_event,

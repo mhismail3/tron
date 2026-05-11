@@ -20,9 +20,9 @@ extension ChatViewModel: MessagingContext {
         )
     }
 
-    func ensureLiveEventSubscription() {
+    func ensureLiveEventSubscription() async throws {
         logger.info("Ensuring live engine event subscription before prompt send", category: .events)
-        engineClient.setCurrentSessionId(sessionId)
+        try await engineClient.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
     }
 
     func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {

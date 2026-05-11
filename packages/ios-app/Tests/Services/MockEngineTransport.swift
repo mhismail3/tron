@@ -17,6 +17,10 @@ final class MockEngineTransport: EngineTransport {
 
     var setSessionIdCallCount = 0
     var lastSetSessionId: String?
+    var ensureSessionEventSubscriptionCallCount = 0
+    var ensuredSessionEventSubscriptions: [(sessionId: String, workspaceId: String?)] = []
+    var ensureSessionEventSubscriptionShouldThrow = false
+    var operationOrder: [String] = []
 
     var setModelCallCount = 0
     var lastSetModel: String?
@@ -30,6 +34,23 @@ final class MockEngineTransport: EngineTransport {
         setSessionIdCallCount += 1
         lastSetSessionId = id
         currentSessionId = id
+    }
+
+    func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
+        _ = try requireConnection()
+        if ensureSessionEventSubscriptionShouldThrow {
+            throw EngineConnectionError.notConnected
+        }
+        operationOrder.append("subscribe:\(sessionId)")
+        ensureSessionEventSubscriptionCallCount += 1
+        ensuredSessionEventSubscriptions.append((sessionId: sessionId, workspaceId: workspaceId))
+        currentSessionId = sessionId
+        return EngineSubscription(
+            subscriptionId: "test-subscription-\(ensureSessionEventSubscriptionCallCount)",
+            topic: "events.session",
+            cursor: 100,
+            limit: 100
+        )
     }
 
     func setCurrentModel(_ model: String) {
@@ -58,6 +79,7 @@ final class MockEngineTransport: EngineTransport {
         lastWriteIdempotencyKey = idempotencyKey
         lastWriteOptions = options
         lastWritePayload = payload
+        operationOrder.append("write:\(functionId.rawValue)")
         if let writeHandler {
             guard let response = try writeHandler(functionId, payload, idempotencyKey, options) as? R else {
                 throw EngineConnectionError.invalidResponse

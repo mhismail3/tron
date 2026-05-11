@@ -43,6 +43,13 @@ enum EngineClientStreamSubscriptionPolicy {
     ) -> Bool {
         !previous.isConnected && next.isConnected && hasCurrentSession
     }
+
+    static func sessionEventSubscriptionCursor(stored: EngineStreamCursor?) -> EngineStreamCursor? {
+        // Session history is reconstructed through `session::reconstruct`.
+        // `events.session` is the live lane and must not replay old events into
+        // the view state machine after reconstruction.
+        nil
+    }
 }
 
 // MARK: - Engine Client
@@ -200,7 +207,7 @@ final class EngineClient: EngineTransport {
     deinit {
         MainActor.assumeIsolated {
             observationTask?.cancel()
-            for var task in streamAckTasks.values {
+            for task in streamAckTasks.values {
                 task.cancel()
             }
         }
@@ -256,7 +263,7 @@ final class EngineClient: EngineTransport {
         // so it can miss the .connecting → .connected transition.
         connectionState = ws.connectionState
         if connectionState.isConnected, let currentSessionId {
-            await subscribeToSessionEvents(sessionId: currentSessionId, workspaceId: nil)
+            _ = try? await ensureSessionEventSubscription(sessionId: currentSessionId, workspaceId: nil)
         }
     }
 
@@ -300,7 +307,7 @@ final class EngineClient: EngineTransport {
                     next: nextState,
                     hasCurrentSession: self.currentSessionId != nil
                 ), let currentSessionId = self.currentSessionId {
-                    await self.subscribeToSessionEvents(sessionId: currentSessionId, workspaceId: nil)
+                    _ = try? await self.ensureSessionEventSubscription(sessionId: currentSessionId, workspaceId: nil)
                 }
 
                 await withCheckedContinuation { cont in
@@ -462,7 +469,14 @@ final class EngineClient: EngineTransport {
         currentSessionId = id
         guard connectionState.isConnected, let id else { return }
         Task { @MainActor [weak self] in
-            await self?.subscribeToSessionEvents(sessionId: id, workspaceId: nil)
+            do {
+                try await self?.ensureSessionEventSubscription(sessionId: id, workspaceId: nil)
+            } catch {
+                logger.warning(
+                    "Failed to ensure session event subscription for \(id): \(error.localizedDescription)",
+                    category: .events
+                )
+            }
         }
     }
 
@@ -470,8 +484,15 @@ final class EngineClient: EngineTransport {
         currentModel = model
     }
 
-    private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async {
-        guard let ws = engineConnection, connectionState.isConnected else { return }
+    @discardableResult
+    func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
+        currentSessionId = sessionId
+        return try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
+    }
+
+    private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
+        guard let ws = engineConnection else { throw EngineClientError.connectionNotEstablished }
+        guard connectionState.isConnected else { throw EngineConnectionError.notConnected }
         let filters = Self.sessionEventFilters(sessionId: sessionId, workspaceId: workspaceId)
         let key = streamKey(
             topic: "events.session",
@@ -484,24 +505,30 @@ final class EngineClient: EngineTransport {
                 "Session event stream already subscribed for session \(sessionId): \(existing.subscriptionId)",
                 category: .events
             )
-            return
+            return existing
         }
         do {
-            let cursor = streamCursorStore.cursor(for: key)
+            let cursor = EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
+                stored: streamCursorStore.cursor(for: key)
+            )
             let subscription = try await ws.subscribe(
                 topic: key.topic,
                 cursor: cursor,
                 filters: filters,
                 context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
             )
+            let subscribedCursor = EngineStreamCursor(rawValue: subscription.cursor)
+            streamCursorStore.save(subscribedCursor, for: key)
             streamSubscriptions[key] = subscription
             streamSubscriptionKeysById[subscription.subscriptionId] = key
             logger.info(
-                "Subscribed to \(key.topic) for session \(sessionId) from cursor \(cursor?.rawValue.description ?? "start")",
+                "Subscribed to \(key.topic) for session \(sessionId) from live tail \(subscribedCursor.rawValue)",
                 category: .events
             )
+            return subscription
         } catch {
             logger.warning("Failed to subscribe to session events: \(error.localizedDescription)", category: .events)
+            throw error
         }
     }
 
@@ -574,7 +601,7 @@ final class EngineClient: EngineTransport {
     private func clearActiveStreamSubscriptions(reason: String) {
         let subscriptionCount = streamSubscriptions.count
         let ackTaskCount = streamAckTasks.count
-        for var task in streamAckTasks.values {
+        for task in streamAckTasks.values {
             task.cancel()
         }
         streamAckTasks.removeAll()

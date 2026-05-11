@@ -723,6 +723,15 @@ impl EngineHostHandle {
             )
     }
 
+    /// Return the latest stream cursor for one topic.
+    pub async fn latest_stream_cursor(&self, topic: &str) -> Result<StreamCursor> {
+        let store = self.inner.lock().await.primitives.streams.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .latest_cursor(topic)
+    }
+
     /// Poll the engine stream store.
     pub async fn poll_stream(
         &self,

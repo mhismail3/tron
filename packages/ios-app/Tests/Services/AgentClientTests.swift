@@ -238,6 +238,11 @@ struct AgentClientTests {
             idempotencyKey: .userAction("tool.result.test")
         )
 
+        #expect(transport.ensureSessionEventSubscriptionCallCount == 8)
+        #expect(transport.operationOrder.prefix(2) == [
+            "subscribe:\(sessionId)",
+            "write:agent::prompt"
+        ])
         #expect(seenFunctions == [
             "agent::prompt",
             "skills::activate",
@@ -252,6 +257,22 @@ struct AgentClientTests {
             "agent::abort_tool",
             "tool::result"
         ])
+    }
+
+    @Test("Prompt does not invoke agent when live session stream cannot subscribe")
+    func promptRequiresLiveSessionSubscription() async {
+        let transport = makeConnectedTransport()
+        transport.ensureSessionEventSubscriptionShouldThrow = true
+        let client = AgentClient(transport: transport)
+        transport.writeHandler = { _, _, _, _ in
+            Issue.record("agent::prompt should not be invoked without a live session stream")
+            return AgentPromptResult(acknowledged: true)
+        }
+
+        await #expect(throws: EngineConnectionError.self) {
+            try await client.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
+        }
+        #expect(transport.lastWriteFunctionId == nil)
     }
 
     // MARK: - Skill Activation Tests

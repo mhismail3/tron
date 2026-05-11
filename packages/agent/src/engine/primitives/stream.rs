@@ -25,7 +25,7 @@ pub(super) fn registrations(
             primitive_function(
                 "stream::subscribe",
                 STREAM_WORKER_ID,
-                "subscribe to a cursor-pull stream",
+                "subscribe to a live stream; omit afterCursor to start at the topic tail",
                 EffectClass::IdempotentWrite,
                 "stream.write",
             )
@@ -98,9 +98,10 @@ impl InProcessFunctionHandler for StreamPrimitiveHandler {
                 let subscription_id =
                     super::optional_string(invocation.payload.get("subscriptionId"))?
                         .unwrap_or_else(|| crate::engine::InvocationId::generate().to_string());
-                let cursor = StreamCursor(
-                    optional_u64(invocation.payload.get("afterCursor"))?.unwrap_or_default(),
-                );
+                let cursor = match optional_u64(invocation.payload.get("afterCursor"))? {
+                    Some(cursor) => StreamCursor(cursor),
+                    None => store.latest_cursor(&topic)?,
+                };
                 let visibility = optional_visibility(invocation.payload.get("visibility"))?
                     .unwrap_or(VisibilityScope::Session);
                 let session_id = super::optional_string(invocation.payload.get("sessionId"))?
@@ -186,7 +187,7 @@ fn stream_subscribe_schema() -> Value {
         "properties": {
             "topic": {"type": "string"},
             "subscriptionId": {"type": "string"},
-            "afterCursor": {"type": "integer"},
+            "afterCursor": {"type": "integer", "description": "Replay cursor. Omit to start at the current topic tail for live-only delivery."},
             "visibility": {"type": "string"},
             "sessionId": {"type": "string"},
             "workspaceId": {"type": "string"}

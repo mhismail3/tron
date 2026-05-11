@@ -147,16 +147,18 @@ tool execution, session mutation policy, or stream delivery rules. Write calls
 carry an explicit `EngineInvocationContext` when the capability is scoped to a
 session or workspace, and live session subscriptions send explicit stream
 filters (`sessionId` and, when known, `workspaceId`) so the server can enforce
-visibility with its engine stream primitives. The client stores cursors locally
-only to resume delivery; ACKs are coalesced to the latest cursor per
-subscription so catch-up bursts do not turn into one engine request per event.
+visibility with its engine stream primitives. Session history is reconstructed
+with `session::reconstruct`; `events.session` subscriptions are live-tail only
+and never replay a stored cursor into the view state machine. The client records
+delivered cursors for ACK coalescing and diagnostics, not as the source of
+session catch-up. ACKs are coalesced to the latest cursor per
+subscription so bursts do not turn into one engine request per event.
 Active subscription ids are per WebSocket, so they are cleared whenever the
-transport leaves `.connected` and recreated from the stored cursor after
-reconnect. Catalog, ledger, idempotency, approval, lease, and worker ownership
-stay server-side. Before sending a prompt, the chat view sets the active session
-on `EngineClient`, which ensures the `events.session` subscription exists before
-agent output begins; any missed output is recovered through the same stream
-cursor and reconstruction path rather than a client-side capability shortcut.
+transport leaves `.connected` and recreated at the engine topic tail after
+reconnect. Catalog, ledger, idempotency, approval, lease, stream visibility, and
+worker ownership stay server-side. Before sending prompt-producing agent writes,
+the client awaits the `events.session` subscription; if that cannot be
+established, it does not start server work that the UI cannot observe.
 Foreground notification inbox updates follow the same thin-client rule:
 `NotifyApp` tool completions delivered over `/engine` refresh the inbox, while
 APNs remains the background device-delivery transport.

@@ -8,6 +8,21 @@ extension EventStoreManager {
     func setSessionProcessing(_ sessionId: String, isProcessing: Bool) {
         if isProcessing {
             processingSessionIds.insert(sessionId)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    try await engineClient.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
+                    logger.debug(
+                        "Session projection subscribed to live events for processing session \(String(sessionId.prefix(12)))...",
+                        category: .events
+                    )
+                } catch {
+                    logger.warning(
+                        "Session projection could not subscribe to live events for \(String(sessionId.prefix(12)))...: \(error.localizedDescription)",
+                        category: .events
+                    )
+                }
+            }
         } else {
             processingSessionIds.remove(sessionId)
         }

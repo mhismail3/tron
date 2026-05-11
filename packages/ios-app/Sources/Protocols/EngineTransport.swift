@@ -24,6 +24,11 @@ protocol EngineTransport: AnyObject {
     /// Update the current session ID
     func setCurrentSessionId(_ id: String?)
 
+    /// Ensure the transport has an active engine stream subscription for the
+    /// session before server-owned work can publish live events.
+    @discardableResult
+    func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription
+
     /// Update the current model
     func setCurrentModel(_ model: String)
 

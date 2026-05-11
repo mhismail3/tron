@@ -113,4 +113,34 @@ final class SessionStateInvariantsTests: XCTestCase {
         XCTAssertTrue(vm.currentToolMessages.isEmpty)
         XCTAssertTrue(vm.currentTurnToolCalls.isEmpty)
     }
+
+    /// A completed `session::reconstruct` response is server-authoritative.
+    /// It must clear any local live-turn indicators that were left behind by a
+    /// dropped socket, a stale post-processing timeout, or an old stream frame.
+    func testCompletedReconstructionReconcilesTransientLiveState() {
+        let vm = makeViewModel("sess-reconcile-\(UUID().uuidString)")
+        vm.agentPhase = .postProcessing
+        vm.runningToolCount = 2
+        vm.pullUpPanelState.awaitingSuggestions = true
+        vm.postProcessingTimeoutTask = Task { try? await Task.sleep(for: .seconds(30)) }
+        let thinking = ChatMessage.thinking("still thinking", isStreaming: true)
+        vm.appendToMessages(thinking)
+        vm.thinkingMessageId = thinking.id
+        let toolId = UUID()
+        vm.currentToolMessages[toolId] = ChatMessage(id: toolId, role: .assistant, content: .text(""))
+        vm.currentTurnToolCalls.append(ToolCallRecord(toolCallId: "t", toolName: "Bash", arguments: "{}"))
+
+        vm.reconcileCompletedReconstructionState()
+
+        XCTAssertEqual(vm.agentPhase, .idle)
+        XCTAssertEqual(vm.runningToolCount, 0)
+        XCTAssertFalse(vm.pullUpPanelState.awaitingSuggestions)
+        XCTAssertNil(vm.postProcessingTimeoutTask)
+        XCTAssertTrue(vm.currentToolMessages.isEmpty)
+        XCTAssertTrue(vm.currentTurnToolCalls.isEmpty)
+        guard case .thinking(_, _, let isStreaming) = vm.messages[0].content else {
+            return XCTFail("expected thinking message")
+        }
+        XCTAssertFalse(isStreaming)
+    }
 }

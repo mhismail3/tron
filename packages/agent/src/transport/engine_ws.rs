@@ -414,7 +414,20 @@ impl EngineWsSession {
             Ok(limit) => limit,
             Err(error) => return self.send_error(message.id, error),
         };
-        let cursor = StreamCursor(message.cursor.unwrap_or(0));
+        let cursor = match message.cursor {
+            Some(cursor) => StreamCursor(cursor),
+            None => match self
+                .ctx
+                .engine_host
+                .latest_stream_cursor(&message.topic)
+                .await
+            {
+                Ok(cursor) => cursor,
+                Err(error) => {
+                    return self.send_error(message.id, engine_error_to_capability_error(error));
+                }
+            },
+        };
         let context = self.merged_context(message.context);
         let subscription_id = format!("engine-ws:{}:{}", self.client_id, uuid::Uuid::now_v7());
         let visibility = visibility_for_context(&context);
@@ -529,7 +542,16 @@ impl EngineWsSession {
             self.client_id,
             uuid::Uuid::now_v7()
         );
-        let cursor = StreamCursor(message.cursor.unwrap_or(0));
+        let Some(cursor) = message.cursor.map(StreamCursor) else {
+            return self.send_error(
+                message.id,
+                protocol_error(
+                    INVALID_PARAMS,
+                    "topic poll requires an explicit cursor; omit cursor only for live subscribe",
+                    None,
+                ),
+            );
+        };
         let visibility = visibility_for_context(&context);
         let subscribe_result = self
             .ctx
@@ -1363,6 +1385,80 @@ mod tests {
         let event = server_payload_from_stream_event(&page.events[0]);
         assert_eq!(event.event_type, "agent.ready");
         assert_eq!(event.stream_cursor, Some(1));
+    }
+
+    #[tokio::test]
+    async fn subscribe_without_cursor_starts_at_topic_tail() {
+        let (mut session, mut rx) = test_session();
+        session.hello = Some(HelloState {
+            session_id: Some("s1".to_owned()),
+            workspace_id: None,
+        });
+        let old_cursor = session
+            .ctx
+            .engine_host
+            .publish_stream_event(PublishStreamEvent {
+                topic: "events.session".to_owned(),
+                payload: json!({
+                    "serverEvent": ServerEventPayload::new(
+                        "agent.old",
+                        Some("s1".to_owned()),
+                        Some(json!({"old": true}))
+                    )
+                }),
+                visibility: VisibilityScope::Session,
+                session_id: Some("s1".to_owned()),
+                workspace_id: None,
+                producer: "test".to_owned(),
+                trace_id: None,
+                parent_invocation_id: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            session
+                .handle_text(r#"{"type":"subscribe","id":"s","topic":"events.session"}"#)
+                .await
+        );
+        let response = rx.recv().await.unwrap();
+        let value: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            value.pointer("/result/cursor").and_then(Value::as_u64),
+            Some(old_cursor.0)
+        );
+
+        let subscription = session
+            .subscriptions
+            .lock()
+            .await
+            .values()
+            .next()
+            .cloned()
+            .unwrap();
+        assert_eq!(subscription.cursor, old_cursor);
+    }
+
+    #[tokio::test]
+    async fn topic_poll_requires_explicit_cursor() {
+        let (mut session, mut rx) = test_session();
+        session.hello = Some(HelloState {
+            session_id: Some("s1".to_owned()),
+            workspace_id: None,
+        });
+
+        assert!(
+            session
+                .handle_text(r#"{"type":"poll","id":"p","topic":"events.session"}"#)
+                .await
+        );
+        let response = rx.recv().await.unwrap();
+        let value: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(value.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            value.pointer("/error/message").and_then(Value::as_str),
+            Some("topic poll requires an explicit cursor; omit cursor only for live subscribe")
+        );
     }
 
     #[tokio::test]

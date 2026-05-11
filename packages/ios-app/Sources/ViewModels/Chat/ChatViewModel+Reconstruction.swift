@@ -77,6 +77,10 @@ extension ChatViewModel {
         // 7. Ensure context window limit is set (prefetchModels runs in parallel and may not have completed)
         await refreshContextFromServer()
 
+        if !result.isRunning {
+            reconcileCompletedReconstructionState()
+        }
+
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
 
@@ -114,6 +118,30 @@ extension ChatViewModel {
         }
 
         logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0)", category: .session)
+    }
+
+    /// Reconcile transient live-turn state after a server-authoritative
+    /// completed reconstruction.
+    ///
+    /// `session::reconstruct` is the source of truth for history. When it says
+    /// the session is not running, no local phase, stale post-processing
+    /// timeout, or reconstructed half-open thinking/tool marker may keep the
+    /// chat in a processing UI state.
+    func reconcileCompletedReconstructionState() {
+        postProcessingTimeoutTask?.cancel()
+        postProcessingTimeoutTask = nil
+        agentPhase = .idle
+        runningToolCount = 0
+        pullUpPanelState.awaitingSuggestions = false
+        currentToolMessages.removeAll()
+        currentTurnToolCalls.removeAll()
+        streamingManager.reset()
+        thinkingState.markStreamingComplete()
+        markThinkingMessageCompleteIfNeeded()
+        logger.info(
+            "[RECONSTRUCT] Reconciled completed session to idle live state",
+            category: .session
+        )
     }
 
     /// Process in-flight state from a running agent turn.

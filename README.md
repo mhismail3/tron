@@ -457,6 +457,14 @@ Engine stream (`events.session`, `catalog`, `jobs`, ...)
 /engine subscriptions -> Per-connection WebSocket writers
 ```
 
+Live `/engine` subscriptions are not history loaders. Session screens reconstruct
+persisted history through `session::reconstruct`; their `events.session`
+subscription then starts at the current topic tail and carries only future
+records. Stateless stream polling and non-session catch-up remain explicit cursor
+operations. Stream polling applies engine visibility before pagination, so a
+session subscriber is never blocked behind older stream rows owned by unrelated
+sessions.
+
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` tool frames when iOS clients are subscribed.
 
 ---
@@ -753,7 +761,7 @@ packages/ios-app/Sources/
 - **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; engine-native clients discover the live endpoint by invoking `codex_app::status` and do not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
-- **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription from the stored cursor after reconnect, and coalesces stream ACKs to the latest cursor so large turn catch-up bursts stay inside the engine stream protocol.
+- **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.

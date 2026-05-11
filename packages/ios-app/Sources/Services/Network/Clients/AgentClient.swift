@@ -6,6 +6,13 @@ final class AgentClient: EngineDomainClient {
 
     // MARK: - Agent Methods
 
+    private func requireLiveSessionEvents() async throws -> String {
+        let transport = try requireTransport()
+        let (_, sessionId) = try transport.requireSession()
+        try await transport.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
+        return sessionId
+    }
+
     func sendPrompt(
         _ prompt: String,
         images: [ImageAttachment]? = nil,
@@ -13,7 +20,7 @@ final class AgentClient: EngineDomainClient {
         reasoningLevel: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws {
-        let (_, sessionId) = try requireTransport().requireSession()
+        let sessionId = try await requireLiveSessionEvents()
 
         let params = AgentPromptParams(
             sessionId: sessionId,
@@ -70,7 +77,7 @@ final class AgentClient: EngineDomainClient {
     /// Queue a prompt for later delivery when the agent becomes ready.
     /// Server persists a `message.queued` event and publishes it through engine streams.
     func queuePrompt(_ text: String, idempotencyKey: EngineIdempotencyKey) async throws -> PendingQueueItem {
-        let (_, sessionId) = try requireTransport().requireSession()
+        let sessionId = try await requireLiveSessionEvents()
         let params = QueuePromptParams(sessionId: sessionId, prompt: text)
         return try await invokeWrite(
             "agent::queue_prompt",
@@ -82,7 +89,7 @@ final class AgentClient: EngineDomainClient {
 
     /// Cancel a specific queued prompt by its queue ID.
     func dequeuePrompt(_ queueId: String, idempotencyKey: EngineIdempotencyKey) async throws {
-        let (_, sessionId) = try requireTransport().requireSession()
+        let sessionId = try await requireLiveSessionEvents()
         let params = DequeuePromptParams(sessionId: sessionId, queueId: queueId)
         let _: DequeueResult = try await invokeWrite(
             "agent::dequeue_prompt",
@@ -94,7 +101,7 @@ final class AgentClient: EngineDomainClient {
 
     /// Clear all queued prompts for the current session.
     func clearQueue(idempotencyKey: EngineIdempotencyKey) async throws {
-        let (_, sessionId) = try requireTransport().requireSession()
+        let sessionId = try await requireLiveSessionEvents()
         let params = ClearQueueParams(sessionId: sessionId)
         let _: ClearQueueResult = try await invokeWrite(
             "agent::clear_queue",
@@ -109,7 +116,7 @@ final class AgentClient: EngineDomainClient {
     /// Deliver pending subagent results as a server-constructed prompt.
     /// The server formats the results and either spawns a prompt run or queues if busy.
     func deliverSubagentResults(idempotencyKey: EngineIdempotencyKey) async throws -> DeliverSubagentResultsResponse {
-        let (_, sessionId) = try requireTransport().requireSession()
+        let sessionId = try await requireLiveSessionEvents()
         let params = DeliverSubagentResultsParams(sessionId: sessionId)
         return try await invokeWrite(
             "agent::deliver_subagent_results",
@@ -129,7 +136,7 @@ final class AgentClient: EngineDomainClient {
         note: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> SubmitConfirmationResponse {
-        let (_, sessionId) = try requireTransport().requireSession()
+        let sessionId = try await requireLiveSessionEvents()
         let params = SubmitConfirmationParams(
             sessionId: sessionId,
             action: action,
@@ -150,7 +157,7 @@ final class AgentClient: EngineDomainClient {
         questions: [AnswerSubmission],
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> SubmitAnswersResponse {
-        let (_, sessionId) = try requireTransport().requireSession()
+        let sessionId = try await requireLiveSessionEvents()
         let params = SubmitAnswersParams(sessionId: sessionId, questions: questions)
         return try await invokeWrite(
             "agent::submit_answers",
@@ -203,6 +210,7 @@ final class AgentClient: EngineDomainClient {
         result: AskUserQuestionResult,
         idempotencyKey: EngineIdempotencyKey
     ) async throws {
+        try await requireTransport().ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
         let params = ToolResultParams(sessionId: sessionId, toolCallId: toolCallId, result: result)
         logger.info("[TOOL_RESULT] Sending tool result: sessionId=\(sessionId), toolCallId=\(toolCallId)", category: .session)
 

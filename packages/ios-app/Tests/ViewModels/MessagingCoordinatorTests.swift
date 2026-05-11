@@ -70,6 +70,22 @@ final class MessagingCoordinatorTests: XCTestCase {
         // Then: The chat view is subscribed before server output starts.
         XCTAssertTrue(mockContext.ensureLiveEventSubscriptionCalled)
         XCTAssertTrue(mockContext.sendPromptCalled)
+        XCTAssertEqual(mockContext.callOrder.prefix(2), ["ensureLiveEventSubscription", "sendPromptToServer"])
+    }
+
+    func testSendMessageDoesNotSendWhenLiveEventSubscriptionFails() async {
+        // Given: Valid text, but the live stream cannot be established.
+        mockContext.inputText = "Stream the response live"
+        mockContext.ensureLiveEventSubscriptionShouldFail = true
+
+        // When: Sending message
+        await coordinator.sendMessage(context: mockContext)
+
+        // Then: Do not start server work that the client cannot observe.
+        XCTAssertTrue(mockContext.ensureLiveEventSubscriptionCalled)
+        XCTAssertFalse(mockContext.sendPromptCalled)
+        XCTAssertTrue(mockContext.showErrorCalled)
+        XCTAssertEqual(mockContext.inputText, "Stream the response live")
     }
 
     func testSendMessageWithAttachmentsOnlySendsToServer() async {
@@ -649,6 +665,8 @@ final class MockMessagingContext: MessagingContext {
     var cancelActiveDeviceRequestsCalled = false
     var showErrorCalled = false
     var ensureLiveEventSubscriptionCalled = false
+    var ensureLiveEventSubscriptionShouldFail = false
+    var callOrder: [String] = []
 
     // MARK: - Test Configuration
     var sendPromptShouldFail = false
@@ -662,6 +680,7 @@ final class MockMessagingContext: MessagingContext {
         reasoningLevel: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws {
+        callOrder.append("sendPromptToServer")
         sendPromptCalled = true
         lastSentText = text
         lastSentAttachments = attachments
@@ -672,8 +691,12 @@ final class MockMessagingContext: MessagingContext {
         }
     }
 
-    func ensureLiveEventSubscription() {
+    func ensureLiveEventSubscription() async throws {
+        callOrder.append("ensureLiveEventSubscription")
         ensureLiveEventSubscriptionCalled = true
+        if ensureLiveEventSubscriptionShouldFail {
+            throw MessagingTestError.serverError
+        }
     }
 
     var activateSkillOnServerCallCount = 0

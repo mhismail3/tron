@@ -134,6 +134,17 @@ final class TestEngineTransport: EngineTransport {
         currentSessionId = id
     }
 
+    func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
+        _ = try requireConnection()
+        currentSessionId = sessionId
+        return EngineSubscription(
+            subscriptionId: "test-subscription",
+            topic: "events.session",
+            cursor: 100,
+            limit: 100
+        )
+    }
+
     func setCurrentModel(_ model: String) {
         currentModel = model
     }
