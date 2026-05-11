@@ -204,7 +204,7 @@ extension ChatViewModel {
         isRetaining = false
         memoryRetainInProgressMessageId = nil
         askUserQuestionState.clearAll()
-        getConfirmationState.clearAll()
+        engineApprovalState.clearAll()
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
         pullUpPanelState.awaitingSuggestions = false
@@ -316,7 +316,7 @@ extension ChatViewModel {
         isRetaining = false
         memoryRetainInProgressMessageId = nil
         askUserQuestionState.clearAll()
-        getConfirmationState.clearAll()
+        engineApprovalState.clearAll()
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

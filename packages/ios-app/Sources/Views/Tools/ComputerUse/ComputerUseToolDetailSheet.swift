@@ -490,7 +490,7 @@ struct ComputerUseToolDetailSheet: View {
             status: .error,
             durationMs: 30,
             arguments: "{\"action\": \"click\", \"x\": 100, \"y\": 200}",
-            result: "Action 'click' requires confirmation. Call GetConfirmation first.",
+            result: "Action 'click' was blocked by engine approval policy.",
             isResultTruncated: false
         )
     )

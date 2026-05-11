@@ -9,7 +9,6 @@
 //! | Module              | Tool             | Content |
 //! |---------------------|------------------|---------|
 //! | [`ask_user`]        | `AskUserQuestion` | Pose a question with typed answer choices; blocks the turn until iOS responds |
-//! | [`get_confirmation`]| `GetConfirmation` | Two-step confirmation gate for destructive / mutating actions |
 //! | [`notify`]          | `NotifyApp`       | Send an APNS push to the user's device (falls back to stub when push is disabled) |
 //! | [`computer_use`]    | `ComputerUse`     | macOS GUI automation (screenshot, click, type, scroll) — see submodule docs |
 //! | [`display`]         | `Display`         | Render structured content (markdown, code, table) in the iOS chat |
@@ -18,9 +17,9 @@
 //!
 //! ## Invariants
 //!
-//! - Mutating [`computer_use`] actions are gated by [`get_confirmation`]
-//!   in production; a `confirmed=true` parameter is required to bypass,
-//!   and is itself only valid after a successful `GetConfirmation` call.
+//! - User decisions for engine policy approvals are owned by the engine
+//!   `approval::*` primitives. UI tools here only ask product questions or
+//!   surface notifications.
 //! - [`notify`] silently degrades to a stub when push is disabled — the
 //!   tool returns a warning the agent surfaces, but does not error, so
 //!   session flow never depends on APNS availability (see M19).
@@ -29,7 +28,6 @@ pub mod ask_user;
 pub mod computer_use;
 pub mod display;
 pub mod display_stream;
-pub mod get_confirmation;
 #[cfg(target_os = "macos")]
 pub mod input;
 pub mod notify;

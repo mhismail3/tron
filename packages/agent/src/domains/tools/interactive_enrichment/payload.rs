@@ -10,15 +10,6 @@ pub(super) fn build_user_message_metadata(
 ) -> Map<String, Value> {
     let mut out = Map::new();
     match tool_name {
-        "GetConfirmation" => {
-            let _ = out.insert("messageKind".into(), json!("confirmation_response"));
-            if let Some(decision) = tool_fields.get("confirmationDecision") {
-                let _ = out.insert("confirmationDecision".into(), decision.clone());
-            }
-            if let Some(note) = tool_fields.get("confirmationNote") {
-                let _ = out.insert("confirmationNote".into(), note.clone());
-            }
-        }
         "AskUserQuestion" => {
             let _ = out.insert("messageKind".into(), json!("answered_questions"));
             if let Some(parsed) = tool_fields.get("parsedAnswers").and_then(Value::as_array) {

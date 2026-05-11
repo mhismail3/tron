@@ -1,53 +1,6 @@
-use serde_json::Value;
-
 use super::ComputerUseTool;
-use crate::domains::tools::implementations::utils::validation::{
-    get_optional_string, get_optional_u64,
-};
 
 impl ComputerUseTool {
-    /// Generate a human-readable description of the action for confirmation.
-    #[allow(clippy::unused_self)]
-    pub(super) fn describe_action(&self, action: &str, params: &Value) -> String {
-        match action {
-            "clickElement" => {
-                let text = get_optional_string(params, "text").unwrap_or_default();
-                let app = get_optional_string(params, "app");
-                match app {
-                    Some(a) => format!("Click element \"{text}\" in {a}"),
-                    None => format!("Click element \"{text}\""),
-                }
-            }
-            "type" => {
-                let text = get_optional_string(params, "text").unwrap_or_default();
-                let preview = if text.len() > 30 {
-                    format!("{}...", &text[..27])
-                } else {
-                    text
-                };
-                format!("Type text: \"{preview}\"")
-            }
-            "keypress" => {
-                let keys: Vec<String> = params
-                    .get("keys")
-                    .and_then(Value::as_array)
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                format!("Press keys: {}", keys.join("+"))
-            }
-            "scroll" => {
-                let dir = get_optional_string(params, "direction").unwrap_or_else(|| "down".into());
-                let amount = get_optional_u64(params, "amount").unwrap_or(100);
-                format!("Scroll {dir} by {amount}px")
-            }
-            _ => action.to_string(),
-        }
-    }
-
     /// Build a Swift script that finds the best matching window for screenshot capture.
     ///
     /// Scores all matching windows by:

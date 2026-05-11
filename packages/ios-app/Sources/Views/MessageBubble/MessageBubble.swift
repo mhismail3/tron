@@ -99,7 +99,7 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case .askUserQuestion, .getConfirmation:
+            case .askUserQuestion:
                 ToolResultRouter(tool: tool)
             default:
                 let chipData = CommandToolChipData(from: tool)
@@ -131,16 +131,13 @@ struct MessageBubble: View {
                 onTap?(.askUserQuestion(data))
             }
 
-        case .getConfirmation(let data):
-            GetConfirmationToolViewer(data: data) {
-                onTap?(.getConfirmation(data))
+        case .engineApproval(let data):
+            EngineApprovalChipView(data: data) {
+                onTap?(.engineApproval(data))
             }
 
         case .answeredQuestions(let count):
             AnsweredQuestionsChipView(questionCount: count)
-
-        case .confirmedAction(let approved):
-            ConfirmedActionChipView(approved: approved)
 
         case .subagentResultsDelivered(let count):
             SubagentResultsDeliveredChipView(subagentCount: count)

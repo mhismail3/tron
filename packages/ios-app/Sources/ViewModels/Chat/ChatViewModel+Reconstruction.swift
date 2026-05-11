@@ -47,7 +47,12 @@ extension ChatViewModel {
         default: agentPhase = .idle
         }
 
-        // 4b. Process in-flight state (if agent is running)
+        // 4b. Restore durable engine approval chips from the server-owned
+        // approval projection. Live approval stream events update the same
+        // chip ids, so reconstruction and realtime delivery converge.
+        restoreEngineApprovalItems(result.approvalItems ?? [])
+
+        // 4c. Process in-flight state (if agent is running)
         if let inFlight = result.inFlight {
             await processInFlightState(inFlight)
         }
@@ -117,7 +122,23 @@ extension ChatViewModel {
             streamingRecoverySnapshot = nil
         }
 
-        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0)", category: .session)
+        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0), approvals=\(result.approvalItems?.count ?? 0)", category: .session)
+    }
+
+    private func restoreEngineApprovalItems(_ items: [EngineApprovalItem]) {
+        guard !items.isEmpty else { return }
+        var restored = 0
+        for item in items {
+            let data = engineApprovalToolData(from: item.approval)
+            if let index = MessageFinder.lastIndexOfEngineApproval(toolCallId: data.toolCallId, in: messages) {
+                messages[index].content = .engineApproval(data)
+            } else {
+                messages.append(ChatMessage(role: .assistant, content: .engineApproval(data)))
+            }
+            restored += 1
+        }
+        messageIndex.rebuild(from: messages)
+        logger.info("[RECONSTRUCT] Restored \(restored) engine approval chip(s)", category: .session)
     }
 
     /// Reconcile transient live-turn state after a server-authoritative
@@ -369,13 +390,13 @@ extension ChatViewModel {
         if let existingIdx = messages.firstIndex(where: { msg in
             switch msg.content {
             case .toolUse(let data): return data.toolCallId == toolCall.toolCallId
-            case .getConfirmation(let data): return data.toolCallId == toolCall.toolCallId
+            case .engineApproval(let data): return data.toolCallId == toolCall.toolCallId
             case .subagent(let data): return data.toolCallId == toolCall.toolCallId
             default: return false
             }
         }) {
             // Only update .toolUse with richer in-flight data (streaming output, startedAt).
-            // .getConfirmation and .subagent have authoritative content from persisted lifecycle
+            // .engineApproval and .subagent have authoritative content from persisted lifecycle
             // events — don't downgrade to .toolUse.
             if case .toolUse = messages[existingIdx].content {
                 messages[existingIdx].content = .toolUse(toolUseData)

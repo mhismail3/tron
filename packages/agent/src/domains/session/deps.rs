@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub(crate) struct Deps {
     pub(super) context_artifacts: Arc<crate::domains::session::context::ContextArtifactsService>,
     pub(super) event_store: Arc<EventStore>,
+    pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) profile_runtime: Arc<ProfileRuntime>,
     pub(super) session_manager: Arc<SessionManager>,
@@ -23,6 +24,7 @@ impl Deps {
         Self {
             context_artifacts: deps.context_artifacts.clone(),
             event_store: deps.event_store.clone(),
+            engine_host: deps.engine_host.clone(),
             orchestrator: deps.orchestrator.clone(),
             profile_runtime: deps.profile_runtime.clone(),
             session_manager: deps.session_manager.clone(),

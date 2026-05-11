@@ -114,9 +114,6 @@ protocol ToolStateTracking: AnyObject {
 
     /// Whether AskUserQuestion was called in the current turn.
     var askUserQuestionCalledInTurn: Bool { get set }
-
-    /// Whether GetConfirmation was called in the current turn.
-    var getConfirmationCalledInTurn: Bool { get set }
 }
 
 // MARK: - Dashboard Updates

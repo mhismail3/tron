@@ -706,7 +706,7 @@ fn ask_user_stopping_tools() -> HashSet<String> {
 }
 
 fn both_stopping_tools() -> HashSet<String> {
-    HashSet::from(["AskUserQuestion".to_string(), "GetConfirmation".to_string()])
+    HashSet::from(["AskUserQuestion".to_string(), "AskUserQuestion".to_string()])
 }
 
 /// Helper: build a Done event with token usage.
@@ -808,17 +808,17 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
         yield Ok(StreamEvent::TextDelta { delta: "answer".into() });
         yield Ok(StreamEvent::TextEnd { text: "answer".into(), signature: None });
         yield Ok(StreamEvent::ToolCallStart {
-            tool_call_id: "tc-conf".into(),
-            name: "GetConfirmation".into(),
+            tool_call_id: "tc-ask-confirm".into(),
+            name: "AskUserQuestion".into(),
         });
         yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-conf".into(),
-            arguments_delta: r#"{"action":"delete"}"#.into(),
+            tool_call_id: "tc-ask-confirm".into(),
+            arguments_delta: r#"{"questions":[{"question":"Proceed?"}]}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-conf", "GetConfirmation", {
+            tool_call: ToolCall::new("tc-ask-confirm", "AskUserQuestion", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("action".into(), serde_json::json!("delete"));
+                let _ = m.insert("questions".into(), serde_json::json!([{ "question": "Proceed?" }]));
                 m
             }),
         });
@@ -869,7 +869,7 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
     }
     // Tool preserved
     assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "GetConfirmation");
+    assert_eq!(result.tool_calls[0].name, "AskUserQuestion");
 }
 
 #[tokio::test]

@@ -22,10 +22,10 @@ import Foundation
 /// - `tool_use`: Tool invocation (combined with tool.call/tool.result data)
 ///
 /// ## Interactive Tool Handling
-/// `AskUserQuestion` and `GetConfirmation` tools are transformed via dedicated
-/// transformers that read server-enriched status fields directly from the
-/// tool.call payload. The server's stream processor drains content after
-/// these tools, so no trailing text blocks arrive.
+/// `AskUserQuestion` is transformed via a dedicated transformer that reads
+/// server-enriched status fields directly from the tool.call payload. Engine
+/// approvals are not model tools; they render from `approval.pending` /
+/// `approval.resolved` stream events and session reconstruction records.
 enum InterleavedContentProcessor {
 
     /// Transform an assistant message's content blocks into ChatMessages.
@@ -94,20 +94,6 @@ enum InterleavedContentProcessor {
                         turn: parsed.turn
                     ) {
                         messages.append(askUserMessage)
-                    }
-                    continue
-                }
-
-                // Check if this is GetConfirmation - handle specially
-                if toolName == "GetConfirmation" {
-                    if let confirmMessage = GetConfirmationTransformer.transform(
-                        toolUseId: toolUseId,
-                        toolCall: toolCall,
-                        contentBlock: block,
-                        timestamp: timestamp,
-                        turn: parsed.turn
-                    ) {
-                        messages.append(confirmMessage)
                     }
                     continue
                 }

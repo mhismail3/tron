@@ -120,13 +120,13 @@ fn schema_action_enum_values() {
 }
 
 #[test]
-fn schema_has_confirmed_property() {
+fn schema_has_no_confirmation_bypass_property() {
     let t = tool(true);
     let def = t.definition();
     let props = def.parameters.properties.unwrap();
     assert!(
-        props.contains_key("confirmed"),
-        "should have confirmed property for confirmation bypass"
+        !props.contains_key("confirmed"),
+        "ComputerUse must not expose a model-level confirmation bypass parameter"
     );
 }
 
@@ -166,83 +166,6 @@ fn screenshot_action_no_required_params() {
     let required = def.parameters.required.unwrap();
     assert_eq!(required.len(), 1);
     assert_eq!(required[0], "action");
-}
-
-// ─── Confirmation gating tests ───
-
-#[tokio::test]
-async fn mutating_action_requires_confirmation_when_enabled() {
-    let t = tool(true);
-    for action in MUTATING_ACTIONS {
-        let mut params = json!({"action": action});
-        // Add required params for each action
-        match *action {
-            "click" | "moveMouse" => {
-                params["x"] = json!(100);
-                params["y"] = json!(200);
-            }
-            "type" => {
-                params["text"] = json!("hello");
-            }
-            "keypress" => {
-                params["keys"] = json!(["enter"]);
-            }
-            _ => {}
-        }
-        let r = t.execute(params, &make_ctx()).await.unwrap();
-        assert_eq!(
-            r.is_error,
-            Some(true),
-            "action '{action}' should require confirmation"
-        );
-        assert!(
-            extract_text(&r).contains("requires confirmation"),
-            "action '{action}' error should mention confirmation"
-        );
-    }
-}
-
-#[tokio::test]
-#[cfg(target_os = "macos")]
-async fn mutating_action_proceeds_with_confirmed_flag() {
-    let t = tool(true);
-    let r = t
-        .execute(
-            json!({"action": "type", "text": "hello", "confirmed": true}),
-            &make_ctx(),
-        )
-        .await
-        .unwrap();
-    assert!(r.is_error.is_none(), "should proceed when confirmed=true");
-}
-
-#[tokio::test]
-#[cfg(target_os = "macos")]
-async fn mutating_action_proceeds_when_confirmation_disabled() {
-    let t = tool(false);
-    let r = t
-        .execute(json!({"action": "type", "text": "hello"}), &make_ctx())
-        .await
-        .unwrap();
-    assert!(
-        r.is_error.is_none(),
-        "should proceed when confirm_before_action=false"
-    );
-}
-
-#[tokio::test]
-async fn readonly_actions_skip_confirmation() {
-    let t = tool(true);
-    // screenshot is read-only
-    // Note: screenshot will fail with mock since there's no file, but it shouldn't hit confirmation
-    let r = t
-        .execute(json!({"action": "getWindows"}), &make_ctx())
-        .await
-        .unwrap();
-    assert!(
-        r.is_error.is_none(),
-        "getWindows should not require confirmation"
-    );
 }
 
 // ─── Action tests ───
@@ -1476,8 +1399,29 @@ async fn click_element_not_found() {
 }
 
 #[tokio::test]
-async fn click_element_requires_confirmation() {
-    let t = tool(true);
+async fn click_element_uses_engine_policy_not_local_confirmation_flag() {
+    let runner = MockRunner::with_handler(|cmd| {
+        if cmd.contains("swift") {
+            ProcessOutput {
+                stdout: "found\tpressed\tAXButton\tSubmit\t0\t0\t0\t0".into(),
+                stderr: String::new(),
+                exit_code: 0,
+                duration_ms: 10,
+                timed_out: false,
+                interrupted: false,
+            }
+        } else {
+            ProcessOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+                duration_ms: 10,
+                timed_out: false,
+                interrupted: false,
+            }
+        }
+    });
+    let t = tool_with_runner(runner, true);
     let r = t
         .execute(
             json!({"action": "clickElement", "text": "Submit"}),
@@ -1485,11 +1429,11 @@ async fn click_element_requires_confirmation() {
         )
         .await
         .unwrap();
-    assert_eq!(r.is_error, Some(true));
+    assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
     let text = extract_text(&r);
     assert!(
-        text.contains("requires confirmation"),
-        "should require confirmation: {text}"
+        !text.contains("requires confirmation"),
+        "local confirmation gate should be gone: {text}"
     );
 }
 
@@ -1815,26 +1759,6 @@ async fn screenshot_window_special_chars_escaped() {
         swift_cmd.contains(r#"\""#),
         "quotes should be escaped in swift: {swift_cmd}"
     );
-}
-
-// ─── Confirmation describe_action tests ───
-
-#[test]
-fn describe_type_action_truncated() {
-    let t = tool(true);
-    let desc = t.describe_action(
-        "type",
-        &json!({"text": "This is a very long string that should be truncated in the description"}),
-    );
-    assert!(desc.contains("..."));
-    assert!(desc.len() < 60);
-}
-
-#[test]
-fn describe_keypress_action() {
-    let t = tool(true);
-    let desc = t.describe_action("keypress", &json!({"keys": ["cmd", "c"]}));
-    assert_eq!(desc, "Press keys: cmd+c");
 }
 
 // ─── is_mutating tests ───

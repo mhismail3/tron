@@ -3,7 +3,7 @@ import Foundation
 /// Extracts tool arguments from either a `ToolCallPayload` or a content block dictionary.
 ///
 /// Used by `InterleavedContentProcessor`, `AskUserQuestionTransformer`, and
-/// `GetConfirmationTransformer` to resolve tool arguments consistently.
+/// `AskUserQuestionTransformer` to resolve tool arguments consistently.
 enum ToolArgumentExtractor {
 
     /// Extract arguments JSON string from a tool call payload or content block.

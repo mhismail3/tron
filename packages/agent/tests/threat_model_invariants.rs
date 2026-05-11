@@ -781,7 +781,7 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
         "sandbox::get_spawned_worker",
         "sandbox::stop_spawned_worker",
         "sandbox-worker",
-        "approvalRequiredForAgentVisibility",
+        "sandboxAutonomy",
         "worker:{workerId}",
     ] {
         assert!(
@@ -789,6 +789,10 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
             "sandbox::spawn_worker must stay a high-risk domain-owned capability with complete engine metadata; missing `{required}`"
         );
     }
+    assert!(
+        !sandbox_contract.contains(".approval_required(true)"),
+        "sandbox lifecycle capabilities are sandbox-autonomous and must not create user approvals"
+    );
 
     let sandbox = std::fs::read_to_string(crate_root.join("src/domains/sandbox/mod.rs"))
         .expect("failed to read sandbox domain");
@@ -798,6 +802,72 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
             && !sandbox.contains(".unregister_worker("),
         "sandbox worker cleanup must route through engine worker/stream primitives, not direct catalog cleanup"
     );
+}
+
+#[test]
+fn approvals_are_engine_owned_not_model_confirmation_tools() {
+    let repo_root = repo_root();
+    let agent_root = crate_root();
+    let tool_catalog =
+        std::fs::read_to_string(agent_root.join("src/domains/tools/operations/catalog.rs"))
+            .expect("failed to read tool catalog");
+    let agent_contract = std::fs::read_to_string(agent_root.join("src/domains/agent/contract.rs"))
+        .expect("failed to read agent contract");
+    let agent_handlers = std::fs::read_to_string(agent_root.join("src/domains/agent/handlers.rs"))
+        .expect("failed to read agent handlers");
+    let engine_tools =
+        std::fs::read_to_string(agent_root.join("src/domains/tools/implementations/engine/mod.rs"))
+            .expect("failed to read engine tools");
+
+    assert!(
+        !tool_catalog.contains("GetConfirmation"),
+        "approval UI must be engine-owned; GetConfirmation must not be a model-facing tool"
+    );
+    assert!(
+        !agent_contract.contains("agent::submit_confirmation")
+            && !agent_handlers.contains("submit_confirmation"),
+        "model-level confirmation submission must not be a canonical agent capability"
+    );
+    for stale in [
+        "/engine/approvals",
+        "/api/approvals",
+        "model-level GetConfirmation",
+    ] {
+        assert!(
+            !engine_tools.contains(stale),
+            "agent engine tool guidance must not mention stale approval path `{stale}`"
+        );
+    }
+
+    let ios_agent_client = std::fs::read_to_string(
+        repo_root.join("packages/ios-app/Sources/Services/Network/Clients/AgentClient.swift"),
+    )
+    .expect("failed to read iOS agent client");
+    assert!(
+        !ios_agent_client.contains("submitConfirmation")
+            && !ios_agent_client.contains("agent::submit_confirmation"),
+        "iOS must resolve approvals through approval::resolve, never agent::submit_confirmation"
+    );
+
+    let ios_sources = repo_root.join("packages/ios-app/Sources");
+    for path in files_with_extensions(&ios_sources, &["swift"]) {
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read iOS source {path:?}: {e}"));
+        for stale in [
+            "GetConfirmation",
+            "getconfirmation",
+            "submitConfirmation",
+            "submit_confirmation",
+            "confirmedAction",
+            "confirmation_response",
+        ] {
+            assert!(
+                !content.contains(stale),
+                "{} contains stale model-confirmation approval path `{stale}`",
+                path.strip_prefix(&repo_root).unwrap_or(&path).display()
+            );
+        }
+    }
 }
 
 #[test]
@@ -1091,7 +1161,6 @@ fn server_package_uses_domain_owned_engine_layout() {
         "context/queries/payload_preview.rs",
         "context/queries/prepare.rs",
         "context/queries/snapshot.rs",
-        "tools/interactive_enrichment/confirmation.rs",
         "tools/interactive_enrichment/payload.rs",
         "tools/interactive_enrichment/questions.rs",
         "tools/interactive_enrichment/subagent.rs",
@@ -1403,6 +1472,33 @@ fn files_to_scan(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_files(root, &mut files);
     files
+}
+
+fn files_with_extensions(root: &Path, extensions: &[&str]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    visit_files_with_extensions(root, extensions, &mut files);
+    files
+}
+
+fn visit_files_with_extensions(root: &Path, extensions: &[&str], files: &mut Vec<PathBuf>) {
+    if !root.exists() {
+        return;
+    }
+    let entries = std::fs::read_dir(root)
+        .unwrap_or_else(|e| panic!("failed to read directory {root:?}: {e}"));
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|e| panic!("failed to read entry in {root:?}: {e}"));
+        let path = entry.path();
+        if path.is_dir() {
+            visit_files_with_extensions(&path, extensions, files);
+        } else if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| extensions.contains(&ext))
+        {
+            files.push(path);
+        }
+    }
 }
 
 fn visit_files(root: &Path, files: &mut Vec<PathBuf>) {

@@ -227,14 +227,7 @@ struct DeliverSubagentResultsParams: Encodable {
     let sessionId: String
 }
 
-// MARK: - Confirmation/Answer Submission
-
-struct SubmitConfirmationParams: Encodable {
-    let sessionId: String
-    let action: String
-    let decision: String
-    let note: String?
-}
+// MARK: - Answer Submission
 
 struct AnswerSubmission: Encodable {
     let id: String
@@ -246,12 +239,6 @@ struct AnswerSubmission: Encodable {
 struct SubmitAnswersParams: Encodable {
     let sessionId: String
     let questions: [AnswerSubmission]
-}
-
-struct SubmitConfirmationResponse: Decodable {
-    let acknowledged: Bool
-    let queued: Bool
-    let runId: String?
 }
 
 struct SubmitAnswersResponse: Decodable {
@@ -266,4 +253,3 @@ struct DeliverSubagentResultsResponse: Decodable {
     let subagentCount: Int
     let runId: String?
 }
-

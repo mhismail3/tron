@@ -98,9 +98,9 @@ final class SheetCoordinator {
         present(.askUserQuestion)
     }
 
-    /// Show get confirmation sheet
-    func showGetConfirmation() {
-        present(.getConfirmation)
+    /// Show the engine approval sheet.
+    func showEngineApproval() {
+        present(.engineApproval)
     }
 
     /// Show subagent detail sheet

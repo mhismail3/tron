@@ -279,7 +279,7 @@ execution path is still canonical engine invocation: `Bash` resolves to
 `tool::engine_discover`, and so on. There is no separate production tool
 registry path.
 
-### Always-on (22)
+### Always-on (21)
 
 | Tool | Description |
 |------|-------------|
@@ -290,7 +290,6 @@ registry path.
 | `Search` | Full-text content search built on ripgrep (regex, glob filters, multiple output modes). |
 | `Bash` | Execute shell commands with configurable timeout. Supports backgrounding, blob storage for large output, and an optional sandbox image. |
 | `AskUserQuestion` | Prompt the user for input with structured options. |
-| `GetConfirmation` | Ask the user to answer a model-level product confirmation. Engine policy approvals are separate canonical `approval::*` capabilities and resolve through `approval::resolve`. |
 | `NotifyApp` | Send a push notification to iOS through the Cloudflare relay; if relay config or active device tokens are missing, return an explicit warning while foreground iOS refreshes notification inbox state from engine stream events. |
 | `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
 | `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/profiles/auth.json`. |
@@ -395,12 +394,13 @@ primitive response contracts.
 
 Sandbox-created capabilities enter through the high-risk
 `sandbox::spawn_worker` capability. It requires explicit idempotency,
-`sandbox.write` authority, approval for autonomous actors, a worker resource
-lease, and compensation notes. The capability starts a local worker process with
-scoped `/engine/workers` environment, waits for the expected registration, and
-returns the worker id, registered functions, catalog revision, visibility, and
-process metadata. Session visibility is the default; workspace/system promotion
-is still only `engine::promote`. `sandbox::list_spawned_workers`,
+`sandbox.write` authority, a worker resource lease, compensation notes, and the
+sandbox autonomy contract recorded on the capability. It starts a local worker
+process with scoped `/engine/workers` environment, waits for the expected
+registration, and returns the worker id, registered functions, catalog revision,
+visibility, and process metadata without a separate approval prompt. Session
+visibility is the default; workspace/system promotion is still only
+`engine::promote`. `sandbox::list_spawned_workers`,
 `sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
 local process lifecycle; stop kills the process, unregisters volatile catalog
 entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.
@@ -466,10 +466,14 @@ session subscriber is never blocked behind older stream rows owned by unrelated
 sessions.
 
 High-risk engine capabilities publish `approval.pending` records to the
-`approvals` stream. Thin clients render those records and resolve them by
-invoking the canonical `approval::resolve` primitive; the decision, resumed child
-invocation, ledger entry, and `approval.resolved` stream event all remain
-engine-owned.
+`approvals` stream only after the target payload and authority preflight pass.
+Thin clients render those records and resolve them by invoking the canonical
+`approval::resolve` primitive; the decision, resumed child invocation, ledger
+entry, and `approval.resolved` stream event all remain engine-owned. Agents can
+not see or invoke `approval::*` functions in their live catalog. When an engine
+tool invocation returns `APPROVAL_REQUIRED`, the turn stops and waits for the
+client/user approval record to resolve instead of polling private endpoints or
+asking through a model-visible confirmation tool.
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` tool frames when iOS clients are subscribed.
 

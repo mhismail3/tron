@@ -5,7 +5,8 @@
 //! - **stream** — live-updating views (browser windows, log tails)
 //!
 //! Text, links, and formatted content belong in the assistant's markdown
-//! response — NOT in this tool. Use GetConfirmation for approval gates.
+//! response; engine approval gates are enforced by capability policy, not this
+//! display tool.
 //!
 //! ## Image handling
 //!

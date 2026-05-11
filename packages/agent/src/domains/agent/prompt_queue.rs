@@ -499,14 +499,13 @@ mod tests {
     fn enqueue_with_metadata_roundtrips_through_event_log() {
         let (store, sid) = make_store_and_session();
         let metadata = json!({
-            "messageKind": "confirmation_response",
-            "confirmationDecision": "Approved",
-            "confirmationNote": "looks good",
+            "messageKind": "answered_questions",
+            "answerCount": 1,
         });
         let item = PromptQueueService::enqueue_with_metadata(
             &store,
             &sid,
-            "[Confirmation response]\n\nDecision: Approved",
+            "[Answered questions]\n\nAnswer 1: looks good",
             Some(metadata.clone()),
         )
         .unwrap();
@@ -535,10 +534,10 @@ mod tests {
         PromptQueueService::enqueue_with_metadata(
             &store,
             &sid,
-            "[Confirmation response]\n\nDecision: Denied",
+            "[Answered questions]\n\nAnswer 1: no",
             Some(json!({
-                "messageKind": "confirmation_response",
-                "confirmationDecision": "Denied",
+                "messageKind": "answered_questions",
+                "answerCount": 1,
             })),
         )
         .unwrap();
@@ -547,8 +546,8 @@ mod tests {
         assert_eq!(pending.len(), 2);
         assert!(pending[0].metadata.is_none());
         let meta = pending[1].metadata.as_ref().unwrap();
-        assert_eq!(meta["messageKind"], "confirmation_response");
-        assert_eq!(meta["confirmationDecision"], "Denied");
+        assert_eq!(meta["messageKind"], "answered_questions");
+        assert_eq!(meta["answerCount"], 1);
     }
 
     #[test]

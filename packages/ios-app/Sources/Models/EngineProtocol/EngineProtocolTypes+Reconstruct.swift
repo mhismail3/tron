@@ -33,6 +33,13 @@ struct SessionReconstructResult: Decodable {
     let metadata: ReconstructMetadata
     /// Pending queued messages (server-sourced, drives pill UI).
     let pendingQueue: [PendingQueueItem]?
+    /// Durable engine approval records scoped to this session.
+    let approvalItems: [EngineApprovalItem]?
+}
+
+struct EngineApprovalItem: Decodable, Sendable {
+    let id: String
+    let approval: EngineApprovalRecordDTO
 }
 
 /// In-flight state for an active turn.

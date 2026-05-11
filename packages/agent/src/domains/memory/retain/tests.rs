@@ -650,15 +650,6 @@ fn assistant_ask_user_question(tool_id: &str, questions: &[&str]) -> Message {
     assistant_tool_use_with_input("AskUserQuestion", tool_id, json!({"questions": qs}))
 }
 
-/// Assistant message for a `GetConfirmation` tool call.
-fn assistant_get_confirmation(tool_id: &str, action: &str, reason: &str) -> Message {
-    assistant_tool_use_with_input(
-        "GetConfirmation",
-        tool_id,
-        json!({"action": action, "reason": reason, "riskLevel": "high"}),
-    )
-}
-
 fn assistant_text(text: &str) -> Message {
     Message {
         role: "assistant".to_string(),
@@ -694,13 +685,6 @@ fn collect_interactive_ids_finds_ask_user_question() {
     let ids = collect_interactive_tool_use_ids(&msgs);
     assert!(ids.contains("aq_1"));
     assert_eq!(ids.len(), 1);
-}
-
-#[test]
-fn collect_interactive_ids_finds_get_confirmation() {
-    let msgs = vec![assistant_tool_use("GetConfirmation", "gc_1")];
-    let ids = collect_interactive_tool_use_ids(&msgs);
-    assert!(ids.contains("gc_1"));
 }
 
 #[test]
@@ -826,36 +810,6 @@ fn serialize_filters_ask_user_question_result_but_keeps_question_text() {
     );
     // And the user's answer is preserved.
     assert!(out.contains("[USER] Red"), "user answer preserved: {out}");
-}
-
-#[test]
-fn serialize_filters_get_confirmation_result_but_keeps_action() {
-    let msgs = vec![
-        assistant_get_confirmation("gc_1", "Delete ~/old-project/", "User requested cleanup"),
-        tool_result("gc_1", "Requesting confirmation: Delete /path Risk: high"),
-        user_text("approved"),
-    ];
-    let out = serialize_for_memory(&msgs);
-    // Verbose tool_result filtered.
-    assert!(
-        !out.contains("[TOOL_RESULT]"),
-        "GetConfirmation result should be filtered: {out}"
-    );
-    // Recap text (from tool_result) gone.
-    assert!(
-        !out.contains("Delete /path"),
-        "recap action string leaked: {out}"
-    );
-    // Action/reason from the real tool_use input survive in the assistant line.
-    assert!(
-        out.contains("[ASSISTANT] Requested confirmation: Delete ~/old-project/"),
-        "action context should appear in assistant line: {out}"
-    );
-    assert!(
-        out.contains("reason: User requested cleanup"),
-        "reason should appear in assistant line: {out}"
-    );
-    assert!(out.contains("[USER] approved"));
 }
 
 #[test]
@@ -1047,45 +1001,6 @@ fn extract_summary_ask_user_omits_options_and_mode() {
         !out.contains("ratification"),
         "context should be omitted: {out}"
     );
-}
-
-#[test]
-fn extract_summary_get_confirmation_with_reason() {
-    let block = json!({
-        "type": "tool_use",
-        "id": "gc_1",
-        "name": "GetConfirmation",
-        "input": {"action": "Delete ~/x", "reason": "user cleanup", "riskLevel": "high"}
-    });
-    assert_eq!(
-        extract_interactive_tool_summary(&block),
-        Some("Requested confirmation: Delete ~/x (reason: user cleanup)".to_string())
-    );
-}
-
-#[test]
-fn extract_summary_get_confirmation_without_reason() {
-    let block = json!({
-        "type": "tool_use",
-        "id": "gc_1",
-        "name": "GetConfirmation",
-        "input": {"action": "Install pkg", "riskLevel": "low"}
-    });
-    assert_eq!(
-        extract_interactive_tool_summary(&block),
-        Some("Requested confirmation: Install pkg".to_string())
-    );
-}
-
-#[test]
-fn extract_summary_get_confirmation_without_action_returns_none() {
-    let block = json!({
-        "type": "tool_use",
-        "id": "gc_1",
-        "name": "GetConfirmation",
-        "input": {"reason": "some reason"}
-    });
-    assert_eq!(extract_interactive_tool_summary(&block), None);
 }
 
 // ── serialize assistant-line question preservation ──

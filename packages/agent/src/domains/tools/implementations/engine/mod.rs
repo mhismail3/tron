@@ -282,7 +282,8 @@ impl TronTool for EngineInvokeTool {
                 _ => None,
             };
             let message = error.to_string();
-            return Ok(json_error_result(
+            let approval_required = is_approval_required(engine_details.as_ref());
+            let mut tool_result = json_error_result(
                 format_engine_error_result(
                     &function_id,
                     &result.invocation_id,
@@ -293,8 +294,13 @@ impl TronTool for EngineInvokeTool {
                     "invocationId": result.invocation_id,
                     "functionId": function_id,
                     "engine": engine_details,
+                    "approvalRequired": approval_required,
                 }),
-            ));
+            );
+            if approval_required {
+                tool_result.stop_turn = Some(true);
+            }
+            return Ok(tool_result);
         }
         let result_value = result.value.unwrap_or(Value::Null);
         Ok(json_result(
@@ -364,8 +370,6 @@ fn agent_authority_scopes() -> Vec<&'static str> {
         "queue.read",
         "queue.write",
         "queue.admin",
-        "approval.read",
-        "approval.request",
         "worker.read",
         "worker.write",
         "sandbox.read",
@@ -606,11 +610,18 @@ fn format_engine_error_result(
             .is_some_and(|code| code == "APPROVAL_REQUIRED")
         {
             lines.push(
-                "Approval is required before this autonomous agent invocation can run. The engine has published an `approval.pending` stream event for the user client to resolve through canonical `approval::resolve`. Stop and wait for that engine approval; do not bypass with Bash, direct HTTP, or the model-level GetConfirmation tool.".to_owned(),
+                "Approval is required before this autonomous agent invocation can run. The engine has published an `approval.pending` stream event for the user client to resolve through canonical `approval::resolve`. This tool result stops the turn; wait for the next user/client action instead of probing approval state.".to_owned(),
             );
         }
     }
     lines.join("\n")
+}
+
+fn is_approval_required(engine_details: Option<&Value>) -> bool {
+    engine_details
+        .and_then(|details| details.get("code"))
+        .and_then(Value::as_str)
+        .is_some_and(|code| code == "APPROVAL_REQUIRED")
 }
 
 fn authority_summary(function: &FunctionDefinition) -> String {
@@ -805,8 +816,9 @@ mod tests {
     use super::*;
     use crate::domains::tools::implementations::testutil::{extract_text, make_ctx};
     use crate::engine::{
-        AuthorityRequirement, EffectClass, FunctionDefinition, InProcessFunctionHandler,
-        Invocation, Provenance, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+        AuthorityRequirement, CompensationContract, CompensationKind, EffectClass,
+        FunctionDefinition, IdempotencyContract, InProcessFunctionHandler, Invocation, Provenance,
+        RiskLevel, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
     };
 
     #[derive(Clone)]
@@ -853,6 +865,41 @@ mod tests {
             function =
                 function.with_idempotency(crate::engine::IdempotencyContract::caller_session());
         }
+        host.register_function_for_setup(function, Some(std::sync::Arc::new(Echo)), false)
+            .unwrap();
+        host
+    }
+
+    async fn host_with_approval_gated_capability() -> EngineHostHandle {
+        let host = EngineHostHandle::new_in_memory().unwrap();
+        host.register_worker_for_setup(
+            WorkerDefinition::new(
+                worker_id("danger"),
+                WorkerKind::InProcess,
+                ActorId::new("owner").unwrap(),
+                AuthorityGrantId::new("grant").unwrap(),
+            )
+            .with_namespace_claim("danger"),
+            false,
+        )
+        .unwrap();
+        let function = FunctionDefinition::new(
+            FunctionId::new("danger::delete").unwrap(),
+            worker_id("danger"),
+            "approval gated delete",
+            VisibilityScope::Agent,
+            EffectClass::IdempotentWrite,
+        )
+        .with_required_authority(
+            AuthorityRequirement::scope("state.write").with_approval_required(),
+        )
+        .with_risk(RiskLevel::High)
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_compensation(CompensationContract::new(
+            CompensationKind::ManualOnly,
+            "approval-gated test operation is manually compensated",
+        ))
+        .with_provenance(Provenance::system());
         host.register_function_for_setup(function, Some(std::sync::Arc::new(Echo)), false)
             .unwrap();
         host
@@ -1012,6 +1059,33 @@ mod tests {
             .unwrap();
         assert_eq!(result.is_error, Some(true));
         assert!(extract_text(&result).contains("idempotencyKey"));
+    }
+
+    #[tokio::test]
+    async fn invoke_approval_required_stops_agent_turn() {
+        let host = host_with_approval_gated_capability().await;
+        let tool = EngineInvokeTool::new(host);
+        let result = tool
+            .execute(
+                json!({
+                    "functionId": "danger::delete",
+                    "payload": {"id": "target"},
+                    "idempotencyKey": "danger-delete-key"
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.stop_turn, Some(true));
+        let details = result.details.as_ref().unwrap();
+        assert_eq!(details["approvalRequired"], true);
+        assert_eq!(details["engine"]["code"], "APPROVAL_REQUIRED");
+        assert!(
+            extract_text(&result).contains("This tool result stops the turn"),
+            "approval-required engine invocations must block instead of inviting polling"
+        );
     }
 
     #[tokio::test]

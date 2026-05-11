@@ -1,29 +1,20 @@
-//! Enrich interactive tool (GetConfirmation, AskUserQuestion) `tool.call`
-//! events during session reconstruction with their parsed status from
-//! subsequent `message.user` events.
+//! Enrich AskUserQuestion `tool.call` events during session reconstruction
+//! with their parsed status from subsequent `message.user` events.
 //!
 //! ## Why server-side
 //!
-//! Historically, iOS scanned the event stream during reconstruction to
-//! figure out whether a GetConfirmation had been approved/denied or whether
-//! an AskUserQuestion had been answered — by parsing text markers like
-//! `[Confirmation response]` or `[Answers to your questions]` that the
-//! server emits into synthetic user messages. That logic lived in
-//! `GetConfirmationDetector`, `AskUserQuestionDetector`, and `AnswerParser`
-//! on iOS (~270 lines total).
+//! iOS used to scan the event stream during reconstruction to figure out
+//! whether an AskUserQuestion had been answered by parsing text markers like
+//! `[Answers to your questions]` that the server emits into synthetic user
+//! messages. That logic now lives here so the client reads server-owned
+//! structured fields.
 //!
-//! Since the server generates those text prefixes in the canonical
-//! `agent::submit_confirmation` / `agent::submit_answers` engine functions,
-//! the server is the authoritative source for the parse. Enrichment runs
-//! here, injects structured fields into the `tool.call` wire payload, and iOS
-//! just reads them — no scanning, no fragile string matching on the client.
+//! Since the server generates the answer text prefix in the canonical
+//! `agent::submit_answers` engine function, the server is the authoritative
+//! source for the parse. Enrichment runs here, injects structured fields into
+//! the `tool.call` wire payload, and iOS just reads them.
 //!
 //! ## Wire format (what iOS reads)
-//!
-//! For GetConfirmation, the enriched `payload` gets:
-//! - `toolStatus`: `"pending"` | `"approved"` | `"denied"` | `"superseded"`
-//! - `confirmationDecision`: `"Approved"` | `"Denied"` (when present)
-//! - `confirmationNote`: optional note text (when present and non-empty)
 //!
 //! For AskUserQuestion, the enriched `payload` gets:
 //! - `toolStatus`: `"pending"` | `"answered"` | `"superseded"`
@@ -33,26 +24,24 @@
 //! In addition, the associated `message.user` event (the one that triggered
 //! the enrichment) gets back-filled with the same structured fields that the
 //! server writes on the live path via `build_user_event_payload`:
-//! - `messageKind`: `"confirmation_response"` | `"answered_questions"`
-//! - `confirmationDecision` / `confirmationNote` / `answerCount`
+//! - `messageKind`: `"answered_questions"`
+//! - `answerCount`
 //!
-//! This means iOS can render the matching confirmation/answers chip from
-//! historical events without scanning the text content.
+//! This means iOS can render the matching answers chip from historical events
+//! without scanning the text content.
 //!
 //! ## INVARIANT
 //!
 //! The text formats parsed here must match exactly what
 //! `server/domains/agent` generates. If that domain changes the
-//! confirmation/answer prefix format, update this module in lockstep. Tests
-//! below pin the exact formats.
+//! answer prefix format, update this module in lockstep. Tests below pin the
+//! exact formats.
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
-const CONFIRMATION_MARKER: &str = "[Confirmation response]";
 const ANSWERS_MARKER: &str = "[Answers to your questions]";
 const SUBAGENT_RESULTS_MARKER: &str = "# Completed Sub-Agent Results";
 
-mod confirmation;
 mod payload;
 mod questions;
 mod subagent;
@@ -60,12 +49,11 @@ mod subagent;
 #[cfg(test)]
 mod tests;
 
-use confirmation::parse_confirmation;
 use payload::{build_user_message_metadata, find_first_user_message_after, inject_into_payload};
 use questions::{extract_questions, parse_answers};
 use subagent::enrich_subagent_result_messages;
 
-/// Enrich GetConfirmation and AskUserQuestion `tool.call` events in place.
+/// Enrich AskUserQuestion `tool.call` events in place.
 ///
 /// Walks the events array, finds each interactive tool call, searches for
 /// the first subsequent `message.user` event, and injects the parsed status
@@ -87,7 +75,7 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
                 return None;
             }
             let name = e.get("toolName").and_then(Value::as_str)?.to_string();
-            if name == "GetConfirmation" || name == "AskUserQuestion" {
+            if name == "AskUserQuestion" {
                 Some((i, name))
             } else {
                 None
@@ -107,7 +95,6 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
         });
 
         let fields = match tool_name.as_str() {
-            "GetConfirmation" => parse_confirmation(user_msg_content.as_deref()),
             "AskUserQuestion" => {
                 let questions = extract_questions(&events[call_idx]);
                 parse_answers(user_msg_content.as_deref(), &questions)
@@ -121,7 +108,7 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
         if let (Some(user_idx), Some(status)) = (
             user_msg_position,
             fields.get("toolStatus").and_then(Value::as_str),
-        ) && matches!(status, "approved" | "denied" | "answered")
+        ) && status == "answered"
         {
             let user_fields = build_user_message_metadata(tool_name.as_str(), &fields);
             inject_into_payload(&mut events[user_idx], user_fields);

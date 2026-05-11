@@ -128,29 +128,6 @@ final class AgentClient: EngineDomainClient {
 
     // MARK: - Confirmation/Answer Submission
 
-    /// Submit a confirmation decision for a GetConfirmation tool call.
-    /// Server constructs the prompt and spawns a prompt run (or queues if busy).
-    func submitConfirmation(
-        action: String,
-        decision: String,
-        note: String?,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> SubmitConfirmationResponse {
-        let sessionId = try await requireLiveSessionEvents()
-        let params = SubmitConfirmationParams(
-            sessionId: sessionId,
-            action: action,
-            decision: decision,
-            note: note
-        )
-        return try await invokeWrite(
-            "agent::submit_confirmation",
-            params,
-            idempotencyKey: idempotencyKey,
-            context: sessionInvocationContext(sessionId)
-        )
-    }
-
     /// Submit answers for an AskUserQuestion tool call.
     /// Server constructs the prompt and spawns a prompt run (or queues if busy).
     func submitAnswers(

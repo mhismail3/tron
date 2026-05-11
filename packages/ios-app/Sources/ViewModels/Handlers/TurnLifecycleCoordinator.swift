@@ -35,7 +35,6 @@ final class TurnLifecycleCoordinator {
 
         // Reset interactive tool tracking for the new turn
         context.askUserQuestionCalledInTurn = false
-        context.getConfirmationCalledInTurn = false
 
         // Finalize any streaming text from the previous turn
         if context.hasActiveStreaming {
@@ -133,7 +132,7 @@ final class TurnLifecycleCoordinator {
             for i in startIndex..<context.messages.count {
                 if context.messages[i].role == .assistant {
                     switch context.messages[i].content {
-                    case .text, .toolUse, .askUserQuestion, .getConfirmation:
+                    case .text, .toolUse, .askUserQuestion, .engineApproval:
                         targetIndex = i
                     default:
                         break

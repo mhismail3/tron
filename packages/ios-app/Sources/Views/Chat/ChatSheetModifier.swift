@@ -34,9 +34,9 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator.showAskUserQuestion()
                 }
             }
-            .onChange(of: viewModel.getConfirmationState.showSheet) { _, show in
+            .onChange(of: viewModel.engineApprovalState.showSheet) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showGetConfirmation()
+                    sheetCoordinator.showEngineApproval()
                 }
             }
             .onChange(of: viewModel.subagentState.showDetailSheet) { _, show in
@@ -60,11 +60,11 @@ struct ChatSheetModifier: ViewModifier {
         // prompt send (which triggers isProcessing, keyboard resign, etc.) happens
         // here to avoid concurrent state mutations that glitch the InputBar layout.
         viewModel.executePendingAskUserQuestionSubmission()
-        viewModel.executePendingGetConfirmationSubmission()
+        viewModel.executePendingEngineApprovalSubmission()
         viewModel.executePendingSourceChangesSubmission()
 
         viewModel.askUserQuestionState.showSheet = false
-        viewModel.getConfirmationState.showSheet = false
+        viewModel.engineApprovalState.showSheet = false
         viewModel.subagentState.showDetailSheet = false
         viewModel.showSettings = false
         sheetCoordinator.onDismiss?()

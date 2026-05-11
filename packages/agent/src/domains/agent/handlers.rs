@@ -41,9 +41,6 @@ operation_bindings! {
         "deliver_subagent_results" => |invocation, deps| {
             deliver_subagent_results_value(Some(&invocation.payload), deps).await
         },
-        "submit_confirmation" => |invocation, deps| {
-            submit_confirmation_value(Some(&invocation.payload), deps).await
-        },
         "submit_answers" => |invocation, deps| {
             submit_answers_value(Some(&invocation.payload), deps).await
         },

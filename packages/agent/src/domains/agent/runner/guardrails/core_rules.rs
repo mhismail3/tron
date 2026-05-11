@@ -374,8 +374,7 @@ fn bash_long_timeout_warning() -> GuardrailRule {
         base: RuleBase {
             id: "bash.long-timeout".into(),
             name: "Bash Long Timeout Warning".into(),
-            description: "Warns when bash timeout exceeds 10 minutes — use GetConfirmation first"
-                .into(),
+            description: "Warns when bash timeout exceeds 10 minutes".into(),
             severity: Severity::Warn,
             scope: Scope::Tool,
             tier: RuleTier::Standard,

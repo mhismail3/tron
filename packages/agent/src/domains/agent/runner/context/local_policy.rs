@@ -293,7 +293,6 @@ mod tests {
     fn cloud_only_tool_rejected() {
         let allowed = local_policy().tool_filter().unwrap();
         assert!(!allowed.iter().any(|tool| tool == "SpawnSubagent"));
-        assert!(!allowed.iter().any(|tool| tool == "GetConfirmation"));
         assert!(!allowed.iter().any(|tool| tool == "UnknownTool"));
     }
 

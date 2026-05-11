@@ -1,9 +1,9 @@
 //! `ComputerUse` tool — screenshot, click, type, keypress, scroll via macOS APIs.
 //!
 //! Provides GUI automation through `screencapture` CLI and `osascript` (`AppleScript`).
-//! All mutating actions (click, type, keypress, scroll, `moveMouse`) are gated behind a
-//! configurable confirmation flag. Read-only actions (screenshot, `getWindows`)
-//! are always allowed.
+//! Mutating actions are audited through the canonical `tool::computer_use`
+//! invocation path. Engine policy approvals are represented by engine approval
+//! records, not by a model-level confirmation tool.
 //!
 //! ## Submodules
 //!
@@ -31,7 +31,8 @@ const MUTATING_ACTIONS: &[&str] = &["clickElement", "type", "keypress", "scroll"
 /// The `ComputerUse` tool provides GUI automation on macOS.
 pub struct ComputerUseTool {
     runner: Arc<dyn ProcessRunner>,
-    /// Whether mutating actions require confirmation (default: true in production).
+    /// Product setting retained by the runtime config; approval behavior is
+    /// enforced by the engine capability path rather than this tool body.
     confirm_before_action: bool,
     /// Minimum interval between screenshots in milliseconds.
     screenshot_throttle_ms: u64,
@@ -110,8 +111,6 @@ impl TronTool for ComputerUseTool {
              - **scroll**: Scroll in a direction (up/down/left/right).\n\
              - **getWindows**: List all windows with position, size, and visibility.\n\
              - **focusWindow**: Bring a window to front by name. Works across Spaces.\n\n\
-             NOTE: Mutating actions (clickElement, type, keypress, scroll) may require \
-             calling GetConfirmation first if confirmation is enabled.\n\n\
              IMPORTANT: If you get a permission error, tell the user to grant the permission in \
              System Settings > Privacy & Security.",
         )
@@ -127,7 +126,6 @@ impl TronTool for ComputerUseTool {
         .property("region", json!({"type": "object", "description": "Screen region to capture (for screenshot). Specify x, y, width, height in screen points.", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number"}, "height": {"type": "number"}}, "required": ["x", "y", "width", "height"]}))
         .property("direction", json!({"type": "string", "description": "Scroll direction: up, down, left, right", "enum": ["up", "down", "left", "right"]}))
         .property("amount", json!({"type": "number", "description": "Scroll amount in pixels (default: 100)", "default": 100}))
-        .property("confirmed", json!({"type": "boolean", "description": "Set to true after user has confirmed via GetConfirmation (bypasses confirmation gate)"}))
         .build()
     }
 
@@ -137,21 +135,8 @@ impl TronTool for ComputerUseTool {
             Err(e) => return Ok(e),
         };
 
-        // Confirmation gate: mutating actions require GetConfirmation first
-        if self.confirm_before_action && Self::is_mutating(&action) {
-            let confirmed = params
-                .get("confirmed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if !confirmed {
-                let desc = self.describe_action(&action, &params);
-                return Ok(error_result(format!(
-                    "Action '{action}' requires confirmation. Call GetConfirmation first with \
-                     action='{desc}' and riskLevel='medium', then retry this ComputerUse call \
-                     with confirmed=true."
-                )));
-            }
-        }
+        let _engine_owned_approval_setting =
+            self.confirm_before_action && Self::is_mutating(&action);
 
         match action.as_str() {
             "screenshot" => self.take_screenshot(&params, ctx).await,

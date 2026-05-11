@@ -61,9 +61,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Mark pending AskUserQuestion chips as superseded
     func markPendingQuestionsAsSuperseded()
 
-    /// Mark pending GetConfirmation chips as superseded
-    func markPendingConfirmationsAsSuperseded()
-
     /// Dismiss pending subagent results (user chose to send a different message)
     func dismissPendingSubagentResults()
 
@@ -134,11 +131,12 @@ final class MessagingCoordinator {
             return
         }
 
-        // Confirmation/answer submissions and subagent results are delivered via
-        // dedicated engine protocols, not through sendMessage. Any regular user message sent here
-        // supersedes pending interactive tools and dismisses subagent notifications.
+        // Answer submissions and subagent results are delivered via dedicated
+        // engine protocols, not through sendMessage. Any regular user message
+        // sent here supersedes pending question tools and dismisses subagent
+        // notifications. Engine approval chips are server-owned and are never
+        // locally superseded by a typed prompt.
         context.markPendingQuestionsAsSuperseded()
-        context.markPendingConfirmationsAsSuperseded()
         context.dismissPendingSubagentResults()
 
         // Reset browser dismissal for new prompt - browser can auto-open again

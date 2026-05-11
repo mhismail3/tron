@@ -878,7 +878,11 @@ impl EngineHostHandle {
 
         let child_result = match prepared.child {
             PreparedSyncInvocationDecision::Execute(child) => {
-                self.execute_prepared_regular(*child).await
+                if child.invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
+                    self.execute_prepared_approval_resolve(*child).await
+                } else {
+                    self.execute_prepared_regular(*child).await
+                }
             }
             PreparedSyncInvocationDecision::Finished(result) => *result,
         };
@@ -902,12 +906,18 @@ impl EngineHostHandle {
             PreparedSyncInvocationDecision::Execute(prepared) => prepared,
             PreparedSyncInvocationDecision::Finished(result) => return *result,
         };
+        self.execute_prepared_approval_resolve(*prepared).await
+    }
 
+    async fn execute_prepared_approval_resolve(
+        &self,
+        prepared: super::registry::PreparedSyncInvocation,
+    ) -> InvocationResult {
         let approval_id = match required_str(&prepared.invocation.payload, "approvalId") {
             Ok(value) => value.to_owned(),
             Err(error) => {
                 return self
-                    .finish_prepared_approval_resolve(*prepared, Err(error))
+                    .finish_prepared_approval_resolve(prepared, Err(error))
                     .await;
             }
         };
@@ -917,14 +927,14 @@ impl EngineHostHandle {
             Ok(decision) => decision,
             Err(error) => {
                 return self
-                    .finish_prepared_approval_resolve(*prepared, Err(error))
+                    .finish_prepared_approval_resolve(prepared, Err(error))
                     .await;
             }
         };
         if !can_resolve_approval(&prepared.invocation.causal_context.actor_kind) {
             return self
                 .finish_prepared_approval_resolve(
-                    *prepared,
+                    prepared,
                     Err(EngineError::PolicyViolation(
                         "approval resolution requires an admin, system, or user-authorized actor"
                             .to_owned(),
@@ -943,7 +953,7 @@ impl EngineHostHandle {
             Ok(record) => record,
             Err(error) => {
                 return self
-                    .finish_prepared_approval_resolve(*prepared, Err(error))
+                    .finish_prepared_approval_resolve(prepared, Err(error))
                     .await;
             }
         };
@@ -971,7 +981,7 @@ impl EngineHostHandle {
                 }
                 Err(error) => {
                     return self
-                        .finish_prepared_approval_resolve(*prepared, Err(error))
+                        .finish_prepared_approval_resolve(prepared, Err(error))
                         .await;
                 }
             }
@@ -1001,7 +1011,7 @@ impl EngineHostHandle {
             .await;
 
         self.finish_prepared_approval_resolve(
-            *prepared,
+            prepared,
             Ok(json!({
                 "approval": resolved,
                 "child": child_result.map(|result| invocation_result_value(&result)),
@@ -1534,7 +1544,9 @@ impl EngineHost {
                 ));
             }
         };
-        let child = if is_host_dispatched_primitive_namespace(child.function_id.namespace()) {
+        let child = if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
+            self.catalog.prepare_sync_invocation(child)
+        } else if is_host_dispatched_primitive_namespace(child.function_id.namespace()) {
             PreparedSyncInvocationDecision::Finished(Box::new(
                 self.invoke_sync_host_dispatched_primitive(child),
             ))

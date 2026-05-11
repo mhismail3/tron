@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::domains::session::event_store::types::state::Message;
 
-const INTERACTIVE_TOOL_NAMES: &[&str] = &["AskUserQuestion", "GetConfirmation"];
+const INTERACTIVE_TOOL_NAMES: &[&str] = &["AskUserQuestion"];
 
 /// First-pass scan to collect `tool_use` block IDs that belong to an
 /// interactive tool. Their matching `tool_result` messages are then filtered
@@ -56,15 +56,6 @@ pub(super) fn extract_interactive_tool_summary(block: &Value) -> Option<String> 
                 None
             } else {
                 Some(format!("Asked: {}", texts.join("; ")))
-            }
-        }
-        "GetConfirmation" => {
-            let action = input.get("action").and_then(Value::as_str)?;
-            match input.get("reason").and_then(Value::as_str) {
-                Some(reason) => Some(format!(
-                    "Requested confirmation: {action} (reason: {reason})"
-                )),
-                None => Some(format!("Requested confirmation: {action}")),
             }
         }
         _ => None,

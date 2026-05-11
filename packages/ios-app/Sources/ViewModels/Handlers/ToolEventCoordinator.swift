@@ -49,13 +49,6 @@ final class ToolEventCoordinator {
                 result: nil
             )
             content = .askUserQuestion(toolData)
-        case .getConfirmation:
-            let toolData = GetConfirmationToolData(
-                toolCallId: pluginResult.toolCallId,
-                params: GetConfirmationParams(action: "", reason: "", riskLevel: .low),
-                status: .generating
-            )
-            content = .getConfirmation(toolData)
         default:
             let tool = ToolUseData(
                 toolName: pluginResult.toolName,
@@ -75,7 +68,7 @@ final class ToolEventCoordinator {
         )
 
         // Only regular tools enqueue for staggered animation
-        if kind != .askUserQuestion && kind != .getConfirmation {
+        if kind != .askUserQuestion {
             let toolStartData = UIUpdateQueue.ToolStartData(
                 toolCallId: pluginResult.toolCallId,
                 toolName: pluginResult.toolName,
@@ -101,21 +94,12 @@ final class ToolEventCoordinator {
         // Classify tool type
         let kind = ToolKind(toolName: pluginResult.toolName)
         let isAskUserQuestion = kind == .askUserQuestion
-        let isGetConfirmation = kind == .getConfirmation
 
         // Parse AskUserQuestion params if applicable
         var askUserQuestionParams: AskUserQuestionParams?
         if isAskUserQuestion {
             if let paramsData = pluginResult.formattedArguments.data(using: .utf8) {
                 askUserQuestionParams = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData)
-            }
-        }
-
-        // Parse GetConfirmation params if applicable
-        var getConfirmationParams: GetConfirmationParams?
-        if isGetConfirmation {
-            if let paramsData = pluginResult.formattedArguments.data(using: .utf8) {
-                getConfirmationParams = try? JSONDecoder().decode(GetConfirmationParams.self, from: paramsData)
             }
         }
 
@@ -144,8 +128,6 @@ final class ToolEventCoordinator {
             // Let them fall through to handleAskUserQuestionToolStart below.
             if case .askUserQuestion = context.messages[existingIndex].content {
                 // Fall through — handled below at line "if isAskUserQuestion"
-            } else if case .getConfirmation = context.messages[existingIndex].content {
-                // Fall through — handled below at line "if isGetConfirmation"
             } else {
                 context.logInfo("Updating existing tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) with arguments")
                 // Still make the tool visible (in case it wasn't)
@@ -174,12 +156,6 @@ final class ToolEventCoordinator {
         // Handle AskUserQuestion specially
         if isAskUserQuestion {
             handleAskUserQuestionToolStart(pluginResult, params: askUserQuestionParams, context: context)
-            return
-        }
-
-        // Handle GetConfirmation specially
-        if isGetConfirmation {
-            handleGetConfirmationToolStart(pluginResult, params: getConfirmationParams, context: context)
             return
         }
 
@@ -246,17 +222,6 @@ final class ToolEventCoordinator {
             return
         }
 
-        // Check if this is a GetConfirmation tool end
-        if let index = MessageFinder.lastIndexOfGetConfirmation(toolCallId: pluginResult.toolCallId, in: context.messages) {
-            if case .getConfirmation(let data) = context.messages[index].content {
-                // In async mode, tool.end means confirmation is ready for user
-                // Status is already .pending, now auto-open the sheet
-                context.logInfo("GetConfirmation tool.end - opening sheet for user input")
-                context.openGetConfirmationSheet(for: data)
-            }
-            return
-        }
-
         // Update tracked tool call with result
         if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
             context.currentTurnToolCalls[idx].result = pluginResult.displayResult
@@ -277,7 +242,7 @@ final class ToolEventCoordinator {
     // MARK: - Private Helpers
 
     /// Append a generating chip to chat, track in currentToolMessages, and record for persistence.
-    /// Shared by AskUserQuestion, GetConfirmation, and regular tool chips.
+    /// Shared by AskUserQuestion and regular tool chips.
     private func trackGeneratingChip(
         content: MessageContent,
         toolCallId: String,
@@ -294,69 +259,6 @@ final class ToolEventCoordinator {
             toolCallId: toolCallId,
             toolName: toolName,
             arguments: ""
-        )
-        context.currentTurnToolCalls.append(record)
-    }
-
-    /// Handle GetConfirmation tool start - creates or updates special message
-    private func handleGetConfirmationToolStart(
-        _ pluginResult: ToolStartPlugin.Result,
-        params: GetConfirmationParams?,
-        context: ToolEventContext
-    ) {
-        context.logInfo("GetConfirmation tool detected")
-
-        // Mark that GetConfirmation was called in this turn
-        context.getConfirmationCalledInTurn = true
-
-        // Check if a generating chip already exists from tool_generating
-        if let existingIndex = MessageFinder.lastIndexOfGetConfirmation(toolCallId: pluginResult.toolCallId, in: context.messages) {
-            if case .getConfirmation(var toolData) = context.messages[existingIndex].content {
-                if let params = params {
-                    toolData.params = params
-                    toolData.status = .pending
-                } else {
-                    context.logError("Failed to parse GetConfirmation params: \(pluginResult.formattedArguments.prefix(500))")
-                    toolData.status = .pending
-                }
-                context.messages[existingIndex].content = .getConfirmation(toolData)
-                context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
-            }
-
-            if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
-                context.currentTurnToolCalls[idx].arguments = pluginResult.formattedArguments
-            }
-            return
-        }
-
-        // No existing chip — create fresh
-        guard let params = params else {
-            context.logError("Failed to parse GetConfirmation params: \(pluginResult.formattedArguments.prefix(500))")
-            let tool = ToolUseData(
-                toolName: pluginResult.toolName,
-                toolCallId: pluginResult.toolCallId,
-                arguments: pluginResult.formattedArguments,
-                status: .running
-            )
-            let message = ChatMessage(role: .assistant, content: .toolUse(tool))
-            context.appendToMessages(message)
-            context.makeToolVisible(pluginResult.toolCallId)
-            return
-        }
-
-        let toolData = GetConfirmationToolData(
-            toolCallId: pluginResult.toolCallId,
-            params: params,
-            status: .pending
-        )
-
-        let message = ChatMessage(role: .assistant, content: .getConfirmation(toolData))
-        context.appendToMessages(message)
-
-        let record = ToolCallRecord(
-            toolCallId: pluginResult.toolCallId,
-            toolName: pluginResult.toolName,
-            arguments: pluginResult.formattedArguments
         )
         context.currentTurnToolCalls.append(record)
     }

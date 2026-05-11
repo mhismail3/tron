@@ -27,6 +27,7 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
             .effect_class
             .requires_approval_for_agent_visibility()
             && !function.required_authority.approval_required
+            && !has_sandbox_autonomy_contract(function)
         {
             return Err(EngineError::PolicyViolation(format!(
                 "irreversible agent-visible function {} requires approval metadata",
@@ -36,6 +37,7 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
         if function.effect_class.is_mutating()
             && function.risk_level >= RiskLevel::High
             && !function.required_authority.approval_required
+            && !has_sandbox_autonomy_contract(function)
         {
             return Err(EngineError::PolicyViolation(format!(
                 "high-risk agent-visible function {} requires approval metadata",
@@ -101,6 +103,31 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
     }
 
     Ok(())
+}
+
+fn has_sandbox_autonomy_contract(function: &FunctionDefinition) -> bool {
+    let Some(contract) = function
+        .metadata
+        .pointer("/highRiskContract/sandboxAutonomy")
+    else {
+        return false;
+    };
+    contract
+        .get("withoutUserApproval")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        && contract
+            .get("requiresIdempotency")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        && contract
+            .get("requiresLease")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        && contract
+            .get("requiresCompensation")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
 }
 
 /// Validate a trigger definition before registration.

@@ -59,48 +59,6 @@ pub(crate) async fn clear_queue_value(
     Ok(json!({ "cleared": cleared }))
 }
 
-pub(crate) async fn submit_confirmation_value(
-    params: Option<&Value>,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let session_id = require_string_param(params, "sessionId")?;
-    let action = require_string_param(params, "action")?;
-    let decision = require_string_param(params, "decision")?;
-    let note = params
-        .and_then(|p| p.get("note"))
-        .and_then(Value::as_str)
-        .map(String::from);
-    let mut lines = vec![
-        "[Confirmation response]".to_string(),
-        String::new(),
-        format!("Action: {action}"),
-        format!("Decision: {decision}"),
-    ];
-    if let Some(ref note) = note
-        && !note.is_empty()
-    {
-        lines.push(format!("Note: {note}"));
-    }
-    let prompt = lines.join("\n");
-    let mut metadata_obj = serde_json::Map::new();
-    let _ = metadata_obj.insert("messageKind".into(), json!("confirmation_response"));
-    let _ = metadata_obj.insert("confirmationDecision".into(), json!(decision));
-    if let Some(ref n) = note
-        && !n.is_empty()
-    {
-        let _ = metadata_obj.insert("confirmationNote".into(), json!(n));
-    }
-    start_or_queue_prompt(
-        deps,
-        session_id,
-        prompt,
-        Some(Value::Object(metadata_obj)),
-        "agent.submitConfirmation.queue",
-        true,
-    )
-    .await
-}
-
 #[derive(Deserialize)]
 pub(crate) struct AnswerSubmission {
     #[serde(default)]

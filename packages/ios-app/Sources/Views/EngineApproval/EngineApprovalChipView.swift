@@ -1,13 +1,12 @@
 import SwiftUI
 
-// MARK: - GetConfirmation Tool Viewer
+// MARK: - Engine Approval Chip
 
-/// In-chat viewer for GetConfirmation tool calls.
-/// Compact chip style matching AskUserQuestionToolViewer — glassy capsule with status colors.
-/// Uses async model: pending -> approved/denied or superseded.
+/// In-chat viewer for engine-owned approval records.
+/// Compact chip style matching AskUserQuestionToolViewer.
 @available(iOS 26.0, *)
-struct GetConfirmationToolViewer: View {
-    let data: GetConfirmationToolData
+struct EngineApprovalChipView: View {
+    let data: EngineApprovalToolData
     let onTap: () -> Void
 
     var body: some View {
@@ -20,13 +19,10 @@ struct GetConfirmationToolViewer: View {
                     .foregroundStyle(textColor)
                     .lineLimit(1)
 
-                // Risk level badge (not during generating)
-                if data.status != .generating {
-                    riskBadge
-                }
+                riskBadge
 
                 // Chevron for tappable states
-                if data.status != .superseded && data.status != .generating {
+                if data.status != .failed {
                     Image(systemName: "chevron.right")
                         .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                         .foregroundStyle(textColor.opacity(0.6))
@@ -38,17 +34,13 @@ struct GetConfirmationToolViewer: View {
         }
         .buttonStyle(.plain)
         .chipStyle(tintColor)
-        .disabled(data.status == .superseded || data.status == .generating)
-        .opacity(data.status == .superseded ? 0.6 : 1.0)
+        .disabled(data.status == .failed)
+        .opacity(data.status == .failed ? 0.75 : 1.0)
     }
 
     @ViewBuilder
     private var statusIcon: some View {
         switch data.status {
-        case .generating:
-            ProgressView()
-                .controlSize(.small)
-                .tint(.tronAmber)
         case .pending:
             Image(systemName: "checkmark.shield")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -61,25 +53,23 @@ struct GetConfirmationToolViewer: View {
             Image(systemName: "xmark.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronError)
-        case .superseded:
-            Image(systemName: "xmark.circle.fill")
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.tronError)
         }
     }
 
     private var statusText: String {
         switch data.status {
-        case .generating:
-            return "Preparing confirmation\u{2026}"
         case .pending:
             return "Confirm action"
         case .approved:
             return "Approved"
         case .denied:
             return "Denied"
-        case .superseded:
-            return "Skipped"
+        case .failed:
+            return "Approval failed"
         }
     }
 
@@ -106,19 +96,17 @@ struct GetConfirmationToolViewer: View {
 
     private var textColor: Color {
         switch data.status {
-        case .generating, .pending: return .tronAmber
+        case .pending: return .tronAmber
         case .approved: return .tronSuccess
-        case .denied: return .tronError
-        case .superseded: return .tronTextMuted
+        case .denied, .failed: return .tronError
         }
     }
 
     private var tintColor: Color {
         switch data.status {
-        case .generating, .pending: return .tronAmber
+        case .pending: return .tronAmber
         case .approved: return .tronSuccess
-        case .denied: return .tronError
-        case .superseded: return .tronTextMuted
+        case .denied, .failed: return .tronError
         }
     }
 }
@@ -129,10 +117,10 @@ struct GetConfirmationToolViewer: View {
 @available(iOS 26.0, *)
 #Preview("All States") {
     VStack(spacing: 16) {
-        GetConfirmationToolViewer(
-            data: GetConfirmationToolData(
+        EngineApprovalChipView(
+            data: EngineApprovalToolData(
                 toolCallId: "call_1",
-                params: GetConfirmationParams(
+                params: EngineApprovalParams(
                     action: "Install ffmpeg via brew",
                     reason: "Needed for video processing",
                     riskLevel: .low
@@ -142,10 +130,10 @@ struct GetConfirmationToolViewer: View {
             onTap: { }
         )
 
-        GetConfirmationToolViewer(
-            data: GetConfirmationToolData(
+        EngineApprovalChipView(
+            data: EngineApprovalToolData(
                 toolCallId: "call_2",
-                params: GetConfirmationParams(
+                params: EngineApprovalParams(
                     action: "Deploy to production",
                     reason: "Release v2.0",
                     riskLevel: .high
@@ -155,10 +143,10 @@ struct GetConfirmationToolViewer: View {
             onTap: { }
         )
 
-        GetConfirmationToolViewer(
-            data: GetConfirmationToolData(
+        EngineApprovalChipView(
+            data: EngineApprovalToolData(
                 toolCallId: "call_3",
-                params: GetConfirmationParams(
+                params: EngineApprovalParams(
                     action: "Install ffmpeg",
                     reason: "Needed",
                     riskLevel: .low
@@ -168,10 +156,10 @@ struct GetConfirmationToolViewer: View {
             onTap: { }
         )
 
-        GetConfirmationToolViewer(
-            data: GetConfirmationToolData(
+        EngineApprovalChipView(
+            data: EngineApprovalToolData(
                 toolCallId: "call_4",
-                params: GetConfirmationParams(
+                params: EngineApprovalParams(
                     action: "Delete ~/project/",
                     reason: "Cleanup",
                     riskLevel: .high
@@ -181,15 +169,15 @@ struct GetConfirmationToolViewer: View {
             onTap: { }
         )
 
-        GetConfirmationToolViewer(
-            data: GetConfirmationToolData(
+        EngineApprovalChipView(
+            data: EngineApprovalToolData(
                 toolCallId: "call_5",
-                params: GetConfirmationParams(
+                params: EngineApprovalParams(
                     action: "Modify config",
                     reason: "Settings",
                     riskLevel: .medium
                 ),
-                status: .superseded
+                status: .failed
             ),
             onTap: { }
         )

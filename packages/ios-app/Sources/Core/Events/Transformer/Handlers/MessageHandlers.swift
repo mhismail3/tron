@@ -11,7 +11,7 @@ enum MessageHandlers {
     /// Transform message.user event into a ChatMessage.
     ///
     /// User messages contain the user's input to the agent.
-    /// Interactive-tool responses (confirmation, answered questions) are
+    /// Interactive-tool responses (answered questions and subagent results) are
     /// identified by the server-provided `messageKind` field and rendered
     /// as chips — iOS does not parse the message text content for these.
     static func transformUserMessage(
@@ -35,13 +35,6 @@ enum MessageHandlers {
             return ChatMessage(
                 role: .user,
                 content: .answeredQuestions(questionCount: max(1, parsed.answerCount ?? 1)),
-                timestamp: timestamp
-            )
-        case "confirmation_response":
-            let approved = parsed.confirmationDecision == "Approved"
-            return ChatMessage(
-                role: .user,
-                content: .confirmedAction(approved: approved),
                 timestamp: timestamp
             )
         case "subagent_results_delivered":

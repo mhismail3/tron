@@ -84,7 +84,7 @@ extension ChatViewModel {
             return true
         case .askUserQuestion(let data) where data.toolCallId == toolCallId:
             return true
-        case .getConfirmation(let data) where data.toolCallId == toolCallId:
+        case .engineApproval(let data) where data.toolCallId == toolCallId:
             return true
         default:
             return false

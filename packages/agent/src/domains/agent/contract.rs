@@ -67,12 +67,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
-        CapabilityContract::new("agent::submit_confirmation", "agent", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("agent.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"action":{"type":"string"},"decision":{"type":"string"},"note":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","action","decision"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .build()?,
         CapabilityContract::new("agent::submit_answers", "agent", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("agent.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"questions":{"items":{"additionalProperties":false,"properties":{"id":{"type":"string"},"otherValue":{"type":"string"},"question":{"type":"string"},"selectedValues":{"items":{"type":"string"},"type":"array"}},"required":["question"],"type":"object"},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","questions"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))

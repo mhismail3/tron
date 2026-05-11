@@ -101,10 +101,6 @@ pub(crate) fn builtin_tool_specs(
         Arc::new(crate::domains::tools::implementations::fs::find::FindTool::new()),
         Arc::new(crate::domains::tools::implementations::ui::ask_user::AskUserQuestionTool::new()),
         Arc::new(
-            crate::domains::tools::implementations::ui::get_confirmation::GetConfirmationTool::new(
-            ),
-        ),
-        Arc::new(
             crate::domains::tools::implementations::ui::notify::NotifyAppTool::new(
                 deps.tool_runtime.notify_delegate.clone(),
             ),
@@ -468,7 +464,6 @@ mod tests {
             "Search",
             "Find",
             "AskUserQuestion",
-            "GetConfirmation",
             "NotifyApp",
             "WebFetch",
             "WebSearch",

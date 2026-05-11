@@ -25,6 +25,7 @@
 //!   runId: string?,          // active run id, null when idle
 //!   metadata: {...},
 //!   pendingQueue: [...],     // queued messages not yet sent (pills on iOS)
+//!   approvalItems: [...],    // durable engine approvals scoped to session
 //! }
 //! ```
 
@@ -156,7 +157,27 @@ impl SessionReconstructService {
             None
         };
 
-        // 3. Get lastSequence from the session's sequence counter
+        // 3. Load engine-owned approval records for durable approval chips.
+        let approval_items = deps
+            .engine_host
+            .list_approvals(None, Some(&session_id), 500)
+            .await
+            .map(|items| {
+                items
+                    .into_iter()
+                    .map(|record| {
+                        json!({
+                            "id": format!("engine-approval:{}", record.approval_id),
+                            "approval": record,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|error| CapabilityError::Internal {
+                message: format!("Failed to load engine approvals: {error}"),
+            })?;
+
+        // 4. Get lastSequence from the session's sequence counter
         // Falls back to the last event's sequence if counter not initialized
         let last_sequence = orchestrator
             .current_sequence(&session_id)
@@ -164,12 +185,11 @@ impl SessionReconstructService {
 
         let oldest_sequence = events.first().map(|e| e.sequence);
 
-        // 4. Convert events to wire format
+        // 5. Convert events to wire format
         let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
 
-        // 4a. Enrich interactive tool.call events (GetConfirmation,
-        // AskUserQuestion) with server-parsed status so iOS can render
-        // them without scanning event history.
+        // 5a. Enrich AskUserQuestion tool.call events with server-parsed
+        // status so iOS can render them without scanning event history.
         crate::domains::tools::interactive_enrichment::enrich_interactive_tool_statuses(
             &mut wire_events,
         );
@@ -196,6 +216,7 @@ impl SessionReconstructService {
             "agentPhase": if is_running { "processing" } else { "idle" },
             "metadata": session_metadata,
             "pendingQueue": pending_queue,
+            "approvalItems": approval_items,
         }))
     }
 

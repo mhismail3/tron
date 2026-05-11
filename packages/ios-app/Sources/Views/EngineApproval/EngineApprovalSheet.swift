@@ -1,13 +1,13 @@
 import SwiftUI
 
-// MARK: - GetConfirmation Sheet
+// MARK: - EngineApproval Sheet
 
-/// Sheet for approving or denying GetConfirmation tool calls.
+/// Sheet for resolving engine-owned approval records.
 /// Shows action, reason, risk level badge, approve/deny buttons, and optional note input.
 @available(iOS 26.0, *)
-struct GetConfirmationSheet: View {
-    let toolData: GetConfirmationToolData
-    let onSubmit: (ConfirmationDecision, String?) -> Void
+struct EngineApprovalSheet: View {
+    let toolData: EngineApprovalToolData
+    let onSubmit: (EngineApprovalUserDecision, String?) -> Void
     let onDismiss: () -> Void
     var readOnly: Bool = false
 
@@ -15,7 +15,7 @@ struct GetConfirmationSheet: View {
     @State private var noteText = ""
 
     private var isDecided: Bool {
-        toolData.status == .approved || toolData.status == .denied
+        toolData.status == .approved || toolData.status == .denied || toolData.status == .failed
     }
 
     var body: some View {
@@ -225,10 +225,9 @@ struct GetConfirmationSheet: View {
 
     private var accentColor: Color {
         switch toolData.status {
-        case .generating, .pending: return .tronAmber
+        case .pending: return .tronAmber
         case .approved: return .tronSuccess
-        case .denied: return .tronError
-        case .superseded: return .tronTextMuted
+        case .denied, .failed: return .tronError
         }
     }
 
@@ -236,7 +235,7 @@ struct GetConfirmationSheet: View {
         switch toolData.decision {
         case .approved: return "Approved"
         case .denied: return "Denied"
-        case nil: return "Confirmation"
+        case nil: return toolData.status == .failed ? "Failed" : "Approval"
         }
     }
 
@@ -270,10 +269,10 @@ struct GetConfirmationSheet: View {
 #if DEBUG
 @available(iOS 26.0, *)
 #Preview("Pending - Low Risk") {
-    GetConfirmationSheet(
-        toolData: GetConfirmationToolData(
+    EngineApprovalSheet(
+        toolData: EngineApprovalToolData(
             toolCallId: "call_1",
-            params: GetConfirmationParams(
+            params: EngineApprovalParams(
                 action: "Install ffmpeg via brew",
                 reason: "The video processing task requires ffmpeg for format conversion.",
                 riskLevel: .low
@@ -287,10 +286,10 @@ struct GetConfirmationSheet: View {
 
 @available(iOS 26.0, *)
 #Preview("Pending - High Risk") {
-    GetConfirmationSheet(
-        toolData: GetConfirmationToolData(
+    EngineApprovalSheet(
+        toolData: EngineApprovalToolData(
             toolCallId: "call_2",
-            params: GetConfirmationParams(
+            params: EngineApprovalParams(
                 action: "Deploy v2.0 to production",
                 reason: "All tests pass and the release branch is ready. This will affect live users.",
                 riskLevel: .high
@@ -304,10 +303,10 @@ struct GetConfirmationSheet: View {
 
 @available(iOS 26.0, *)
 #Preview("Approved - Read Only") {
-    GetConfirmationSheet(
-        toolData: GetConfirmationToolData(
+    EngineApprovalSheet(
+        toolData: EngineApprovalToolData(
             toolCallId: "call_3",
-            params: GetConfirmationParams(
+            params: EngineApprovalParams(
                 action: "Install ffmpeg via brew",
                 reason: "Needed for video processing",
                 riskLevel: .low

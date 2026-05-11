@@ -4261,6 +4261,101 @@ async fn approval_resolution_rejects_agent_even_with_resolve_scope() {
 }
 
 #[tokio::test]
+async fn agent_capability_client_hides_all_approval_primitives_without_new_approval() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let client = AgentCapabilityClient::new(handle.clone(), actor("agent"), grant("agent-grant"))
+        .with_scopes(["approval.resolve"])
+        .with_session_id("session-a");
+    let visible_approval_functions = client
+        .discover(FunctionQuery {
+            namespace_prefix: Some("approval".to_owned()),
+            ..FunctionQuery::default()
+        })
+        .await;
+    assert!(
+        visible_approval_functions.is_empty(),
+        "approval primitives are client-owned and must not be visible to agent discovery"
+    );
+    assert!(client.inspect(&fid("approval::get")).await.is_err());
+    assert!(client.inspect(&fid("approval::list")).await.is_err());
+    assert!(client.inspect(&fid("approval::resolve")).await.is_err());
+
+    let rejected = client
+        .invoke(
+            fid("approval::resolve"),
+            json!({"approvalId": "approval-a", "decision": "approve"}),
+            Some("agent-approval-resolve-key".to_owned()),
+            None,
+        )
+        .await;
+
+    let Some(EngineError::PolicyViolation(message)) = rejected.error else {
+        panic!("expected policy violation, got {:?}", rejected.error);
+    };
+    assert!(message.contains("user/client approval flow"));
+    let approvals = handle.list_approvals(None, None, 100).await.unwrap();
+    assert!(approvals.is_empty());
+}
+
+#[tokio::test]
+async fn agent_approval_preflight_rejects_invalid_payload_before_request() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("danger", "danger"), false)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let function = FunctionDefinition::new(
+        fid("danger::delete"),
+        wid("danger"),
+        "approval-gated delete",
+        VisibilityScope::Agent,
+        EffectClass::IrreversibleSideEffect,
+    )
+    .with_required_authority(AuthorityRequirement::scope("danger.write").with_approval_required())
+    .with_risk(RiskLevel::High)
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "approval preflight test delete is manually compensated",
+    ))
+    .with_request_schema(json!({
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {"id": {"type": "string"}}
+    }));
+    handle
+        .register_function_for_setup(
+            function,
+            Some(Arc::new(CountingHandler {
+                calls: Arc::clone(&calls),
+            })),
+            false,
+        )
+        .unwrap();
+
+    let client = AgentCapabilityClient::new(handle.clone(), actor("agent"), grant("agent-grant"))
+        .with_scopes(["danger.write"])
+        .with_session_id("session-a");
+    let rejected = client
+        .invoke(
+            fid("danger::delete"),
+            json!({}),
+            Some("invalid-approval-key".to_owned()),
+            None,
+        )
+        .await;
+
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::SchemaViolation { .. })
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let approvals = handle.list_approvals(None, None, 100).await.unwrap();
+    assert!(approvals.is_empty());
+}
+
+#[tokio::test]
 async fn approval_resolution_resumes_original_invocation_with_original_causality() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
@@ -4330,6 +4425,86 @@ async fn approval_resolution_resumes_original_invocation_with_original_causality
     );
     assert_eq!(
         resolved.value.as_ref().unwrap()["child"]["value"]["call"],
+        1
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn engine_invoke_routes_approval_resolve_through_host_resume_path() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("danger", "danger"), false)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let function = FunctionDefinition::new(
+        fid("danger::write"),
+        wid("danger"),
+        "approval-gated write",
+        VisibilityScope::Agent,
+        EffectClass::IrreversibleSideEffect,
+    )
+    .with_required_authority(AuthorityRequirement::scope("danger.write").with_approval_required())
+    .with_risk(RiskLevel::High)
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "approval test write is manually compensated",
+    ));
+    handle
+        .register_function_for_setup(
+            function,
+            Some(Arc::new(CountingHandler {
+                calls: Arc::clone(&calls),
+            })),
+            false,
+        )
+        .unwrap();
+
+    let client = AgentCapabilityClient::new(handle.clone(), actor("agent"), grant("agent-grant"))
+        .with_scopes(["danger.write"])
+        .with_session_id("session-a");
+    let pending = client
+        .invoke(
+            fid("danger::write"),
+            json!({"value": 1}),
+            Some("approval-engine-invoke-child-key".to_owned()),
+            None,
+        )
+        .await;
+    let approval_id = match pending.error.unwrap() {
+        EngineError::DomainFailure { details, .. } => {
+            details.unwrap()["approvalId"].as_str().unwrap().to_owned()
+        }
+        other => panic!("unexpected error {other:?}"),
+    };
+
+    let resolved = handle
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({
+                "functionId": "approval::resolve",
+                "payload": {"approvalId": approval_id, "decision": "approve"},
+                "idempotencyKey": "transport-approval-resolve-key"
+            }),
+            CausalContext::new(
+                actor("engine-user"),
+                ActorKind::User,
+                grant("engine-transport"),
+                trace("transport-approval-trace"),
+            )
+            .with_scope("approval.resolve")
+            .with_session_id("session-a"),
+        ))
+        .await;
+
+    assert_eq!(resolved.error, None);
+    assert_eq!(
+        resolved.value.as_ref().unwrap()["child"]["value"]["approval"]["status"],
+        "executed"
+    );
+    assert_eq!(
+        resolved.value.as_ref().unwrap()["child"]["value"]["child"]["value"]["call"],
         1
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);

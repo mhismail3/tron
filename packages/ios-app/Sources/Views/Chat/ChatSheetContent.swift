@@ -78,8 +78,8 @@ struct ChatSheetContent: View {
         case .askUserQuestion:
             askUserQuestionSheet
 
-        case .getConfirmation:
-            getConfirmationSheet
+        case .engineApproval:
+            engineApprovalSheet
 
         case .subagentDetail:
             subagentDetailSheet
@@ -182,15 +182,15 @@ struct ChatSheetContent: View {
     }
 
     @ViewBuilder
-    private var getConfirmationSheet: some View {
-        if let data = viewModel.getConfirmationState.currentData {
-            GetConfirmationSheet(
+    private var engineApprovalSheet: some View {
+        if let data = viewModel.engineApprovalState.currentData {
+            EngineApprovalSheet(
                 toolData: data,
                 onSubmit: { decision, note in
-                    viewModel.prepareGetConfirmationSubmission(decision, note: note)
+                    viewModel.prepareEngineApprovalSubmission(decision, note: note)
                 },
                 onDismiss: {
-                    viewModel.dismissGetConfirmationSheet()
+                    viewModel.dismissEngineApprovalSheet()
                 },
                 readOnly: data.status == .approved || data.status == .denied
             )

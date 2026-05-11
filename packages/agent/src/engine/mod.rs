@@ -22,6 +22,8 @@
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
 //! - agents use `AgentCapabilityClient` and engine tools to discover, inspect,
 //!   watch, and invoke live canonical capabilities without frozen snapshots;
+//!   the client preflights schema/authority before creating approval records,
+//!   and agents cannot resolve approvals themselves;
 //! - canonical domain functions such as `events::append`,
 //!   `filesystem::create_dir`, and `skills::activate` are the only executable
 //!   domain surface;
@@ -29,7 +31,9 @@
 //!   are registered as first-class primitive workers with in-memory and
 //!   SQLite-backed stores scoped outside the production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
-//!   pause into `approval::*` records and scoped stream events before execution;
+//!   pause into `approval::*` records and scoped stream events before execution,
+//!   while `approval::resolve` remains a user/client-owned primitive routed
+//!   through `EngineHostHandle` so the stored invocation resumes in one trace;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   high-risk shared-state mutations, so the host can acquire/release one
 //!   domain resource, record auditable rollback/compensation state, and avoid

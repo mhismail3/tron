@@ -13,7 +13,7 @@ extension ChatMessage {
             return data.toolCallId
         case .askUserQuestion(let data):
             return data.toolCallId
-        case .getConfirmation(let data):
+        case .engineApproval(let data):
             return data.toolCallId
         default:
             return nil

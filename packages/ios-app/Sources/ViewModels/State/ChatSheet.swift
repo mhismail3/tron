@@ -52,7 +52,7 @@ enum ChatSheet: Identifiable, Equatable {
 
     // Tool sheets
     case askUserQuestion
-    case getConfirmation
+    case engineApproval
     case subagentDetail
 
     // Notification sheets
@@ -79,8 +79,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "memoryRetain"
         case .askUserQuestion:
             return "askUserQuestion"
-        case .getConfirmation:
-            return "getConfirmation"
+        case .engineApproval:
+            return "engineApproval"
         case .subagentDetail:
             return "subagent"
         case .subagentResultsList:
@@ -112,7 +112,7 @@ enum ChatSheet: Identifiable, Equatable {
             return data1 == data2
         case (.askUserQuestion, .askUserQuestion):
             return true
-        case (.getConfirmation, .getConfirmation):
+        case (.engineApproval, .engineApproval):
             return true
         case (.subagentDetail, .subagentDetail):
             return true

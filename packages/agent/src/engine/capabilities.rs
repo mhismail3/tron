@@ -13,6 +13,7 @@ use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, T
 use super::invocation::{CausalContext, Invocation, InvocationResult};
 use super::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 use super::types::{FunctionDefinition, RiskLevel};
+use super::{policy, schema};
 
 /// Agent-facing engine capability client.
 #[derive(Clone)]
@@ -71,13 +72,16 @@ impl AgentCapabilityClient {
             .discover(&query)
             .await
             .into_iter()
-            .filter(|function| function.id.namespace() != "rpc")
+            .filter(|function| {
+                function.id.namespace() != "rpc" && !is_agent_blocked_function(&function.id)
+            })
             .collect()
     }
 
     /// Inspect one canonical function.
     pub async fn inspect(&self, function_id: &FunctionId) -> Result<FunctionDefinition> {
         reject_noncanonical_namespace(function_id)?;
+        reject_agent_blocked_function(function_id)?;
         self.handle
             .inspect_function(function_id, Some(&self.actor_context()))
             .await
@@ -109,57 +113,85 @@ impl AgentCapabilityClient {
         if let Some(parent) = parent_invocation_id {
             context = context.with_parent_invocation(parent);
         }
-        let inspected = self.inspect(&function_id).await;
-        if let Ok(function) = inspected
-            && function.required_authority.approval_required
-            && function.risk_level >= RiskLevel::High
-        {
-            let invocation = Invocation::new_sync(function_id.clone(), payload.clone(), context);
-            let approval = self
+        let invocation = Invocation::new_sync(function_id.clone(), payload.clone(), context);
+        if let Err(error) = reject_agent_blocked_function(&function_id) {
+            let (worker_id, revision) = self
                 .handle
-                .request_approval(EngineApprovalRequest {
-                    function_id: function_id.clone(),
-                    payload,
-                    causal_context: invocation.causal_context.clone(),
-                    delivery_mode: invocation.delivery_mode,
-                })
-                .await;
-            let details = match approval {
-                Ok(record) => serde_json::json!({
-                    "code": "APPROVAL_REQUIRED",
-                    "approvalId": record.approval_id,
-                    "status": record.status,
-                    "functionId": function_id.as_str(),
-                    "traceId": record.trace_id.as_str(),
-                }),
-                Err(error) => serde_json::json!({
-                    "code": "APPROVAL_REQUEST_FAILED",
-                    "functionId": function_id.as_str(),
-                    "error": error.to_string(),
-                }),
-            };
-            let error = EngineError::DomainFailure {
-                domain: "approval".to_owned(),
-                code: "APPROVAL_REQUIRED".to_owned(),
-                message: format!(
-                    "approval required before agent invocation of {}",
-                    invocation.function_id
-                ),
-                details: Some(details),
-            };
+                .inspect_function(&function_id, Some(&self.actor_context()))
+                .await
+                .map(|function| (function.owner_worker, function.revision))
+                .unwrap_or_else(|_| {
+                    (
+                        super::ids::WorkerId::new(function_id.namespace()).unwrap_or_else(|_| {
+                            super::ids::WorkerId::new("agent").expect("valid static worker id")
+                        }),
+                        super::types::FunctionRevision(0),
+                    )
+                });
             return self
                 .handle
-                .record_policy_stopped_invocation(
-                    invocation,
-                    function.owner_worker,
-                    function.revision,
-                    error,
-                )
+                .record_policy_stopped_invocation(invocation, worker_id, revision, error)
                 .await;
         }
-        self.handle
-            .invoke(Invocation::new_sync(function_id, payload, context))
-            .await
+        if let Ok(function) = self.inspect(&function_id).await {
+            if let Err(error) = preflight_agent_invocation(&function, &invocation) {
+                return self
+                    .handle
+                    .record_policy_stopped_invocation(
+                        invocation,
+                        function.owner_worker,
+                        function.revision,
+                        error,
+                    )
+                    .await;
+            }
+            if function.required_authority.approval_required
+                && function.risk_level >= RiskLevel::High
+            {
+                let approval = self
+                    .handle
+                    .request_approval(EngineApprovalRequest {
+                        function_id: function_id.clone(),
+                        payload,
+                        causal_context: invocation.causal_context.clone(),
+                        delivery_mode: invocation.delivery_mode,
+                    })
+                    .await;
+                let details = match approval {
+                    Ok(record) => serde_json::json!({
+                        "code": "APPROVAL_REQUIRED",
+                        "approvalId": record.approval_id,
+                        "status": record.status,
+                        "functionId": function_id.as_str(),
+                        "traceId": record.trace_id.as_str(),
+                    }),
+                    Err(error) => serde_json::json!({
+                        "code": "APPROVAL_REQUEST_FAILED",
+                        "functionId": function_id.as_str(),
+                        "error": error.to_string(),
+                    }),
+                };
+                let error = EngineError::DomainFailure {
+                    domain: "approval".to_owned(),
+                    code: "APPROVAL_REQUIRED".to_owned(),
+                    message: format!(
+                        "approval required before agent invocation of {}",
+                        invocation.function_id
+                    ),
+                    details: Some(details),
+                };
+                return self
+                    .handle
+                    .record_policy_stopped_invocation(
+                        invocation,
+                        function.owner_worker,
+                        function.revision,
+                        error,
+                    )
+                    .await;
+            }
+        }
+        self.handle.invoke(invocation).await
     }
 
     /// Dispatch a manual trigger.
@@ -218,12 +250,37 @@ impl AgentCapabilityClient {
     }
 }
 
+fn preflight_agent_invocation(
+    function: &FunctionDefinition,
+    invocation: &Invocation,
+) -> Result<()> {
+    policy::validate_invocation(function, invocation)?;
+    if let Some(schema) = &function.request_schema {
+        schema::validate_payload(&function.id, "request", schema, &invocation.payload)?;
+    }
+    Ok(())
+}
+
 fn reject_noncanonical_namespace(function_id: &FunctionId) -> Result<()> {
     let namespace = function_id.namespace();
     if namespace == "rpc" {
         return Err(EngineError::PolicyViolation(format!(
             "agent capability client refuses non-canonical namespace {namespace}"
         )));
+    }
+    Ok(())
+}
+
+fn is_agent_blocked_function(function_id: &FunctionId) -> bool {
+    function_id.namespace() == "approval"
+}
+
+fn reject_agent_blocked_function(function_id: &FunctionId) -> Result<()> {
+    if is_agent_blocked_function(function_id) {
+        return Err(EngineError::PolicyViolation(
+            "approval primitives are owned by user/client approval flow; agents must stop when an engine invocation returns APPROVAL_REQUIRED"
+                .to_owned(),
+        ));
     }
     Ok(())
 }

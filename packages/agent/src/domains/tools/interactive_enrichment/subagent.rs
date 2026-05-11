@@ -1,5 +1,6 @@
+use super::SUBAGENT_RESULTS_MARKER;
 use super::payload::inject_into_payload;
-use super::{Map, SUBAGENT_RESULTS_MARKER};
+use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 
