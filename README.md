@@ -321,6 +321,21 @@ can enter the capability registry.
 
 Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block tells agents to inspect `process::run` before using standard `git` commands and to defer risky or publishing operations to the user.
 
+The same capability worker also registers operator/admin functions for native
+clients and the Engine Console. These are normal engine catalog functions, not
+provider-facing tools:
+
+| Function family | Functions |
+|-----------------|-----------|
+| Status/snapshot/audit | `capability::status`, `capability::registry_snapshot`, `capability::audit_query` |
+| Bindings | `capability::binding_list`, `capability::binding_set` |
+| Plugins/conformance | `capability::plugin_list`, `capability::plugin_inspect`, `capability::plugin_install`, `capability::plugin_update`, `capability::plugin_set_state`, `capability::plugin_promote`, `capability::conformance_run` |
+| Implementations/policy | `capability::implementation_set_state`, `capability::policy_get`, `capability::policy_validate`, `capability::policy_update` |
+
+Admin mutations carry high-risk capability metadata, approval requirements,
+idempotency, policy evaluation, tracing, and audit records. Read paths return
+redacted audit data by default; reveal behavior remains server-authoritative.
+
 ---
 
 ## Engine Protocol API
@@ -803,10 +818,10 @@ packages/ios-app/Sources/
 +-- Protocols/            Coordinator and view model protocols
 +-- Services/             Network (engine client, WebSocket, deep links), paired servers, audio,
 +                         Codex App Server client, push notifications, local diagnostics,
-+                         feedback composer, Keychain tokens
++                         feedback composer, Engine Console cache, Keychain tokens
 +-- ViewModels/           Chat and Codex view models, handlers, managers, @Observable state,
-+                         OnboardingState
-+-- Views/                SwiftUI views (chat, Codex, tools, voice notes, settings, Onboarding/, ...)
++                         OnboardingState, EngineConsoleState
++-- Views/                SwiftUI views (chat, Codex, Engine Console, tools, voice notes, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions
@@ -825,6 +840,7 @@ packages/ios-app/Sources/
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
 - **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; engine-native clients discover the live endpoint by invoking `codex_app::status` and do not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
+- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, plugin manifests, bindings, vector index state, and redacted audit rows. It invokes capability admin functions rather than hardcoded tool descriptors. `EngineConsoleCache` stores read-only summaries for disconnected browsing; mutations stay server-authoritative and are disabled by the console state while offline.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.
@@ -838,6 +854,7 @@ packages/ios-app/Sources/
 Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
 Codex:   /engine invoke(codex_app::status) -> Codex App Server WS -> CodexJSONRPCTransport -> CodexAppClient -> CodexAppViewModel -> Codex mode UI
+Console: /engine invoke(capability::*) -> CapabilityClient -> EngineConsoleState -> EngineConsoleView
 ```
 
 ### Build Configurations
@@ -854,6 +871,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `architecture.md` — App architecture, patterns, file placement
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
+- `capability-ui.md` — Engine Console, capability DTOs, schema forms, offline cache, and admin client boundaries
 - `apns.md` — Push notification setup
 - `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
 - `codex-app-server.md` — Server-owned Codex App Server lifecycle, security, transport, and tests

@@ -8,6 +8,8 @@
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use super::Deps;
 use super::registry::{
@@ -18,7 +20,8 @@ use super::registry::{
     u64_field,
 };
 use super::types::{
-    CapabilityBindingDecision, CapabilityExecutionRecord, CapabilityRejectedCandidate,
+    CapabilityBindingDecision, CapabilityExecutionRecord, CapabilityPluginManifest,
+    CapabilityRejectedCandidate,
 };
 use crate::engine::{
     ActorContext, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EffectClass,
@@ -26,6 +29,8 @@ use crate::engine::{
     Invocation, RiskLevel,
 };
 use crate::shared::content::ToolResultContent;
+use crate::shared::paths::files;
+use crate::shared::profile::CapabilityPolicySpec;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
@@ -226,6 +231,542 @@ pub(crate) async fn execute_value(
             message: format!("Unsupported capability execute mode '{other}'"),
         }),
     }
+}
+
+pub(crate) async fn status_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    sync_registry_for_admin(invocation, deps).await?;
+    let include_snapshot = bool_field(&invocation.payload, "includeSnapshot").unwrap_or(false);
+    let store = deps.registry_store.clone();
+    let mut status = run_blocking_task("capability.status", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store.admin_status().map_err(registry_store_error)
+    })
+    .await?;
+    status["serverProfile"] = json!({
+        "profileName": deps.profile_runtime.current().profile_name(),
+        "profileHash": deps.profile_runtime.current().spec_hash(),
+    });
+    if include_snapshot {
+        let snapshot = registry_snapshot_from_store(deps).await?;
+        status["snapshot"] = snapshot;
+    }
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.status",
+        json!({"includeSnapshot": include_snapshot}),
+    )
+    .await?;
+    Ok(status)
+}
+
+pub(crate) async fn registry_snapshot_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    sync_registry_for_admin(invocation, deps).await?;
+    let mut snapshot = registry_snapshot_from_store(deps).await?;
+    if !bool_field(&invocation.payload, "includeDocuments").unwrap_or(true) {
+        snapshot["documents"] = json!([]);
+    }
+    if !bool_field(&invocation.payload, "includeBindings").unwrap_or(true) {
+        snapshot["bindings"] = json!([]);
+    }
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.registry_snapshot",
+        json!({
+            "includeDocuments": bool_field(&invocation.payload, "includeDocuments").unwrap_or(true),
+            "includeBindings": bool_field(&invocation.payload, "includeBindings").unwrap_or(true),
+        }),
+    )
+    .await?;
+    Ok(snapshot)
+}
+
+pub(crate) async fn audit_query_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let event_type = string_field(&invocation.payload, "eventType");
+    let trace_id = string_field(&invocation.payload, "traceId");
+    let limit = u64_field(&invocation.payload, "limit")
+        .map(|value| value.clamp(1, 200) as usize)
+        .unwrap_or(50);
+    let reveal_payloads = bool_field(&invocation.payload, "revealPayloads").unwrap_or(false);
+    let store = deps.registry_store.clone();
+    let event_type_for_query = event_type.clone();
+    let trace_id_for_query = trace_id.clone();
+    let result = run_blocking_task("capability.audit_query", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .audit_query(
+                event_type_for_query.as_deref(),
+                trace_id_for_query.as_deref(),
+                limit,
+                reveal_payloads,
+            )
+            .map_err(registry_store_error)
+    })
+    .await?;
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.audit_query",
+        json!({
+            "eventType": event_type,
+            "traceId": trace_id,
+            "limit": limit,
+            "revealPayloads": reveal_payloads,
+        }),
+    )
+    .await?;
+    Ok(result)
+}
+
+pub(crate) async fn binding_list_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    sync_registry_for_admin(invocation, deps).await?;
+    let store = deps.registry_store.clone();
+    let result = run_blocking_task("capability.binding_list", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store.list_bindings().map_err(registry_store_error)
+    })
+    .await?;
+    record_admin_audit(deps, invocation, "capability.binding_list", json!({})).await?;
+    Ok(result)
+}
+
+pub(crate) async fn binding_set_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    sync_registry_for_admin(invocation, deps).await?;
+    let contract_id = required_string(&invocation.payload, "contractId")?;
+    let selected_implementation = required_string(&invocation.payload, "selectedImplementation")?;
+    let scope_kind =
+        string_field(&invocation.payload, "scopeKind").unwrap_or_else(|| "system".to_owned());
+    let scope_value =
+        string_field(&invocation.payload, "scopeValue").unwrap_or_else(|| "default".to_owned());
+    validate_binding_scope(&scope_kind)?;
+    let selection_policy = string_field(&invocation.payload, "selectionPolicy")
+        .unwrap_or_else(|| "explicit".to_owned());
+    let secondary_implementations =
+        string_array_field(&invocation.payload, "secondaryImplementations")?;
+    let priority = u64_field(&invocation.payload, "priority").unwrap_or(0) as i64;
+    let enabled = bool_field(&invocation.payload, "enabled").unwrap_or(true);
+    ensure_implementation_known(deps, &selected_implementation).await?;
+    let store = deps.registry_store.clone();
+    let contract_for_result = contract_id.clone();
+    let implementation_for_result = selected_implementation.clone();
+    let scope_kind_for_result = scope_kind.clone();
+    let scope_value_for_result = scope_value.clone();
+    let selection_policy_for_result = selection_policy.clone();
+    let secondary_for_result = secondary_implementations.clone();
+    run_blocking_task("capability.binding_set", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .upsert_binding(
+                &contract_id,
+                &scope_kind,
+                &scope_value,
+                &selected_implementation,
+                &selection_policy,
+                &secondary_implementations,
+                priority,
+                enabled,
+            )
+            .map_err(registry_store_error)
+    })
+    .await?;
+    let result = json!({
+        "binding": {
+            "contractId": contract_for_result,
+            "scopeKind": scope_kind_for_result,
+            "scopeValue": scope_value_for_result,
+            "selectedImplementation": implementation_for_result,
+            "selectionPolicy": selection_policy_for_result,
+            "secondaryImplementations": secondary_for_result,
+            "priority": priority,
+            "enabled": enabled,
+        }
+    });
+    record_admin_audit(deps, invocation, "capability.binding_set", result.clone()).await?;
+    Ok(result)
+}
+
+pub(crate) async fn plugin_list_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    sync_registry_for_admin(invocation, deps).await?;
+    let store = deps.registry_store.clone();
+    let result = run_blocking_task("capability.plugin_list", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store.list_plugins().map_err(registry_store_error)
+    })
+    .await?;
+    record_admin_audit(deps, invocation, "capability.plugin_list", json!({})).await?;
+    Ok(result)
+}
+
+pub(crate) async fn plugin_inspect_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    sync_registry_for_admin(invocation, deps).await?;
+    let plugin_id = required_string(&invocation.payload, "pluginId")?;
+    let store = deps.registry_store.clone();
+    let plugin_id_for_query = plugin_id.clone();
+    let result = run_blocking_task("capability.plugin_inspect", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .plugin_inspect(&plugin_id_for_query)
+            .map_err(registry_store_error)?
+            .ok_or_else(|| CapabilityError::NotFound {
+                code: "CAPABILITY_PLUGIN_NOT_FOUND".to_owned(),
+                message: format!("Capability plugin '{plugin_id_for_query}' was not found"),
+            })
+    })
+    .await?;
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.plugin_inspect",
+        json!({"pluginId": plugin_id}),
+    )
+    .await?;
+    Ok(result)
+}
+
+pub(crate) async fn plugin_install_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    upsert_plugin_from_payload(invocation, deps, "install").await
+}
+
+pub(crate) async fn plugin_update_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    upsert_plugin_from_payload(invocation, deps, "update").await
+}
+
+pub(crate) async fn plugin_set_state_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let plugin_id = required_string(&invocation.payload, "pluginId")?;
+    let state = required_string(&invocation.payload, "state")?;
+    validate_conformance_state(&state)?;
+    let store = deps.registry_store.clone();
+    let plugin_id_for_update = plugin_id.clone();
+    let state_for_update = state.clone();
+    run_blocking_task("capability.plugin_set_state", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .set_plugin_state(&plugin_id_for_update, &state_for_update)
+            .map_err(registry_store_error)
+    })
+    .await?;
+    let result = json!({"pluginId": plugin_id, "state": state});
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.plugin_set_state",
+        result.clone(),
+    )
+    .await?;
+    Ok(result)
+}
+
+pub(crate) async fn plugin_promote_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let plugin_id = required_string(&invocation.payload, "pluginId")?;
+    let target_visibility = required_string(&invocation.payload, "targetVisibility")?;
+    if !matches!(target_visibility.as_str(), "workspace" | "system") {
+        return Err(CapabilityError::InvalidParams {
+            message: "targetVisibility must be workspace or system".to_owned(),
+        });
+    }
+    let inspected = inspect_plugin_manifest(deps, &plugin_id).await?;
+    let manifest_value =
+        inspected
+            .get("manifest")
+            .cloned()
+            .ok_or_else(|| CapabilityError::Internal {
+                message: "plugin inspect did not return a manifest".to_owned(),
+            })?;
+    let mut manifest: CapabilityPluginManifest =
+        serde_json::from_value(manifest_value).map_err(|error| CapabilityError::Internal {
+            message: format!("decode plugin manifest: {error}"),
+        })?;
+    if manifest.conformance_state != "healthy" {
+        return Err(CapabilityError::Custom {
+            code: "PLUGIN_PROMOTION_REQUIRES_HEALTHY_CONFORMANCE".to_owned(),
+            message: format!(
+                "{} cannot be promoted while conformanceState={}",
+                manifest.id, manifest.conformance_state
+            ),
+            details: Some(json!({
+                "pluginId": manifest.id,
+                "conformanceState": manifest.conformance_state,
+            })),
+        });
+    }
+    manifest.visibility_ceiling = target_visibility.clone();
+    let catalog_revision = deps.engine_host.catalog_revision().await.0;
+    let store = deps.registry_store.clone();
+    let manifest_for_update = manifest.clone();
+    run_blocking_task("capability.plugin_promote", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .upsert_plugin_manifest(&manifest_for_update, "healthy", catalog_revision)
+            .map_err(registry_store_error)
+    })
+    .await?;
+    let result = json!({
+        "pluginId": plugin_id,
+        "targetVisibility": target_visibility,
+        "state": "healthy",
+    });
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.plugin_promote",
+        result.clone(),
+    )
+    .await?;
+    Ok(result)
+}
+
+pub(crate) async fn conformance_run_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    sync_registry_for_admin(invocation, deps).await?;
+    let plugin_id = required_string(&invocation.payload, "pluginId")?;
+    let requested_implementation = string_field(&invocation.payload, "implementationId");
+    let inspected = inspect_plugin_manifest(deps, &plugin_id).await?;
+    let manifest_value =
+        inspected
+            .get("manifest")
+            .cloned()
+            .ok_or_else(|| CapabilityError::Internal {
+                message: "plugin inspect did not return a manifest".to_owned(),
+            })?;
+    let manifest: CapabilityPluginManifest =
+        serde_json::from_value(manifest_value).map_err(|error| CapabilityError::Internal {
+            message: format!("decode plugin manifest: {error}"),
+        })?;
+    let implementations = inspected
+        .get("implementations")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let known = implementations
+        .iter()
+        .filter_map(|implementation| {
+            implementation
+                .get("implementationId")
+                .and_then(Value::as_str)
+        })
+        .map(ToOwned::to_owned)
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected = requested_implementation
+        .clone()
+        .map(|implementation| vec![implementation])
+        .unwrap_or_else(|| manifest.provided_implementations.clone());
+    let missing = expected
+        .iter()
+        .filter(|implementation| !known.contains(*implementation))
+        .cloned()
+        .collect::<Vec<_>>();
+    let next_state = if missing.is_empty() {
+        "healthy"
+    } else {
+        "degraded"
+    };
+    let store = deps.registry_store.clone();
+    let plugin_for_update = plugin_id.clone();
+    let expected_for_update = expected.clone();
+    let next_state_for_update = next_state.to_owned();
+    run_blocking_task("capability.conformance_run", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .set_plugin_state(&plugin_for_update, &next_state_for_update)
+            .map_err(registry_store_error)?;
+        for implementation_id in expected_for_update {
+            let _ = store.set_implementation_state(&implementation_id, &next_state_for_update);
+        }
+        Ok(())
+    })
+    .await?;
+    let result = json!({
+        "pluginId": plugin_id,
+        "implementationId": requested_implementation,
+        "state": next_state,
+        "checks": {
+            "manifestImplementationsPresent": missing.is_empty(),
+            "missingImplementations": missing,
+        }
+    });
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.conformance_run",
+        result.clone(),
+    )
+    .await?;
+    Ok(result)
+}
+
+pub(crate) async fn implementation_set_state_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let implementation_id = required_string(&invocation.payload, "implementationId")?;
+    let state = required_string(&invocation.payload, "state")?;
+    validate_conformance_state(&state)?;
+    let store = deps.registry_store.clone();
+    let implementation_for_update = implementation_id.clone();
+    let state_for_update = state.clone();
+    run_blocking_task("capability.implementation_set_state", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .set_implementation_state(&implementation_for_update, &state_for_update)
+            .map_err(registry_store_error)
+    })
+    .await?;
+    let result = json!({"implementationId": implementation_id, "state": state});
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.implementation_set_state",
+        result.clone(),
+    )
+    .await?;
+    Ok(result)
+}
+
+pub(crate) async fn policy_get_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let policy_id = string_field(&invocation.payload, "policyId");
+    let current = deps.profile_runtime.current();
+    let document = current.execution_spec().document();
+    let policies = if let Some(policy_id) = &policy_id {
+        let policy = document.capability_policies.get(policy_id).ok_or_else(|| {
+            CapabilityError::NotFound {
+                code: "CAPABILITY_POLICY_NOT_FOUND".to_owned(),
+                message: format!("Capability policy '{policy_id}' was not found"),
+            }
+        })?;
+        json!({ policy_id: policy })
+    } else {
+        serde_json::to_value(&document.capability_policies).map_err(|error| {
+            CapabilityError::Internal {
+                message: format!("serialize capability policies: {error}"),
+            }
+        })?
+    };
+    let result = json!({
+        "profileName": current.profile_name(),
+        "profileHash": current.spec_hash(),
+        "policyId": policy_id,
+        "capabilityPolicies": policies,
+    });
+    record_admin_audit(deps, invocation, "capability.policy_get", result.clone()).await?;
+    Ok(result)
+}
+
+pub(crate) async fn policy_validate_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let raw_policy = invocation.payload.get("policy").cloned().ok_or_else(|| {
+        CapabilityError::InvalidParams {
+            message: "policy is required".to_owned(),
+        }
+    })?;
+    let validation = validate_capability_policy_payload(raw_policy);
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.policy_validate",
+        json!({
+            "policyId": string_field(&invocation.payload, "policyId"),
+            "valid": validation.get("valid").and_then(Value::as_bool).unwrap_or(false),
+        }),
+    )
+    .await?;
+    Ok(validation)
+}
+
+pub(crate) async fn policy_update_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let policy_id = required_string(&invocation.payload, "policyId")?;
+    validate_profile_id(&policy_id)?;
+    let raw_policy = invocation.payload.get("policy").cloned().ok_or_else(|| {
+        CapabilityError::InvalidParams {
+            message: "policy is required".to_owned(),
+        }
+    })?;
+    let policy: CapabilityPolicySpec =
+        serde_json::from_value(raw_policy).map_err(|error| CapabilityError::InvalidParams {
+            message: format!("Invalid capability policy: {error}"),
+        })?;
+    let runtime = deps.profile_runtime.clone();
+    let path = current_profile_toml_path(deps);
+    let policy_id_for_write = policy_id.clone();
+    let result = run_blocking_task("capability.policy_update", move || {
+        write_capability_policy_to_profile_and_reload(
+            &path,
+            &policy_id_for_write,
+            &policy,
+            runtime.as_ref(),
+        )?;
+        Ok(json!({
+            "policyId": policy_id_for_write,
+            "profilePath": path.display().to_string(),
+            "updated": true,
+        }))
+    })
+    .await?;
+    record_admin_audit(deps, invocation, "capability.policy_update", result.clone()).await?;
+    Ok(result)
 }
 
 pub(crate) async fn render_capability_primer(
@@ -811,6 +1352,398 @@ fn registry_store_error(error: String) -> CapabilityError {
     CapabilityError::Internal { message: error }
 }
 
+async fn sync_registry_for_admin(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<u64, CapabilityError> {
+    let actor = actor_from_invocation(invocation)?;
+    let functions = deps
+        .engine_host
+        .discover(&FunctionQuery {
+            actor: Some(actor),
+            ..FunctionQuery::default()
+        })
+        .await;
+    let catalog_revision = deps.engine_host.catalog_revision().await.0;
+    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision);
+    let store = deps.registry_store.clone();
+    let embedding_provider = deps.embedding_provider.clone();
+    run_blocking_task("capability.admin.sync_registry", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .sync_snapshot(
+                &snapshot,
+                embedding_provider.as_ref(),
+                &registry_metadata_sync_policy(),
+            )
+            .map_err(registry_store_error)?;
+        Ok(())
+    })
+    .await?;
+    Ok(catalog_revision)
+}
+
+async fn registry_snapshot_from_store(deps: &Deps) -> Result<Value, CapabilityError> {
+    let store = deps.registry_store.clone();
+    run_blocking_task("capability.registry_snapshot.store", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store.registry_snapshot().map_err(registry_store_error)
+    })
+    .await
+}
+
+async fn record_admin_audit(
+    deps: &Deps,
+    invocation: &Invocation,
+    event_type: &'static str,
+    payload: Value,
+) -> Result<(), CapabilityError> {
+    let store = deps.registry_store.clone();
+    let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    run_blocking_task("capability.admin.audit", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .record_audit_event(event_type, Some(&trace_id), payload)
+            .map_err(registry_store_error)
+    })
+    .await
+}
+
+async fn inspect_plugin_manifest(deps: &Deps, plugin_id: &str) -> Result<Value, CapabilityError> {
+    let store = deps.registry_store.clone();
+    let plugin_id = plugin_id.to_owned();
+    run_blocking_task("capability.plugin.inspect.store", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .plugin_inspect(&plugin_id)
+            .map_err(registry_store_error)?
+            .ok_or_else(|| CapabilityError::NotFound {
+                code: "CAPABILITY_PLUGIN_NOT_FOUND".to_owned(),
+                message: format!("Capability plugin '{plugin_id}' was not found"),
+            })
+    })
+    .await
+}
+
+async fn upsert_plugin_from_payload(
+    invocation: &Invocation,
+    deps: &Deps,
+    action: &'static str,
+) -> Result<Value, CapabilityError> {
+    let manifest_value = invocation.payload.get("manifest").cloned().ok_or_else(|| {
+        CapabilityError::InvalidParams {
+            message: "manifest is required".to_owned(),
+        }
+    })?;
+    let manifest: CapabilityPluginManifest =
+        serde_json::from_value(manifest_value).map_err(|error| CapabilityError::InvalidParams {
+            message: format!("Invalid capability plugin manifest: {error}"),
+        })?;
+    validate_plugin_manifest(&manifest)?;
+    let catalog_revision = deps.engine_host.catalog_revision().await.0;
+    let state = if action == "install" {
+        "candidate".to_owned()
+    } else {
+        manifest.conformance_state.clone()
+    };
+    validate_conformance_state(&state)?;
+    let store = deps.registry_store.clone();
+    let manifest_for_store = manifest.clone();
+    let state_for_store = state.clone();
+    run_blocking_task("capability.plugin_upsert", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .upsert_plugin_manifest(&manifest_for_store, &state_for_store, catalog_revision)
+            .map_err(registry_store_error)
+    })
+    .await?;
+    let result = json!({
+        "action": action,
+        "pluginId": manifest.id,
+        "conformanceState": state,
+        "catalogRevision": catalog_revision,
+    });
+    record_admin_audit(
+        deps,
+        invocation,
+        if action == "install" {
+            "capability.plugin_install"
+        } else {
+            "capability.plugin_update"
+        },
+        result.clone(),
+    )
+    .await?;
+    Ok(result)
+}
+
+async fn ensure_implementation_known(
+    deps: &Deps,
+    selected_implementation: &str,
+) -> Result<(), CapabilityError> {
+    let snapshot = registry_snapshot_from_store(deps).await?;
+    let known = snapshot
+        .get("implementations")
+        .and_then(Value::as_array)
+        .is_some_and(|implementations| {
+            implementations.iter().any(|implementation| {
+                implementation
+                    .get("implementationId")
+                    .and_then(Value::as_str)
+                    == Some(selected_implementation)
+            })
+        });
+    if known {
+        return Ok(());
+    }
+    Err(CapabilityError::NotFound {
+        code: "CAPABILITY_IMPLEMENTATION_NOT_FOUND".to_owned(),
+        message: format!("Capability implementation '{selected_implementation}' was not found"),
+    })
+}
+
+fn required_string(params: &Value, key: &str) -> Result<String, CapabilityError> {
+    string_field(params, key).ok_or_else(|| CapabilityError::InvalidParams {
+        message: format!("{key} is required"),
+    })
+}
+
+fn string_array_field(params: &Value, key: &str) -> Result<Vec<String>, CapabilityError> {
+    let Some(value) = params.get(key) else {
+        return Ok(Vec::new());
+    };
+    let Some(values) = value.as_array() else {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{key} must be an array of strings"),
+        });
+    };
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| CapabilityError::InvalidParams {
+                    message: format!("{key} must be an array of strings"),
+                })
+        })
+        .collect()
+}
+
+fn validate_binding_scope(scope_kind: &str) -> Result<(), CapabilityError> {
+    if matches!(scope_kind, "session" | "workspace" | "profile" | "system") {
+        return Ok(());
+    }
+    Err(CapabilityError::InvalidParams {
+        message: "scopeKind must be session, workspace, profile, or system".to_owned(),
+    })
+}
+
+fn validate_conformance_state(state: &str) -> Result<(), CapabilityError> {
+    if matches!(
+        state,
+        "candidate" | "healthy" | "degraded" | "quarantined" | "disabled"
+    ) {
+        return Ok(());
+    }
+    Err(CapabilityError::InvalidParams {
+        message: "state must be candidate, healthy, degraded, quarantined, or disabled".to_owned(),
+    })
+}
+
+fn validate_plugin_manifest(manifest: &CapabilityPluginManifest) -> Result<(), CapabilityError> {
+    validate_nonempty_id("manifest.id", &manifest.id)?;
+    validate_nonempty_id("manifest.name", &manifest.name)?;
+    validate_nonempty_id("manifest.version", &manifest.version)?;
+    validate_nonempty_id("manifest.publisher", &manifest.publisher)?;
+    validate_conformance_state(&manifest.conformance_state)?;
+    if manifest.namespace_claims.is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "manifest.namespaceClaims must not be empty".to_owned(),
+        });
+    }
+    for namespace in &manifest.namespace_claims {
+        validate_namespace_claim(namespace)?;
+    }
+    for contract_id in &manifest.provided_contracts {
+        ensure_claim_covers_id("providedContracts", &manifest.namespace_claims, contract_id)?;
+    }
+    for implementation_id in &manifest.provided_implementations {
+        ensure_claim_covers_id(
+            "providedImplementations",
+            &manifest.namespace_claims,
+            implementation_id,
+        )?;
+    }
+    if manifest.trust_tier == "first_party_signed" && manifest.signature_status != "valid" {
+        return Err(CapabilityError::InvalidParams {
+            message: "first_party_signed plugins require signatureStatus=valid".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_nonempty_id(field: &str, value: &str) -> Result<(), CapabilityError> {
+    if value.trim().is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{field} must not be empty"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_namespace_claim(namespace: &str) -> Result<(), CapabilityError> {
+    validate_nonempty_id("namespaceClaim", namespace)?;
+    if namespace == "capability" || namespace.starts_with("capability::") {
+        return Err(CapabilityError::InvalidParams {
+            message: "plugins cannot claim the reserved capability namespace".to_owned(),
+        });
+    }
+    if namespace.contains('*') {
+        return Err(CapabilityError::InvalidParams {
+            message: "namespace claims must be explicit prefixes and cannot contain '*'".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn ensure_claim_covers_id(
+    field: &str,
+    namespace_claims: &[String],
+    id: &str,
+) -> Result<(), CapabilityError> {
+    if namespace_claims
+        .iter()
+        .any(|claim| id == claim || id.starts_with(&format!("{claim}::")) || id.starts_with(claim))
+    {
+        return Ok(());
+    }
+    Err(CapabilityError::InvalidParams {
+        message: format!("{field} id '{id}' is outside namespaceClaims"),
+    })
+}
+
+fn validate_capability_policy_payload(raw_policy: Value) -> Value {
+    match serde_json::from_value::<CapabilityPolicySpec>(raw_policy) {
+        Ok(policy) => json!({
+            "valid": true,
+            "policy": policy,
+            "errors": []
+        }),
+        Err(error) => json!({
+            "valid": false,
+            "errors": [error.to_string()]
+        }),
+    }
+}
+
+fn validate_profile_id(policy_id: &str) -> Result<(), CapabilityError> {
+    validate_nonempty_id("policyId", policy_id)?;
+    let valid = policy_id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'));
+    if valid {
+        return Ok(());
+    }
+    Err(CapabilityError::InvalidParams {
+        message: "policyId contains unsupported characters".to_owned(),
+    })
+}
+
+fn current_profile_toml_path(deps: &Deps) -> PathBuf {
+    deps.profile_runtime
+        .current()
+        .profile
+        .active_dir
+        .join(files::PROFILE_TOML)
+}
+
+fn write_capability_policy_to_profile_and_reload(
+    path: &Path,
+    policy_id: &str,
+    policy: &CapabilityPolicySpec,
+    runtime: &crate::domains::agent::runner::profile_runtime::ProfileRuntime,
+) -> Result<(), CapabilityError> {
+    let previous = fs::read_to_string(path).map_err(|error| CapabilityError::Internal {
+        message: format!("read profile TOML {}: {error}", path.display()),
+    })?;
+    write_capability_policy_to_profile_inner(path, policy_id, policy, &previous)?;
+    if let Err(error) = runtime.reload_now("capability::policy_update") {
+        atomic_write(path, previous.as_bytes())?;
+        let _ = runtime.reload_now("capability::policy_update.rollback");
+        return Err(CapabilityError::Internal {
+            message: format!(
+                "profile runtime rejected updated capability policy; profile TOML was rolled back: {error}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn write_capability_policy_to_profile_inner(
+    path: &Path,
+    policy_id: &str,
+    policy: &CapabilityPolicySpec,
+    previous: &str,
+) -> Result<(), CapabilityError> {
+    let mut value: toml::Value =
+        toml::from_str(previous).map_err(|error| CapabilityError::InvalidParams {
+            message: format!("profile TOML is invalid and cannot be updated: {error}"),
+        })?;
+    let Some(table) = value.as_table_mut() else {
+        return Err(CapabilityError::InvalidParams {
+            message: "profile TOML root must be a table".to_owned(),
+        });
+    };
+    let policies = table
+        .entry("capabilityPolicies".to_owned())
+        .or_insert_with(|| toml::Value::Table(Default::default()));
+    let Some(policies_table) = policies.as_table_mut() else {
+        return Err(CapabilityError::InvalidParams {
+            message: "profile capabilityPolicies must be a table".to_owned(),
+        });
+    };
+    let policy_value =
+        toml::Value::try_from(policy).map_err(|error| CapabilityError::Internal {
+            message: format!("serialize capability policy to TOML: {error}"),
+        })?;
+    policies_table.insert(policy_id.to_owned(), policy_value);
+    let next = toml::to_string_pretty(&value).map_err(|error| CapabilityError::Internal {
+        message: format!("serialize profile TOML: {error}"),
+    })?;
+    atomic_write(path, next.as_bytes())
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), CapabilityError> {
+    let parent = path.parent().ok_or_else(|| CapabilityError::Internal {
+        message: format!("path {} has no parent", path.display()),
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("profile.toml");
+    let tmp = parent.join(format!(
+        ".{file_name}.tmp-{}",
+        uuid::Uuid::now_v7().as_simple()
+    ));
+    fs::write(&tmp, bytes).map_err(|error| CapabilityError::Internal {
+        message: format!("write temporary profile TOML {}: {error}", tmp.display()),
+    })?;
+    fs::rename(&tmp, path).map_err(|error| CapabilityError::Internal {
+        message: format!("replace profile TOML {}: {error}", path.display()),
+    })
+}
+
 fn actor_from_invocation(invocation: &Invocation) -> Result<ActorContext, CapabilityError> {
     let mut actor = ActorContext::new(
         invocation.causal_context.actor_id.clone(),
@@ -1168,6 +2101,43 @@ mod tests {
         let parsed = search_policy_from_runtime(&invocation).expect("policy");
         assert!(!parsed.require_local_vector);
         assert!(parsed.allow_lexical_only_when_degraded);
+    }
+
+    #[test]
+    fn plugin_manifest_validation_rejects_reserved_namespace_claims() {
+        let manifest = CapabilityPluginManifest {
+            id: "external.test".to_owned(),
+            name: "Test".to_owned(),
+            version: "1.0.0".to_owned(),
+            publisher: "test".to_owned(),
+            signature_status: "unsigned".to_owned(),
+            runtime: "mcp".to_owned(),
+            namespace_claims: vec!["capability".to_owned()],
+            provided_contracts: vec!["capability::status".to_owned()],
+            provided_implementations: vec!["capability.status.impl".to_owned()],
+            requested_authorities: Vec::new(),
+            trust_tier: "external_mcp".to_owned(),
+            visibility_ceiling: "session".to_owned(),
+            conformance_state: "candidate".to_owned(),
+            docs: json!({}),
+            examples: Vec::new(),
+            search_metadata: json!({}),
+        };
+        let error = validate_plugin_manifest(&manifest).unwrap_err();
+        assert!(matches!(error, CapabilityError::InvalidParams { .. }));
+    }
+
+    #[test]
+    fn policy_validation_reports_structured_errors_without_updating() {
+        let validation = validate_capability_policy_payload(json!({
+            "allowedCapabilities": "filesystem::read_file"
+        }));
+        assert_eq!(validation["valid"], json!(false));
+        assert!(
+            validation["errors"]
+                .as_array()
+                .is_some_and(|errors| !errors.is_empty())
+        );
     }
 
     #[test]

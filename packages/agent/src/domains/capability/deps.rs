@@ -11,6 +11,7 @@ pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
     pub(crate) registry_store: SharedCapabilityRegistryStore,
     pub(crate) embedding_provider: Arc<dyn EmbeddingProvider>,
+    pub(crate) profile_runtime: Arc<crate::domains::agent::runner::profile_runtime::ProfileRuntime>,
 }
 
 impl Deps {
@@ -24,6 +25,7 @@ impl Deps {
             registry_store: open_capability_registry_store(storage_path)
                 .expect("capability registry store must open"),
             embedding_provider: default_embedding_provider(),
+            profile_runtime: deps.profile_runtime.clone(),
         }
     }
 }

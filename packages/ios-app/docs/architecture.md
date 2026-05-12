@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-11 (engine thin-client boundary, server-owned storage/observability settings, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-12 (engine thin-client boundary, capability-native Engine Console, server-owned storage/observability settings, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -13,6 +13,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A separate Codex mode that connects directly to a Tron-managed `codex app-server` on the active paired machine without using Tron agent sessions
+- A top-level Engine Console mode for live capability registry, plugin, binding, index, and redacted audit inspection
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
 
@@ -48,16 +49,17 @@ Sources/
 │   ├── PairingURLParser.swift  # tron://pair?host&port&token&label parser + builder
 │   ├── Parsing/            # Tool result parsers (delegated by ToolResultParser)
 │   ├── Settings/           # PairedServerStore (local server list + active id)
-│   └── Storage/            # KeychainItem + PairedServerTokenStore
+│   └── Storage/            # KeychainItem, PairedServerTokenStore, EngineConsoleCache
 ├── ViewModels/             # View state management
 │   ├── CodexApp/           # Codex mode state reducer and view model
 │   ├── Chat/               # ChatViewModel and extensions
 │   ├── Handlers/           # Event handling coordinators
 │   ├── Managers/           # Specialized state managers
-│   └── State/              # @Observable state objects
+│   └── State/              # @Observable state objects, including EngineConsoleState
 └── Views/                  # SwiftUI views
     ├── CodexApp/           # Codex dashboard, full-screen thread detail, setup/status, approvals
     ├── Chat/               # Core chat interface
+    ├── EngineConsole/      # Capability registry/plugin/binding/audit console
     ├── Tools/              # Tool chips + detail sheets
     ├── Components/         # Reusable UI components
     └── ...                 # Feature-specific views
@@ -114,6 +116,7 @@ Two systems handle events:
 ```
 Live:   WebSocket → EventRegistry → Plugin → EventDispatchCoordinator → ChatViewModel
 Stored: EventDatabase → Transformer → ChatMessage array
+Console: /engine invoke(capability::*) → CapabilityClient → EngineConsoleState → EngineConsoleView
 ```
 
 ### @Observable State Objects
@@ -138,10 +141,14 @@ final class SubagentState {
 | `Models/UnifiedEventTransformer.swift` | History reconstruction |
 | `ViewModels/Chat/ChatViewModel.swift` | Main chat state |
 | `Services/Network/EngineClient.swift` | /engine client protocol, canonical invoke, and stream subscriptions |
+| `Services/Network/Clients/CapabilityClient.swift` | Capability admin and primitive client for Engine Console |
+| `Services/Storage/EngineConsoleCache.swift` | Read-only disconnected Engine Console summary cache |
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `Services/CodexApp/CodexJSONRPCTransport.swift` | Direct Codex App Server JSON-RPC transport |
 | `ViewModels/CodexApp/CodexAppViewModel.swift` | Codex mode setup, connection, thread, turn, and approval state |
+| `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
+| `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
 
 ## Engine Client Boundary
 
@@ -177,6 +184,24 @@ established, it does not start server work that the UI cannot observe.
 Foreground notification inbox updates follow the same thin-client rule:
 `NotifyApp` tool completions delivered over `/engine` refresh the inbox, while
 APNs remains the background device-delivery transport.
+
+### Capability Console Boundary
+
+`NavigationMode.engine` is the native operator surface for the live capability
+architecture. It calls `capability::status`, `capability::registry_snapshot`,
+`capability::audit_query`, binding functions, plugin functions, conformance, and
+policy functions through `CapabilityClient`; it never reads a hardcoded tool
+descriptor catalog. `EngineConsoleState` owns refresh, search, inspect,
+mutation gating, and disconnected cache fallback. The server remains the source
+of truth for policy, authority, approval, audit redaction, plugin lifecycle, and
+binding selection.
+
+The console cache is intentionally read-only. On disconnect, the UI shows stale
+catalog/registry/index summaries and disables mutations. Reconnect refreshes the
+live snapshot and replaces cached summaries when the server reports a newer
+catalog or registry revision. The cache stores redacted audit rows only; full
+payload reveal is a future server-authorized flow and must not be reconstructed
+locally.
 
 ## Data Flow
 
@@ -375,6 +400,7 @@ the returned server-authoritative metadata for the active paired origin.
 | engine client | `Services/Network/` |
 | State object | `ViewModels/State/` |
 | Coordinator | `ViewModels/Handlers/` |
+| Engine Console surface | `Views/EngineConsole/` |
 | Tool chip+sheet | `Views/Tools/<ToolName>/` |
 | Reusable component | `Views/Components/` |
 

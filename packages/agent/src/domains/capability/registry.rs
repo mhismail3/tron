@@ -556,6 +556,51 @@ pub(crate) trait CapabilityRegistryStore: Send {
         trace_id: Option<&str>,
         payload: Value,
     ) -> Result<(), String>;
+
+    fn admin_status(&self) -> Result<Value, String>;
+
+    fn registry_snapshot(&self) -> Result<Value, String>;
+
+    fn audit_query(
+        &self,
+        event_type: Option<&str>,
+        trace_id: Option<&str>,
+        limit: usize,
+        reveal_payloads: bool,
+    ) -> Result<Value, String>;
+
+    fn list_bindings(&self) -> Result<Value, String>;
+
+    fn upsert_binding(
+        &mut self,
+        contract_id: &str,
+        scope_kind: &str,
+        scope_value: &str,
+        selected_implementation: &str,
+        selection_policy: &str,
+        secondary_implementations: &[String],
+        priority: i64,
+        enabled: bool,
+    ) -> Result<(), String>;
+
+    fn list_plugins(&self) -> Result<Value, String>;
+
+    fn plugin_inspect(&self, plugin_id: &str) -> Result<Option<Value>, String>;
+
+    fn upsert_plugin_manifest(
+        &mut self,
+        manifest: &CapabilityPluginManifest,
+        conformance_state: &str,
+        catalog_revision: u64,
+    ) -> Result<(), String>;
+
+    fn set_plugin_state(&mut self, plugin_id: &str, state: &str) -> Result<(), String>;
+
+    fn set_implementation_state(
+        &mut self,
+        implementation_id: &str,
+        state: &str,
+    ) -> Result<(), String>;
 }
 
 #[derive(Default)]
@@ -563,6 +608,8 @@ pub(crate) struct InMemoryCapabilityRegistryStore {
     documents: BTreeMap<String, CapabilityIndexDocument>,
     bindings: BTreeMap<(String, String, String), CapabilityBindingRecord>,
     conformance: BTreeMap<String, String>,
+    plugins: BTreeMap<String, Value>,
+    implementations: BTreeMap<String, Value>,
     inspections: BTreeMap<String, (String, u64, String)>,
     audits: Vec<Value>,
 }
@@ -574,16 +621,39 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
         embedding_provider: &dyn EmbeddingProvider,
         policy: &CapabilitySearchPolicy,
     ) -> Result<CapabilityIndexStatus, String> {
+        let prior_conformance = self.conformance.clone();
+        let prior_plugins = self.plugins.clone();
         self.documents.clear();
         self.conformance.clear();
+        self.plugins.clear();
+        self.implementations.clear();
         for document in snapshot.index_documents() {
             let _ = self.documents.insert(document_key(&document), document);
         }
         for entry in &snapshot.entries {
-            let _ = self.conformance.insert(
-                entry.implementation_id.clone(),
-                conformance_state(&entry.function, &entry.trust_tier),
-            );
+            let state = prior_conformance
+                .get(&entry.implementation_id)
+                .cloned()
+                .unwrap_or_else(|| conformance_state(&entry.function, &entry.trust_tier));
+            let _ = self
+                .conformance
+                .insert(entry.implementation_id.clone(), state.clone());
+            let mut manifest_value =
+                serde_json::to_value(plugin_manifest_for_entry(entry)).unwrap_or(Value::Null);
+            if let Some(existing_state) = prior_plugins
+                .get(&entry.plugin_id)
+                .and_then(|plugin| plugin.get("conformanceState"))
+                .and_then(Value::as_str)
+            {
+                manifest_value["conformanceState"] = json!(existing_state);
+            }
+            let _ = self.plugins.insert(entry.plugin_id.clone(), manifest_value);
+            let mut implementation =
+                serde_json::to_value(entry.implementation_record()).unwrap_or(Value::Null);
+            implementation["conformanceState"] = json!(state);
+            let _ = self
+                .implementations
+                .insert(entry.implementation_id.clone(), implementation);
         }
         let mut status = ready_index_status(policy, embedding_provider);
         if policy.local_vector {
@@ -703,6 +773,144 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
             "payload": payload,
             "createdAt": Utc::now().to_rfc3339()
         }));
+        Ok(())
+    }
+
+    fn admin_status(&self) -> Result<Value, String> {
+        Ok(json!({
+            "plugins": self.plugins.len(),
+            "implementations": self.implementations.len(),
+            "bindings": self.bindings.len(),
+            "documents": self.documents.len(),
+            "auditEvents": self.audits.len(),
+            "indexStatus": {
+                "state": "memory",
+                "lexical": true,
+                "localVector": false,
+                "cloudEmbeddings": false,
+                "vectorStore": "memory",
+                "embeddingModel": "none",
+                "degradedReason": Value::Null
+            }
+        }))
+    }
+
+    fn registry_snapshot(&self) -> Result<Value, String> {
+        Ok(json!({
+            "plugins": self.plugins.values().cloned().collect::<Vec<_>>(),
+            "implementations": self.implementations.values().cloned().collect::<Vec<_>>(),
+            "bindings": self.bindings.values().cloned().collect::<Vec<_>>(),
+            "documents": self.documents.values().cloned().collect::<Vec<_>>(),
+        }))
+    }
+
+    fn audit_query(
+        &self,
+        event_type: Option<&str>,
+        trace_id: Option<&str>,
+        limit: usize,
+        reveal_payloads: bool,
+    ) -> Result<Value, String> {
+        let events = self
+            .audits
+            .iter()
+            .rev()
+            .filter(|event| {
+                event_type.is_none_or(|expected| {
+                    event.get("eventType").and_then(Value::as_str) == Some(expected)
+                }) && trace_id.is_none_or(|expected| {
+                    event.get("traceId").and_then(Value::as_str) == Some(expected)
+                })
+            })
+            .take(limit)
+            .map(|event| redact_audit_event(event.clone(), reveal_payloads))
+            .collect::<Vec<_>>();
+        Ok(json!({ "events": events, "redacted": !reveal_payloads }))
+    }
+
+    fn list_bindings(&self) -> Result<Value, String> {
+        Ok(json!({ "bindings": self.bindings.values().cloned().collect::<Vec<_>>() }))
+    }
+
+    fn upsert_binding(
+        &mut self,
+        contract_id: &str,
+        scope_kind: &str,
+        scope_value: &str,
+        selected_implementation: &str,
+        selection_policy: &str,
+        secondary_implementations: &[String],
+        _priority: i64,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let binding = CapabilityBindingRecord {
+            contract_id: contract_id.to_owned(),
+            selected_implementation: selected_implementation.to_owned(),
+            selection_policy: selection_policy.to_owned(),
+            secondary_implementations: secondary_implementations.to_vec(),
+            enabled,
+        };
+        let _ = self.bindings.insert(
+            (
+                contract_id.to_owned(),
+                scope_kind.to_owned(),
+                scope_value.to_owned(),
+            ),
+            binding,
+        );
+        Ok(())
+    }
+
+    fn list_plugins(&self) -> Result<Value, String> {
+        Ok(json!({ "plugins": self.plugins.values().cloned().collect::<Vec<_>>() }))
+    }
+
+    fn plugin_inspect(&self, plugin_id: &str) -> Result<Option<Value>, String> {
+        Ok(self.plugins.get(plugin_id).cloned().map(|manifest| {
+            let implementations = self
+                .implementations
+                .values()
+                .filter(|implementation| {
+                    implementation.get("pluginId").and_then(Value::as_str) == Some(plugin_id)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            json!({ "manifest": manifest, "implementations": implementations })
+        }))
+    }
+
+    fn upsert_plugin_manifest(
+        &mut self,
+        manifest: &CapabilityPluginManifest,
+        conformance_state: &str,
+        _catalog_revision: u64,
+    ) -> Result<(), String> {
+        let mut value = serde_json::to_value(manifest)
+            .map_err(|error| format!("serialize plugin manifest: {error}"))?;
+        value["conformanceState"] = json!(conformance_state);
+        let _ = self.plugins.insert(manifest.id.clone(), value);
+        Ok(())
+    }
+
+    fn set_plugin_state(&mut self, plugin_id: &str, state: &str) -> Result<(), String> {
+        let Some(plugin) = self.plugins.get_mut(plugin_id) else {
+            return Err(format!("plugin '{plugin_id}' not found"));
+        };
+        plugin["conformanceState"] = json!(state);
+        Ok(())
+    }
+
+    fn set_implementation_state(
+        &mut self,
+        implementation_id: &str,
+        state: &str,
+    ) -> Result<(), String> {
+        let _ = self
+            .conformance
+            .insert(implementation_id.to_owned(), state.to_owned());
+        if let Some(implementation) = self.implementations.get_mut(implementation_id) {
+            implementation["conformanceState"] = json!(state);
+        }
         Ok(())
     }
 }
@@ -878,7 +1086,11 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
                     manifest_json = excluded.manifest_json,
                     trust_tier = excluded.trust_tier,
                     signature_status = excluded.signature_status,
-                    conformance_state = excluded.conformance_state,
+                    conformance_state = CASE
+                      WHEN capability_plugins.conformance_state IN ('candidate', 'degraded', 'quarantined', 'disabled')
+                      THEN capability_plugins.conformance_state
+                      ELSE excluded.conformance_state
+                    END,
                     catalog_revision = excluded.catalog_revision,
                     updated_at = excluded.updated_at",
                 params![
@@ -909,7 +1121,11 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
                     trust_tier = excluded.trust_tier,
                     health = excluded.health,
                     visibility = excluded.visibility,
-                    conformance_state = excluded.conformance_state,
+                    conformance_state = CASE
+                      WHEN capability_implementations.conformance_state IN ('candidate', 'degraded', 'quarantined', 'disabled')
+                      THEN capability_implementations.conformance_state
+                      ELSE excluded.conformance_state
+                    END,
                     signature_status = excluded.signature_status,
                     function_json = excluded.function_json,
                     updated_at = excluded.updated_at",
@@ -1215,6 +1431,284 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             .map_err(|error| format!("record capability audit event: {error}"))?;
         Ok(())
     }
+
+    fn admin_status(&self) -> Result<Value, String> {
+        let count = |table: &str| -> Result<i64, String> {
+            self.conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .map_err(|error| format!("count {table}: {error}"))
+        };
+        let vector = self
+            .conn
+            .query_row(
+                "SELECT dimension, model_id, state, degraded_reason, updated_at
+                 FROM capability_vector_metadata WHERE name = 'default'",
+                [],
+                |row| {
+                    Ok(json!({
+                        "dimension": row.get::<_, i64>(0)?,
+                        "embeddingModel": row.get::<_, String>(1)?,
+                        "state": row.get::<_, String>(2)?,
+                        "degradedReason": row.get::<_, Option<String>>(3)?,
+                        "updatedAt": row.get::<_, String>(4)?,
+                        "vectorStore": "sqlite-vec",
+                        "localVector": true,
+                        "cloudEmbeddings": false,
+                    }))
+                },
+            )
+            .optional()
+            .map_err(|error| format!("read vector metadata: {error}"))?
+            .unwrap_or_else(|| {
+                json!({
+                    "state": "unavailable",
+                    "degradedReason": "no vector metadata",
+                    "vectorStore": "sqlite-vec",
+                    "localVector": false,
+                    "cloudEmbeddings": false,
+                })
+            });
+        let catalog_revision = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(catalog_revision), 0) FROM capability_implementations",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or_default();
+        Ok(json!({
+            "catalogRevision": catalog_revision,
+            "plugins": count("capability_plugins")?,
+            "implementations": count("capability_implementations")?,
+            "bindings": count("capability_bindings")?,
+            "documents": count("capability_index_documents")?,
+            "inspectionHandles": count("capability_inspection_handles")?,
+            "bindingDecisions": count("capability_binding_decisions")?,
+            "auditEvents": count("capability_audit_events")?,
+            "indexStatus": vector,
+        }))
+    }
+
+    fn registry_snapshot(&self) -> Result<Value, String> {
+        Ok(json!({
+            "plugins": query_json_column(&self.conn, "SELECT manifest_json FROM capability_plugins ORDER BY plugin_id")?,
+            "implementations": query_implementations(&self.conn)?,
+            "bindings": query_bindings(&self.conn)?,
+            "documents": query_json_column(&self.conn, "SELECT document_json FROM capability_index_documents ORDER BY kind, capability_id")?,
+        }))
+    }
+
+    fn audit_query(
+        &self,
+        event_type: Option<&str>,
+        trace_id: Option<&str>,
+        limit: usize,
+        reveal_payloads: bool,
+    ) -> Result<Value, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, event_type, trace_id, payload_json, created_at
+                 FROM capability_audit_events
+                 WHERE (?1 IS NULL OR event_type = ?1)
+                   AND (?2 IS NULL OR trace_id = ?2)
+                 ORDER BY created_at DESC
+                 LIMIT ?3",
+            )
+            .map_err(|error| format!("prepare audit query: {error}"))?;
+        let rows = stmt
+            .query_map(params![event_type, trace_id, limit as i64], |row| {
+                let payload_json: String = row.get(3)?;
+                let payload = serde_json::from_str::<Value>(&payload_json).unwrap_or(Value::Null);
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "eventType": row.get::<_, String>(1)?,
+                    "traceId": row.get::<_, Option<String>>(2)?,
+                    "payload": payload,
+                    "createdAt": row.get::<_, String>(4)?,
+                }))
+            })
+            .map_err(|error| format!("query audit events: {error}"))?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(redact_audit_event(
+                row.map_err(|error| format!("read audit event: {error}"))?,
+                reveal_payloads,
+            ));
+        }
+        Ok(json!({ "events": events, "redacted": !reveal_payloads }))
+    }
+
+    fn list_bindings(&self) -> Result<Value, String> {
+        Ok(json!({ "bindings": query_bindings(&self.conn)? }))
+    }
+
+    fn upsert_binding(
+        &mut self,
+        contract_id: &str,
+        scope_kind: &str,
+        scope_value: &str,
+        selected_implementation: &str,
+        selection_policy: &str,
+        secondary_implementations: &[String],
+        priority: i64,
+        enabled: bool,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO capability_bindings
+                   (contract_id, scope_kind, scope_value, selected_implementation,
+                    selection_policy, secondary_implementations_json, enabled, priority, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(contract_id, scope_kind, scope_value, selected_implementation)
+                 DO UPDATE SET
+                    selection_policy = excluded.selection_policy,
+                    secondary_implementations_json = excluded.secondary_implementations_json,
+                    enabled = excluded.enabled,
+                    priority = excluded.priority,
+                    updated_at = excluded.updated_at",
+                params![
+                    contract_id,
+                    scope_kind,
+                    scope_value,
+                    selected_implementation,
+                    selection_policy,
+                    serde_json::to_string(secondary_implementations)
+                        .map_err(|error| format!("serialize secondary implementations: {error}"))?,
+                    if enabled { 1 } else { 0 },
+                    priority,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("upsert capability binding: {error}"))?;
+        Ok(())
+    }
+
+    fn list_plugins(&self) -> Result<Value, String> {
+        Ok(
+            json!({ "plugins": query_json_column(&self.conn, "SELECT manifest_json FROM capability_plugins ORDER BY plugin_id")? }),
+        )
+    }
+
+    fn plugin_inspect(&self, plugin_id: &str) -> Result<Option<Value>, String> {
+        let manifest = self
+            .conn
+            .query_row(
+                "SELECT manifest_json FROM capability_plugins WHERE plugin_id = ?1",
+                params![plugin_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("read capability plugin: {error}"))?;
+        let Some(manifest_json) = manifest else {
+            return Ok(None);
+        };
+        let manifest = serde_json::from_str::<Value>(&manifest_json)
+            .map_err(|error| format!("decode plugin manifest: {error}"))?;
+        let implementations = query_implementations_for_plugin(&self.conn, plugin_id)?;
+        Ok(Some(json!({
+            "manifest": manifest,
+            "implementations": implementations
+        })))
+    }
+
+    fn upsert_plugin_manifest(
+        &mut self,
+        manifest: &CapabilityPluginManifest,
+        conformance_state: &str,
+        catalog_revision: u64,
+    ) -> Result<(), String> {
+        let mut manifest_value = serde_json::to_value(manifest)
+            .map_err(|error| format!("serialize plugin manifest: {error}"))?;
+        manifest_value["conformanceState"] = json!(conformance_state);
+        self.conn
+            .execute(
+                "INSERT INTO capability_plugins
+                   (plugin_id, manifest_json, trust_tier, signature_status,
+                    conformance_state, catalog_revision, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(plugin_id) DO UPDATE SET
+                    manifest_json = excluded.manifest_json,
+                    trust_tier = excluded.trust_tier,
+                    signature_status = excluded.signature_status,
+                    conformance_state = excluded.conformance_state,
+                    catalog_revision = excluded.catalog_revision,
+                    updated_at = excluded.updated_at",
+                params![
+                    manifest.id,
+                    serde_json::to_string(&manifest_value)
+                        .map_err(|error| format!("serialize plugin manifest json: {error}"))?,
+                    manifest.trust_tier,
+                    manifest.signature_status,
+                    conformance_state,
+                    catalog_revision as i64,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("upsert plugin manifest: {error}"))?;
+        Ok(())
+    }
+
+    fn set_plugin_state(&mut self, plugin_id: &str, state: &str) -> Result<(), String> {
+        let manifest_json = self
+            .conn
+            .query_row(
+                "SELECT manifest_json FROM capability_plugins WHERE plugin_id = ?1",
+                params![plugin_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("read plugin manifest for state update: {error}"))?;
+        let Some(manifest_json) = manifest_json else {
+            return Err(format!("plugin '{plugin_id}' not found"));
+        };
+        let mut manifest = serde_json::from_str::<Value>(&manifest_json)
+            .map_err(|error| format!("decode plugin manifest for state update: {error}"))?;
+        manifest["conformanceState"] = json!(state);
+        let changed = self
+            .conn
+            .execute(
+                "UPDATE capability_plugins
+                 SET conformance_state = ?1,
+                     manifest_json = ?2,
+                     updated_at = ?3
+                 WHERE plugin_id = ?4",
+                params![
+                    state,
+                    serde_json::to_string(&manifest)
+                        .map_err(|error| format!("serialize plugin manifest: {error}"))?,
+                    Utc::now().to_rfc3339(),
+                    plugin_id
+                ],
+            )
+            .map_err(|error| format!("set plugin state: {error}"))?;
+        if changed == 0 {
+            return Err(format!("plugin '{plugin_id}' not found"));
+        }
+        Ok(())
+    }
+
+    fn set_implementation_state(
+        &mut self,
+        implementation_id: &str,
+        state: &str,
+    ) -> Result<(), String> {
+        let changed = self
+            .conn
+            .execute(
+                "UPDATE capability_implementations
+                 SET conformance_state = ?1, updated_at = ?2
+                 WHERE implementation_id = ?3",
+                params![state, Utc::now().to_rfc3339(), implementation_id],
+            )
+            .map_err(|error| format!("set implementation state: {error}"))?;
+        if changed == 0 {
+            return Err(format!("implementation '{implementation_id}' not found"));
+        }
+        Ok(())
+    }
 }
 
 impl SqliteCapabilityRegistryStore {
@@ -1292,6 +1786,168 @@ impl SqliteCapabilityRegistryStore {
                 .then_with(|| a.function_id.cmp(&b.function_id))
         });
         Ok(hits)
+    }
+}
+
+fn query_json_column(conn: &Connection, sql: &str) -> Result<Vec<Value>, String> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|error| format!("prepare json query: {error}"))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("query json rows: {error}"))?;
+    let mut values = Vec::new();
+    for row in rows {
+        let raw = row.map_err(|error| format!("read json row: {error}"))?;
+        values
+            .push(serde_json::from_str(&raw).map_err(|error| format!("decode json row: {error}"))?);
+    }
+    Ok(values)
+}
+
+fn query_bindings(conn: &Connection) -> Result<Vec<Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT contract_id, scope_kind, scope_value, selected_implementation,
+                    selection_policy, secondary_implementations_json, enabled, priority, updated_at
+             FROM capability_bindings
+             ORDER BY scope_kind, scope_value, contract_id, priority DESC",
+        )
+        .map_err(|error| format!("prepare binding query: {error}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            let secondary_json: String = row.get(5)?;
+            Ok(json!({
+                "contractId": row.get::<_, String>(0)?,
+                "scopeKind": row.get::<_, String>(1)?,
+                "scopeValue": row.get::<_, String>(2)?,
+                "selectedImplementation": row.get::<_, String>(3)?,
+                "selectionPolicy": row.get::<_, String>(4)?,
+                "secondaryImplementations": serde_json::from_str::<Value>(&secondary_json).unwrap_or_else(|_| json!([])),
+                "enabled": row.get::<_, i64>(6)? == 1,
+                "priority": row.get::<_, i64>(7)?,
+                "updatedAt": row.get::<_, String>(8)?,
+            }))
+        })
+        .map_err(|error| format!("query capability bindings: {error}"))?;
+    collect_value_rows(rows)
+}
+
+fn query_implementations(conn: &Connection) -> Result<Vec<Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT implementation_id, contract_id, function_id, plugin_id, worker_id,
+                    schema_digest, catalog_revision, trust_tier, health, visibility,
+                    conformance_state, signature_status, updated_at
+             FROM capability_implementations
+             ORDER BY contract_id, implementation_id",
+        )
+        .map_err(|error| format!("prepare implementation query: {error}"))?;
+    let rows = stmt
+        .query_map([], implementation_row)
+        .map_err(|error| format!("query implementations: {error}"))?;
+    collect_value_rows(rows)
+}
+
+fn query_implementations_for_plugin(
+    conn: &Connection,
+    plugin_id: &str,
+) -> Result<Vec<Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT implementation_id, contract_id, function_id, plugin_id, worker_id,
+                    schema_digest, catalog_revision, trust_tier, health, visibility,
+                    conformance_state, signature_status, updated_at
+             FROM capability_implementations
+             WHERE plugin_id = ?1
+             ORDER BY contract_id, implementation_id",
+        )
+        .map_err(|error| format!("prepare plugin implementation query: {error}"))?;
+    let rows = stmt
+        .query_map(params![plugin_id], implementation_row)
+        .map_err(|error| format!("query plugin implementations: {error}"))?;
+    collect_value_rows(rows)
+}
+
+fn implementation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    Ok(json!({
+        "implementationId": row.get::<_, String>(0)?,
+        "contractId": row.get::<_, String>(1)?,
+        "functionId": row.get::<_, String>(2)?,
+        "pluginId": row.get::<_, String>(3)?,
+        "workerId": row.get::<_, String>(4)?,
+        "schemaDigest": row.get::<_, String>(5)?,
+        "catalogRevision": row.get::<_, i64>(6)?,
+        "trustTier": row.get::<_, String>(7)?,
+        "health": row.get::<_, String>(8)?,
+        "visibility": row.get::<_, String>(9)?,
+        "conformanceState": row.get::<_, String>(10)?,
+        "signatureStatus": row.get::<_, String>(11)?,
+        "updatedAt": row.get::<_, String>(12)?,
+    }))
+}
+
+fn collect_value_rows<F>(rows: rusqlite::MappedRows<'_, F>) -> Result<Vec<Value>, String>
+where
+    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<Value>,
+{
+    let mut values = Vec::new();
+    for row in rows {
+        values.push(row.map_err(|error| format!("read value row: {error}"))?);
+    }
+    Ok(values)
+}
+
+fn redact_audit_event(mut event: Value, reveal_payloads: bool) -> Value {
+    if reveal_payloads {
+        event["redacted"] = json!(false);
+        return event;
+    }
+    let payload = event.get("payload").cloned().unwrap_or(Value::Null);
+    event["payloadSummary"] = audit_payload_summary(&payload);
+    event["payload"] = json!({
+        "redacted": true,
+        "keys": payload.as_object()
+            .map(|object| object.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    });
+    event["redacted"] = json!(true);
+    event
+}
+
+fn audit_payload_summary(payload: &Value) -> Value {
+    let Some(object) = payload.as_object() else {
+        return json!({"type": payload_type(payload)});
+    };
+    let interesting = [
+        "status",
+        "contractId",
+        "implementationId",
+        "functionId",
+        "pluginId",
+        "workerId",
+        "catalogRevision",
+        "schemaDigest",
+        "error",
+    ];
+    let mut summary = serde_json::Map::new();
+    for key in interesting {
+        if let Some(value) = object.get(key) {
+            summary.insert(key.to_owned(), value.clone());
+        }
+    }
+    summary.insert("keyCount".to_owned(), json!(object.len()));
+    Value::Object(summary)
+}
+
+fn payload_type(payload: &Value) -> &'static str {
+    match payload {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 
@@ -2484,6 +3140,70 @@ mod tests {
             !store
                 .validate_inspection(&handle.handle, &stale_entry)
                 .expect("stale inspection rejected")
+        );
+    }
+
+    #[test]
+    fn registry_preserves_manual_conformance_state_across_resync() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        let snapshot =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 1);
+        let policy = CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        };
+        let provider = HashEmbeddingProvider::new(64);
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("initial sync");
+        store
+            .set_implementation_state("first_party.filesystem.v1.read_file", "disabled")
+            .expect("disable implementation");
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("resync");
+        assert_eq!(
+            store
+                .implementation_conformance_state("first_party.filesystem.v1.read_file")
+                .expect("state"),
+            Some("disabled".to_owned())
+        );
+    }
+
+    #[test]
+    fn audit_query_redacts_payload_by_default() {
+        let mut store = InMemoryCapabilityRegistryStore::default();
+        store
+            .record_audit_event(
+                "capability.execute",
+                Some("trace-1"),
+                json!({
+                    "contractId": "filesystem::read_file",
+                    "secret": "should-not-render",
+                }),
+            )
+            .expect("audit");
+        let redacted = store
+            .audit_query(Some("capability.execute"), Some("trace-1"), 10, false)
+            .expect("query");
+        let event = &redacted["events"][0];
+        assert_eq!(event["redacted"], json!(true));
+        assert_eq!(event["payload"]["redacted"], json!(true));
+        assert_eq!(
+            event["payloadSummary"]["contractId"],
+            json!("filesystem::read_file")
+        );
+        assert_eq!(event["payload"].get("secret"), None);
+
+        let revealed = store
+            .audit_query(Some("capability.execute"), Some("trace-1"), 10, true)
+            .expect("revealed query");
+        assert_eq!(
+            revealed["events"][0]["payload"]["secret"],
+            json!("should-not-render")
         );
     }
 

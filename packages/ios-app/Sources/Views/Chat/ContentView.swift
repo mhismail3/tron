@@ -171,6 +171,8 @@ struct ContentView: View {
             compactVoiceNotesList
         } else if navigationMode == .codex {
             codexMode
+        } else if navigationMode == .engine {
+            engineConsoleMode
         } else if horizontalSizeClass == .compact && navigationMode == .sandboxes {
             compactSandboxesDashboard
         } else if horizontalSizeClass == .compact && navigationMode == .automations {
@@ -228,6 +230,16 @@ struct ContentView: View {
             activeServerSelectionVersion: dependencies.activeServerSelectionVersion,
             actions: dashboardActions
         )
+    }
+
+    @ViewBuilder
+    private var engineConsoleMode: some View {
+        NavigationStack {
+            EngineConsoleView(
+                engineClient: engineClient,
+                actions: dashboardActions
+            )
+        }
     }
 
     /// Whether the sidebar is currently visible (for hiding duplicate controls in detail view)

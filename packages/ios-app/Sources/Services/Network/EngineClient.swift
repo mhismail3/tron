@@ -154,6 +154,10 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var display: DisplayClient = DisplayClient(transport: self)
 
+    /// Capability registry, plugin, binding, policy, audit, and primitive client.
+    @ObservationIgnored
+    lazy var capability: CapabilityClient = CapabilityClient(transport: self)
+
     /// Claude Code session import client (discover, preview, execute).
     @ObservationIgnored
     lazy var importClient: ImportClient = ImportClient(transport: self)

@@ -6,6 +6,7 @@ import SwiftUI
 enum NavigationMode: String, CaseIterable {
     case agents = "Sessions"
     case codex = "Codex"
+    case engine = "Engine"
     case voiceNotes = "Voice Notes"
     case automations = "Automations"
     case sandboxes = "Sandboxes"
@@ -14,6 +15,7 @@ enum NavigationMode: String, CaseIterable {
         switch self {
         case .agents: "cpu"
         case .codex: "terminal"
+        case .engine: "server.rack"
         case .voiceNotes: "waveform"
         case .automations: "clock.badge.checkmark"
         case .sandboxes: "shippingbox"

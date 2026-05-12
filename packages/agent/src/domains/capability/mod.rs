@@ -14,8 +14,8 @@
 //! | `contract` | Canonical `capability::*` function contracts and model metadata |
 //! | `deps` | Narrow dependency bundle for catalog, registry-store, embedding, and invocation access |
 //! | `embeddings` | Embedded first-party ONNX/tokenizer provider for offline local search |
-//! | `handlers` | Declarative operation bindings for `search`, `inspect`, and `execute` |
-//! | `operations` | Catalog projection, binding resolution, and delegated execution |
+//! | `handlers` | Declarative operation bindings for model primitives plus capability admin/console functions |
+//! | `operations` | Catalog projection, binding resolution, delegated execution, plugin lifecycle, policy, and audit operations |
 //! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, and primer rendering |
 //! | `types` | Typed contract, implementation, binding, inspection, and execution records |
 //!
@@ -23,7 +23,10 @@
 //!
 //! Provider integrations should only expose the three capability primitives. All
 //! other behavior must remain discoverable/executable as worker-owned catalog
-//! entries rather than prompt-expanded hardcoded tools.
+//! entries rather than prompt-expanded hardcoded tools. Admin functions such as
+//! `capability::status`, `capability::plugin_list`, and
+//! `capability::policy_validate` are normal catalog functions for operator
+//! clients and are never marked with model-facing tool metadata.
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!
@@ -40,7 +43,13 @@ mod operations;
 pub(crate) mod registry;
 mod types;
 pub(crate) use deps::Deps;
-pub(crate) use operations::{execute_value, inspect_value, render_capability_primer, search_value};
+pub(crate) use operations::{
+    audit_query_value, binding_list_value, binding_set_value, conformance_run_value, execute_value,
+    implementation_set_state_value, inspect_value, plugin_inspect_value, plugin_install_value,
+    plugin_list_value, plugin_promote_value, plugin_set_state_value, plugin_update_value,
+    policy_get_value, policy_update_value, policy_validate_value, registry_snapshot_value,
+    render_capability_primer, search_value, status_value,
+};
 
 use serde_json::Value;
 

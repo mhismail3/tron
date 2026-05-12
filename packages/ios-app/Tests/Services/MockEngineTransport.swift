@@ -24,6 +24,10 @@ final class MockEngineTransport: EngineTransport {
 
     var setModelCallCount = 0
     var lastSetModel: String?
+    var lastReadFunctionId: EngineFunctionId?
+    var lastReadOptions: EngineInvocationOptions?
+    var lastReadPayload: Any?
+    var readHandler: ((EngineFunctionId, Any, EngineInvocationOptions) throws -> Any)?
     var lastWriteFunctionId: EngineFunctionId?
     var lastWriteIdempotencyKey: EngineIdempotencyKey?
     var lastWriteOptions: EngineInvocationOptions?
@@ -65,6 +69,16 @@ final class MockEngineTransport: EngineTransport {
         options: EngineInvocationOptions
     ) async throws -> R {
         _ = try requireConnection()
+        lastReadFunctionId = functionId
+        lastReadOptions = options
+        lastReadPayload = payload
+        operationOrder.append("read:\(functionId.rawValue)")
+        if let readHandler {
+            guard let response = try readHandler(functionId, payload, options) as? R else {
+                throw EngineConnectionError.invalidResponse
+            }
+            return response
+        }
         throw EngineConnectionError.invalidResponse
     }
 
