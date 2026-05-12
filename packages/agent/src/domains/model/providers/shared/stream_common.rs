@@ -411,12 +411,12 @@ mod tests {
     #[test]
     fn start_tool_call_emits_start_event() {
         let mut acc = StreamAccumulator::new();
-        let events = acc.start_tool_call("call_1".into(), "bash".into());
+        let events = acc.start_tool_call("call_1".into(), "execute".into());
         assert_eq!(events.len(), 1);
         match &events[0] {
             StreamEvent::ToolCallStart { tool_call_id, name } => {
                 assert_eq!(tool_call_id, "call_1");
-                assert_eq!(name, "bash");
+                assert_eq!(name, "execute");
             }
             _ => panic!("expected ToolCallStart"),
         }
@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn append_tool_args_emits_delta() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "bash".into());
+        let _ = acc.start_tool_call("call_1".into(), "execute".into());
         let events = acc.append_tool_args("call_1", r#"{"cmd":"#);
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -452,14 +452,14 @@ mod tests {
     #[test]
     fn finish_tool_call_emits_end_with_parsed_args() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "bash".into());
+        let _ = acc.start_tool_call("call_1".into(), "execute".into());
         let _ = acc.append_tool_args("call_1", r#"{"cmd":"ls"}"#);
         let events = acc.finish_tool_call("call_1");
         assert_eq!(events.len(), 1);
         match &events[0] {
             StreamEvent::ToolCallEnd { tool_call } => {
                 assert_eq!(tool_call.id, "call_1");
-                assert_eq!(tool_call.name, "bash");
+                assert_eq!(tool_call.name, "execute");
                 assert_eq!(tool_call.arguments["cmd"], "ls");
             }
             _ => panic!("expected ToolCallEnd"),
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn finish_tool_call_empty_args_gives_empty_map() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "bash".into());
+        let _ = acc.start_tool_call("call_1".into(), "execute".into());
         let events = acc.finish_tool_call("call_1");
         match &events[0] {
             StreamEvent::ToolCallEnd { tool_call } => {
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn finish_tool_call_with_thought_signature() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "bash".into());
+        let _ = acc.start_tool_call("call_1".into(), "execute".into());
         let _ = acc.append_tool_args("call_1", r#"{"cmd":"ls"}"#);
         let args: Map<String, serde_json::Value> = serde_json::from_str(r#"{"cmd":"ls"}"#).unwrap();
         let events = acc.finish_tool_call_with("call_1", args, Some("sig-abc".into()));
@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn tool_call_mut_returns_mutable_ref() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "bash".into());
+        let _ = acc.start_tool_call("call_1".into(), "execute".into());
         let tc = acc.tool_call_mut("call_1").unwrap();
         tc.args.push_str("modified");
         assert_eq!(acc.tool_calls()[0].args, "modified");
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn full_tool_call_lifecycle() {
         let mut acc = StreamAccumulator::new();
-        let start = acc.start_tool_call("call_1".into(), "bash".into());
+        let start = acc.start_tool_call("call_1".into(), "execute".into());
         let d1 = acc.append_tool_args("call_1", r#"{"cm"#);
         let d2 = acc.append_tool_args("call_1", r#"d":"ls"}"#);
         let end = acc.finish_tool_call("call_1");

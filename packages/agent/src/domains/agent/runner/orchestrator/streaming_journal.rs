@@ -438,7 +438,7 @@ mod tests {
         writeln!(f, r#"{{"t":"thinking","c":"I should greet"}}"#).unwrap();
         writeln!(
             f,
-            r#"{{"t":"tool_use","c":"{{\"name\":\"bash\",\"id\":\"tc1\"}}"}}"#
+            r#"{{"t":"tool_use","c":"{{\"name\":\"execute\",\"id\":\"tc1\"}}"}}"#
         )
         .unwrap();
         drop(f);
@@ -471,7 +471,7 @@ mod tests {
         assert_eq!(text, "Hello world");
         assert_eq!(thinking, "I should greet");
         assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0]["name"], "bash");
+        assert_eq!(tool_calls[0]["name"], "execute");
     }
 
     // ── Test 6: load_recovery_nonexistent_returns_none ─────────────────────

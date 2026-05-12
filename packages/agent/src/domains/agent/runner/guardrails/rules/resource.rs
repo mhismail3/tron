@@ -1,12 +1,12 @@
-//! Resource rule: enforces numeric bounds on tool argument values.
+//! Resource rule: enforces numeric bounds on capability argument values.
 //!
-//! Used for limits like maximum bash timeout.
+//! Used for limits like maximum process timeout.
 
 use crate::domains::agent::runner::guardrails::types::{EvaluationContext, RuleEvaluationResult};
 
 use super::RuleBase;
 
-/// A rule that enforces numeric bounds on a specific tool argument.
+/// A rule that enforces numeric bounds on a specific capability argument.
 #[derive(Debug)]
 pub struct ResourceRule {
     /// Common rule fields.

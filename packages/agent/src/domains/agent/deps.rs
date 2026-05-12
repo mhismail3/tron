@@ -20,7 +20,7 @@ pub(crate) struct Deps {
     pub(super) hook_abort_tracker:
         Arc<crate::domains::agent::runner::hooks::abort_tracker::HookAbortTracker>,
     pub(super) job_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     pub(super) memory_registry:
         Arc<parking_lot::Mutex<crate::domains::agent::runner::memory::MemoryRegistry>>,
     pub(super) orchestrator: Arc<Orchestrator>,
@@ -28,8 +28,9 @@ pub(crate) struct Deps {
     pub(super) output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,
-    pub(super) process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub(super) process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     pub(super) profile_runtime: Arc<ProfileRuntime>,
     pub(super) session_manager: Arc<SessionManager>,
     pub(super) skill_registry: Arc<parking_lot::RwLock<SkillRegistry>>,

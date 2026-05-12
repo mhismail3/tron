@@ -128,7 +128,7 @@ mod tests {
         let _ = args.insert("command".into(), json!("ls"));
         let content = vec![AssistantContent::ToolUse {
             id: "id1".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: args,
             thought_signature: None,
         }];
@@ -175,7 +175,7 @@ mod tests {
             AssistantContent::text("I'll run that command"),
             AssistantContent::ToolUse {
                 id: "tc1".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: args,
                 thought_signature: None,
             },
@@ -190,7 +190,7 @@ mod tests {
     fn build_content_json_tool_use_with_thought_signature() {
         let content = vec![AssistantContent::ToolUse {
             id: "tc1".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: Map::new(),
             thought_signature: Some("gemini-sig".into()),
         }];

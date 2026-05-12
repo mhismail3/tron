@@ -312,13 +312,13 @@ mod tests {
         let messages = vec![
             Message::user("hello"),
             assistant_with_content(vec![
-                tool_use("tc-1", "bash"),
+                tool_use("tc-1", "execute"),
                 AssistantContent::text("some text"),
             ]),
             tool_result("tc-1", "output"),
             // Second assistant reuses the same tool_use ID
             assistant_with_content(vec![
-                tool_use("tc-1", "bash"),
+                tool_use("tc-1", "execute"),
                 AssistantContent::text("more text"),
             ]),
         ];
@@ -340,7 +340,7 @@ mod tests {
     fn unmatched_tool_use_gets_synthetic_result() {
         let messages = vec![
             Message::user("hello"),
-            assistant_with_content(vec![tool_use("tc-1", "bash")]),
+            assistant_with_content(vec![tool_use("tc-1", "execute")]),
             // No tool result for tc-1
         ];
         let result = sanitize_messages(messages);
@@ -367,7 +367,7 @@ mod tests {
     fn matched_tool_use_no_synthetic_result() {
         let messages = vec![
             Message::user("hello"),
-            assistant_with_content(vec![tool_use("tc-1", "bash")]),
+            assistant_with_content(vec![tool_use("tc-1", "execute")]),
             tool_result("tc-1", "output"),
         ];
         let result = sanitize_messages(messages);
@@ -379,9 +379,9 @@ mod tests {
         let messages = vec![
             Message::user("hello"),
             assistant_with_content(vec![
-                tool_use("tc-1", "bash"),
-                tool_use("tc-2", "read"),
-                tool_use("tc-3", "write"),
+                tool_use("tc-1", "execute"),
+                tool_use("tc-2", "inspect"),
+                tool_use("tc-3", "search"),
             ]),
         ];
         let result = sanitize_messages(messages);
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn idempotent_double_sanitize() {
         let messages = vec![
-            assistant_with_content(vec![tool_use("tc-1", "bash")]),
+            assistant_with_content(vec![tool_use("tc-1", "execute")]),
             Message::user("hello"),
         ];
         let first = sanitize_messages(messages);
@@ -450,9 +450,9 @@ mod tests {
         let messages = vec![
             Message::user("hello"),
             assistant_with_content(vec![
-                tool_use("tc-1", "bash"),
-                tool_use("tc-2", "read"),
-                tool_use("tc-3", "write"),
+                tool_use("tc-1", "execute"),
+                tool_use("tc-2", "inspect"),
+                tool_use("tc-3", "search"),
             ]),
             tool_result("tc-1", "output1"),
             tool_result("tc-2", "output2"),
@@ -480,7 +480,7 @@ mod tests {
                     thinking: "Let me search for that.".into(),
                     signature: Some("d7f2ef852b1a3c4e5f6a7b8c9d0e1f2a3b4c5d6e".into()),
                 },
-                tool_use("call_abc123", "bash"),
+                tool_use("call_abc123", "execute"),
             ]),
             tool_result("call_abc123", "output"),
         ];
@@ -530,7 +530,7 @@ mod tests {
                     thinking: "second thought".into(),
                     signature: Some("sig2".into()),
                 },
-                tool_use("tc-1", "bash"),
+                tool_use("tc-1", "execute"),
             ]),
             tool_result("tc-1", "output"),
         ];

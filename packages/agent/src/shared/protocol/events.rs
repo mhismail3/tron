@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::shared::messages::{TokenUsage, ToolCall};
-use crate::shared::tools::TronToolResult;
+use crate::shared::tools::CapabilityResult;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StreamEvent — LLM provider streaming events
@@ -492,7 +492,7 @@ tron_events! {
         #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        result: Option<TronToolResult>,
+        result: Option<CapabilityResult>,
     } => "tool_execution_end",
 
     /// Tool call argument delta (during streaming).
@@ -1491,12 +1491,12 @@ mod tests {
     fn stream_event_toolcall_start() {
         let e = StreamEvent::ToolCallStart {
             tool_call_id: "tc-1".into(),
-            name: "bash".into(),
+            name: "execute".into(),
         };
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["type"], "toolcall_start");
         assert_eq!(json["toolCallId"], "tc-1");
-        assert_eq!(json["name"], "bash");
+        assert_eq!(json["name"], "execute");
     }
 
     #[test]
@@ -1702,7 +1702,7 @@ mod tests {
         let e = TronEvent::ToolExecutionStart {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc-1".into(),
-            tool_name: "bash".into(),
+            tool_name: "execute".into(),
             arguments: None,
         };
         assert!(e.is_tool_execution());
@@ -1738,7 +1738,7 @@ mod tests {
             result: HookResult::Block,
             duration: Some(150),
             reason: Some("Dangerous command detected".into()),
-            tool_name: Some("bash".into()),
+            tool_name: Some("execute".into()),
             tool_call_id: Some("tc-1".into()),
         };
         let json = serde_json::to_value(&e).unwrap();

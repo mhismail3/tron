@@ -118,6 +118,7 @@ fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     specs.extend(super::auth::contract::capabilities()?);
     specs.extend(super::blob::contract::capabilities()?);
     specs.extend(super::browser::contract::capabilities()?);
+    specs.extend(super::capability::contract::capabilities()?);
     specs.extend(super::codex_app::contract::capabilities()?);
     specs.extend(super::context::contract::capabilities()?);
     specs.extend(super::cron::contract::capabilities()?);
@@ -135,6 +136,7 @@ fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     specs.extend(super::model::contract::capabilities()?);
     specs.extend(super::notifications::contract::capabilities()?);
     specs.extend(super::plan::contract::capabilities()?);
+    specs.extend(super::process::contract::capabilities()?);
     specs.extend(super::prompt_library::contract::capabilities()?);
     specs.extend(super::repo::contract::capabilities()?);
     specs.extend(super::sandbox::contract::capabilities()?);
@@ -142,10 +144,10 @@ fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     specs.extend(super::settings::contract::capabilities()?);
     specs.extend(super::skills::contract::capabilities()?);
     specs.extend(super::system::contract::capabilities()?);
-    specs.extend(super::tools::contract::capabilities()?);
     specs.extend(super::transcription::contract::capabilities()?);
     specs.extend(super::tree::contract::capabilities()?);
     specs.extend(super::voice_notes::contract::capabilities()?);
+    specs.extend(super::web::contract::capabilities()?);
     specs.extend(super::worktree::contract::capabilities()?);
     Ok(specs)
 }

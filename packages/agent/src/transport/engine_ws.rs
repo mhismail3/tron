@@ -1,9 +1,12 @@
 //! `/engine` WebSocket protocol over the canonical engine transport envelope.
 //!
 //! This module owns only WebSocket framing, protocol validation, correlation
-//! ids, heartbeat, and stream cursor subscription state. Discover/inspect/watch
-//! invoke/promote messages are translated into [`EngineTransportRequest`] and
-//! then dispatched through the canonical engine transport path.
+//! ids, heartbeat, and stream cursor subscription state. Worker/client
+//! discover/inspect/watch/invoke/promote messages are translated into
+//! [`EngineTransportRequest`] and then dispatched through the canonical engine
+//! transport path. Model providers do not receive this transport surface; they
+//! receive only the capability-domain `search`, `inspect`, and `execute`
+//! primitives.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

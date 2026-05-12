@@ -6,7 +6,7 @@
 //! - [`SessionError`]: Session lifecycle failures (create, resume, fork, run)
 //! - [`PersistenceError`]: Database/storage errors with table and operation context
 //! - [`ProviderError`]: LLM provider errors with status code and retry info
-//! - [`ToolError`]: Tool execution failures with tool name and call ID
+//! - [`ToolError`]: Tool execution failures with capability id and call ID
 //! - [`ErrorCollector`]: Accumulates errors from fire-and-forget operations
 //!
 //! The error parsing utilities in [`parse`] classify raw error strings into

@@ -132,7 +132,7 @@ mod tests {
         HookContext::PreToolUse {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "Bash".to_string(),
+            tool_name: "process::run".to_string(),
             tool_arguments: serde_json::json!({}),
             tool_call_id: "tc1".to_string(),
         }

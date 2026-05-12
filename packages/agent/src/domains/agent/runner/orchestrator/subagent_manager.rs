@@ -8,12 +8,12 @@ use std::time::Instant;
 
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
-use crate::domains::model::providers::provider::ProviderFactory;
-use crate::domains::session::event_store::{EventStore, EventType};
-use crate::domains::tools::implementations::errors::ToolError;
-use crate::domains::tools::implementations::traits::{
+use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::traits::{
     SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner, WaitMode,
 };
+use crate::domains::model::providers::provider::ProviderFactory;
+use crate::domains::session::event_store::{EventStore, EventType};
 use crate::shared::events::{BaseEvent, TronEvent};
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -36,7 +36,7 @@ mod tracking;
 /// Distinguishes tool-spawned agents from system-spawned `subsessions`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpawnType {
-    /// Spawned by the LLM via the `SpawnSubagent` tool.
+    /// Spawned by the LLM through the `agent::spawn_subagent` capability.
     ToolAgent,
     /// Spawned programmatically for internal tasks (compaction, memory, etc.).
     Subsession,
@@ -82,14 +82,14 @@ pub struct SubsessionConfig {
     pub max_turns: u32,
     /// Maximum subagent nesting depth (default 0 = no nesting).
     pub max_depth: u32,
-    /// Whether to inherit tools from the parent's live catalog policy (default false).
-    pub inherit_tools: bool,
+    /// Whether to inherit capabilities from the parent's live catalog policy (default false).
+    pub inherit_capabilities: bool,
     /// Tools to deny from the inherited set.
-    pub denied_tools: Vec<String>,
-    /// Optional strict allowlist — when `Some`, ONLY these tools are kept
-    /// (applied after `denied_tools`). Future-proof: newly registered tools
+    pub denied_capabilities: Vec<String>,
+    /// Optional strict allowlist — when `Some`, ONLY these capabilities are kept
+    /// (applied after `denied_capabilities`). Future-proof: newly registered tools
     /// will not leak into a restricted subagent.
-    pub allowed_tools: Option<Vec<String>>,
+    pub allowed_capabilities: Option<Vec<String>>,
     /// Reasoning effort level (default Some(Medium)).
     pub reasoning_level: Option<ReasoningLevel>,
     /// Spawn type for event tagging (default `Subsession`).
@@ -109,9 +109,9 @@ impl Default for SubsessionConfig {
             blocking_timeout_ms: Some(30_000),
             max_turns: 1,
             max_depth: 0,
-            inherit_tools: false,
-            denied_tools: vec![],
-            allowed_tools: None,
+            inherit_capabilities: false,
+            denied_capabilities: vec![],
+            allowed_capabilities: None,
             reasoning_level: Some(ReasoningLevel::Medium),
             spawn_type: SpawnType::Subsession,
         }
@@ -169,7 +169,7 @@ pub struct SubagentManager {
     /// Tracked subagents: `child_session_id` → `TrackedSubagent`.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
     /// Skill registry used to resolve `SubagentConfig.skills` names to
-    /// metadata so frontmatter `deniedTools` / `allowedTools` can be
+    /// metadata so frontmatter `deniedCapabilities` / `allowedCapabilities` can be
     /// enforced on the spawned child. INVARIANT: if unset, `skills` on a
     /// `SubagentConfig` are silently ignored (documented as a wiring
     /// pitfall — see `main.rs::build_services` for the canonical setup).
@@ -259,7 +259,7 @@ impl SubagentManager {
     ///
     /// INVARIANT: If this setter is not called, `SubagentConfig.skills` is
     /// silently no-op'd (skills contribute no tool denials). This matches
-    /// the `Option<SkillRegistry>` contract in [`compute_denied_tools`] and
+    /// the `Option<SkillRegistry>` contract in [`compute_denied_capabilities`] and
     /// keeps skill wiring opt-in for isolated tests and minimal runtimes.
     pub fn set_skill_registry(
         &self,
@@ -280,15 +280,15 @@ impl SubagentManager {
             })
     }
 
-    /// Compute the full `denied_tools` list for a spawned subagent by
-    /// unioning explicit denials (from the LLM's `deniedTools` param) with
-    /// any denials implied by `skills[*]` frontmatter (`deniedTools` /
-    /// inverted `allowedTools`).
+    /// Compute the full `denied_capabilities` list for a spawned subagent by
+    /// unioning explicit denials (from the LLM's `deniedCapabilities` param) with
+    /// any denials implied by `skills[*]` frontmatter (`deniedCapabilities` /
+    /// inverted `allowedCapabilities`).
     ///
     /// Unknown skill names are silently skipped — the LLM may have
     /// hallucinated one, and we should not fail the spawn for that.
     /// Duplicates are deduplicated automatically (order is not preserved).
-    pub(crate) fn compute_denied_tools(
+    pub(crate) fn compute_denied_capabilities(
         &self,
         explicit_denied: &[String],
         skills: Option<&[String]>,
@@ -307,7 +307,7 @@ impl SubagentManager {
                     &meta.frontmatter,
                     all_tool_names,
                 ) {
-                    for tool in cfg.denied_tools {
+                    for tool in cfg.denied_capabilities {
                         let _ = denied.insert(tool);
                     }
                 }
@@ -321,14 +321,14 @@ impl SubagentManager {
         let Some(host) = self.engine_host.get() else {
             return Vec::new();
         };
-        match crate::domains::tools::implementations::capability_surface::list_model_tool_names(
+        match crate::domains::capability_support::implementations::capability_surface::list_model_tool_names(
             host, session_id, None,
         )
         .await
         {
             Ok(names) => names,
             Err(error) => {
-                tracing::warn!(error = %error, "failed to read live tool catalog for subagent policy");
+                tracing::warn!(error = %error, "failed to read live capability catalog for subagent policy");
                 Vec::new()
             }
         }
@@ -337,7 +337,7 @@ impl SubagentManager {
     /// Spawn a system subsession for programmatic tasks (hooks, compaction, memory).
     ///
     /// Unlike `spawn()` (tool-agent path), the caller provides the system prompt
-    /// directly, tools are optional, and the subsession is tracked as
+    /// directly, capabilities are optional, and the subsession is tracked as
     /// `SpawnType::Subsession`.
     ///
     /// Returns `Err` if the subsession fails for any reason (provider error,
@@ -398,11 +398,11 @@ impl SubagentManager {
             spawn_type: Some(spawn_type.as_str().to_owned()),
         });
 
-        let mut tool_policy = process_plan.tool_policy.clone();
-        if config.inherit_tools {
-            tool_policy.allowed_tools = config.allowed_tools.clone();
+        let mut capability_policy = process_plan.capability_policy.clone();
+        if config.inherit_capabilities {
+            capability_policy.allowed_capabilities = config.allowed_capabilities.clone();
         } else {
-            tool_policy.allowed_tools = Some(Vec::new());
+            capability_policy.allowed_capabilities = Some(Vec::new());
         }
 
         execution::spawn_subsession_task(execution::SubsessionTaskLaunch {
@@ -427,8 +427,8 @@ impl SubagentManager {
             spawn_type: spawn_type.as_str().to_owned(),
             tracker: tracker.clone(),
             cancel,
-            tool_policy,
-            denied_tools: config.denied_tools.clone(),
+            capability_policy,
+            denied_capabilities: config.denied_capabilities.clone(),
             engine_host: self.engine_host.get().cloned(),
         });
 
@@ -484,13 +484,13 @@ impl SubagentSpawner for SubagentManager {
             .current_tool_names(config.parent_session_id.as_deref().unwrap_or("subagent"))
             .await;
 
-        // INVARIANT: subagent denied_tools = union(explicit_deniedTools,
+        // INVARIANT: subagent denied_capabilities = union(explicit_deniedCapabilities,
         // each skill's frontmatter denials). AgentFactory applies this merged
         // policy to the live catalog tool surface for the child agent. Without
-        // this merge, skills with `deniedTools: [...]` or `allowedTools: [...]`
+        // this merge, skills with `deniedCapabilities: [...]` or `allowedCapabilities: [...]`
         // frontmatter would not affect the child agent's model-visible tools.
-        let merged_denied_tools = self.compute_denied_tools(
-            &config.denied_tools,
+        let merged_denied_capabilities = self.compute_denied_capabilities(
+            &config.denied_capabilities,
             config.skills.as_deref(),
             &all_tool_names,
         );
@@ -613,7 +613,7 @@ impl SubagentSpawner for SubagentManager {
             blocking_timeout_ms: config.blocking_timeout_ms,
             tracker: tracker.clone(),
             cancel,
-            denied_tools: merged_denied_tools,
+            denied_capabilities: merged_denied_capabilities,
             run_state_probe: self.probe_clone(),
             spawn_type: SpawnType::ToolAgent.as_str().to_owned(),
             engine_host: self.engine_host.get().cloned(),
@@ -669,11 +669,11 @@ impl SubagentSpawner for SubagentManager {
 }
 
 #[async_trait]
-impl crate::domains::tools::implementations::traits::SubagentOps for SubagentManager {
+impl crate::domains::capability_support::implementations::traits::SubagentOps for SubagentManager {
     fn list_active_jobs(
         &self,
         parent_session_id: &str,
-    ) -> Vec<crate::domains::tools::implementations::traits::JobInfo> {
+    ) -> Vec<crate::domains::capability_support::implementations::traits::JobInfo> {
         self.list_active_jobs(parent_session_id)
     }
 
@@ -686,8 +686,10 @@ impl crate::domains::tools::implementations::traits::SubagentOps for SubagentMan
         session_ids: &[String],
         mode: WaitMode,
         timeout_ms: u64,
-    ) -> Result<Vec<crate::domains::tools::implementations::traits::SubagentResult>, ToolError>
-    {
+    ) -> Result<
+        Vec<crate::domains::capability_support::implementations::traits::SubagentResult>,
+        ToolError,
+    > {
         self.wait_for_agents_impl(session_ids, mode, timeout_ms)
             .await
     }
@@ -695,7 +697,7 @@ impl crate::domains::tools::implementations::traits::SubagentOps for SubagentMan
     fn get_subagent_result(
         &self,
         session_id: &str,
-    ) -> Option<crate::domains::tools::implementations::traits::SubagentResult> {
+    ) -> Option<crate::domains::capability_support::implementations::traits::SubagentResult> {
         self.subagents
             .get(session_id)
             .and_then(|t| t.result.lock().clone())

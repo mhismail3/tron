@@ -449,7 +449,7 @@ mod tests {
     fn assistant_content_tool_use() {
         let ac = AssistantContent::ToolUse {
             id: "call-1".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: serde_json::Map::new(),
             thought_signature: None,
         };
@@ -462,13 +462,13 @@ mod tests {
         let _ = args.insert("command".into(), json!("ls"));
         let ac = AssistantContent::ToolUse {
             id: "call-1".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: args,
             thought_signature: None,
         };
         let json = serde_json::to_value(&ac).unwrap();
         assert_eq!(json["type"], "tool_use");
-        assert_eq!(json["name"], "bash");
+        assert_eq!(json["name"], "execute");
         assert_eq!(json["arguments"]["command"], "ls");
         let back: AssistantContent = serde_json::from_value(json).unwrap();
         assert_eq!(ac, back);
@@ -479,7 +479,7 @@ mod tests {
         let json = json!({
             "type": "tool_use",
             "id": "toolu_01abc",
-            "name": "bash",
+            "name": "execute",
             "input": {"command": "ls"}
         });
         let err = serde_json::from_value::<AssistantContent>(json).unwrap_err();

@@ -1,7 +1,7 @@
 //! MCP server lifecycle management.
 //!
 //! Handles starting, stopping, health monitoring, and automatic crash recovery
-//! for MCP servers. Discovers tools from connected servers and registers them
+//! for MCP servers. Discovers capabilities from connected servers and registers them
 //! dynamically.
 //!
 //! ## Crash Recovery
@@ -9,7 +9,7 @@
 //! When a server connection is lost (detected on tool call failure), the manager
 //! attempts automatic restart with exponential backoff. After
 //! [`MAX_CONSECUTIVE_FAILURES`] consecutive failures, the server is marked
-//! [`McpServerHealth::Failed`] and its tools are disabled until manual restart.
+//! [`McpServerHealth::Failed`] and its capabilities are disabled until manual restart.
 
 use std::collections::HashMap;
 use std::sync::Arc;

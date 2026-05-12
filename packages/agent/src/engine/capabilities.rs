@@ -8,7 +8,7 @@ use serde_json::Value;
 use super::approval::EngineApprovalRequest;
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
-use super::host::{EngineHostHandle, EngineWatchRequest, EngineWatchResponse};
+use super::host::{CatalogWatchRequest, CatalogWatchResponse, EngineHostHandle};
 use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId};
 use super::invocation::{CausalContext, Invocation, InvocationResult};
 use super::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
@@ -88,7 +88,7 @@ impl AgentCapabilityClient {
     }
 
     /// Watch catalog changes visible to this agent.
-    pub async fn watch(&self, request: EngineWatchRequest) -> Result<EngineWatchResponse> {
+    pub async fn watch(&self, request: CatalogWatchRequest) -> Result<CatalogWatchResponse> {
         self.handle.watch(&self.actor_context(), request).await
     }
 

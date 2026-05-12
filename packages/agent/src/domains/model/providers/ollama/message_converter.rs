@@ -438,7 +438,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "toolu_xyz".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: serde_json::Map::new(),
                     thought_signature: None,
                 }],
@@ -461,7 +461,7 @@ mod tests {
             Some(Value::String("command output".into()))
         );
         // Native Ollama API: tool results use tool_name, not tool_call_id
-        assert_eq!(result[1].tool_name, Some("bash".into()));
+        assert_eq!(result[1].tool_name, Some("execute".into()));
     }
 
     #[test]
@@ -576,7 +576,7 @@ mod tests {
         let messages = vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "toolu_01".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -602,7 +602,7 @@ mod tests {
         let messages = vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "toolu_01".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             }],
@@ -654,7 +654,7 @@ mod tests {
         let messages = vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "toolu_01".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -680,13 +680,13 @@ mod tests {
             content: vec![
                 AssistantContent::ToolUse {
                     id: "toolu_01".into(),
-                    name: "read".into(),
+                    name: "inspect".into(),
                     arguments: args1,
                     thought_signature: None,
                 },
                 AssistantContent::ToolUse {
                     id: "toolu_02".into(),
-                    name: "read".into(),
+                    name: "inspect".into(),
                     arguments: args2,
                     thought_signature: None,
                 },
@@ -714,7 +714,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "toolu_01".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: serde_json::Map::new(),
                     thought_signature: None,
                 }],
@@ -731,7 +731,7 @@ mod tests {
         ];
         let result = convert_messages(&messages, true);
         let wire = serde_json::to_value(&result[1]).unwrap();
-        assert_eq!(wire["tool_name"], "bash");
+        assert_eq!(wire["tool_name"], "execute");
         assert!(wire.get("tool_call_id").is_none());
     }
 
@@ -801,7 +801,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "toolu_err".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: serde_json::Map::new(),
                     thought_signature: None,
                 }],
@@ -818,7 +818,7 @@ mod tests {
         ];
         let result = convert_messages(&messages, true);
         assert_eq!(result[1].role, "tool");
-        assert_eq!(result[1].tool_name, Some("bash".into()));
+        assert_eq!(result[1].tool_name, Some("execute".into()));
         assert_eq!(
             result[1].content,
             Some(Value::String("Error: permission denied".into()))
@@ -835,7 +835,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "toolu_01".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: args,
                     thought_signature: None,
                 }],
@@ -872,7 +872,7 @@ mod tests {
 
         // Tool result — uses tool_name, no tool_call_id
         assert_eq!(wire[2]["role"], "tool");
-        assert_eq!(wire[2]["tool_name"], "bash");
+        assert_eq!(wire[2]["tool_name"], "execute");
         assert_eq!(wire[2]["content"], "hello");
         assert!(wire[2].get("tool_call_id").is_none());
     }
@@ -894,7 +894,7 @@ mod tests {
                     },
                     AssistantContent::ToolUse {
                         id: "toolu_02".into(),
-                        name: "bash".into(),
+                        name: "execute".into(),
                         arguments: args2,
                         thought_signature: None,
                     },
@@ -918,7 +918,7 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 3);
         assert_eq!(result[1].tool_name, Some("read_file".into()));
-        assert_eq!(result[2].tool_name, Some("bash".into()));
+        assert_eq!(result[2].tool_name, Some("execute".into()));
     }
 
     #[test]
@@ -940,7 +940,7 @@ mod tests {
         let messages = vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "call_abc".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             }],
@@ -998,7 +998,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "call_already_openai".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: serde_json::Map::new(),
                     thought_signature: None,
                 }],
@@ -1020,6 +1020,6 @@ mod tests {
             "call_already_openai"
         );
         // tool_name still resolved correctly
-        assert_eq!(result[1].tool_name, Some("bash".into()));
+        assert_eq!(result[1].tool_name, Some("execute".into()));
     }
 }

@@ -159,7 +159,7 @@ fn make_config(task: &str) -> SubagentConfig {
         working_directory: "/tmp".into(),
         max_turns: 5,
         timeout_ms: 10_000,
-        denied_tools: vec![],
+        denied_capabilities: vec![],
         skills: None,
         max_depth: 0,
         current_depth: 0,
@@ -370,8 +370,8 @@ fn subsession_config_defaults() {
     assert_eq!(config.blocking_timeout_ms, Some(30_000));
     assert_eq!(config.max_turns, 1);
     assert_eq!(config.max_depth, 0);
-    assert!(!config.inherit_tools);
-    assert!(config.denied_tools.is_empty());
+    assert!(!config.inherit_capabilities);
+    assert!(config.denied_capabilities.is_empty());
     assert_eq!(config.reasoning_level, Some(ReasoningLevel::Medium));
 }
 
@@ -438,7 +438,7 @@ async fn spawn_subsession_nonblocking_returns_session_id() {
 
 #[tokio::test]
 async fn spawn_subsession_no_tools_by_default() {
-    // Default inherit_tools = false, so subsession should have empty live tool catalog
+    // Default inherit_capabilities = false, so subsession should have empty live capability catalog
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
     let config = make_subsession_config("summarize", "parent-001");
     let result = manager.spawn_subsession(config).await.unwrap();
@@ -446,10 +446,10 @@ async fn spawn_subsession_no_tools_by_default() {
 }
 
 #[tokio::test]
-async fn spawn_subsession_inherit_tools() {
+async fn spawn_subsession_inherit_capabilities() {
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
     let mut config = make_subsession_config("summarize", "parent-001");
-    config.inherit_tools = true;
+    config.inherit_capabilities = true;
     let result = manager.spawn_subsession(config).await.unwrap();
     assert!(!result.session_id.is_empty());
 }
@@ -1169,7 +1169,7 @@ async fn subagent_failed_includes_spawn_type() {
 //
 // REGRESSION: `skill_frontmatter_to_denials` was implemented + unit-tested
 // but never called from production code. Subagents spawned with
-// `skills: ["name"]` ignored the skill's `deniedTools` / `allowedTools`
+// `skills: ["name"]` ignored the skill's `deniedCapabilities` / `allowedCapabilities`
 // frontmatter. These tests pin the wiring in `SubagentManager`.
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -1202,194 +1202,220 @@ fn make_manager_with_registry(
 }
 
 #[test]
-fn compute_denied_tools_no_skills_passes_explicit_through() {
+fn compute_denied_capabilities_no_skills_passes_explicit_through() {
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    let merged = manager.compute_denied_tools(
-        &["Bash".into(), "Write".into()],
+    let merged = manager.compute_denied_capabilities(
+        &["process::run".into(), "filesystem::write_file".into()],
         None,
-        &["Read".into(), "Write".into(), "Bash".into()],
+        &[
+            "filesystem::read_file".into(),
+            "filesystem::write_file".into(),
+            "process::run".into(),
+        ],
     );
     let set: std::collections::HashSet<_> = merged.into_iter().collect();
     assert_eq!(set.len(), 2);
-    assert!(set.contains("Bash"));
-    assert!(set.contains("Write"));
+    assert!(set.contains("process::run"));
+    assert!(set.contains("filesystem::write_file"));
 }
 
 #[test]
-fn compute_denied_tools_empty_everything_yields_empty() {
+fn compute_denied_capabilities_empty_everything_yields_empty() {
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    let merged = manager.compute_denied_tools(&[], None, &[]);
+    let merged = manager.compute_denied_capabilities(&[], None, &[]);
     assert!(merged.is_empty());
 }
 
 #[test]
-fn compute_denied_tools_without_skill_registry_set_ignores_skills() {
+fn compute_denied_capabilities_without_skill_registry_set_ignores_skills() {
     // Safety-net: if the wiring in main.rs is omitted, skills silently no-op
     // rather than panic. This locks in that behavior (and forces a wiring
     // regression test below to catch the happy path instead).
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    let merged = manager.compute_denied_tools(
-        &["Bash".into()],
+    let merged = manager.compute_denied_capabilities(
+        &["process::run".into()],
         Some(&["any-skill".into()]),
-        &["Read".into(), "Bash".into()],
+        &["filesystem::read_file".into(), "process::run".into()],
     );
-    assert_eq!(merged, vec!["Bash".to_string()]);
+    assert_eq!(merged, vec!["process::run".to_string()]);
 }
 
 #[test]
-fn compute_denied_tools_merges_skill_denied_with_explicit() {
+fn compute_denied_capabilities_merges_skill_denied_with_explicit() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "dangerous",
         SkillFrontmatter {
-            denied_tools: Some(vec!["Bash".to_string()]),
+            denied_capabilities: Some(vec!["process::run".to_string()]),
             ..Default::default()
         },
     ));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    let merged = manager.compute_denied_tools(
-        &["Write".into()],
+    let merged = manager.compute_denied_capabilities(
+        &["filesystem::write_file".into()],
         Some(&["dangerous".into()]),
-        &["Read".into(), "Write".into(), "Bash".into()],
+        &[
+            "filesystem::read_file".into(),
+            "filesystem::write_file".into(),
+            "process::run".into(),
+        ],
     );
     let set: std::collections::HashSet<_> = merged.into_iter().collect();
     assert_eq!(set.len(), 2, "union of explicit + skill denials: {set:?}");
-    assert!(set.contains("Bash"));
-    assert!(set.contains("Write"));
+    assert!(set.contains("process::run"));
+    assert!(set.contains("filesystem::write_file"));
 }
 
 #[test]
-fn compute_denied_tools_skill_allowed_tools_inverted_to_denials() {
+fn compute_denied_capabilities_skill_allowed_capabilities_inverted_to_denials() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "readonly",
         SkillFrontmatter {
-            allowed_tools: Some(vec!["Read".to_string(), "Grep".to_string()]),
+            allowed_capabilities: Some(vec![
+                "filesystem::read_file".to_string(),
+                "Grep".to_string(),
+            ]),
             ..Default::default()
         },
     ));
     let (manager, _, _) = make_manager_with_registry(registry);
 
     let all_tools = vec![
-        "Read".to_string(),
-        "Write".to_string(),
-        "Bash".to_string(),
+        "filesystem::read_file".to_string(),
+        "filesystem::write_file".to_string(),
+        "process::run".to_string(),
         "Grep".to_string(),
-        "Edit".to_string(),
+        "filesystem::edit_file".to_string(),
     ];
-    let merged = manager.compute_denied_tools(&[], Some(&["readonly".into()]), &all_tools);
+    let merged = manager.compute_denied_capabilities(&[], Some(&["readonly".into()]), &all_tools);
     let set: std::collections::HashSet<_> = merged.into_iter().collect();
-    assert!(set.contains("Write"));
-    assert!(set.contains("Bash"));
-    assert!(set.contains("Edit"));
-    assert!(!set.contains("Read"), "Read should be allowed");
+    assert!(set.contains("filesystem::write_file"));
+    assert!(set.contains("process::run"));
+    assert!(set.contains("filesystem::edit_file"));
+    assert!(
+        !set.contains("filesystem::read_file"),
+        "filesystem::read_file should be allowed"
+    );
     assert!(!set.contains("Grep"), "Grep should be allowed");
 }
 
 #[test]
-fn compute_denied_tools_unknown_skill_name_is_skipped() {
+fn compute_denied_capabilities_unknown_skill_name_is_skipped() {
     let registry = SkillRegistry::new();
     let (manager, _, _) = make_manager_with_registry(registry);
 
     // Unknown skill in the list should silently no-op (not panic) and leave
     // explicit denials untouched.
-    let merged = manager.compute_denied_tools(
-        &["Bash".into()],
+    let merged = manager.compute_denied_capabilities(
+        &["process::run".into()],
         Some(&["does-not-exist".into()]),
-        &["Read".into(), "Bash".into()],
+        &["filesystem::read_file".into(), "process::run".into()],
     );
-    assert_eq!(merged, vec!["Bash".to_string()]);
+    assert_eq!(merged, vec!["process::run".to_string()]);
 }
 
 #[test]
-fn compute_denied_tools_deduplicates_overlapping_denials() {
+fn compute_denied_capabilities_deduplicates_overlapping_denials() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "overlap",
         SkillFrontmatter {
-            denied_tools: Some(vec!["Bash".to_string(), "Edit".to_string()]),
+            denied_capabilities: Some(vec![
+                "process::run".to_string(),
+                "filesystem::edit_file".to_string(),
+            ]),
             ..Default::default()
         },
     ));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    // Explicit denials already include "Bash"; skill repeats it.
-    let merged = manager.compute_denied_tools(
-        &["Bash".into(), "Write".into()],
+    // Explicit denials already include "process::run"; skill repeats it.
+    let merged = manager.compute_denied_capabilities(
+        &["process::run".into(), "filesystem::write_file".into()],
         Some(&["overlap".into()]),
-        &["Read".into(), "Write".into(), "Bash".into(), "Edit".into()],
+        &[
+            "filesystem::read_file".into(),
+            "filesystem::write_file".into(),
+            "process::run".into(),
+            "filesystem::edit_file".into(),
+        ],
     );
     let set: std::collections::HashSet<_> = merged.into_iter().collect();
     assert_eq!(set.len(), 3, "dedup: {set:?}");
-    assert!(set.contains("Bash"));
-    assert!(set.contains("Write"));
-    assert!(set.contains("Edit"));
+    assert!(set.contains("process::run"));
+    assert!(set.contains("filesystem::write_file"));
+    assert!(set.contains("filesystem::edit_file"));
 }
 
 #[test]
-fn compute_denied_tools_multiple_skills_unions() {
+fn compute_denied_capabilities_multiple_skills_unions() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "no-bash",
         SkillFrontmatter {
-            denied_tools: Some(vec!["Bash".to_string()]),
+            denied_capabilities: Some(vec!["process::run".to_string()]),
             ..Default::default()
         },
     ));
     registry.insert(make_skill(
         "no-write",
         SkillFrontmatter {
-            denied_tools: Some(vec!["Write".to_string()]),
+            denied_capabilities: Some(vec!["filesystem::write_file".to_string()]),
             ..Default::default()
         },
     ));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    let merged = manager.compute_denied_tools(
+    let merged = manager.compute_denied_capabilities(
         &[],
         Some(&["no-bash".into(), "no-write".into()]),
-        &["Read".into(), "Bash".into(), "Write".into()],
+        &[
+            "filesystem::read_file".into(),
+            "process::run".into(),
+            "filesystem::write_file".into(),
+        ],
     );
     let set: std::collections::HashSet<_> = merged.into_iter().collect();
     assert_eq!(set.len(), 2);
-    assert!(set.contains("Bash"));
-    assert!(set.contains("Write"));
+    assert!(set.contains("process::run"));
+    assert!(set.contains("filesystem::write_file"));
 }
 
 #[test]
-fn compute_denied_tools_skill_with_empty_frontmatter_is_noop() {
+fn compute_denied_capabilities_skill_with_empty_frontmatter_is_noop() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill("plain", SkillFrontmatter::default()));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    // Skill exists but has no deniedTools / allowedTools — should not
+    // Skill exists but has no deniedCapabilities / allowedCapabilities — should not
     // contribute any denials.
-    let merged = manager.compute_denied_tools(
-        &["Bash".into()],
+    let merged = manager.compute_denied_capabilities(
+        &["process::run".into()],
         Some(&["plain".into()]),
-        &["Read".into(), "Bash".into()],
+        &["filesystem::read_file".into(), "process::run".into()],
     );
-    assert_eq!(merged, vec!["Bash".to_string()]);
+    assert_eq!(merged, vec!["process::run".to_string()]);
 }
 
 #[tokio::test]
-async fn spawn_with_skill_denials_forwards_merged_denied_tools_to_execution() {
+async fn spawn_with_skill_denials_forwards_merged_denied_capabilities_to_execution() {
     // End-to-end wiring test: construct a SubagentManager with a skill
     // registry, spawn a subagent with `skills: ["restricted"]`, and observe
     // that the resulting subagent run executed with the skill's
-    // `deniedTools` in force (via side-channel: the mock provider path
+    // `deniedCapabilities` in force (via side-channel: the mock provider path
     // doesn't block compilation, but we verify by the spawn
     // completing successfully and inspecting captured state on the
     // tracker). The load-bearing assertion is on the helper above; this
-    // test exists so that if `compute_denied_tools` is inadvertently
+    // test exists so that if `compute_denied_capabilities` is inadvertently
     // bypassed by `spawn()`, CI fails.
 
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "restricted",
         SkillFrontmatter {
-            denied_tools: Some(vec!["Bash".to_string()]),
+            denied_capabilities: Some(vec!["process::run".to_string()]),
             ..Default::default()
         },
     ));
@@ -1400,14 +1426,18 @@ async fn spawn_with_skill_denials_forwards_merged_denied_tools_to_execution() {
     let handle = manager.spawn(config).await.unwrap();
     assert!(!handle.session_id.is_empty());
 
-    // Cross-check: the helper would have produced Bash in the denied list.
-    let merged = manager.compute_denied_tools(
+    // Cross-check: the helper would have produced process::run in the denied list.
+    let merged = manager.compute_denied_capabilities(
         &[],
         Some(&["restricted".into()]),
-        &["Read".into(), "Bash".into(), "Write".into()],
+        &[
+            "filesystem::read_file".into(),
+            "process::run".into(),
+            "filesystem::write_file".into(),
+        ],
     );
     assert!(
-        merged.contains(&"Bash".to_string()),
+        merged.contains(&"process::run".to_string()),
         "skill frontmatter denials must be included in merged list: {merged:?}"
     );
 }

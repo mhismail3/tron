@@ -61,7 +61,7 @@ impl ContentSequenceItem {
 pub struct AccumulatedToolCall {
     /// Unique identifier for this tool call.
     pub tool_call_id: String,
-    /// Name of the tool (e.g. "bash", "read").
+    /// Name of the tool (e.g. "execute", "inspect").
     pub tool_name: String,
     /// Parsed arguments, populated when execution starts.
     pub arguments: Option<Value>,
@@ -117,7 +117,7 @@ impl AccumulatedToolCall {
 /// "what is the agent doing" info, not the full accumulator state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CurrentToolSnapshot {
-    /// The tool's registered name (e.g. "Bash", "WebFetch").
+    /// The tool's registered name (e.g. "process::run", "web::fetch").
     pub tool_name: String,
     /// Unique ID of the in-flight tool call.
     pub tool_call_id: String,
@@ -543,10 +543,10 @@ mod tests {
     #[test]
     fn add_tool_call_generating() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         assert_eq!(acc.tool_calls.len(), 1);
         assert_eq!(acc.tool_calls[0].tool_call_id, "tc_1");
-        assert_eq!(acc.tool_calls[0].tool_name, "bash");
+        assert_eq!(acc.tool_calls[0].tool_name, "execute");
         assert_eq!(acc.tool_calls[0].status, "generating");
         assert_eq!(acc.content_sequence.len(), 1);
         assert!(matches!(
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn update_tool_start() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         acc.update_tool_start("tc_1", Some(&serde_json::json!({"command": "ls"})));
         assert_eq!(acc.tool_calls[0].status, "running");
         assert!(acc.tool_calls[0].arguments.is_some());
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn update_tool_end_success() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         acc.update_tool_start("tc_1", None);
         acc.update_tool_end("tc_1", Some("output"), false);
         assert_eq!(acc.tool_calls[0].status, "completed");
@@ -580,7 +580,7 @@ mod tests {
     #[test]
     fn update_tool_end_error() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         acc.update_tool_start("tc_1", None);
         acc.update_tool_end("tc_1", Some("command not found"), true);
         assert_eq!(acc.tool_calls[0].status, "error");
@@ -598,8 +598,8 @@ mod tests {
     #[test]
     fn multiple_tool_calls_tracked_independently() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
-        acc.add_tool_generating("tc_2", "read");
+        acc.add_tool_generating("tc_1", "execute");
+        acc.add_tool_generating("tc_2", "inspect");
         acc.update_tool_start("tc_1", None);
         acc.update_tool_end("tc_1", Some("ok"), false);
         acc.update_tool_start("tc_2", None);
@@ -613,7 +613,7 @@ mod tests {
     fn text_after_tool_creates_new_text_item() {
         let mut acc = TurnAccumulator::new();
         acc.append_text("before ");
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         acc.append_text("after");
         assert_eq!(acc.content_sequence.len(), 3);
         assert!(matches!(
@@ -634,7 +634,7 @@ mod tests {
     fn to_json_produces_expected_format() {
         let mut acc = TurnAccumulator::new();
         acc.append_text("hello");
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         let (text, tools, sequence) = acc.to_json();
         assert_eq!(text, "hello");
         assert!(tools.is_array());
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn tool_streaming_output_accumulates() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         acc.update_tool_start("tc_1", None);
         let tc = &mut acc.tool_calls[0];
         let streaming = tc.streaming_output.get_or_insert_with(String::new);
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn tool_streaming_output_included_in_json() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         acc.update_tool_start("tc_1", None);
         acc.tool_calls[0].streaming_output = Some("partial output".into());
         let (_, tools, _) = acc.to_json();
@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn tool_streaming_output_omitted_when_none() {
         let mut acc = TurnAccumulator::new();
-        acc.add_tool_generating("tc_1", "bash");
+        acc.add_tool_generating("tc_1", "execute");
         let (_, tools, _) = acc.to_json();
         assert!(tools[0].get("streamingOutput").is_none());
     }
@@ -765,7 +765,7 @@ mod tests {
         map.handle_thinking_delta("s1", "let me think...");
         map.handle_text_delta("s1", "The answer is ");
         map.handle_text_delta("s1", "42");
-        map.handle_tool_generating("s1", "tc_1", "bash");
+        map.handle_tool_generating("s1", "tc_1", "execute");
         map.handle_tool_start("s1", "tc_1", None);
         map.handle_tool_end("s1", "tc_1", Some("output"), false);
         map.handle_text_delta("s1", " and more");
@@ -782,7 +782,7 @@ mod tests {
     fn map_tool_streaming_output() {
         let map = TurnAccumulatorMap::new();
         map.handle_turn_start("s1");
-        map.handle_tool_generating("s1", "tc_1", "bash");
+        map.handle_tool_generating("s1", "tc_1", "execute");
         map.handle_tool_start("s1", "tc_1", None);
         map.handle_tool_output("s1", "tc_1", "partial ");
         map.handle_tool_output("s1", "tc_1", "output");
@@ -872,18 +872,18 @@ mod tests {
         map.update_from_event(&TronEvent::ToolCallGenerating {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
-            tool_name: "bash".into(),
+            tool_name: "execute".into(),
         });
         map.update_from_event(&TronEvent::ToolExecutionStart {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
-            tool_name: "bash".into(),
+            tool_name: "execute".into(),
             arguments: None,
         });
         map.update_from_event(&TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
-            tool_name: "bash".into(),
+            tool_name: "execute".into(),
             duration: 100,
             is_error: Some(false),
             result: None,
@@ -902,12 +902,12 @@ mod tests {
         map.update_from_event(&TronEvent::ToolCallGenerating {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
-            tool_name: "bash".into(),
+            tool_name: "execute".into(),
         });
         map.update_from_event(&TronEvent::ToolExecutionStart {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
-            tool_name: "bash".into(),
+            tool_name: "execute".into(),
             arguments: None,
         });
         map.update_from_event(&TronEvent::ToolExecutionUpdate {

@@ -634,7 +634,7 @@ fn assistant_tool_use(tool_name: &str, tool_id: &str) -> Message {
     assistant_tool_use_with_input(tool_name, tool_id, json!({}))
 }
 
-/// Assistant message for an `AskUserQuestion` tool call with real question
+/// Assistant message for an `agent::ask_user` tool call with real question
 /// text (what the agent would actually send at runtime).
 fn assistant_ask_user_question(tool_id: &str, questions: &[&str]) -> Message {
     let qs: Vec<Value> = questions
@@ -647,7 +647,7 @@ fn assistant_ask_user_question(tool_id: &str, questions: &[&str]) -> Message {
             })
         })
         .collect();
-    assistant_tool_use_with_input("AskUserQuestion", tool_id, json!({"questions": qs}))
+    assistant_tool_use_with_input("agent::ask_user", tool_id, json!({"questions": qs}))
 }
 
 fn assistant_text(text: &str) -> Message {
@@ -681,7 +681,7 @@ fn tool_result(tool_call_id: &str, text: &str) -> Message {
 
 #[test]
 fn collect_interactive_ids_finds_ask_user_question() {
-    let msgs = vec![assistant_tool_use("AskUserQuestion", "aq_1")];
+    let msgs = vec![assistant_tool_use("agent::ask_user", "aq_1")];
     let ids = collect_interactive_tool_use_ids(&msgs);
     assert!(ids.contains("aq_1"));
     assert_eq!(ids.len(), 1);
@@ -690,8 +690,8 @@ fn collect_interactive_ids_finds_ask_user_question() {
 #[test]
 fn collect_interactive_ids_ignores_non_interactive_tools() {
     let msgs = vec![
-        assistant_tool_use("Read", "r_1"),
-        assistant_tool_use("Bash", "b_1"),
+        assistant_tool_use("filesystem::read_file", "r_1"),
+        assistant_tool_use("process::run", "b_1"),
     ];
     let ids = collect_interactive_tool_use_ids(&msgs);
     assert!(
@@ -705,8 +705,8 @@ fn collect_interactive_ids_mixed_tool_use() {
     let msgs = vec![Message {
         role: "assistant".to_string(),
         content: json!([
-            {"type": "tool_use", "id": "aq_1", "name": "AskUserQuestion", "input": {}},
-            {"type": "tool_use", "id": "r_1", "name": "Read", "input": {}}
+            {"type": "tool_use", "id": "aq_1", "name": "agent::ask_user", "input": {}},
+            {"type": "tool_use", "id": "r_1", "name": "filesystem::read_file", "input": {}}
         ]),
         tool_call_id: None,
         is_error: None,
@@ -733,7 +733,7 @@ fn collect_interactive_ids_string_content_skipped_safely() {
 fn collect_interactive_ids_block_without_type_field() {
     let msgs = vec![Message {
         role: "assistant".to_string(),
-        content: json!([{"name": "AskUserQuestion", "id": "aq_1"}]),
+        content: json!([{"name": "agent::ask_user", "id": "aq_1"}]),
         tool_call_id: None,
         is_error: None,
     }];
@@ -745,7 +745,7 @@ fn collect_interactive_ids_block_without_type_field() {
 fn collect_interactive_ids_tool_use_without_id() {
     let msgs = vec![Message {
         role: "assistant".to_string(),
-        content: json!([{"type": "tool_use", "name": "AskUserQuestion"}]),
+        content: json!([{"type": "tool_use", "name": "agent::ask_user"}]),
         tool_call_id: None,
         is_error: None,
     }];
@@ -756,9 +756,9 @@ fn collect_interactive_ids_tool_use_without_id() {
 #[test]
 fn collect_interactive_ids_multiple_ask_user_calls() {
     let msgs = vec![
-        assistant_tool_use("AskUserQuestion", "aq_1"),
-        assistant_tool_use("AskUserQuestion", "aq_2"),
-        assistant_tool_use("AskUserQuestion", "aq_3"),
+        assistant_tool_use("agent::ask_user", "aq_1"),
+        assistant_tool_use("agent::ask_user", "aq_2"),
+        assistant_tool_use("agent::ask_user", "aq_3"),
     ];
     let ids = collect_interactive_tool_use_ids(&msgs);
     assert_eq!(ids.len(), 3);
@@ -815,7 +815,7 @@ fn serialize_filters_ask_user_question_result_but_keeps_question_text() {
 #[test]
 fn serialize_retains_non_interactive_tool_result() {
     let msgs = vec![
-        assistant_tool_use("Read", "r_1"),
+        assistant_tool_use("filesystem::read_file", "r_1"),
         tool_result("r_1", "file contents here"),
     ];
     let out = serialize_for_memory(&msgs);
@@ -828,13 +828,13 @@ fn serialize_retains_non_interactive_tool_result() {
 #[test]
 fn serialize_filters_multiple_interactive_in_slice() {
     let msgs = vec![
-        assistant_tool_use("AskUserQuestion", "aq_1"),
+        assistant_tool_use("agent::ask_user", "aq_1"),
         tool_result("aq_1", "Q1: first"),
         user_text("a1"),
-        assistant_tool_use("AskUserQuestion", "aq_2"),
+        assistant_tool_use("agent::ask_user", "aq_2"),
         tool_result("aq_2", "Q2: second"),
         user_text("a2"),
-        assistant_tool_use("AskUserQuestion", "aq_3"),
+        assistant_tool_use("agent::ask_user", "aq_3"),
         tool_result("aq_3", "Q3: third"),
         user_text("a3"),
     ];
@@ -867,16 +867,19 @@ fn serialize_keeps_orphan_tool_result() {
 #[test]
 fn serialize_preserves_mixed_interactive_and_regular() {
     let msgs = vec![
-        assistant_tool_use("AskUserQuestion", "aq_1"),
+        assistant_tool_use("agent::ask_user", "aq_1"),
         tool_result("aq_1", "Q1: pick one"),
         user_text("done"),
-        assistant_tool_use("Read", "r_1"),
+        assistant_tool_use("filesystem::read_file", "r_1"),
         tool_result("r_1", "file body"),
         assistant_text("final thoughts"),
     ];
     let out = serialize_for_memory(&msgs);
     assert!(!out.contains("pick one"), "interactive filtered: {out}");
-    assert!(out.contains("[TOOL_RESULT] file body"), "Read kept: {out}");
+    assert!(
+        out.contains("[TOOL_RESULT] file body"),
+        "filesystem read kept: {out}"
+    );
     assert!(out.contains("[ASSISTANT] final thoughts"));
     assert!(out.contains("[USER] done"));
 }
@@ -884,7 +887,7 @@ fn serialize_preserves_mixed_interactive_and_regular() {
 #[test]
 fn serialize_flags_errored_non_interactive_tool_result() {
     let msgs = vec![
-        assistant_tool_use("Bash", "b_1"),
+        assistant_tool_use("process::run", "b_1"),
         Message {
             role: "tool_result".to_string(),
             content: json!([{"type": "text", "text": "command failed"}]),
@@ -912,7 +915,7 @@ fn extract_summary_returns_none_for_non_interactive_tool_use() {
     let block = json!({
         "type": "tool_use",
         "id": "r_1",
-        "name": "Read",
+        "name": "filesystem::read_file",
         "input": {"path": "/tmp/x"}
     });
     assert_eq!(extract_interactive_tool_summary(&block), None);
@@ -923,7 +926,7 @@ fn extract_summary_returns_none_when_input_missing() {
     let block = json!({
         "type": "tool_use",
         "id": "aq_1",
-        "name": "AskUserQuestion"
+        "name": "agent::ask_user"
     });
     assert_eq!(extract_interactive_tool_summary(&block), None);
 }
@@ -933,7 +936,7 @@ fn extract_summary_ask_user_single_question() {
     let block = json!({
         "type": "tool_use",
         "id": "aq_1",
-        "name": "AskUserQuestion",
+        "name": "agent::ask_user",
         "input": {
             "questions": [{"question": "What's next?", "options": [{"label":"A"},{"label":"B"}], "mode":"single"}]
         }
@@ -949,7 +952,7 @@ fn extract_summary_ask_user_multiple_questions_joined() {
     let block = json!({
         "type": "tool_use",
         "id": "aq_1",
-        "name": "AskUserQuestion",
+        "name": "agent::ask_user",
         "input": {
             "questions": [
                 {"question": "Q one?", "options": [{"label":"A"},{"label":"B"}]},
@@ -966,7 +969,7 @@ fn extract_summary_ask_user_without_questions_returns_none() {
     let block = json!({
         "type": "tool_use",
         "id": "aq_1",
-        "name": "AskUserQuestion",
+        "name": "agent::ask_user",
         "input": {"questions": []}
     });
     assert_eq!(extract_interactive_tool_summary(&block), None);
@@ -980,7 +983,7 @@ fn extract_summary_ask_user_omits_options_and_mode() {
     let block = json!({
         "type": "tool_use",
         "id": "aq_1",
-        "name": "AskUserQuestion",
+        "name": "agent::ask_user",
         "input": {
             "questions": [{
                 "question": "Pick color",
@@ -1037,7 +1040,7 @@ fn serialize_assistant_mixes_text_and_interactive_summary() {
         role: "assistant".to_string(),
         content: json!([
             {"type": "text", "text": "Let me ask you something."},
-            {"type": "tool_use", "id": "aq_1", "name": "AskUserQuestion", "input": {
+            {"type": "tool_use", "id": "aq_1", "name": "agent::ask_user", "input": {
                 "questions": [{"question": "Ready?", "options": [{"label":"Y"},{"label":"N"}]}]
             }}
         ]),
@@ -1061,7 +1064,7 @@ fn serialize_ignores_non_interactive_tool_use_in_assistant_content() {
         role: "assistant".to_string(),
         content: json!([
             {"type": "text", "text": "reading file"},
-            {"type": "tool_use", "id": "r_1", "name": "Read", "input": {"path": "/tmp/x"}}
+            {"type": "tool_use", "id": "r_1", "name": "filesystem::read_file", "input": {"path": "/tmp/x"}}
         ]),
         tool_call_id: None,
         is_error: None,

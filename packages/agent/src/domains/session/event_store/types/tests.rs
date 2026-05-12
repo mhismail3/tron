@@ -147,7 +147,7 @@ mod session_event_tests {
             EventType::ToolCall,
             json!({
                 "toolCallId": "tc-1",
-                "name": "bash",
+                "name": "execute",
                 "arguments": {"command": "ls"},
                 "turn": 1
             }),
@@ -156,7 +156,7 @@ mod session_event_tests {
         match payload {
             SessionEventPayload::ToolCall(p) => {
                 assert_eq!(p.tool_call_id, "tc-1");
-                assert_eq!(p.name, "bash");
+                assert_eq!(p.name, "execute");
             }
             other => panic!("expected ToolCall, got {other:?}"),
         }
@@ -360,7 +360,7 @@ mod session_event_tests {
             ),
             (
                 EventType::ToolCall,
-                json!({"toolCallId": "tc", "name": "bash", "arguments": {}, "turn": 1}),
+                json!({"toolCallId": "tc", "name": "execute", "arguments": {}, "turn": 1}),
             ),
             (
                 EventType::ToolResult,

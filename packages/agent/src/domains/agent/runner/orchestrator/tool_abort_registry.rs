@@ -1,20 +1,20 @@
-//! Per-tool cancellation registry for cooperative abort.
+//! Per-call cancellation registry for cooperative abort.
 //!
-//! Each in-flight tool call gets its own `CancellationToken` child of the
+//! Each in-flight provider call gets its own `CancellationToken` child of the
 //! turn-level cancellation token. The registry maps
 //! `(session_id, tool_call_id)` to that child token so the `agent.abortTool`
-//! Engine capabilities can cancel a single tool without cancelling the rest of the turn.
+//! Engine capabilities can cancel a single call without cancelling the rest of the turn.
 //!
 //! ## Lifecycle
 //!
 //! 1. `register(session_id, tool_call_id, parent)` — creates a child of the
 //!    turn's cancellation token and stores it. Returns the child so the
-//!    tool executor can pass it into `ToolContext.cancellation`.
+//!    executor can pass it into capability-owned work.
 //! 2. `unregister(session_id, tool_call_id)` — removes the entry once the
 //!    tool completes (success, error, or cancellation). Called in a `Drop`
 //!    guard in the executor so early returns cannot leak entries.
 //! 3. `abort(session_id, tool_call_id)` — looked up by the engine transport.
-//!    Returns `true` if a matching tool was in flight; the child token is
+//!    Returns `true` if a matching call was in flight; the child token is
 //!    cancelled and the entry is removed.
 //!
 //! Parent-level turn abort (via `CancellationToken::cancel` on the turn
@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 type Key = (String, String);
 
-/// Per-tool cancellation registry.
+/// Per-call cancellation registry.
 #[derive(Default)]
 pub struct ToolAbortRegistry {
     entries: DashMap<Key, CancellationToken>,
@@ -43,9 +43,9 @@ impl ToolAbortRegistry {
         }
     }
 
-    /// Register a new in-flight tool call. Returns a child token derived
-    /// from `parent` — the executor passes this into `ToolContext.cancellation`
-    /// and selects on it for cooperative cancellation.
+    /// Register a new in-flight provider call. Returns a child token derived
+    /// from `parent`; capability-owned work selects on it for cooperative
+    /// cancellation.
     #[must_use]
     pub fn register(
         &self,

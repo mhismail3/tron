@@ -224,7 +224,7 @@ mod tests {
             payload: serde_json::json!({
                 "content": [
                     {"type": "thinking", "thinking": "I'll write the file", "signature": "sig123"},
-                    {"type": "tool_use", "id": "toolu_01abc", "name": "Write", "arguments": {"file_path": "/tmp/test.txt", "content": "hello"}}
+                    {"type": "tool_use", "id": "toolu_01abc", "name": "filesystem::write_file", "arguments": {"file_path": "/tmp/test.txt", "content": "hello"}}
                 ],
                 "turn": 1
             }),
@@ -284,7 +284,7 @@ mod tests {
             } = tool_use
             {
                 assert_eq!(id, "toolu_01abc");
-                assert_eq!(name, "Write");
+                assert_eq!(name, "filesystem::write_file");
                 assert_eq!(arguments["file_path"], "/tmp/test.txt");
             }
         } else {

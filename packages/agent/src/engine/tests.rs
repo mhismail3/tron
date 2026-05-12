@@ -28,9 +28,9 @@ use super::types::{
     WorkerDefinition, WorkerKind,
 };
 use super::{
-    AcquireResourceLease, AgentCapabilityClient, ApprovalStatus, EngineExternalWorkerRuntime,
-    EngineHost, EngineHostHandle, EngineQueueDrainer, EngineResourceLeaseStatus,
-    EngineTriggerRuntime, EngineWatchRequest, StreamActorScope, StreamCursor,
+    AcquireResourceLease, AgentCapabilityClient, ApprovalStatus, CatalogWatchRequest,
+    EngineExternalWorkerRuntime, EngineHost, EngineHostHandle, EngineQueueDrainer,
+    EngineResourceLeaseStatus, EngineTriggerRuntime, StreamActorScope, StreamCursor,
     TriggerDispatchRequest,
 };
 
@@ -1662,7 +1662,7 @@ async fn host_unregister_function_updates_discovery_and_watch() {
     assert_eq!(host.discover(&query).await.len(), 1);
 
     let before = host
-        .watch(&actor_context, EngineWatchRequest::default())
+        .watch(&actor_context, CatalogWatchRequest::default())
         .await
         .unwrap()
         .current_revision;
@@ -1674,12 +1674,12 @@ async fn host_unregister_function_updates_discovery_and_watch() {
     let page = host
         .watch(
             &actor_context,
-            EngineWatchRequest {
+            CatalogWatchRequest {
                 after_revision: before,
                 classes: Some(vec![CatalogChangeClass::Availability]),
                 subject_prefix: Some("alpha::".to_owned()),
                 owner_worker: Some(wid("w1")),
-                ..EngineWatchRequest::default()
+                ..CatalogWatchRequest::default()
             },
         )
         .await

@@ -1,21 +1,21 @@
 //! Domain worker registration.
 //!
 //! This module registers canonical in-process domain workers, their functions,
-//! hidden apply functions, tool functions, and trigger definitions. Transport
+//! hidden apply functions and trigger definitions. Transport
 //! startup calls this module once; individual domain workers own the executable
 //! behavior and metadata.
 //!
-//! Domain workers such as `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
+//! Domain workers such as `capability`, `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
 //! `git`, `worktree`, `auth`, `device`, `voice_notes`, `transcription`,
-//! `browser`, `display`, `sandbox`, `mcp`, and `system` own executable
-//! function contracts and behavior metadata. A separate `tool` worker registers
-//! built-in agent tools as
-//! canonical `tool::*` functions. Provider requests now resolve schemas from
-//! the live catalog, so built-ins, engine meta-tools, and eligible MCP
-//! capabilities are all surfaced through the same agent-facing capability
-//! fabric.
-//! `engine_ws` trigger records capture public engine protocol messages.
+//! `browser`, `display`, `sandbox`, `mcp`, `process`, `web`, and `system` own
+//! executable function contracts and behavior metadata. Provider requests now
+//! resolve schemas from the live catalog, so first-party, MCP, sandbox, and
+//! external capabilities are all surfaced through the same agent-facing
+//! capability fabric.
+//! `capability` is the collapsed model-facing harness worker: providers see
+//! only `search`, `inspect`, and `execute`, and those primitives route back
+//! into live worker-owned catalog entries. `engine_ws` trigger records capture public engine protocol messages.
 //! `cron_schedule` trigger records capture scheduled automation fires.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
@@ -33,9 +33,10 @@ use crate::domains::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, auth, blob, browser, codex_app, context, cron, device, display, events, filesystem, git,
-    import, job, logs, mcp, memory, message, model, notifications, plan, prompt_library, repo,
-    sandbox, session, settings, skills, system, tools, transcription, tree, voice_notes, worktree,
+    agent, auth, blob, browser, capability, codex_app, context, cron, device, display, events,
+    filesystem, git, import, job, logs, mcp, memory, message, model, notifications, plan, process,
+    prompt_library, repo, sandbox, session, settings, skills, system, transcription, tree,
+    voice_notes, web, worktree,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -67,9 +68,9 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
     let deps = DomainRegistrationContext::from_context(ctx);
     let mut modules = vec![
         system::worker_module(&deps)?,
+        capability::worker_module(&deps)?,
         codex_app::worker_module(&deps)?,
         blob::worker_module(&deps)?,
-        tools::worker_module(&deps)?,
         message::worker_module(&deps)?,
         cron::worker_module(&deps)?,
         settings::worker_module(&deps)?,
@@ -86,6 +87,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         job::worker_module(&deps)?,
         notifications::worker_module(&deps)?,
         plan::worker_module(&deps)?,
+        process::worker_module(&deps)?,
         prompt_library::worker_module(&deps)?,
         tree::worker_module(&deps)?,
         repo::worker_module(&deps)?,
@@ -95,6 +97,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         device::worker_module(&deps)?,
         transcription::worker_module(&deps)?,
         voice_notes::worker_module(&deps)?,
+        web::worker_module(&deps)?,
         sandbox::worker_module(&deps)?,
         git::worker_module(&deps)?,
         worktree::worker_module(&deps)?,

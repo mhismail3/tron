@@ -62,8 +62,8 @@ pub struct TronSettings {
     pub api: ApiSettings,
     /// Retry configuration for API calls.
     pub retry: RetrySettings,
-    /// Tool-specific settings.
-    pub tools: ToolSettings,
+    /// Capability-specific settings.
+    pub tools: CapabilitySettings,
     /// Context management settings (compaction, memory, rules, tasks).
     pub context: ContextSettings,
     /// Agent runtime settings (max turns, timeouts).
@@ -107,7 +107,7 @@ impl Default for TronSettings {
             name: "tron".to_string(),
             api: ApiSettings::default(),
             retry: RetrySettings::default(),
-            tools: ToolSettings::default(),
+            tools: CapabilitySettings::default(),
             context: ContextSettings::default(),
             agent: AgentRuntimeSettings::default(),
             logging: LoggingSettings::default(),
@@ -160,14 +160,14 @@ impl TronSettings {
 
         clamp_ratio(&mut self.retry.jitter_factor, "jitter_factor");
 
-        let bash = &mut self.tools.bash;
-        if bash.max_timeout_ms < bash.default_timeout_ms {
+        let process = &mut self.tools.process;
+        if process.max_timeout_ms < process.default_timeout_ms {
             tracing::warn!(
-                "bash max_timeout_ms ({}) < default_timeout_ms ({}), correcting",
-                bash.max_timeout_ms,
-                bash.default_timeout_ms
+                "process max_timeout_ms ({}) < default_timeout_ms ({}), correcting",
+                process.max_timeout_ms,
+                process.default_timeout_ms
             );
-            bash.max_timeout_ms = bash.default_timeout_ms;
+            process.max_timeout_ms = process.default_timeout_ms;
         }
     }
 }
@@ -440,12 +440,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_corrects_bash_timeout_inversion() {
+    fn validate_corrects_process_timeout_inversion() {
         let mut s = TronSettings::default();
-        s.tools.bash.default_timeout_ms = 300_000;
-        s.tools.bash.max_timeout_ms = 100_000;
+        s.tools.process.default_timeout_ms = 300_000;
+        s.tools.process.max_timeout_ms = 100_000;
         s.validate();
-        assert_eq!(s.tools.bash.max_timeout_ms, 300_000);
+        assert_eq!(s.tools.process.max_timeout_ms, 300_000);
     }
 
     #[test]
@@ -453,11 +453,11 @@ mod tests {
         let mut s = TronSettings::default();
         let before_threshold = s.context.compactor.compaction_threshold;
         let before_jitter = s.retry.jitter_factor;
-        let before_max = s.tools.bash.max_timeout_ms;
+        let before_max = s.tools.process.max_timeout_ms;
         s.validate();
         assert!((s.context.compactor.compaction_threshold - before_threshold).abs() < f64::EPSILON);
         assert!((s.retry.jitter_factor - before_jitter).abs() < f64::EPSILON);
-        assert_eq!(s.tools.bash.max_timeout_ms, before_max);
+        assert_eq!(s.tools.process.max_timeout_ms, before_max);
     }
 
     #[test]

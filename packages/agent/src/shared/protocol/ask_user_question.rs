@@ -1,4 +1,4 @@
-//! `AskUserQuestion` tool types.
+//! `AskUserPrompt` tool types.
 //!
 //! Types for the interactive question tool that lets the agent ask
 //! the user multiple-choice or free-form questions.
@@ -35,7 +35,7 @@ pub enum SelectionMode {
 /// A single question with options.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AskUserQuestion {
+pub struct AskUserPrompt {
     /// Unique identifier.
     pub id: String,
     /// The question text.
@@ -52,11 +52,11 @@ pub struct AskUserQuestion {
     pub other_placeholder: Option<String>,
 }
 
-/// Parameters for the `AskUserQuestion` tool call.
+/// Parameters for the `AskUserPrompt` tool call.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct AskUserQuestionParams {
+pub struct AskUserParams {
     /// Array of questions (1–5).
-    pub questions: Vec<AskUserQuestion>,
+    pub questions: Vec<AskUserPrompt>,
     /// Optional context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
@@ -75,10 +75,10 @@ pub struct QuestionAnswer {
     pub other_value: Option<String>,
 }
 
-/// The complete result from the `AskUserQuestion` tool.
+/// The complete result from the `AskUserPrompt` tool.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AskUserQuestionResult {
+pub struct AskUserResult {
     /// All answers.
     pub answers: Vec<QuestionAnswer>,
     /// Whether all questions were answered.
@@ -100,9 +100,9 @@ pub struct ValidationResult {
     pub error: Option<String>,
 }
 
-/// Validate [`AskUserQuestionParams`].
+/// Validate [`AskUserParams`].
 #[must_use]
-pub fn validate_params(params: &AskUserQuestionParams) -> ValidationResult {
+pub fn validate_params(params: &AskUserParams) -> ValidationResult {
     if params.questions.is_empty() {
         return ValidationResult {
             valid: false,
@@ -148,7 +148,7 @@ pub fn validate_params(params: &AskUserQuestionParams) -> ValidationResult {
 
 /// Check if all questions have been answered.
 #[must_use]
-pub fn is_complete(questions: &[AskUserQuestion], answers: &[QuestionAnswer]) -> bool {
+pub fn is_complete(questions: &[AskUserPrompt], answers: &[QuestionAnswer]) -> bool {
     for question in questions {
         let answer = answers.iter().find(|a| a.question_id == question.id);
         match answer {
@@ -181,8 +181,8 @@ mod tests {
         }
     }
 
-    fn make_question(id: &str) -> AskUserQuestion {
-        AskUserQuestion {
+    fn make_question(id: &str) -> AskUserPrompt {
+        AskUserPrompt {
             id: id.into(),
             question: format!("Question {id}?"),
             options: vec![make_option("A"), make_option("B")],
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn validate_empty_questions() {
-        let params = AskUserQuestionParams {
+        let params = AskUserParams {
             questions: vec![],
             context: None,
         };
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn validate_too_many_questions() {
-        let params = AskUserQuestionParams {
+        let params = AskUserParams {
             questions: (0..6).map(|i| make_question(&i.to_string())).collect(),
             context: None,
         };
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn validate_duplicate_ids() {
-        let params = AskUserQuestionParams {
+        let params = AskUserParams {
             questions: vec![make_question("q1"), make_question("q1")],
             context: None,
         };
@@ -231,7 +231,7 @@ mod tests {
     fn validate_too_few_options() {
         let mut q = make_question("q1");
         q.options = vec![make_option("only-one")];
-        let params = AskUserQuestionParams {
+        let params = AskUserParams {
             questions: vec![q],
             context: None,
         };
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn validate_valid_params() {
-        let params = AskUserQuestionParams {
+        let params = AskUserParams {
             questions: vec![make_question("q1"), make_question("q2")],
             context: Some("context".into()),
         };
@@ -345,7 +345,7 @@ mod tests {
     fn ask_user_question_serde_roundtrip() {
         let q = make_question("q1");
         let json = serde_json::to_string(&q).unwrap();
-        let back: AskUserQuestion = serde_json::from_str(&json).unwrap();
+        let back: AskUserPrompt = serde_json::from_str(&json).unwrap();
         assert_eq!(q, back);
     }
 

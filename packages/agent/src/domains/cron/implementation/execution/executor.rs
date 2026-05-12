@@ -923,11 +923,11 @@ mod tests {
     // ── Tool restriction enforcement ─────────────────────────────────
 
     #[tokio::test]
-    async fn shell_command_blocked_by_allowed_tools_missing() {
+    async fn shell_command_blocked_by_allowed_capabilities_missing() {
         let deps = make_test_deps();
         let mut job = make_shell_job("echo hi");
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec!["Webhook".into()]),
+            allowed_capabilities: Some(vec!["Webhook".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
@@ -952,14 +952,14 @@ mod tests {
         let deps = make_test_deps();
         let mut job = make_shell_job("echo allowed");
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec!["ShellCommand".into()]),
+            allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn webhook_blocked_by_allowed_tools() {
+    async fn webhook_blocked_by_allowed_capabilities() {
         let deps = make_test_deps();
         let mut job = CronJob {
             payload: Payload::Webhook {
@@ -972,7 +972,7 @@ mod tests {
             ..make_shell_job("echo")
         };
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec!["ShellCommand".into()]),
+            allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
@@ -980,7 +980,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn system_event_blocked_by_allowed_tools() {
+    async fn system_event_blocked_by_allowed_capabilities() {
         let deps = make_test_deps();
         let mut job = CronJob {
             payload: Payload::SystemEvent {
@@ -990,7 +990,7 @@ mod tests {
             ..make_shell_job("echo")
         };
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec!["ShellCommand".into()]),
+            allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_err());
@@ -1017,7 +1017,7 @@ mod tests {
         };
         // Even with restrictions that don't include AgentTurn, it should dispatch
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec!["ShellCommand".into()]),
+            allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_ok());

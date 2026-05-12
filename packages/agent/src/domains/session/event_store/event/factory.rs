@@ -294,7 +294,10 @@ mod tests {
         assert_eq!(chain.head_event_id(), evt2.id);
 
         let evt3 = chain
-            .append(EventType::ToolCall, serde_json::json!({"toolName": "Bash"}))
+            .append(
+                EventType::ToolCall,
+                serde_json::json!({"toolName": "process::run"}),
+            )
             .unwrap();
         assert_eq!(evt3.parent_id.as_deref(), Some(evt2.id.as_str()));
 

@@ -708,31 +708,31 @@ mod tests {
         let global1 = make_global_rule(".claude/b-global.md", "# Global B");
         let global2 = make_global_rule(".claude/a-global.md", "# Global A");
         let scoped1 = make_scoped_rule(
-            "src/domains/tools/implementations",
-            "src/domains/tools/implementations/.claude/CLAUDE.md",
-            "# Tools",
+            "src/domains/capability_support/implementations",
+            "src/domains/capability_support/implementations/.claude/CLAUDE.md",
+            "# Capability Support",
         );
         let scoped2 = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Context");
         let index = RulesIndex::new(vec![global1, global2, scoped1, scoped2]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
 
-        // Activate tools first, then context
-        let _ = tracker.touch_path("src/domains/tools/implementations/read.ts");
+        // Activate capability support first, then context.
+        let _ = tracker.touch_path("src/domains/capability_support/implementations/read.ts");
         let _ = tracker.touch_path("src/context/loader.ts");
 
         let content = tracker.build_dynamic_rules_content().unwrap();
         let global_a_pos = content.find("# Global A").unwrap();
         let second_global_pos = content.find("# Global B").unwrap();
-        let tools_pos = content.find("# Tools").unwrap();
+        let capability_support_pos = content.find("# Capability Support").unwrap();
         let context_pos = content.find("# Context").unwrap();
 
         // Globals sorted by relative_path (a < b)
         assert!(global_a_pos < second_global_pos);
         // Globals before scoped
-        assert!(second_global_pos < tools_pos);
-        // Scoped in activation order (tools first, then context)
-        assert!(tools_pos < context_pos);
+        assert!(second_global_pos < capability_support_pos);
+        // Scoped in activation order (capability support first, then context)
+        assert!(capability_support_pos < context_pos);
     }
 
     #[test]

@@ -44,7 +44,7 @@ const PER_HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 /// - [`Agent`](ShutdownPhase::Agent) drains in-flight turns first so
 ///   tools they own finish naturally.
 /// - [`Tools`](ShutdownPhase::Tools) then cancels anything still running
-///   (e.g. long bash commands that ignored turn cancel).
+///   (e.g. long process capabilities that ignored turn cancel).
 /// - [`Mcp`](ShutdownPhase::Mcp) disconnects external MCP servers BEFORE
 ///   we stop accepting capability calls that would call them.
 /// - [`Cron`](ShutdownPhase::Cron) stops scheduling new runs.
@@ -55,7 +55,7 @@ const PER_HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum ShutdownPhase {
     /// Agent turn loops — drain in-flight turns before any tool dies.
     Agent = 0,
-    /// Tool executors (bash, webfetch, subagents) that outlive their turn.
+    /// Capability executors that outlive their turn.
     Tools = 1,
     /// MCP stdio/SSE clients — disconnect cleanly before the transport stops.
     Mcp = 2,

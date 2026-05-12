@@ -90,8 +90,8 @@ pub mod dirs {
     pub const HOOKS: &str = "hooks";
     /// Provider presentation files referenced by a profile.
     pub const PROVIDERS: &str = "providers";
-    /// Tool policy/presentation files referenced by a profile.
-    pub const TOOLS: &str = "tools";
+    /// Capability presentation files referenced by a profile.
+    pub const CAPABILITIES: &str = "capabilities";
     /// Context compiler policy files referenced by a profile.
     pub const CONTEXT: &str = "context";
     /// Relative agent dir for rules discovery: `.tron/memory/rules`.

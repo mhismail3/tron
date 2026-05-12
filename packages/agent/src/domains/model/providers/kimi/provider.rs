@@ -448,7 +448,7 @@ mod tests {
         let provider = KimiProvider::new(test_config());
         let ctx = Context {
             tools: Some(vec![crate::shared::tools::Tool {
-                name: "bash".into(),
+                name: "execute".into(),
                 description: "Run commands".into(),
                 parameters: crate::shared::tools::ToolParameterSchema {
                     schema_type: "object".into(),
@@ -465,7 +465,7 @@ mod tests {
         let tools = body["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], "function");
-        assert_eq!(tools[0]["function"]["name"], "bash");
+        assert_eq!(tools[0]["function"]["name"], "execute");
     }
 
     #[test]
@@ -475,7 +475,7 @@ mod tests {
         let provider = KimiProvider::new(cfg);
         let ctx = Context {
             tools: Some(vec![crate::shared::tools::Tool {
-                name: "bash".into(),
+                name: "execute".into(),
                 description: "Run commands".into(),
                 parameters: crate::shared::tools::ToolParameterSchema {
                     schema_type: "object".into(),

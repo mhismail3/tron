@@ -147,7 +147,7 @@ pub fn generate_tool_clarification_message(
 
     format!(
         "[TRON CONTEXT]\n\
-        You are Tron, an AI coding assistant with full access to the user's file system.\n\
+        You are Tron, an AI coding assistant that acts through Tron's live capability system.\n\
         {cwd_line}\n\
         \n\
         ## Available Tools\n\
@@ -156,23 +156,18 @@ pub fn generate_tool_clarification_message(
         \n\
         {tool_list}\n\
         \n\
-        ## Bash Tool Capabilities\n\
-        The Bash tool runs commands on the user's local machine with FULL capabilities:\n\
-        - **Network access**: Use curl, wget, or other tools to fetch URLs, APIs, websites\n\
-        - **File system**: Full read/write access to files and directories\n\
-        - **Git operations**: Clone, commit, push, pull, etc.\n\
-        - **Package managers**: npm, pip, brew, apt, etc.\n\
-        - **Any installed CLI tools**: rg, jq, python, node, etc.\n\
-        \n\
-        When asked to visit a website or fetch data from the internet, USE the Bash tool with curl. \
-        Example: `curl -s https://example.com`\n\
+        ## Capability Execution\n\
+        Discover concrete abilities with `search`, inspect schemas and risk with `inspect`, \
+        then call `execute` with the selected contract or implementation id.\n\
+        Common contracts include filesystem capabilities for file operations, `process::run` for \
+        command execution, and web capabilities for network retrieval when they are visible to the session.\n\
         \n\
         ## Important Rules\n\
         1. You MUST provide ALL required parameters when calling tools - never call with empty arguments\n\
         2. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
         3. Confidently interpret and explain results from tool calls - you have full context of what was returned\n\
         4. Be helpful, accurate, and efficient when working with code\n\
-        5. Read existing files to understand context before making changes\n\
+        5. Inspect/read existing files through capabilities before changing them\n\
         6. Make targeted, minimal edits rather than rewriting entire files",
         tool_list = tool_descriptions.join("\n")
     )
@@ -642,7 +637,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "call_existing".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: Map::new(),
                     thought_signature: None,
                 }],
@@ -678,7 +673,7 @@ mod tests {
                     AssistantContent::text("Reading..."),
                     AssistantContent::ToolUse {
                         id: "call_1".into(),
-                        name: "read".into(),
+                        name: "inspect".into(),
                         arguments: args,
                         thought_signature: None,
                     },
@@ -712,8 +707,8 @@ mod tests {
     fn convert_tools_v2_without_tool_search() {
         use crate::domains::model::providers::openai::types::ResponsesToolEntry;
         let tools = vec![
-            make_tool("bash", "Run commands"),
-            make_tool("read", "Read file"),
+            make_tool("execute", "Run commands"),
+            make_tool("inspect", "Read file"),
         ];
         let result = convert_tools_v2(&tools, false);
 
@@ -732,8 +727,8 @@ mod tests {
     fn convert_tools_v2_with_tool_search() {
         use crate::domains::model::providers::openai::types::ResponsesToolEntry;
         let tools = vec![
-            make_tool("bash", "Run commands"),
-            make_tool("read", "Read file"),
+            make_tool("execute", "Run commands"),
+            make_tool("inspect", "Read file"),
         ];
         let result = convert_tools_v2(&tools, true);
 
@@ -756,7 +751,7 @@ mod tests {
 
     #[test]
     fn convert_tools_v2_tool_search_json_shape() {
-        let tools = vec![make_tool("bash", "Run commands")];
+        let tools = vec![make_tool("execute", "Run commands")];
         let result = convert_tools_v2(&tools, true);
         let json = serde_json::to_value(&result).unwrap();
         let arr = json.as_array().unwrap();
@@ -764,7 +759,7 @@ mod tests {
         // Function with defer_loading
         assert_eq!(arr[0]["type"], "function");
         assert_eq!(arr[0]["defer_loading"], true);
-        assert_eq!(arr[0]["name"], "bash");
+        assert_eq!(arr[0]["name"], "execute");
 
         // Tool search sentinel
         assert_eq!(arr[1]["type"], "tool_search");
@@ -783,15 +778,15 @@ mod tests {
     #[test]
     fn clarification_includes_tool_names() {
         let tools = vec![make_tool_with_required(
-            "Bash",
-            "Run bash commands",
-            vec!["command"],
+            "execute",
+            "Execute inspected capabilities",
+            vec!["mode"],
         )];
         let result = generate_tool_clarification_message(&tools, None);
 
-        assert!(result.contains("Bash"));
-        assert!(result.contains("Run bash commands"));
-        assert!(result.contains("required params: command"));
+        assert!(result.contains("execute"));
+        assert!(result.contains("Execute inspected capabilities"));
+        assert!(result.contains("required params: mode"));
     }
 
     #[test]
@@ -809,11 +804,11 @@ mod tests {
     }
 
     #[test]
-    fn clarification_includes_bash_capabilities() {
+    fn clarification_includes_capability_execution_guidance() {
         let result = generate_tool_clarification_message(&[], None);
-        assert!(result.contains("Bash Tool Capabilities"));
-        assert!(result.contains("Network access"));
-        assert!(result.contains("curl"));
+        assert!(result.contains("Capability Execution"));
+        assert!(result.contains("process::run"));
+        assert!(result.contains("search"));
     }
 
     // ── normalize_schema_for_openai ──────────────────────────────────

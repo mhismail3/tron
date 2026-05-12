@@ -494,7 +494,7 @@ pub struct CompactionTriggerInput {
     pub current_token_ratio: f64,
     /// Recent event types from the current cycle.
     pub recent_event_types: Vec<String>,
-    /// Recent Bash tool call commands.
+    /// Recent process::run tool call commands.
     pub recent_tool_calls: Vec<String>,
 }
 
@@ -699,14 +699,14 @@ mod tests {
     #[test]
     fn tool_summary_serde_roundtrip() {
         let summary = ToolSummary {
-            name: "bash".into(),
+            name: "process".into(),
             description: "Execute a shell command.".into(),
         };
         let json = serde_json::to_value(&summary).unwrap();
-        assert_eq!(json["name"], "bash");
+        assert_eq!(json["name"], "process");
         assert_eq!(json["description"], "Execute a shell command.");
         let back: ToolSummary = serde_json::from_value(json).unwrap();
-        assert_eq!(back.name, "bash");
+        assert_eq!(back.name, "process");
         assert_eq!(back.description, "Execute a shell command.");
     }
 

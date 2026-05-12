@@ -41,8 +41,8 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) spawn_type: String,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
-    pub(super) tool_policy: crate::shared::profile::ToolPolicySpec,
-    pub(super) denied_tools: Vec<String>,
+    pub(super) capability_policy: crate::shared::profile::CapabilityPolicySpec,
+    pub(super) denied_capabilities: Vec<String>,
     pub(super) engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -68,7 +68,7 @@ pub(super) struct ToolAgentTaskLaunch {
     pub(super) blocking_timeout_ms: Option<u64>,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
-    pub(super) denied_tools: Vec<String>,
+    pub(super) denied_capabilities: Vec<String>,
     /// Optional weak probe to query whether the parent session has an active
     /// agent run. Used to compute the `notify` field on
     /// `SubagentResultAvailable` (notify=true when parent is idle).
@@ -152,11 +152,11 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         CreateAgentOpts {
             provider,
             context_policy: params.process_plan.runtime_context_policy(),
-            tool_policy: params.tool_policy.clone(),
+            capability_policy: params.capability_policy.clone(),
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
-            denied_tools: params.denied_tools.clone(),
+            denied_capabilities: params.denied_capabilities.clone(),
             subagent_depth: 0,
             subagent_max_depth: params.subagent_max_depth,
             rules_content: None,
@@ -323,11 +323,11 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         CreateAgentOpts {
             provider,
             context_policy: params.process_plan.runtime_context_policy(),
-            tool_policy: params.process_plan.tool_policy.clone(),
+            capability_policy: params.process_plan.capability_policy.clone(),
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
-            denied_tools: params.denied_tools,
+            denied_capabilities: params.denied_capabilities,
             subagent_depth: params.subagent_depth,
             subagent_max_depth: params.subagent_max_depth,
             rules_content: None,

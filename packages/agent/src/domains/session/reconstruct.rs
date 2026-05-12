@@ -7,7 +7,7 @@
 //!
 //! ## In-flight reconciliation
 //!
-//! When tools are executing, `message.assistant` has already been persisted (containing
+//! When capabilities are executing, `message.assistant` has already been persisted (containing
 //! thinking, text, and tool_use blocks), but the turn accumulator still holds the same
 //! content. [`reconcile_in_flight`] strips text/thinking from in-flight state when tools
 //! are past "generating" status, preventing duplicate content on iOS reconstruction.
@@ -188,9 +188,9 @@ impl SessionReconstructService {
         // 5. Convert events to wire format
         let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
 
-        // 5a. Enrich AskUserQuestion tool.call events with server-parsed
+        // 5a. Enrich agent::ask_user tool.call events with server-parsed
         // status so iOS can render them without scanning event history.
-        crate::domains::tools::interactive_enrichment::enrich_interactive_tool_statuses(
+        crate::domains::capability_support::interactive_enrichment::enrich_interactive_tool_statuses(
             &mut wire_events,
         );
 
@@ -303,7 +303,7 @@ mod tests {
             "I'll run sleep 10.".into(),
             json!([{
                 "toolCallId": "tc_1",
-                "toolName": "bash",
+                "toolName": "execute",
                 "status": "running",
                 "startedAt": "2026-04-07T12:00:00Z",
                 "streamingOutput": "running...",
@@ -338,7 +338,7 @@ mod tests {
             "Let me think...".into(),
             json!([{
                 "toolCallId": "tc_1",
-                "toolName": "bash",
+                "toolName": "execute",
                 "status": "generating",
             }]),
             json!([
@@ -387,8 +387,8 @@ mod tests {
         let result = SessionReconstructService::reconcile_in_flight(
             "Running tools...".into(),
             json!([
-                { "toolCallId": "tc_1", "toolName": "bash", "status": "running" },
-                { "toolCallId": "tc_2", "toolName": "read", "status": "generating" },
+                { "toolCallId": "tc_1", "toolName": "execute", "status": "running" },
+                { "toolCallId": "tc_2", "toolName": "inspect", "status": "generating" },
             ]),
             json!([
                 { "type": "thinking", "thinking": "Let me run both." },
@@ -414,7 +414,7 @@ mod tests {
             "Done.".into(),
             json!([{
                 "toolCallId": "tc_1",
-                "toolName": "read",
+                "toolName": "inspect",
                 "status": "completed",
                 "result": "file contents...",
                 "completedAt": "2026-04-07T12:00:01Z",
@@ -437,7 +437,7 @@ mod tests {
             "Trying...".into(),
             json!([{
                 "toolCallId": "tc_1",
-                "toolName": "bash",
+                "toolName": "execute",
                 "status": "error",
                 "isError": true,
                 "result": "command not found",
@@ -459,7 +459,7 @@ mod tests {
             "text".into(),
             json!([{
                 "toolCallId": "tc_1",
-                "toolName": "bash",
+                "toolName": "execute",
                 "status": "running",
                 "arguments": { "command": "sleep 10" },
                 "startedAt": "2026-04-07T12:00:00Z",
@@ -498,8 +498,8 @@ mod tests {
         let result = SessionReconstructService::reconcile_in_flight(
             "second text".into(),
             json!([
-                { "toolCallId": "tc_1", "toolName": "bash", "status": "running" },
-                { "toolCallId": "tc_2", "toolName": "read", "status": "running" },
+                { "toolCallId": "tc_1", "toolName": "execute", "status": "running" },
+                { "toolCallId": "tc_2", "toolName": "inspect", "status": "running" },
             ]),
             json!([
                 { "type": "thinking", "thinking": "plan A" },

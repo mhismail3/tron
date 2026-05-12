@@ -61,10 +61,11 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) updater_state_path: PathBuf,
     pub(crate) engine_host: crate::engine::EngineHostHandle,
     pub(crate) tool_runtime: ToolRuntimeConfig,
-    pub(crate) process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub(crate) process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     pub(crate) job_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     pub(crate) output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,

@@ -10,12 +10,14 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::domains::tools::implementations::errors::ToolError;
-use crate::domains::tools::implementations::traits::{
+use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::traits::{
     JobInfo, JobKind, JobManagerOps, JobResult, JobState, ManagedProcessResult, ProcessManagerOps,
     SubagentOps, WaitMode,
 };
-use crate::domains::tools::implementations::utils::truncation::{WAIT_OUTPUT_LIMIT, truncate_tail};
+use crate::domains::capability_support::implementations::utils::truncation::{
+    WAIT_OUTPUT_LIMIT, truncate_tail,
+};
 
 /// Unified job manager delegating to process and subagent backends.
 pub struct JobManager {
@@ -350,7 +352,7 @@ impl JobManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::tools::implementations::traits::{
+    use crate::domains::capability_support::implementations::traits::{
         ManagedProcessConfig, ManagedProcessHandle, ProcessInfo, ProcessKind, SubagentOps,
         SubagentResult,
     };

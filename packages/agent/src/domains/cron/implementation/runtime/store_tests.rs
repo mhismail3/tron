@@ -432,7 +432,7 @@ fn upsert_job_with_tool_restrictions() {
     let pool = setup_pool();
     let mut job = make_job("cron_tr", "Restricted");
     job.tool_restrictions = Some(crate::domains::cron::types::ToolRestrictions {
-        allowed_tools: Some(vec!["Read".into(), "Grep".into()]),
+        allowed_capabilities: Some(vec!["filesystem::read_file".into(), "Grep".into()]),
     });
     upsert_job(&pool, &job).unwrap();
 
@@ -440,8 +440,11 @@ fn upsert_job_with_tool_restrictions() {
     assert!(loaded.tool_restrictions.is_some());
     let tr = loaded.tool_restrictions.unwrap();
     assert_eq!(
-        tr.allowed_tools,
-        Some(vec!["Read".to_string(), "Grep".to_string()])
+        tr.allowed_capabilities,
+        Some(vec![
+            "filesystem::read_file".to_string(),
+            "Grep".to_string()
+        ])
     );
 }
 

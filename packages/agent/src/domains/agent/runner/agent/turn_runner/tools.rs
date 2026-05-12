@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use crate::domains::tools::implementations::capability_surface::ResolvedToolSurface;
-use crate::domains::tools::implementations::traits::ExecutionMode;
+use crate::domains::capability_support::implementations::capability_surface::{
+    CapabilitySurfacePolicy, ResolvedToolSurface,
+};
+use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::shared::events::ActivatedRuleInfo;
 use crate::shared::messages::{Message, ToolResultMessageContent};
 use serde_json::json;
@@ -28,6 +30,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub stream_result: &'a StreamResult,
     pub context_manager: &'a mut ContextManager,
     pub tool_surface: &'a ResolvedToolSurface,
+    pub capability_policy: &'a CapabilitySurfacePolicy,
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     pub hooks: &'a Option<Arc<HookEngine>>,
     pub compaction: &'a CompactionHandler,
@@ -38,15 +41,16 @@ pub(super) struct ToolPhaseParams<'a> {
     pub subagent_max_depth: u32,
     pub workspace_id: Option<&'a str>,
     pub persister: Option<&'a EventPersister>,
-    /// Same persister as `persister`, but kept as a borrowed `Arc` so the tool
-    /// layer can clone it into `ToolContext` (for long-running tools that emit
-    /// `tool.progress` events). The dual surface avoids changing every existing
-    /// `Option<&EventPersister>` signature upstream.
+    /// Same persister as `persister`, but kept as a borrowed `Arc` so
+    /// domain-owned capabilities can persist progress events. The dual surface
+    /// avoids changing every existing `Option<&EventPersister>` signature upstream.
     pub persister_arc: Option<&'a Arc<EventPersister>>,
-    pub process_manager:
-        Option<&'a Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
-    pub job_manager:
-        Option<&'a Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    pub process_manager: Option<
+        &'a Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
+    pub job_manager: Option<
+        &'a Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
+    >,
     pub output_buffer_registry: Option<
         &'a Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,
@@ -55,8 +59,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub execution_spec: Option<&'a crate::shared::profile::AgentExecutionSpec>,
     /// Optional per-tool abort registry (see `TurnParams::tool_abort_registry`).
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
-    /// Optional engine host used to route actual tool execution through
-    /// canonical `tool::*` functions.
+    /// Optional engine host used to route model-facing capability primitives.
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
     /// Stable run id used for runtime tool-call idempotency.
     pub run_id: Option<&'a str>,
@@ -151,6 +154,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                 let working_dir = &working_dir;
                 let tool_ctx = tool_executor::ToolExecutionContext {
                     tool_surface: params.tool_surface,
+                    capability_policy: params.capability_policy,
                     guardrails: params.guardrails,
                     hooks: params.hooks,
                     emitter: params.emitter,
@@ -286,10 +290,22 @@ async fn process_tool_results(
                 .extend(params.context_manager.touch_file_path(path));
         }
 
-        if tool_call.name == "Bash"
-            && let Some(command) = tool_call.arguments.get("command").and_then(|v| v.as_str())
+        if tool_call.name == "execute"
+            && matches!(
+                tool_call
+                    .arguments
+                    .get("contractId")
+                    .and_then(serde_json::Value::as_str),
+                Some("process::run")
+            )
+            && let Some(command) = tool_call
+                .arguments
+                .get("payload")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|payload| payload.get("command"))
+                .and_then(serde_json::Value::as_str)
         {
-            params.compaction.record_bash_command(command);
+            params.compaction.record_process_command(command);
         }
 
         if exec_result.stops_turn {
@@ -399,12 +415,12 @@ mod tests {
     use super::*;
     use crate::domains::agent::runner::types::ToolExecutionResult;
     use crate::shared::content::ToolResultContent;
-    use crate::shared::tools::{ToolResultBody, TronToolResult};
+    use crate::shared::tools::{CapabilityResult, ToolResultBody};
 
     fn make_exec_result(content: ToolResultBody) -> ToolExecutionResult {
         ToolExecutionResult {
             tool_call_id: "test".into(),
-            result: TronToolResult {
+            result: CapabilityResult {
                 content,
                 details: None,
                 is_error: None,

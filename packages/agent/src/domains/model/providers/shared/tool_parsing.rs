@@ -12,7 +12,7 @@ use tracing::debug;
 pub struct ToolCallContext {
     /// The tool call ID (for correlation).
     pub tool_call_id: Option<String>,
-    /// The tool name.
+    /// The capability id.
     pub tool_name: Option<String>,
     /// The provider that generated this tool call.
     pub provider: Option<String>,
@@ -152,7 +152,7 @@ mod tests {
     fn parse_with_context_logs() {
         let ctx = ToolCallContext {
             tool_call_id: Some("toolu_123".into()),
-            tool_name: Some("Bash".into()),
+            tool_name: Some("process::run".into()),
             provider: Some("anthropic".into()),
         };
         // Invalid JSON with context — should still return empty

@@ -165,7 +165,7 @@ fn three_chunk_assistant() {
             Some("a2"),
             "2026-01-01T00:00:02Z",
             "msg1",
-            json!([{ "type": "tool_use", "id": "t1", "name": "Bash", "input": {} }]),
+            json!([{ "type": "tool_use", "id": "t1", "name": "process::run", "input": {} }]),
             Some("tool_use"),
             Some(json!({ "input_tokens": 200, "output_tokens": 100 })),
             None,

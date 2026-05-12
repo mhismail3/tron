@@ -586,7 +586,7 @@ mod tests {
         let provider = OllamaProvider::new(test_config());
         let ctx = Context {
             tools: Some(vec![crate::shared::tools::Tool {
-                name: "bash".into(),
+                name: "execute".into(),
                 description: "Run commands".into(),
                 parameters: crate::shared::tools::ToolParameterSchema {
                     schema_type: "object".into(),

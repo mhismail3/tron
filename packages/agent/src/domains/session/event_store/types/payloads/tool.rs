@@ -19,12 +19,13 @@ pub struct ToolCallPayload {
 
 /// Payload for `tool.progress` events.
 ///
-/// Emitted by long-running tools (Bash, WebFetch, SpawnSubagent, …) to keep
+/// Emitted by long-running capability calls (`process::run`, `web::fetch`,
+/// `agent::spawn_subagent`, …) to keep
 /// iOS chips from looking frozen and to let users cancel work that's taking
 /// too long. Every field except `tool_call_id` is optional — tools pick
-/// whichever fit their work: Bash streams a `message` with the latest stdout
-/// line; WebFetch sets both `percent` (bytes/total) and `message` ("32 KiB of
-/// 120 KiB"); SpawnSubagent sets `message` with the child turn count.
+/// whichever fit their work: process::run streams a `message` with the latest stdout
+/// line; web::fetch sets both `percent` (bytes/total) and `message` ("32 KiB of
+/// 120 KiB"); subagent execution sets `message` with the child turn count.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolProgressPayload {
@@ -34,7 +35,7 @@ pub struct ToolProgressPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// Fractional completion in `[0.0, 1.0]` when a total is known. Tools
-    /// without a bound (Bash heartbeat, indefinite subagent) leave this unset
+    /// without a bound (process::run heartbeat, indefinite subagent) leave this unset
     /// rather than guessing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub percent: Option<f64>,
@@ -63,8 +64,8 @@ pub struct ToolResultPayload {
     /// Blob ID for truncated content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_id: Option<String>,
-    /// Tool-specific metadata (e.g. `WebFetch`: url, status, `fromCache`, `responseHeaders`;
-    /// `Bash`: `exitCode`, command, `durationMs`).
+    /// Tool-specific metadata (e.g. `web::fetch`: url, status, `fromCache`, `responseHeaders`;
+    /// `process::run`: `exitCode`, command, `durationMs`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
 }

@@ -70,10 +70,10 @@ fn tool_call_stream() -> StreamEventStream {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "Running:".into() });
         yield Ok(StreamEvent::TextEnd { text: "Running:".into(), signature: None });
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "bash".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "execute".into() });
         yield Ok(StreamEvent::ToolCallDelta { tool_call_id: "tc-1".into(), arguments_delta: r#"{"command":"ls"}"#.into() });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-1", "bash", {
+            tool_call: ToolCall::new("tc-1", "execute", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -85,7 +85,7 @@ fn tool_call_stream() -> StreamEventStream {
                     AssistantContent::text("Running:"),
                     AssistantContent::ToolUse {
                         id: "tc-1".into(),
-                        name: "bash".into(),
+                        name: "execute".into(),
                         arguments: {
                             let mut m = serde_json::Map::new();
                             let _ = m.insert("command".into(), serde_json::json!("ls"));
@@ -184,7 +184,7 @@ async fn text_plus_tool_call() {
 
     assert_eq!(result.stop_reason, "tool_use");
     assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "bash");
+    assert_eq!(result.tool_calls[0].name, "execute");
     assert_eq!(
         result.tool_calls[0].arguments["command"],
         serde_json::json!("ls")
@@ -195,13 +195,13 @@ async fn text_plus_tool_call() {
 async fn multiple_tool_calls() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "read".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "inspect".into() });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-1", "read", serde_json::Map::new()),
+            tool_call: ToolCall::new("tc-1", "inspect", serde_json::Map::new()),
         });
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-2".into(), name: "write".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-2".into(), name: "search".into() });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-2", "write", serde_json::Map::new()),
+            tool_call: ToolCall::new("tc-2", "search", serde_json::Map::new()),
         });
         yield Ok(StreamEvent::Done {
             message: AssistantMessage { content: vec![], token_usage: None },
@@ -224,8 +224,8 @@ async fn multiple_tool_calls() {
     .unwrap();
 
     assert_eq!(result.tool_calls.len(), 2);
-    assert_eq!(result.tool_calls[0].name, "read");
-    assert_eq!(result.tool_calls[1].name, "write");
+    assert_eq!(result.tool_calls[0].name, "inspect");
+    assert_eq!(result.tool_calls[1].name, "search");
 }
 
 #[tokio::test]
@@ -541,12 +541,12 @@ async fn duplicate_tool_calls_deduped_by_id() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         // First occurrence — empty/malformed args
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "bash".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "execute".into() });
         yield Ok(StreamEvent::ToolCallDelta { tool_call_id: "tc-dup".into(), arguments_delta: "{}".into() });
         // Second occurrence — valid args (replaces via ToolCallEnd dedup)
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "bash".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "execute".into() });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-dup", "bash", {
+            tool_call: ToolCall::new("tc-dup", "execute", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -590,13 +590,13 @@ async fn duplicate_tool_calls_deduped_by_id() {
 fn finalize_tool_call_with_valid_json() {
     let mut tool_calls = Vec::new();
     let mut id = Some("tc-1".to_string());
-    let mut name = Some("bash".to_string());
+    let mut name = Some("execute".to_string());
     let mut args = r#"{"command":"ls"}"#.to_string();
 
     finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
 
     assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0].name, "bash");
+    assert_eq!(tool_calls[0].name, "execute");
     assert_eq!(tool_calls[0].id, "tc-1");
     assert_eq!(tool_calls[0].arguments["command"], serde_json::json!("ls"));
 }
@@ -605,13 +605,13 @@ fn finalize_tool_call_with_valid_json() {
 fn finalize_tool_call_with_malformed_json() {
     let mut tool_calls = Vec::new();
     let mut id = Some("tc-2".to_string());
-    let mut name = Some("read".to_string());
+    let mut name = Some("inspect".to_string());
     let mut args = "{ not valid".to_string();
 
     finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
 
     assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0].name, "read");
+    assert_eq!(tool_calls[0].name, "inspect");
     assert_eq!(tool_calls[0].id, "tc-2");
     assert!(tool_calls[0].arguments.is_empty());
 }
@@ -620,7 +620,7 @@ fn finalize_tool_call_with_malformed_json() {
 fn finalize_tool_call_with_empty_string() {
     let mut tool_calls = Vec::new();
     let mut id = Some("tc-3".to_string());
-    let mut name = Some("write".to_string());
+    let mut name = Some("search".to_string());
     let mut args = String::new();
 
     finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
@@ -702,11 +702,11 @@ async fn abort_mid_thinking_preserves_signature() {
 // -- drain mode tests --
 
 fn ask_user_stopping_tools() -> HashSet<String> {
-    HashSet::from(["AskUserQuestion".to_string()])
+    HashSet::from(["agent::ask_user".to_string()])
 }
 
 fn both_stopping_tools() -> HashSet<String> {
-    HashSet::from(["AskUserQuestion".to_string(), "AskUserQuestion".to_string()])
+    HashSet::from(["agent::ask_user".to_string(), "agent::ask_user".to_string()])
 }
 
 /// Helper: build a Done event with token usage.
@@ -733,14 +733,14 @@ async fn drain_after_interactive_tool_drops_trailing_text() {
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
         yield Ok(StreamEvent::ToolCallStart {
             tool_call_id: "tc-ask".into(),
-            name: "AskUserQuestion".into(),
+            name: "agent::ask_user".into(),
         });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q1"]}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q1"]));
                 m
@@ -770,7 +770,7 @@ async fn drain_after_interactive_tool_drops_trailing_text() {
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "tool_use");
     assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "AskUserQuestion");
+    assert_eq!(result.tool_calls[0].name, "agent::ask_user");
 
     // Token usage captured from Done event
     let usage = result.token_usage.expect("should have token usage");
@@ -809,14 +809,14 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
         yield Ok(StreamEvent::TextEnd { text: "answer".into(), signature: None });
         yield Ok(StreamEvent::ToolCallStart {
             tool_call_id: "tc-ask-confirm".into(),
-            name: "AskUserQuestion".into(),
+            name: "agent::ask_user".into(),
         });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-ask-confirm".into(),
             arguments_delta: r#"{"questions":[{"question":"Proceed?"}]}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask-confirm", "AskUserQuestion", {
+            tool_call: ToolCall::new("tc-ask-confirm", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!([{ "question": "Proceed?" }]));
                 m
@@ -869,20 +869,20 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
     }
     // Tool preserved
     assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "AskUserQuestion");
+    assert_eq!(result.tool_calls[0].name, "agent::ask_user");
 }
 
 #[tokio::test]
 async fn drain_with_preceding_tools_keeps_all_before_interactive() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-bash".into(), name: "Bash".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-bash".into(), name: "process::run".into() });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-bash".into(),
             arguments_delta: r#"{"command":"ls"}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-bash", "Bash", {
+            tool_call: ToolCall::new("tc-bash", "process::run", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -890,27 +890,27 @@ async fn drain_with_preceding_tools_keeps_all_before_interactive() {
         });
         yield Ok(StreamEvent::ToolCallStart {
             tool_call_id: "tc-ask".into(),
-            name: "AskUserQuestion".into(),
+            name: "agent::ask_user".into(),
         });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q"]}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q"]));
                 m
             }),
         });
         // Tool after interactive — should be drained
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-edit".into(), name: "Edit".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-edit".into(), name: "filesystem::edit_file".into() });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-edit".into(),
             arguments_delta: r#"{"file":"x"}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-edit", "Edit", serde_json::Map::new()),
+            tool_call: ToolCall::new("tc-edit", "filesystem::edit_file", serde_json::Map::new()),
         });
         yield Ok(done_with_usage(vec![], "tool_use"));
     };
@@ -930,10 +930,15 @@ async fn drain_with_preceding_tools_keeps_all_before_interactive() {
     .unwrap();
 
     assert_eq!(result.tool_calls.len(), 2);
-    assert_eq!(result.tool_calls[0].name, "Bash");
-    assert_eq!(result.tool_calls[1].name, "AskUserQuestion");
-    // Edit should NOT be in tool_calls
-    assert!(!result.tool_calls.iter().any(|tc| tc.name == "Edit"));
+    assert_eq!(result.tool_calls[0].name, "process::run");
+    assert_eq!(result.tool_calls[1].name, "agent::ask_user");
+    // filesystem::edit_file should NOT be in tool_calls
+    assert!(
+        !result
+            .tool_calls
+            .iter()
+            .any(|tc| tc.name == "filesystem::edit_file")
+    );
 }
 
 #[tokio::test]
@@ -943,13 +948,13 @@ async fn no_drain_for_non_stopping_tools() {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "Bash".into() });
+        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "process::run".into() });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-1".into(),
             arguments_delta: r#"{"command":"ls"}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-1", "Bash", {
+            tool_call: ToolCall::new("tc-1", "process::run", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -964,7 +969,7 @@ async fn no_drain_for_non_stopping_tools() {
                     AssistantContent::text("hello world"),
                     AssistantContent::ToolUse {
                         id: "tc-1".into(),
-                        name: "Bash".into(),
+                        name: "process::run".into(),
                         arguments: serde_json::Map::new(),
                         thought_signature: None,
                     },
@@ -977,7 +982,7 @@ async fn no_drain_for_non_stopping_tools() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    // AskUserQuestion is in the set, but Bash is not — no drain
+    // agent::ask_user is in the set, but process::run is not — no drain
     let result = process_stream(
         Box::pin(s),
         "s1",
@@ -993,7 +998,7 @@ async fn no_drain_for_non_stopping_tools() {
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "tool_use");
     assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "Bash");
+    assert_eq!(result.tool_calls[0].name, "process::run");
     // Message should come from final_message (has combined text)
     let usage = result.token_usage.unwrap();
     assert_eq!(usage.input_tokens, 50);
@@ -1008,14 +1013,14 @@ async fn cancel_during_drain_returns_interrupted() {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::ToolCallStart {
             tool_call_id: "tc-ask".into(),
-            name: "AskUserQuestion".into(),
+            name: "agent::ask_user".into(),
         });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q"]}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q"]));
                 m
@@ -1044,7 +1049,7 @@ async fn cancel_during_drain_returns_interrupted() {
     assert_eq!(result.stop_reason, "interrupted");
     // Tool call should still be in the result (was finalized before drain)
     assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "AskUserQuestion");
+    assert_eq!(result.tool_calls[0].name, "agent::ask_user");
 }
 
 #[tokio::test]
@@ -1056,14 +1061,14 @@ async fn drain_empty_stopping_set_no_change() {
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
         yield Ok(StreamEvent::ToolCallStart {
             tool_call_id: "tc-ask".into(),
-            name: "AskUserQuestion".into(),
+            name: "agent::ask_user".into(),
         });
         yield Ok(StreamEvent::ToolCallDelta {
             tool_call_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q"]}"#.into(),
         });
         yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "AskUserQuestion", {
+            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q"]));
                 m

@@ -24,10 +24,11 @@ pub(crate) struct PromptRunPlan {
         Option<Arc<crate::domains::agent::runner::orchestrator::subagent_manager::SubagentManager>>,
     pub(super) shutdown_token: Option<tokio_util::sync::CancellationToken>,
     pub(super) worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
-    pub(super) process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub(super) process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     pub(super) job_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     pub(super) output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,

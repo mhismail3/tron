@@ -24,12 +24,12 @@ use tokio_util::sync::CancellationToken;
 use routed::StreamScope;
 use tron::tron_event_to_projected;
 
+mod capability_call;
 mod hook;
 mod message;
 mod routed;
 mod session;
 mod streaming;
-mod tool;
 mod tron;
 mod turn;
 

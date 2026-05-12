@@ -470,7 +470,7 @@ mod tests {
         store.add(Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "tc-1".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             }],

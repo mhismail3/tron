@@ -192,9 +192,9 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             ..crate::domains::agent::runner::AgentConfig::default()
         };
 
-        // 4. Build denied tools list from user restrictions using the live tool catalog.
+        // 4. Build denied tools list from user restrictions using the live capability catalog.
         let tool_names =
-            match crate::domains::tools::implementations::capability_surface::list_model_tool_names(
+            match crate::domains::capability_support::implementations::capability_surface::list_model_tool_names(
                 &self.engine_host,
                 &session_id,
                 workspace_id,
@@ -203,14 +203,14 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             {
                 Ok(names) => names,
                 Err(error) => {
-                    tracing::warn!(error = %error, "failed to read live tool catalog for cron restrictions");
+                    tracing::warn!(error = %error, "failed to read live capability catalog for cron restrictions");
                     Vec::new()
                 }
             };
-        let denied_tools = tool_restrictions
+        let denied_capabilities = tool_restrictions
             .map(|r| r.to_denied_list(&tool_names))
             .unwrap_or_default();
-        // Interactive tools (AskUserQuestion, etc.)
+        // Interactive capabilities such as `agent::ask_user`.
         // are removed automatically by AgentFactory when is_unattended=true.
 
         // 6. Create agent via factory
@@ -220,11 +220,11 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             crate::domains::agent::runner::CreateAgentOpts {
                 provider,
                 context_policy: session_plan.runtime_context_policy(),
-                tool_policy: session_plan.tool_policy.clone(),
+                capability_policy: session_plan.capability_policy.clone(),
                 guardrails: None,
                 hooks: None,
                 is_unattended: true,
-                denied_tools,
+                denied_capabilities,
                 subagent_depth: 0,
                 subagent_max_depth: 0,
                 rules_content: None,

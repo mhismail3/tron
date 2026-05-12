@@ -4,7 +4,7 @@ You are running inside an isolated git worktree on a dedicated session branch, n
 
 ### What you do directly
 
-Use `Bash` with standard `git` commands for everything source-control related. There are no typed git tools.
+Use the inspected `process::run` capability with standard `git` commands for source-control operations that are allowed in this session.
 
 Common read-only inspection:
 
@@ -21,7 +21,7 @@ Making commits as you work:
 
 ### What the user drives
 
-These operations belong to the user via the Source Control sheet. Do not run them from `Bash`:
+These operations belong to the user via the Source Control sheet. Do not run them from `process::run`:
 
 - `git push`
 - merging/finalizing a session into main

@@ -132,7 +132,7 @@ fn extract_text_from_payload(payload_str: &str) -> String {
 }
 
 /// Activity summary line for dashboard card display.
-/// Lightweight: iOS enriches with its local tool presentation catalog.
+/// Lightweight: iOS enriches with its local capability presentation catalog.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySummaryLine {
@@ -572,7 +572,7 @@ impl SessionRepo {
     /// Build activity summary lines for a session's dashboard card.
     ///
     /// Walks persisted events to produce a compact summary of recent activity.
-    /// iOS enriches each line with its local tool presentation catalog.
+    /// iOS enriches each line with its local capability presentation catalog.
     pub fn get_activity_summaries(
         conn: &Connection,
         session_id: &str,
@@ -666,7 +666,7 @@ impl SessionRepo {
                                         .get("name")
                                         .and_then(|n| n.as_str())
                                         .unwrap_or("unknown");
-                                    if name == "SpawnSubagent" {
+                                    if name == "agent::spawn_subagent" {
                                         continue;
                                     }
                                     let tool_id = block.get("id").and_then(|id| id.as_str());
@@ -1608,7 +1608,7 @@ mod tests {
     #[test]
     fn extract_text_skips_non_text_blocks() {
         let text = extract_text_from_payload(
-            r#"{"content": [{"type": "text", "text": "hi"}, {"type": "tool_use", "name": "bash"}]}"#,
+            r#"{"content": [{"type": "text", "text": "hi"}, {"type": "tool_use", "name": "execute"}]}"#,
         );
         assert_eq!(text, "hi");
     }

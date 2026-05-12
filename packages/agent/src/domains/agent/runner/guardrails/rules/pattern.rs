@@ -9,11 +9,11 @@ use crate::domains::agent::runner::guardrails::types::{EvaluationContext, RuleEv
 
 use super::RuleBase;
 
-/// A rule that matches regex patterns against a specific tool argument.
+/// A rule that matches regex patterns against a specific capability argument.
 pub struct PatternRule {
     /// Common rule fields.
     pub base: RuleBase,
-    /// Which argument to check (e.g., "command" for Bash).
+    /// Which argument to check (e.g., "command" for process::run).
     pub target_argument: String,
     /// Regex patterns to match. First match wins.
     pub patterns: Vec<Regex>,

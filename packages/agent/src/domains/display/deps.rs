@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
-    pub(super) process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub(super) process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
 }
 
 impl Deps {

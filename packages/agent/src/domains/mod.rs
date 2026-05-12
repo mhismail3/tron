@@ -10,10 +10,11 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `catalog` | Aggregated discovery, diagnostics, and guardrail view over domain-owned contracts |
+//! | `capability` | Collapsed model-facing `search`/`inspect`/`execute` harness over the live catalog |
 //! | `contract` | Method-agnostic builders for domain-owned `contract.rs` records |
 //! | `registration` | Startup loop that registers worker modules returned by domains |
 //! | `worker` | Shared setup-only domain worker module and function registration types |
-//! | domain modules | Engine-owned behavior for agent, settings, tools, MCP, git/worktree, session, cron, and the rest of Tron |
+//! | domain modules | Engine-owned behavior for agent, settings, capability support, MCP, git/worktree, session, cron, and the rest of Tron |
 //!
 //! Each domain `contract.rs` is the local source of truth for that worker's
 //! function ids, schemas, authority, risk, idempotency, leases, compensation,
@@ -45,6 +46,8 @@ pub mod auth;
 pub mod bindings;
 pub mod blob;
 pub mod browser;
+pub mod capability;
+pub mod capability_support;
 pub mod catalog;
 pub mod codex_app;
 pub mod context;
@@ -65,6 +68,7 @@ pub mod message;
 pub mod model;
 pub mod notifications;
 pub mod plan;
+pub mod process;
 pub mod prompt_library;
 pub mod registration;
 pub mod repo;
@@ -74,9 +78,9 @@ pub mod session;
 pub mod settings;
 pub mod skills;
 pub mod system;
-pub mod tools;
 pub mod transcription;
 pub mod tree;
 pub mod voice_notes;
+pub mod web;
 pub mod worker;
 pub mod worktree;

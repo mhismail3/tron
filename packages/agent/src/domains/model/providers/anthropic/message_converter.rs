@@ -580,7 +580,7 @@ mod tests {
         let _ = args.insert("cmd".into(), json!("ls"));
         let content = vec![AssistantContent::ToolUse {
             id: "toolu_01abc".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: args,
             thought_signature: None,
         }];
@@ -588,7 +588,7 @@ mod tests {
         let param = convert_assistant_message(&content, &id_mapping);
         assert_eq!(param.content[0]["type"], "tool_use");
         assert_eq!(param.content[0]["id"], "toolu_01abc");
-        assert_eq!(param.content[0]["name"], "bash");
+        assert_eq!(param.content[0]["name"], "execute");
         assert_eq!(param.content[0]["input"]["cmd"], "ls");
     }
 
@@ -598,7 +598,7 @@ mod tests {
         let _ = args.insert("cmd".into(), json!("ls"));
         let content = vec![AssistantContent::ToolUse {
             id: "call_abc123xyz".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: args,
             thought_signature: None,
         }];
@@ -757,11 +757,11 @@ mod tests {
 
     #[test]
     fn convert_tools_always_caches_last() {
-        let tools = vec![make_tool("bash"), make_tool("read")];
+        let tools = vec![make_tool("execute"), make_tool("inspect")];
         let result = convert_tools(&tools);
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].name, "bash");
-        assert_eq!(result[1].name, "read");
+        assert_eq!(result[0].name, "execute");
+        assert_eq!(result[1].name, "inspect");
         assert!(result[0].cache_control.is_none());
         assert!(result[1].cache_control.is_some());
         assert_eq!(
@@ -794,7 +794,7 @@ mod tests {
                 },
             ]
             .into(),
-            tools: Some(vec![make_tool("bash")]),
+            tools: Some(vec![make_tool("execute")]),
             ..Default::default()
         };
 
@@ -816,7 +816,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "call_abc123def456".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: Map::new(),
                     thought_signature: None,
                 }],
@@ -838,7 +838,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "toolu_01abc".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: Map::new(),
                     thought_signature: None,
                 }],
@@ -860,9 +860,9 @@ mod tests {
         let messages = vec![AnthropicMessageParam {
             role: "assistant".into(),
             content: vec![
-                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "bash", "input": {"cmd": "echo old"}}),
+                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo old"}}),
                 json!({"type": "text", "text": "thinking..."}),
-                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "bash", "input": {"cmd": "echo new"}}),
+                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo new"}}),
             ],
         }];
         let deduped = dedup_tool_blocks(messages);
@@ -980,19 +980,19 @@ mod tests {
                 content: vec![
                     AssistantContent::ToolUse {
                         id: "toolu_01a".into(),
-                        name: "bash".into(),
+                        name: "execute".into(),
                         arguments: args.clone(),
                         thought_signature: None,
                     },
                     AssistantContent::ToolUse {
                         id: "toolu_01b".into(),
-                        name: "read".into(),
+                        name: "inspect".into(),
                         arguments: args.clone(),
                         thought_signature: None,
                     },
                     AssistantContent::ToolUse {
                         id: "toolu_01c".into(),
-                        name: "write".into(),
+                        name: "search".into(),
                         arguments: args,
                         thought_signature: None,
                     },
@@ -1044,13 +1044,13 @@ mod tests {
                 content: vec![
                     AssistantContent::ToolUse {
                         id: "call_abc123".into(),
-                        name: "bash".into(),
+                        name: "execute".into(),
                         arguments: args.clone(),
                         thought_signature: None,
                     },
                     AssistantContent::ToolUse {
                         id: "call_def456".into(),
-                        name: "read".into(),
+                        name: "inspect".into(),
                         arguments: args,
                         thought_signature: None,
                     },

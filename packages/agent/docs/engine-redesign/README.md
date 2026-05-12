@@ -49,7 +49,7 @@ flowchart LR
   Client["Client / Agent"] --> EngineWs["/engine WebSocket protocol"]
   EngineWs --> Transport
   Transport --> Engine["EngineHost"]
-  AgentTool["Agent engine tools"] --> Engine
+  CapabilityPrimitives["Model tools: search / inspect / execute"] --> Engine
   Worker["In-process / local worker"] --> Engine
   Engine --> Catalog["Live Catalog"]
   Engine --> Ledger["Invocation / idempotency / catalog ledger"]
@@ -89,10 +89,18 @@ The code layout follows the same boundary:
 
 ## Agent-Native Semantics
 
-Agents receive stable meta-tools for discovery, inspection, watch, and
-invocation. The underlying catalog can change between model calls. A newly
-registered capability appears on the next live catalog projection if it is
-visible, healthy, schema-bearing, and authorized for the actor.
+Agents receive exactly three stable model-facing primitives: `search`,
+`inspect`, and `execute`. The underlying catalog can change between model
+calls. A newly registered capability appears in `search` once it is visible,
+healthy, schema-bearing, and authorized for the actor; it does not require a
+prompt or provider-schema rewrite. The `/engine` discover/inspect/watch/invoke
+messages remain the worker/client transport protocol and are not exposed as
+model tools.
+
+`search` projects live catalog functions as capability contracts and concrete
+implementations. `inspect` returns the full current contract, selected
+implementation, authority, risk, schema digest, and expected revision.
+`execute` delegates through the engine ledger to the selected function.
 
 Agent-created capabilities default to session visibility. Promotion to
 workspace or system visibility goes through `/engine` `promote`, requires

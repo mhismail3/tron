@@ -196,14 +196,14 @@ impl GuardrailEngine {
         self.audit_logger.as_mut()
     }
 
-    /// Get rule IDs applicable to a specific tool, sorted by priority (descending).
+    /// Get rule IDs applicable to a specific capability, sorted by priority (descending).
     fn get_applicable_rule_ids(&self, tool_name: &str) -> Vec<String> {
         let mut applicable: Vec<(&String, i32)> = self
             .rules
             .iter()
             .filter(|(_, rule)| {
                 let base = rule.base();
-                base.tools.is_empty() || base.tools.iter().any(|t| t == tool_name)
+                base.capabilities.is_empty() || base.capabilities.iter().any(|t| t == tool_name)
             })
             .map(|(id, rule)| (id, rule.base().priority))
             .collect();

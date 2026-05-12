@@ -492,7 +492,7 @@ mod tests {
                 content: Some(GeminiCandidateContent {
                     parts: vec![GeminiPart::FunctionCall {
                         function_call: FunctionCallData {
-                            name: "bash".into(),
+                            name: "execute".into(),
                             args: serde_json::json!({"command": "ls"}),
                         },
                         thought_signature: Some("sig-123".into()),
@@ -507,7 +507,7 @@ mod tests {
         let mut state = create_stream_state();
         let events = process_stream_chunk(&chunk, &mut state);
         assert_eq!(events.len(), 3); // start, delta, end
-        assert!(matches!(&events[0], StreamEvent::ToolCallStart { name, .. } if name == "bash"));
+        assert!(matches!(&events[0], StreamEvent::ToolCallStart { name, .. } if name == "execute"));
         assert!(
             matches!(&events[2], StreamEvent::ToolCallEnd { tool_call } if tool_call.thought_signature.as_deref() == Some("sig-123"))
         );
@@ -613,7 +613,7 @@ mod tests {
         let mut state = create_stream_state();
         state.tool_calls.push(ToolCallState {
             id: "call_123".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             args: serde_json::json!({"cmd": "ls"}),
             thought_signature: Some("sig".into()),
         });
@@ -630,7 +630,7 @@ mod tests {
                         thought_signature,
                         ..
                     } => {
-                        assert_eq!(name, "bash");
+                        assert_eq!(name, "execute");
                         assert_eq!(thought_signature.as_deref(), Some("sig"));
                     }
                     _ => panic!("Expected ToolUse"),

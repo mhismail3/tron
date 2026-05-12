@@ -1,5 +1,5 @@
 use super::*;
-use crate::domains::tools::implementations::traits::ProcessKind;
+use crate::domains::capability_support::implementations::traits::ProcessKind;
 use std::time::Duration;
 
 fn make_config(label: &str) -> ManagedProcessConfig {

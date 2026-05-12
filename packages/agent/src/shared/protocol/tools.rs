@@ -60,7 +60,7 @@ pub enum ToolResultBody {
 /// Result of a tool execution.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TronToolResult {
+pub struct CapabilityResult {
     /// The tool output content.
     pub content: ToolResultBody,
     /// Optional structured details (tool-specific metadata).
@@ -96,8 +96,8 @@ pub enum ToolCategory {
 
 /// Create a simple text result.
 #[must_use]
-pub fn text_result(text: impl Into<String>, is_error: bool) -> TronToolResult {
-    TronToolResult {
+pub fn text_result(text: impl Into<String>, is_error: bool) -> CapabilityResult {
+    CapabilityResult {
         content: ToolResultBody::Blocks(vec![ToolResultContent::text(text)]),
         details: None,
         is_error: if is_error { Some(true) } else { None },
@@ -107,7 +107,7 @@ pub fn text_result(text: impl Into<String>, is_error: bool) -> TronToolResult {
 
 /// Create an error result.
 #[must_use]
-pub fn error_result(message: impl Into<String>) -> TronToolResult {
+pub fn error_result(message: impl Into<String>) -> CapabilityResult {
     text_result(message, true)
 }
 
@@ -117,13 +117,13 @@ pub fn image_result(
     data: impl Into<String>,
     mime_type: impl Into<String>,
     caption: Option<&str>,
-) -> TronToolResult {
+) -> CapabilityResult {
     let mut blocks: Vec<ToolResultContent> = Vec::new();
     if let Some(cap) = caption {
         blocks.push(ToolResultContent::text(cap));
     }
     blocks.push(ToolResultContent::image(data, mime_type));
-    TronToolResult {
+    CapabilityResult {
         content: ToolResultBody::Blocks(blocks),
         details: None,
         is_error: None,
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn tool_serde_roundtrip() {
         let tool = Tool {
-            name: "bash".into(),
+            name: "execute".into(),
             description: "Execute a shell command".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn tool_result_serde_text_body() {
-        let r = TronToolResult {
+        let r = CapabilityResult {
             content: ToolResultBody::Text("plain output".into()),
             details: None,
             is_error: None,
@@ -216,13 +216,13 @@ mod tests {
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["content"], "plain output");
-        let back: TronToolResult = serde_json::from_value(json).unwrap();
+        let back: CapabilityResult = serde_json::from_value(json).unwrap();
         assert_eq!(r, back);
     }
 
     #[test]
     fn tool_result_serde_with_details() {
-        let r = TronToolResult {
+        let r = CapabilityResult {
             content: ToolResultBody::Text("ok".into()),
             details: Some(json!({"bytes_written": 42})),
             is_error: None,

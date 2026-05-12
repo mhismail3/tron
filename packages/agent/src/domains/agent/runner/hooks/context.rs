@@ -217,8 +217,11 @@ mod tests {
     #[test]
     fn test_pre_tool_context() {
         let factory = make_factory();
-        let ctx =
-            factory.create_pre_tool_context("Bash", serde_json::json!({"command": "ls"}), "tc-1");
+        let ctx = factory.create_pre_tool_context(
+            "process::run",
+            serde_json::json!({"command": "ls"}),
+            "tc-1",
+        );
         assert_eq!(ctx.hook_type(), HookType::PreToolUse);
         assert_eq!(ctx.session_id(), "session-123");
         assert!(!ctx.timestamp().is_empty());
@@ -228,7 +231,7 @@ mod tests {
     fn test_post_tool_context() {
         let factory = make_factory();
         let ctx = factory.create_post_tool_context(
-            "Bash",
+            "process::run",
             "tc-1",
             serde_json::json!({"output": "foo"}),
             150,

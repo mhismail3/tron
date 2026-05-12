@@ -1,4 +1,4 @@
-//! Agent-facing engine host and privileged meta-capabilities.
+//! Engine host, privileged transport functions, and ledgered invocation.
 //!
 //! `EngineHost` is the boundary future server/runtime services should use when
 //! they need the live capability fabric. It keeps `engine::*` capabilities
@@ -296,8 +296,8 @@ impl EngineHostHandle {
     pub async fn watch(
         &self,
         actor: &ActorContext,
-        request: EngineWatchRequest,
-    ) -> Result<EngineWatchResponse> {
+        request: CatalogWatchRequest,
+    ) -> Result<CatalogWatchResponse> {
         self.inner.lock().await.watch_catalog(actor, request)
     }
 
@@ -1170,7 +1170,7 @@ fn can_resolve_approval(actor_kind: &ActorKind) -> bool {
 
 /// Cursor-pull request for catalog changes.
 #[derive(Clone, Debug, PartialEq)]
-pub struct EngineWatchRequest {
+pub struct CatalogWatchRequest {
     /// Return changes after this catalog revision.
     pub after_revision: CatalogRevision,
     /// Maximum number of visible matching changes to return.
@@ -1185,7 +1185,7 @@ pub struct EngineWatchRequest {
     pub owner_worker: Option<WorkerId>,
 }
 
-impl Default for EngineWatchRequest {
+impl Default for CatalogWatchRequest {
     fn default() -> Self {
         Self {
             after_revision: CatalogRevision(0),
@@ -1200,7 +1200,7 @@ impl Default for EngineWatchRequest {
 
 /// Cursor-pull response for catalog changes.
 #[derive(Clone, Debug, PartialEq)]
-pub struct EngineWatchResponse {
+pub struct CatalogWatchResponse {
     /// Visible matching changes.
     pub changes: Vec<CatalogChange>,
     /// Current live catalog revision.
@@ -1243,7 +1243,7 @@ impl EngineHost {
         Ok(host)
     }
 
-    /// Wrap an existing catalog and bootstrap engine meta-capabilities.
+    /// Wrap an existing catalog and bootstrap engine transport functions.
     pub fn from_catalog(catalog: LiveCatalog) -> Result<Self> {
         Self::from_catalog_and_primitives(catalog, PrimitiveStores::in_memory())
     }
@@ -1276,11 +1276,11 @@ impl EngineHost {
     pub fn watch_catalog(
         &self,
         actor: &ActorContext,
-        request: EngineWatchRequest,
-    ) -> Result<EngineWatchResponse> {
+        request: CatalogWatchRequest,
+    ) -> Result<CatalogWatchResponse> {
         let current_revision = self.catalog.revision();
         if request.after_revision > current_revision {
-            return Ok(EngineWatchResponse {
+            return Ok(CatalogWatchResponse {
                 changes: Vec::new(),
                 current_revision,
                 next_revision: current_revision,
@@ -1335,7 +1335,7 @@ impl EngineHost {
             .last()
             .map(|change| change.after)
             .unwrap_or(request.after_revision);
-        Ok(EngineWatchResponse {
+        Ok(CatalogWatchResponse {
             changes,
             current_revision,
             next_revision,
@@ -2439,8 +2439,8 @@ fn watch_limit(value: Option<&Value>) -> Result<usize> {
     Ok((limit as usize).min(WATCH_MAX_LIMIT))
 }
 
-fn watch_request_from_payload(payload: &Value) -> Result<EngineWatchRequest> {
-    Ok(EngineWatchRequest {
+fn watch_request_from_payload(payload: &Value) -> Result<CatalogWatchRequest> {
+    Ok(CatalogWatchRequest {
         after_revision: CatalogRevision(
             optional_u64(payload.get("afterRevision"))?.unwrap_or_default(),
         ),

@@ -1,0 +1,68 @@
+//! capability domain worker.
+//!
+//! This module owns the collapsed model-facing harness. It does not implement
+//! filesystem, web, MCP, shell, UI, or app behavior itself; it exposes stable
+//! discovery, inspection, and execution primitives over the live engine catalog.
+//!
+//! ## Submodules
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | `contract` | Canonical `capability::*` function contracts and model metadata |
+//! | `deps` | Narrow dependency bundle for catalog and invocation access |
+//! | `handlers` | Declarative operation bindings for `search`, `inspect`, and `execute` |
+//! | `operations` | Catalog projection, binding resolution, and delegated execution |
+//! | `types` | Typed contract, implementation, binding, inspection, and execution records |
+//!
+//! # INVARIANT: the model-facing surface is tiny
+//!
+//! Provider integrations should only expose the three capability primitives. All
+//! other behavior must remain discoverable/executable as worker-owned catalog
+//! entries rather than prompt-expanded hardcoded tools.
+
+pub(crate) mod contract;
+pub(crate) mod deps;
+pub(crate) mod handlers;
+mod operations;
+mod types;
+pub(crate) use deps::Deps;
+pub(crate) use operations::{execute_value, inspect_value, search_value};
+
+use serde_json::Value;
+
+use crate::domains::worker::{DomainRegistrationContext, DomainWorkerModule};
+
+pub(crate) fn worker_module(
+    deps: &DomainRegistrationContext,
+) -> crate::engine::Result<DomainWorkerModule> {
+    let domain_deps = Deps::from_engine(deps);
+    let mut registrations =
+        handlers::function_registrations(contract::capabilities()?, domain_deps)?;
+    for registration in &mut registrations {
+        merge_metadata(
+            &mut registration.definition.metadata,
+            contract::model_metadata(registration.definition.id.as_str()),
+        );
+    }
+    crate::domains::worker::domain_worker_module(
+        "capability",
+        contract::STREAM_TOPICS,
+        registrations,
+    )
+}
+
+fn merge_metadata(target: &mut Value, extra: Value) {
+    if extra.is_null() {
+        return;
+    }
+    match (target, extra) {
+        (Value::Object(target), Value::Object(extra)) => {
+            for (key, value) in extra {
+                let _ = target.insert(key, value);
+            }
+        }
+        (target, extra) => {
+            *target = extra;
+        }
+    }
+}

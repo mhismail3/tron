@@ -3,7 +3,7 @@
 //! Spawned by the `worktree::resolve_conflicts_with_subagent capability once the
 //! user has tapped "Let Resolver Run" on the iOS conflict sub-sheet. The
 //! subagent runs inside the same worktree as the parent session with a
-//! restricted tool allowlist (`Read`, `Edit`, `Write`, `Bash`) and drives
+//! restricted tool allowlist (`filesystem::read_file`, `filesystem::edit_file`, `filesystem::write_file`, `process::run`) and drives
 //! the merge entirely via `git` shell commands. It is expected to
 //! complete the merge with `git commit --no-edit` (or
 //! `git rebase --continue`) before terminating.
@@ -32,7 +32,7 @@ use tracing::{info, warn};
 use crate::domains::agent::runner::orchestrator::subagent_manager::{
     SpawnType, SubagentManager, SubsessionConfig,
 };
-use crate::domains::tools::implementations::traits::{SubagentOps, WaitMode};
+use crate::domains::capability_support::implementations::traits::{SubagentOps, WaitMode};
 use crate::domains::worktree::WorktreeCoordinator;
 use crate::domains::worktree::types::ConflictedFile;
 
@@ -185,9 +185,9 @@ pub async fn spawn(
     let process = &process_plan.process;
     let working_directory = info.worktree_path.to_string_lossy().to_string();
     let allowed: Vec<String> = process
-        .allowed_tools
+        .allowed_capabilities
         .clone()
-        .expect("conflictResolver process must define allowedTools");
+        .expect("conflictResolver process must define allowedCapabilities");
 
     let config = SubsessionConfig {
         process_id: Some("conflictResolver".into()),
@@ -214,11 +214,11 @@ pub async fn spawn(
         max_depth: process
             .max_depth
             .expect("conflictResolver process must define maxDepth"),
-        inherit_tools: process
-            .inherit_tools
-            .expect("conflictResolver process must define inheritTools"),
-        denied_tools: process.denied_tools.clone(),
-        allowed_tools: Some(allowed),
+        inherit_capabilities: process
+            .inherit_capabilities
+            .expect("conflictResolver process must define inheritCapabilities"),
+        denied_capabilities: process.denied_capabilities.clone(),
+        allowed_capabilities: Some(allowed),
         reasoning_level: None,
         spawn_type: SpawnType::Subsession,
     };
@@ -452,19 +452,30 @@ mod tests {
             .process("conflictResolver")
             .expect("default profile must define conflictResolver");
         let allowlist = process
-            .allowed_tools
+            .allowed_capabilities
             .as_deref()
-            .expect("default conflictResolver must define allowedTools");
-        assert_eq!(allowlist, &["Read", "Edit", "Write", "Bash"]);
-        // Must NOT expose SpawnSubagent to prevent recursive resolver
+            .expect("default conflictResolver must define allowedCapabilities");
+        assert_eq!(
+            allowlist,
+            &[
+                "search",
+                "inspect",
+                "execute",
+                "filesystem::read_file",
+                "filesystem::edit_file",
+                "filesystem::write_file",
+                "process::run"
+            ]
+        );
+        // Must NOT expose the subagent capability to prevent recursive resolver
         // spawning.
-        assert!(!allowlist.iter().any(|tool| tool == "SpawnSubagent"));
+        assert!(!allowlist.iter().any(|tool| tool == "agent::spawn_subagent"));
     }
 
     // ─── wait_or_cancel: wall-clock timeout tests (M9) ─────────────────
 
-    use crate::domains::tools::implementations::errors::ToolError;
-    use crate::domains::tools::implementations::traits::{JobInfo, SubagentResult};
+    use crate::domains::capability_support::implementations::errors::ToolError;
+    use crate::domains::capability_support::implementations::traits::{JobInfo, SubagentResult};
     use async_trait::async_trait;
 
     /// Mock `SubagentOps` that either always times out or always succeeds

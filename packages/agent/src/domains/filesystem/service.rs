@@ -25,7 +25,8 @@
 //! flip signal — DO NOT delete it silently.
 
 use std::cmp::Ordering;
-use std::path::Path;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -187,6 +188,274 @@ pub(crate) fn read_file(path: &str) -> Result<Value, CapabilityError> {
     })?;
 
     Ok(serde_json::json!({ "content": content, "path": path }))
+}
+
+pub(crate) fn write_file(path: &str, content: &str) -> Result<Value, CapabilityError> {
+    trace_out_of_home(path, "write_file");
+    if Path::new(path).parent().is_none() && path == "/" {
+        return Err(CapabilityError::InvalidParams {
+            message: "refusing to write to filesystem root".to_owned(),
+        });
+    }
+    let existed = Path::new(path).exists();
+    if let Some(parent) = Path::new(path).parent() {
+        std::fs::create_dir_all(parent).map_err(|error| CapabilityError::Custom {
+            code: errors::FILESYSTEM_ERROR.into(),
+            message: error.to_string(),
+            details: None,
+        })?;
+    }
+    std::fs::write(path, content.as_bytes()).map_err(|error| CapabilityError::Custom {
+        code: errors::FILE_ERROR.into(),
+        message: error.to_string(),
+        details: None,
+    })?;
+    Ok(serde_json::json!({
+        "path": path,
+        "bytesWritten": content.len(),
+        "created": !existed,
+    }))
+}
+
+pub(crate) fn edit_file(
+    path: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+) -> Result<Value, CapabilityError> {
+    trace_out_of_home(path, "edit_file");
+    if old_string.is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "oldString must not be empty".to_owned(),
+        });
+    }
+    let content = read_text(path)?;
+    let occurrences = content.matches(old_string).count();
+    if occurrences == 0 {
+        return Err(CapabilityError::Custom {
+            code: "PATTERN_NOT_FOUND".to_owned(),
+            message: "oldString was not found in the file".to_owned(),
+            details: Some(serde_json::json!({"path": path})),
+        });
+    }
+    if occurrences > 1 && !replace_all {
+        return Err(CapabilityError::Custom {
+            code: "MULTIPLE_OCCURRENCES".to_owned(),
+            message: format!(
+                "oldString matched {occurrences} times; pass replaceAll=true or make the string more specific"
+            ),
+            details: Some(serde_json::json!({"path": path, "occurrences": occurrences})),
+        });
+    }
+    let updated = if replace_all {
+        content.replace(old_string, new_string)
+    } else {
+        content.replacen(old_string, new_string, 1)
+    };
+    std::fs::write(path, updated.as_bytes()).map_err(|error| CapabilityError::Custom {
+        code: errors::FILE_ERROR.into(),
+        message: error.to_string(),
+        details: None,
+    })?;
+    let replacements = if replace_all { occurrences } else { 1 };
+    Ok(serde_json::json!({
+        "path": path,
+        "replacements": replacements,
+        "diff": unified_diff(&content, &updated),
+    }))
+}
+
+pub(crate) fn diff_file(path: &str, new_content: &str) -> Result<Value, CapabilityError> {
+    let content = read_text(path)?;
+    Ok(serde_json::json!({
+        "path": path,
+        "diff": unified_diff(&content, new_content),
+    }))
+}
+
+pub(crate) fn find(
+    path: &str,
+    pattern: &str,
+    type_filter: &str,
+    max_depth: Option<usize>,
+    max_results: usize,
+    exclude: &[String],
+) -> Result<Value, CapabilityError> {
+    trace_out_of_home(path, "find");
+    let root = PathBuf::from(path);
+    let matcher = globset::GlobBuilder::new(pattern)
+        .literal_separator(false)
+        .build()
+        .map_err(|error| CapabilityError::InvalidParams {
+            message: format!("invalid glob pattern: {error}"),
+        })?
+        .compile_matcher();
+    let exclude_matchers = exclude
+        .iter()
+        .filter_map(|pattern| {
+            globset::GlobBuilder::new(pattern)
+                .literal_separator(false)
+                .build()
+                .ok()
+                .map(|glob| glob.compile_matcher())
+        })
+        .collect::<Vec<_>>();
+    let mut walker = walkdir::WalkDir::new(&root);
+    if let Some(depth) = max_depth {
+        walker = walker.max_depth(depth);
+    }
+
+    let mut matches = Vec::new();
+    let mut truncated = false;
+    for entry in walker.into_iter().filter_map(Result::ok) {
+        let is_dir = entry.file_type().is_dir();
+        match type_filter {
+            "file" if is_dir => continue,
+            "directory" if !is_dir => continue,
+            _ => {}
+        }
+        let rel_path = entry.path().strip_prefix(&root).unwrap_or(entry.path());
+        if rel_path.as_os_str().is_empty() {
+            continue;
+        }
+        if !matcher.is_match(rel_path) && !matcher.is_match(entry.file_name()) {
+            continue;
+        }
+        if exclude_matchers
+            .iter()
+            .any(|matcher| matcher.is_match(rel_path) || matcher.is_match(entry.file_name()))
+        {
+            continue;
+        }
+        if matches.len() >= max_results {
+            truncated = true;
+            break;
+        }
+        let metadata = entry.metadata().ok();
+        matches.push(serde_json::json!({
+            "path": rel_path.to_string_lossy(),
+            "absolutePath": entry.path().to_string_lossy(),
+            "isDirectory": is_dir,
+            "size": metadata.as_ref().map(std::fs::Metadata::len),
+        }));
+    }
+    Ok(serde_json::json!({
+        "path": path,
+        "matches": matches,
+        "truncated": truncated,
+    }))
+}
+
+pub(crate) fn search_text(
+    path: &str,
+    pattern: &str,
+    file_pattern: Option<&str>,
+    context: usize,
+    max_results: usize,
+) -> Result<Value, CapabilityError> {
+    trace_out_of_home(path, "search_text");
+    let regex = regex::Regex::new(pattern).map_err(|error| CapabilityError::InvalidParams {
+        message: format!("invalid regex pattern: {error}"),
+    })?;
+    let file_matcher = match file_pattern {
+        Some(pattern) => Some(
+            globset::GlobBuilder::new(pattern)
+                .literal_separator(false)
+                .build()
+                .map_err(|error| CapabilityError::InvalidParams {
+                    message: format!("invalid filePattern: {error}"),
+                })?
+                .compile_matcher(),
+        ),
+        None => None,
+    };
+    let mut matches = Vec::new();
+    let mut truncated = false;
+    for entry in walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+    {
+        if let Some(matcher) = &file_matcher
+            && !matcher.is_match(entry.path())
+            && !matcher.is_match(entry.file_name())
+        {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let lines = content.lines().collect::<Vec<_>>();
+        for (index, line) in lines.iter().enumerate() {
+            if !regex.is_match(line) {
+                continue;
+            }
+            if matches.len() >= max_results {
+                truncated = true;
+                break;
+            }
+            let start = index.saturating_sub(context);
+            let end = (index + context + 1).min(lines.len());
+            matches.push(serde_json::json!({
+                "path": entry.path().to_string_lossy(),
+                "line": index + 1,
+                "text": line,
+                "context": lines[start..end],
+            }));
+        }
+        if truncated {
+            break;
+        }
+    }
+    Ok(serde_json::json!({
+        "path": path,
+        "matches": matches,
+        "truncated": truncated,
+    }))
+}
+
+fn read_text(path: &str) -> Result<String, CapabilityError> {
+    std::fs::read_to_string(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            CapabilityError::NotFound {
+                code: errors::FILE_NOT_FOUND.into(),
+                message: format!("File not found: {path}"),
+            }
+        } else {
+            CapabilityError::Custom {
+                code: errors::FILE_ERROR.into(),
+                message: error.to_string(),
+                details: None,
+            }
+        }
+    })
+}
+
+fn unified_diff(old: &str, new: &str) -> String {
+    let old_lines = old.lines().collect::<Vec<_>>();
+    let new_lines = new.lines().collect::<Vec<_>>();
+    let mut output = String::new();
+    output.push_str("--- before\n+++ after\n");
+    let max = old_lines.len().max(new_lines.len());
+    for index in 0..max {
+        match (old_lines.get(index), new_lines.get(index)) {
+            (Some(left), Some(right)) if left == right => {
+                let _ = writeln!(output, " {left}");
+            }
+            (Some(left), Some(right)) => {
+                let _ = writeln!(output, "-{left}");
+                let _ = writeln!(output, "+{right}");
+            }
+            (Some(left), None) => {
+                let _ = writeln!(output, "-{left}");
+            }
+            (None, Some(right)) => {
+                let _ = writeln!(output, "+{right}");
+            }
+            (None, None) => {}
+        }
+    }
+    output
 }
 
 #[cfg(test)]

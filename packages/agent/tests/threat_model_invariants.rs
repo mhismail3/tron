@@ -225,8 +225,11 @@ fn server_blocking_work_uses_the_supervisor_entrypoint() {
         for path in rust_files_under(&root) {
             let rel = path.strip_prefix(&crate_root).unwrap();
             if rel == Path::new("src/shared/server/context.rs")
-                || rel == Path::new("src/domains/tools/implementations/ui/input.rs")
-                || rel == Path::new("src/domains/tools/implementations/backends/process.rs")
+                || rel == Path::new("src/domains/capability_support/implementations/ui/input.rs")
+                || rel
+                    == Path::new(
+                        "src/domains/capability_support/implementations/backends/process.rs",
+                    )
                 || rel
                     == Path::new("src/domains/session/event_store/store/event_store/auxiliary.rs")
             {
@@ -317,11 +320,11 @@ fn tool_registry_authority_stays_deleted() {
 
     for removed in [
         ["src/tool", "_factory.rs"].concat(),
-        "src/domains/tools/implementations/registry.rs".to_string(),
+        "src/domains/capability_support/implementations/registry.rs".to_string(),
     ] {
         assert!(
             !crate_root.join(&removed).exists(),
-            "{removed} must stay deleted; built-in tools are domain-owned tool::* capabilities"
+            "{removed} must stay deleted; provider tools are capability primitives over domain-owned workers"
         );
     }
 
@@ -338,7 +341,7 @@ fn tool_registry_authority_stays_deleted() {
         crate_root.join("src/main.rs"),
         crate_root.join("src/domains/agent/runner"),
         crate_root.join("src/app"),
-        crate_root.join("src/domains/tools"),
+        crate_root.join("src/domains/capability_support"),
         repo_root.join("README.md"),
     ] {
         for path in files_to_scan(&root) {
@@ -354,18 +357,31 @@ fn tool_registry_authority_stays_deleted() {
         }
     }
 
-    let tool_execution =
-        std::fs::read_to_string(crate_root.join("src/domains/tools/operations/execution.rs"))
-            .expect("failed to read tool execution handler");
     assert!(
-        tool_execution.contains("TOOL_RUNTIME_CONTEXT_REQUIRED"),
-        "tool::* handlers must fail closed unless the agent turn prepared runtime context"
+        !crate_root
+            .join(["src/domains/", "tools", "/operations/execution.rs"].concat())
+            .exists(),
+        "legacy tool execution handler must stay deleted"
     );
-    assert_eq!(
-        tool_execution.matches("tool.execute(").count(),
-        1,
-        "TronTool::execute may be called only inside the tools-domain runtime-context helper"
+    let tool_execution =
+        std::fs::read_to_string(crate_root.join("src/domains/agent/runner/agent/tool_executor.rs"))
+            .expect("failed to read agent tool executor");
+    assert!(
+        tool_execution.contains("\"search\"")
+            && tool_execution.contains("\"inspect\"")
+            && tool_execution.contains("\"execute\""),
+        "agent tool executor must route only the three capability primitives"
     );
+    for retired_runtime_term in [
+        concat!("Tool", "Context"),
+        concat!("capability", "_runtime"),
+        concat!("Tron", "Tool"),
+    ] {
+        assert!(
+            !tool_execution.contains(retired_runtime_term),
+            "agent tool executor must not reintroduce the retired runtime bridge"
+        );
+    }
 }
 
 #[test]
@@ -868,19 +884,15 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
 fn approvals_are_engine_owned_not_model_confirmation_tools() {
     let repo_root = repo_root();
     let agent_root = crate_root();
-    let tool_catalog =
-        std::fs::read_to_string(agent_root.join("src/domains/tools/operations/catalog.rs"))
-            .expect("failed to read tool catalog");
     let agent_contract = std::fs::read_to_string(agent_root.join("src/domains/agent/contract.rs"))
         .expect("failed to read agent contract");
     let agent_handlers = std::fs::read_to_string(agent_root.join("src/domains/agent/handlers.rs"))
         .expect("failed to read agent handlers");
-    let engine_tools =
-        std::fs::read_to_string(agent_root.join("src/domains/tools/implementations/engine/mod.rs"))
-            .expect("failed to read engine tools");
 
     assert!(
-        !tool_catalog.contains("GetConfirmation"),
+        !agent_root
+            .join(["src/domains/", "tools", "/operations/catalog.rs"].concat())
+            .exists(),
         "approval UI must be engine-owned; GetConfirmation must not be a model-facing tool"
     );
     assert!(
@@ -893,9 +905,12 @@ fn approvals_are_engine_owned_not_model_confirmation_tools() {
         "/api/approvals",
         "model-level GetConfirmation",
     ] {
+        let capability_docs =
+            std::fs::read_to_string(agent_root.join("src/domains/capability/mod.rs"))
+                .expect("failed to read capability docs");
         assert!(
-            !engine_tools.contains(stale),
-            "agent engine tool guidance must not mention stale approval path `{stale}`"
+            !capability_docs.contains(stale),
+            "capability guidance must not mention stale approval path `{stale}`"
         );
     }
 
@@ -1039,6 +1054,16 @@ fn server_package_uses_domain_owned_engine_layout() {
             continue;
         }
         let domain_name = path.file_name().unwrap().to_string_lossy();
+        if domain_name == "capability_support" {
+            assert!(
+                !path.join("contract.rs").exists()
+                    && !path.join("deps.rs").exists()
+                    && !path.join("handlers.rs").exists()
+                    && !path.join("operations").exists(),
+                "capability_support is a support namespace and must not own an active worker surface"
+            );
+            continue;
+        }
         assert!(
             path.join("contract.rs").is_file(),
             "domain worker module `{domain_name}` must own a contract.rs file"
@@ -1056,9 +1081,7 @@ fn server_package_uses_domain_owned_engine_layout() {
             "domain worker module `{domain_name}` must not split contract truth into spec.rs"
         );
     }
-    for required in [
-        "agent", "auth", "cron", "session", "settings", "tools", "worktree",
-    ] {
+    for required in ["agent", "auth", "cron", "session", "settings", "worktree"] {
         let domain_root = domains_root.join(required);
         assert!(
             domain_root.is_dir(),
@@ -1082,8 +1105,7 @@ fn server_package_uses_domain_owned_engine_layout() {
         );
     }
     for required in [
-        "agent", "auth", "context", "cron", "job", "mcp", "memory", "model", "session", "tools",
-        "worktree",
+        "agent", "auth", "context", "cron", "job", "mcp", "memory", "model", "session", "worktree",
     ] {
         let domain_root = domains_root.join(required);
         let operations_mod = domain_root.join("operations").join("mod.rs");
@@ -1221,9 +1243,9 @@ fn server_package_uses_domain_owned_engine_layout() {
         "context/queries/payload_preview.rs",
         "context/queries/prepare.rs",
         "context/queries/snapshot.rs",
-        "tools/interactive_enrichment/payload.rs",
-        "tools/interactive_enrichment/questions.rs",
-        "tools/interactive_enrichment/subagent.rs",
+        "capability_support/interactive_enrichment/payload.rs",
+        "capability_support/interactive_enrichment/questions.rs",
+        "capability_support/interactive_enrichment/subagent.rs",
         "memory/retain/auto_retain/decision.rs",
         "memory/retain/auto_retain/state.rs",
         "memory/retain/auto_retain/fire.rs",
@@ -1398,7 +1420,8 @@ fn server_package_uses_domain_owned_engine_layout() {
                     && !production_content.contains("\"cron::list\" =>")
                     && !production_content.contains("\"mcp::status\" =>")
                     && !production_content.contains("\"job::background\" =>")
-                    && !production_content.contains("\"tool::result\" =>")
+                    && !production_content
+                        .contains(&format!("\"{}\" =>", concat!("tool", "::result")))
                     && !production_content.contains("\"session::create\" =>"),
                 "{} must bind by domain operation key, not canonical function id",
                 rel.display()

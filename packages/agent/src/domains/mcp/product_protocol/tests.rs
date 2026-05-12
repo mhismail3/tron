@@ -1,4 +1,4 @@
-//! Integration tests for MCP client, tool projection, and server manager.
+//! Integration tests for MCP client and server manager.
 //!
 //! Uses a mock MCP server implemented as a child process that communicates
 //! via stdio JSON-RPC. The mock is a small Rust binary compiled inline via
@@ -6,16 +6,12 @@
 
 #[cfg(test)]
 mod integration {
-    use std::collections::HashMap;
-    use std::sync::Arc;
-
     use serde_json::json;
+    use std::collections::HashMap;
 
     use crate::domains::mcp::client::{McpClient, McpErrorKind};
     use crate::domains::mcp::server_manager::McpServerManager;
-    use crate::domains::mcp::tool_projection::{McpToolProjection, create_mcp_tools};
     use crate::domains::mcp::types::*;
-    use crate::domains::tools::implementations::traits::TronTool;
 
     // -----------------------------------------------------------------------
     // Mock MCP server helper
@@ -287,72 +283,6 @@ while true; do read -r line 2>/dev/null || exit 0; done
             result.unwrap_err().kind,
             McpErrorKind::ConnectionLost
         ));
-    }
-
-    // -----------------------------------------------------------------------
-    // Tool projection tests
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn projected_tool_definition_matches_schema() {
-        let script =
-            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
-        let config = mock_config("projection-def-test", &script);
-        let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
-
-        let tools = client.list_tools().await.unwrap();
-        let projection = McpToolProjection::new("sqlite", &tools[0], client.clone());
-
-        let def = projection.definition();
-        assert_eq!(def.name, "sqlite.query");
-        assert!(def.description.contains("[MCP: sqlite]"));
-        assert!(def.description.contains("Run SQL query"));
-
-        // Verify parameter schema
-        let params = &def.parameters;
-        assert_eq!(params.schema_type, "object");
-        assert!(params.properties.as_ref().unwrap().contains_key("sql"));
-        assert_eq!(params.required.as_ref().unwrap(), &vec!["sql".to_string()]);
-
-        client.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn projected_tool_execute_forwards_params() {
-        let script =
-            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
-        let config = mock_config("projection-exec-test", &script);
-        let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
-
-        let tools = client.list_tools().await.unwrap();
-        let projected_tools = create_mcp_tools("sqlite", &tools, &client);
-
-        assert_eq!(projected_tools.len(), 2);
-        assert_eq!(projected_tools[0].name(), "sqlite.query");
-        assert_eq!(projected_tools[1].name(), "sqlite.list_tables");
-
-        client.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn projected_tool_name_prefixed_with_server() {
-        let script =
-            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
-        let config = mock_config("prefix-test", &script);
-        let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
-
-        let tools = client.list_tools().await.unwrap();
-        let projections = create_mcp_tools("github", &tools, &client);
-
-        for projection in &projections {
-            assert!(
-                projection.name().starts_with("github."),
-                "Tool name should be prefixed: {}",
-                projection.name()
-            );
-        }
-
-        client.shutdown().await;
     }
 
     // -----------------------------------------------------------------------

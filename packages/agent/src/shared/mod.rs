@@ -7,12 +7,12 @@
 //! - **Branded IDs**: [`ids::EventId`], [`ids::SessionId`], [`ids::WorkspaceId`] as newtypes
 //! - **Messages**: [`messages::Message`] enum with `User`, `Assistant`, `ToolResult` variants
 //! - **Content blocks**: [`content::UserContent`], [`content::AssistantContent`], etc.
-//! - **Tool results**: [`tools::TronToolResult`] with content, details, error/stop flags
+//! - **Tool results**: [`tools::CapabilityResult`] with content, details, error/stop flags
 //! - **Errors**: [`errors::TronError`] hierarchy via `thiserror`, capability error codes
 //! - **Events**: [`events::StreamEvent`] for LLM streaming, [`events::TronEvent`] for agent lifecycle
 //! - **Retry**: [`retry::RetryConfig`] and backoff calculation
 //! - **Profile Home**: [`constitution`] home migration/recovery and [`profile`] execution specs
-//! - **`AskUserQuestion`**: [`ask_user_question::AskUserQuestion`] interactive tool types
+//! - **`agent::ask_user`**: [`ask_user_question::agent::ask_user`] interactive tool types
 //! - **Memory**: [`memory::SessionMemory`]
 //!
 //! ## Module Position

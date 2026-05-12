@@ -207,7 +207,7 @@ pub(crate) fn build_summarizer(
 }
 
 pub(crate) async fn tool_definitions(deps: &Deps, session_id: &str) -> Vec<Tool> {
-    match crate::domains::tools::implementations::capability_surface::list_model_tools(
+    match crate::domains::capability_support::implementations::capability_surface::list_model_tools(
         &deps.engine_host,
         session_id,
         None,
@@ -219,7 +219,7 @@ pub(crate) async fn tool_definitions(deps: &Deps, session_id: &str) -> Vec<Tool>
             tracing::warn!(
                 session_id,
                 error = %error,
-                "failed to read live tool catalog for context assembly"
+                "failed to read live capability catalog for context assembly"
             );
             Vec::new()
         }

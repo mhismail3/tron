@@ -68,7 +68,7 @@ agent autonomy.
 
 | Area | iii baseline | Tron specialization |
 |------|--------------|---------------------|
-| Discovery | Every worker can read the live registry and receive topology notifications. | The live catalog is the agent's primary substrate. Agents get stable meta-capabilities for discover/search/inspect/invoke/watch/spawn, and the underlying catalog changes while the agent runs. |
+| Discovery | Every worker can read the live registry and receive topology notifications. | The live catalog is the agent's primary substrate. Agents get stable model-facing primitives for search, inspection, and execution, and the underlying catalog changes while the agent runs. |
 | Visibility | Registry availability is mostly a worker/RBAC concern. | Visibility is scoped: session, workspace, system, client, worker, admin. Agent-created capabilities default to session visibility. |
 | Self-modification | Sandboxes and workers can be added live. | Agents can create session-scoped workers/functions, test them immediately, then request explicit promotion to wider visibility. |
 | Idempotency | Queue retries make delivery concerns visible. | Every mutating agent-visible function must declare an idempotency contract before invocation is allowed. |
@@ -92,14 +92,11 @@ Tron discovery should expose:
 - catalog-change streams with change classes agents can subscribe to.
 
 The live catalog should not be frozen for an agent turn. Instead, agents should
-use stable meta-capabilities:
+use stable capability primitives:
 
-- `engine::capabilities::search`
-- `engine::capabilities::inspect`
-- `engine::capabilities::invoke`
-- `engine::catalog::watch`
-- `engine::workers::spawn`
-- `engine::capabilities::promote`
+- `search`
+- `inspect`
+- `execute`
 
 Those stable calls keep the LLM provider interface small while allowing the
 underlying capability set to change at runtime.
@@ -195,7 +192,7 @@ small.
 
 ## What Tron should add
 
-- Agent-native stable meta-capabilities over the live catalog.
+- Agent-native stable capability primitives over the live catalog.
 - Session-live default visibility for agent-created capabilities.
 - Explicit promotion workflow for wider visibility.
 - Required idempotency contracts for mutating agent-visible functions.

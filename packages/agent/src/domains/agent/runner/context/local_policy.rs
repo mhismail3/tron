@@ -4,7 +4,7 @@
 //! prompt to minimize time-to-first-token. The active profile owns every
 //! decision that differs from cloud behavior:
 //!
-//! - Which tools are exposed (and executable) on local models
+//! - Which capabilities are exposed (and executable) on local models
 //! - How much of the rules content is included before truncation
 //! - Which provider types are considered "local"
 //!
@@ -14,10 +14,10 @@
 //! ## Invariant
 //!
 //! If a session plan selects a local provider policy, the model must only see
-//! and be able to execute tools in that profile's local tool policy. Schema filtering
-//! alone is insufficient — the executor must also refuse off-list calls to
-//! close the gap where a model hallucinates a tool name from training data or
-//! memory.
+//! and be able to execute capabilities in that profile's local capability
+//! policy. Schema filtering alone is insufficient — the executor must also
+//! refuse off-list calls to close the gap where a model hallucinates a
+//! capability id from training data or memory.
 
 use crate::shared::messages::Provider;
 
@@ -31,7 +31,7 @@ use crate::shared::messages::Provider;
 pub struct ContextPolicy {
     id: String,
     spec: crate::shared::profile::ContextPolicySpec,
-    tool_policy: Option<crate::shared::profile::ToolPolicySpec>,
+    capability_policy: Option<crate::shared::profile::CapabilityPolicySpec>,
     is_local: bool,
 }
 
@@ -86,12 +86,12 @@ impl ContextPolicy {
             .entrypoints
             .get("main")
             .expect("validated profile must define entrypoints.main");
-        let tool_policy_id = context_spec
-            .tool_policy
+        let capability_policy_id = context_spec
+            .capability_policy
             .as_deref()
-            .unwrap_or(entrypoint.tool_policy.as_str());
-        let tool_policy = spec.tool_policy(tool_policy_id).cloned();
-        Self::from_resolved_parts(context_id, context_spec, tool_policy, is_local)
+            .unwrap_or(entrypoint.capability_policy.as_str());
+        let capability_policy = spec.capability_policy(capability_policy_id).cloned();
+        Self::from_resolved_parts(context_id, context_spec, capability_policy, is_local)
     }
 
     /// Build a context policy from already-resolved profile policy tables.
@@ -99,13 +99,13 @@ impl ContextPolicy {
     pub fn from_resolved_parts(
         id: impl Into<String>,
         spec: crate::shared::profile::ContextPolicySpec,
-        tool_policy: Option<crate::shared::profile::ToolPolicySpec>,
+        capability_policy: Option<crate::shared::profile::CapabilityPolicySpec>,
         is_local: bool,
     ) -> Self {
         Self {
             id: id.into(),
             spec,
-            tool_policy,
+            capability_policy,
             is_local,
         }
     }
@@ -123,10 +123,10 @@ impl ContextPolicy {
         self.is_local
     }
 
-    /// Tool policy id for this context policy.
+    /// Capability policy id for this context policy.
     #[must_use]
-    pub fn tool_policy_id(&self) -> Option<&str> {
-        self.spec.tool_policy.as_deref()
+    pub fn capability_policy_id(&self) -> Option<&str> {
+        self.spec.capability_policy.as_deref()
     }
 
     /// Cache-agnostic context policy spec.
@@ -135,10 +135,10 @@ impl ContextPolicy {
         &self.spec
     }
 
-    /// Tool presentation policy spec, if one is attached.
+    /// Capability presentation policy spec, if one is attached.
     #[must_use]
-    pub fn tool_policy(&self) -> Option<&crate::shared::profile::ToolPolicySpec> {
-        self.tool_policy.as_ref()
+    pub fn capability_policy(&self) -> Option<&crate::shared::profile::CapabilityPolicySpec> {
+        self.capability_policy.as_ref()
     }
 
     /// Does this policy strip `memory_content`?
@@ -166,12 +166,12 @@ impl ContextPolicy {
         self.spec.skip_pending_jobs_bootstrap
     }
 
-    /// The allow-list of tool names, or `None` if all registered tools apply.
+    /// The allow-list of capability ids, or `None` if all registered tools apply.
     #[must_use]
-    pub fn tool_filter(&self) -> Option<Vec<String>> {
-        self.tool_policy
+    pub fn capability_filter(&self) -> Option<Vec<String>> {
+        self.capability_policy
             .as_ref()
-            .and_then(|policy| policy.allowed_tools.clone())
+            .and_then(|policy| policy.allowed_capabilities.clone())
     }
 
     /// The rules truncation budget (chars), or `None` for no truncation.
@@ -270,18 +270,9 @@ mod tests {
     // ── local tool filter ────────────────────────────────────────────────
 
     #[test]
-    fn local_tools_allow_file_search_web_and_questions() {
-        let allowed = local_policy().tool_filter().unwrap();
-        for name in [
-            "Read",
-            "Write",
-            "Edit",
-            "Bash",
-            "Search",
-            "Find",
-            "WebFetch",
-            "AskUserQuestion",
-        ] {
+    fn local_tools_allow_capability_primitives() {
+        let allowed = local_policy().capability_filter().unwrap();
+        for name in ["search", "inspect", "execute"] {
             assert!(
                 allowed.iter().any(|tool| tool == name),
                 "{name} should be local-allowed"
@@ -291,16 +282,17 @@ mod tests {
 
     #[test]
     fn cloud_only_tool_rejected() {
-        let allowed = local_policy().tool_filter().unwrap();
-        assert!(!allowed.iter().any(|tool| tool == "SpawnSubagent"));
+        let allowed = local_policy().capability_filter().unwrap();
+        assert!(!allowed.iter().any(|tool| tool == "agent::spawn_subagent"));
+        assert!(!allowed.iter().any(|tool| tool == "filesystem::read_file"));
         assert!(!allowed.iter().any(|tool| tool == "UnknownTool"));
     }
 
     #[test]
     fn local_tool_check_is_case_sensitive() {
-        let allowed = local_policy().tool_filter().unwrap();
-        assert!(!allowed.iter().any(|tool| tool == "read"));
-        assert!(!allowed.iter().any(|tool| tool == "BASH"));
+        let allowed = local_policy().capability_filter().unwrap();
+        assert!(!allowed.iter().any(|tool| tool == "Search"));
+        assert!(!allowed.iter().any(|tool| tool == "EXECUTE"));
     }
 
     // ── truncate_rules ──────────────────────────────────────────────────
@@ -380,7 +372,7 @@ mod tests {
         assert!(p.strip_skill_index());
         assert!(p.strip_job_results());
         assert!(p.skip_pending_jobs_bootstrap());
-        assert!(p.tool_filter().is_some());
+        assert!(p.capability_filter().is_some());
         assert!(p.rules_truncation().is_some());
     }
 
@@ -391,7 +383,7 @@ mod tests {
         assert!(!p.strip_skill_index());
         assert!(!p.strip_job_results());
         assert!(!p.skip_pending_jobs_bootstrap());
-        assert_eq!(p.tool_filter(), None);
+        assert_eq!(p.capability_filter(), None);
         assert_eq!(p.rules_truncation(), None);
     }
 

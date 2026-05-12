@@ -21,13 +21,13 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
+use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::traits::{Notification, NotifyResult};
 use crate::domains::session::event_store::sqlite::repositories::device_token::{
     DeactivatedTokenInfo, DeviceTokenRepo,
 };
 use crate::domains::session::event_store::types::payloads::device::DeviceTokenInvalidatedPayload;
 use crate::domains::session::event_store::{AppendOptions, ConnectionPool, EventStore, EventType};
-use crate::domains::tools::implementations::errors::ToolError;
-use crate::domains::tools::implementations::traits::{Notification, NotifyResult};
 
 use super::types::{ApnsNotification, ApnsSendResult};
 
@@ -329,7 +329,7 @@ fn maybe_emit_invalidated_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::tools::implementations::traits::Notification;
+    use crate::domains::capability_support::implementations::traits::Notification;
 
     #[test]
     fn to_apns_notification_maps_all_fields() {

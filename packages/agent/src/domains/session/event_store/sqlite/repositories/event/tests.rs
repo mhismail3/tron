@@ -85,12 +85,12 @@ fn insert_extracts_tool_name() {
         1,
         EventType::ToolCall,
         None,
-        json!({"toolName": "bash", "toolCallId": "tc_1"}),
+        json!({"toolName": "execute", "toolCallId": "tc_1"}),
     );
     EventRepo::insert(&conn, &event).unwrap();
 
     let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
-    assert_eq!(row.tool_name.as_deref(), Some("bash"));
+    assert_eq!(row.tool_name.as_deref(), Some("execute"));
     assert_eq!(row.tool_call_id.as_deref(), Some("tc_1"));
 }
 

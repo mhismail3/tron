@@ -703,8 +703,8 @@ mod tests {
         let provider = AnthropicProvider::new(api_key_config());
         let ctx = Context {
             tools: Some(vec![crate::shared::tools::Tool {
-                name: "bash".into(),
-                description: "Run commands".into(),
+                name: "execute".into(),
+                description: "Execute inspected capabilities".into(),
                 parameters: crate::shared::tools::ToolParameterSchema {
                     schema_type: "object".into(),
                     properties: None,
@@ -717,7 +717,7 @@ mod tests {
         };
         let tools = provider.build_tools(&ctx).unwrap();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, "bash");
+        assert_eq!(tools[0].name, "execute");
         // API key now gets cache too
         assert!(tools[0].cache_control.is_some());
         assert_eq!(
@@ -732,8 +732,8 @@ mod tests {
         let ctx = Context {
             tools: Some(vec![
                 crate::shared::tools::Tool {
-                    name: "bash".into(),
-                    description: "Run".into(),
+                    name: "search".into(),
+                    description: "Search capability catalog".into(),
                     parameters: crate::shared::tools::ToolParameterSchema {
                         schema_type: "object".into(),
                         properties: None,
@@ -743,8 +743,8 @@ mod tests {
                     },
                 },
                 crate::shared::tools::Tool {
-                    name: "read".into(),
-                    description: "Read".into(),
+                    name: "execute".into(),
+                    description: "Execute inspected capabilities".into(),
                     parameters: crate::shared::tools::ToolParameterSchema {
                         schema_type: "object".into(),
                         properties: None,

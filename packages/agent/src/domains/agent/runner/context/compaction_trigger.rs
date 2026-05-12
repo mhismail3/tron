@@ -20,7 +20,7 @@ pub struct CompactionTriggerResult {
     pub reason: String,
 }
 
-/// Progress signal patterns matched against recent Bash tool call commands.
+/// Progress signal patterns matched against recent process::run tool call commands.
 // SAFETY: Constant patterns validated by every test run. LazyLock ensures
 // these compile exactly once at first use; invalid regex panics immediately
 // at startup, never at runtime.

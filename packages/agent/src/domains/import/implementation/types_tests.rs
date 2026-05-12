@@ -220,7 +220,7 @@ fn deserialize_assistant_tool_use() {
             "content": [{
                 "type": "tool_use",
                 "id": "toolu_01QZ",
-                "name": "Bash",
+                "name": "process::run",
                 "input": { "command": "ls -la" }
             }],
             "stop_reason": "tool_use",
@@ -233,7 +233,7 @@ fn deserialize_assistant_tool_use() {
     assert_eq!(msg.stop_reason.as_deref(), Some("tool_use"));
     let content = msg.content.unwrap();
     let block = &content.as_array().unwrap()[0];
-    assert_eq!(block["name"], "Bash");
+    assert_eq!(block["name"], "process::run");
     assert_eq!(block["input"]["command"], "ls -la");
 }
 

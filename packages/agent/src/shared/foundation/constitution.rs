@@ -191,7 +191,7 @@ const MANAGED_DEFAULTS: &[ManagedDefault] = &[
         true
     ),
     managed_default!(
-        "profiles/default/tools/presentation.toml",
+        "profiles/default/capabilities/presentation.toml",
         DefaultKind::Toml,
         true
     ),
@@ -245,7 +245,7 @@ fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
             .join(dirs::CONTEXT),
         home.join(dirs::PROFILES)
             .join(DEFAULT_PROFILE)
-            .join(dirs::TOOLS),
+            .join(dirs::CAPABILITIES),
         home.join(dirs::PROFILES).join(USER_PROFILE),
         home.join(dirs::PROFILES)
             .join(USER_PROFILE)

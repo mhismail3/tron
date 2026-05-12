@@ -352,7 +352,7 @@ mod tests {
         let context = ctx(vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "call_123".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: args,
                 thought_signature: Some("sig-abc".into()),
             }],
@@ -368,7 +368,7 @@ mod tests {
                 function_call,
                 thought_signature,
             } => {
-                assert_eq!(function_call.name, "bash");
+                assert_eq!(function_call.name, "execute");
                 assert_eq!(thought_signature.as_deref(), Some("sig-abc"));
             }
             _ => panic!("Expected function call part"),
@@ -380,7 +380,7 @@ mod tests {
         let context = ctx(vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "toolu_123".into(),
-                name: "read".into(),
+                name: "inspect".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             }],
@@ -466,7 +466,7 @@ mod tests {
         let mut props = serde_json::Map::new();
         props.insert("command".into(), serde_json::json!({"type": "string"}));
         let tools = vec![Tool {
-            name: "bash".into(),
+            name: "execute".into(),
             description: "Run a command".into(),
             parameters: crate::shared::tools::ToolParameterSchema {
                 schema_type: "object".into(),
@@ -479,7 +479,7 @@ mod tests {
         let gemini_tools = convert_tools(&tools);
         assert_eq!(gemini_tools.len(), 1);
         assert_eq!(gemini_tools[0].function_declarations.len(), 1);
-        assert_eq!(gemini_tools[0].function_declarations[0].name, "bash");
+        assert_eq!(gemini_tools[0].function_declarations[0].name, "execute");
     }
 
     #[test]

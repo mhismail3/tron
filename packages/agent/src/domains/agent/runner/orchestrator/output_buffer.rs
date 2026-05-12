@@ -146,11 +146,7 @@ impl Default for SharedOutputBuffer {
 
 /// Registry mapping job IDs to their output buffers.
 ///
-/// The bash tool registers a buffer after spawning a managed process.
-/// Job capabilities look up buffers to subscribe to output streaming.
-/// Registry mapping job IDs to their output buffers.
-///
-/// The bash tool registers a buffer after spawning a managed process.
+/// Process capabilities register buffers after spawning managed processes.
 /// Job capabilities look up buffers to subscribe to output streaming.
 pub struct OutputBufferRegistry {
     /// Maps job_id → (buffer, tool_call_id).

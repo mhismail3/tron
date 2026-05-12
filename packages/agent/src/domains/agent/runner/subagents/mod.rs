@@ -2,7 +2,7 @@
 //!
 //! Programmatic subagent definitions — specialized child agents that the
 //! server spawns internally for specific workflows (distinct from
-//! LLM-initiated `SpawnSubagent` calls).
+//! LLM-initiated `agent::spawn_subagent` capability executions).
 //!
 //! Each submodule owns a single, named subagent: its system prompt, the
 //! tool allowlist, and the wire-up helper that shapes a

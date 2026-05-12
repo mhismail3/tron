@@ -94,11 +94,11 @@ impl ContextManager {
         });
         let context_policy = config.context_policy.clone();
 
-        // Filter tool definitions for token estimation accuracy. Local models
-        // only receive the profile-selected local tool policy at turn time, so
-        // the estimator should count only those.
+        // Filter provider tool definitions for token estimation accuracy.
+        // Local models only receive the profile-selected local capability
+        // policy at turn time, so the estimator should count only those.
         if context_policy.is_local()
-            && let Some(local_tools) = context_policy.tool_filter()
+            && let Some(local_tools) = context_policy.capability_filter()
         {
             config
                 .tools

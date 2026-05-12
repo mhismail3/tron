@@ -18,7 +18,7 @@
 //!   follow symlinks, so a `memory/` dir that's symlinked into a dotfiles
 //!   repo just works.
 //! - **Detail files (`rules/*.md`) are LISTED, not loaded.** The agent
-//!   reads them on demand via the standard `Read` tool.
+//!   reads them on demand through inspected filesystem capabilities.
 //!
 //! ## Module position
 //!

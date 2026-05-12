@@ -380,7 +380,7 @@ mod tests {
         let msgs = vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "call_abc".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -395,7 +395,7 @@ mod tests {
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].id, "call_abc");
         assert_eq!(tc[0].call_type, "function");
-        assert_eq!(tc[0].function.name, "bash");
+        assert_eq!(tc[0].function.name, "execute");
         assert_eq!(tc[0].function.arguments, r#"{"cmd":"ls"}"#);
     }
 
@@ -449,7 +449,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "call_abc".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: Map::new(),
                     thought_signature: None,
                 }],
@@ -478,7 +478,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "toolu_01abc".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: args,
                     thought_signature: None,
                 }],
@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn convert_tools_format() {
         let tools = vec![Tool {
-            name: "bash".into(),
+            name: "execute".into(),
             description: "Run commands".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
@@ -540,7 +540,7 @@ mod tests {
         let result = convert_tools(&tools);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].tool_type, "function");
-        assert_eq!(result[0].function.name, "bash");
+        assert_eq!(result[0].function.name, "execute");
         assert_eq!(result[0].function.description, "Run commands");
     }
 
@@ -566,7 +566,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "call_1".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                     arguments: Map::new(),
                     thought_signature: None,
                 }],

@@ -19,9 +19,11 @@ pub(super) async fn build_prompt_agent(
     >,
     health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     process_manager: Option<
-        Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>,
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
     >,
-    job_manager: Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    job_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
+    >,
     output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,
@@ -119,11 +121,11 @@ pub(super) async fn build_prompt_agent(
         CreateAgentOpts {
             provider,
             context_policy: session_plan.runtime_context_policy(),
-            tool_policy: session_plan.tool_policy.clone(),
+            capability_policy: session_plan.capability_policy.clone(),
             guardrails,
             hooks,
             is_unattended: false,
-            denied_tools: vec![],
+            denied_capabilities: vec![],
             subagent_depth: 0,
             subagent_max_depth: settings.agent.subagent_max_depth,
             rules_content: combined_rules,

@@ -212,7 +212,7 @@ mod tests {
             AgentDeps {
                 provider,
                 tool_surface_policy:
-                    crate::domains::tools::implementations::capability_surface::ToolSurfacePolicy::default(),
+                    crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy::default(),
                 guardrails: None,
                 hooks: None,
                 context_manager: ContextManager::new(ContextManagerConfig {

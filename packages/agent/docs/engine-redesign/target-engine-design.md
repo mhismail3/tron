@@ -74,17 +74,19 @@ key.
 
 ## Agent Semantics
 
-Agents use stable meta-capabilities to interact with a live catalog:
+Agents use stable capability primitives to interact with a live catalog:
 
-- discover visible, healthy capabilities;
-- inspect schemas, authority, risk, effect, leases, and provenance;
-- watch catalog changes by cursor;
-- invoke canonical functions;
-- request promotion of session-scoped capabilities.
+- `search` visible contracts and implementations;
+- `inspect` schemas, selected implementation, authority, risk, effect, leases,
+  provenance, schema digest, and expected revision;
+- `execute` canonical functions through direct invocation;
+- request promotion of session-scoped capabilities by executing the relevant
+  engine promotion function after inspection.
 
 The catalog is not frozen for a full turn. The provider tool surface is
-projected from the live catalog at each model-call boundary, so newly registered
-or removed capabilities are reflected on the next call.
+projected from the live catalog at each model-call boundary, but only the three
+capability primitives are exposed. Newly registered or removed implementations
+are reflected by `search` without changing provider schemas.
 
 ## Guardrails
 

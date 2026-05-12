@@ -6,9 +6,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
+use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::traits::{NotifyDelegate, NotifyResult};
 use crate::domains::session::event_store::{ConnectionPool, EventStore};
-use crate::domains::tools::implementations::errors::ToolError;
-use crate::domains::tools::implementations::traits::{NotifyDelegate, NotifyResult};
 
 use super::push_helpers;
 use super::sender::{ApnsBatch, PushSender};
@@ -44,7 +44,7 @@ impl RelayNotifyDelegate {
 impl NotifyDelegate for RelayNotifyDelegate {
     async fn send_notification(
         &self,
-        notification: &crate::domains::tools::implementations::traits::Notification,
+        notification: &crate::domains::capability_support::implementations::traits::Notification,
     ) -> Result<NotifyResult, ToolError> {
         let device_tokens = push_helpers::active_tokens(&self.pool)?;
 
@@ -102,9 +102,9 @@ impl NotifyDelegate for RelayNotifyDelegate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::capability_support::implementations::traits::Notification;
     use crate::domains::session::event_store::sqlite::migrations::run_migrations;
     use crate::domains::session::event_store::sqlite::repositories::device_token::DeviceTokenRepo;
-    use crate::domains::tools::implementations::traits::Notification;
     use crate::platform::apns::sender::tests::MockPushSender;
     use crate::platform::apns::types::ApnsSendResult;
 

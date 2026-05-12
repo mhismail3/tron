@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
+use crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy;
 use crate::domains::model::providers::provider::Provider;
-use crate::domains::tools::implementations::capability_surface::ToolSurfacePolicy;
 use crate::shared::events::{BaseEvent, TronEvent};
 use crate::shared::messages::{Message, TokenUsage, UserMessageContent};
 use tokio::sync::broadcast;
@@ -47,7 +47,7 @@ pub struct AgentDeps {
     /// LLM provider for generating completions.
     pub provider: Arc<dyn Provider>,
     /// Live catalog policy for model-facing tools.
-    pub tool_surface_policy: ToolSurfacePolicy,
+    pub tool_surface_policy: CapabilitySurfacePolicy,
     /// Optional guardrail engine for content safety.
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for lifecycle hooks.
@@ -61,16 +61,17 @@ pub struct AgentDeps {
     pub compaction_trigger_config:
         crate::domains::agent::runner::context::types::CompactionTriggerConfig,
     /// Optional process manager for background process execution.
-    pub process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     /// Optional unified job manager for process + subagent lifecycle.
-    pub job_manager: Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    pub job_manager:
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
     pub output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,
-    /// Optional engine host for routing actual tool execution through
-    /// canonical `tool::*` functions.
+    /// Optional engine host for routing model-facing capability primitives.
     pub engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -78,7 +79,7 @@ pub struct AgentDeps {
 pub struct TronAgent {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
-    tool_surface_policy: ToolSurfacePolicy,
+    tool_surface_policy: CapabilitySurfacePolicy,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
     context_manager: ContextManager,
@@ -95,20 +96,21 @@ pub struct TronAgent {
     /// Optional per-session sequence counter for monotonic event ordering.
     sequence_counter: Option<Arc<AtomicI64>>,
     /// Optional process manager for background process execution.
-    process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     /// Optional unified job manager for process + subagent lifecycle.
-    job_manager: Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    job_manager:
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
     output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,
-    /// Optional per-tool cancellation registry. Enables `agent.abortTool` to
-    /// cancel a single in-flight tool without aborting the whole turn. When
-    /// `None` (subagents, older code paths) tools share the turn-level token.
+    /// Optional per-call cancellation registry. Enables `agent.abortTool` to
+    /// cancel a single in-flight capability without aborting the whole turn.
+    /// When `None` (subagents, older code paths) calls share the turn-level token.
     tool_abort_registry: Option<Arc<ToolAbortRegistry>>,
-    /// Optional engine host used by the tool executor to invoke canonical
-    /// `tool::*` functions while preserving runtime tool context.
+    /// Optional engine host used by the executor to invoke capability primitives.
     engine_host: Option<crate::engine::EngineHostHandle>,
 }
 

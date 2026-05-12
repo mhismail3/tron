@@ -503,7 +503,7 @@ mod tests {
         let _ = args.insert("cmd".into(), json!("ls"));
         let tc = ToolCall {
             id: "call-1".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: args,
             ..ToolCall::default()
         };
@@ -710,7 +710,7 @@ mod tests {
             AssistantContent::text("text"),
             AssistantContent::ToolUse {
                 id: "tc-1".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             },
@@ -720,7 +720,7 @@ mod tests {
             },
             AssistantContent::ToolUse {
                 id: "tc-2".into(),
-                name: "read".into(),
+                name: "inspect".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             },
@@ -735,7 +735,7 @@ mod tests {
             AssistantContent::text("first"),
             AssistantContent::ToolUse {
                 id: "tc-1".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             },
@@ -774,13 +774,13 @@ mod tests {
 
     #[test]
     fn is_api_tool_use_block_positive() {
-        let v = json!({"type": "tool_use", "id": "tc-1", "name": "bash", "arguments": {}});
+        let v = json!({"type": "tool_use", "id": "tc-1", "name": "execute", "arguments": {}});
         assert!(is_api_tool_use_block(&v));
     }
 
     #[test]
     fn is_api_tool_use_block_negative_missing_arguments() {
-        let v = json!({"type": "tool_use", "id": "tc-1", "name": "bash"});
+        let v = json!({"type": "tool_use", "id": "tc-1", "name": "execute"});
         assert!(!is_api_tool_use_block(&v));
     }
 

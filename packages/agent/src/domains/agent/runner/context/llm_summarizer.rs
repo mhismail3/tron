@@ -177,7 +177,7 @@ mod tests {
         let msgs = [Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "tc-1".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -187,7 +187,7 @@ mod tests {
             thinking: None,
         }];
         let result = serialize_messages(&msgs);
-        assert!(result.starts_with("[TOOL_CALL] bash("));
+        assert!(result.starts_with("[TOOL_CALL] execute("));
         assert!(result.contains("file_path: /src/main.rs"));
     }
 

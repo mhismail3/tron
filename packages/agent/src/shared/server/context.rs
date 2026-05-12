@@ -183,25 +183,26 @@ pub struct AgentDeps {
 /// capability handlers.
 #[derive(Clone)]
 pub struct ToolRuntimeConfig {
-    /// Shared HTTP client (connection pool reused across web/MCP-related tools).
+    /// Shared HTTP client (connection pool reused across web/MCP-related capabilities).
     pub http_client: reqwest::Client,
-    /// Bash sandbox settings from the active profile.
-    pub sandbox_settings: crate::domains::settings::BashSandboxSettings,
+    /// Process sandbox settings from the active profile.
+    pub sandbox_settings: crate::domains::settings::ProcessSandboxSettings,
     /// Computer-use settings from the active profile.
     pub computer_use_settings: crate::domains::settings::ComputerUseSettings,
     /// Notification delivery implementation. Production may be APNS-backed;
     /// development/test contexts use the stub delegate.
-    pub notify_delegate: Arc<dyn crate::domains::tools::implementations::traits::NotifyDelegate>,
+    pub notify_delegate:
+        Arc<dyn crate::domains::capability_support::implementations::traits::NotifyDelegate>,
 }
 
 impl Default for ToolRuntimeConfig {
     fn default() -> Self {
         Self {
             http_client: reqwest::Client::new(),
-            sandbox_settings: crate::domains::settings::BashSandboxSettings::default(),
+            sandbox_settings: crate::domains::settings::ProcessSandboxSettings::default(),
             computer_use_settings: crate::domains::settings::ComputerUseSettings::default(),
             notify_delegate: Arc::new(
-                crate::domains::tools::implementations::backends::StubNotifyDelegate,
+                crate::domains::capability_support::implementations::backends::StubNotifyDelegate,
             ),
         }
     }
@@ -275,12 +276,12 @@ pub struct ServerRuntimeContext {
     pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::domains::mcp::router::McpRouter>>>,
     /// Active display stream registry (shared with DisplayTool for on-demand cancellation).
     pub display_stream_registry:
-        Option<crate::domains::tools::implementations::ui::display_stream::ActiveStreamRegistry>,
+        Option<crate::domains::capability_support::implementations::ui::display_stream::ActiveStreamRegistry>,
     /// Process manager for background process lifecycle (shared with tools).
     pub process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>>,
     /// Unified job manager for waiting on and managing processes + subagents.
-    pub job_manager: Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    pub job_manager: Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     /// Output buffer registry for on-demand process output streaming.
     pub output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,

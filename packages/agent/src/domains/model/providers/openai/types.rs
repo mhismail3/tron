@@ -3251,13 +3251,13 @@ mod tests {
         let item = ResponsesInputItem::FunctionCall {
             id: None,
             call_id: "call_abc".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: r#"{"cmd":"ls"}"#.into(),
         };
         let json = serde_json::to_value(&item).unwrap();
         assert_eq!(json["type"], "function_call");
         assert_eq!(json["call_id"], "call_abc");
-        assert_eq!(json["name"], "bash");
+        assert_eq!(json["name"], "execute");
     }
 
     #[test]
@@ -3277,14 +3277,14 @@ mod tests {
     #[test]
     fn tool_entry_function_serde() {
         let entry = ResponsesToolEntry::Function {
-            name: "bash".into(),
+            name: "execute".into(),
             description: "Run commands".into(),
             parameters: json!({"type": "object"}),
             defer_loading: None,
         };
         let json = serde_json::to_value(&entry).unwrap();
         assert_eq!(json["type"], "function");
-        assert_eq!(json["name"], "bash");
+        assert_eq!(json["name"], "execute");
         assert!(json.get("defer_loading").is_none());
 
         let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
@@ -3342,7 +3342,7 @@ mod tests {
     fn tool_entry_serde_roundtrip_all_variants() {
         let entries = vec![
             ResponsesToolEntry::Function {
-                name: "bash".into(),
+                name: "execute".into(),
                 description: "Run".into(),
                 parameters: json!({}),
                 defer_loading: Some(true),
@@ -3443,7 +3443,7 @@ mod tests {
             "item": {
                 "type": "function_call",
                 "call_id": "call_abc",
-                "name": "bash",
+                "name": "execute",
             },
         });
         let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
@@ -3451,7 +3451,7 @@ mod tests {
         let item = event.item.unwrap();
         assert_eq!(item.item_type, OutputItemType::FunctionCall);
         assert_eq!(item.call_id.as_deref(), Some("call_abc"));
-        assert_eq!(item.name.as_deref(), Some("bash"));
+        assert_eq!(item.name.as_deref(), Some("execute"));
     }
 
     #[test]
@@ -3551,7 +3551,7 @@ mod tests {
         let item = ResponsesOutputItem {
             item_type: OutputItemType::FunctionCall,
             call_id: Some("call_abc".into()),
-            name: Some("bash".into()),
+            name: Some("execute".into()),
             arguments: Some(r#"{"cmd":"ls"}"#.into()),
             ..Default::default()
         };

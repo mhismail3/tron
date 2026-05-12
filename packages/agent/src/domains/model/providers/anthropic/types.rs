@@ -1164,14 +1164,14 @@ mod tests {
         let json = r#"{
             "type": "content_block_start",
             "index": 1,
-            "content_block": {"type": "tool_use", "id": "toolu_01abc", "name": "bash"}
+            "content_block": {"type": "tool_use", "id": "toolu_01abc", "name": "execute"}
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
             AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
                 SseContentBlock::ToolUse { id, name } => {
                     assert_eq!(id, "toolu_01abc");
-                    assert_eq!(name, "bash");
+                    assert_eq!(name, "execute");
                 }
                 _ => panic!("expected ToolUse"),
             },
@@ -1337,10 +1337,10 @@ mod tests {
     fn tool_use_block_builds_correct_json() {
         let mut input = Map::new();
         let _ = input.insert("cmd".into(), serde_json::json!("ls"));
-        let block = tool_use_block("toolu_01abc", "bash", &input);
+        let block = tool_use_block("toolu_01abc", "execute", &input);
         assert_eq!(block["type"], "tool_use");
         assert_eq!(block["id"], "toolu_01abc");
-        assert_eq!(block["name"], "bash");
+        assert_eq!(block["name"], "execute");
         assert_eq!(block["input"]["cmd"], "ls");
     }
 
@@ -1365,20 +1365,20 @@ mod tests {
     #[test]
     fn anthropic_tool_serde() {
         let tool = AnthropicTool {
-            name: "bash".into(),
+            name: "execute".into(),
             description: "Run commands".into(),
             input_schema: serde_json::json!({"type": "object"}),
             cache_control: None,
         };
         let json = serde_json::to_value(&tool).unwrap();
-        assert_eq!(json["name"], "bash");
+        assert_eq!(json["name"], "execute");
         assert!(json.get("cache_control").is_none());
     }
 
     #[test]
     fn anthropic_tool_with_cache_control() {
         let tool = AnthropicTool {
-            name: "bash".into(),
+            name: "execute".into(),
             description: "Run commands".into(),
             input_schema: serde_json::json!({"type": "object"}),
             cache_control: Some(CacheControl {

@@ -1274,7 +1274,7 @@ fn agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "tool_use", "id": "tool_1", "name": "Bash", "arguments": {"command": "ls"}}],
+                "content": [{"type": "tool_use", "id": "tool_1", "name": "process::run", "arguments": {"command": "ls"}}],
                 "turn": 1,
                 "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
             }),
@@ -1900,7 +1900,7 @@ fn get_state_at_head_with_agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "tool_use", "id": "c1", "name": "Bash", "arguments": {}}],
+                "content": [{"type": "tool_use", "id": "c1", "name": "process::run", "arguments": {}}],
                 "turn": 1,
             }),
             parent_id: None,
@@ -2584,7 +2584,7 @@ fn get_activity_summary_tool_use_with_result() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "tool_use", "id": "call_1", "name": "Read", "input": {"path": "/foo.rs"}}
+                {"type": "tool_use", "id": "call_1", "name": "filesystem::read_file", "input": {"path": "/foo.rs"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -2605,7 +2605,7 @@ fn get_activity_summary_tool_use_with_result() {
         .unwrap();
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].kind, "tool");
-    assert_eq!(lines[0].tool_name.as_deref(), Some("Read"));
+    assert_eq!(lines[0].tool_name.as_deref(), Some("filesystem::read_file"));
     assert_eq!(lines[0].duration_ms, Some(150));
     assert_eq!(lines[0].is_error, Some(false));
     assert!(lines[0].tool_args.is_some());
@@ -2624,7 +2624,7 @@ fn get_activity_summary_tool_use_no_result() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "tool_use", "id": "call_99", "name": "Bash", "input": {"command": "ls"}}
+                {"type": "tool_use", "id": "call_99", "name": "process::run", "input": {"command": "ls"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -2636,7 +2636,7 @@ fn get_activity_summary_tool_use_no_result() {
         .unwrap();
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].kind, "tool");
-    assert_eq!(lines[0].tool_name.as_deref(), Some("Bash"));
+    assert_eq!(lines[0].tool_name.as_deref(), Some("process::run"));
     assert!(lines[0].duration_ms.is_none());
     assert!(lines[0].is_error.is_none());
 }
@@ -2652,8 +2652,8 @@ fn get_activity_summary_spawn_subagent_skipped() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "tool_use", "id": "call_1", "name": "SpawnSubagent", "input": {"task": "do stuff"}},
-                {"type": "tool_use", "id": "call_2", "name": "Read", "input": {"path": "/bar.rs"}}
+                {"type": "tool_use", "id": "call_1", "name": "agent::spawn_subagent", "input": {"task": "do stuff"}},
+                {"type": "tool_use", "id": "call_2", "name": "filesystem::read_file", "input": {"path": "/bar.rs"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -2664,7 +2664,7 @@ fn get_activity_summary_spawn_subagent_skipped() {
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].tool_name.as_deref(), Some("Read"));
+    assert_eq!(lines[0].tool_name.as_deref(), Some("filesystem::read_file"));
 }
 
 #[test]
@@ -2810,7 +2810,7 @@ fn get_activity_summary_interleaved_content() {
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
                 {"type": "text", "text": "Let me read the file"},
-                {"type": "tool_use", "id": "c1", "name": "Read", "input": {"path": "a.rs"}},
+                {"type": "tool_use", "id": "c1", "name": "filesystem::read_file", "input": {"path": "a.rs"}},
                 {"type": "text", "text": "Now I see the issue"}
             ]}),
             parent_id: None,
@@ -2825,7 +2825,7 @@ fn get_activity_summary_interleaved_content() {
     assert_eq!(lines[0].kind, "text");
     assert_eq!(lines[0].text.as_deref(), Some("Let me read the file"));
     assert_eq!(lines[1].kind, "tool");
-    assert_eq!(lines[1].tool_name.as_deref(), Some("Read"));
+    assert_eq!(lines[1].tool_name.as_deref(), Some("filesystem::read_file"));
     assert_eq!(lines[2].kind, "text");
     assert_eq!(lines[2].text.as_deref(), Some("Now I see the issue"));
 }

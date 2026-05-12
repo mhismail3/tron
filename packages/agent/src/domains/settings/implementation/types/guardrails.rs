@@ -85,9 +85,9 @@ pub struct CustomGuardrailRule {
     pub tier: GuardrailTier,
     /// Action severity when triggered.
     pub severity: GuardrailSeverity,
-    /// Tool names this rule applies to (empty = all tools).
+    /// Capability ids this rule applies to (empty = all capabilities).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<String>>,
+    pub capabilities: Option<Vec<String>>,
     /// Execution priority (lower = earlier).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<i32>,
@@ -189,7 +189,7 @@ mod tests {
             rule_type: GuardrailRuleType::Pattern,
             tier: GuardrailTier::Standard,
             severity: GuardrailSeverity::Block,
-            tools: Some(vec!["Bash".to_string()]),
+            capabilities: Some(vec!["process::run".to_string()]),
             priority: Some(10),
             tags: None,
             target_argument: Some("command".to_string()),

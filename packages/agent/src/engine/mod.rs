@@ -4,8 +4,10 @@
 //!
 //! This module is the foundation for the engine redesign documented in
 //! `packages/agent/docs/engine-redesign/`. The public `/engine` protocol is
-//! only a transport over canonical capabilities, and agents get first-party
-//! tools over this same live catalog. The core invariants are:
+//! worker/client transport over canonical capabilities; model providers do not
+//! see that transport surface directly. Agents receive the capability-domain
+//! primitives (`search`, `inspect`, and `execute`) over this same live catalog.
+//! The core invariants are:
 //!
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;
@@ -15,15 +17,16 @@
 //!   pluggable engine ledger;
 //! - declared request/response schemas are enforced before/after handlers;
 //! - session capabilities can be explicitly promoted to workspace/system scope;
-//! - `EngineHost` exposes privileged `engine::*` meta-capabilities for live
-//!   discovery, inspection, cursor watch, delegated invocation, and promotion;
+//! - `EngineHost` exposes privileged `engine::*` transport functions for live
+//!   worker/client discovery, inspection, cursor watch, delegated invocation,
+//!   and promotion;
 //! - `EngineHostHandle` gives server startup and runtime services an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
-//! - agents use `AgentCapabilityClient` and engine tools to discover, inspect,
-//!   watch, and invoke live canonical capabilities without frozen snapshots;
-//!   the client preflights schema/authority before creating approval records,
-//!   and agents cannot resolve approvals themselves;
+//! - model-facing agents discover, inspect, and invoke live canonical
+//!   capabilities only through the capability-domain primitives; internal
+//!   clients preflight schema/authority before creating approval records, and
+//!   agents cannot resolve approvals themselves;
 //! - canonical domain functions such as `events::append`,
 //!   `filesystem::create_dir`, and `skills::activate` are the only executable
 //!   domain surface;
@@ -50,9 +53,9 @@
 //! # INVARIANT: one production execution shape
 //!
 //! Production behavior must enter the fabric as a canonical engine function.
-//! The `/engine` protocol exposes discovery, inspection, watch, invocation,
-//! promotion, and stream subscription messages. Production engine modules must
-//! not call handler-shaped transport shortcuts.
+//! The `/engine` protocol exposes worker/client discovery, inspection, watch,
+//! invocation, promotion, and stream subscription messages. Production engine
+//! modules must not call handler-shaped transport shortcuts.
 //!
 //! ## Module Position
 //!
@@ -98,7 +101,7 @@ pub use compensation::{
 pub use discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use errors::{EngineError, Result};
 pub use external::{EngineExternalWorkerRuntime, ExternalWorkerConnection};
-pub use host::{EngineHost, EngineHostHandle, EngineWatchRequest, EngineWatchResponse};
+pub use host::{CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle};
 pub use ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
     WorkerId,

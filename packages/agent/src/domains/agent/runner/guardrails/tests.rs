@@ -12,9 +12,9 @@ use crate::domains::agent::runner::guardrails::types::{
 };
 use std::collections::HashMap;
 
-fn make_bash_ctx(command: &str) -> EvaluationContext {
+fn make_process_ctx(command: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": command}),
         session_id: Some("test-session".into()),
         tool_call_id: Some("call-1".into()),
@@ -23,7 +23,7 @@ fn make_bash_ctx(command: &str) -> EvaluationContext {
 
 fn make_write_ctx(file_path: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "Write".into(),
+        tool_name: "filesystem::write_file".into(),
         tool_arguments: serde_json::json!({"file_path": file_path, "content": "test"}),
         session_id: Some("test-session".into()),
         tool_call_id: Some("call-1".into()),
@@ -32,7 +32,7 @@ fn make_write_ctx(file_path: &str) -> EvaluationContext {
 
 fn make_edit_ctx(file_path: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "Edit".into(),
+        tool_name: "filesystem::edit_file".into(),
         tool_arguments: serde_json::json!({"file_path": file_path}),
         session_id: None,
         tool_call_id: None,
@@ -41,7 +41,7 @@ fn make_edit_ctx(file_path: &str) -> EvaluationContext {
 
 fn make_read_ctx(file_path: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "Read".into(),
+        tool_name: "filesystem::read_file".into(),
         tool_arguments: serde_json::json!({"file_path": file_path}),
         session_id: None,
         tool_call_id: None,
@@ -93,14 +93,14 @@ fn scope_serde_roundtrip() {
 #[test]
 fn evaluation_context_serde_roundtrip() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": "ls"}),
         session_id: Some("sess-1".into()),
         tool_call_id: None,
     };
     let json = serde_json::to_string(&ctx).unwrap();
     let back: EvaluationContext = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.tool_name, "Bash");
+    assert_eq!(back.tool_name, "process::run");
     assert_eq!(back.session_id, Some("sess-1".into()));
     assert_eq!(back.tool_call_id, None);
 }
@@ -108,7 +108,7 @@ fn evaluation_context_serde_roundtrip() {
 #[test]
 fn evaluation_context_omits_none_fields() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({}),
         session_id: None,
         tool_call_id: None,
@@ -169,7 +169,7 @@ fn audit_entry_serde_roundtrip() {
         id: "audit-1".into(),
         timestamp: "2026-01-01T00:00:00Z".into(),
         session_id: Some("sess-1".into()),
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_call_id: None,
         evaluation: GuardrailEvaluation {
             blocked: false,
@@ -185,13 +185,13 @@ fn audit_entry_serde_roundtrip() {
     let json = serde_json::to_string(&entry).unwrap();
     let back: AuditEntry = serde_json::from_str(&json).unwrap();
     assert_eq!(back.id, "audit-1");
-    assert_eq!(back.tool_name, "Bash");
+    assert_eq!(back.tool_name, "process::run");
 }
 
 #[test]
 fn pattern_rm_rf_root_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("rm -rf /"));
+    let eval = engine.evaluate(&make_process_ctx("rm -rf /"));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
@@ -203,84 +203,84 @@ fn pattern_rm_rf_root_blocked() {
 #[test]
 fn pattern_sudo_rm_rf_root_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("sudo rm -rf /"));
+    let eval = engine.evaluate(&make_process_ctx("sudo rm -rf /"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_rm_rf_star_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("rm -rf /*"));
+    let eval = engine.evaluate(&make_process_ctx("rm -rf /*"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_fork_bomb_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx(":(){ :|: & };:"));
+    let eval = engine.evaluate(&make_process_ctx(":(){ :|: & };:"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_dd_to_device_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("dd if=/dev/zero of=/dev/sda"));
+    let eval = engine.evaluate(&make_process_ctx("dd if=/dev/zero of=/dev/sda"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_write_to_device_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("> /dev/sda"));
+    let eval = engine.evaluate(&make_process_ctx("> /dev/sda"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_mkfs_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("mkfs.ext4 /dev/sda1"));
+    let eval = engine.evaluate(&make_process_ctx("mkfs.ext4 /dev/sda1"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_chmod_777_root_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("chmod 777 /"));
+    let eval = engine.evaluate(&make_process_ctx("chmod 777 /"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_sudo_rm_usr_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("sudo rm -rf /usr"));
+    let eval = engine.evaluate(&make_process_ctx("sudo rm -rf /usr"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_safe_rm_not_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("rm file.txt"));
+    let eval = engine.evaluate(&make_process_ctx("rm file.txt"));
     assert!(!eval.blocked);
 }
 
 #[test]
 fn pattern_safe_ls_not_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("ls -la"));
+    let eval = engine.evaluate(&make_process_ctx("ls -la"));
     assert!(!eval.blocked);
 }
 
 #[test]
 fn pattern_git_push_not_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("git push origin main"));
+    let eval = engine.evaluate(&make_process_ctx("git push origin main"));
     assert!(!eval.blocked);
 }
 
 #[test]
 fn pattern_tron_delete_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("rm -rf ~/.tron/skills/test"));
+    let eval = engine.evaluate(&make_process_ctx("rm -rf ~/.tron/skills/test"));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
@@ -292,14 +292,14 @@ fn pattern_tron_delete_blocked() {
 #[test]
 fn pattern_trash_tron_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("trash ~/.tron/old-file"));
+    let eval = engine.evaluate(&make_process_ctx("trash ~/.tron/old-file"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn pattern_target_argument_missing_not_triggered() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"timeout": 5000}),
         session_id: None,
         tool_call_id: None,
@@ -394,7 +394,7 @@ fn path_no_traversal_not_blocked() {
 #[test]
 fn path_hidden_mkdir_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("mkdir .hidden"));
+    let eval = engine.evaluate(&make_process_ctx("mkdir .hidden"));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
@@ -406,51 +406,51 @@ fn path_hidden_mkdir_blocked() {
 #[test]
 fn path_hidden_mkdir_p_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("mkdir -p /tmp/.secret"));
+    let eval = engine.evaluate(&make_process_ctx("mkdir -p /tmp/.secret"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn path_normal_mkdir_not_blocked() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("mkdir new_directory"));
+    let eval = engine.evaluate(&make_process_ctx("mkdir new_directory"));
     assert!(!eval.blocked);
 }
 
 #[test]
-fn path_bash_tee_to_tron_home_blocked() {
+fn path_process_tee_to_tron_home_blocked() {
     let home = crate::shared::paths::home_dir();
     let mut engine = default_engine();
     let cmd = format!("echo test | tee {home}/.tron/profiles/user/profile.toml");
-    let eval = engine.evaluate(&make_bash_ctx(&cmd));
+    let eval = engine.evaluate(&make_process_ctx(&cmd));
     assert!(eval.blocked);
 }
 
 #[test]
-fn path_bash_cp_to_tron_home_db_blocked() {
+fn path_process_cp_to_tron_home_db_blocked() {
     let home = crate::shared::paths::home_dir();
     let mut engine = default_engine();
     let cmd = format!(
         "cp foo.db {home}/.tron/internal/{}/prod.db",
         crate::shared::paths::dirs::DB
     );
-    let eval = engine.evaluate(&make_bash_ctx(&cmd));
+    let eval = engine.evaluate(&make_process_ctx(&cmd));
     assert!(eval.blocked);
 }
 
 #[test]
-fn path_bash_redirect_to_tron_home_auth_blocked() {
+fn path_process_redirect_to_tron_home_auth_blocked() {
     let home = crate::shared::paths::home_dir();
     let mut engine = default_engine();
     let cmd = format!("echo '{{}}' > {home}/.tron/profiles/auth.json");
-    let eval = engine.evaluate(&make_bash_ctx(&cmd));
+    let eval = engine.evaluate(&make_process_ctx(&cmd));
     assert!(eval.blocked);
 }
 
 #[test]
 fn resource_timeout_exceeds_max_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": "sleep 1000", "timeout": 4_000_000}),
         session_id: None,
         tool_call_id: None,
@@ -461,14 +461,14 @@ fn resource_timeout_exceeds_max_blocked() {
     assert!(
         eval.triggered_rules
             .iter()
-            .any(|r| r.rule_id == "bash.timeout")
+            .any(|r| r.rule_id == "process.timeout")
     );
 }
 
 #[test]
 fn resource_timeout_above_600s_warns_but_not_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": "build", "timeout": 900_000}),
         session_id: None,
         tool_call_id: None,
@@ -480,15 +480,15 @@ fn resource_timeout_above_600s_warns_but_not_blocked() {
     assert!(
         eval.triggered_rules
             .iter()
-            .any(|r| r.rule_id == "bash.long-timeout"),
-        "bash.long-timeout warning should fire"
+            .any(|r| r.rule_id == "process.long-timeout"),
+        "process.long-timeout warning should fire"
     );
 }
 
 #[test]
 fn resource_timeout_within_limit_not_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 500_000}),
         session_id: None,
         tool_call_id: None,
@@ -499,14 +499,14 @@ fn resource_timeout_within_limit_not_blocked() {
         !eval
             .triggered_rules
             .iter()
-            .any(|r| r.rule_id == "bash.timeout")
+            .any(|r| r.rule_id == "process.timeout")
     );
 }
 
 #[test]
 fn resource_timeout_exact_max_not_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 600_000}),
         session_id: None,
         tool_call_id: None,
@@ -517,14 +517,14 @@ fn resource_timeout_exact_max_not_blocked() {
         !eval
             .triggered_rules
             .iter()
-            .any(|r| r.rule_id == "bash.timeout")
+            .any(|r| r.rule_id == "process.timeout")
     );
 }
 
 #[test]
 fn resource_missing_argument_not_triggered() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": "ls"}),
         session_id: None,
         tool_call_id: None,
@@ -535,14 +535,14 @@ fn resource_missing_argument_not_triggered() {
         !eval
             .triggered_rules
             .iter()
-            .any(|r| r.rule_id == "bash.timeout")
+            .any(|r| r.rule_id == "process.timeout")
     );
 }
 
 #[test]
 fn resource_non_numeric_argument_not_triggered() {
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"command": "ls", "timeout": "not-a-number"}),
         session_id: None,
         tool_call_id: None,
@@ -553,7 +553,7 @@ fn resource_non_numeric_argument_not_triggered() {
         !eval
             .triggered_rules
             .iter()
-            .any(|r| r.rule_id == "bash.timeout")
+            .any(|r| r.rule_id == "process.timeout")
     );
 }
 
@@ -567,7 +567,7 @@ fn resource_min_value_check() {
             severity: Severity::Block,
             scope: Scope::Tool,
             tier: RuleTier::Custom,
-            tools: vec!["Bash".into()],
+            capabilities: vec!["process::run".into()],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -577,7 +577,7 @@ fn resource_min_value_check() {
         min_value: Some(10.0),
     };
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"value": 5}),
         session_id: None,
         tool_call_id: None,
@@ -596,7 +596,7 @@ fn resource_both_min_max() {
             severity: Severity::Warn,
             scope: Scope::Tool,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -641,7 +641,7 @@ fn context_rule_condition_true_triggers() {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -673,7 +673,7 @@ fn context_rule_condition_false_not_triggered() {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -705,7 +705,7 @@ fn composite_and_all_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -721,7 +721,7 @@ fn composite_and_all_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -737,7 +737,7 @@ fn composite_and_all_triggered() {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 50,
             enabled: true,
             tags: vec![],
@@ -746,7 +746,7 @@ fn composite_and_all_triggered() {
         child_rule_ids: vec!["child.a".into(), "child.b".into()],
     }));
 
-    let ctx = make_bash_ctx("test command");
+    let ctx = make_process_ctx("test command");
     let eval = engine.evaluate(&ctx);
     assert!(
         eval.triggered_rules
@@ -769,7 +769,7 @@ fn composite_and_partial_not_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -785,7 +785,7 @@ fn composite_and_partial_not_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -801,7 +801,7 @@ fn composite_and_partial_not_triggered() {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 50,
             enabled: true,
             tags: vec![],
@@ -810,7 +810,7 @@ fn composite_and_partial_not_triggered() {
         child_rule_ids: vec!["child.a".into(), "child.b".into()],
     }));
 
-    let ctx = make_bash_ctx("test command");
+    let ctx = make_process_ctx("test command");
     let eval = engine.evaluate(&ctx);
     assert!(
         !eval
@@ -834,7 +834,7 @@ fn composite_or_any_triggers() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -850,7 +850,7 @@ fn composite_or_any_triggers() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -866,7 +866,7 @@ fn composite_or_any_triggers() {
             severity: Severity::Warn,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 50,
             enabled: true,
             tags: vec![],
@@ -875,7 +875,7 @@ fn composite_or_any_triggers() {
         child_rule_ids: vec!["child.a".into(), "child.b".into()],
     }));
 
-    let ctx = make_bash_ctx("test command");
+    let ctx = make_process_ctx("test command");
     let eval = engine.evaluate(&ctx);
     assert!(
         eval.triggered_rules
@@ -898,7 +898,7 @@ fn composite_or_none_not_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -914,7 +914,7 @@ fn composite_or_none_not_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -930,7 +930,7 @@ fn composite_or_none_not_triggered() {
             severity: Severity::Warn,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 50,
             enabled: true,
             tags: vec![],
@@ -939,7 +939,7 @@ fn composite_or_none_not_triggered() {
         child_rule_ids: vec!["child.a".into(), "child.b".into()],
     }));
 
-    let ctx = make_bash_ctx("safe command");
+    let ctx = make_process_ctx("safe command");
     let eval = engine.evaluate(&ctx);
     assert!(
         !eval
@@ -963,7 +963,7 @@ fn composite_not_triggered_when_child_not_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -979,7 +979,7 @@ fn composite_not_triggered_when_child_not_triggered() {
             severity: Severity::Warn,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 50,
             enabled: true,
             tags: vec![],
@@ -988,7 +988,7 @@ fn composite_not_triggered_when_child_not_triggered() {
         child_rule_ids: vec!["child.a".into()],
     }));
 
-    let ctx = make_bash_ctx("safe command");
+    let ctx = make_process_ctx("safe command");
     let eval = engine.evaluate(&ctx);
     assert!(
         eval.triggered_rules
@@ -1011,7 +1011,7 @@ fn composite_not_not_triggered_when_child_triggered() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -1027,7 +1027,7 @@ fn composite_not_not_triggered_when_child_triggered() {
             severity: Severity::Warn,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 50,
             enabled: true,
             tags: vec![],
@@ -1036,7 +1036,7 @@ fn composite_not_not_triggered_when_child_triggered() {
         child_rule_ids: vec!["child.a".into()],
     }));
 
-    let ctx = make_bash_ctx("test command");
+    let ctx = make_process_ctx("test command");
     let eval = engine.evaluate(&ctx);
     assert!(
         !eval
@@ -1060,7 +1060,7 @@ fn composite_unknown_child_handled() {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 50,
             enabled: true,
             tags: vec![],
@@ -1069,7 +1069,7 @@ fn composite_unknown_child_handled() {
         child_rule_ids: vec!["nonexistent.rule".into()],
     }));
 
-    let ctx = make_bash_ctx("test");
+    let ctx = make_process_ctx("test");
     let eval = engine.evaluate(&ctx);
     assert!(
         !eval
@@ -1134,7 +1134,7 @@ fn engine_warn_rule_not_blocked() {
             severity: Severity::Warn,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -1143,7 +1143,7 @@ fn engine_warn_rule_not_blocked() {
         patterns: vec![regex::Regex::new("warn-trigger").unwrap()],
     }));
 
-    let eval = engine.evaluate(&make_bash_ctx("warn-trigger"));
+    let eval = engine.evaluate(&make_process_ctx("warn-trigger"));
     assert!(!eval.blocked);
     assert!(eval.has_warnings);
     assert!(!eval.warnings.is_empty());
@@ -1163,7 +1163,7 @@ fn engine_audit_rule_silent() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec![],
+            capabilities: vec![],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -1172,7 +1172,7 @@ fn engine_audit_rule_silent() {
         patterns: vec![regex::Regex::new("audit-trigger").unwrap()],
     }));
 
-    let eval = engine.evaluate(&make_bash_ctx("audit-trigger"));
+    let eval = engine.evaluate(&make_process_ctx("audit-trigger"));
     assert!(!eval.blocked);
     assert!(!eval.has_warnings);
     assert!(
@@ -1196,7 +1196,7 @@ fn engine_priority_ordering() {
             severity: Severity::Audit,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec!["Test".into()],
+            capabilities: vec!["Test".into()],
             priority: 10,
             enabled: true,
             tags: vec![],
@@ -1212,7 +1212,7 @@ fn engine_priority_ordering() {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Custom,
-            tools: vec!["Test".into()],
+            capabilities: vec!["Test".into()],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -1233,7 +1233,7 @@ fn engine_priority_ordering() {
 }
 
 #[test]
-fn engine_tool_filtering() {
+fn engine_capability_filtering() {
     let mut engine = GuardrailEngine::new(GuardrailEngineOptions {
         enable_audit: Some(false),
         ..Default::default()
@@ -1246,7 +1246,7 @@ fn engine_tool_filtering() {
             severity: Severity::Block,
             scope: Scope::Tool,
             tier: RuleTier::Custom,
-            tools: vec!["SpecialTool".into()],
+            capabilities: vec!["SpecialTool".into()],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -1256,7 +1256,7 @@ fn engine_tool_filtering() {
     }));
 
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({"input": "anything"}),
         session_id: None,
         tool_call_id: None,
@@ -1328,14 +1328,14 @@ fn engine_core_rule_cannot_be_disabled_by_override() {
     });
 
     assert!(engine.is_rule_enabled("core.destructive-commands"));
-    let eval = engine.evaluate(&make_bash_ctx("rm -rf /"));
+    let eval = engine.evaluate(&make_process_ctx("rm -rf /"));
     assert!(eval.blocked);
 }
 
 #[test]
 fn engine_timing_populated() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("ls"));
+    let eval = engine.evaluate(&make_process_ctx("ls"));
     assert!(eval.timestamp.contains('T'));
 }
 
@@ -1364,7 +1364,7 @@ fn engine_prevent_non_core_as_core() {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
-            tools: vec![],
+            capabilities: vec![],
             priority: 1000,
             enabled: true,
             tags: vec![],
@@ -1380,7 +1380,7 @@ fn audit_log_and_retrieve() {
     let mut logger = AuditLogger::new(None);
     let entry = logger.log(AuditEntryParams {
         session_id: Some("sess-1".into()),
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_call_id: Some("call-1".into()),
         tool_arguments: Some(serde_json::json!({"command": "ls"})),
         evaluation: GuardrailEvaluation {
@@ -1428,7 +1428,7 @@ fn audit_entries_for_session() {
     for session in &["sess-1", "sess-2", "sess-1"] {
         let _ = logger.log(AuditEntryParams {
             session_id: Some((*session).to_string()),
-            tool_name: "Bash".into(),
+            tool_name: "process::run".into(),
             tool_call_id: None,
             tool_arguments: None,
             evaluation: GuardrailEvaluation {
@@ -1452,7 +1452,7 @@ fn audit_triggered_entries_filter() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1471,7 +1471,7 @@ fn audit_triggered_entries_filter() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Read".into(),
+        tool_name: "filesystem::read_file".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1495,7 +1495,7 @@ fn audit_blocked_entries_filter() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1510,7 +1510,7 @@ fn audit_blocked_entries_filter() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Read".into(),
+        tool_name: "filesystem::read_file".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1532,7 +1532,7 @@ fn audit_clear() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1556,7 +1556,7 @@ fn audit_stats() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1575,7 +1575,7 @@ fn audit_stats() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Write".into(),
+        tool_name: "filesystem::write_file".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1594,7 +1594,7 @@ fn audit_stats() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_call_id: None,
         tool_arguments: None,
         evaluation: GuardrailEvaluation {
@@ -1613,8 +1613,8 @@ fn audit_stats() {
     assert_eq!(stats.blocked, 1);
     assert_eq!(stats.warnings, 1);
     assert_eq!(stats.passed, 1);
-    assert_eq!(stats.by_tool.get("Bash"), Some(&2));
-    assert_eq!(stats.by_tool.get("Write"), Some(&1));
+    assert_eq!(stats.by_tool.get("process::run"), Some(&2));
+    assert_eq!(stats.by_tool.get("filesystem::write_file"), Some(&1));
     assert_eq!(stats.by_rule.get("rule-a"), Some(&1));
     assert_eq!(stats.by_rule.get("rule-b"), Some(&1));
 }
@@ -1623,7 +1623,7 @@ fn audit_stats() {
 fn audit_redaction_in_logged_entry() {
     let mut engine = default_engine();
     let ctx = EvaluationContext {
-        tool_name: "Bash".into(),
+        tool_name: "process::run".into(),
         tool_arguments: serde_json::json!({
             "command": "ls",
             "password": "secret123",
@@ -1644,18 +1644,18 @@ fn audit_redaction_in_logged_entry() {
 }
 
 #[test]
-fn integration_safe_bash_command() {
+fn integration_safe_process_command() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("cargo test --workspace"));
+    let eval = engine.evaluate(&make_process_ctx("cargo test --workspace"));
     assert!(!eval.blocked);
     assert!(!eval.has_warnings);
     assert!(eval.triggered_rules.is_empty());
 }
 
 #[test]
-fn integration_dangerous_bash_multiple_rules() {
+fn integration_dangerous_process_multiple_rules() {
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_bash_ctx("rm -rf ~/.tron"));
+    let eval = engine.evaluate(&make_process_ctx("rm -rf ~/.tron"));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules

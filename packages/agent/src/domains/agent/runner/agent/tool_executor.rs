@@ -8,13 +8,9 @@ use crate::domains::agent::runner::context::local_policy;
 use crate::domains::agent::runner::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::agent::runner::hooks::types::{HookAction, HookContext};
-use crate::domains::tools::implementations::capability_runtime::{
-    RuntimeToolExecution, insert_runtime_tool_execution, remove_runtime_tool_execution,
+use crate::domains::capability_support::implementations::capability_surface::{
+    CapabilitySurfacePolicy, EngineToolTarget, ResolvedToolSurface,
 };
-use crate::domains::tools::implementations::capability_surface::{
-    EngineToolTarget, ResolvedToolSurface,
-};
-use crate::domains::tools::implementations::traits::ToolContext;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
     InvocationId, TraceId,
@@ -64,6 +60,8 @@ fn traced_base(
 pub struct ToolExecutionContext<'a> {
     /// Live engine-catalog tool surface resolved for this turn.
     pub tool_surface: &'a ResolvedToolSurface,
+    /// Profile/session capability policy that gates direct execute targets.
+    pub capability_policy: &'a CapabilitySurfacePolicy,
     /// Optional guardrail engine for pre-execution validation.
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for pre/post tool-use hooks.
@@ -79,11 +77,13 @@ pub struct ToolExecutionContext<'a> {
     /// Workspace identifier for scoped memory recall.
     pub workspace_id: Option<&'a str>,
     /// Optional process manager for background process execution.
-    pub process_manager:
-        Option<&'a Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub process_manager: Option<
+        &'a Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     /// Optional unified job manager for process + subagent lifecycle.
-    pub job_manager:
-        Option<&'a Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    pub job_manager: Option<
+        &'a Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
+    >,
     /// Optional output buffer registry for on-demand process output streaming.
     pub output_buffer_registry: Option<
         &'a Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
@@ -95,23 +95,20 @@ pub struct ToolExecutionContext<'a> {
     pub provider_type: Provider,
     /// Optional execution spec selected by the current session profile.
     pub execution_spec: Option<&'a crate::shared::profile::AgentExecutionSpec>,
-    /// Optional persister for durable progress events. When `Some`, long-running
-    /// tools can call `ctx.emit_progress(...)` to surface incremental status
-    /// (Bash heartbeat, WebFetch bytes, subagent turn count) as persisted
-    /// `tool.progress` events visible through live stream and reconstruction.
+    /// Optional persister for durable progress events emitted by domain-owned
+    /// capabilities that report incremental progress.
     pub event_persister: Option<
         &'a Arc<crate::domains::agent::runner::orchestrator::event_persister::EventPersister>,
     >,
     /// Turn number this tool call belongs to. Copied into each progress event
     /// so iOS can attribute progress after disconnect/reconnect.
     pub turn: i64,
-    /// Optional per-tool abort registry. When `Some`, each tool call registers
-    /// a child `CancellationToken` so `agent.abortTool` can cancel a single
-    /// tool without aborting the whole turn. When `None`, the turn-level
+    /// Optional per-call abort registry. When `Some`, each model tool call registers
+    /// a child `CancellationToken` so `agent.abortTool` can cancel one capability
+    /// primitive without aborting the whole turn. When `None`, the turn-level
     /// `cancel` token is passed through unchanged.
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
-    /// Optional engine host for routing actual tool execution through
-    /// canonical `tool::*` functions after runtime guardrails and hooks.
+    /// Optional engine host for routing model-facing capability primitives.
     pub engine_host: Option<&'a EngineHostHandle>,
     /// Stable run id used for model tool-call idempotency.
     pub run_id: Option<&'a str>,
@@ -136,7 +133,7 @@ pub async fn execute_tool(
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
 
-    // 1. Resolve the model tool name through the live engine catalog captured
+    // 1. Resolve the model capability id through the live engine catalog captured
     // at the provider request boundary.
     let engine_target = ctx.tool_surface.targets_by_name.get(&tool_name);
     if engine_target.is_none() {
@@ -164,9 +161,9 @@ pub async fn execute_tool(
         .expect("ToolExecutionContext.execution_spec must come from the session execution plan");
     let context_policy =
         local_policy::ContextPolicy::from_entrypoint_with_spec(ctx.provider_type, spec, "main");
-    let allowed_tools = context_policy.tool_filter();
+    let allowed_capabilities = context_policy.capability_filter();
     if context_policy.is_local()
-        && let Some(allowed) = allowed_tools.as_ref()
+        && let Some(allowed) = allowed_capabilities.as_ref()
         && !allowed.iter().any(|allowed| allowed == &tool_name)
     {
         warn!(tool_name, "tool not available for local model");
@@ -184,11 +181,15 @@ pub async fn execute_tool(
         };
     }
 
+    let mut effective_args = Value::Object(tool_call.arguments.clone());
+
     // 2. Evaluate guardrails (synchronous)
     if let Some(guardrail_engine) = ctx.guardrails {
+        let guardrail_tool_name = guardrail_capability_id(&tool_name, &effective_args);
+        let guardrail_arguments = guardrail_capability_arguments(&tool_name, &effective_args);
         let eval_ctx = EvaluationContext {
-            tool_name: tool_name.clone(),
-            tool_arguments: Value::Object(tool_call.arguments.clone()),
+            tool_name: guardrail_tool_name,
+            tool_arguments: guardrail_arguments,
             session_id: Some(session_id.to_owned()),
             tool_call_id: Some(tool_call_id.clone()),
         };
@@ -214,7 +215,6 @@ pub async fn execute_tool(
     }
 
     // 3. Execute PreToolUse hooks (blocking, sequential)
-    let mut effective_args = Value::Object(tool_call.arguments.clone());
     if let Some(hook_engine) = ctx.hooks {
         let hook_ctx = HookContext::PreToolUse {
             session_id: session_id.to_owned(),
@@ -330,7 +330,7 @@ pub async fn execute_tool(
         tool_call_id, session_id, "tool execution started"
     );
 
-    // 5. Execute tool with streaming output channel
+    // 5. Execute the capability primitive.
     //
     // When a `tool_abort_registry` is present, derive a child `CancellationToken`
     // scoped to this single call. `agent.abortTool` cancels the child; parent
@@ -346,48 +346,11 @@ pub async fn execute_tool(
         None => (ctx.cancel.clone(), None),
     };
 
-    let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let tool_ctx = ToolContext {
-        tool_call_id: tool_call_id.clone(),
-        session_id: session_id.to_owned(),
-        working_directory: working_directory.to_owned(),
-        cancellation: per_tool_cancel.clone(),
-        subagent_depth: ctx.subagent_depth,
-        subagent_max_depth: ctx.subagent_max_depth,
-        workspace_id: ctx.workspace_id.map(String::from),
-        output_tx: Some(output_tx),
-        process_manager: ctx.process_manager.map(Arc::clone),
-        job_manager: ctx.job_manager.map(Arc::clone),
-        output_buffer_registry: ctx.output_buffer_registry.map(Arc::clone),
-        event_emitter: Some(Arc::clone(ctx.emitter)),
-        event_persister: ctx.event_persister.map(Arc::clone),
-        turn: ctx.turn,
-        all_tool_names: ctx.tool_surface.all_tool_names.clone(),
-    };
-
-    // Spawn a task to forward streaming output chunks as ToolExecutionUpdate events
-    let stream_emitter = ctx.emitter.clone();
-    let stream_tool_call_id = tool_call_id.clone();
-    let stream_session_id = session_id.to_owned();
-    let stream_trace_id = ctx.trace_id.map(|id| id.as_str().to_owned());
-    let stream_parent_invocation_id = ctx.parent_invocation_id.map(|id| id.as_str().to_owned());
-    let stream_handle = tokio::spawn(async move {
-        while let Some(chunk) = output_rx.recv().await {
-            let _ = stream_emitter.emit(TronEvent::ToolExecutionUpdate {
-                base: BaseEvent::now(&stream_session_id).with_trace_context(
-                    stream_trace_id.clone(),
-                    stream_parent_invocation_id.clone(),
-                ),
-                tool_call_id: stream_tool_call_id.clone(),
-                update: chunk,
-            });
-        }
-    });
-
     let tool_result = if per_tool_cancel.is_cancelled() {
         crate::shared::tools::error_result("Operation cancelled")
     } else if let (Some(engine_host), Some(target)) = (ctx.engine_host, engine_target) {
-        execute_tool_via_engine(
+        let execution_policy_scopes = ctx.capability_policy.execution_policy_scopes();
+        execute_capability_primitive_via_engine(
             engine_host,
             target,
             &tool_name,
@@ -399,8 +362,8 @@ pub async fn execute_tool(
             ctx.run_id,
             ctx.trace_id,
             ctx.parent_invocation_id,
+            &execution_policy_scopes,
             effective_args,
-            tool_ctx.clone(),
         )
         .await
     } else {
@@ -416,9 +379,6 @@ pub async fn execute_tool(
             is_interactive,
         };
     };
-    // Drop the ToolContext's sender so the stream_handle can complete
-    drop(tool_ctx);
-    let _ = stream_handle.await;
 
     let duration_ms = duration_ceil_ms(start.elapsed());
 
@@ -540,8 +500,33 @@ pub async fn execute_tool(
     }
 }
 
+fn guardrail_capability_id(model_tool_name: &str, args: &Value) -> String {
+    if model_tool_name != "execute" {
+        return model_tool_name.to_owned();
+    }
+    [
+        "contractId",
+        "implementationId",
+        "functionId",
+        "capabilityId",
+    ]
+    .iter()
+    .find_map(|key| args.get(key).and_then(Value::as_str))
+    .unwrap_or(model_tool_name)
+    .to_owned()
+}
+
+fn guardrail_capability_arguments(model_tool_name: &str, args: &Value) -> Value {
+    if model_tool_name == "execute"
+        && let Some(payload) = args.get("payload")
+    {
+        return payload.clone();
+    }
+    args.clone()
+}
+
 #[allow(clippy::too_many_arguments)]
-async fn execute_tool_via_engine(
+async fn execute_capability_primitive_via_engine(
     engine_host: &EngineHostHandle,
     target: &EngineToolTarget,
     tool_name: &str,
@@ -553,9 +538,9 @@ async fn execute_tool_via_engine(
     run_id: Option<&str>,
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
+    execution_policy_scopes: &[String],
     effective_args: Value,
-    tool_ctx: ToolContext,
-) -> crate::shared::tools::TronToolResult {
+) -> crate::shared::tools::CapabilityResult {
     let material = stable_tool_call_material(
         run_id,
         session_id,
@@ -581,11 +566,16 @@ async fn execute_tool_via_engine(
         .cloned()
         .unwrap_or_else(TraceId::generate);
     let mut causal_context = CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
-        .with_scope("tool.read")
-        .with_scope("tool.write")
-        .with_scope("tool.invoke")
+        .with_scope("capability.search")
+        .with_scope("capability.inspect")
+        .with_scope("capability.execute")
         .with_session_id(session_id.to_owned())
         .with_idempotency_key(idempotency_key);
+    for scope in execution_policy_scopes {
+        if !causal_context.has_scope(scope) {
+            causal_context = causal_context.with_scope(scope.clone());
+        }
+    }
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
     }
@@ -598,19 +588,9 @@ async fn execute_tool_via_engine(
         }
     }
     let payload = effective_args;
-    let runtime_execution = RuntimeToolExecution {
-        tool_name: tool_name.to_owned(),
-        params: payload.clone(),
-        context: tool_ctx,
-    };
     let invocation = Invocation::new_sync(function_id.clone(), payload, causal_context)
         .expecting_revision(target.function.revision);
-    let runtime_invocation_id = invocation.id.to_string();
-    if function_id.namespace() == "tool" {
-        insert_runtime_tool_execution(runtime_invocation_id.clone(), runtime_execution);
-    }
-    let result = engine_host.invoke(invocation.clone()).await;
-    remove_runtime_tool_execution(&runtime_invocation_id);
+    let result = engine_host.invoke(invocation).await;
 
     if let Some(error) = result.error {
         return crate::shared::tools::error_result(format!(
@@ -666,10 +646,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
-    use crate::domains::tools::implementations::capability_surface::{
-        EngineToolTarget, ResolvedToolSurface, ToolSurfacePolicy, resolve_provider_tools,
+    use crate::domains::capability_support::implementations::capability_surface::{
+        CapabilitySurfacePolicy, EngineToolTarget, ResolvedToolSurface, resolve_provider_tools,
     };
-    use crate::domains::tools::implementations::traits::ExecutionMode;
+    use crate::domains::capability_support::implementations::traits::ExecutionMode;
     use crate::engine::{
         AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel,
         VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
@@ -703,18 +683,18 @@ mod tests {
     }
 
     fn surface_with_echo() -> ResolvedToolSurface {
-        let function_id = FunctionId::new("tool::echo").expect("function id");
+        let function_id = FunctionId::new("capability::execute").expect("function id");
         let function = FunctionDefinition::new(
             function_id.clone(),
-            WorkerId::new("tool").expect("worker id"),
+            WorkerId::new("capability").expect("worker id"),
             "Echo".to_owned(),
             VisibilityScope::System,
             EffectClass::PureRead,
         )
         .with_risk(RiskLevel::Low)
-        .with_required_authority(AuthorityRequirement::scope("tool.read"));
+        .with_required_authority(AuthorityRequirement::scope("capability.execute"));
         let target = EngineToolTarget {
-            model_tool_name: "Echo".to_owned(),
+            model_tool_name: "execute".to_owned(),
             function_id,
             function,
             stops_turn: true,
@@ -722,13 +702,13 @@ mod tests {
             execution_mode: ExecutionMode::Parallel,
         };
         let mut targets_by_name = BTreeMap::new();
-        let _ = targets_by_name.insert("Echo".to_owned(), target);
+        let _ = targets_by_name.insert("execute".to_owned(), target);
         ResolvedToolSurface {
             catalog_revision: crate::engine::CatalogRevision(0),
             tools: Vec::new(),
             targets_by_name,
-            all_tool_names: vec!["Echo".to_owned()],
-            turn_stopping_tools: HashSet::from(["Echo".to_owned()]),
+            all_tool_names: vec!["execute".to_owned()],
+            turn_stopping_tools: HashSet::from(["execute".to_owned()]),
         }
     }
 
@@ -740,6 +720,7 @@ mod tests {
     ) -> ToolExecutionContext<'a> {
         ToolExecutionContext {
             tool_surface: surface,
+            capability_policy: &DEFAULT_CAPABILITY_POLICY,
             guardrails: &None,
             hooks: &None,
             emitter,
@@ -763,6 +744,9 @@ mod tests {
         }
     }
 
+    static DEFAULT_CAPABILITY_POLICY: std::sync::LazyLock<CapabilitySurfacePolicy> =
+        std::sync::LazyLock::new(CapabilitySurfacePolicy::default);
+
     #[tokio::test]
     async fn unknown_model_tool_fails_before_execution() {
         let surface = empty_surface();
@@ -782,14 +766,14 @@ mod tests {
         let cancel = CancellationToken::new();
         let spec = default_execution_spec();
         let ctx = tool_exec_ctx(&surface, &emitter, &cancel, &spec);
-        let call = ToolCall::new("tc1", "Echo", Default::default());
+        let call = ToolCall::new("tc1", "execute", Default::default());
         let result = execute_tool(&call, "s1", "/tmp", &ctx).await;
         assert!(result.result.is_error.unwrap_or(false));
         assert!(result.stops_turn);
     }
 
     #[tokio::test]
-    async fn model_tool_call_invokes_builtin_tool_through_engine() {
+    async fn model_tool_call_invokes_capability_primitive_through_engine() {
         let server = crate::shared::server::test_support::make_test_context();
         let spec = default_execution_spec();
         let context_policy =
@@ -803,11 +787,12 @@ mod tests {
             None,
             Provider::Anthropic,
             &context_policy,
-            &ToolSurfacePolicy::default(),
+            &CapabilitySurfacePolicy::default(),
         )
         .await
         .expect("provider tool surface");
-        assert!(surface.targets_by_name.contains_key("Read"));
+        assert_eq!(surface.all_tool_names, vec!["search", "inspect", "execute"]);
+        assert!(surface.targets_by_name.contains_key("execute"));
 
         let tempdir = tempfile::tempdir().expect("tool tempdir");
         let file_path = tempdir.path().join("note.txt");
@@ -819,11 +804,16 @@ mod tests {
         ctx.engine_host = Some(&server.engine_host);
 
         let mut args = serde_json::Map::new();
+        args.insert("mode".to_owned(), Value::String("invoke".to_owned()));
         args.insert(
-            "file_path".to_owned(),
-            Value::String(file_path.to_string_lossy().into_owned()),
+            "functionId".to_owned(),
+            Value::String("filesystem::read_file".to_owned()),
         );
-        let call = ToolCall::new("tc1", "Read", args);
+        args.insert(
+            "payload".to_owned(),
+            json!({"path": file_path.to_string_lossy()}),
+        );
+        let call = ToolCall::new("tc1", "execute", args);
         let result = execute_tool(
             &call,
             "s1",
@@ -865,28 +855,28 @@ mod tests {
         engine_host
             .register_worker(
                 WorkerDefinition::new(
-                    WorkerId::new("tool").expect("worker id"),
+                    WorkerId::new("capability").expect("worker id"),
                     WorkerKind::InProcess,
-                    ActorId::new("tool-owner").expect("actor id"),
-                    AuthorityGrantId::new("tool-grant").expect("grant id"),
+                    ActorId::new("capability-owner").expect("actor id"),
+                    AuthorityGrantId::new("capability-grant").expect("grant id"),
                 )
-                .with_namespace_claim("tool"),
+                .with_namespace_claim("capability"),
                 false,
             )
             .await
             .expect("register worker");
 
         let captured = Arc::new(Mutex::new(None));
-        let function_id = FunctionId::new("tool::capture").expect("function id");
+        let function_id = FunctionId::new("capability::capture").expect("function id");
         let function = FunctionDefinition::new(
             function_id.clone(),
-            WorkerId::new("tool").expect("worker id"),
-            "Capture tool invocation".to_owned(),
+            WorkerId::new("capability").expect("worker id"),
+            "Capture capability invocation".to_owned(),
             VisibilityScope::System,
             EffectClass::IdempotentWrite,
         )
         .with_risk(RiskLevel::Medium)
-        .with_required_authority(AuthorityRequirement::scope("tool.write"))
+        .with_required_authority(AuthorityRequirement::scope("capability.execute"))
         .with_idempotency(crate::engine::IdempotencyContract::caller_session_engine_ledger());
         engine_host
             .register_function(
@@ -901,9 +891,9 @@ mod tests {
 
         let mut targets_by_name = BTreeMap::new();
         let _ = targets_by_name.insert(
-            "Capture".to_owned(),
+            "execute".to_owned(),
             EngineToolTarget {
-                model_tool_name: "Capture".to_owned(),
+                model_tool_name: "execute".to_owned(),
                 function_id,
                 function,
                 stops_turn: false,
@@ -915,7 +905,7 @@ mod tests {
             catalog_revision: crate::engine::CatalogRevision(42),
             tools: Vec::new(),
             targets_by_name,
-            all_tool_names: vec!["Capture".to_owned()],
+            all_tool_names: vec!["execute".to_owned()],
             turn_stopping_tools: HashSet::new(),
         };
         let emitter = Arc::new(EventEmitter::new());
@@ -930,7 +920,7 @@ mod tests {
 
         let mut args = serde_json::Map::new();
         args.insert("value".to_owned(), Value::String("hello".to_owned()));
-        let call = ToolCall::new("tool-call-1", "Capture", args);
+        let call = ToolCall::new("tool-call-1", "execute", args);
         let result = execute_tool(&call, "session-1", "/tmp/worktree", &ctx).await;
 
         assert_eq!(result.result.is_error, None);
@@ -948,7 +938,7 @@ mod tests {
             "session-1",
             1,
             "tool-call-1",
-            "Capture",
+            "execute",
             "/tmp/worktree",
             None,
             &json!({"value": "hello"}),

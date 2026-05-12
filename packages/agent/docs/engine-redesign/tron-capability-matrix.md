@@ -2,16 +2,19 @@
 
 The current server capability inventory is canonical-first. Each row below is a
 worker namespace that owns `namespace::function` capabilities in the live engine
-catalog. The `/engine` protocol exposes these domains through discovery,
-inspection, invocation, and stream subscription messages.
+catalog. The `/engine` protocol is the worker/client transport for discovery,
+inspection, invocation, and stream subscription messages; the model-facing
+harness sees the `capability` worker's `search`, `inspect`, and `execute`
+primitives over that same catalog.
 
 | Worker | Default Visibility | Primary Effect Classes | Idempotency | Authority / Risk Notes |
 |--------|--------------------|------------------------|-------------|------------------------|
-| `engine` | System | Pure read, delegated invocation, idempotent promotion | Explicit for promotion | Reserved namespace; normal workers cannot override meta-capabilities. |
+| `engine` | System | Pure read, delegated invocation, idempotent promotion | Explicit for promotion | Reserved namespace for worker/client transport; normal workers cannot override these functions, and providers do not see them as model tools. |
 | `agent` | System, hidden apply internals | Reads, idempotent writes, external side effects | Session scoped writes | Prompt, abort, queue, confirmation, answers, subagent result delivery. High-risk autonomous prompt/abort paths require approval. |
 | `approval` | System | Idempotent writes, reads | System scoped writes | User/system-authorized resolution only; agent self-resolution is rejected. |
 | `auth` | System | Reads, reversible side effects | System scoped writes | Auth-file leases; secrets never logged or embedded in docs/tests. |
 | `browser` / `display` | System | Reads, reversible stream controls | System scoped writes | Stream lifecycle records and local authority. |
+| `capability` | System | Pure read, delegated invocation | Session scoped delegated execution | Collapsed model harness; exposes only `search`, `inspect`, and `execute` while concrete work remains owned by live workers. |
 | `config` / `model` / `settings` | System | Reads, reversible side effects | Session/system scoped writes | Resource leases protect session model/reasoning and settings profile writes. |
 | `context` / `memory` | System | Reads, reversible/external side effects | Session scoped writes | Event-store truth remains authoritative; retain/compact flows are high risk. |
 | `cron` | System plus hidden apply | Reads, high-risk side effects, scheduled triggers | System scoped writes/runs | `cron_schedule` triggers dispatch through the engine runtime. |
@@ -29,7 +32,6 @@ inspection, invocation, and stream subscription messages.
 | `session` | System | Reads, idempotent/reversible lifecycle writes | Session/system scoped writes | Session truth is event-sourced; mutations are causally recorded. |
 | `skills` | System/session | Reads, idempotent session writes | Session scoped writes | Activation state is reconstructed from events. |
 | `state` / `stream` | Scoped primitive workers | Projection writes, stream append/poll | Scoped writes | Primitives support catalog watch, subscriptions, approvals, jobs, and runtime delivery. |
-| `tool` | System/session as visible | Tool-specific effects | Explicit for mutating tools | Model-visible schemas are projected from the live catalog every model call. |
 | `transcription` / `voice_notes` | System | Reads, high-risk media writes | File/model scoped writes | Audio/model-cache/file leases guard side effects. |
 | `system` / `codex_app` | System | Reads, critical lifecycle writes | Explicit writes | Shutdown/update/check/status are canonical functions with strict authority. |
 

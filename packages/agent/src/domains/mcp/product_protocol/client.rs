@@ -343,7 +343,7 @@ impl McpClient {
         Ok(())
     }
 
-    /// Discover available tools from the server.
+    /// Discover available capabilities from the server.
     pub async fn list_tools(&self) -> Result<Vec<McpToolDef>, McpError> {
         let result = self.send_request("tools/list", None).await?;
 

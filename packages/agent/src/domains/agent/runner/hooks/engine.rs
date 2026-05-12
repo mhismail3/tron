@@ -590,14 +590,14 @@ mod tests {
             HookType::PreToolUse => HookContext::PreToolUse {
                 session_id: "s1".to_string(),
                 timestamp: "t".to_string(),
-                tool_name: "Bash".to_string(),
+                tool_name: "process::run".to_string(),
                 tool_arguments: serde_json::json!({}),
                 tool_call_id: "tc1".to_string(),
             },
             HookType::PostToolUse => HookContext::PostToolUse {
                 session_id: "s1".to_string(),
                 timestamp: "t".to_string(),
-                tool_name: "Bash".to_string(),
+                tool_name: "process::run".to_string(),
                 tool_call_id: "tc1".to_string(),
                 result: serde_json::json!({}),
                 duration_ms: 100,

@@ -339,11 +339,11 @@ mod tests {
         fn get_tool_summaries(&self) -> Vec<ToolSummary> {
             vec![
                 ToolSummary {
-                    name: "bash".into(),
+                    name: "execute".into(),
                     description: "Execute a shell command.".into(),
                 },
                 ToolSummary {
-                    name: "read".into(),
+                    name: "inspect".into(),
                     description: "Read file contents.".into(),
                 },
             ]
@@ -423,8 +423,8 @@ mod tests {
         );
         assert!(detailed.tool_clarification_content.is_none());
         assert_eq!(detailed.tools_content.len(), 2);
-        assert_eq!(detailed.tools_content[0].name, "bash");
-        assert_eq!(detailed.tools_content[1].name, "read");
+        assert_eq!(detailed.tools_content[0].name, "execute");
+        assert_eq!(detailed.tools_content[1].name, "inspect");
     }
 
     #[test]
@@ -475,7 +475,7 @@ mod tests {
         let msg = Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "tc-1".into(),
-                name: "bash".into(),
+                name: "execute".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -488,7 +488,7 @@ mod tests {
         assert!(info.tool_calls.is_some());
         let calls = info.tool_calls.unwrap();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].name, "bash");
+        assert_eq!(calls[0].name, "execute");
         assert!(calls[0].arguments.contains("ls"));
     }
 

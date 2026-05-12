@@ -668,10 +668,12 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(state.tool_calls["call_late"].args, r#"{"command":"date"}"#);
 
-        let events =
-            process_stream_event(&function_call_added_event("call_late", "Bash"), &mut state);
+        let events = process_stream_event(
+            &function_call_added_event("call_late", "process::run"),
+            &mut state,
+        );
         assert!(events.is_empty());
-        assert_eq!(state.tool_calls["call_late"].name, "Bash");
+        assert_eq!(state.tool_calls["call_late"].name, "process::run");
         assert_eq!(state.tool_calls["call_late"].args, r#"{"command":"date"}"#);
     }
 
@@ -861,14 +863,17 @@ mod tests {
     #[test]
     fn output_item_done_emits_toolcall_end_with_arguments() {
         let mut state = create_stream_state();
-        let _ = process_stream_event(&function_call_added_event("call_abc", "Bash"), &mut state);
+        let _ = process_stream_event(
+            &function_call_added_event("call_abc", "process::run"),
+            &mut state,
+        );
 
         let event = ResponsesSseEvent {
             event_type: SseEventType::OutputItemDone,
             item: Some(ResponsesOutputItem {
                 item_type: OutputItemType::FunctionCall,
                 call_id: Some("call_abc".into()),
-                name: Some("Bash".into()),
+                name: Some("process::run".into()),
                 arguments: Some(r#"{"command":"date"}"#.into()),
                 ..Default::default()
             }),
@@ -881,7 +886,7 @@ mod tests {
             .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
         assert!(tool_end.is_some());
         if let Some(StreamEvent::ToolCallEnd { tool_call }) = tool_end {
-            assert_eq!(tool_call.name, "Bash");
+            assert_eq!(tool_call.name, "process::run");
             assert_eq!(
                 tool_call
                     .arguments

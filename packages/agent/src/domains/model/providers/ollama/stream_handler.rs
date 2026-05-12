@@ -437,7 +437,7 @@ mod tests {
                 tool_calls: Some(vec![OllamaToolCall {
                     id: Some("call_abc123".into()),
                     function: OllamaToolCallFunction {
-                        name: "bash".into(),
+                        name: "execute".into(),
                         arguments: {
                             let mut m = Map::new();
                             m.insert("command".into(), Value::String("ls".into()));
@@ -456,7 +456,7 @@ mod tests {
         assert!(matches!(events[1], StreamEvent::ToolCallDelta { .. }));
         assert!(matches!(events[2], StreamEvent::ToolCallEnd { .. }));
         if let StreamEvent::ToolCallEnd { tool_call } = &events[2] {
-            assert_eq!(tool_call.name, "bash");
+            assert_eq!(tool_call.name, "execute");
             assert_eq!(tool_call.arguments["command"], "ls");
         }
     }
@@ -472,14 +472,14 @@ mod tests {
                     OllamaToolCall {
                         id: Some("call_1".into()),
                         function: OllamaToolCallFunction {
-                            name: "bash".into(),
+                            name: "execute".into(),
                             arguments: Map::new(),
                         },
                     },
                     OllamaToolCall {
                         id: Some("call_2".into()),
                         function: OllamaToolCallFunction {
-                            name: "read".into(),
+                            name: "inspect".into(),
                             arguments: Map::new(),
                         },
                     },
@@ -545,7 +545,7 @@ mod tests {
                 tool_calls: Some(vec![OllamaToolCall {
                     id: Some("call_1".into()),
                     function: OllamaToolCallFunction {
-                        name: "bash".into(),
+                        name: "execute".into(),
                         arguments: Map::new(),
                     },
                 }]),
@@ -579,7 +579,7 @@ mod tests {
                 tool_calls: Some(vec![OllamaToolCall {
                     id: Some("call_1".into()),
                     function: OllamaToolCallFunction {
-                        name: "bash".into(),
+                        name: "execute".into(),
                         arguments: Map::new(),
                     },
                 }]),

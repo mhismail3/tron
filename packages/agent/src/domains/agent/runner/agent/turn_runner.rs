@@ -13,11 +13,11 @@ use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::context::local_policy;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
+use crate::domains::capability_support::implementations::capability_surface::{
+    self, CapabilitySurfacePolicy, ResolvedToolSurface,
+};
 use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::Provider;
-use crate::domains::tools::implementations::capability_surface::{
-    self, ResolvedToolSurface, ToolSurfacePolicy,
-};
 use crate::shared::events::{BaseEvent, TronEvent};
 use crate::shared::messages::Context;
 
@@ -64,7 +64,7 @@ pub struct TurnParams<'a> {
     /// LLM provider for streaming.
     pub provider: &'a Arc<dyn Provider>,
     /// Live catalog policy for tool lookup and execution.
-    pub tool_surface_policy: &'a ToolSurfacePolicy,
+    pub tool_surface_policy: &'a CapabilitySurfacePolicy,
     /// Optional guardrail engine for tool argument validation.
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for pre/post tool use hooks.
@@ -81,10 +81,9 @@ pub struct TurnParams<'a> {
     pub run_context: &'a RunContext,
     /// Optional event persister for inline event storage.
     pub persister: Option<&'a EventPersister>,
-    /// Borrowed `Arc<EventPersister>` for cheap cloning into tool contexts.
-    /// Must refer to the same persister as `persister`. Tools that emit
-    /// `tool.progress` clone this Arc into their `ToolContext` so they can
-    /// persist progress events durably.
+    /// Borrowed `Arc<EventPersister>` for cheap cloning into capability contexts.
+    /// Must refer to the same persister as `persister`. Capabilities that emit
+    /// progress events clone this Arc so they can persist progress durably.
     pub persister_arc: Option<&'a Arc<EventPersister>>,
     /// Previous turn's context window token count (for delta tracking).
     pub previous_context_baseline: u64,
@@ -101,11 +100,13 @@ pub struct TurnParams<'a> {
     /// Server origin (e.g. `"localhost:9847"`) for system prompt.
     pub server_origin: Option<&'a str>,
     /// Optional process manager for background process execution.
-    pub process_manager:
-        Option<&'a Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub process_manager: Option<
+        &'a Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     /// Optional unified job manager for process + subagent lifecycle.
-    pub job_manager:
-        Option<&'a Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    pub job_manager: Option<
+        &'a Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
+    >,
     /// Optional output buffer registry for process output streaming.
     pub output_buffer_registry: Option<
         &'a Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
@@ -268,7 +269,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             .clone()
             .unwrap_or_else(|| resolved_profile.name.clone());
         let profile = Some(active_profile_name.as_str());
-        let (context_policy_id, tool_policy_id, cache_policy_id) =
+        let (context_policy_id, capability_policy_id, cache_policy_id) =
             resolved_turn_policy_ids(&resolved_profile, provider.provider_type());
         let metadata = serde_json::json!({
             "messageCount": context.messages.len(),
@@ -279,7 +280,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 "profileChain": resolved_profile.profile_chain.clone(),
                 "profileSpecHash": resolved_profile.spec_hash.clone(),
             "contextPolicy": context_policy_id,
-            "toolPolicy": tool_policy_id,
+            "capabilityPolicy": capability_policy_id,
         });
         let audit = crate::domains::session::event_store::sqlite::repositories::constitution::ContextResolutionAudit {
             session_id: Some(session_id),
@@ -670,6 +671,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         stream_result: &stream_result,
         context_manager,
         tool_surface: &tool_surface,
+        capability_policy: tool_surface_policy,
         guardrails,
         hooks,
         compaction,
@@ -899,7 +901,7 @@ async fn resolve_provider_tool_surface(
     workspace_id: Option<&str>,
     provider_type: crate::shared::messages::Provider,
     context_policy: &local_policy::ContextPolicy,
-    tool_policy: &ToolSurfacePolicy,
+    capability_policy: &CapabilitySurfacePolicy,
 ) -> Result<ResolvedToolSurface, String> {
     if let Some(host) = engine_host {
         return capability_surface::resolve_provider_tools(
@@ -908,7 +910,7 @@ async fn resolve_provider_tool_surface(
             workspace_id,
             provider_type,
             context_policy,
-            tool_policy,
+            capability_policy,
         )
         .await;
     }
@@ -920,7 +922,7 @@ async fn resolve_provider_tool_surface(
             workspace_id,
             provider_type,
             context_policy,
-            tool_policy,
+            capability_policy,
         );
         return Ok(ResolvedToolSurface {
             catalog_revision: crate::engine::CatalogRevision(0),
@@ -938,7 +940,7 @@ async fn resolve_provider_tool_surface(
             workspace_id,
             provider_type,
             context_policy,
-            tool_policy,
+            capability_policy,
         );
         Err("engine host is required for provider tool schema resolution".to_owned())
     }
@@ -960,33 +962,33 @@ fn resolved_turn_policy_ids(
             "main",
         );
     let context_policy_id = context_policy.id().to_string();
-    let tool_policy_id = context_policy
-        .tool_policy_id()
+    let capability_policy_id = context_policy
+        .capability_policy_id()
         .map(String::from)
-        .unwrap_or_else(|| entrypoint.tool_policy.clone());
+        .unwrap_or_else(|| entrypoint.capability_policy.clone());
     let cache_policy_id = entrypoint.cache_policy.clone();
 
-    (context_policy_id, tool_policy_id, cache_policy_id)
+    (context_policy_id, capability_policy_id, cache_policy_id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::tools::implementations::capability_surface::{
+    use crate::domains::capability_support::implementations::capability_surface::{
         EngineToolTarget, ResolvedToolSurface,
     };
-    use crate::domains::tools::implementations::traits::ExecutionMode;
+    use crate::domains::capability_support::implementations::traits::ExecutionMode;
     use crate::engine::{EffectClass, FunctionDefinition, FunctionId, VisibilityScope, WorkerId};
     use std::collections::{BTreeMap, HashSet};
 
     fn surface(modes: Vec<(&str, ExecutionMode)>) -> ResolvedToolSurface {
         let mut targets_by_name = BTreeMap::new();
         for (name, mode) in modes {
-            let function_id = FunctionId::new(format!("tool::{}", name.to_ascii_lowercase()))
+            let function_id = FunctionId::new(format!("capability::{}", name.to_ascii_lowercase()))
                 .expect("function id");
             let function = FunctionDefinition::new(
                 function_id.clone(),
-                WorkerId::new("tool").expect("worker id"),
+                WorkerId::new("capability").expect("worker id"),
                 name.to_owned(),
                 VisibilityScope::System,
                 EffectClass::PureRead,
@@ -1029,12 +1031,12 @@ mod tests {
     #[test]
     fn build_execution_waves_parallel_tools_share_one_wave() {
         let calls = vec![
-            crate::shared::messages::ToolCall::new("1", "Read", Default::default()),
-            crate::shared::messages::ToolCall::new("2", "Search", Default::default()),
+            crate::shared::messages::ToolCall::new("1", "search", Default::default()),
+            crate::shared::messages::ToolCall::new("2", "inspect", Default::default()),
         ];
         let surface = surface(vec![
-            ("Read", ExecutionMode::Parallel),
-            ("Search", ExecutionMode::Parallel),
+            ("search", ExecutionMode::Parallel),
+            ("inspect", ExecutionMode::Parallel),
         ]);
         let waves = tools::build_execution_waves(&calls, &surface);
         assert_eq!(waves, vec![vec![0, 1]]);

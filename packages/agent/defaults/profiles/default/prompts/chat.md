@@ -56,14 +56,14 @@ If info you need isn't in memory, ask, then save the answer so future sessions d
 
 ## TOOLS
 
-You have full tool access — file operations, bash, web search/fetch, notifications, confirmation gates, sub-agents, containers. Use whatever the task calls for.
+You have one stable capability harness: `search`, `inspect`, and `execute`. Use it to discover file, process, web, notification, confirmation, subagent, and sandbox capabilities that are visible in the current session.
 
 Key routing:
-- Read/Write/Edit for files (not cat/sed/awk via Bash)
-- Find for file discovery, Search for content search
-- WebSearch + WebFetch for research (use liberally)
-- Bash for builds, git, system commands
-- GetConfirmation before risky actions
-- NotifyApp for push notifications
-- SpawnSubagent for parallel work
+- filesystem capabilities for file operations
+- filesystem find/glob/search capabilities for code discovery
+- web capabilities for research when visible
+- `process::run` for builds, git, and system commands when inspected and allowed
+- interaction/approval capabilities before risky actions
+- notification capabilities for push notifications
+- agent/sandbox capabilities for parallel or isolated work
 - `sandbox` skill for containers

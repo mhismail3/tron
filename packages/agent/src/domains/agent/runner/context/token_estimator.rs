@@ -366,7 +366,7 @@ mod tests {
         let block = json!({
             "type": "tool_use",
             "id": "toolu_01",
-            "name": "read",
+            "name": "inspect",
             "arguments": {"file_path": "/tmp/test.rs"}
         });
         assert!(estimate_block_tokens(&block) > 0);
@@ -377,7 +377,7 @@ mod tests {
         let block = json!({
             "type": "tool_use",
             "id": "toolu_01",
-            "name": "read",
+            "name": "inspect",
             "input": {"file_path": "/tmp/test.rs"}
         });
         assert!(estimate_block_tokens(&block) > 0);
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn tools_tokens_with_tools() {
-        let tools = vec![make_test_tool("read", "Read a file")];
+        let tools = vec![make_test_tool("inspect", "Read a file")];
         assert!(estimate_tools_tokens(&tools) > 0);
     }
 
@@ -543,7 +543,7 @@ mod tests {
     #[test]
     fn system_tokens_combined() {
         let prompt = "System prompt here";
-        let tools = vec![make_test_tool("bash", "Run commands")];
+        let tools = vec![make_test_tool("execute", "Run commands")];
         let combined = estimate_system_tokens(prompt, &tools);
         assert!(combined > 0);
         assert!(combined >= estimate_system_prompt_tokens(prompt, None));
@@ -604,12 +604,12 @@ mod tests {
         let _ = args.insert("cmd".into(), Value::String("ls".into()));
         let block = AssistantContent::ToolUse {
             id: "call_1".into(),
-            name: "bash".into(),
+            name: "execute".into(),
             arguments: args,
             thought_signature: None,
         };
-        // "call_1"(6) + "bash"(4) + `{"cmd":"ls"}`(12) = 22
-        assert_eq!(estimate_assistant_content_chars(&block), 22);
+        // "call_1"(6) + "execute"(7) + `{"cmd":"ls"}`(12) = 25
+        assert_eq!(estimate_assistant_content_chars(&block), 25);
     }
 
     #[test]

@@ -70,7 +70,7 @@ pub enum SummarizerError {
 ///
 /// Used when the LLM summarizer fails (timeout, parse error, etc.).
 /// Produces a simple narrative by concatenating user messages and
-/// extracting file paths and tool names.
+/// extracting file paths and capability ids.
 pub struct KeywordSummarizer;
 
 impl KeywordSummarizer {
@@ -562,7 +562,7 @@ mod tests {
         let messages = vec![Message::Assistant {
             content: vec![AssistantContent::ToolUse {
                 id: "tc-1".into(),
-                name: "read".into(),
+                name: "inspect".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -572,7 +572,7 @@ mod tests {
             thinking: None,
         }];
         let result = serialize_messages(&messages);
-        assert_eq!(result, "[TOOL_CALL] read(file_path: /src/main.rs)");
+        assert_eq!(result, "[TOOL_CALL] inspect(file_path: /src/main.rs)");
     }
 
     #[test]
@@ -760,7 +760,7 @@ mod tests {
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "tc-1".into(),
-                    name: "read".into(),
+                    name: "inspect".into(),
                     arguments: args,
                     thought_signature: None,
                 }],

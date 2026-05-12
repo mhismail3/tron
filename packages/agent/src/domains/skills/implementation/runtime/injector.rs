@@ -240,7 +240,7 @@ pub fn build_activation_directive(skill_names: &[String]) -> Option<String> {
 fn build_tool_preferences(skill: &SkillMetadata) -> String {
     let fm = &skill.frontmatter;
 
-    if let Some(allowed) = &fm.allowed_tools
+    if let Some(allowed) = &fm.allowed_capabilities
         && !allowed.is_empty()
     {
         let tools = allowed.join(", ");
@@ -249,12 +249,12 @@ fn build_tool_preferences(skill: &SkillMetadata) -> String {
         );
     }
 
-    if let Some(denied) = &fm.denied_tools
+    if let Some(denied) = &fm.denied_capabilities
         && !denied.is_empty()
     {
         let tools = denied.join(", ");
         return format!(
-            "<skill-tool-restrictions>This skill must NOT use: {tools}. These tools are restricted.</skill-tool-restrictions>"
+            "<skill-tool-restrictions>This skill must NOT use: {tools}. These capabilities are restricted.</skill-tool-restrictions>"
         );
     }
 
@@ -311,8 +311,8 @@ mod tests {
             description: String::new(),
             content: content.to_string(),
             frontmatter: SkillFrontmatter {
-                allowed_tools: allowed,
-                denied_tools: denied,
+                allowed_capabilities: allowed,
+                denied_capabilities: denied,
                 ..Default::default()
             },
             source: SkillSource::Global,
@@ -453,25 +453,32 @@ mod tests {
     }
 
     #[test]
-    fn test_build_context_with_allowed_tools() {
+    fn test_build_context_with_allowed_capabilities() {
         let skill = make_skill_with_tools(
             "reader",
-            "Read things.",
-            Some(vec!["Read".to_string(), "Grep".to_string()]),
+            "filesystem::read_file things.",
+            Some(vec![
+                "filesystem::read_file".to_string(),
+                "filesystem::search_text".to_string(),
+            ]),
             None,
         );
         let context = build_skill_context(&[&skill]);
         assert!(context.contains("<skill-tool-preferences>"));
-        assert!(context.contains("Read, Grep"));
+        assert!(context.contains("filesystem::read_file, filesystem::search_text"));
     }
 
     #[test]
-    fn test_build_context_with_denied_tools() {
-        let skill =
-            make_skill_with_tools("safe", "Safe skill.", None, Some(vec!["Bash".to_string()]));
+    fn test_build_context_with_denied_capabilities() {
+        let skill = make_skill_with_tools(
+            "safe",
+            "Safe skill.",
+            None,
+            Some(vec!["process::run".to_string()]),
+        );
         let context = build_skill_context(&[&skill]);
         assert!(context.contains("<skill-tool-restrictions>"));
-        assert!(context.contains("Bash"));
+        assert!(context.contains("process::run"));
     }
 
     #[test]

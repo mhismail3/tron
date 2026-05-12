@@ -162,7 +162,7 @@ fn validate_reports_orphan_tool_result() {
                 "id": "msg_01",
                 "role": "assistant",
                 "content": [
-                    { "type": "tool_use", "id": "toolu_real", "name": "Read", "input": { "path": "a.txt" } }
+                    { "type": "tool_use", "id": "toolu_real", "name": "filesystem::read_file", "input": { "path": "a.txt" } }
                 ],
                 "stop_reason": "tool_use",
                 "usage": { "input_tokens": 10, "output_tokens": 5 },
@@ -249,7 +249,7 @@ fn validate_reports_orphan_tool_use_alone() {
                 "id": "msg_01",
                 "role": "assistant",
                 "content": [
-                    { "type": "tool_use", "id": "toolu_lost", "name": "Bash", "input": { "command": "ls" } }
+                    { "type": "tool_use", "id": "toolu_lost", "name": "process::run", "input": { "command": "ls" } }
                 ],
                 "stop_reason": "tool_use",
                 "usage": { "input_tokens": 10, "output_tokens": 5 },
@@ -365,8 +365,8 @@ fn validate_duplicate_ids_dedup_to_single_warning() {
                 "id": "msg_01",
                 "role": "assistant",
                 "content": [
-                    { "type": "tool_use", "id": "toolu_lonely", "name": "Read", "input": { "path": "a.txt" } },
-                    { "type": "tool_use", "id": "toolu_lonely", "name": "Read", "input": { "path": "b.txt" } }
+                    { "type": "tool_use", "id": "toolu_lonely", "name": "filesystem::read_file", "input": { "path": "a.txt" } },
+                    { "type": "tool_use", "id": "toolu_lonely", "name": "filesystem::read_file", "input": { "path": "b.txt" } }
                 ],
                 "stop_reason": "tool_use",
                 "usage": { "input_tokens": 10, "output_tokens": 5 },
@@ -425,7 +425,7 @@ fn validate_matched_tool_call_and_result_emits_no_warning() {
                 "id": "msg_01",
                 "role": "assistant",
                 "content": [
-                    { "type": "tool_use", "id": "toolu_paired", "name": "Read", "input": { "path": "a.txt" } }
+                    { "type": "tool_use", "id": "toolu_paired", "name": "filesystem::read_file", "input": { "path": "a.txt" } }
                 ],
                 "stop_reason": "tool_use",
                 "usage": { "input_tokens": 10, "output_tokens": 5 },

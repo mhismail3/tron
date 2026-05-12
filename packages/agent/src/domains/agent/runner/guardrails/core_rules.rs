@@ -13,8 +13,8 @@
 //!
 //! ## Standard Rules (3)
 //! - `path.traversal` — blocks `..` sequences in filesystem operations
-//! - `path.hidden-mkdir` — blocks hidden directory creation in Bash
-//! - `bash.timeout` — enforces 10-minute bash timeout limit
+//! - `path.hidden-mkdir` — blocks hidden directory creation in process::run
+//! - `process.timeout` — enforces 10-minute process timeout limit
 
 use regex::Regex;
 
@@ -63,8 +63,8 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         // Standard rules
         path_traversal(),
         path_hidden_mkdir(),
-        bash_timeout(),
-        bash_long_timeout_warning(),
+        process_timeout(),
+        process_long_timeout_warning(),
         command_substitution_warning(),
     ]
 }
@@ -80,7 +80,7 @@ fn core_destructive_commands() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
-            tools: vec!["Bash".into()],
+            capabilities: vec!["process::run".into()],
             priority: 1000,
             enabled: true,
             tags: vec!["security".into(), "system-protection".into()],
@@ -101,7 +101,7 @@ fn core_destructive_commands() -> GuardrailRule {
             Regex::new(r"^:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;\s*:").unwrap(),
             // dd to raw devices
             Regex::new(r"(?i)(sudo\s+)?dd\s+if=.*of=/dev/[sh]d[a-z]").unwrap(),
-            // Write to raw disk devices
+            // filesystem::write_file to raw disk devices
             Regex::new(r"(?i)>\s*/dev/[sh]d[a-z]").unwrap(),
             // mkfs (filesystem formatting)
             Regex::new(r"(?i)^(sudo\s+)?mkfs\.").unwrap(),
@@ -132,7 +132,7 @@ fn core_tron_no_delete() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
-            tools: vec!["Bash".into()],
+            capabilities: vec!["process::run".into()],
             priority: 1000,
             enabled: true,
             tags: vec!["security".into(), "config-protection".into()],
@@ -175,7 +175,11 @@ fn core_tron_home_protection() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
-            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
+            capabilities: vec![
+                "filesystem::write_file".into(),
+                "filesystem::edit_file".into(),
+                "process::run".into(),
+            ],
             priority: 1000,
             enabled: true,
             tags: vec!["security".into(), "config-protection".into()],
@@ -200,7 +204,11 @@ fn core_synology_drive_protection() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
-            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
+            capabilities: vec![
+                "filesystem::write_file".into(),
+                "filesystem::edit_file".into(),
+                "process::run".into(),
+            ],
             priority: 1000,
             enabled: true,
             tags: vec!["security".into(), "cloud-storage-protection".into()],
@@ -222,7 +230,11 @@ fn core_system_protection() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
-            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
+            capabilities: vec![
+                "filesystem::write_file".into(),
+                "filesystem::edit_file".into(),
+                "process::run".into(),
+            ],
             priority: 1000,
             enabled: true,
             tags: vec!["security".into(), "system-protection".into()],
@@ -259,7 +271,7 @@ fn core_system_protection() -> GuardrailRule {
     })
 }
 
-/// Core rule: Read-only access to dotfiles.
+/// Core rule: filesystem::read_file-only access to dotfiles.
 fn core_dotfiles_protection() -> GuardrailRule {
     let home = homedir();
 
@@ -272,7 +284,11 @@ fn core_dotfiles_protection() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
-            tools: vec!["Write".into(), "Edit".into(), "Bash".into()],
+            capabilities: vec![
+                "filesystem::write_file".into(),
+                "filesystem::edit_file".into(),
+                "process::run".into(),
+            ],
             priority: 1000,
             enabled: true,
             tags: vec!["security".into(), "config-protection".into()],
@@ -313,7 +329,11 @@ fn path_traversal() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Tool,
             tier: RuleTier::Standard,
-            tools: vec!["Write".into(), "Edit".into(), "Read".into()],
+            capabilities: vec![
+                "filesystem::write_file".into(),
+                "filesystem::edit_file".into(),
+                "filesystem::read_file".into(),
+            ],
             priority: 800,
             enabled: true,
             tags: vec!["security".into(), "filesystem".into()],
@@ -335,7 +355,7 @@ fn path_hidden_mkdir() -> GuardrailRule {
             severity: Severity::Block,
             scope: Scope::Tool,
             tier: RuleTier::Standard,
-            tools: vec!["Bash".into()],
+            capabilities: vec!["process::run".into()],
             priority: 700,
             enabled: true,
             tags: vec!["filesystem".into()],
@@ -347,17 +367,17 @@ fn path_hidden_mkdir() -> GuardrailRule {
     })
 }
 
-/// Standard rule: Enforce bash timeout limits (60 minutes max).
-fn bash_timeout() -> GuardrailRule {
+/// Standard rule: Enforce process timeout limits (60 minutes max).
+fn process_timeout() -> GuardrailRule {
     GuardrailRule::Resource(ResourceRule {
         base: RuleBase {
-            id: "bash.timeout".into(),
-            name: "Bash Timeout Limit".into(),
-            description: "Enforces maximum timeout for bash commands (60 minutes)".into(),
+            id: "process.timeout".into(),
+            name: "process::run Timeout Limit".into(),
+            description: "Enforces maximum timeout for process commands (60 minutes)".into(),
             severity: Severity::Block,
             scope: Scope::Tool,
             tier: RuleTier::Standard,
-            tools: vec!["Bash".into()],
+            capabilities: vec!["process::run".into()],
             priority: 500,
             enabled: true,
             tags: vec!["resource-limits".into()],
@@ -368,17 +388,17 @@ fn bash_timeout() -> GuardrailRule {
     })
 }
 
-/// Standard rule: Warn when bash timeout exceeds 10 minutes.
-fn bash_long_timeout_warning() -> GuardrailRule {
+/// Standard rule: Warn when process timeout exceeds 10 minutes.
+fn process_long_timeout_warning() -> GuardrailRule {
     GuardrailRule::Resource(ResourceRule {
         base: RuleBase {
-            id: "bash.long-timeout".into(),
-            name: "Bash Long Timeout Warning".into(),
-            description: "Warns when bash timeout exceeds 10 minutes".into(),
+            id: "process.long-timeout".into(),
+            name: "process::run Long Timeout Warning".into(),
+            description: "Warns when process timeout exceeds 10 minutes".into(),
             severity: Severity::Warn,
             scope: Scope::Tool,
             tier: RuleTier::Standard,
-            tools: vec!["Bash".into()],
+            capabilities: vec!["process::run".into()],
             priority: 400,
             enabled: true,
             tags: vec!["resource-limits".into()],
@@ -397,14 +417,14 @@ fn bash_long_timeout_warning() -> GuardrailRule {
 fn command_substitution_warning() -> GuardrailRule {
     GuardrailRule::Pattern(PatternRule {
         base: RuleBase {
-            id: "bash.command-substitution".into(),
+            id: "process.command-substitution".into(),
             name: "Command Substitution Warning".into(),
             description: "Warns when command substitution may construct destructive commands"
                 .into(),
             severity: Severity::Warn,
             scope: Scope::Tool,
             tier: RuleTier::Standard,
-            tools: vec!["Bash".into()],
+            capabilities: vec!["process::run".into()],
             priority: 300,
             enabled: true,
             tags: vec!["security".into()],
@@ -510,41 +530,56 @@ mod tests {
     fn system_protection_blocks_write_to_usr() {
         let rule = find_rule("core.system-protection");
         let ctx = make_ctx(
-            "Write",
+            "filesystem::write_file",
             serde_json::json!({"file_path": "/usr/local/bin/test"}),
         );
         let result = rule.evaluate(&ctx, None);
-        assert!(result.triggered, "Write to /usr should be blocked");
+        assert!(
+            result.triggered,
+            "filesystem::write_file to /usr should be blocked"
+        );
     }
 
     #[test]
     fn system_protection_blocks_write_to_etc() {
         let rule = find_rule("core.system-protection");
-        let ctx = make_ctx("Edit", serde_json::json!({"file_path": "/etc/hosts"}));
+        let ctx = make_ctx(
+            "filesystem::edit_file",
+            serde_json::json!({"file_path": "/etc/hosts"}),
+        );
         let result = rule.evaluate(&ctx, None);
-        assert!(result.triggered, "Write to /etc should be blocked");
+        assert!(
+            result.triggered,
+            "filesystem::write_file to /etc should be blocked"
+        );
     }
 
     #[test]
     fn system_protection_allows_tmp() {
         let rule = find_rule("core.system-protection");
         let ctx = make_ctx(
-            "Write",
+            "filesystem::write_file",
             serde_json::json!({"file_path": "/tmp/scratch.txt"}),
         );
         let result = rule.evaluate(&ctx, None);
-        assert!(!result.triggered, "Write to /tmp should be allowed");
+        assert!(
+            !result.triggered,
+            "filesystem::write_file to /tmp should be allowed"
+        );
     }
 
     #[test]
-    fn system_protection_blocks_bash_redirect_to_etc() {
+    fn system_protection_blocks_process_redirect_to_etc() {
         let rule = find_rule("core.system-protection");
         let ctx = make_ctx(
-            "Bash",
+            "process::run",
             serde_json::json!({"command": "echo test > /etc/hosts"}),
         );
         let result = rule.evaluate(&ctx, None);
-        assert!(result.triggered, "Bash redirect to /etc should be blocked");
+        assert!(
+            result.triggered,
+            "process::run redirect to /etc should be blocked"
+        );
     }
 
     // ── dotfiles-protection tests ────────────────────────────────
@@ -554,19 +589,25 @@ mod tests {
         let rule = find_rule("core.dotfiles-protection");
         let home = homedir();
         let ctx = make_ctx(
-            "Write",
+            "filesystem::write_file",
             serde_json::json!({"file_path": format!("{home}/.ssh/config")}),
         );
         let result = rule.evaluate(&ctx, None);
-        assert!(result.triggered, "Write to ~/.ssh should be blocked");
+        assert!(
+            result.triggered,
+            "filesystem::write_file to ~/.ssh should be blocked"
+        );
     }
 
     #[test]
     fn dotfiles_does_not_apply_to_read_tool() {
         let rule = find_rule("core.dotfiles-protection");
         assert!(
-            !rule.base().tools.contains(&"Read".to_string()),
-            "Dotfiles rule should not apply to Read tool"
+            !rule
+                .base()
+                .capabilities
+                .contains(&"filesystem::read_file".to_string()),
+            "Dotfiles rule should not apply to filesystem::read_file tool"
         );
     }
 
@@ -575,11 +616,14 @@ mod tests {
         let rule = find_rule("core.dotfiles-protection");
         let home = homedir();
         let ctx = make_ctx(
-            "Write",
+            "filesystem::write_file",
             serde_json::json!({"file_path": format!("{home}/Workspace/project/file.rs")}),
         );
         let result = rule.evaluate(&ctx, None);
-        assert!(!result.triggered, "Write to ~/Workspace should be allowed");
+        assert!(
+            !result.triggered,
+            "filesystem::write_file to ~/Workspace should be allowed"
+        );
     }
 
     #[test]
@@ -587,20 +631,23 @@ mod tests {
         let rule = find_rule("core.dotfiles-protection");
         let home = homedir();
         let ctx = make_ctx(
-            "Write",
+            "filesystem::write_file",
             serde_json::json!({"file_path": format!("{home}/Desktop/file.txt")}),
         );
         let result = rule.evaluate(&ctx, None);
-        assert!(!result.triggered, "Write to ~/Desktop should be allowed");
+        assert!(
+            !result.triggered,
+            "filesystem::write_file to ~/Desktop should be allowed"
+        );
     }
 
-    // ── bash timeout guardrail tests ─────────────────────────────
+    // ── process timeout guardrail tests ─────────────────────────────
 
     #[test]
-    fn bash_timeout_blocks_above_3600s() {
-        let rule = find_rule("bash.timeout");
+    fn process_timeout_blocks_above_3600s() {
+        let rule = find_rule("process.timeout");
         let ctx = make_ctx(
-            "Bash",
+            "process::run",
             serde_json::json!({"command": "sleep 999", "timeout": 3_700_000}),
         );
         let result = rule.evaluate(&ctx, None);
@@ -609,10 +656,10 @@ mod tests {
     }
 
     #[test]
-    fn bash_timeout_allows_up_to_3600s() {
-        let rule = find_rule("bash.timeout");
+    fn process_timeout_allows_up_to_3600s() {
+        let rule = find_rule("process.timeout");
         let ctx = make_ctx(
-            "Bash",
+            "process::run",
             serde_json::json!({"command": "sleep 999", "timeout": 3_600_000}),
         );
         let result = rule.evaluate(&ctx, None);
@@ -623,10 +670,10 @@ mod tests {
     }
 
     #[test]
-    fn bash_timeout_allows_600s() {
-        let rule = find_rule("bash.timeout");
+    fn process_timeout_allows_600s() {
+        let rule = find_rule("process.timeout");
         let ctx = make_ctx(
-            "Bash",
+            "process::run",
             serde_json::json!({"command": "ls", "timeout": 600_000}),
         );
         let result = rule.evaluate(&ctx, None);
@@ -634,10 +681,10 @@ mod tests {
     }
 
     #[test]
-    fn bash_long_timeout_warns_above_600s() {
-        let rule = find_rule("bash.long-timeout");
+    fn process_long_timeout_warns_above_600s() {
+        let rule = find_rule("process.long-timeout");
         let ctx = make_ctx(
-            "Bash",
+            "process::run",
             serde_json::json!({"command": "build", "timeout": 900_000}),
         );
         let result = rule.evaluate(&ctx, None);
@@ -649,10 +696,10 @@ mod tests {
     }
 
     #[test]
-    fn bash_long_timeout_no_warn_at_600s() {
-        let rule = find_rule("bash.long-timeout");
+    fn process_long_timeout_no_warn_at_600s() {
+        let rule = find_rule("process.long-timeout");
         let ctx = make_ctx(
-            "Bash",
+            "process::run",
             serde_json::json!({"command": "ls", "timeout": 600_000}),
         );
         let result = rule.evaluate(&ctx, None);
@@ -660,9 +707,9 @@ mod tests {
     }
 
     #[test]
-    fn bash_long_timeout_no_warn_without_timeout() {
-        let rule = find_rule("bash.long-timeout");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "ls"}));
+    fn process_long_timeout_no_warn_without_timeout() {
+        let rule = find_rule("process.long-timeout");
+        let ctx = make_ctx("process::run", serde_json::json!({"command": "ls"}));
         let result = rule.evaluate(&ctx, None);
         assert!(!result.triggered, "No timeout param should not warn");
     }
@@ -678,7 +725,7 @@ mod tests {
             "sudo rm --recursive --force /",
         ];
         for cmd in cases {
-            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let ctx = make_ctx("process::run", serde_json::json!({"command": cmd}));
             let result = rule.evaluate(&ctx, None);
             assert!(result.triggered, "Should block: {cmd}");
         }
@@ -694,7 +741,7 @@ mod tests {
             "rm -f --recursive /",
         ];
         for cmd in cases {
-            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let ctx = make_ctx("process::run", serde_json::json!({"command": cmd}));
             let result = rule.evaluate(&ctx, None);
             assert!(result.triggered, "Should block: {cmd}");
         }
@@ -713,7 +760,7 @@ mod tests {
             "sudo rm -rf /home",
         ];
         for cmd in cases {
-            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let ctx = make_ctx("process::run", serde_json::json!({"command": cmd}));
             let result = rule.evaluate(&ctx, None);
             assert!(result.triggered, "Should block: {cmd}");
         }
@@ -729,7 +776,7 @@ mod tests {
             "rm --recursive -f /var",
         ];
         for cmd in cases {
-            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let ctx = make_ctx("process::run", serde_json::json!({"command": cmd}));
             let result = rule.evaluate(&ctx, None);
             assert!(result.triggered, "Should block: {cmd}");
         }
@@ -738,7 +785,10 @@ mod tests {
     #[test]
     fn destructive_blocks_extra_whitespace() {
         let rule = find_rule("core.destructive-commands");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "rm   -rf   /"}));
+        let ctx = make_ctx(
+            "process::run",
+            serde_json::json!({"command": "rm   -rf   /"}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(result.triggered, "Should block rm with extra whitespace");
     }
@@ -755,7 +805,7 @@ mod tests {
             "docker rm -f container_name",
         ];
         for cmd in safe {
-            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let ctx = make_ctx("process::run", serde_json::json!({"command": cmd}));
             let result = rule.evaluate(&ctx, None);
             assert!(!result.triggered, "Should NOT block: {cmd}");
         }
@@ -765,8 +815,11 @@ mod tests {
 
     #[test]
     fn command_sub_warns_dollar_paren_rm() {
-        let rule = find_rule("bash.command-substitution");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "$(which rm) -rf /"}));
+        let rule = find_rule("process.command-substitution");
+        let ctx = make_ctx(
+            "process::run",
+            serde_json::json!({"command": "$(which rm) -rf /"}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(result.triggered, "Should warn on $(which rm) -rf /");
         assert_eq!(result.severity, Some(Severity::Warn));
@@ -774,30 +827,36 @@ mod tests {
 
     #[test]
     fn command_sub_warns_eval_rm() {
-        let rule = find_rule("bash.command-substitution");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "eval \"rm -rf /\""}));
+        let rule = find_rule("process.command-substitution");
+        let ctx = make_ctx(
+            "process::run",
+            serde_json::json!({"command": "eval \"rm -rf /\""}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(result.triggered, "Should warn on eval rm -rf /");
     }
 
     #[test]
     fn command_sub_warns_backtick_rm() {
-        let rule = find_rule("bash.command-substitution");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "`which rm` -rf /"}));
+        let rule = find_rule("process.command-substitution");
+        let ctx = make_ctx(
+            "process::run",
+            serde_json::json!({"command": "`which rm` -rf /"}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(result.triggered, "Should warn on `which rm` -rf /");
     }
 
     #[test]
     fn command_sub_allows_benign_subst() {
-        let rule = find_rule("bash.command-substitution");
+        let rule = find_rule("process.command-substitution");
         let safe = [
             "echo $(date)",
             "$(which python) script.py",
             "export PATH=$(brew --prefix)/bin:$PATH",
         ];
         for cmd in safe {
-            let ctx = make_ctx("Bash", serde_json::json!({"command": cmd}));
+            let ctx = make_ctx("process::run", serde_json::json!({"command": cmd}));
             let result = rule.evaluate(&ctx, None);
             assert!(!result.triggered, "Should NOT warn: {cmd}");
         }
@@ -808,13 +867,13 @@ mod tests {
         let rule = find_rule("core.dotfiles-protection");
         let home = homedir();
         let ctx = make_ctx(
-            "Write",
+            "filesystem::write_file",
             serde_json::json!({"file_path": format!("{home}/.tron/{}/{}/file.txt", crate::shared::paths::dirs::WORKSPACE, crate::shared::paths::dirs::SCRATCH)}),
         );
         let result = rule.evaluate(&ctx, None);
         assert!(
             !result.triggered,
-            "Write to ~/.tron/workspace/scratch should be allowed"
+            "filesystem::write_file to ~/.tron/workspace/scratch should be allowed"
         );
     }
 }

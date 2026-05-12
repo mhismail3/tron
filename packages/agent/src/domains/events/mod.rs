@@ -121,7 +121,7 @@ async fn events_get_history_value(
     let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
     let oldest_event_id = events.first().map(|e| e.id.clone());
     let mut wire_events: Vec<Value> = events.iter().map(event_wire::event_row_to_wire).collect();
-    crate::domains::tools::interactive_enrichment::enrich_interactive_tool_statuses(
+    crate::domains::capability_support::interactive_enrichment::enrich_interactive_tool_statuses(
         &mut wire_events,
     );
 
@@ -159,7 +159,7 @@ async fn events_get_since_value(
         events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
     }
     let mut wire_events: Vec<Value> = events.iter().map(event_wire::event_row_to_wire).collect();
-    crate::domains::tools::interactive_enrichment::enrich_interactive_tool_statuses(
+    crate::domains::capability_support::interactive_enrichment::enrich_interactive_tool_statuses(
         &mut wire_events,
     );
     let next_cursor = events.last().map(|r| r.id.clone());

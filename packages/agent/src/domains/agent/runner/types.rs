@@ -375,7 +375,7 @@ pub struct ToolExecutionResult {
     /// Tool call ID.
     pub tool_call_id: String,
     /// Tool result.
-    pub result: crate::shared::tools::TronToolResult,
+    pub result: crate::shared::tools::CapabilityResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
     /// Whether a hook blocked execution.

@@ -404,7 +404,7 @@ mod tests {
         let ctx = Context {
             messages: vec![crate::shared::messages::Message::user("hello")].into(),
             tools: Some(vec![crate::shared::tools::Tool {
-                name: "read".into(),
+                name: "inspect".into(),
                 description: "Read a file".into(),
                 parameters: crate::shared::tools::ToolParameterSchema {
                     schema_type: "object".into(),

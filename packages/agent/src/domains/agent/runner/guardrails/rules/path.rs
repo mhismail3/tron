@@ -4,7 +4,7 @@
 //! - Protected path matching (glob patterns)
 //! - Path traversal detection (`..` sequences)
 //! - Hidden directory creation blocking
-//! - Bash command path extraction (detects writes to protected paths)
+//! - process::run command path extraction (detects writes to protected paths)
 
 use std::path::{Path, PathBuf};
 
@@ -40,9 +40,9 @@ impl PathRule {
                 continue;
             };
 
-            // For bash commands, extract paths from the command string
+            // For process commands, extract paths from the command string
             if arg_name == "command" {
-                if self.check_bash_command_for_paths(value, &homedir) {
+                if self.check_process_command_for_paths(value, &homedir) {
                     return RuleEvaluationResult::triggered(
                         &self.base.id,
                         self.base.severity,
@@ -52,7 +52,7 @@ impl PathRule {
                         "command": crate::shared::text::truncate_str(value, 200)
                     }));
                 }
-                // For bash, also check hidden mkdir
+                // For process, also check hidden mkdir
                 if self.block_hidden && has_hidden_mkdir(value) {
                     return RuleEvaluationResult::triggered(
                         &self.base.id,
@@ -111,25 +111,25 @@ impl PathRule {
         RuleEvaluationResult::not_triggered(&self.base.id)
     }
 
-    /// Check if a bash command would write to protected paths.
+    /// Check if a process command would write to protected paths.
     ///
     /// Hardening:
     /// - Write-operation regexes are compiled once via `std::sync::OnceLock`
     ///   instead of `Regex::new` per (protected_path × pattern) — a 5N
-    ///   regex-compilation cost on every bash command pre-fix where N was
+    ///   regex-compilation cost on every process command pre-fix where N was
     ///   the protected-paths list size.
     /// - A `MAX_COMMAND_LEN_FOR_REGEX` cap short-circuits pathological
     ///   inputs (multi-MB heredocs or pasted payloads) to "deny" before the
     ///   regex engine burns CPU on a worst-case scan. Treating oversized
-    ///   bash commands as protected-path writes is fail-safe: the command
+    ///   process commands as protected-path writes is fail-safe: the command
     ///   is already suspicious, and the alternative (bypass) is a
     ///   hardening hole.
-    fn check_bash_command_for_paths(&self, command: &str, homedir: &str) -> bool {
+    fn check_process_command_for_paths(&self, command: &str, homedir: &str) -> bool {
         if command.len() > MAX_COMMAND_LEN_FOR_REGEX {
             tracing::warn!(
                 command_len = command.len(),
                 limit = MAX_COMMAND_LEN_FOR_REGEX,
-                "bash command exceeds regex budget; treating as protected-path write (fail-safe)"
+                "process command exceeds regex budget; treating as protected-path write (fail-safe)"
             );
             return true;
         }
@@ -178,7 +178,7 @@ impl PathRule {
     }
 }
 
-/// Maximum bash command length subjected to full regex scanning.
+/// Maximum process command length subjected to full regex scanning.
 /// Above this, the rule fails-safe to "protected-path write detected".
 /// 64 KB comfortably covers any realistic interactive command; longer
 /// inputs are almost always pasted heredocs, base64 blobs, or
@@ -188,7 +188,7 @@ const MAX_COMMAND_LEN_FOR_REGEX: usize = 64 * 1024;
 /// Return a shared, one-time-compiled slice of the write-operation regexes.
 ///
 /// Pre-fix these were recompiled per (protected_path × pattern) on every
-/// bash-command evaluation, so a 100-path protected list meant 500 regex
+/// process-command evaluation, so a 100-path protected list meant 500 regex
 /// compiles per command.
 fn write_patterns() -> &'static [Regex] {
     use std::sync::OnceLock;
@@ -214,7 +214,7 @@ fn write_patterns() -> &'static [Regex] {
     })
 }
 
-/// Check if a bash command contains `mkdir` targeting a hidden directory.
+/// Check if a process command contains `mkdir` targeting a hidden directory.
 fn has_hidden_mkdir(command: &str) -> bool {
     let Ok(pattern) = Regex::new(r"mkdir\s+(?:-p\s+)?(\S+)") else {
         return false;
@@ -392,7 +392,7 @@ mod tests {
                 severity: Severity::Block,
                 scope: Scope::Global,
                 tier: RuleTier::Custom,
-                tools: Vec::new(),
+                capabilities: Vec::new(),
                 priority: 0,
                 enabled: true,
                 tags: Vec::new(),
@@ -405,39 +405,39 @@ mod tests {
     }
 
     #[test]
-    fn bash_command_under_limit_is_scanned_normally() {
+    fn process_command_under_limit_is_scanned_normally() {
         let rule = make_path_rule(vec!["/home/user/.tron".into()]);
         // Below cap, not in protected path → not triggered.
-        assert!(!rule.check_bash_command_for_paths("echo hello > /tmp/a", "/home/user"));
+        assert!(!rule.check_process_command_for_paths("echo hello > /tmp/a", "/home/user"));
         // Below cap, inside protected path → triggered.
-        assert!(rule.check_bash_command_for_paths("echo x > /home/user/.tron/a", "/home/user"));
+        assert!(rule.check_process_command_for_paths("echo x > /home/user/.tron/a", "/home/user"));
     }
 
     #[test]
-    fn bash_command_over_limit_fails_safe_to_triggered() {
+    fn process_command_over_limit_fails_safe_to_triggered() {
         // A pasted multi-MB command must not be scanned character-by-
         // character against N×5 regexes. The rule fails safe to "writes
         // protected path" so the command is blocked without burning CPU.
         let rule = make_path_rule(vec!["/home/user/.tron".into()]);
         let huge = "x".repeat(MAX_COMMAND_LEN_FOR_REGEX + 1);
-        assert!(rule.check_bash_command_for_paths(&huge, "/home/user"));
+        assert!(rule.check_process_command_for_paths(&huge, "/home/user"));
     }
 
     #[test]
-    fn bash_command_at_exact_limit_is_still_scanned() {
+    fn process_command_at_exact_limit_is_still_scanned() {
         // Boundary-inclusive: a command exactly at the cap is scanned
         // normally. Only inputs STRICTLY larger than the cap fail-safe.
         let rule = make_path_rule(vec!["/home/user/.tron".into()]);
         let at_limit = "x".repeat(MAX_COMMAND_LEN_FOR_REGEX);
         // Benign content at the exact limit → not protected.
-        assert!(!rule.check_bash_command_for_paths(&at_limit, "/home/user"));
+        assert!(!rule.check_process_command_for_paths(&at_limit, "/home/user"));
     }
 
     #[test]
     fn write_patterns_are_compiled_only_once() {
         // Regression guard: repeated calls return the same underlying slice
         // (OnceLock memoization). Previously every call to
-        // check_bash_command_for_paths recompiled the 5 regexes.
+        // check_process_command_for_paths recompiled the 5 regexes.
         let first = write_patterns().as_ptr();
         let second = write_patterns().as_ptr();
         assert_eq!(first, second, "regex vector should be the same allocation");

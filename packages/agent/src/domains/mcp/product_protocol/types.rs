@@ -119,7 +119,7 @@ pub enum McpContentBlock {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
-    /// Server name (used as tool name prefix).
+    /// Server name (used as capability id prefix).
     pub name: String,
     /// Command to spawn the server process (stdio transport).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,10 +158,10 @@ pub struct McpSettings {
     pub servers: Vec<McpServerConfig>,
     /// Proactive schema-refresh TTL in milliseconds.
     ///
-    /// Each `McpCall` invocation re-fetches a server's tool list if more than
+    /// Each MCP invocation re-fetches a server's tool list if more than
     /// this many ms have elapsed since the previous refresh. On drift, the
-    /// tool index is rebuilt so subsequent `McpSearch` results — and therefore
-    /// the LLM's next call arguments — see the live schema.
+    /// tool index is rebuilt so subsequent capability search results see the
+    /// live schema.
     ///
     /// `0` disables proactive refresh entirely (cache is only rebuilt at
     /// startup and on manual restart). Default: 30 seconds.

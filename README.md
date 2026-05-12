@@ -45,13 +45,13 @@ This README is the single, canonical reference for the project and is expected t
 |                          Rust Agent Server                                  |
 |                         packages/agent                                      |
 |                                                                             |
-|  +-------------+  +-----------+  +------------+  +------------------------+ |
-|  |  Providers  |  |   Tools   |  |  Context   |  |     Orchestrator       | |
-|  |  Anthropic  |  | read/write|  |  loader    |  |  Session lifecycle     | |
-|  |  OpenAI     |  | edit/bash |  |  compaction|  |  Turn management       | |
-|  |  Google     |  | search/web|  |  skills    |  |  Event routing         | |
-|  |  MiniMax    |  | subagents |  |  rules     |  |  Subagent coordination | |
-|  +-------------+  +-----------+  +------------+  +------------------------+ |
+|  +-------------+  +------------+  +------------+  +------------------------+ |
+|  |  Providers  |  | Capability |  |  Context   |  |     Orchestrator       | |
+|  |  Anthropic  |  | search     |  |  loader    |  |  Session lifecycle     | |
+|  |  OpenAI     |  | inspect    |  |  compaction|  |  Turn management       | |
+|  |  Google     |  | execute    |  |  skills    |  |  Event routing         | |
+|  |  MiniMax    |  | workers    |  |  rules     |  |  Subagent coordination | |
+|  +-------------+  +------------+  +------------+  +------------------------+ |
 +------------------------------------+----------------------------------------+
                                      |
                                      v
@@ -133,7 +133,7 @@ main.rs     Thin CLI/startup entry point
 | `app` | Startup/bootstrap + HTTP shell | `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
-| `domains` | Worker-owned Tron behavior and implementation code | `registration::register_domain_workers_for_context()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
+| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor/product-protocol integrations | `CodexAppServerManager`, APNS senders, updater scheduler |
 | `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
@@ -147,7 +147,7 @@ uses; `handlers.rs` binds operation keys to local handler structs; `operations/`
 contains executable operation bodies. Runtime support is split the same way in
 domain-owned folders such as `domains/agent/runner/*`,
 `domains/agent/runtime/*`, `domains/session/event_store/*`,
-`domains/tools/implementations/*`, and `domains/worktree/implementation/*`.
+`domains/capability_support/implementations/*`, and `domains/worktree/implementation/*`.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -271,45 +271,34 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 ## Tools
 
-Tools are registered by the `domains::tools` worker as canonical `tool::*` capabilities. Each built-in tool has a tools-domain capability spec with model-facing schema metadata, authority/risk/idempotency policy, and a local handler binding. At model-call time, provider-facing tool schemas are projected from the live engine catalog, so built-ins, engine meta-tools, and eligible live MCP capabilities are filtered by current visibility, health, authority, and schema metadata before being sent to the model.
-
-The names in the table below are provider-facing model tool names. Their
-execution path is still canonical engine invocation: `Bash` resolves to
-`tool::bash`, `Read` resolves to `tool::read`, `engine_discover` resolves to
-`tool::engine_discover`, and so on. There is no separate production tool
-registry path.
-`engine_discover` is a filtered live-catalog search: query results are not
-presented as the whole engine surface unless the agent asks with no query or a
-broad namespace. Use `engine_inspect` on returned canonical ids before invoking
-them.
-
-### Always-on (21)
+The model-facing harness is intentionally collapsed to three live capability
+primitives registered by the `domains::capability` worker:
 
 | Tool | Description |
 |------|-------------|
-| `Read` | Read file contents with line numbers. Supports offset/limit for large files and PDF extraction. |
-| `Write` | Write content to a file (creates or overwrites). |
-| `Edit` | Search-and-replace within files (exact string matching, optional `replace_all`). |
-| `Find` | Find files by glob pattern. |
-| `Search` | Full-text content search built on ripgrep (regex, glob filters, multiple output modes). |
-| `Bash` | Execute shell commands with configurable timeout. Supports backgrounding, blob storage for large output, and an optional sandbox image. |
-| `AskUserQuestion` | Prompt the user for input with structured options. |
-| `NotifyApp` | Record an engine-owned notification inbox item and send a push notification through the Cloudflare relay when APNs is configured; if device push is unavailable, the tool reports that the inbox item still exists. |
-| `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
-| `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/profiles/auth.json`. |
-| `Display` | Render rich content (images, streams) for iOS clients via blob storage and `DisplayFrame` events. |
-| `ComputerUse` | Screenshot, click, type, keypress, scroll, window management. |
-| `engine_discover` | Search the live canonical engine capability catalog visible to the current agent/session; natural query terms such as `sandbox spawn worker` match canonical ids like `sandbox::spawn_worker`. |
-| `engine_inspect` | Inspect an engine capability contract with model-readable request/response schemas, risk, authority, idempotency, approval, lease, stream, health, compensation, and provenance metadata. |
-| `engine_watch` | Poll live catalog changes after a catalog revision cursor. |
-| `engine_invoke` | Invoke canonical engine functions directly, with explicit idempotency required for writes and structured approval-required responses for high-risk capabilities. |
-| `McpSearch` | Meta-tool that searches across connected MCP server tool catalogs by keyword. Empty query and empty server filter list every indexed tool. |
-| `McpCall` | Meta-tool that invokes a specific tool on an MCP server. Registered even before MCP servers are configured, so later settings changes do not require a daemon restart. |
-| `SpawnSubagent` | Spawn a child agent. Parent depth is controlled by `agent.subagent_max_depth`; tool `maxDepth: 0` creates a leaf child that cannot spawn its own children. |
-| `ManageJob` | Inspect, signal, and clean up background jobs (Bash backgrounded processes + subagents). |
-| `Wait` | Block until specified background jobs complete or hit a timeout. |
+| `search` | Search the live catalog for contracts, implementations, workers, plugins, examples, and docs visible to the current actor/session/workspace. |
+| `inspect` | Inspect one capability contract and selected implementation, including schemas, risk, authority, idempotency, approval, leases, compensation, provenance, schema digest, and expected revision. |
+| `execute` | Invoke a selected capability through the engine ledger. |
 
-Source-control operations are now canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block still tells agents how to inspect state and use `Bash git ...` where appropriate while deferring risky / publishing operations to the user.
+Filesystem, code search, shell/process, web, MCP, iOS/app interaction, display,
+notifications, subagents, and sandbox workers are not provider-facing built-ins.
+They are worker-owned capabilities discovered and invoked through the three
+primitives. Provider integrations do not expose their implementation names directly.
+
+Capability identity is projected from the live catalog:
+
+| Shape | Meaning |
+|-------|---------|
+| `contractId` | Stable abstract interface. First-party functions default to their canonical engine id unless richer plugin manifests provide explicit contracts. |
+| `implementationId` | Concrete provider. Existing catalog functions default to `function:namespace::function`. |
+| `pluginId` | Owning package/domain. Existing first-party workers default to `first_party.<worker>`, while MCP defaults to `external.mcp`. |
+
+Mutating or medium/high-risk execution requires a fresh `inspect` result and
+the returned `expectedRevision`. Mutating calls also require stable idempotency;
+model tool calls derive a child key from the parent call when one is not passed
+explicitly.
+
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block tells agents to inspect `process::run` before using standard `git` commands and to defer risky or publishing operations to the user.
 
 ---
 
@@ -379,12 +368,11 @@ but still returns the current Python template so the agent receives executable
 guidance instead of searching source after a schema rejection.
 `sandbox::spawn_worker` injects `TRON_ENGINE_WORKER_ENDPOINT` as a complete
 `ws://` or `wss://` URL ending in `/engine/workers`, so generated workers do not
-derive socket paths from client URLs. The intended loop is: discover/inspect
-`worker::protocol_guide`, write the worker script from that template, invoke
+derive socket paths from client URLs. The intended loop is: `search`/`inspect`
+`worker::protocol_guide`, write the worker script from that template, `execute`
 `sandbox::spawn_worker` with expected function ids and a stable idempotency key,
-observe the catalog revision through `engine_watch` or `catalog::list`, invoke
-the new `namespace::function`, then stop it with
-`sandbox::stop_spawned_worker`.
+search or inspect the new catalog entry, execute the new `namespace::function`,
+then stop it with `sandbox::stop_spawned_worker`.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, and `approval::*` preserve the runtime semantics for delivery,
@@ -555,7 +543,7 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
   },
 
   "tools": {
-    "bash": { "defaultTimeoutMs": 120000 }
+    "process": { "defaultTimeoutMs": 120000 }
   },
 
   "skills": {
@@ -979,13 +967,13 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   |   |   +-- processes/         Summarizer, hook, automation, and subagent process prompts
 |   |   +-- context/               Context block assembly policy
 |   |   +-- providers/             Provider-specific presentation defaults
-|   |   +-- tools/                 Tool presentation policy
+|   |   +-- capabilities/          Capability presentation policy
 |   +-- normal/                    Managed standard workspace/session profile
 |   |   +-- profile.toml           Inherits default; profileClass = "normal"
 |   +-- chat/                      Managed quick-chat profile
 |   |   +-- profile.toml           Inherits default; maps main entrypoint to chat prompt
 |   +-- local/                     Managed local-provider profile
-|   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/tools
+|   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/capabilities
 |   +-- user/                      Sparse user profile/settings/prompt overrides
 |       +-- profile.toml           Sparse `[settings]` overrides
 +-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel

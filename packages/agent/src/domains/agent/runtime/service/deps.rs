@@ -20,9 +20,11 @@ pub struct PromptRuntimeDeps {
     pub subagent_manager:
         Option<Arc<crate::domains::agent::runner::orchestrator::subagent_manager::SubagentManager>>,
     pub worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
-    pub process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
-    pub job_manager: Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    pub process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
+    pub job_manager:
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     pub output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,

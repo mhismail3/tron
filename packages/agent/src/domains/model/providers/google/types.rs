@@ -933,13 +933,13 @@ mod tests {
     fn gemini_part_function_call_serde() {
         let part = GeminiPart::FunctionCall {
             function_call: FunctionCallData {
-                name: "bash".into(),
+                name: "execute".into(),
                 args: serde_json::json!({"command": "ls"}),
             },
             thought_signature: Some("sig-123".into()),
         };
         let json = serde_json::to_value(&part).unwrap();
-        assert_eq!(json["functionCall"]["name"], "bash");
+        assert_eq!(json["functionCall"]["name"], "execute");
         assert_eq!(json["thoughtSignature"], "sig-123");
     }
 
@@ -971,7 +971,7 @@ mod tests {
     fn gemini_tool_serde() {
         let tool = GeminiTool {
             function_declarations: vec![FunctionDeclaration {
-                name: "bash".into(),
+                name: "execute".into(),
                 description: "Run a command".into(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -980,7 +980,7 @@ mod tests {
             }],
         };
         let json = serde_json::to_value(&tool).unwrap();
-        assert_eq!(json["functionDeclarations"][0]["name"], "bash");
+        assert_eq!(json["functionDeclarations"][0]["name"], "execute");
     }
 
     #[test]

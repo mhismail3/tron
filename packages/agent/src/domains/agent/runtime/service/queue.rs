@@ -38,9 +38,11 @@ pub(crate) fn drain_prompt_queue(
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
     process_manager: Option<
-        Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>,
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
     >,
-    job_manager: Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    job_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
+    >,
     output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,

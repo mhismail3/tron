@@ -740,7 +740,7 @@ mod tests {
         let ctx = HookContext::PreToolUse {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "Bash".to_string(),
+            tool_name: "process::run".to_string(),
             tool_arguments: serde_json::json!({"command": "ls"}),
             tool_call_id: "tc1".to_string(),
         };
@@ -754,7 +754,7 @@ mod tests {
         let ctx = HookContext::PostToolUse {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "Bash".to_string(),
+            tool_name: "process::run".to_string(),
             tool_call_id: "tc1".to_string(),
             result: serde_json::json!({"ok": true}),
             duration_ms: 150,
@@ -846,7 +846,7 @@ mod tests {
         let ctx = HookContext::PreToolUse {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "Bash".to_string(),
+            tool_name: "process::run".to_string(),
             tool_arguments: serde_json::json!({"command": "ls"}),
             tool_call_id: "tc1".to_string(),
         };

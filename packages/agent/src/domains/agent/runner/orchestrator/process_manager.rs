@@ -29,15 +29,15 @@ use uuid::Uuid;
 use tracing::{debug, warn};
 
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
-use crate::domains::session::event_store::{EventStore, EventType};
-use crate::domains::tools::implementations::errors::ToolError;
-use crate::domains::tools::implementations::traits::{
+use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::traits::{
     BackgroundReason, ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult,
     ProcessInfo, ProcessManagerOps, ProcessState,
 };
-use crate::domains::tools::implementations::utils::truncation::{
+use crate::domains::capability_support::implementations::utils::truncation::{
     HEAD_CHARS, INLINE_OUTPUT_LIMIT, TAIL_CHARS, truncate_head_tail,
 };
+use crate::domains::session::event_store::{EventStore, EventType};
 use crate::shared::events::{BaseEvent, TronEvent};
 
 // =============================================================================
@@ -95,13 +95,15 @@ impl ProcessManager {
         format!("proc-{}", Uuid::now_v7())
     }
 
-    fn kind_string(kind: &crate::domains::tools::implementations::traits::ProcessKind) -> String {
+    fn kind_string(
+        kind: &crate::domains::capability_support::implementations::traits::ProcessKind,
+    ) -> String {
         match kind {
-            crate::domains::tools::implementations::traits::ProcessKind::Shell => "shell".into(),
-            crate::domains::tools::implementations::traits::ProcessKind::DisplayStream => {
+            crate::domains::capability_support::implementations::traits::ProcessKind::Shell => "shell".into(),
+            crate::domains::capability_support::implementations::traits::ProcessKind::DisplayStream => {
                 "display_stream".into()
             }
-            crate::domains::tools::implementations::traits::ProcessKind::ToolOperation => {
+            crate::domains::capability_support::implementations::traits::ProcessKind::ToolOperation => {
                 "tool_operation".into()
             }
         }
@@ -205,7 +207,7 @@ impl ProcessManagerOps for ProcessManager {
             // Truncate large output and store full content in blob.
             let (truncated_output, blob_id) = if result.output.len() > INLINE_OUTPUT_LIMIT {
                 let blob_id = if let Some(ref store) = event_store_for_completion {
-                    match crate::domains::tools::implementations::traits::BlobStore::store(
+                    match crate::domains::capability_support::implementations::traits::BlobStore::store(
                         store.as_ref(),
                         result.output.as_bytes(),
                         "text/plain",

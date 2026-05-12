@@ -146,10 +146,10 @@ pub fn make_test_agent_deps() -> AgentDeps {
 pub(crate) fn make_test_tool_runtime_config() -> ToolRuntimeConfig {
     ToolRuntimeConfig {
         http_client: reqwest::Client::new(),
-        sandbox_settings: crate::domains::settings::BashSandboxSettings::default(),
+        sandbox_settings: crate::domains::settings::ProcessSandboxSettings::default(),
         computer_use_settings: crate::domains::settings::ComputerUseSettings::default(),
         notify_delegate: Arc::new(
-            crate::domains::tools::implementations::backends::StubNotifyDelegate,
+            crate::domains::capability_support::implementations::backends::StubNotifyDelegate,
         ),
     }
 }

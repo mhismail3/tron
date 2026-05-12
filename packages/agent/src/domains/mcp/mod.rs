@@ -2,7 +2,7 @@
 //!
 //! This module owns canonical function execution for the mcp namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
-//! Server lifecycle commands, status reads, tool catalog refresh, and MCP tool
+//! Server lifecycle commands, status reads, capability catalog refresh, and MCP tool
 //! function handlers live in `operations/`; product MCP protocol handling stays
 //! in the MCP runtime layer.
 

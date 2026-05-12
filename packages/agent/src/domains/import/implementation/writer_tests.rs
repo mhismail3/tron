@@ -67,7 +67,7 @@ fn write_sample_session(dir: &Path) -> std::path::PathBuf {
             "role": "assistant",
             "content": [
                 { "type": "text", "text": "Here's how to use Rust:" },
-                { "type": "tool_use", "id": "toolu_01", "name": "Write", "input": { "path": "main.rs", "content": "fn main() {}" } }
+                { "type": "tool_use", "id": "toolu_01", "name": "filesystem::write_file", "input": { "path": "main.rs", "content": "fn main() {}" } }
             ],
             "stop_reason": "tool_use",
             "usage": { "input_tokens": 500, "output_tokens": 200 }
@@ -560,7 +560,7 @@ fn import_session_passes_warnings_through_result() {
             "id": "msg_01",
             "role": "assistant",
             "content": [
-                { "type": "tool_use", "id": "toolu_orphan", "name": "Read", "input": { "path": "x.txt" } }
+                { "type": "tool_use", "id": "toolu_orphan", "name": "filesystem::read_file", "input": { "path": "x.txt" } }
             ],
             "stop_reason": "tool_use",
             "usage": { "input_tokens": 10, "output_tokens": 5 },

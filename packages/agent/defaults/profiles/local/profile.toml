@@ -3,7 +3,7 @@
 # Local sessions optimize for smaller local model context windows while still
 # preserving enough orientation to be useful. The profile inherits the complete
 # default spec, then maps the main entrypoint to the local prompt, local context
-# policy, and local tool policy. Future local variants should inherit from this
+# policy, and local capability policy. Future local variants should inherit from this
 # profile rather than from "default" directly.
 
 version = "2"
@@ -17,4 +17,4 @@ authProfile = "default"
 prompt = "prompts/local.md"
 contextPolicy = "localDefault"
 localContextPolicy = "localDefault"
-toolPolicy = "localModel"
+capabilityPolicy = "localModel"

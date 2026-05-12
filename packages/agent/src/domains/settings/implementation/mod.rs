@@ -215,7 +215,7 @@ authProfile = "default"
         assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(settings.retry.max_retries, 3);
         assert_eq!(settings.agent.max_turns, 250);
-        assert_eq!(settings.tools.bash.default_timeout_ms, 120_000);
+        assert_eq!(settings.tools.process.default_timeout_ms, 120_000);
         assert_eq!(settings.context.compactor.max_tokens, 25_000);
         assert!(settings.guardrails.is_none());
     }

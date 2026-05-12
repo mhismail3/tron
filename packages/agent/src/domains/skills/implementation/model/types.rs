@@ -76,12 +76,12 @@ pub struct SkillFrontmatter {
     /// Categorization tags.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    /// Allow-list of tools (mutually exclusive with `denied_tools`).
+    /// Allow-list of tools (mutually exclusive with `denied_capabilities`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_tools: Option<Vec<String>>,
-    /// Deny-list of tools (mutually exclusive with `allowed_tools`).
+    pub allowed_capabilities: Option<Vec<String>>,
+    /// Deny-list of tools (mutually exclusive with `allowed_capabilities`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub denied_tools: Option<Vec<String>>,
+    pub denied_capabilities: Option<Vec<String>>,
     /// Subagent execution mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SkillSubagentMode>,
@@ -228,7 +228,7 @@ pub struct AddedSkillInfo {
 #[derive(Debug, Clone)]
 pub struct ToolDenialConfig {
     /// Tools that are denied.
-    pub denied_tools: Vec<String>,
+    pub denied_capabilities: Vec<String>,
 }
 
 #[cfg(test)]

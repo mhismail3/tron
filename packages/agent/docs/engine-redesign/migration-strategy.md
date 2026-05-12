@@ -36,15 +36,16 @@ Before this branch is considered stable, verification must prove:
 - queue drain and approval resolution preserve original trace, authority,
   parent invocation, idempotency, leases, and compensation metadata;
 - model tool schemas are projected from the live engine catalog at each model
-  call boundary.
+  call boundary, with only the `search`, `inspect`, and `execute` primitives
+  exposed to providers.
 
 ## Client Follow-Up
 
 This branch is server-first and intentionally breaks old clients. The next
 client work should replace dotted method calls with:
 
-1. `/engine` `discover` for available capabilities;
-2. `/engine` `inspect` for contracts and schema details;
-3. `/engine` `invoke` for canonical function execution;
-4. `/engine` `watch` or `/engine` stream subscriptions for live changes;
-5. `/engine` `promote` for explicit promotion flows.
+1. provider-facing `search` for available contracts and implementations;
+2. provider-facing `inspect` for contracts, schema details, authority, and expected revision;
+3. provider-facing `execute` for canonical function execution;
+4. `/engine` `watch` or `/engine` stream subscriptions for non-model live clients;
+5. `/engine` `promote` or the corresponding inspected capability for explicit promotion flows.

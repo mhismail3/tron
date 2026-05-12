@@ -1,30 +1,30 @@
-//! Tool-specific settings.
+//! Capability-specific settings.
 //!
-//! Configuration for each tool category: Bash, Read, Find, Search, and Web.
+//! Configuration for process, filesystem, search, web, browser, and computer-use capabilities.
 
 use serde::{Deserialize, Serialize};
 
-/// Container for all tool settings.
+/// Container for all capability settings.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct ToolSettings {
-    /// Bash/shell execution settings.
-    pub bash: BashToolSettings,
+pub struct CapabilitySettings {
+    /// Process execution settings.
+    pub process: ProcessCapabilitySettings,
     /// File reading settings.
-    pub read: ReadToolSettings,
+    pub filesystem_read: FilesystemReadCapabilitySettings,
     /// File finding/glob settings.
-    pub find: FindToolSettings,
+    pub find: FindCapabilitySettings,
     /// Content search settings.
-    pub search: SearchToolSettings,
-    /// Web fetch and cache settings.
-    pub web: WebToolSettings,
+    pub search: SearchCapabilitySettings,
+    /// Web request and cache settings.
+    pub web: WebCapabilitySettings,
     /// Browser automation settings.
     pub browser: BrowserSettings,
     /// Computer use (screenshot, click, type) settings.
     pub computer_use: ComputerUseSettings,
 }
 
-/// Computer use tool settings.
+/// Computer-use capability settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ComputerUseSettings {
@@ -43,10 +43,10 @@ impl Default for ComputerUseSettings {
     }
 }
 
-/// Bash tool settings.
+/// Process capability settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct BashToolSettings {
+pub struct ProcessCapabilitySettings {
     /// Default command timeout in milliseconds.
     pub default_timeout_ms: u64,
     /// Maximum allowed timeout in milliseconds.
@@ -56,20 +56,20 @@ pub struct BashToolSettings {
     /// Regex patterns for detecting dangerous commands.
     pub dangerous_patterns: Vec<String>,
     /// Sandbox settings.
-    pub sandbox: BashSandboxSettings,
+    pub sandbox: ProcessSandboxSettings,
 }
 
-/// Sandbox settings for the Bash tool.
+/// Sandbox settings for the Process capability.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct BashSandboxSettings {
+pub struct ProcessSandboxSettings {
     /// Default Docker image for `sandbox: "docker"` mode.
     pub default_image: String,
     /// Whether to enable network access in Docker sandbox by default.
     pub network_enabled: bool,
 }
 
-impl Default for BashSandboxSettings {
+impl Default for ProcessSandboxSettings {
     fn default() -> Self {
         Self {
             default_image: "ubuntu:latest".to_string(),
@@ -78,13 +78,13 @@ impl Default for BashSandboxSettings {
     }
 }
 
-impl Default for BashToolSettings {
+impl Default for ProcessCapabilitySettings {
     fn default() -> Self {
         Self {
             default_timeout_ms: 120_000,
             max_timeout_ms: 600_000,
             max_output_length: 40_000,
-            sandbox: BashSandboxSettings::default(),
+            sandbox: ProcessSandboxSettings::default(),
             dangerous_patterns: vec![
                 r"^rm\s+(-rf?|--force)\s+/\s*$".to_string(),
                 r"rm\s+-rf?\s+/".to_string(),
@@ -98,10 +98,10 @@ impl Default for BashToolSettings {
     }
 }
 
-/// Read tool settings.
+/// Filesystem read capability settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct ReadToolSettings {
+pub struct FilesystemReadCapabilitySettings {
     /// Default maximum lines to read per file.
     pub default_limit_lines: usize,
     /// Maximum characters per line before truncation.
@@ -110,7 +110,7 @@ pub struct ReadToolSettings {
     pub max_output_tokens: usize,
 }
 
-impl Default for ReadToolSettings {
+impl Default for FilesystemReadCapabilitySettings {
     fn default() -> Self {
         Self {
             default_limit_lines: 2000,
@@ -120,17 +120,17 @@ impl Default for ReadToolSettings {
     }
 }
 
-/// Find tool settings.
+/// Find capability settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct FindToolSettings {
+pub struct FindCapabilitySettings {
     /// Default maximum number of results.
     pub default_max_results: usize,
     /// Default maximum directory depth.
     pub default_max_depth: usize,
 }
 
-impl Default for FindToolSettings {
+impl Default for FindCapabilitySettings {
     fn default() -> Self {
         Self {
             default_max_results: 100,
@@ -139,10 +139,10 @@ impl Default for FindToolSettings {
     }
 }
 
-/// Search/grep tool settings.
+/// Search/grep capability settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct SearchToolSettings {
+pub struct SearchCapabilitySettings {
     /// Default maximum number of results.
     pub default_max_results: usize,
     /// Maximum file size to search in bytes.
@@ -167,7 +167,7 @@ pub struct SearchToolSettings {
     pub default_timeout_ms: u64,
 }
 
-impl Default for SearchToolSettings {
+impl Default for SearchCapabilitySettings {
     fn default() -> Self {
         Self {
             default_max_results: 100,
@@ -206,25 +206,25 @@ impl Default for SearchToolSettings {
     }
 }
 
-/// Web fetch and cache settings container.
+/// Web request and cache settings container.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct WebToolSettings {
+pub struct WebCapabilitySettings {
     /// HTTP fetch settings.
-    pub fetch: WebFetchSettings,
+    pub fetch: WebRequestSettings,
     /// Response cache settings.
     pub cache: WebCacheSettings,
 }
 
-/// Web fetch settings.
+/// Web request settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct WebFetchSettings {
+pub struct WebRequestSettings {
     /// HTTP request timeout in milliseconds.
     pub timeout_ms: u64,
 }
 
-impl Default for WebFetchSettings {
+impl Default for WebRequestSettings {
     fn default() -> Self {
         Self { timeout_ms: 30_000 }
     }
@@ -270,8 +270,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bash_defaults() {
-        let b = BashToolSettings::default();
+    fn process_defaults() {
+        let b = ProcessCapabilitySettings::default();
         assert_eq!(b.default_timeout_ms, 120_000);
         assert_eq!(b.max_timeout_ms, 600_000);
         assert_eq!(b.max_output_length, 40_000);
@@ -279,19 +279,19 @@ mod tests {
     }
 
     #[test]
-    fn bash_serde_roundtrip() {
-        let b = BashToolSettings::default();
+    fn process_serde_roundtrip() {
+        let b = ProcessCapabilitySettings::default();
         let json = serde_json::to_value(&b).unwrap();
         assert_eq!(json["defaultTimeoutMs"], 120_000);
         assert_eq!(json["maxTimeoutMs"], 600_000);
-        let back: BashToolSettings = serde_json::from_value(json).unwrap();
+        let back: ProcessCapabilitySettings = serde_json::from_value(json).unwrap();
         assert_eq!(back.default_timeout_ms, b.default_timeout_ms);
         assert_eq!(back.dangerous_patterns.len(), b.dangerous_patterns.len());
     }
 
     #[test]
-    fn read_defaults() {
-        let r = ReadToolSettings::default();
+    fn filesystem_read_defaults() {
+        let r = FilesystemReadCapabilitySettings::default();
         assert_eq!(r.default_limit_lines, 2000);
         assert_eq!(r.max_line_length, 2000);
         assert_eq!(r.max_output_tokens, 20_000);
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn search_defaults() {
-        let s = SearchToolSettings::default();
+        let s = SearchCapabilitySettings::default();
         assert_eq!(s.default_max_results, 100);
         assert_eq!(s.max_file_size_bytes, 10_485_760);
         assert!(!s.binary_extensions.is_empty());
@@ -309,25 +309,25 @@ mod tests {
 
     #[test]
     fn web_defaults() {
-        let w = WebToolSettings::default();
+        let w = WebCapabilitySettings::default();
         assert_eq!(w.fetch.timeout_ms, 30_000);
         assert_eq!(w.cache.ttl_ms, 900_000);
         assert_eq!(w.cache.max_entries, 100);
     }
 
     #[test]
-    fn tool_settings_partial_json() {
+    fn capability_settings_partial_json() {
         let json = serde_json::json!({
-            "bash": {
+            "process": {
                 "defaultTimeoutMs": 60000
             }
         });
-        let tools: ToolSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(tools.bash.default_timeout_ms, 60_000);
-        // Other bash fields should be defaults
-        assert_eq!(tools.bash.max_timeout_ms, 600_000);
-        // Other tool sections should be defaults
-        assert_eq!(tools.read.default_limit_lines, 2000);
+        let tools: CapabilitySettings = serde_json::from_value(json).unwrap();
+        assert_eq!(tools.process.default_timeout_ms, 60_000);
+        // Other process fields should be defaults.
+        assert_eq!(tools.process.max_timeout_ms, 600_000);
+        // Other capability sections should be defaults.
+        assert_eq!(tools.filesystem_read.default_limit_lines, 2000);
     }
 
     #[test]
@@ -382,16 +382,16 @@ mod tests {
     }
 
     #[test]
-    fn tool_settings_with_browser_partial_json() {
+    fn capability_settings_with_browser_partial_json() {
         let json = serde_json::json!({
             "browser": {
                 "headed": true
             }
         });
-        let tools: ToolSettings = serde_json::from_value(json).unwrap();
+        let tools: CapabilitySettings = serde_json::from_value(json).unwrap();
         assert!(tools.browser.headed);
-        // Other tool sections should still be defaults
-        assert_eq!(tools.bash.default_timeout_ms, 120_000);
+        // Other capability sections should still be defaults.
+        assert_eq!(tools.process.default_timeout_ms, 120_000);
     }
 
     #[test]
@@ -425,17 +425,17 @@ mod tests {
     }
 
     #[test]
-    fn tool_settings_with_computer_use_partial_json() {
+    fn capability_settings_with_computer_use_partial_json() {
         let json = serde_json::json!({
             "computerUse": {
                 "confirmBeforeAction": false,
                 "screenshotThrottleMs": 250
             }
         });
-        let tools: ToolSettings = serde_json::from_value(json).unwrap();
+        let tools: CapabilitySettings = serde_json::from_value(json).unwrap();
         assert!(!tools.computer_use.confirm_before_action);
         assert_eq!(tools.computer_use.screenshot_throttle_ms, 250);
-        // Other tool sections should still be defaults
-        assert_eq!(tools.bash.default_timeout_ms, 120_000);
+        // Other capability sections should still be defaults.
+        assert_eq!(tools.process.default_timeout_ms, 120_000);
     }
 }

@@ -67,7 +67,7 @@ impl ToolIndex {
         Self { tools: Vec::new() }
     }
 
-    /// Add tools from a server. Parses schemas and tokenizes for search.
+    /// Add capabilities from a server. Parses schemas and tokenizes for search.
     pub fn add_server_tools(&mut self, server: &str, defs: &[McpToolDef]) {
         for def in defs {
             let params = extract_params(&def.input_schema);
@@ -130,7 +130,7 @@ impl ToolIndex {
         self.tools.len()
     }
 
-    /// Number of tools from a specific server.
+    /// Number of capabilities from a specific server.
     pub fn server_tool_count(&self, server: &str) -> usize {
         self.tools
             .iter()
@@ -187,7 +187,7 @@ fn score_tool(tool: &IndexedTool, keywords: &[String]) -> u32 {
     let server_lower = tool.server_name.to_lowercase();
 
     for kw in keywords {
-        // Exact tool name match
+        // Exact capability id match
         if tool.name_tokens.iter().any(|t| t == kw) {
             total += 100;
         }
@@ -199,7 +199,7 @@ fn score_tool(tool: &IndexedTool, keywords: &[String]) -> u32 {
         else if tool.name_tokens.iter().any(|t| t.starts_with(kw.as_str())) {
             total += 30;
         }
-        // Keyword appears in tool name (substring)
+        // Keyword appears in capability id (substring)
         else if tool.name_tokens.iter().any(|t| t.contains(kw.as_str())) {
             total += 20;
         }

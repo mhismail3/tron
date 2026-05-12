@@ -1439,13 +1439,13 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Bash", "arguments": {"command": "ls"}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "process::run", "arguments": {"command": "ls"}}],
                     "turn": 1,
                 }),
             ),
             ev(
                 EventType::ToolCall,
-                serde_json::json!({"toolCallId": "call_1", "name": "Bash", "arguments": {"command": "ls"}}),
+                serde_json::json!({"toolCallId": "call_1", "name": "process::run", "arguments": {"command": "ls"}}),
             ),
             ev(
                 EventType::ToolResult,
@@ -1455,13 +1455,13 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_2", "name": "Read", "arguments": {"path": "file1.txt"}}],
+                    "content": [{"type": "tool_use", "id": "call_2", "name": "filesystem::read_file", "arguments": {"path": "file1.txt"}}],
                     "turn": 2,
                 }),
             ),
             ev(
                 EventType::ToolCall,
-                serde_json::json!({"toolCallId": "call_2", "name": "Read", "arguments": {"path": "file1.txt"}}),
+                serde_json::json!({"toolCallId": "call_2", "name": "filesystem::read_file", "arguments": {"path": "file1.txt"}}),
             ),
             ev(
                 EventType::ToolResult,
@@ -1874,7 +1874,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "toolu_abc", "name": "Read", "arguments": {"path": "file.txt"}}],
+                    "content": [{"type": "tool_use", "id": "toolu_abc", "name": "filesystem::read_file", "arguments": {"path": "file.txt"}}],
                     "turn": 1,
                 }),
             ),
@@ -1899,8 +1899,8 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_gpt_1", "name": "Write", "arguments": {"path": "out.txt"}},
-                        {"type": "tool_use", "id": "call_gpt_2", "name": "Bash", "arguments": {"command": "echo hi"}}
+                        {"type": "tool_use", "id": "call_gpt_1", "name": "filesystem::write_file", "arguments": {"path": "out.txt"}},
+                        {"type": "tool_use", "id": "call_gpt_2", "name": "process::run", "arguments": {"command": "echo hi"}}
                     ],
                     "turn": 3,
                 }),
@@ -1948,7 +1948,7 @@ mod tests {
                 serde_json::json!({
                     "content": [
                         {"type": "text", "text": "I'll help with"},
-                        {"type": "tool_use", "id": "tc_1", "name": "bash", "arguments": {"command": "ls"}}
+                        {"type": "tool_use", "id": "tc_1", "name": "execute", "arguments": {"command": "ls"}}
                     ],
                     "turn": 1,
                     "stopReason": "interrupted",
@@ -2010,7 +2010,7 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "tc_1", "name": "bash", "arguments": {}}
+                        {"type": "tool_use", "id": "tc_1", "name": "execute", "arguments": {}}
                     ],
                     "turn": 1,
                     "stopReason": "interrupted",

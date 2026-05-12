@@ -77,7 +77,7 @@ steps are:
 - `settings::init_settings()` receives the settings embedded in the compiled
   profile snapshot after sparse `profiles/user/profile.toml` settings and
   environment overrides have been applied.
-- The agent turn runner builds provider-visible tools from the live engine
+- The agent turn runner builds provider-visible capabilities from the live engine
   catalog. Built-ins, MCP tools, and local worker functions enter the model
   surface only as canonical capabilities.
 - `ServerRuntimeContext` is setup-only. Domain runtime paths receive narrowed
@@ -141,7 +141,7 @@ gravity.
   dynamic rules from `RunContext`.
 - Local providers use `runtime/context/local_policy.rs` as a thin projection over
   the active AgentExecutionSpec: reduced tool schemas including
-  `AskUserQuestion`, no memory, no skill index, no job results, truncated rules,
+  `agent::ask_user`, no memory, no skill index, no job results, truncated rules,
   but explicit skill activation/active/removal context is retained.
 - `compose_context_audit_blocks` compiles the provider-independent audit view.
   It includes prompt blocks plus audit-only hook context, tool schemas, and

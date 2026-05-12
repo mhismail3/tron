@@ -32,6 +32,40 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("filesystem::read_file", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"path":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"content":{"type":"string"},"path":{"type":"string"}},"required":["content","path"],"type":"object"}))
+            .build()?,
+        CapabilityContract::new("filesystem::write_file", "filesystem", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("filesystem.write"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"content":{"type":"string"},"path":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","content"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"bytesWritten":{"type":"integer"},"created":{"type":"boolean"},"path":{"type":"string"}},"required":["path","bytesWritten","created"],"type":"object"}))
+            .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "writes are audited with byte counts; callers should inspect/diff before replacing important content"))
+            .build()?,
+        CapabilityContract::new("filesystem::edit_file", "filesystem", EffectClass::ReversibleSideEffect, RiskLevel::Medium, Some("filesystem.write"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"newString":{"type":"string"},"oldString":{"type":"string"},"path":{"type":"string"},"replaceAll":{"type":"boolean"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","oldString","newString"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}},"required":["path","replacements","diff"],"type":"object"}))
+            .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "the returned diff contains enough context for manual reversal when the edited file still exists"))
+            .build()?,
+        CapabilityContract::new("filesystem::find", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"exclude":{"items":{"type":"string"},"type":"array"},"maxDepth":{"type":"integer"},"maxResults":{"type":"integer"},"path":{"type":"string"},"pattern":{"type":"string"},"sessionId":{"type":"string"},"type":{"enum":["file","directory","all"],"type":"string"},"workspaceId":{"type":"string"}},"required":["pattern"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"matches":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"path":{"type":"string"},"truncated":{"type":"boolean"}},"required":["path","matches","truncated"],"type":"object"}))
+            .build()?,
+        CapabilityContract::new("filesystem::glob", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"exclude":{"items":{"type":"string"},"type":"array"},"maxDepth":{"type":"integer"},"maxResults":{"type":"integer"},"path":{"type":"string"},"pattern":{"type":"string"},"sessionId":{"type":"string"},"type":{"enum":["file","directory","all"],"type":"string"},"workspaceId":{"type":"string"}},"required":["pattern"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"matches":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"path":{"type":"string"},"truncated":{"type":"boolean"}},"required":["path","matches","truncated"],"type":"object"}))
+            .build()?,
+        CapabilityContract::new("filesystem::search_text", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"context":{"type":"integer"},"filePattern":{"type":"string"},"maxResults":{"type":"integer"},"path":{"type":"string"},"pattern":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["pattern"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"matches":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"path":{"type":"string"},"truncated":{"type":"boolean"}},"required":["path","matches","truncated"],"type":"object"}))
+            .build()?,
+        CapabilityContract::new("filesystem::diff", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"newContent":{"type":"string"},"path":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","newContent"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"diff":{"type":"string"},"path":{"type":"string"}},"required":["path","diff"],"type":"object"}))
+            .build()?,
+        CapabilityContract::new("filesystem::apply_patch", "filesystem", EffectClass::ReversibleSideEffect, RiskLevel::Medium, Some("filesystem.write"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"newString":{"type":"string"},"oldString":{"type":"string"},"path":{"type":"string"},"replaceAll":{"type":"boolean"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","oldString","newString"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}},"required":["path","replacements","diff"],"type":"object"}))
+            .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "patch edits return a diff for manual reversal when the edited file still exists"))
             .build()?
     ])
 }

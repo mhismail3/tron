@@ -443,7 +443,7 @@ mod tests {
                         index: 0,
                         id: Some("call_abc".into()),
                         function: Some(ChunkToolCallFunction {
-                            name: Some("bash".into()),
+                            name: Some("execute".into()),
                             arguments: Some("{\"cm".into()),
                         }),
                     }]),
@@ -494,7 +494,7 @@ mod tests {
                             index: 0,
                             id: Some("call_1".into()),
                             function: Some(ChunkToolCallFunction {
-                                name: Some("bash".into()),
+                                name: Some("execute".into()),
                                 arguments: Some("{}".into()),
                             }),
                         },
@@ -502,7 +502,7 @@ mod tests {
                             index: 1,
                             id: Some("call_2".into()),
                             function: Some(ChunkToolCallFunction {
-                                name: Some("read".into()),
+                                name: Some("inspect".into()),
                                 arguments: Some("{}".into()),
                             }),
                         },
@@ -665,7 +665,7 @@ mod tests {
                         index: 0,
                         id: Some("call_1".into()),
                         function: Some(ChunkToolCallFunction {
-                            name: Some("bash".into()),
+                            name: Some("execute".into()),
                             arguments: Some("{}".into()),
                         }),
                     }]),
@@ -693,7 +693,7 @@ mod tests {
                         index: 0,
                         id: Some("call_1".into()),
                         function: Some(ChunkToolCallFunction {
-                            name: Some("bash".into()),
+                            name: Some("execute".into()),
                             arguments: Some("{\"cm".into()),
                         }),
                     }]),
@@ -747,7 +747,7 @@ mod tests {
             .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
         assert!(tool_end.is_some());
         if let StreamEvent::ToolCallEnd { tool_call } = tool_end.unwrap() {
-            assert_eq!(tool_call.name, "bash");
+            assert_eq!(tool_call.name, "execute");
             assert_eq!(tool_call.arguments["cmd"], "ls");
         }
     }

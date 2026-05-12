@@ -1,7 +1,8 @@
 //! Engine client protocol contracts.
 //!
-//! Public `/engine` message types are transport bindings over engine-owned
-//! meta-capabilities. Domain workers do not own these message contracts.
+//! Public `/engine` message types are worker/client transport bindings over
+//! engine-owned functions. They are not model-facing tools; domain workers do
+//! not own these message contracts.
 
 use serde_json::json;
 
@@ -19,7 +20,7 @@ use crate::shared::server::context::ServerRuntimeContext;
 const PUBLIC_ENGINE_TRANSPORT_METHODS: &[&str] =
     &["discover", "inspect", "watch", "invoke", "promote"];
 
-/// Public `/engine` client protocol meta-methods.
+/// Public `/engine` client protocol methods.
 pub fn public_engine_transport_methods() -> impl Iterator<Item = &'static str> {
     PUBLIC_ENGINE_TRANSPORT_METHODS.iter().copied()
 }

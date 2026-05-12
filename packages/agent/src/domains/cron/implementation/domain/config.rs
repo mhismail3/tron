@@ -472,7 +472,7 @@ mod tests {
     fn validate_job_tool_restrictions_allowed_only() {
         let mut job = make_valid_job();
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec!["Read".into()]),
+            allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
         });
         validate_job(&job).unwrap();
     }
@@ -488,7 +488,7 @@ mod tests {
     fn validate_job_tool_restrictions_empty_list() {
         let mut job = make_valid_job();
         job.tool_restrictions = Some(ToolRestrictions {
-            allowed_tools: Some(vec![]),
+            allowed_capabilities: Some(vec![]),
         });
         validate_job(&job).unwrap();
     }

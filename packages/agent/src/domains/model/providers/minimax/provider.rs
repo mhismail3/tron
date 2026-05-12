@@ -410,7 +410,7 @@ mod tests {
     fn build_tools_no_cache_control() {
         let ctx = Context {
             tools: Some(vec![crate::shared::tools::Tool {
-                name: "bash".into(),
+                name: "execute".into(),
                 description: "Run commands".into(),
                 parameters: crate::shared::tools::ToolParameterSchema {
                     schema_type: "object".into(),

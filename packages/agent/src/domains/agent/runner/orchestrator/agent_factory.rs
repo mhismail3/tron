@@ -8,8 +8,8 @@ use crate::domains::agent::runner::context::rules_index::RulesIndex;
 use crate::domains::agent::runner::context::types::ContextManagerConfig;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
+use crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy;
 use crate::domains::model::providers::provider::Provider;
-use crate::domains::tools::implementations::capability_surface::ToolSurfacePolicy;
 use crate::shared::messages::Message;
 
 use crate::domains::agent::runner::agent::tron_agent::{AgentDeps, TronAgent};
@@ -21,19 +21,19 @@ pub struct CreateAgentOpts {
     pub provider: Arc<dyn Provider>,
     /// Profile-resolved context policy for this agent.
     pub context_policy: ContextPolicy,
-    /// Profile-resolved tool policy for this agent.
-    pub tool_policy: crate::shared::profile::ToolPolicySpec,
+    /// Profile-resolved capability policy for this agent.
+    pub capability_policy: crate::shared::profile::CapabilityPolicySpec,
     /// Guardrail engine (optional).
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Hook engine (optional).
     pub hooks: Option<Arc<HookEngine>>,
     /// Whether this agent runs without direct user oversight.
-    /// When true, interactive tools are removed, spawn tools are gated
-    /// by `max_depth`, and all `denied_tools` are enforced.
+    /// When true, interactive capabilities are removed, spawn capabilities are gated
+    /// by `max_depth`, and all `denied_capabilities` are enforced.
     /// Set to true for: subagents, cron agents, system subsessions.
     pub is_unattended: bool,
-    /// Model tool names denied for this agent.
-    pub denied_tools: Vec<String>,
+    /// Model capability ids denied for this agent.
+    pub denied_capabilities: Vec<String>,
     /// Current subagent nesting depth (0 = top-level agent).
     pub subagent_depth: u32,
     /// Maximum nesting depth allowed for spawning children.
@@ -58,16 +58,17 @@ pub struct CreateAgentOpts {
     pub compaction_trigger_config:
         crate::domains::agent::runner::context::types::CompactionTriggerConfig,
     /// Optional process manager for background process execution.
-    pub process_manager:
-        Option<Arc<dyn crate::domains::tools::implementations::traits::ProcessManagerOps>>,
+    pub process_manager: Option<
+        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    >,
     /// Optional unified job manager for process + subagent lifecycle.
-    pub job_manager: Option<Arc<dyn crate::domains::tools::implementations::traits::JobManagerOps>>,
+    pub job_manager:
+        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
     pub output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,
-    /// Optional engine host for routing actual tool execution through
-    /// canonical `tool::*` functions.
+    /// Optional engine host for routing model-facing capability primitives.
     pub engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -84,9 +85,9 @@ impl AgentFactory {
         config.subagent_depth = opts.subagent_depth;
         config.subagent_max_depth = opts.subagent_max_depth;
 
-        let tool_surface_policy = ToolSurfacePolicy::from_profile(
-            &opts.tool_policy,
-            &opts.denied_tools,
+        let tool_surface_policy = CapabilitySurfacePolicy::from_profile(
+            &opts.capability_policy,
+            &opts.denied_capabilities,
             opts.is_unattended,
             opts.subagent_max_depth,
         );
@@ -200,11 +201,11 @@ mod tests {
                     ProviderKind::Anthropic,
                     spec,
                 ),
-            tool_policy: spec.tool_policies["default"].clone(),
+            capability_policy: spec.capability_policies["default"].clone(),
             guardrails: None,
             hooks: None,
             is_unattended: false,
-            denied_tools: vec![],
+            denied_capabilities: vec![],
             subagent_depth: 0,
             subagent_max_depth: 0,
             rules_content: None,
@@ -235,9 +236,9 @@ mod tests {
     }
 
     #[test]
-    fn create_agent_stores_live_catalog_tool_policy() {
+    fn create_agent_stores_live_catalog_capability_policy() {
         let mut opts = default_opts(Arc::new(MockProvider));
-        opts.denied_tools = vec!["Bash".into()];
+        opts.denied_capabilities = vec!["process::run".into()];
         let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
         assert!(agent.context_manager().tool_names().is_empty());
     }

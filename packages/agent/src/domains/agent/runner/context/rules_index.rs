@@ -197,7 +197,7 @@ mod tests {
         );
         assert!(
             index
-                .match_path("src/domains/tools/implementations/fs/read.ts")
+                .match_path("src/domains/capability_support/implementations/fs/read.ts")
                 .is_empty()
         );
     }

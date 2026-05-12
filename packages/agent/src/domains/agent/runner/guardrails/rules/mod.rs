@@ -25,12 +25,12 @@ pub struct RuleBase {
     pub description: String,
     /// Severity when rule is triggered.
     pub severity: Severity,
-    /// Where this rule applies (global or tool-specific).
+    /// Where this rule applies (global or capability-specific).
     pub scope: Scope,
     /// Core rules cannot be disabled.
     pub tier: RuleTier,
-    /// Tools this rule applies to. Empty means all tools.
-    pub tools: Vec<String>,
+    /// Capability ids this rule applies to. Empty means all capabilities.
+    pub capabilities: Vec<String>,
     /// Higher priority rules are evaluated first.
     pub priority: i32,
     /// Whether rule is enabled (ignored for core tier).

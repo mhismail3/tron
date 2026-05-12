@@ -53,9 +53,9 @@ pub(super) async fn run_summarizer(
             timeout_ms: process
                 .timeout_ms
                 .expect("memoryRetain process must define timeoutMs"),
-            inherit_tools: process
-                .inherit_tools
-                .expect("memoryRetain process must define inheritTools"),
+            inherit_capabilities: process
+                .inherit_capabilities
+                .expect("memoryRetain process must define inheritCapabilities"),
             max_turns: process
                 .max_turns
                 .expect("memoryRetain process must define maxTurns"),

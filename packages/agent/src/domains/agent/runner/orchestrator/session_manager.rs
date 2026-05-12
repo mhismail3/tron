@@ -158,7 +158,7 @@ impl SessionManager {
     }
 
     /// Like [`create_session_with_worktree_override`] but records the selected
-    /// execution profile for prompt/context/tool policy resolution.
+    /// execution profile for prompt/context/capability policy resolution.
     #[instrument(skip(self), fields(model, working_dir = workspace_path))]
     pub fn create_session_with_profile_and_worktree_override(
         &self,

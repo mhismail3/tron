@@ -348,7 +348,7 @@ impl HookHandler for PromptHookHandler {
                     model: Some(model.clone()),
                     system_prompt: "You are a helpful assistant performing a quick task. Be concise and follow the instruction exactly.".to_string(),
                     working_directory: "/tmp".into(),
-                    inherit_tools: false,
+                    inherit_capabilities: false,
                     max_turns: 1,
                     max_depth: 0,
                     reasoning_level: None,

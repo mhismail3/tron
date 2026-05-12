@@ -426,7 +426,7 @@ mod tests {
             index: 1,
             content_block: SseContentBlock::ToolUse {
                 id: "toolu_01abc".into(),
-                name: "bash".into(),
+                name: "execute".into(),
             },
         };
         let events = process_sse_event(&event, &mut state);
@@ -434,12 +434,12 @@ mod tests {
         match &events[0] {
             StreamEvent::ToolCallStart { tool_call_id, name } => {
                 assert_eq!(tool_call_id, "toolu_01abc");
-                assert_eq!(name, "bash");
+                assert_eq!(name, "execute");
             }
             _ => panic!("expected ToolCallStart"),
         }
         assert_eq!(state.current_tool_call_id, Some("toolu_01abc".into()));
-        assert_eq!(state.acc.tool_calls()[0].name, "bash");
+        assert_eq!(state.acc.tool_calls()[0].name, "execute");
     }
 
     // ── content_block_delta ─────────────────────────────────────────────
@@ -523,7 +523,7 @@ mod tests {
         state.current_tool_call_id = Some("toolu_01abc".into());
         let _ = state
             .acc
-            .start_tool_call("toolu_01abc".into(), "bash".into());
+            .start_tool_call("toolu_01abc".into(), "execute".into());
         let event = AnthropicSseEvent::ContentBlockDelta {
             index: 1,
             delta: SseDelta::InputJsonDelta {
@@ -610,7 +610,7 @@ mod tests {
         state.current_tool_call_id = Some("toolu_01abc".into());
         let _ = state
             .acc
-            .start_tool_call("toolu_01abc".into(), "bash".into());
+            .start_tool_call("toolu_01abc".into(), "execute".into());
         let _ = state.acc.append_tool_args("toolu_01abc", r#"{"cmd":"ls"}"#);
         let event = AnthropicSseEvent::ContentBlockStop { index: 1 };
         let events = process_sse_event(&event, &mut state);
@@ -618,7 +618,7 @@ mod tests {
         match &events[0] {
             StreamEvent::ToolCallEnd { tool_call } => {
                 assert_eq!(tool_call.id, "toolu_01abc");
-                assert_eq!(tool_call.name, "bash");
+                assert_eq!(tool_call.name, "execute");
                 assert_eq!(tool_call.arguments["cmd"], "ls");
             }
             _ => panic!("expected ToolCallEnd"),
@@ -634,7 +634,7 @@ mod tests {
         state.current_tool_call_id = Some("toolu_01abc".into());
         let _ = state
             .acc
-            .start_tool_call("toolu_01abc".into(), "bash".into());
+            .start_tool_call("toolu_01abc".into(), "execute".into());
         // Empty args
         let event = AnthropicSseEvent::ContentBlockStop { index: 0 };
         let events = process_sse_event(&event, &mut state);
@@ -1010,7 +1010,7 @@ mod tests {
                 index: 0,
                 content_block: SseContentBlock::ToolUse {
                     id: "toolu_01abc".into(),
-                    name: "bash".into(),
+                    name: "execute".into(),
                 },
             },
             &mut state,
@@ -1040,7 +1040,7 @@ mod tests {
         match &events[0] {
             StreamEvent::ToolCallEnd { tool_call } => {
                 assert_eq!(tool_call.id, "toolu_01abc");
-                assert_eq!(tool_call.name, "bash");
+                assert_eq!(tool_call.name, "execute");
                 assert_eq!(tool_call.arguments["cmd"], "ls");
             }
             _ => panic!("expected ToolCallEnd"),

@@ -6,7 +6,7 @@
 //! The handler determines the [`CompactionReason`] internally from the
 //! signal that fired (`ThresholdExceeded` vs `ProgressSignal`).
 //!
-//! Event types and bash commands are recorded between compactions and
+//! Event types and process commands are recorded between compactions and
 //! cleared after successful compaction.
 
 use std::sync::Arc;
@@ -90,9 +90,9 @@ impl crate::domains::agent::runner::context::llm_summarizer::SubsessionSpawner
                     .timeout_ms
                     .expect("compaction process must define timeoutMs"),
                 blocking_timeout_ms: process.blocking_timeout_ms,
-                inherit_tools: process
-                    .inherit_tools
-                    .expect("compaction process must define inheritTools"),
+                inherit_capabilities: process
+                    .inherit_capabilities
+                    .expect("compaction process must define inheritCapabilities"),
                 max_turns: process
                     .max_turns
                     .expect("compaction process must define maxTurns"),
@@ -127,10 +127,10 @@ impl crate::domains::agent::runner::context::llm_summarizer::SubsessionSpawner
 }
 
 // =============================================================================
-// SubagentContentSummarizer — ContentSummarizer for WebFetch
+// SubagentContentSummarizer — ContentSummarizer for web::fetch
 // =============================================================================
 
-/// [`ContentSummarizer`](crate::domains::tools::implementations::traits::ContentSummarizer) that wraps
+/// [`ContentSummarizer`](crate::domains::capability_support::implementations::traits::ContentSummarizer) that wraps
 /// `SubagentManager::spawn_subsession()` to summarize web page content via Haiku.
 pub struct SubagentContentSummarizer {
     /// The subagent manager to spawn through.
@@ -138,7 +138,7 @@ pub struct SubagentContentSummarizer {
 }
 
 #[async_trait]
-impl crate::domains::tools::implementations::traits::ContentSummarizer
+impl crate::domains::capability_support::implementations::traits::ContentSummarizer
     for SubagentContentSummarizer
 {
     async fn summarize(
@@ -146,15 +146,15 @@ impl crate::domains::tools::implementations::traits::ContentSummarizer
         task: &str,
         parent_session_id: &str,
     ) -> Result<
-        crate::domains::tools::implementations::traits::SummarizerResult,
-        crate::domains::tools::implementations::errors::ToolError,
+        crate::domains::capability_support::implementations::traits::SummarizerResult,
+        crate::domains::capability_support::implementations::errors::ToolError,
     > {
-        let process_plan = self.manager.plan_process("webFetchSummarizer")?;
+        let process_plan = self.manager.plan_process("webSummarizer")?;
         let process = &process_plan.process;
         let result = self
             .manager
             .spawn_subsession(SubsessionConfig {
-                process_id: Some("webFetchSummarizer".into()),
+                process_id: Some("webSummarizer".into()),
                 parent_session_id: parent_session_id.to_owned(),
                 task: task.to_owned(),
                 model: None,
@@ -166,20 +166,20 @@ impl crate::domains::tools::implementations::traits::ContentSummarizer
                 working_directory: process
                     .working_directory
                     .clone()
-                    .expect("webFetchSummarizer process must define workingDirectory"),
+                    .expect("webSummarizer process must define workingDirectory"),
                 timeout_ms: process
                     .timeout_ms
-                    .expect("webFetchSummarizer process must define timeoutMs"),
+                    .expect("webSummarizer process must define timeoutMs"),
                 blocking_timeout_ms: process.blocking_timeout_ms,
-                inherit_tools: process
-                    .inherit_tools
-                    .expect("webFetchSummarizer process must define inheritTools"),
+                inherit_capabilities: process
+                    .inherit_capabilities
+                    .expect("webSummarizer process must define inheritCapabilities"),
                 max_turns: process
                     .max_turns
-                    .expect("webFetchSummarizer process must define maxTurns"),
+                    .expect("webSummarizer process must define maxTurns"),
                 max_depth: process
                     .max_depth
-                    .expect("webFetchSummarizer process must define maxDepth"),
+                    .expect("webSummarizer process must define maxDepth"),
                 reasoning_level: process
                     .reasoning
                     .as_deref()
@@ -187,14 +187,14 @@ impl crate::domains::tools::implementations::traits::ContentSummarizer
                 ..SubsessionConfig::default()
             })
             .await
-            .map_err(
-                |e| crate::domains::tools::implementations::errors::ToolError::Internal {
+            .map_err(|e| {
+                crate::domains::capability_support::implementations::errors::ToolError::Internal {
                     message: format!("Summarizer subsession failed: {e}"),
-                },
-            )?;
+                }
+            })?;
 
         Ok(
-            crate::domains::tools::implementations::traits::SummarizerResult {
+            crate::domains::capability_support::implementations::traits::SummarizerResult {
                 answer: result.output,
                 session_id: result.session_id,
             },
@@ -221,8 +221,8 @@ pub struct CompactionHandler {
     >,
     /// Multi-signal compaction trigger.
     trigger: Mutex<CompactionTrigger>,
-    /// Bash commands accumulated between compactions for progress-signal detection.
-    pending_bash_commands: Mutex<Vec<String>>,
+    /// Process commands accumulated between compactions for progress-signal detection.
+    pending_process_commands: Mutex<Vec<String>>,
     /// Event types accumulated between compactions for progress-signal detection
     /// (e.g. `"worktree.commit"`).
     pending_event_types: Mutex<Vec<String>>,
@@ -251,7 +251,7 @@ impl CompactionHandler {
             subagent_manager: None,
             persister: Mutex::new(None),
             trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
-            pending_bash_commands: Mutex::new(Vec::new()),
+            pending_process_commands: Mutex::new(Vec::new()),
             pending_event_types: Mutex::new(Vec::new()),
         }
     }
@@ -267,7 +267,7 @@ impl CompactionHandler {
             subagent_manager: Some(manager),
             persister: Mutex::new(None),
             trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
-            pending_bash_commands: Mutex::new(Vec::new()),
+            pending_process_commands: Mutex::new(Vec::new()),
             pending_event_types: Mutex::new(Vec::new()),
         }
     }
@@ -287,10 +287,10 @@ impl CompactionHandler {
         self.is_compacting.load(Ordering::Relaxed)
     }
 
-    /// Record a bash command for progress-signal detection.
-    /// Called by `turn_runner` after each bash tool execution.
-    pub fn record_bash_command(&self, command: &str) {
-        self.pending_bash_commands
+    /// Record a process command for progress-signal detection.
+    /// Called by `turn_runner` after each process tool execution.
+    pub fn record_process_command(&self, command: &str) {
+        self.pending_process_commands
             .lock()
             .unwrap()
             .push(command.to_owned());
@@ -340,7 +340,7 @@ impl CompactionHandler {
         #[allow(clippy::cast_precision_loss)]
         let token_ratio = current_tokens as f64 / context_limit as f64;
 
-        let pending_commands = self.pending_bash_commands.lock().unwrap().clone();
+        let pending_commands = self.pending_process_commands.lock().unwrap().clone();
         let pending_events = self.pending_event_types.lock().unwrap().clone();
         let trigger_input = CompactionTriggerInput {
             current_token_ratio: token_ratio,
@@ -380,7 +380,7 @@ impl CompactionHandler {
 
         if success {
             self.trigger.lock().unwrap().reset();
-            self.pending_bash_commands.lock().unwrap().clear();
+            self.pending_process_commands.lock().unwrap().clear();
             self.pending_event_types.lock().unwrap().clear();
         }
 
@@ -1136,12 +1136,12 @@ mod tests {
     }
 
     #[test]
-    fn record_bash_command_accumulates() {
+    fn record_process_command_accumulates() {
         let handler = CompactionHandler::default();
-        handler.record_bash_command("git status");
-        handler.record_bash_command("cargo build");
-        handler.record_bash_command("git push origin main");
-        let cmds = handler.pending_bash_commands.lock().unwrap();
+        handler.record_process_command("git status");
+        handler.record_process_command("cargo build");
+        handler.record_process_command("git push origin main");
+        let cmds = handler.pending_process_commands.lock().unwrap();
         assert_eq!(cmds.len(), 3);
     }
 

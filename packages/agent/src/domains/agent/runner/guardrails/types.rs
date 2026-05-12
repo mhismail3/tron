@@ -9,13 +9,13 @@ use std::collections::HashMap;
 /// Severity of a triggered guardrail rule.
 ///
 /// Determines what action is taken when a rule matches:
-/// - `Block`: Stop tool execution entirely
+/// - `Block`: Stop capability execution entirely
 /// - `Warn`: Log a warning but continue
 /// - `Audit`: Silently log for analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-    /// Block tool execution.
+    /// Block capability execution.
     Block,
     /// Warn but allow execution.
     Warn,
@@ -63,9 +63,9 @@ impl std::fmt::Display for RuleTier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
-    /// Applies to all tools globally.
+    /// Applies to all capabilities globally.
     Global,
-    /// Applies to specific tools only.
+    /// Applies to specific capabilities only.
     Tool,
 }
 
@@ -73,21 +73,21 @@ impl std::fmt::Display for Scope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Global => write!(f, "global"),
-            Self::Tool => write!(f, "tool"),
+            Self::Tool => write!(f, "capability"),
         }
     }
 }
 
 /// Context passed to rule evaluation.
 ///
-/// Contains the tool name, arguments, and optional session/call metadata
+/// Contains the capability id, arguments, and optional session/call metadata
 /// needed to evaluate guardrail rules.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EvaluationContext {
-    /// Tool being invoked (e.g., "Bash", "Write", "Edit").
+    /// Capability being invoked, usually a contract id such as `process::run`.
     pub tool_name: String,
-    /// Arguments passed to the tool as a JSON object.
+    /// Arguments passed to the capability as a JSON object.
     pub tool_arguments: serde_json::Value,
     /// Session ID for audit logging.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -155,7 +155,7 @@ impl RuleEvaluationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardrailEvaluation {
-    /// Whether the tool should be blocked.
+    /// Whether the capability should be blocked.
     pub blocked: bool,
     /// Reason for blocking (if blocked).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -183,9 +183,9 @@ pub struct AuditEntry {
     /// Session ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// Tool being invoked.
+    /// Capability being invoked.
     pub tool_name: String,
-    /// Tool call ID.
+    /// Provider call ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     /// Evaluation result.
@@ -207,7 +207,7 @@ pub struct AuditStats {
     pub warnings: usize,
     /// Number of evaluations that passed.
     pub passed: usize,
-    /// Counts by tool name.
+    /// Counts by capability id.
     pub by_tool: HashMap<String, usize>,
     /// Counts by rule ID.
     pub by_rule: HashMap<String, usize>,

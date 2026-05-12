@@ -261,7 +261,7 @@ mod tests {
         // Verify the content block construction logic
         let text = "Hello world";
         let thinking = "Let me think";
-        let tool_call = json!({"name": "bash", "id": "tc_1"});
+        let tool_call = json!({"name": "execute", "id": "tc_1"});
 
         let mut content = Vec::new();
         if !text.is_empty() {

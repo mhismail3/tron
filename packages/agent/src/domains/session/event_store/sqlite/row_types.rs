@@ -96,7 +96,7 @@ pub struct EventRow {
     pub workspace_id: String,
     /// Denormalized role.
     pub role: Option<String>,
-    /// Denormalized tool name.
+    /// Denormalized capability id.
     pub tool_name: Option<String>,
     /// Denormalized tool call ID.
     pub tool_call_id: Option<String>,

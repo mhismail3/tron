@@ -222,7 +222,7 @@ fn assistant_emits_message_tool_calls_and_turn_end() {
     let items = vec![make_assistant_item(
         vec![
             json!({"type": "text", "text": "Let me check"}),
-            json!({"type": "tool_use", "id": "toolu_01", "name": "Bash", "input": {"command": "ls"}}),
+            json!({"type": "tool_use", "id": "toolu_01", "name": "process::run", "input": {"command": "ls"}}),
         ],
         1,
         "claude-opus-4-6",
@@ -267,7 +267,7 @@ fn assistant_thinking_has_thinking_flag() {
 fn assistant_tool_use_produces_tool_call_event() {
     let items = vec![make_assistant_item(
         vec![
-            json!({"type": "tool_use", "id": "toolu_x", "name": "Read", "input": {"path": "/a.rs"}}),
+            json!({"type": "tool_use", "id": "toolu_x", "name": "filesystem::read_file", "input": {"path": "/a.rs"}}),
         ],
         1,
         "claude-opus-4-6",
@@ -283,7 +283,7 @@ fn assistant_tool_use_produces_tool_call_event() {
         .find(|e| e.event_type == EventType::ToolCall)
         .unwrap();
     assert_eq!(tc.payload["toolCallId"], "toolu_x");
-    assert_eq!(tc.payload["name"], "Read");
+    assert_eq!(tc.payload["name"], "filesystem::read_file");
     assert_eq!(tc.payload["arguments"]["path"], "/a.rs");
     assert_eq!(tc.payload["turn"], 1);
 }
@@ -292,9 +292,9 @@ fn assistant_tool_use_produces_tool_call_event() {
 fn assistant_multiple_tool_uses() {
     let items = vec![make_assistant_item(
         vec![
-            json!({"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}),
-            json!({"type": "tool_use", "id": "t2", "name": "Read", "input": {}}),
-            json!({"type": "tool_use", "id": "t3", "name": "Write", "input": {}}),
+            json!({"type": "tool_use", "id": "t1", "name": "process::run", "input": {}}),
+            json!({"type": "tool_use", "id": "t2", "name": "filesystem::read_file", "input": {}}),
+            json!({"type": "tool_use", "id": "t3", "name": "filesystem::write_file", "input": {}}),
         ],
         1,
         "claude-opus-4-6",
@@ -434,7 +434,7 @@ fn full_conversation_event_sequence() {
         make_assistant_item(
             vec![
                 json!({"type": "text", "text": "Here's an example:"}),
-                json!({"type": "tool_use", "id": "t1", "name": "Write", "input": {"path": "main.rs"}}),
+                json!({"type": "tool_use", "id": "t1", "name": "filesystem::write_file", "input": {"path": "main.rs"}}),
             ],
             2,
             "claude-opus-4-6",
@@ -480,7 +480,7 @@ fn assistant_tool_use_normalized_input_to_arguments() {
         vec![json!({
             "type": "tool_use",
             "id": "toolu_01",
-            "name": "Bash",
+            "name": "process::run",
             "input": {"command": "ls"},
             "caller": "tool_caller_xyz"
         })],
@@ -506,5 +506,5 @@ fn assistant_tool_use_normalized_input_to_arguments() {
     // Other fields preserved
     assert_eq!(block["type"], "tool_use");
     assert_eq!(block["id"], "toolu_01");
-    assert_eq!(block["name"], "Bash");
+    assert_eq!(block["name"], "process::run");
 }

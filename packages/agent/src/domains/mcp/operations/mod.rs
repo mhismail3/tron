@@ -1,6 +1,6 @@
 //! MCP operation implementations.
 //!
-//! MCP server lifecycle, status, tool catalog refresh, and live MCP function
+//! MCP server lifecycle, status, capability catalog refresh, and live MCP function
 //! registration are executed here as canonical `mcp::*` operations.
 
 use crate::domains::mcp::tool_index::ParamSummary;

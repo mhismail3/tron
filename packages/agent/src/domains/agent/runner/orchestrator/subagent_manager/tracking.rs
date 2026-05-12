@@ -1,13 +1,13 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::domains::tools::implementations::errors::ToolError;
-use crate::domains::tools::implementations::traits::{SubagentResult, WaitMode};
+use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::traits::{SubagentResult, WaitMode};
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use crate::domains::tools::implementations::traits::{JobInfo, JobKind, JobState};
+use crate::domains::capability_support::implementations::traits::{JobInfo, JobKind, JobState};
 
 use super::{SpawnType, SubagentManager, TrackedSubagent};
 

@@ -60,8 +60,8 @@ pub struct ProfileDocument {
     pub model_policies: HashMap<String, ModelPolicySpec>,
     /// Context assembly policies.
     pub context_policies: HashMap<String, ContextPolicySpec>,
-    /// Tool visibility and presentation policies.
-    pub tool_policies: HashMap<String, ToolPolicySpec>,
+    /// Capability visibility and presentation policies.
+    pub capability_policies: HashMap<String, CapabilityPolicySpec>,
     /// Permission and inheritance policies.
     pub permission_policies: HashMap<String, PermissionPolicySpec>,
     /// Provider-specific presentation/adaptation policies.
@@ -78,7 +78,8 @@ pub struct ProfileDocument {
     pub auth: AuthSpec,
 }
 
-/// Prompt, provider, context, or tool file compiled into the runtime spec.
+/// Prompt, provider, context, or capability-presentation file compiled into
+/// the runtime spec.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledProfileFile {
     /// Profile-relative reference from TOML.
@@ -104,8 +105,8 @@ pub struct AgentExecutionSpec {
     pub provider_prompts: HashMap<String, CompiledProfileFile>,
     /// Context block manifest files by context policy id.
     pub context_manifests: HashMap<String, CompiledProfileFile>,
-    /// Tool presentation manifest files by tool policy id.
-    pub tool_manifests: HashMap<String, CompiledProfileFile>,
+    /// Capability presentation manifest files by capability policy id.
+    pub capability_manifests: HashMap<String, CompiledProfileFile>,
     /// Readable auth registry used to resolve authProfile.
     pub auth_registry: Option<CompiledProfileFile>,
     /// All source files that affect this compiled spec.
@@ -132,8 +133,8 @@ pub struct EntryPointSpec {
     pub context_policy: String,
     /// Optional local-model context policy id.
     pub local_context_policy: Option<String>,
-    /// Tool policy id.
-    pub tool_policy: String,
+    /// Capability policy id.
+    pub capability_policy: String,
     /// Permission policy id.
     pub permission_policy: String,
     /// Provider policy id.
@@ -159,8 +160,8 @@ pub enum ProcessKind {
     Hook,
     /// Automation runner.
     Automation,
-    /// Tool-owned worker process.
-    ToolWorker,
+    /// Capability-owned worker process.
+    CapabilityWorker,
     /// Non-agentic transform.
     Transform,
 }
@@ -177,8 +178,8 @@ pub struct ProcessSpec {
     pub model_policy: String,
     /// Context policy id.
     pub context_policy: String,
-    /// Tool policy id.
-    pub tool_policy: String,
+    /// Capability policy id.
+    pub capability_policy: String,
     /// Permission policy id.
     pub permission_policy: String,
     /// Output contract id.
@@ -196,12 +197,12 @@ pub struct ProcessSpec {
     pub max_turns: Option<u32>,
     /// Maximum child nesting depth.
     pub max_depth: Option<u32>,
-    /// Whether tools are inherited from the parent registry.
-    pub inherit_tools: Option<bool>,
-    /// Strict allowlist applied after inherited tools are loaded.
-    pub allowed_tools: Option<Vec<String>>,
+    /// Whether capabilities are inherited from the parent registry.
+    pub inherit_capabilities: Option<bool>,
+    /// Strict allowlist applied after inherited capabilities are loaded.
+    pub allowed_capabilities: Option<Vec<String>>,
     /// Tools denied from the inherited registry.
-    pub denied_tools: Vec<String>,
+    pub denied_capabilities: Vec<String>,
     /// Reasoning level string (`none`, `low`, `medium`, `high`, `xhigh`, `max`).
     pub reasoning: Option<String>,
     /// Working directory override.
@@ -234,8 +235,8 @@ pub struct ContextPolicySpec {
     pub blocks: Option<String>,
     /// Provider ids that activate this policy as local.
     pub local_providers: Vec<String>,
-    /// Tool policy to use when this context policy is active.
-    pub tool_policy: Option<String>,
+    /// Capability policy to use when this context policy is active.
+    pub capability_policy: Option<String>,
     /// Strip memory block.
     pub strip_memory: bool,
     /// Strip skill index block.
@@ -250,19 +251,19 @@ pub struct ContextPolicySpec {
     pub rules_truncation_suffix: Option<String>,
 }
 
-/// Tool visibility/presentation policy.
+/// Capability visibility/presentation policy.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct ToolPolicySpec {
+pub struct CapabilityPolicySpec {
     /// Optional policy manifest file.
     pub manifest: Option<String>,
-    /// Strict allowlist of tool names.
-    pub allowed_tools: Option<Vec<String>>,
-    /// Tool names denied by this policy.
-    pub denied_tools: Vec<String>,
-    /// Whether interactive tools may be exposed.
+    /// Strict allowlist of capability ids.
+    pub allowed_capabilities: Option<Vec<String>>,
+    /// Capability ids denied by this policy.
+    pub denied_capabilities: Vec<String>,
+    /// Whether interactive capabilities may be exposed.
     pub expose_interactive_tools: Option<bool>,
-    /// Whether spawn/wait tools are removed at max depth.
+    /// Whether spawn/wait capabilities are removed at max depth.
     pub remove_spawn_tools_at_max_depth: Option<bool>,
 }
 
@@ -270,8 +271,8 @@ pub struct ToolPolicySpec {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct PermissionPolicySpec {
-    /// Whether tools may be inherited from the parent registry.
-    pub inherit_tools: bool,
+    /// Whether capabilities may be inherited from the parent registry.
+    pub inherit_capabilities: bool,
     /// Whether filesystem access may exceed the parent process.
     pub allow_filesystem_escalation: bool,
     /// Whether model/provider class may exceed the parent process.
@@ -401,7 +402,7 @@ impl AgentExecutionSpec {
             process_prompts: HashMap::new(),
             provider_prompts: HashMap::new(),
             context_manifests: HashMap::new(),
-            tool_manifests: HashMap::new(),
+            capability_manifests: HashMap::new(),
             auth_registry: None,
             source_files: Vec::new(),
         }
@@ -453,10 +454,10 @@ impl AgentExecutionSpec {
         self.document.context_policies.get(name)
     }
 
-    /// Tool policy by id.
+    /// Capability policy by id.
     #[must_use]
-    pub fn tool_policy(&self, name: &str) -> Option<&ToolPolicySpec> {
-        self.document.tool_policies.get(name)
+    pub fn capability_policy(&self, name: &str) -> Option<&CapabilityPolicySpec> {
+        self.document.capability_policies.get(name)
     }
 
     /// Local context policy, if any, matching provider id.
@@ -750,17 +751,18 @@ fn compile_agent_execution_spec(
             spec.context_manifests.insert(policy_id.clone(), compiled);
         }
     }
-    for (policy_id, policy) in &spec.document.tool_policies {
+    for (policy_id, policy) in &spec.document.capability_policies {
         if let Some(manifest) = &policy.manifest {
             let compiled = compile_profile_file(
                 home,
                 name,
                 candidate_profiles,
-                &format!("toolPolicies.{policy_id}.manifest"),
+                &format!("capabilityPolicies.{policy_id}.manifest"),
                 manifest,
             )?;
             source_files.push(compiled.source_path.clone());
-            spec.tool_manifests.insert(policy_id.clone(), compiled);
+            spec.capability_manifests
+                .insert(policy_id.clone(), compiled);
         }
     }
     source_files.sort();
@@ -844,9 +846,9 @@ fn agent_execution_spec_hash(raw_string: &str, spec: &AgentExecutionSpec) -> Str
             .map(|(id, file)| (format!("contextPolicies.{id}.blocks"), file)),
     );
     files.extend(
-        spec.tool_manifests
+        spec.capability_manifests
             .iter()
-            .map(|(id, file)| (format!("toolPolicies.{id}.manifest"), file)),
+            .map(|(id, file)| (format!("capabilityPolicies.{id}.manifest"), file)),
     );
     files.sort_by(|left, right| left.0.cmp(&right.0));
 
@@ -941,9 +943,9 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
         }
         validate_policy_ref(
             name,
-            "toolPolicies",
-            &entry.tool_policy,
-            &spec.tool_policies,
+            "capabilityPolicies",
+            &entry.capability_policy,
+            &spec.capability_policies,
         )?;
         validate_policy_ref(
             name,
@@ -990,9 +992,9 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
         )?;
         validate_policy_ref(
             name,
-            "toolPolicies",
-            &process.tool_policy,
-            &spec.tool_policies,
+            "capabilityPolicies",
+            &process.capability_policy,
+            &spec.capability_policies,
         )?;
         validate_policy_ref(
             name,
@@ -1015,8 +1017,8 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
         validate_tool_overlap(
             name,
             process_id,
-            process.allowed_tools.as_deref(),
-            &process.denied_tools,
+            process.allowed_capabilities.as_deref(),
+            &process.denied_capabilities,
         )?;
     }
 
@@ -1031,26 +1033,31 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
             )?;
             validate_context_block_manifest(&path)?;
         }
-        if let Some(tool_policy) = &policy.tool_policy {
-            validate_policy_ref(name, "toolPolicies", tool_policy, &spec.tool_policies)?;
+        if let Some(capability_policy) = &policy.capability_policy {
+            validate_policy_ref(
+                name,
+                "capabilityPolicies",
+                capability_policy,
+                &spec.capability_policies,
+            )?;
         }
     }
 
-    for (policy_id, policy) in &spec.tool_policies {
+    for (policy_id, policy) in &spec.capability_policies {
         if let Some(manifest) = &policy.manifest {
             validate_profile_file_ref(
                 home,
                 name,
                 &candidate_profiles,
-                &format!("toolPolicies.{policy_id}.manifest"),
+                &format!("capabilityPolicies.{policy_id}.manifest"),
                 manifest,
             )?;
         }
         validate_tool_overlap(
             name,
             policy_id,
-            policy.allowed_tools.as_deref(),
-            &policy.denied_tools,
+            policy.allowed_capabilities.as_deref(),
+            &policy.denied_capabilities,
         )?;
     }
 
@@ -1464,11 +1471,11 @@ store = "auth.json"
         assert_eq!(spec.processes["compaction"].kind, ProcessKind::Summarizer);
         assert_eq!(spec.processes["memoryRetain"].kind, ProcessKind::Summarizer);
         assert_eq!(
-            spec.processes["webFetchSummarizer"].kind,
-            ProcessKind::ToolWorker
+            spec.processes["webSummarizer"].kind,
+            ProcessKind::CapabilityWorker
         );
         assert!(spec.context_policies.contains_key("cloudDefault"));
-        assert!(spec.tool_policies.contains_key("localModel"));
+        assert!(spec.capability_policies.contains_key("localModel"));
         assert!(spec.provider_policies.contains_key("default"));
         assert!(spec.cache_policies.contains_key("default"));
         assert_eq!(spec.settings.server.default_model, "claude-sonnet-4-6");
@@ -1493,7 +1500,10 @@ store = "auth.json"
             local.spec.entrypoints["main"].context_policy,
             "localDefault"
         );
-        assert_eq!(local.spec.entrypoints["main"].tool_policy, "localModel");
+        assert_eq!(
+            local.spec.entrypoints["main"].capability_policy,
+            "localModel"
+        );
     }
 
     #[test]
@@ -1575,7 +1585,7 @@ prompt = "prompts/custom-chat.md"
             Some("prompts/custom-chat.md")
         );
         assert_eq!(
-            resolved.spec.entrypoints["chat"].tool_policy, "default",
+            resolved.spec.entrypoints["chat"].capability_policy, "default",
             "partial child entrypoint override should inherit parent policy fields"
         );
     }

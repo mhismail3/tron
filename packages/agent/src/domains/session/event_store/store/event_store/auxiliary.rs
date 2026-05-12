@@ -101,31 +101,33 @@ impl EventStore {
 }
 
 #[async_trait::async_trait]
-impl crate::domains::tools::implementations::traits::BlobStore for EventStore {
+impl crate::domains::capability_support::implementations::traits::BlobStore for EventStore {
     async fn store(
         &self,
         content: &[u8],
         mime_type: &str,
-    ) -> std::result::Result<String, crate::domains::tools::implementations::errors::ToolError>
-    {
+    ) -> std::result::Result<
+        String,
+        crate::domains::capability_support::implementations::errors::ToolError,
+    > {
         let pool = self.pool().clone();
         let content = content.to_vec();
         let mime = mime_type.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get().map_err(|e| {
-                crate::domains::tools::implementations::errors::ToolError::Internal {
+                crate::domains::capability_support::implementations::errors::ToolError::Internal {
                     message: format!("blob store connection error: {e}"),
                 }
             })?;
             BlobRepo::store(&conn, &content, &mime).map_err(|e| {
-                crate::domains::tools::implementations::errors::ToolError::Internal {
+                crate::domains::capability_support::implementations::errors::ToolError::Internal {
                     message: format!("blob store write error: {e}"),
                 }
             })
         })
         .await
         .map_err(|e| {
-            crate::domains::tools::implementations::errors::ToolError::Internal {
+            crate::domains::capability_support::implementations::errors::ToolError::Internal {
                 message: format!("blob store task join error: {e}"),
             }
         })?
@@ -138,7 +140,10 @@ mod tests {
 
     #[test]
     fn event_store_implements_blob_store() {
-        fn assert_blob_store<T: crate::domains::tools::implementations::traits::BlobStore>() {}
+        fn assert_blob_store<
+            T: crate::domains::capability_support::implementations::traits::BlobStore,
+        >() {
+        }
         assert_blob_store::<EventStore>();
     }
 }

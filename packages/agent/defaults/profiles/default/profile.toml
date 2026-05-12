@@ -52,10 +52,10 @@
 #        blockingTimeoutMs = 120000
 #        maxTurns = 25
 #
-# - Give local models a different tool set:
+# - Give local models a different primitive tool set:
 #
-#        [toolPolicies.localModel]
-#        allowedTools = ["Read", "Search", "Find", "WebFetch", "AskUserQuestion"]
+#        [capabilityPolicies.localModel]
+#        allowedCapabilities = ["search", "inspect"]
 #
 #   Because arrays replace parent arrays, include the complete desired list.
 #
@@ -71,28 +71,28 @@
 #        prompt = "prompts/processes/my-transform.md"
 #        modelPolicy = "settingsSubagent"
 #        contextPolicy = "minimalTransform"
-#        toolPolicy = "none"
+#        capabilityPolicy = "none"
 #        permissionPolicy = "lockedDown"
 #        outputContract = "plainText"
 #        auditPolicy = "default"
 #        maxTurns = 1
-#        inheritTools = false
+#        inheritCapabilities = false
 #
 # The adjacent files below are also part of this managed default profile:
 #
 # - prompts/*.md: main/chat/local/git workflow behavior text.
 # - prompts/processes/*.md: model-backed child process behavior.
-# - [settings]: server, provider, UI, tool, hook, memory, automation, git,
+# - [settings]: server, provider, UI, capability, hook, memory, automation, git,
 #   MCP, and iOS-facing defaults.
 # - context/context-blocks.toml: the allowed context block ids, homes,
 #   cache classes, and provider surfaces.
-# - tools/presentation.toml: profile-owned tool presentation rules.
+# - capabilities/presentation.toml: provider capability presentation rules.
 # - providers/**: provider-specific prompt/presentation policy text.
 #
 # Value reference:
 #
 # - process kind: "main", "subagent", "summarizer", "hook", "automation",
-#   "toolWorker", "transform".
+#   "capabilityWorker", "transform".
 # - profileClass: "base", "normal", "chat", "local", or "custom".
 # - model policy selection: "sessionDefault" uses the session/default model,
 #   "inheritParent" uses the parent process model, and "settingsSubagent" uses
@@ -106,12 +106,12 @@
 # - provider surface: "instructions", "message", "tool", "excluded".
 # - provider systemPromptSurface: "providerDefault" or "toolClarification".
 # - output contract kind: "plainText", "plainTextList",
-#   "compactionSummary", "memoryRetention", or "toolAnswer".
+#   "compactionSummary", "memoryRetention", or "capabilityAnswer".
 # - resultInjection ids currently used by runtime: "nextParentTurn" and
 #   "automationLedger".
-# - first-party tool ids include Read, Write, Edit, Bash, Search, Find,
-#   AskUserQuestion, GetConfirmation, NotifyApp, WebFetch, WebSearch, Display,
-#   ComputerUse, SpawnSubagent, ManageJob, Wait, McpSearch, and McpCall.
+# - model-facing tool ids are search, inspect, and execute. First-party
+#   filesystem, web, shell, MCP, app, and agent actions are live worker
+#   capabilities discovered and invoked through those primitives.
 
 version = "2"
 name = "default"
@@ -147,17 +147,17 @@ baseDelayMs = 1000
 maxDelayMs = 60000
 jitterFactor = 0.2
 
-[settings.tools.bash]
+[settings.tools.process]
 defaultTimeoutMs = 120000
 maxTimeoutMs = 600000
 maxOutputLength = 40000
 dangerousPatterns = ["^rm\\s+(-rf?|--force)\\s+/\\s*$", "rm\\s+-rf?\\s+/", "^sudo\\s+", "^chmod\\s+777\\s+/\\s*$", "^mkfs\\.", "^dd\\s+if=.*of=/dev/", ">\\s*/dev/sd[a-z]"]
 
-[settings.tools.bash.sandbox]
+[settings.tools.process.sandbox]
 defaultImage = "ubuntu:latest"
 networkEnabled = true
 
-[settings.tools.read]
+[settings.tools.filesystemRead]
 defaultLimitLines = 2000
 maxLineLength = 2000
 maxOutputTokens = 20000
@@ -384,7 +384,7 @@ rawStore = "auth.json"
 #   project worktrees or workspace-scoped context.
 # - local: local-provider variant automatically selected when a local provider
 #   such as Ollama is selected. It bundles the local prompt, stripped/truncated
-#   context policy, and local tool policy.
+#   context policy, and local capability policy.
 # - gitWorkflow: merge/rebase/conflict workflow behavior.
 #
 # Each entrypoint selects one prompt and references policy ids defined later in
@@ -395,7 +395,7 @@ prompt = "prompts/core.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
 localContextPolicy = "localDefault"
-toolPolicy = "default"
+capabilityPolicy = "default"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
@@ -406,7 +406,7 @@ prompt = "prompts/chat.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
 localContextPolicy = "localDefault"
-toolPolicy = "default"
+capabilityPolicy = "default"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
@@ -416,7 +416,7 @@ auditPolicy = "default"
 prompt = "prompts/local.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "localDefault"
-toolPolicy = "localModel"
+capabilityPolicy = "localModel"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
@@ -426,7 +426,7 @@ auditPolicy = "default"
 prompt = "prompts/git-workflow.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
-toolPolicy = "default"
+capabilityPolicy = "default"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
@@ -435,13 +435,13 @@ auditPolicy = "default"
 # Processes are every harness-spawned child execution contract, model-backed or
 # otherwise. Summarizers are not separate primitives; they are processes with
 # kind = "summarizer". A process may be invoked automatically by the harness,
-# by a tool, by a hook, by automation, or by an LLM tool call.
+# by a capability, by a hook, by automation, or by an LLM tool call.
 #
 # Process fields:
 #
 # - kind: one of the process kind values listed in the header.
 # - prompt: optional Markdown prompt ref, relative to the profile chain.
-# - modelPolicy/contextPolicy/toolPolicy/permissionPolicy/outputContract/
+# - modelPolicy/contextPolicy/capabilityPolicy/permissionPolicy/outputContract/
 #   auditPolicy: ids from policy tables below.
 # - timeoutMs: total wall-clock budget. Omit for runtime default; 0 means
 #   unbounded/background for the tmux-style subagent path.
@@ -449,9 +449,9 @@ auditPolicy = "default"
 # - blocking: true means caller waits by default; false means background.
 # - maxTurns: process turn budget.
 # - maxDepth: child nesting budget. Use 0 for no further children.
-# - inheritTools: whether this process starts from the parent tool registry.
-# - allowedTools: strict allowlist after inheritance/registration.
-# - deniedTools: denylist after inheritance/registration.
+# - inheritCapabilities: whether this process starts from the parent capability catalog.
+# - allowedCapabilities: strict allowlist after inheritance/registration.
+# - deniedCapabilities: denylist after inheritance/registration.
 # - workingDirectory: optional process cwd override.
 # - resultInjection: how results re-enter parent/workspace state.
 # - audit: per-process audit switch; auditPolicy still defines what to record.
@@ -460,7 +460,7 @@ kind = "summarizer"
 prompt = "prompts/processes/compaction.md"
 modelPolicy = "inheritParent"
 contextPolicy = "minimalTransform"
-toolPolicy = "none"
+capabilityPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "compactionSummary"
 auditPolicy = "default"
@@ -469,7 +469,7 @@ blockingTimeoutMs = 30000
 blocking = true
 maxTurns = 1
 maxDepth = 0
-inheritTools = false
+inheritCapabilities = false
 reasoning = "medium"
 audit = true
 
@@ -478,7 +478,7 @@ kind = "summarizer"
 prompt = "prompts/processes/memory-retain.md"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-toolPolicy = "none"
+capabilityPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "memoryRetention"
 auditPolicy = "default"
@@ -487,25 +487,25 @@ blockingTimeoutMs = 30000
 blocking = true
 maxTurns = 1
 maxDepth = 0
-inheritTools = false
+inheritCapabilities = false
 reasoning = "medium"
 audit = true
 
-[processes.webFetchSummarizer]
-kind = "toolWorker"
+[processes.webSummarizer]
+kind = "capabilityWorker"
 prompt = "prompts/processes/web-fetch-summarizer.md"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-toolPolicy = "none"
+capabilityPolicy = "none"
 permissionPolicy = "lockedDown"
-outputContract = "toolAnswer"
+outputContract = "capabilityAnswer"
 auditPolicy = "default"
 timeoutMs = 30000
 blockingTimeoutMs = 30000
 blocking = true
 maxTurns = 1
 maxDepth = 0
-inheritTools = false
+inheritCapabilities = false
 workingDirectory = "/tmp"
 audit = true
 
@@ -514,7 +514,7 @@ kind = "subagent"
 prompt = "prompts/processes/conflict-resolver.md"
 modelPolicy = "settingsSubagent"
 contextPolicy = "cloudDefault"
-toolPolicy = "conflictResolver"
+capabilityPolicy = "conflictResolver"
 permissionPolicy = "restrictedChild"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -522,8 +522,8 @@ timeoutMs = 900000
 blocking = false
 maxTurns = 40
 maxDepth = 0
-inheritTools = true
-allowedTools = ["Read", "Edit", "Write", "Bash"]
+inheritCapabilities = true
+allowedCapabilities = ["search", "inspect", "execute", "filesystem::read_file", "filesystem::edit_file", "filesystem::write_file", "process::run"]
 audit = true
 
 [processes."spawnSubagent.inProcess"]
@@ -531,7 +531,7 @@ kind = "subagent"
 prompt = "prompts/core.md"
 modelPolicy = "inheritParent"
 contextPolicy = "cloudDefault"
-toolPolicy = "subagentInherited"
+capabilityPolicy = "subagentInherited"
 permissionPolicy = "child"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -539,7 +539,7 @@ timeoutMs = 300000
 blockingTimeoutMs = 300000
 blocking = true
 maxTurns = 50
-inheritTools = true
+inheritCapabilities = true
 resultInjection = "nextParentTurn"
 audit = true
 
@@ -548,14 +548,14 @@ kind = "subagent"
 prompt = "prompts/core.md"
 modelPolicy = "inheritParent"
 contextPolicy = "cloudDefault"
-toolPolicy = "subagentInherited"
+capabilityPolicy = "subagentInherited"
 permissionPolicy = "child"
 outputContract = "plainText"
 auditPolicy = "default"
 timeoutMs = 0
 blocking = false
 maxTurns = 100
-inheritTools = true
+inheritCapabilities = true
 resultInjection = "nextParentTurn"
 audit = true
 
@@ -563,7 +563,7 @@ audit = true
 kind = "hook"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-toolPolicy = "none"
+capabilityPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -572,14 +572,14 @@ blockingTimeoutMs = 5000
 blocking = true
 maxTurns = 1
 maxDepth = 0
-inheritTools = false
+inheritCapabilities = false
 audit = true
 
 [processes."hooks.branchName"]
 kind = "hook"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-toolPolicy = "none"
+capabilityPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -588,14 +588,14 @@ blockingTimeoutMs = 5000
 blocking = true
 maxTurns = 1
 maxDepth = 0
-inheritTools = false
+inheritCapabilities = false
 audit = true
 
 [processes."hooks.suggestPrompts"]
 kind = "hook"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-toolPolicy = "none"
+capabilityPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "plainTextList"
 auditPolicy = "default"
@@ -604,19 +604,19 @@ blockingTimeoutMs = 5000
 blocking = true
 maxTurns = 1
 maxDepth = 0
-inheritTools = false
+inheritCapabilities = false
 audit = true
 
 [processes.automationRun]
 kind = "automation"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
-toolPolicy = "unattended"
+capabilityPolicy = "unattended"
 permissionPolicy = "child"
 outputContract = "plainText"
 auditPolicy = "default"
 blocking = false
-inheritTools = true
+inheritCapabilities = true
 resultInjection = "automationLedger"
 audit = true
 
@@ -661,71 +661,71 @@ providerClass = "any"
 #
 # - blocks: context block manifest relative to the profile chain.
 # - localProviders: provider ids that select this as a local policy.
-# - toolPolicy: tool policy that should accompany this context policy.
+# - capabilityPolicy: capability policy that should accompany this context policy.
 # - stripMemory/stripSkillIndex/stripJobResults: remove those context blocks.
 # - skipPendingJobsBootstrap: avoid DB bootstrap for background result context.
 # - rulesTruncationChars/rulesTruncationSuffix: local-model rules budget.
 [contextPolicies.cloudDefault]
 blocks = "context/context-blocks.toml"
-toolPolicy = "default"
+capabilityPolicy = "default"
 
 [contextPolicies.localDefault]
 blocks = "context/context-blocks.toml"
 localProviders = ["ollama"]
-toolPolicy = "localModel"
+capabilityPolicy = "localModel"
 stripMemory = true
 stripSkillIndex = true
 stripJobResults = true
 skipPendingJobsBootstrap = true
 rulesTruncationChars = 500
-rulesTruncationSuffix = "\n\n[Truncated - full rules available via Read tool]"
+rulesTruncationSuffix = "\n\n[Truncated - full rules are available through search, inspect, and execute]"
 
 [contextPolicies.minimalTransform]
-toolPolicy = "none"
+capabilityPolicy = "none"
 stripMemory = true
 stripSkillIndex = true
 stripJobResults = true
 skipPendingJobsBootstrap = true
 
-# Tool policies control tool visibility and execution eligibility.
+# Capability policies control capability visibility and execution eligibility.
 #
 # Semantics:
 #
-# - manifest: optional tool presentation file for descriptions/schema policy.
-# - allowedTools: if present, only listed tools survive.
-# - deniedTools: listed tools are removed after allowlist/inheritance.
-# - exposeInteractiveTools: false hides user-blocking UI tools when a runtime
-#   path applies interactive-tool filtering, such as unattended jobs.
-# - removeSpawnToolsAtMaxDepth: hides child-spawn tools when depth is exhausted.
+# - manifest: optional capability presentation file for descriptions/schema policy.
+# - allowedCapabilities: if present, only listed capabilities survive.
+# - deniedCapabilities: listed capabilities are removed after allowlist/inheritance.
+# - exposeInteractiveTools: false hides user-blocking UI capabilities when a runtime
+#   path applies interactive filtering, such as unattended jobs.
+# - removeSpawnToolsAtMaxDepth: hides child-spawn capabilities when depth is exhausted.
 #
-# Tool policy is not a security boundary by itself. It pairs with permission
-# policy and executor checks so hidden/denied tools cannot be called anyway.
-[toolPolicies.default]
-manifest = "tools/presentation.toml"
+# Capability policy is not a security boundary by itself. It pairs with permission
+# policy and executor checks so hidden/denied capabilities cannot be called anyway.
+[capabilityPolicies.default]
+manifest = "capabilities/presentation.toml"
 exposeInteractiveTools = true
 removeSpawnToolsAtMaxDepth = true
 
-[toolPolicies.localModel]
-allowedTools = ["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch", "AskUserQuestion"]
+[capabilityPolicies.localModel]
+allowedCapabilities = ["search", "inspect", "execute"]
 exposeInteractiveTools = true
 removeSpawnToolsAtMaxDepth = true
 
-[toolPolicies.none]
-allowedTools = []
+[capabilityPolicies.none]
+allowedCapabilities = []
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
 
-[toolPolicies.subagentInherited]
+[capabilityPolicies.subagentInherited]
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
 
-[toolPolicies.unattended]
-deniedTools = ["AskUserQuestion"]
+[capabilityPolicies.unattended]
+deniedCapabilities = []
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
 
-[toolPolicies.conflictResolver]
-allowedTools = ["Read", "Edit", "Write", "Bash"]
+[capabilityPolicies.conflictResolver]
+allowedCapabilities = ["search", "inspect", "execute"]
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
 
@@ -733,22 +733,22 @@ removeSpawnToolsAtMaxDepth = true
 # gain filesystem, model, or auth authority beyond their parent/profile unless a
 # future policy explicitly opts into that escalation.
 [permissionPolicies.main]
-inheritTools = true
+inheritCapabilities = true
 
 [permissionPolicies.child]
-inheritTools = true
+inheritCapabilities = true
 allowFilesystemEscalation = false
 allowModelEscalation = false
 allowAuthEscalation = false
 
 [permissionPolicies.restrictedChild]
-inheritTools = true
+inheritCapabilities = true
 allowFilesystemEscalation = false
 allowModelEscalation = false
 allowAuthEscalation = false
 
 [permissionPolicies.lockedDown]
-inheritTools = false
+inheritCapabilities = false
 allowFilesystemEscalation = false
 allowModelEscalation = false
 allowAuthEscalation = false
@@ -803,8 +803,8 @@ required = true
 kind = "memoryRetention"
 required = true
 
-[outputContracts.toolAnswer]
-kind = "toolAnswer"
+[outputContracts.capabilityAnswer]
+kind = "capabilityAnswer"
 required = true
 
 # Audit policy controls what is retained for replay/self-inspection. Redaction

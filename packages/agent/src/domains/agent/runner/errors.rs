@@ -100,7 +100,7 @@ pub enum StopReason {
     EndTurn,
     /// Turn limit reached.
     MaxTurns,
-    /// Tool requested stop (`AskUserQuestion`).
+    /// Tool requested stop (`agent::ask_user`).
     ToolStop,
     /// Unrecoverable error.
     Error,
@@ -130,10 +130,10 @@ mod tests {
     #[test]
     fn runtime_error_display() {
         let err = RuntimeError::Tool {
-            tool_name: "bash".into(),
+            tool_name: "execute".into(),
             message: "command failed".into(),
         };
-        assert_eq!(err.to_string(), "Tool error: bash: command failed");
+        assert_eq!(err.to_string(), "Tool error: execute: command failed");
     }
 
     #[test]

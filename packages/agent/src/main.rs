@@ -27,7 +27,7 @@
 //! 2. Unknown model/provider → fail-fast typed error (no implicit substitution)
 //! 3. Event reconstruction is deterministic from persisted events
 //! 4. Session writes are serialized per-session via in-process locks
-//! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
+//! 5. `agent.filesystem_ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
 //! 7. Production DB target is strictly `~/.tron/internal/database/tron.sqlite`
 //! 8. Server shutdown is signal-owned (`SIGINT`/`SIGTERM` on Unix) so managed
@@ -399,18 +399,18 @@ struct McpState {
     router: Arc<tokio::sync::RwLock<tron::domains::mcp::router::McpRouter>>,
 }
 
-/// Create the MCP router and meta-tools.
+/// Create the MCP router for capability-indexed external implementations.
 ///
-/// The router is present even when the server list is empty. That keeps
-/// `McpSearch`/`McpCall` in every session and lets settings updates add servers
-/// without requiring a daemon restart.
+/// The router is present even when the server list is empty. Settings updates
+/// can add servers without requiring a daemon restart, and MCP functions are
+/// projected through `search`, `inspect`, and `execute`.
 async fn init_mcp(
     settings: &tron::domains::settings::TronSettings,
     settings_path: &std::path::Path,
 ) -> McpState {
     let mcp_configs = settings.mcp.servers.clone();
     if mcp_configs.is_empty() {
-        tracing::debug!("no MCP servers configured; registering empty MCP meta-tools");
+        tracing::debug!("no MCP servers configured; MCP capability catalog is empty");
     } else {
         tracing::info!(count = mcp_configs.len(), "starting MCP servers");
     }
@@ -432,7 +432,7 @@ async fn init_mcp(
         tracing::info!(
             servers = ?connected,
             tool_count,
-            "MCP meta-tools registered (McpSearch + McpCall)"
+            "MCP servers available through capability primitives"
         );
     }
     let router = Arc::new(tokio::sync::RwLock::new(router));
@@ -457,8 +457,9 @@ struct ServiceState {
     hook_abort_tracker: Arc<tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker>,
     push_service: PushServiceOption,
     tool_runtime: ToolRuntimeConfig,
-    process_manager: Arc<dyn tron::domains::tools::implementations::traits::ProcessManagerOps>,
-    job_manager: Arc<dyn tron::domains::tools::implementations::traits::JobManagerOps>,
+    process_manager:
+        Arc<dyn tron::domains::capability_support::implementations::traits::ProcessManagerOps>,
+    job_manager: Arc<dyn tron::domains::capability_support::implementations::traits::JobManagerOps>,
     output_buffer_registry:
         Arc<tron::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     transcription_engine: Arc<std::sync::OnceLock<Arc<tron::domains::transcription::MlxEngine>>>,
@@ -499,19 +500,22 @@ async fn init_services(
 
     let (provider_factory, shared_http_client) = init_provider_factory(settings).await;
 
-    // Process manager for background tool execution
-    let process_manager: Arc<dyn tron::domains::tools::implementations::traits::ProcessManagerOps> =
-        Arc::new(
-            tron::domains::agent::runner::orchestrator::process_manager::ProcessManager::with_deps(
-                orchestrator.broadcast().clone(),
-                event_store.clone(),
-            ),
-        );
+    // Process manager for background capability execution.
+    let process_manager: Arc<
+        dyn tron::domains::capability_support::implementations::traits::ProcessManagerOps,
+    > = Arc::new(
+        tron::domains::agent::runner::orchestrator::process_manager::ProcessManager::with_deps(
+            orchestrator.broadcast().clone(),
+            event_store.clone(),
+        ),
+    );
     let output_buffer_registry = Arc::new(
         tron::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry::new(),
     );
 
-    let notify_delegate: Arc<dyn tron::domains::tools::implementations::traits::NotifyDelegate> = {
+    let notify_delegate: Arc<
+        dyn tron::domains::capability_support::implementations::traits::NotifyDelegate,
+    > = {
         #[cfg(feature = "apns")]
         {
             match &push_service {
@@ -522,18 +526,20 @@ async fn init_services(
                     ),
                 ),
                 None => {
-                    Arc::new(tron::domains::tools::implementations::backends::StubNotifyDelegate)
+                    Arc::new(tron::domains::capability_support::implementations::backends::StubNotifyDelegate)
                 }
             }
         }
         #[cfg(not(feature = "apns"))]
         {
-            Arc::new(tron::domains::tools::implementations::backends::StubNotifyDelegate)
+            Arc::new(
+                tron::domains::capability_support::implementations::backends::StubNotifyDelegate,
+            )
         }
     };
     let tool_runtime = ToolRuntimeConfig {
         http_client: shared_http_client,
-        sandbox_settings: settings.tools.bash.sandbox.clone(),
+        sandbox_settings: settings.tools.process.sandbox.clone(),
         computer_use_settings: settings.tools.computer_use.clone(),
         notify_delegate,
     };
@@ -553,22 +559,24 @@ async fn init_services(
     // run state server-side (replaces iOS-side agentPhase check).
     subagent_manager.set_run_state_probe(orchestrator.run_state_probe());
     // Wire skill registry so subagents spawned with `skills: [...]`
-    // honor each skill's frontmatter `deniedTools` / `allowedTools`
-    // via hard tool-catalog removal. Without this, subagent skill
+    // honor each skill's frontmatter `deniedCapabilities` / `allowedCapabilities`
+    // via capability-catalog filtering. Without this, subagent skill
     // restrictions would silently no-op (see
-    // `SubagentManager::compute_denied_tools`).
+    // `SubagentManager::compute_denied_capabilities`).
     subagent_manager.set_skill_registry(skill_registry.clone());
 
     // Unified job manager (processes + subagents)
-    let subagent_ops: Arc<dyn tron::domains::tools::implementations::traits::SubagentOps> =
-        subagent_manager.clone();
-    let job_manager: Arc<dyn tron::domains::tools::implementations::traits::JobManagerOps> =
-        Arc::new(
-            tron::domains::agent::runner::orchestrator::job_manager::JobManager::new(
-                process_manager.clone(),
-                subagent_ops,
-            ),
-        );
+    let subagent_ops: Arc<
+        dyn tron::domains::capability_support::implementations::traits::SubagentOps,
+    > = subagent_manager.clone();
+    let job_manager: Arc<
+        dyn tron::domains::capability_support::implementations::traits::JobManagerOps,
+    > = Arc::new(
+        tron::domains::agent::runner::orchestrator::job_manager::JobManager::new(
+            process_manager.clone(),
+            subagent_ops,
+        ),
+    );
 
     subagent_manager.set_engine_host(engine_host.clone());
 
@@ -843,7 +851,7 @@ const IDLE_SESSION_CACHE_TTL: std::time::Duration = std::time::Duration::from_se
 fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronServer) {
     // Clean up stale sandbox directories from previous sessions (>24h old)
     let sandbox_cleanup = tokio::spawn(async {
-        tron::domains::tools::implementations::system::sandbox::cleanup_stale_sandboxes().await
+        tron::domains::capability_support::implementations::system::sandbox::cleanup_stale_sandboxes().await
     });
     server.shutdown().register_task(sandbox_cleanup);
 

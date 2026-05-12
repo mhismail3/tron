@@ -65,7 +65,7 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
     AgentDeps {
         provider: Arc::new(provider),
         tool_surface_policy:
-            crate::domains::tools::implementations::capability_surface::ToolSurfacePolicy::default(),
+            crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy::default(),
         guardrails: None,
         hooks: None,
         context_manager: test_context_manager("mock-model"),

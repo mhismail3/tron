@@ -12,7 +12,7 @@
 //! bumps, tool additions). The router proactively re-fetches `tools/list` on
 //! every `call` when the per-server cache is older than
 //! `schema_refresh_ttl_ms`. If a drift is detected, the [`ToolIndex`] is
-//! rebuilt for that server so the next `McpSearch` response to the LLM shows
+//! rebuilt for that server so the next capability search result shows
 //! the live schema. TTL `0` disables proactive refresh entirely.
 
 use std::path::PathBuf;
@@ -97,7 +97,7 @@ impl McpRouter {
     /// Before forwarding, the server's tool schemas are re-fetched if the
     /// per-server cache is older than `schema_refresh_ttl_ms` (C8). On drift,
     /// the [`ToolIndex`] is rebuilt for that server so subsequent
-    /// `McpSearch` responses reflect the live schema. Refresh failures are
+    /// capability search results reflect the live schema. Refresh failures are
     /// logged and the call proceeds with the cached schema — the actual tool
     /// call will surface its own error if the server is truly unreachable.
     ///
@@ -139,7 +139,7 @@ impl McpRouter {
             server: server.to_string(),
             kind: crate::domains::mcp::client::McpErrorKind::Protocol("unknown server".into()),
             message: format!(
-                "Tool '{tool}' not found on server '{server}'. Use McpSearch to discover available tools.",
+                "MCP tool '{tool}' not found on server '{server}'. Use capability search to discover available MCP functions.",
             ),
         })?;
 

@@ -259,7 +259,7 @@ fn runtime_does_not_use_global_active_profile_helpers() {
         root.join("packages/agent/src/domains/model/providers"),
         root.join("packages/agent/src/domains/agent/runner"),
         root.join("packages/agent/src/app"),
-        root.join("packages/agent/src/domains/tools"),
+        root.join("packages/agent/src/domains/capability_support"),
     ];
     let forbidden = [
         "active_execution_spec(",
