@@ -254,8 +254,8 @@ impl EventStore {
     #[tracing::instrument(skip(self, opts), fields(dedup_tag = %opts.dedup_tag))]
     pub fn import_atomic(&self, opts: &ImportAtomicOptions<'_>) -> Result<ImportAtomicResult> {
         self.with_global_write_lock(|| {
-            let conn = self.conn()?;
-            let tx = conn.unchecked_transaction()?;
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
             if let Some(existing) = find_session_id_with_tag_in_conn(&tx, opts.dedup_tag)? {
                 return Err(EventStoreError::DuplicateImport {
@@ -364,8 +364,8 @@ impl EventStore {
         use_worktree: Option<bool>,
     ) -> Result<CreateSessionResult> {
         self.with_global_write_lock(|| {
-            let conn = self.conn()?;
-            let tx = conn.unchecked_transaction()?;
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
             let result = create_session_in_tx(
                 &tx,
@@ -395,8 +395,8 @@ impl EventStore {
     #[tracing::instrument(skip(self, opts), fields(from_event_id))]
     pub fn fork(&self, from_event_id: &str, opts: &ForkOptions<'_>) -> Result<ForkResult> {
         self.with_global_write_lock(|| {
-            let conn = self.conn()?;
-            let tx = conn.unchecked_transaction()?;
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
             let source_event = EventRepo::get_by_id(&tx, from_event_id)?
                 .ok_or_else(|| EventStoreError::EventNotFound(from_event_id.to_string()))?;
@@ -523,8 +523,8 @@ impl EventStore {
     #[tracing::instrument(skip(self), fields(session_id))]
     pub fn delete_session(&self, session_id: &str) -> Result<bool> {
         let deleted = self.with_session_write_lock(session_id, || {
-            let conn = self.conn()?;
-            let tx = conn.unchecked_transaction()?;
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
             let _ = EventRepo::delete_by_session(&tx, session_id)?;
             let _ = BranchRepo::delete_by_session(&tx, session_id)?;

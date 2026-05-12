@@ -112,9 +112,10 @@ Parameters:\n\
 - **task**: The task description for the agent (required)\n\
 - **mode**: 'inProcess' (default) or 'tmux'\n\
 - **timeout**: How long to block before auto-backgrounding in ms (default: {default_timeout}). Set 0 to background immediately.\n\
-- **model**, **systemPrompt**, **deniedTools**, **denyAllTools**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
+- **model**, **systemPrompt**, **deniedTools**, **denyAllTools**, **skills**, **workingDirectory**, **maxTurns**, **maxDepth**: Optional overrides\n\
 - **deniedTools**: Array of tool names to remove from the subagent's live catalog\n\
-- **denyAllTools**: Set true for text-only agents (removes all tools)\n\n\
+- **denyAllTools**: Set true for text-only agents (removes all tools)\n\
+- **maxDepth**: Maximum number of child-subagent levels this spawned agent may create; 0 means this spawned agent is a leaf\n\n\
 Returns (when completed within timeout):\n\
 - Full output, token usage, duration statistics, status",
             ),
@@ -186,9 +187,28 @@ Returns (when completed within timeout):\n\
                 .collect()
         });
 
-        // Remaining depth budget from context
-        let remaining_depth = ctx.subagent_max_depth.saturating_sub(1);
-        // LLM-provided maxDepth caps the remaining budget (default = remaining)
+        let child_depth = ctx.subagent_depth.saturating_add(1);
+        if ctx.subagent_max_depth == 0 && ctx.subagent_depth > 0 {
+            return Ok(error_result(format!(
+                "Cannot spawn subagent: maximum configured depth ({}) reached at current depth {}.",
+                ctx.subagent_max_depth, ctx.subagent_depth
+            )));
+        }
+        if ctx.subagent_max_depth > 0 && child_depth > ctx.subagent_max_depth {
+            return Ok(error_result(format!(
+                "Cannot spawn subagent: maximum configured depth ({}) reached at current depth {}.",
+                ctx.subagent_max_depth, ctx.subagent_depth
+            )));
+        }
+
+        // Remaining child-spawn budget for the spawned agent. `maxDepth: 0`
+        // means "spawn this child as a leaf", not "block this spawn".
+        let remaining_depth = if ctx.subagent_max_depth == 0 {
+            0
+        } else {
+            ctx.subagent_max_depth.saturating_sub(child_depth)
+        };
+        // LLM-provided maxDepth caps the child budget (default = remaining).
         #[allow(clippy::cast_possible_truncation)]
         let user_max_depth = get_optional_u64(&params, "maxDepth")
             .map_or(remaining_depth, |v| (v as u32).min(remaining_depth));
@@ -206,7 +226,7 @@ Returns (when completed within timeout):\n\
             denied_tools,
             skills,
             max_depth: user_max_depth,
-            current_depth: ctx.subagent_depth + 1,
+            current_depth: child_depth,
             tool_call_id: Some(ctx.tool_call_id.clone()),
         };
 
@@ -697,18 +717,20 @@ mod tests {
         let _ = tool.execute(json!({"task": "t"}), &ctx).await.unwrap();
         let config = spawner.captured_config();
         assert_eq!(config.current_depth, 2, "child depth = 1 + 1");
-        assert_eq!(config.max_depth, 1, "child max_depth = 2 - 1");
+        assert_eq!(
+            config.max_depth, 0,
+            "child is allowed but cannot spawn children"
+        );
     }
 
     #[tokio::test]
-    async fn spawn_at_max_depth_gives_zero_remaining() {
+    async fn spawn_at_max_depth_returns_tool_error_before_spawner() {
         let spawner = Arc::new(CapturingSpawner::new());
         let tool = SpawnSubagentTool::new(spawner.clone());
         let ctx = make_ctx_with_depth(2, 1);
-        let _ = tool.execute(json!({"task": "t"}), &ctx).await.unwrap();
-        let config = spawner.captured_config();
-        assert_eq!(config.current_depth, 3);
-        assert_eq!(config.max_depth, 0, "no more nesting allowed");
+        let result = tool.execute(json!({"task": "t"}), &ctx).await.unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(extract_text(&result).contains("maximum configured depth"));
     }
 
     #[tokio::test]

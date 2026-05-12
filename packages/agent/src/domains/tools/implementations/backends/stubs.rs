@@ -45,15 +45,15 @@ impl SubagentSpawner for StubSubagentSpawner {
 /// Returns a non-error `NotifyResult` with `success: false` and a
 /// `warning` field explaining the state. Erroring the tool blocks the
 /// agent's flow when a user simply hasn't wired push yet; a warning
-/// instead lets the agent continue and tell the user "the notification
-/// was requested but push isn't configured — here's what to set up".
+/// instead lets the agent continue while still telling the user that the
+/// engine inbox record exists and device push needs configuration.
 pub struct StubNotifyDelegate;
 
 /// Message surfaced to the agent when a `NotifyApp` call hits the stub.
 /// Extracted as a constant so tests can assert on the exact wording.
 pub const STUB_NOTIFY_WARNING: &str = "Push service is not configured on this server. The notification \
-     was not delivered to any device. Configure APNs (direct or via \
-     relay) in the server settings to enable push notifications.";
+     remains available in the engine notification inbox, but no device push was delivered. \
+     Configure APNs through the relay in server settings to enable push notifications.";
 
 #[async_trait]
 impl NotifyDelegate for StubNotifyDelegate {

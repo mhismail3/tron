@@ -9,7 +9,7 @@
 //!
 //! | Module   | Tool             | Content |
 //! |----------|------------------|---------|
-//! | [`spawn`] | `SpawnSubagent` | Launch a child agent with a prompt, optional tool denial list, and configurable max depth |
+//! | [`spawn`] | `SpawnSubagent` | Launch a child agent with a prompt, optional tool denial list, and configurable child depth |
 //!
 //! ## Invariants
 //!
@@ -17,9 +17,9 @@
 //!   ([`crate::domains::agent::runner::orchestrator::subagent_manager`]); their
 //!   lifecycle events (`spawned`, `status_update`, `completed`,
 //!   `failed`) flow through the normal event-persistence pipeline.
-//! - Depth is bounded by `CreateAgentOpts::max_depth`
-//!   ([`crate::domains::agent::runner::orchestrator::agent_factory`]); a child at
-//!   depth `N` can only spawn further children when `max_depth > N`,
-//!   preventing infinite recursion.
+//! - Parent eligibility is bounded by `CreateAgentOpts::max_depth`
+//!   ([`crate::domains::agent::runner::orchestrator::agent_factory`]).
+//!   `SpawnSubagent.maxDepth` caps only the child agent's remaining
+//!   child-spawn budget; `0` creates a leaf child.
 
 pub mod spawn;

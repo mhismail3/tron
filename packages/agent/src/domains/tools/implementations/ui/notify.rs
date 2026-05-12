@@ -114,30 +114,36 @@ impl TronTool for NotifyAppTool {
 
         match self.delegate.send_notification(&notification).await {
             Ok(result) => {
-                // A `warning` on the result means the delivery path
-                // took a non-fatal stub / config-missing branch. Surface
-                // the warning prominently in the tool text so the agent
-                // tells the user "your notification was requested but
-                // could not be delivered because…" instead of silently
-                // assuming it went out.
                 let msg = if let Some(w) = result.warning.as_deref() {
-                    format!("Warning: {w}")
+                    format!(
+                        "Notification recorded in the engine inbox. Push delivery unavailable: {w}"
+                    )
                 } else if result.success {
                     result.message.as_deref().map_or_else(
-                        || "Notification sent successfully".to_string(),
+                        || "Notification recorded in the engine inbox and sent to iOS push successfully".to_string(),
                         String::from,
                     )
                 } else {
                     result.message.as_deref().map_or_else(
-                        || "Notification delivery failed".to_string(),
-                        |m| format!("Notification delivery failed. {m}"),
+                        || "Notification recorded in the engine inbox; push delivery failed".to_string(),
+                        |m| format!("Notification recorded in the engine inbox; push delivery failed. {m}"),
                     )
+                };
+                let delivery_state = if result.warning.is_some() {
+                    "inbox_recorded_push_unavailable"
+                } else if result.success {
+                    "inbox_recorded_push_delivered"
+                } else {
+                    "inbox_recorded_push_failed"
                 };
                 let mut details = json!({
                     "title": title,
                     "body": body,
                     "priority": priority,
                     "success": result.success,
+                    "engineInboxRecorded": true,
+                    "pushDelivered": result.success,
+                    "deliveryState": delivery_state,
                     "successCount": result.success_count,
                     "totalCount": result.total_count,
                     "failureCount": result.total_count.saturating_sub(result.success_count),
@@ -447,9 +453,8 @@ mod tests {
     #[tokio::test]
     async fn warning_surfaces_in_tool_text() {
         // When the delegate returns a warning, the tool's text result
-        // MUST start with "Warning: " so the agent sees the caveat up
-        // front. This is how the agent knows to tell the user "push
-        // wasn't configured" instead of claiming delivery.
+        // must state both sides of the contract: the engine inbox item
+        // exists, and device push delivery needs configuration.
         let mock = Arc::new(MockNotify::with_warning("Push not configured"));
         let tool = NotifyAppTool::new(mock);
         let r = tool
@@ -461,8 +466,8 @@ mod tests {
             "warning must not mark the tool as errored"
         );
         assert!(
-            extract_text(&r).starts_with("Warning: "),
-            "warning must be surfaced with a prefix; got: {}",
+            extract_text(&r).starts_with("Notification recorded in the engine inbox."),
+            "engine inbox ownership must be first in the result; got: {}",
             extract_text(&r)
         );
         assert!(
@@ -485,6 +490,9 @@ mod tests {
             d["success"], false,
             "warning implies no delivery — details.success must be false"
         );
+        assert_eq!(d["engineInboxRecorded"], true);
+        assert_eq!(d["pushDelivered"], false);
+        assert_eq!(d["deliveryState"], "inbox_recorded_push_unavailable");
         assert_eq!(d["successCount"], 0);
         assert_eq!(d["totalCount"], 0);
     }
@@ -516,7 +524,7 @@ mod tests {
             .execute(json!({"title": "t", "body": "b"}), &make_ctx())
             .await
             .unwrap();
-        assert!(extract_text(&r).starts_with("Warning: "));
+        assert!(extract_text(&r).starts_with("Notification recorded in the engine inbox."));
         assert!(extract_text(&r).contains("queue overflowed"));
     }
 
@@ -532,6 +540,9 @@ mod tests {
             .unwrap();
         assert!(extract_text(&r).contains("successfully"));
         let d = r.details.unwrap();
+        assert_eq!(d["engineInboxRecorded"], true);
+        assert_eq!(d["pushDelivered"], true);
+        assert_eq!(d["deliveryState"], "inbox_recorded_push_delivered");
         assert!(
             d.get("warning").is_none(),
             "no warning field when delegate didn't set one"
@@ -552,11 +563,12 @@ mod tests {
             .await
             .unwrap();
         assert!(r.is_error.is_none());
-        assert!(extract_text(&r).starts_with("Warning: "));
+        assert!(extract_text(&r).starts_with("Notification recorded in the engine inbox."));
         assert!(extract_text(&r).contains(STUB_NOTIFY_WARNING));
         let d = r.details.unwrap();
         assert_eq!(d["warning"], STUB_NOTIFY_WARNING);
         assert_eq!(d["success"], false);
+        assert_eq!(d["engineInboxRecorded"], true);
         assert_eq!(d["totalCount"], 0);
     }
 }

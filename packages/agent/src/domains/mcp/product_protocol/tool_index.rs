@@ -92,7 +92,11 @@ impl ToolIndex {
     /// Search for tools matching the query keywords, optionally filtered by server.
     /// Returns up to 40 results sorted by descending score.
     pub fn search(&self, query: &str, server_filter: Option<&str>) -> Vec<ToolMatch> {
-        let keywords: Vec<String> = tokenize(query);
+        let keywords: Vec<String> = tokenize(query.trim());
+        let server_filter = server_filter.and_then(|server| {
+            let trimmed = server.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        });
 
         let mut results: Vec<ToolMatch> = self
             .tools
@@ -479,6 +483,22 @@ mod tests {
     fn format_results_empty_shows_helpful_message() {
         let output = ToolIndex::format_results(&[]);
         assert!(output.contains("No tools found"));
+    }
+
+    #[test]
+    fn blank_server_filter_lists_all_servers() {
+        let mut index = ToolIndex::new();
+        index.add_server_tools("sqlite", &sample_tools());
+        index.add_server_tools(
+            "browser",
+            &[make_tool("click", "Click an element", json!({}))],
+        );
+
+        let results = index.search("", Some(""));
+
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().any(|tool| tool.server == "sqlite"));
+        assert!(results.iter().any(|tool| tool.server == "browser"));
     }
 
     #[test]

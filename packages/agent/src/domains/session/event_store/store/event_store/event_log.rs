@@ -164,8 +164,8 @@ impl EventStore {
     /// Called by `append` (which holds the lock) and by `delete_message`
     /// (which acquires the lock once at its own level).
     fn append_inner(&self, opts: &AppendOptions<'_>) -> Result<EventRow> {
-        let conn = self.conn()?;
-        let tx = conn.unchecked_transaction()?;
+        let mut conn = self.conn()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         let session = SessionRepo::get_by_id(&tx, opts.session_id)?
             .ok_or_else(|| EventStoreError::SessionNotFound(opts.session_id.to_string()))?;

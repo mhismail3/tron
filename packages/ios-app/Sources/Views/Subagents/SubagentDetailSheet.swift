@@ -87,6 +87,11 @@ struct SubagentDetailSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(titleColor)
         .task(id: data.status) {
+            guard data.hasSubagentSession else {
+                chatEvents = []
+                chatLoadError = nil
+                return
+            }
             // Load chat history (uses events::get_history engine protocol → MessageBubble rendering)
             await loadChatHistory()
 
@@ -105,6 +110,7 @@ struct SubagentDetailSheet: View {
 
     /// Load full chat history from server (works for all subagent states)
     private func loadChatHistory() async {
+        guard data.hasSubagentSession else { return }
         isLoadingChat = true
         chatLoadError = nil
         defer { isLoadingChat = false }
@@ -123,6 +129,7 @@ struct SubagentDetailSheet: View {
 
     /// Refresh chat history without showing loading spinner (for polling while running)
     private func refreshChatHistory() async {
+        guard data.hasSubagentSession else { return }
         do {
             let result = try await engineClient.eventSync.getHistory(
                 sessionId: data.subagentSessionId,

@@ -17,7 +17,7 @@ enum SubagentResultParser {
         let turns: Int
 
         if let details = tool.details {
-            sessionId = (details["sessionId"]?.value as? String) ?? tool.toolCallId
+            sessionId = details["sessionId"]?.value as? String ?? ""
             if let success = details["success"]?.value as? Bool {
                 resultStatus = success ? .completed : .failed
             } else {
@@ -26,8 +26,7 @@ enum SubagentResultParser {
             resultSummary = details["resultSummary"]?.value as? String
             turns = (details["totalTurns"]?.value as? Int) ?? 0
         } else {
-            // No details available — use defaults
-            sessionId = tool.toolCallId
+            sessionId = ""
             resultStatus = nil
             resultSummary = nil
             turns = 0

@@ -84,6 +84,11 @@ struct SubagentToolData: Equatable {
     let toolCallId: String
     /// Session ID of the spawned subagent
     let subagentSessionId: String
+    /// Whether the server has emitted the child session id needed for
+    /// history/detail loading.
+    var hasSubagentSession: Bool {
+        subagentSessionId.hasPrefix("sess_")
+    }
     /// The task assigned to the subagent
     let task: String
     /// Model used by the subagent

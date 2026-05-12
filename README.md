@@ -294,7 +294,7 @@ them.
 | `Search` | Full-text content search built on ripgrep (regex, glob filters, multiple output modes). |
 | `Bash` | Execute shell commands with configurable timeout. Supports backgrounding, blob storage for large output, and an optional sandbox image. |
 | `AskUserQuestion` | Prompt the user for input with structured options. |
-| `NotifyApp` | Send a push notification to iOS through the Cloudflare relay; if relay config or active device tokens are missing, return an explicit warning while foreground iOS refreshes notification inbox state from engine stream events. |
+| `NotifyApp` | Record an engine-owned notification inbox item and send a push notification through the Cloudflare relay when APNs is configured; if device push is unavailable, the tool reports that the inbox item still exists. |
 | `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
 | `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/profiles/auth.json`. |
 | `Display` | Render rich content (images, streams) for iOS clients via blob storage and `DisplayFrame` events. |
@@ -303,9 +303,9 @@ them.
 | `engine_inspect` | Inspect an engine capability contract with model-readable request/response schemas, risk, authority, idempotency, approval, lease, stream, health, compensation, and provenance metadata. |
 | `engine_watch` | Poll live catalog changes after a catalog revision cursor. |
 | `engine_invoke` | Invoke canonical engine functions directly, with explicit idempotency required for writes and structured approval-required responses for high-risk capabilities. |
-| `McpSearch` | Meta-tool that searches across all configured MCP server tool catalogs by keyword. Registered with an empty result set when no MCP servers are configured. |
+| `McpSearch` | Meta-tool that searches across connected MCP server tool catalogs by keyword. Empty query and empty server filter list every indexed tool. |
 | `McpCall` | Meta-tool that invokes a specific tool on an MCP server. Registered even before MCP servers are configured, so later settings changes do not require a daemon restart. |
-| `SpawnSubagent` | Spawn a child agent. Max depth controlled by `agent.subagent_max_depth` (default 3). |
+| `SpawnSubagent` | Spawn a child agent. Parent depth is controlled by `agent.subagent_max_depth`; tool `maxDepth: 0` creates a leaf child that cannot spawn its own children. |
 | `ManageJob` | Inspect, signal, and clean up background jobs (Bash backgrounded processes + subagents). |
 | `Wait` | Block until specified background jobs complete or hit a timeout. |
 

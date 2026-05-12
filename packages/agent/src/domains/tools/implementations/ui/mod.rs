@@ -9,7 +9,7 @@
 //! | Module              | Tool             | Content |
 //! |---------------------|------------------|---------|
 //! | [`ask_user`]        | `AskUserQuestion` | Pose a question with typed answer choices; blocks the turn until iOS responds |
-//! | [`notify`]          | `NotifyApp`       | Send an APNS push to the user's device (falls back to stub when push is disabled) |
+//! | [`notify`]          | `NotifyApp`       | Record an engine inbox notification and send an APNS push when configured |
 //! | [`computer_use`]    | `ComputerUse`     | macOS GUI automation (screenshot, click, type, scroll) — see submodule docs |
 //! | [`display`]         | `Display`         | Render structured content (markdown, code, table) in the iOS chat |
 //! | [`display_stream`]  | —                | Helper for incremental `Display` updates during long turns |
@@ -20,9 +20,10 @@
 //! - User decisions for engine policy approvals are owned by the engine
 //!   `approval::*` primitives. UI tools here only ask product questions or
 //!   surface notifications.
-//! - [`notify`] silently degrades to a stub when push is disabled — the
-//!   tool returns a warning the agent surfaces, but does not error, so
-//!   session flow never depends on APNS availability (see M19).
+//! - [`notify`] always records an engine-owned inbox item through the
+//!   session event stream. When APNS is not configured, the tool returns
+//!   a warning the agent surfaces, but does not error, so session flow
+//!   never depends on push availability.
 
 pub mod ask_user;
 pub mod computer_use;

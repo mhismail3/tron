@@ -475,20 +475,10 @@ impl SubagentSpawner for SubagentManager {
             });
         }
 
-        // Depth check
-        if config.max_depth > 0 && config.current_depth >= config.max_depth {
-            return Err(ToolError::Validation {
-                message: format!(
-                    "Maximum subagent depth ({}) exceeded (current: {})",
-                    config.max_depth, config.current_depth
-                ),
-            });
-        }
-        if config.current_depth > 0 && config.max_depth == 0 {
-            return Err(ToolError::Validation {
-                message: "Subagent nesting is not allowed".into(),
-            });
-        }
+        // Depth eligibility is enforced by the spawning engine capability
+        // before this service is called. `config.max_depth` is the child
+        // agent's remaining child-spawn budget; zero means the child is a
+        // leaf agent and is valid.
 
         let all_tool_names = self
             .current_tool_names(config.parent_session_id.as_deref().unwrap_or("subagent"))

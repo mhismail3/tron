@@ -210,13 +210,13 @@ async fn spawn_tmux_mode_rejected() {
 }
 
 #[tokio::test]
-async fn spawn_depth_zero_blocks_nesting() {
+async fn spawn_depth_zero_creates_leaf_subagent() {
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
     let mut config = make_config("nested task");
     config.current_depth = 1;
     config.max_depth = 0;
-    let err = manager.spawn(config).await.unwrap_err();
-    assert!(err.to_string().contains("nesting"));
+    let handle = manager.spawn(config).await.unwrap();
+    assert!(!handle.session_id.is_empty());
 }
 
 #[tokio::test]
@@ -227,16 +227,6 @@ async fn spawn_depth_one_allows_nesting() {
     config.max_depth = 2;
     let handle = manager.spawn(config).await.unwrap();
     assert!(!handle.session_id.is_empty());
-}
-
-#[tokio::test]
-async fn spawn_depth_exceeded_returns_error() {
-    let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    let mut config = make_config("deep task");
-    config.current_depth = 2;
-    config.max_depth = 2; // current >= max → blocked
-    let err = manager.spawn(config).await.unwrap_err();
-    assert!(err.to_string().contains("exceeded"));
 }
 
 #[tokio::test]

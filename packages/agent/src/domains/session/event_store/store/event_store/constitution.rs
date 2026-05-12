@@ -17,7 +17,7 @@ impl EventStore {
     ) -> Result<String> {
         self.with_global_write_lock(|| {
             let mut conn = self.conn()?;
-            let tx = conn.transaction()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let id = ConstitutionAuditRepo::insert_context_resolution(&tx, input)?;
             tx.commit()?;
             Ok(id)
@@ -31,7 +31,7 @@ impl EventStore {
     ) -> Result<String> {
         self.with_global_write_lock(|| {
             let mut conn = self.conn()?;
-            let tx = conn.transaction()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let id = ConstitutionAuditRepo::insert_provider_payload(&tx, input)?;
             tx.commit()?;
             Ok(id)

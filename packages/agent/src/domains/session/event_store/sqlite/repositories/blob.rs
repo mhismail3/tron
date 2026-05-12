@@ -29,6 +29,12 @@ impl BlobRepo {
     pub fn store(conn: &Connection, content: &[u8], mime_type: &str) -> Result<String> {
         let blob_id = crate::shared::storage::store_content_blob(conn, content, mime_type)
             .map_err(|error| {
+                if is_write_contention(&error) {
+                    return EventStoreError::Busy {
+                        operation: "blob storage",
+                        attempts: 1,
+                    };
+                }
                 EventStoreError::Internal(format!("failed to store blob: {error:#}"))
             })?;
         crate::shared::storage::register_existing_blob_owner(
@@ -39,6 +45,12 @@ impl BlobRepo {
             "audit",
         )
         .map_err(|error| {
+            if is_write_contention(&error) {
+                return EventStoreError::Busy {
+                    operation: "blob owner registration",
+                    attempts: 1,
+                };
+            }
             EventStoreError::Internal(format!("failed to record blob owner: {error:#}"))
         })?;
         Ok(blob_id)
@@ -170,6 +182,27 @@ impl BlobRepo {
             ref_count: row.get(8)?,
         })
     }
+}
+
+fn is_write_contention(error: &anyhow::Error) -> bool {
+    for cause in error.chain() {
+        if let Some(rusqlite::Error::SqliteFailure(code, _)) =
+            cause.downcast_ref::<rusqlite::Error>()
+            && matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+        {
+            return true;
+        }
+        let message = cause.to_string();
+        if message.contains("database is locked")
+            || message.contains("Cannot promote read transaction")
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn decode_content(content: &[u8], compression: &str, original_size: i64) -> Result<Vec<u8>> {
