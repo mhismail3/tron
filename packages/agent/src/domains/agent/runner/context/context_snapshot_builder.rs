@@ -87,6 +87,16 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
         };
 
         let threshold_level = ThresholdLevel::from_ratio(usage_percent);
+        let component_total = self.deps.estimate_system_prompt_tokens()
+            + self.deps.estimate_tools_tokens()
+            + self.deps.estimate_rules_tokens()
+            + self.deps.estimate_memory_tokens()
+            + self.deps.estimate_skill_index_tokens()
+            + self.deps.get_volatile_skill_context_tokens()
+            + self.deps.get_volatile_skill_removal_tokens()
+            + self.deps.get_volatile_job_results_tokens()
+            + self.deps.estimate_environment_tokens()
+            + self.deps.get_messages_tokens();
 
         ContextSnapshot {
             current_tokens,
@@ -104,6 +114,7 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
                 job_results: self.deps.get_volatile_job_results_tokens(),
                 environment: self.deps.estimate_environment_tokens(),
                 messages: self.deps.get_messages_tokens(),
+                provider_adjustment: current_tokens.saturating_sub(component_total),
             },
             rules: None,
             is_local_model: self.deps.is_local_model(),
@@ -364,6 +375,24 @@ mod tests {
         assert_eq!(snap.breakdown.tools, 1_000);
         assert_eq!(snap.breakdown.rules, 500);
         assert_eq!(snap.breakdown.messages, 5_000);
+        assert_eq!(snap.breakdown.provider_adjustment, 41_500);
+        assert_eq!(snap.breakdown.total(), snap.current_tokens);
+    }
+
+    #[test]
+    fn build_breakdown_provider_adjustment_reconciles_exact_context_count() {
+        let deps = MockDeps {
+            current_tokens: 10_000,
+            system_prompt_tokens: 1_000,
+            tools_tokens: 2_000,
+            rules_tokens: 500,
+            messages_tokens: 1_500,
+            ..MockDeps::default()
+        };
+        let builder = ContextSnapshotBuilder::new(deps);
+        let snap = builder.build();
+        assert_eq!(snap.breakdown.total(), 10_000);
+        assert_eq!(snap.breakdown.provider_adjustment, 5_000);
     }
 
     #[test]

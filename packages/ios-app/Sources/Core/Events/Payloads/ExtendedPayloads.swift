@@ -153,7 +153,7 @@ struct CompactBoundaryPayload {
         self.originalTokens = originalTokens
         self.compactedTokens = compactedTokens
 
-        // Reason is required — no fallback. The server emits it at every
+        // Reason is required. The server emits it at every
         // production site and the import transformer tags historical
         // boundaries as `"imported"`.
         guard let reason = payload.string("reason"), !reason.isEmpty else {
@@ -295,6 +295,7 @@ struct ContextSnapshotResult: Codable {
         let jobResults: Int
         let environment: Int
         let messages: Int
+        let providerAdjustment: Int?
     }
 }
 

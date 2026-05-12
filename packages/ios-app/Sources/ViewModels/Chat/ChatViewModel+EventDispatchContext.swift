@@ -1,7 +1,7 @@
 import Foundation
 
 /// Extension making ChatViewModel conform to EventDispatchTarget.
-/// This provides the bridge between the EventDispatchCoordinator and
+/// This connects the EventDispatchCoordinator with
 /// the existing event handler methods in ChatViewModel.
 ///
 /// Most handler methods are already implemented in ChatViewModel+Events.swift

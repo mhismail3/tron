@@ -278,6 +278,10 @@ execution path is still canonical engine invocation: `Bash` resolves to
 `tool::bash`, `Read` resolves to `tool::read`, `engine_discover` resolves to
 `tool::engine_discover`, and so on. There is no separate production tool
 registry path.
+`engine_discover` is a filtered live-catalog search: query results are not
+presented as the whole engine surface unless the agent asks with no query or a
+broad namespace. Use `engine_inspect` on returned canonical ids before invoking
+them.
 
 ### Always-on (21)
 
@@ -670,6 +674,14 @@ See [`packages/agent/src/app/onboarding/mod.rs`](packages/agent/src/app/onboardi
 ## Context and Compaction
 
 The context system manages the LLM's input window. Each turn assembles: system prompt + rules + skills + conversation history + tool results.
+
+`context::get_snapshot` and `context::get_detailed_snapshot` report the
+server-owned context total. Before a provider call this is the chars/4 local
+component estimate; after a provider call it uses the exact provider-reported
+context count. When provider tokenizer/cache accounting is higher than the sum
+of local sections, the response includes `breakdown.providerAdjustment` so the
+UI can show the attributed sections plus the provider tokenizer delta without
+guessing.
 
 For the full source-grounded map of what can enter model context, how it is constructed, where it is persisted, and which Constitution/config surfaces are still incomplete, see [`packages/agent/docs/context-architecture.md`](packages/agent/docs/context-architecture.md).
 

@@ -179,6 +179,7 @@ struct ChatView: View {
         .onDisappear {
             // Persist draft state before view is destroyed
             Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
+            viewModel.stopLiveEventStream()
             // Reset for next entry
             initialLoadComplete = false
             // Full reset of animation state when leaving session
@@ -202,6 +203,7 @@ struct ChatView: View {
 
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
+            viewModel.startLiveEventStream()
 
             // Restore draft state and wire draft store
             await dependencies.draftStore.loadDraft(sessionId: sessionId, into: viewModel.inputBarState)

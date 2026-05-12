@@ -1,8 +1,8 @@
 //! Token estimation utilities.
 //!
 //! Pure functions for estimating token counts from text, messages, tools,
-//! and images. Uses a chars/4 approximation consistent with Anthropic's
-//! tokenizer.
+//! and images. Uses a chars/4 approximation as a cheap pre-call heuristic.
+//! Provider-reported usage remains the source of truth after a model call.
 //!
 //! ## Formula
 //!

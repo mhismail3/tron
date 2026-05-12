@@ -99,16 +99,22 @@ impl TronTool for EngineDiscoverTool {
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let mut query = FunctionQuery::default();
-        if let Some(search) = optional_string(&params, "query") {
+        let query_text = optional_string(&params, "query");
+        let namespace_filter = optional_string(&params, "namespace");
+        if let Some(search) = query_text.clone() {
             query.text = Some(search);
         }
-        if let Some(namespace) = optional_string(&params, "namespace") {
+        if let Some(namespace) = namespace_filter.clone() {
             query.namespace_prefix = Some(namespace);
         }
         let client = agent_client(&self.host, ctx)?;
         let functions = client.discover(query).await;
         Ok(json_result(
-            format_discover_result(&functions),
+            format_discover_result(
+                &functions,
+                query_text.as_deref(),
+                namespace_filter.as_deref(),
+            ),
             json!({ "functions": functions }),
         ))
     }
@@ -381,13 +387,22 @@ fn agent_authority_scopes() -> Vec<&'static str> {
     ]
 }
 
-fn format_discover_result(functions: &[FunctionDefinition]) -> String {
+fn format_discover_result(
+    functions: &[FunctionDefinition],
+    query_text: Option<&str>,
+    namespace_filter: Option<&str>,
+) -> String {
+    let filter_summary = discover_filter_summary(query_text, namespace_filter);
     if functions.is_empty() {
-        return "Found 0 visible engine capabilities. Try a namespace filter such as `sandbox`, `catalog`, `worker`, `observability`, or a shorter query. Do not probe Tron engine capabilities through Bash, HTTP, or MCP when this tool returns no matches.".to_owned();
+        return format!(
+            "Found 0 {}. This is a filtered catalog search, not proof that the engine catalog is empty. Try a namespace filter such as `sandbox`, `catalog`, `worker`, `observability`, or a shorter query. Do not probe Tron engine capabilities through Bash, HTTP, or MCP when this tool returns no matches.",
+            filter_summary
+        );
     }
 
     let mut lines = vec![
-        format!("Found {} visible engine capabilities.", functions.len()),
+        format!("Found {} {}.", functions.len(), filter_summary),
+        "This is a catalog search result, not necessarily the full engine surface; run `engine_discover` with no query or a broader namespace when you need the wider visible catalog.".to_owned(),
         "Use canonical function ids with `engine_inspect` for full contract details, then `engine_invoke` for execution.".to_owned(),
         "For Tron engine capability work, stay on these engine tools instead of `/api/*`, `/ws`, Bash curl probes, or MCP search.".to_owned(),
         "For worker creation or on-the-fly capability registration, inspect and invoke `worker::protocol_guide`; it returns the current /engine/workers handshake and an executable local worker template.".to_owned(),
@@ -403,6 +418,22 @@ fn format_discover_result(functions: &[FunctionDefinition]) -> String {
         ));
     }
     lines.join("\n")
+}
+
+fn discover_filter_summary(query_text: Option<&str>, namespace_filter: Option<&str>) -> String {
+    match (query_text, namespace_filter) {
+        (Some(query), Some(namespace)) => format!(
+            "matching visible engine capabilities for query `{}` in namespace `{}`",
+            query, namespace
+        ),
+        (Some(query), None) => {
+            format!("matching visible engine capabilities for query `{}`", query)
+        }
+        (None, Some(namespace)) => {
+            format!("visible engine capabilities in namespace `{}`", namespace)
+        }
+        (None, None) => "visible engine capabilities".to_owned(),
+    }
 }
 
 fn format_function_summary(function: &FunctionDefinition) -> String {
@@ -939,6 +970,8 @@ mod tests {
 
         assert!(text.contains("worker::protocol_guide"));
         assert!(text.contains("invoke `worker::protocol_guide`"));
+        assert!(text.contains("matching visible engine capabilities for query"));
+        assert!(text.contains("not necessarily the full engine surface"));
     }
 
     #[tokio::test]

@@ -252,7 +252,7 @@ extension ChatViewModel {
     /// message whose content is plain text. Used by `retryLastTurn`.
     ///
     /// Internal rather than private so unit tests (C7) can directly verify
-    /// the traversal order, skip semantics, and "no text prompt" fallback
+    /// the traversal order, skip semantics, and "no text prompt" result
     /// without needing to wire a mock engine client.
     func findLastUserTextMessage() -> ChatMessage? {
         for message in messages.reversed() where message.role == .user {

@@ -160,6 +160,14 @@ approval primitive worker instead of through a separate UI-only approval path.
 User decisions invoke canonical `approval::resolve`; iOS does not mutate approval
 state locally. ACKs are coalesced to the latest cursor per subscription so
 bursts do not turn into one engine request per event.
+Each visible `ChatView` starts and stops only its own `ChatViewModel` live-event
+task. SwiftUI can create short-lived chat models during navigation and
+reconstruction, so live-stream lifecycle is local to the view model that owns
+the task. Duplicate server rows are handled by session sequence and cursor
+dedupe; context snapshot refreshes are similarly coalesced inside each chat
+view model so multiple UI triggers after one turn issue one
+`context::get_snapshot` read and apply that server-owned snapshot to the local
+projection.
 Active subscription ids are per WebSocket, so they are cleared whenever the
 transport leaves `.connected` and recreated at the engine topic tail after
 reconnect. Catalog, ledger, idempotency, approval, lease, stream visibility, and
@@ -334,7 +342,7 @@ stream publication. Source-control repo metadata follows the same shape: iOS
 first reads `worktree::get_status` and only asks repo capabilities for
 divergence or sibling-session data when the server reports an active worktree
 with a repo root.
-`ConnectionToastPolicy` bridges app-level connection state into the global
+`ConnectionToastPolicy` maps app-level connection state into the global
 toast banner stack: when an active paired server becomes disconnected,
 reconnecting, failed, or unauthorized, a deduplicated compact pill appears near
 the top safe area with the appropriate repair affordance and hugs its content

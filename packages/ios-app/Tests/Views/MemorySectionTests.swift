@@ -5,7 +5,7 @@ import Foundation
 /// Tests for the iOS MemorySection wire format + decode path.
 /// The view itself is rendered via SwiftUI previews; the tests here
 /// focus on what's easily unit-testable: the UserMemorySnapshot decoder
-/// and its backward/forward compatibility behavior.
+/// and the current DetailedContextSnapshotResult wire shape.
 @Suite("UserMemorySnapshot")
 struct UserMemorySnapshotTests {
 
@@ -111,7 +111,8 @@ struct UserMemorySnapshotTests {
                 "skillRemoval": 0,
                 "jobResults": 0,
                 "environment": 0,
-                "messages": 0
+                "messages": 0,
+                "providerAdjustment": 250
             },
             "messages": [],
             "systemPromptContent": "You are Tron.",
@@ -129,12 +130,13 @@ struct UserMemorySnapshotTests {
         #expect(decoded.memory != nil)
         #expect(decoded.memory?.bootstrapped == true)
         #expect(decoded.memory?.content == "# Me")
+        #expect(decoded.breakdown.providerAdjustment == 250)
     }
 
     @Test("DetailedContextSnapshotResult tolerates memory == null")
     func testDecode_detailedSnapshot_memoryNull() throws {
-        // Backward-compat: older server versions emit memory: null for local
-        // models. iOS must still decode without error.
+        // Current local-model snapshots emit memory: null when no server-owned
+        // memory content is present. iOS must still decode without error.
         let json = """
         {
             "currentTokens": 0,

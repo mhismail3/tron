@@ -149,6 +149,10 @@ final class ChatViewModel {
     /// Task for handling event stream from EngineClient
     @ObservationIgnored
     private var eventTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var eventTaskGeneration: UInt64 = 0
+    @ObservationIgnored
+    private let contextRefreshGate = ContextRefreshGate()
     /// ID of the thinking message for the current turn (thinking appears before text response)
     var thinkingMessageId: UUID?
     /// True while reconstruction is in progress — buffers real-time events for replay after
@@ -278,8 +282,8 @@ final class ChatViewModel {
         self.connectionState = engineClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: engineClient.model)
         // Worktree state reads through the shared cache when a store manager
-        // is available, else a lightweight fallback that exists only for this
-        // view model — tests passing a nil manager still get a working object.
+        // is available, else a test-local cache that exists only for this view
+        // model so tests passing a nil manager still get a working object.
         let cache = eventStoreManager?.worktreeStatusCache
             ?? WorktreeStatusCache(fetch: { [weak engineClient] id in
                 guard let engineClient else { throw CancellationError() }
@@ -287,7 +291,7 @@ final class ChatViewModel {
             })
         self.worktreeState = WorktreeIsolationState(sessionId: sessionId, cache: cache)
         setupBindings()
-        setupEventHandlers()
+        setupEventProcessingCallbacks()
         setupAudioRecorder()
     }
 
@@ -416,7 +420,7 @@ final class ChatViewModel {
 
     /// Process a tool end update that has been ordered by UIUpdateQueue
     private func processOrderedToolEnd(_ data: UIUpdateQueue.ToolEndData) {
-        // Find the tool message by toolCallId (O(1) via index, fallback to linear scan)
+        // Find the tool message by toolCallId (O(1) via index, then a bounded scan)
         if let index = messageIndex.index(forToolCallId: data.toolCallId)
             ?? MessageFinder.lastIndexOfToolUse(toolCallId: data.toolCallId, in: messages) {
             if case .toolUse(var tool) = messages[index].content {
@@ -436,14 +440,18 @@ final class ChatViewModel {
         }
     }
 
-    private func setupEventHandlers() {
+    private func setupEventProcessingCallbacks() {
         // Set up manager callbacks for batched/ordered processing
         setupUIUpdateQueueCallback()
         setupStreamingManagerCallbacks()
+    }
 
+    func startLiveEventStream() {
         // Subscribe to plugin-based event stream from EngineClient using async stream
         // Filter to only handle events for this session
-        eventTask?.cancel()
+        guard eventTask == nil else { return }
+        eventTaskGeneration += 1
+        let generation = eventTaskGeneration
         eventTask = Task { [weak self] in
             guard let self else { return }
             logger.info("[LIVE] Starting engine event stream for session \(sessionId)", category: .events)
@@ -456,7 +464,21 @@ final class ChatViewModel {
                 handleEventV2(event)
             }
             logger.info("[LIVE] Engine event stream ended for session \(sessionId), cancelled=\(Task.isCancelled)", category: .events)
+            if self.eventTaskGeneration == generation {
+                self.eventTask = nil
+            }
         }
+    }
+
+    func stopLiveEventStream() {
+        eventTaskGeneration += 1
+        eventTask?.cancel()
+        eventTask = nil
+        contextRefreshGate.cancel()
+    }
+
+    var liveEventStreamIsActiveForTesting: Bool {
+        eventTask != nil
     }
 
     /// Tracked fire-and-forget tasks — cancelled in deinit to prevent leaks
@@ -476,6 +498,7 @@ final class ChatViewModel {
         // assumeIsolated lets the compiler see we can safely access isolated state.
         MainActor.assumeIsolated {
             eventTask?.cancel()
+            contextRefreshGate.cancel()
             for task in observationTasks { task.cancel() }
             for task in backgroundTasks { task.cancel() }
         }
@@ -724,6 +747,12 @@ final class ChatViewModel {
     /// Syncs both context limit and current token count to keep the pill in sync with the sheet.
     /// When the server returns currentTokens=0 (session not yet built), preserves existing tokens.
     func refreshContextFromServer() async {
+        await contextRefreshGate.run { [weak self] in
+            await self?.performContextRefreshFromServer()
+        }
+    }
+
+    private func performContextRefreshFromServer() async {
         guard let sessionId = engineClient.currentSessionId else {
             logger.debug("No session ID available for context refresh", category: .session)
             return

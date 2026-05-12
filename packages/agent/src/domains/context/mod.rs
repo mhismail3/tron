@@ -6,7 +6,10 @@
 //! `operations/`; query/command services take the narrowed context deps.
 //! `queries/` is split into snapshot rendering, audit trace loading, payload
 //! preview redaction, and context-manager preparation so read paths can be
-//! followed without a central query blob.
+//! followed without a central query blob. Snapshot totals use the exact
+//! provider-reported context count when available and expose a
+//! `providerAdjustment` row so chars/4 local component estimates reconcile to
+//! the server-owned total.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

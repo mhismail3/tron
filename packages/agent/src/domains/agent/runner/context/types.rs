@@ -119,10 +119,18 @@ pub struct TokenBreakdown {
     pub environment: u64,
     /// Message tokens.
     pub messages: u64,
+    /// Exact provider token delta not attributable to estimated local sections.
+    ///
+    /// This reconciles the chars/4 component estimates with the exact provider
+    /// context count after a turn. Anthropic cache-write accounting and exact
+    /// tokenization of system text, tool schemas, cache markers, and messages
+    /// can make the reported total higher than the local estimate without
+    /// implying hidden conversation history.
+    pub provider_adjustment: u64,
 }
 
 impl TokenBreakdown {
-    /// Sum of all component estimates.
+    /// Sum of all displayed token rows.
     #[must_use]
     pub fn total(&self) -> u64 {
         self.system_prompt
@@ -135,6 +143,7 @@ impl TokenBreakdown {
             + self.job_results
             + self.environment
             + self.messages
+            + self.provider_adjustment
     }
 }
 
@@ -592,6 +601,7 @@ mod tests {
                 job_results: 50,
                 environment: 30,
                 messages: 1500,
+                provider_adjustment: 0,
             },
             rules: None,
             is_local_model: false,
@@ -603,6 +613,7 @@ mod tests {
         assert_eq!(json["breakdown"]["memory"], 100);
         assert_eq!(json["breakdown"]["skillContext"], 200);
         assert_eq!(json["breakdown"]["environment"], 30);
+        assert_eq!(json["breakdown"]["providerAdjustment"], 0);
     }
 
     #[test]
@@ -615,6 +626,7 @@ mod tests {
         assert_eq!(b.skill_removal, 0);
         assert_eq!(b.job_results, 0);
         assert_eq!(b.environment, 0);
+        assert_eq!(b.provider_adjustment, 0);
     }
 
     #[test]
@@ -630,8 +642,9 @@ mod tests {
             job_results: 40,
             environment: 15,
             messages: 500,
+            provider_adjustment: 5,
         };
-        assert_eq!(b.total(), 1315);
+        assert_eq!(b.total(), 1320);
     }
 
     #[test]

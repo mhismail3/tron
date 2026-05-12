@@ -47,21 +47,24 @@ extension ChatViewModel: TurnLifecycleContext {
         thinkingState.startTurn(turnNumber, model: model)
     }
 
-    /// End thinking turn and persist content to database (TurnLifecycleContext)
+    /// End thinking turn and cache content to the local event projection when available.
     func endThinkingTurn() async {
         guard let payload = thinkingState.endTurn() else { return }
         await persistThinkingPayload(payload)
     }
 
-    /// Persist a thinking payload to the event database
+    /// Cache a thinking payload to the local event projection.
+    ///
+    /// The server event log remains authoritative; this projection only keeps
+    /// local detail sheets responsive between reconstruction passes.
     private func persistThinkingPayload(_ payload: ThinkingCompletePayload) async {
         guard let database = eventStoreManager?.eventDB else {
-            logger.warning("Cannot persist thinking - no database", category: .session)
+            logger.debug("Skipping local thinking cache write - no event database", category: .session)
             return
         }
 
         guard let session = try? await database.sessions.get(sessionId) else {
-            logger.warning("Cannot persist thinking - session not found", category: .session)
+            logger.debug("Skipping local thinking cache write - session not found", category: .session)
             return
         }
 

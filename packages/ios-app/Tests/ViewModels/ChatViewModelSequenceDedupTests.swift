@@ -111,6 +111,70 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
         XCTAssertEqual(viewModel.sequenceHighWaterMark, 100)
     }
 
+    func testSameSessionViewModelsKeepIndependentSequenceState() {
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let first = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "shared-session",
+            eventStoreManager: nil
+        )
+        let second = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "shared-session",
+            eventStoreManager: nil
+        )
+
+        first.dispatchEvent(
+            .plugin(
+                type: "agent.text_delta",
+                event: ParsedEventData(value: 0),
+                sessionId: "shared-session",
+                sequence: 5,
+                transform: { nil }
+            )
+        )
+        second.dispatchEvent(
+            .plugin(
+                type: "agent.text_delta",
+                event: ParsedEventData(value: 0),
+                sessionId: "shared-session",
+                sequence: 2,
+                transform: { nil }
+            )
+        )
+
+        XCTAssertEqual(first.sequenceHighWaterMark, 5)
+        XCTAssertEqual(second.sequenceHighWaterMark, 2)
+    }
+
+    func testSameSessionLiveStreamsDoNotCancelEachOther() {
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let first = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "shared-session",
+            eventStoreManager: nil
+        )
+        let second = ChatViewModel(
+            engineClient: engineClient,
+            sessionId: "shared-session",
+            eventStoreManager: nil
+        )
+
+        first.startLiveEventStream()
+        second.startLiveEventStream()
+
+        XCTAssertTrue(first.liveEventStreamIsActiveForTesting)
+        XCTAssertTrue(second.liveEventStreamIsActiveForTesting)
+
+        first.stopLiveEventStream()
+
+        XCTAssertFalse(first.liveEventStreamIsActiveForTesting)
+        XCTAssertTrue(second.liveEventStreamIsActiveForTesting)
+
+        second.stopLiveEventStream()
+        XCTAssertFalse(second.liveEventStreamIsActiveForTesting)
+    }
+
     func testWatermarkResetForNewReconstructionCycle() {
         // After a new reconstruction sets watermark, the filter honors it.
         viewModel.sequenceHighWaterMark = 42

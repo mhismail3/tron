@@ -80,6 +80,10 @@ struct ContextDetailView: View {
         snapshot.addedSkills.filter { !pendingSkillDeletions.contains($0.name) }
     }
 
+    private var providerAdjustmentTokens: Int {
+        snapshot.breakdown.providerAdjustment ?? 0
+    }
+
     var body: some View {
         NavigationStack {
         ScrollView(.vertical, showsIndicators: true) {
@@ -153,6 +157,10 @@ struct ContextDetailView: View {
                             toolsContent: snapshot.toolsContent,
                             tokens: snapshot.breakdown.tools
                         )
+                    }
+
+                    if providerAdjustmentTokens > 0 {
+                        providerAdjustmentRow(tokens: providerAdjustmentTokens)
                     }
                 }
                 .padding(.horizontal, ContextLayout.outerPadding)
@@ -264,6 +272,25 @@ struct ContextDetailView: View {
         }
         .padding(.leading, ContextLayout.iconColumnLeading)
         .padding(.trailing, ContextLayout.outerPadding)
+    }
+
+    private func providerAdjustmentRow(tokens: Int) -> some View {
+        HStack(spacing: ContextLayout.iconTextSpacing) {
+            Image(systemName: "number")
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronSlate)
+                .frame(width: ContextLayout.iconFrameWidth)
+            Text("Provider Tokenizer Delta")
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronSlate)
+            Spacer()
+            Text(TokenFormatter.format(tokens))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+        }
+        .padding(ContextLayout.rowInnerPadding)
+        .sectionFill(.tronSlate, interactive: false)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Content Checks

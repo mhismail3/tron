@@ -99,7 +99,7 @@ struct ChatSheetContent: View {
             )
 
         case .commandToolDetail(let data):
-            commandToolDetailSheet(fallback: data)
+            commandToolDetailSheet(snapshot: data)
 
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
@@ -111,14 +111,14 @@ struct ChatSheetContent: View {
     // MARK: - Sheet Builders
 
     @ViewBuilder
-    private func commandToolDetailSheet(fallback: CommandToolChipData) -> some View {
+    private func commandToolDetailSheet(snapshot: CommandToolChipData) -> some View {
         // Look up live data from viewModel.messages so streaming output updates in real-time
         let liveData: CommandToolChipData = {
-            if let index = MessageFinder.lastIndexOfToolUse(toolCallId: fallback.id, in: viewModel.messages),
+            if let index = MessageFinder.lastIndexOfToolUse(toolCallId: snapshot.id, in: viewModel.messages),
                case .toolUse(let tool) = viewModel.messages[index].content {
                 return CommandToolChipData(from: tool)
             }
-            return fallback
+            return snapshot
         }()
         switch liveData.normalizedName {
         case "read":
