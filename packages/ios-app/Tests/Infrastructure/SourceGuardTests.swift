@@ -160,6 +160,25 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Push registration requests permission after engine pairing")
+    func testPushRegistrationRequestsPermissionAfterPairing() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appEntry = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/TronMobileApp.swift"),
+            encoding: .utf8
+        )
+
+        #expect(appEntry.contains("guard onboardingComplete else { return }"))
+        #expect(appEntry.contains("await registerPushIfAuthorized()"))
+        #expect(appEntry.contains("case .notDetermined:"))
+        #expect(appEntry.contains("requestAuthorization()"))
+        #expect(appEntry.contains("device::register"))
+    }
+
     @Test("iOS runtime contract is iOS 26 only")
     func testIOSRuntimeContractIsIOS26Only() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

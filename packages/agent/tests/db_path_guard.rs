@@ -321,6 +321,28 @@ fn mac_bundle_script_loads_gitignored_local_relay_env() {
 }
 
 #[test]
+fn tron_dev_loads_same_gitignored_local_relay_env() {
+    let root = repo_root();
+    let script_path = root.join("scripts/tron");
+    let script = std::fs::read_to_string(&script_path).unwrap();
+
+    assert!(
+        script.contains("MAC_APP_LOCAL_ENV_FILE=\"$PROJECT_DIR/packages/mac-app/.env.local\""),
+        "{} should use the same ignored relay env file as the Mac bundle build",
+        script_path.display()
+    );
+    assert!(script.contains("load_dev_relay_env"));
+    assert!(script.contains("prepare_dev_relay_env"));
+    assert!(script.contains("TRON_RELAY_URL"));
+    assert!(script.contains("TRON_RELAY_SECRET"));
+    assert!(script.contains("TRON_RELAY_ENVIRONMENT"));
+    assert!(
+        script.matches("prepare_dev_relay_env").count() >= 3,
+        "dev build, foreground takeover, and background takeover must all load relay env"
+    );
+}
+
+#[test]
 fn mac_release_workflow_notarizes_dmg_before_stapling() {
     let root = repo_root();
     let workflow_path = root.join(".github/workflows/release-mac.yml");

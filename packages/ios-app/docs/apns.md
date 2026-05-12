@@ -23,7 +23,7 @@ Distributed server builds receive the relay URL and HMAC secret as compile-time 
 | `TRON_RELAY_SECRET` | Build time, runtime override allowed | HMAC shared secret used to sign relay requests |
 | `TRON_RELAY_ENVIRONMENT` | Runtime optional | Default APNs environment for relay metadata; token rows still carry their own environment |
 
-Release users do not configure these values. The Mac DMG workflow reads `TRON_RELAY_URL` and `TRON_RELAY_SECRET` from GitHub Actions secrets while building the bundled server, and uses `TRON_RELAY_ENVIRONMENT=production`. Developer builds may set the same variables in the shell before launching or bundling `tron` when testing push delivery. Relay config is never read from `~/.tron/profiles/auth.json`.
+Release users do not configure these values. The Mac DMG workflow reads `TRON_RELAY_URL` and `TRON_RELAY_SECRET` from GitHub Actions secrets while building the bundled server, and uses `TRON_RELAY_ENVIRONMENT=production`. Developer builds may set the same variables in the shell, or place them in the ignored `packages/mac-app/.env.local`; both `packages/mac-app/scripts/bundle-agent.sh` and `scripts/tron dev` load that file before compiling the helper. Relay config is never read from `~/.tron/profiles/auth.json`.
 
 ## Relay Deployment
 
@@ -69,6 +69,15 @@ func application(_ application: UIApplication,
 }
 ```
 
+After pairing, the iOS app checks the local notification permission. If the
+status is `notDetermined`, it asks for permission and then registers with APNs.
+The App settings page exposes the same control for manual repair: App → Push
+Notifications shows `Allow`, `Register`, `Enabled`, or `Settings` based on the
+local OS state. After APNs returns a token, the thin client sends one canonical
+`device::register` engine invocation with the token, bundle ID, and APNs
+environment. The server stores that routing metadata in `device_tokens` and all
+later delivery is engine-owned.
+
 Notification handling:
 
 ```swift
@@ -98,8 +107,8 @@ Payload shape:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Push service is not configured` | Local server was built or launched without `TRON_RELAY_URL` / `TRON_RELAY_SECRET` | Configure relay env vars before building or launching the server |
-| `no active iOS device tokens are registered` | APNs relay exists, but the iOS app has not granted notification permission or has not registered a token with the server | Open the iOS app, grant notification permission, connect to the server, and confirm `device_tokens` has an active row |
+| `Push service is not configured` | Local server was built or launched without `TRON_RELAY_URL` / `TRON_RELAY_SECRET` | Add both keys to `packages/mac-app/.env.local` or export them, then rebuild/restart with `tron dev -b` or the Mac bundle script |
+| `no active iOS device tokens are registered` | APNs relay exists, but the iOS app has not granted notification permission or has not registered a token with the server | Keep the app connected after pairing so it can request permission and register; if needed open App → Push Notifications, grant permission/register, and confirm `device_tokens` has an active row |
 | `BadDeviceToken` | Token invalid or wrong environment | Auto-deactivated; app re-registers on next launch |
 | `DeviceTokenNotForTopic` | Token bundle does not match `apns-topic` | Auto-deactivated; app re-registers with current bundle |
 | `TopicDisallowed` | Worker APNs credentials do not own the bundle | Check Cloudflare APNs secrets and Apple key permissions |

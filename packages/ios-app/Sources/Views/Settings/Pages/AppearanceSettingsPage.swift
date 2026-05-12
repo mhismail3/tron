@@ -1,7 +1,10 @@
 import SwiftUI
+import UIKit
+import UserNotifications
 
 @available(iOS 26.0, *)
 struct AppearanceSettingsPage: View {
+    @Environment(\.dependencies) private var dependencies
     @Binding var confirmArchive: Bool
     @Binding var autoMarkRead: Bool
     @State private var appearanceSettings = AppearanceSettings.shared
@@ -13,6 +16,7 @@ struct AppearanceSettingsPage: View {
             workspacePillsCard
             confirmArchivingCard
             autoMarkReadCard
+            pushNotificationsCard
             fontCard
             codeFontCard
             thinkingIndicatorCard
@@ -62,6 +66,103 @@ struct AppearanceSettingsPage: View {
             }
 
             SettingsCaption(text: "Automatically mark notifications as read when opened.")
+        }
+    }
+
+    private var pushNotificationsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
+                SettingsRow(icon: "bell.and.waves.left.and.right", label: "Push Notifications") {
+                    Button {
+                        handlePushNotificationAction()
+                    } label: {
+                        Text(pushNotificationActionTitle)
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(pushNotificationActionColor)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(pushNotificationActionDisabled)
+                }
+            }
+
+            SettingsCaption(text: pushNotificationCaption)
+        }
+    }
+
+    private var pushNotificationActionTitle: String {
+        let service = dependencies.pushNotificationService
+        switch service.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return service.deviceToken == nil ? "Register" : "Enabled"
+        case .denied:
+            return "Settings"
+        case .notDetermined:
+            return "Allow"
+        @unknown default:
+            return "Check"
+        }
+    }
+
+    private var pushNotificationActionColor: Color {
+        let service = dependencies.pushNotificationService
+        switch service.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return service.deviceToken == nil ? .tronWarning : .tronEmerald
+        case .denied:
+            return .tronError
+        case .notDetermined:
+            return .tronEmerald
+        @unknown default:
+            return .tronWarning
+        }
+    }
+
+    private var pushNotificationActionDisabled: Bool {
+        let service = dependencies.pushNotificationService
+        switch service.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return service.deviceToken != nil
+        default:
+            return false
+        }
+    }
+
+    private var pushNotificationCaption: String {
+        let service = dependencies.pushNotificationService
+        switch service.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return service.deviceToken == nil
+                ? "Permission is enabled. Register this device with APNs and the active engine."
+                : "This device is ready to receive background push notifications from the engine."
+        case .denied:
+            return "Permission is denied in iOS Settings. Open Settings to enable background delivery."
+        case .notDetermined:
+            return "Allow iOS permission so the engine can register this device for APNs delivery."
+        @unknown default:
+            return "Check iOS notification permission and device-token registration."
+        }
+    }
+
+    private func handlePushNotificationAction() {
+        let service = dependencies.pushNotificationService
+        switch service.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            service.registerIfAuthorized()
+        case .denied:
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        case .notDetermined:
+            Task {
+                let granted = await service.requestAuthorization()
+                guard granted else { return }
+                service.registerIfAuthorized()
+            }
+        @unknown default:
+            Task {
+                await service.checkAuthorizationStatus()
+                service.registerIfAuthorized()
+            }
         }
     }
 
