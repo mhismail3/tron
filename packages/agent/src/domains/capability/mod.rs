@@ -3,16 +3,20 @@
 //! This module owns the collapsed model-facing harness. It does not implement
 //! filesystem, web, MCP, shell, UI, or app behavior itself; it exposes stable
 //! discovery, inspection, and execution primitives over the live engine catalog.
+//! The runnable catalog remains the execution source of truth, while this
+//! domain maintains the durable capability registry/index/audit layer in the
+//! engine ledger database.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Canonical `capability::*` function contracts and model metadata |
-//! | `deps` | Narrow dependency bundle for catalog and invocation access |
+//! | `deps` | Narrow dependency bundle for catalog, registry-store, embedding, and invocation access |
+//! | `embeddings` | Embedded first-party ONNX/tokenizer provider for offline local search |
 //! | `handlers` | Declarative operation bindings for `search`, `inspect`, and `execute` |
 //! | `operations` | Catalog projection, binding resolution, and delegated execution |
-//! | `registry` | Catalog-backed capability records, binding decisions, search index, and primer rendering |
+//! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, and primer rendering |
 //! | `types` | Typed contract, implementation, binding, inspection, and execution records |
 //!
 //! # INVARIANT: the model-facing surface is tiny
@@ -20,9 +24,17 @@
 //! Provider integrations should only expose the three capability primitives. All
 //! other behavior must remain discoverable/executable as worker-owned catalog
 //! entries rather than prompt-expanded hardcoded tools.
+//!
+//! # INVARIANT: search is local and explicit about degradation
+//!
+//! The default search policy requires the binary-embedded first-party embedding
+//! model plus the persistent `sqlite-vec` index. Lexical-only operation is
+//! allowed only when profile policy opts into degraded search; failures surface
+//! as structured capability errors.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
+pub(crate) mod embeddings;
 pub(crate) mod handlers;
 mod operations;
 pub(crate) mod registry;

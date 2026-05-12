@@ -746,6 +746,8 @@ lexical = true
 localVector = true
 cloudEmbeddings = false
 maxResults = 50
+requireLocalVector = true
+allowLexicalOnlyWhenDegraded = false
 
 [capabilityContextPrimerPolicies.coreFirstParty]
 enabled = true

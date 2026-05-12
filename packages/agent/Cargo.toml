@@ -47,7 +47,7 @@ zstd = "0.13"
 sqlite-vec = "=0.1.9"
 
 # Local embeddings / capability search
-fastembed = { version = "5.13.4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
+fastembed = { version = "5.13.4", default-features = false, features = ["ort-download-binaries-rustls-tls"] }
 
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }

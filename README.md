@@ -293,20 +293,31 @@ Capability identity is projected from the live catalog:
 | `implementationId` | Concrete provider. First-party catalog functions default to `first_party.<worker>.v<revision>.<function>`, while external/session workers must register implementation metadata within their namespace claims. |
 | `pluginId` | Owning package/domain. Existing first-party workers default to `first_party.<worker>`, while MCP defaults to `external.mcp`. |
 
-`search` runs through the capability registry, not a handwritten tool list. The
-required local baseline is lexical ranking; semantic ranking is local-only via
-`fastembed` embeddings and an embedded `sqlite-vec` `vec0` index, with
-deterministic fused ranking and explicit degraded status if embeddings or vector
-indexing are unavailable. Profile TOML selects search/context behavior through
+`search` runs through the durable capability registry in the engine ledger
+database, not a handwritten tool list. The registry stores projected
+contracts, implementations, plugin manifests, bindings, inspection handles,
+binding decisions, audit events, index documents, and `sqlite-vec` vector
+metadata over the live runnable catalog. Semantic ranking is local-only via the
+first-party `fastembed` ONNX/tokenizer bundle embedded in the Rust agent binary
+plus a persistent `sqlite-vec` `vec0` index in `tron.sqlite`, with deterministic
+lexical/vector fusion. The default `hybridLocal` policy requires local vectors;
+if the embedded model fails verification or vector tables are unavailable,
+`search` returns
+`CAPABILITY_INDEX_UNAVAILABLE` unless a profile explicitly permits degraded
+lexical-only search. Profile TOML selects search/context behavior through
 `capabilityPolicies.*.searchPolicy`,
 `capabilitySearchPolicies.hybridLocal`,
 `capabilityPolicies.*.contextPrimerPolicy`, and
 `capabilityContextPrimerPolicies.*`.
 
 Mutating or medium/high-risk execution requires a fresh `inspect` result and
-the returned `expectedRevision`. Mutating calls also require stable idempotency;
-model tool calls derive a child key from the parent call when one is not passed
-explicitly.
+the returned `inspectionHandle`, `expectedRevision`, and
+`expectedSchemaDigest`. Mutating calls also require stable idempotency; model
+tool calls derive a child key from the parent call when one is not passed
+explicitly. External/session workers connect with a scoped `workerToken` that
+bounds plugin id, namespace claims, authority ceiling, visibility ceiling,
+trust tier, scope binding, expiry, and signature status before their functions
+can enter the capability registry.
 
 Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block tells agents to inspect `process::run` before using standard `git` commands and to defer risky or publishing operations to the user.
 
@@ -756,6 +767,9 @@ Engine ledger rows, streams, state, queues, approvals, resource leases, compensa
 | `engine_catalog_changes` | Live catalog audit trail for worker/function/trigger registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_approvals`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
+| `capability_plugins`, `capability_implementations`, `capability_bindings` | Durable capability registry layer over the live catalog: plugin manifests, concrete implementations, conformance state, signature status, and policy-selected bindings |
+| `capability_index_documents`, `capability_vector_metadata` | Search documents and persistent local vector-index metadata for hybrid capability search |
+| `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events` | Fresh inspect handles plus auditable records for binding resolution and search/inspect/execute lifecycle decisions |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 | `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row; `bundle_id` lets the relay send Beta-scheme tokens to the correct APNs topic) |
@@ -850,7 +864,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The helper binary itself embeds the first-party capability-search ONNX/tokenizer bundle, so semantic capability search is offline and does not depend on a mutable model cache. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
 
 ```
 packages/mac-app/Sources/
@@ -1014,7 +1028,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- vault/                     Skill-owned local fast secret storage
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
-    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, approvals, leases, compensation, workers
+    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, approvals, leases, compensation, workers, capability registry/index/audit
     |   +-- tron.sqlite.lock       OS-level flock sidecar; one Tron process owns it while running
     |   +-- archive/               One-way archive of retired or incompatible storage generations
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output

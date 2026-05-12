@@ -5,15 +5,22 @@
 //! and invocation; this module gives the capability primitives a stable
 //! contract/implementation vocabulary plus a search index boundary.
 
+use chrono::Utc;
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
+use super::embeddings::EmbeddingProvider;
+#[cfg(test)]
+use super::embeddings::HashEmbeddingProvider;
 use super::types::{
     CapabilityBindingDecision, CapabilityBindingRecord, CapabilityContractRecord,
     CapabilityImplementationRecord, CapabilityIndexHit, CapabilityIndexStatus,
-    CapabilityInspectionHandle, CapabilityInspectionRecord,
+    CapabilityInspectionHandle, CapabilityInspectionRecord, CapabilityPluginManifest,
 };
 use crate::engine::{
     ActorContext, EffectClass, FunctionDefinition, FunctionHealth, FunctionQuery, RiskLevel,
@@ -61,6 +68,8 @@ pub(crate) struct CapabilitySearchPolicy {
     pub(crate) local_vector: bool,
     pub(crate) cloud_embeddings: bool,
     pub(crate) max_results: usize,
+    pub(crate) require_local_vector: bool,
+    pub(crate) allow_lexical_only_when_degraded: bool,
 }
 
 impl Default for CapabilitySearchPolicy {
@@ -70,6 +79,23 @@ impl Default for CapabilitySearchPolicy {
             local_vector: true,
             cloud_embeddings: false,
             max_results: 50,
+            require_local_vector: true,
+            allow_lexical_only_when_degraded: false,
+        }
+    }
+}
+
+impl CapabilitySearchPolicy {
+    pub(crate) fn from_profile(
+        policy: &crate::shared::profile::CapabilitySearchPolicySpec,
+    ) -> Self {
+        Self {
+            lexical: policy.lexical,
+            local_vector: policy.local_vector,
+            cloud_embeddings: policy.cloud_embeddings,
+            max_results: policy.max_results,
+            require_local_vector: policy.require_local_vector,
+            allow_lexical_only_when_degraded: policy.allow_lexical_only_when_degraded,
         }
     }
 }
@@ -127,32 +153,50 @@ impl CapabilitySearchFilters {
         }
     }
 
-    fn allows(&self, record: &CapabilityRegistryEntry) -> bool {
+    fn allows_document(&self, document: &CapabilityIndexDocument) -> bool {
         if let Some(kind) = &self.kind
-            && kind != "implementation"
-            && kind != "function"
-            && kind != "contract"
+            && document.kind != *kind
         {
             return false;
         }
         if let Some(contract_id) = &self.contract_id
-            && record.contract_id != *contract_id
+            && document.contract_id != *contract_id
+        {
+            return false;
+        }
+        if let Some(namespace) = &self.namespace
+            && !document.function_id.starts_with(&format!("{namespace}::"))
+            && document.worker_id != *namespace
+            && !document.plugin_id.contains(namespace)
         {
             return false;
         }
         if let Some(plugin_id) = &self.plugin_id
-            && record.plugin_id != *plugin_id
+            && document.plugin_id != *plugin_id
         {
             return false;
         }
         if let Some(scope) = &self.scope
-            && record.visibility != *scope
+            && document.visibility != *scope
+        {
+            return false;
+        }
+        if let Some(effect) = self.effect
+            && document.effect_class != effect_name(effect)
+        {
+            return false;
+        }
+        if let Some(risk_max) = self.risk_max
+            && risk_rank(&document.risk_level) > risk_rank(risk_name(risk_max))
         {
             return false;
         }
         if let Some(min) = &self.trust_tier_min
-            && trust_rank(&record.trust_tier) > trust_rank(min)
+            && trust_rank(&document.trust_tier) > trust_rank(min)
         {
+            return false;
+        }
+        if !self.include_unavailable && document.health != "Healthy" && document.health != "ready" {
             return false;
         }
         true
@@ -227,6 +271,7 @@ impl CapabilityRegistryEntry {
 
     pub(crate) fn search_document(&self) -> CapabilityIndexDocument {
         CapabilityIndexDocument {
+            kind: "implementation".to_owned(),
             capability_id: self.capability_id(),
             contract_id: self.contract_id.clone(),
             implementation_id: self.implementation_id.clone(),
@@ -286,6 +331,8 @@ impl CapabilityRegistryEntry {
             schema_digest: self.schema_digest.clone(),
             catalog_revision: self.catalog_revision,
             provenance: serde_json::to_value(&self.function.provenance).unwrap_or(Value::Null),
+            conformance_state: conformance_state(&self.function, &self.trust_tier),
+            signature_status: signature_status(&self.function, &self.trust_tier),
         }
     }
 
@@ -310,7 +357,9 @@ impl CapabilityRegistryEntry {
             binding_decision: decision,
             inspection_handle: self.inspection_handle(),
             execution_requirements: json!({
+                "inspectionHandle": self.inspection_handle().handle,
                 "expectedRevision": self.function.revision.0,
+                "expectedSchemaDigest": self.schema_digest,
                 "freshInspectionRequired": requires_fresh_revision(&self.function),
                 "idempotencyKeyRequired": self.function.effect_class.is_mutating(),
                 "approvalRequired": self.function.required_authority.approval_required,
@@ -364,16 +413,19 @@ impl CapabilityRegistrySnapshot {
         }
     }
 
-    pub(crate) fn filtered_documents(
-        &self,
-        filters: &CapabilitySearchFilters,
-    ) -> Vec<CapabilityIndexDocument> {
-        self.entries
+    pub(crate) fn index_documents(&self) -> Vec<CapabilityIndexDocument> {
+        let mut documents = self
+            .entries
             .iter()
-            .filter(|entry| filters.allows(entry))
             .filter(|entry| !entry.is_capability_primitive())
             .map(CapabilityRegistryEntry::search_document)
-            .collect()
+            .collect::<Vec<_>>();
+        documents.extend(aggregate_documents(self, "contract"));
+        documents.extend(aggregate_documents(self, "plugin"));
+        documents.extend(aggregate_documents(self, "worker"));
+        documents.sort_by(|a, b| document_key(a).cmp(&document_key(b)));
+        documents.dedup_by(|a, b| document_key(a) == document_key(b));
+        documents
     }
 
     pub(crate) fn find_candidates(
@@ -421,6 +473,7 @@ impl CapabilityRegistrySnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CapabilityIndexDocument {
+    pub(crate) kind: String,
     pub(crate) capability_id: String,
     pub(crate) contract_id: String,
     pub(crate) implementation_id: String,
@@ -437,8 +490,926 @@ pub(crate) struct CapabilityIndexDocument {
     pub(crate) text: String,
 }
 
+pub(crate) type SharedCapabilityRegistryStore = Arc<Mutex<Box<dyn CapabilityRegistryStore>>>;
+
+pub(crate) fn open_capability_registry_store(
+    engine_ledger_path: Option<PathBuf>,
+) -> Result<SharedCapabilityRegistryStore, String> {
+    let store: Box<dyn CapabilityRegistryStore> = match engine_ledger_path {
+        Some(path) => Box::new(SqliteCapabilityRegistryStore::open(&path)?),
+        None => Box::new(InMemoryCapabilityRegistryStore::default()),
+    };
+    Ok(Arc::new(Mutex::new(store)))
+}
+
+pub(crate) trait CapabilityRegistryStore: Send {
+    fn sync_snapshot(
+        &mut self,
+        snapshot: &CapabilityRegistrySnapshot,
+        embedding_provider: &dyn EmbeddingProvider,
+        policy: &CapabilitySearchPolicy,
+    ) -> Result<CapabilityIndexStatus, String>;
+
+    fn search(
+        &self,
+        query: &str,
+        filters: &CapabilitySearchFilters,
+        policy: &CapabilitySearchPolicy,
+        limit: usize,
+        embedding_provider: &dyn EmbeddingProvider,
+    ) -> Result<CapabilityIndexSearchResult, String>;
+
+    fn active_binding(
+        &self,
+        contract_id: &str,
+        session_id: Option<&str>,
+        workspace_id: Option<&str>,
+    ) -> Result<Option<CapabilityBindingRecord>, String>;
+
+    fn implementation_conformance_state(
+        &self,
+        implementation_id: &str,
+    ) -> Result<Option<String>, String>;
+
+    fn record_inspection(
+        &mut self,
+        handle: &CapabilityInspectionHandle,
+        entry: &CapabilityRegistryEntry,
+        decision: &CapabilityBindingDecision,
+    ) -> Result<(), String>;
+
+    fn validate_inspection(
+        &self,
+        handle: &str,
+        entry: &CapabilityRegistryEntry,
+    ) -> Result<bool, String>;
+
+    fn record_binding_decision(
+        &mut self,
+        decision: &CapabilityBindingDecision,
+        selected_entry: &CapabilityRegistryEntry,
+    ) -> Result<(), String>;
+
+    fn record_audit_event(
+        &mut self,
+        event_type: &str,
+        trace_id: Option<&str>,
+        payload: Value,
+    ) -> Result<(), String>;
+}
+
+#[derive(Default)]
+pub(crate) struct InMemoryCapabilityRegistryStore {
+    documents: BTreeMap<String, CapabilityIndexDocument>,
+    bindings: BTreeMap<(String, String, String), CapabilityBindingRecord>,
+    conformance: BTreeMap<String, String>,
+    inspections: BTreeMap<String, (String, u64, String)>,
+    audits: Vec<Value>,
+}
+
+impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
+    fn sync_snapshot(
+        &mut self,
+        snapshot: &CapabilityRegistrySnapshot,
+        embedding_provider: &dyn EmbeddingProvider,
+        policy: &CapabilitySearchPolicy,
+    ) -> Result<CapabilityIndexStatus, String> {
+        self.documents.clear();
+        self.conformance.clear();
+        for document in snapshot.index_documents() {
+            let _ = self.documents.insert(document_key(&document), document);
+        }
+        for entry in &snapshot.entries {
+            let _ = self.conformance.insert(
+                entry.implementation_id.clone(),
+                conformance_state(&entry.function, &entry.trust_tier),
+            );
+        }
+        let mut status = ready_index_status(policy, embedding_provider);
+        if policy.local_vector {
+            let texts = self
+                .documents
+                .values()
+                .map(|document| document.text.clone())
+                .collect::<Vec<_>>();
+            match embedding_provider.embed(&texts) {
+                Ok(_) => {}
+                Err(error) => {
+                    status.state = "unavailable".to_owned();
+                    status.degraded_reason = Some(error.clone());
+                    if policy.require_local_vector && !policy.allow_lexical_only_when_degraded {
+                        return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
+                    }
+                }
+            }
+        }
+        Ok(status)
+    }
+
+    fn search(
+        &self,
+        query: &str,
+        filters: &CapabilitySearchFilters,
+        policy: &CapabilitySearchPolicy,
+        limit: usize,
+        embedding_provider: &dyn EmbeddingProvider,
+    ) -> Result<CapabilityIndexSearchResult, String> {
+        let documents = self
+            .documents
+            .values()
+            .filter(|document| filters.allows_document(document))
+            .cloned()
+            .collect::<Vec<_>>();
+        HybridLocalCapabilityIndex::new(policy.clone()).search_with_provider(
+            query,
+            documents,
+            limit,
+            embedding_provider,
+        )
+    }
+
+    fn active_binding(
+        &self,
+        contract_id: &str,
+        session_id: Option<&str>,
+        workspace_id: Option<&str>,
+    ) -> Result<Option<CapabilityBindingRecord>, String> {
+        for key in binding_scope_keys(contract_id, session_id, workspace_id) {
+            if let Some(binding) = self.bindings.get(&key)
+                && binding.enabled
+            {
+                return Ok(Some(binding.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    fn implementation_conformance_state(
+        &self,
+        implementation_id: &str,
+    ) -> Result<Option<String>, String> {
+        Ok(self.conformance.get(implementation_id).cloned())
+    }
+
+    fn record_inspection(
+        &mut self,
+        handle: &CapabilityInspectionHandle,
+        entry: &CapabilityRegistryEntry,
+        _decision: &CapabilityBindingDecision,
+    ) -> Result<(), String> {
+        let _ = self.inspections.insert(
+            handle.handle.clone(),
+            (
+                entry.implementation_id.clone(),
+                handle.function_revision,
+                handle.schema_digest.clone(),
+            ),
+        );
+        Ok(())
+    }
+
+    fn validate_inspection(
+        &self,
+        handle: &str,
+        entry: &CapabilityRegistryEntry,
+    ) -> Result<bool, String> {
+        Ok(self
+            .inspections
+            .get(handle)
+            .is_some_and(|(implementation_id, revision, digest)| {
+                implementation_id == &entry.implementation_id
+                    && *revision == entry.function.revision.0
+                    && digest == &entry.schema_digest
+            }))
+    }
+
+    fn record_binding_decision(
+        &mut self,
+        _decision: &CapabilityBindingDecision,
+        _selected_entry: &CapabilityRegistryEntry,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn record_audit_event(
+        &mut self,
+        event_type: &str,
+        trace_id: Option<&str>,
+        payload: Value,
+    ) -> Result<(), String> {
+        self.audits.push(json!({
+            "eventType": event_type,
+            "traceId": trace_id,
+            "payload": payload,
+            "createdAt": Utc::now().to_rfc3339()
+        }));
+        Ok(())
+    }
+}
+
+pub(crate) struct SqliteCapabilityRegistryStore {
+    conn: Connection,
+}
+
+impl SqliteCapabilityRegistryStore {
+    pub(crate) fn open(path: &Path) -> Result<Self, String> {
+        register_sqlite_vec_extension()?;
+        let conn =
+            Connection::open(path).map_err(|error| format!("open registry store: {error}"))?;
+        let store = Self { conn };
+        store.initialize_schema()?;
+        Ok(store)
+    }
+
+    fn initialize_schema(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch(CAPABILITY_REGISTRY_SCHEMA)
+            .map_err(|error| format!("initialize capability registry schema: {error}"))?;
+        Ok(())
+    }
+
+    fn ensure_vector_table(&self, dimensions: usize, model_id: &str) -> Result<(), String> {
+        register_sqlite_vec_extension()?;
+        let current: Option<usize> = self
+            .conn
+            .query_row(
+                "SELECT dimension FROM capability_vector_metadata WHERE name = 'default'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("read capability vector metadata: {error}"))?;
+        if current != Some(dimensions) {
+            self.conn
+                .execute_batch(
+                    "DROP TABLE IF EXISTS capability_index_vectors;
+                     DELETE FROM capability_vector_metadata WHERE name = 'default';",
+                )
+                .map_err(|error| format!("reset capability vector table: {error}"))?;
+            self.conn
+                .execute(
+                    &format!(
+                        "CREATE VIRTUAL TABLE capability_index_vectors USING vec0(embedding float[{dimensions}] distance_metric=cosine)"
+                    ),
+                    [],
+                )
+                .map_err(|error| format!("create capability vector table: {error}"))?;
+            self.conn
+                .execute(
+                    "INSERT INTO capability_vector_metadata(name, dimension, model_id, state, updated_at)
+                     VALUES ('default', ?1, ?2, 'ready', ?3)",
+                    params![
+                        dimensions as i64,
+                        model_id,
+                        Utc::now().to_rfc3339()
+                    ],
+                )
+                .map_err(|error| format!("write capability vector metadata: {error}"))?;
+        }
+        Ok(())
+    }
+
+    fn upsert_document(&self, document: &CapabilityIndexDocument) -> Result<i64, String> {
+        let key = document_key(document);
+        self.conn
+            .execute(
+                "INSERT INTO capability_index_documents
+                   (document_key, kind, capability_id, contract_id, implementation_id,
+                    plugin_id, worker_id, function_id, catalog_revision, schema_digest,
+                    trust_tier, health, visibility, effect_class, risk_level, text,
+                    document_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                 ON CONFLICT(document_key) DO UPDATE SET
+                    kind = excluded.kind,
+                    capability_id = excluded.capability_id,
+                    contract_id = excluded.contract_id,
+                    implementation_id = excluded.implementation_id,
+                    plugin_id = excluded.plugin_id,
+                    worker_id = excluded.worker_id,
+                    function_id = excluded.function_id,
+                    catalog_revision = excluded.catalog_revision,
+                    schema_digest = excluded.schema_digest,
+                    trust_tier = excluded.trust_tier,
+                    health = excluded.health,
+                    visibility = excluded.visibility,
+                    effect_class = excluded.effect_class,
+                    risk_level = excluded.risk_level,
+                    text = excluded.text,
+                    document_json = excluded.document_json,
+                    updated_at = excluded.updated_at",
+                params![
+                    key,
+                    document.kind,
+                    document.capability_id,
+                    document.contract_id,
+                    document.implementation_id,
+                    document.plugin_id,
+                    document.worker_id,
+                    document.function_id,
+                    document.catalog_revision as i64,
+                    document.schema_digest,
+                    document.trust_tier,
+                    document.health,
+                    document.visibility,
+                    document.effect_class,
+                    document.risk_level,
+                    document.text,
+                    serde_json::to_string(document)
+                        .map_err(|error| format!("serialize index document: {error}"))?,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("upsert capability index document: {error}"))?;
+        self.conn
+            .query_row(
+                "SELECT rowid FROM capability_index_documents WHERE document_key = ?1",
+                params![document_key(document)],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("read capability index document rowid: {error}"))
+    }
+
+    fn load_documents(
+        &self,
+        filters: &CapabilitySearchFilters,
+    ) -> Result<Vec<CapabilityIndexDocument>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT document_json FROM capability_index_documents")
+            .map_err(|error| format!("prepare capability document load: {error}"))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query capability documents: {error}"))?;
+        let mut documents = Vec::new();
+        for row in rows {
+            let json = row.map_err(|error| format!("read capability document row: {error}"))?;
+            let document: CapabilityIndexDocument =
+                serde_json::from_str(&json).map_err(|error| format!("decode document: {error}"))?;
+            if filters.allows_document(&document) {
+                documents.push(document);
+            }
+        }
+        Ok(documents)
+    }
+}
+
+impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
+    fn sync_snapshot(
+        &mut self,
+        snapshot: &CapabilityRegistrySnapshot,
+        embedding_provider: &dyn EmbeddingProvider,
+        policy: &CapabilitySearchPolicy,
+    ) -> Result<CapabilityIndexStatus, String> {
+        let mut status = ready_index_status(policy, embedding_provider);
+        let documents = snapshot.index_documents();
+        let keys = documents.iter().map(document_key).collect::<BTreeSet<_>>();
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|error| format!("begin capability registry sync: {error}"))?;
+        for entry in &snapshot.entries {
+            let manifest = plugin_manifest_for_entry(entry);
+            tx.execute(
+                "INSERT INTO capability_plugins
+                   (plugin_id, manifest_json, trust_tier, signature_status, conformance_state,
+                    catalog_revision, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(plugin_id) DO UPDATE SET
+                    manifest_json = excluded.manifest_json,
+                    trust_tier = excluded.trust_tier,
+                    signature_status = excluded.signature_status,
+                    conformance_state = excluded.conformance_state,
+                    catalog_revision = excluded.catalog_revision,
+                    updated_at = excluded.updated_at",
+                params![
+                    manifest.id,
+                    serde_json::to_string(&manifest)
+                        .map_err(|error| format!("serialize plugin manifest: {error}"))?,
+                    manifest.trust_tier,
+                    manifest.signature_status,
+                    manifest.conformance_state,
+                    snapshot.catalog_revision as i64,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("upsert capability plugin: {error}"))?;
+            tx.execute(
+                "INSERT INTO capability_implementations
+                   (implementation_id, contract_id, function_id, plugin_id, worker_id,
+                    schema_digest, catalog_revision, trust_tier, health, visibility,
+                    conformance_state, signature_status, function_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 ON CONFLICT(implementation_id) DO UPDATE SET
+                    contract_id = excluded.contract_id,
+                    function_id = excluded.function_id,
+                    plugin_id = excluded.plugin_id,
+                    worker_id = excluded.worker_id,
+                    schema_digest = excluded.schema_digest,
+                    catalog_revision = excluded.catalog_revision,
+                    trust_tier = excluded.trust_tier,
+                    health = excluded.health,
+                    visibility = excluded.visibility,
+                    conformance_state = excluded.conformance_state,
+                    signature_status = excluded.signature_status,
+                    function_json = excluded.function_json,
+                    updated_at = excluded.updated_at",
+                params![
+                    entry.implementation_id,
+                    entry.contract_id,
+                    entry.function_id,
+                    entry.plugin_id,
+                    entry.worker_id,
+                    entry.schema_digest,
+                    snapshot.catalog_revision as i64,
+                    entry.trust_tier,
+                    format!("{:?}", entry.function.health),
+                    entry.visibility,
+                    conformance_state(&entry.function, &entry.trust_tier),
+                    signature_status(&entry.function, &entry.trust_tier),
+                    serde_json::to_string(&entry.function)
+                        .map_err(|error| format!("serialize function definition: {error}"))?,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("upsert capability implementation: {error}"))?;
+        }
+        tx.commit()
+            .map_err(|error| format!("commit capability registry sync: {error}"))?;
+
+        for document in &documents {
+            let rowid = self.upsert_document(document)?;
+            if policy.local_vector {
+                match embedding_provider.embed(std::slice::from_ref(&document.text)) {
+                    Ok(vectors) => {
+                        self.ensure_vector_table(
+                            embedding_provider.dimensions(),
+                            embedding_provider.model_id(),
+                        )?;
+                        let Some(vector) = vectors.first() else {
+                            return Err("embedding provider returned no vector".to_owned());
+                        };
+                        self.conn
+                            .execute(
+                                "DELETE FROM capability_index_vectors WHERE rowid = ?1",
+                                params![rowid],
+                            )
+                            .map_err(|error| format!("delete stale capability vector: {error}"))?;
+                        self.conn
+                            .execute(
+                                "INSERT INTO capability_index_vectors(rowid, embedding) VALUES (?1, ?2)",
+                                params![rowid, bytemuck::cast_slice::<f32, u8>(vector)],
+                            )
+                            .map_err(|error| format!("insert capability vector: {error}"))?;
+                        self.conn
+                            .execute(
+                                "UPDATE capability_vector_metadata
+                                 SET state = 'ready', degraded_reason = NULL, model_id = ?1, updated_at = ?2
+                                 WHERE name = 'default'",
+                                params![embedding_provider.model_id(), Utc::now().to_rfc3339()],
+                            )
+                            .map_err(|error| {
+                                format!("update capability vector metadata: {error}")
+                            })?;
+                    }
+                    Err(error) => {
+                        status.state = "unavailable".to_owned();
+                        status.degraded_reason = Some(error.clone());
+                        self.conn
+                            .execute(
+                                "UPDATE capability_vector_metadata
+                                 SET state = 'unavailable', degraded_reason = ?1, updated_at = ?2
+                                 WHERE name = 'default'",
+                                params![error, Utc::now().to_rfc3339()],
+                            )
+                            .ok();
+                        if policy.require_local_vector && !policy.allow_lexical_only_when_degraded {
+                            return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        let keep_json = serde_json::to_string(&keys.into_iter().collect::<Vec<_>>())
+            .map_err(|error| format!("serialize live document keys: {error}"))?;
+        self.conn
+            .execute(
+                "DELETE FROM capability_index_documents
+                 WHERE document_key NOT IN (SELECT value FROM json_each(?1))",
+                params![keep_json],
+            )
+            .map_err(|error| format!("delete stale capability documents: {error}"))?;
+        let _ = self.conn.execute(
+            "DELETE FROM capability_index_vectors
+             WHERE rowid NOT IN (SELECT rowid FROM capability_index_documents)",
+            [],
+        );
+        Ok(status)
+    }
+
+    fn search(
+        &self,
+        query: &str,
+        filters: &CapabilitySearchFilters,
+        policy: &CapabilitySearchPolicy,
+        limit: usize,
+        embedding_provider: &dyn EmbeddingProvider,
+    ) -> Result<CapabilityIndexSearchResult, String> {
+        let documents = self.load_documents(filters)?;
+        let mut lexical_hits = if policy.lexical {
+            lexical_rank(query, &documents)
+        } else {
+            Vec::new()
+        };
+        let mut status = ready_index_status(policy, embedding_provider);
+        if policy.local_vector && !query.trim().is_empty() && !documents.is_empty() {
+            let vector_hits = self.vector_search(query, &documents, limit, embedding_provider);
+            match vector_hits {
+                Ok(hits) => {
+                    lexical_hits = fuse_hits(lexical_hits, hits, &documents);
+                }
+                Err(error) => {
+                    status.state = "unavailable".to_owned();
+                    status.degraded_reason = Some(error.clone());
+                    if policy.require_local_vector && !policy.allow_lexical_only_when_degraded {
+                        return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
+                    }
+                }
+            }
+        }
+        lexical_hits.truncate(limit.min(policy.max_results.max(1)));
+        Ok(CapabilityIndexSearchResult {
+            hits: lexical_hits,
+            status,
+        })
+    }
+
+    fn active_binding(
+        &self,
+        contract_id: &str,
+        session_id: Option<&str>,
+        workspace_id: Option<&str>,
+    ) -> Result<Option<CapabilityBindingRecord>, String> {
+        for (scope_kind, scope_value) in binding_scope_parts(session_id, workspace_id) {
+            let value = self
+                .conn
+                .query_row(
+                    "SELECT selected_implementation, selection_policy, secondary_implementations_json, enabled
+                     FROM capability_bindings
+                     WHERE contract_id = ?1 AND scope_kind = ?2 AND scope_value = ?3
+                     ORDER BY priority DESC, updated_at DESC LIMIT 1",
+                    params![contract_id, scope_kind, scope_value],
+                    |row| {
+                        Ok(CapabilityBindingRecord {
+                            contract_id: contract_id.to_owned(),
+                            selected_implementation: row.get(0)?,
+                            selection_policy: row.get(1)?,
+                            secondary_implementations: serde_json::from_str(
+                                &row.get::<_, String>(2)?,
+                            )
+                            .unwrap_or_default(),
+                            enabled: row.get::<_, i64>(3)? == 1,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(|error| format!("read capability binding: {error}"))?;
+            if let Some(binding) = value
+                && binding.enabled
+            {
+                return Ok(Some(binding));
+            }
+        }
+        Ok(None)
+    }
+
+    fn implementation_conformance_state(
+        &self,
+        implementation_id: &str,
+    ) -> Result<Option<String>, String> {
+        self.conn
+            .query_row(
+                "SELECT conformance_state FROM capability_implementations WHERE implementation_id = ?1",
+                params![implementation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("read implementation conformance: {error}"))
+    }
+
+    fn record_inspection(
+        &mut self,
+        handle: &CapabilityInspectionHandle,
+        entry: &CapabilityRegistryEntry,
+        decision: &CapabilityBindingDecision,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO capability_inspection_handles
+                   (handle, contract_id, implementation_id, function_id, catalog_revision,
+                    function_revision, schema_digest, binding_decision_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(handle) DO UPDATE SET
+                    binding_decision_json = excluded.binding_decision_json",
+                params![
+                    handle.handle,
+                    entry.contract_id,
+                    entry.implementation_id,
+                    entry.function_id,
+                    handle.catalog_revision as i64,
+                    handle.function_revision as i64,
+                    handle.schema_digest,
+                    serde_json::to_string(decision)
+                        .map_err(|error| format!("serialize binding decision: {error}"))?,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("record inspection handle: {error}"))?;
+        Ok(())
+    }
+
+    fn validate_inspection(
+        &self,
+        handle: &str,
+        entry: &CapabilityRegistryEntry,
+    ) -> Result<bool, String> {
+        let found = self
+            .conn
+            .query_row(
+                "SELECT implementation_id, function_revision, schema_digest
+                 FROM capability_inspection_handles WHERE handle = ?1",
+                params![handle],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u64>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| format!("validate inspection handle: {error}"))?;
+        Ok(
+            found.is_some_and(|(implementation_id, revision, schema_digest)| {
+                implementation_id == entry.implementation_id
+                    && revision == entry.function.revision.0
+                    && schema_digest == entry.schema_digest
+            }),
+        )
+    }
+
+    fn record_binding_decision(
+        &mut self,
+        decision: &CapabilityBindingDecision,
+        selected_entry: &CapabilityRegistryEntry,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO capability_binding_decisions
+                   (id, contract_id, selected_implementation, selected_function_id,
+                    selection_policy, rejected_candidates_json, catalog_revision,
+                    schema_digest, plugin_id, worker_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    format!(
+                        "binding_decision:{}:{}",
+                        Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+                        decision.selected_implementation
+                    ),
+                    decision.contract_id,
+                    decision.selected_implementation,
+                    decision.selected_function_id,
+                    decision.selection_policy,
+                    serde_json::to_string(&decision.rejected_candidates)
+                        .map_err(|error| format!("serialize rejected candidates: {error}"))?,
+                    decision.catalog_revision as i64,
+                    decision.schema_digest,
+                    selected_entry.plugin_id,
+                    selected_entry.worker_id,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("record binding decision: {error}"))?;
+        Ok(())
+    }
+
+    fn record_audit_event(
+        &mut self,
+        event_type: &str,
+        trace_id: Option<&str>,
+        payload: Value,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO capability_audit_events(id, event_type, trace_id, payload_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    format!("capability_audit:{}:{}", Utc::now().timestamp_nanos_opt().unwrap_or_default(), uuid::Uuid::now_v7()),
+                    event_type,
+                    trace_id,
+                    serde_json::to_string(&payload)
+                        .map_err(|error| format!("serialize audit payload: {error}"))?,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("record capability audit event: {error}"))?;
+        Ok(())
+    }
+}
+
+impl SqliteCapabilityRegistryStore {
+    fn vector_search(
+        &self,
+        query: &str,
+        documents: &[CapabilityIndexDocument],
+        limit: usize,
+        embedding_provider: &dyn EmbeddingProvider,
+    ) -> Result<Vec<CapabilityIndexHit>, String> {
+        let query_embedding = embedding_provider.embed(&[query.to_owned()])?;
+        let Some(query_embedding) = query_embedding.first() else {
+            return Err("embedding provider returned no query vector".to_owned());
+        };
+        self.ensure_vector_table(
+            embedding_provider.dimensions(),
+            embedding_provider.model_id(),
+        )?;
+        let query_bytes = bytemuck::cast_slice::<f32, u8>(query_embedding);
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT d.document_json, v.distance
+                 FROM capability_index_vectors v
+                 JOIN capability_index_documents d ON d.rowid = v.rowid
+                 WHERE v.embedding MATCH ?1 AND k = ?2",
+            )
+            .map_err(|error| format!("prepare capability vector query: {error}"))?;
+        let rows = stmt
+            .query_map(params![query_bytes, limit as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f32>(1)?))
+            })
+            .map_err(|error| format!("query capability vectors: {error}"))?;
+        let visible = documents
+            .iter()
+            .map(|doc| (document_key(doc), doc.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let mut hits = Vec::new();
+        for row in rows {
+            let (json, distance) =
+                row.map_err(|error| format!("read capability vector row: {error}"))?;
+            let document: CapabilityIndexDocument = serde_json::from_str(&json)
+                .map_err(|error| format!("decode vector doc: {error}"))?;
+            if !visible.contains_key(&document_key(&document)) {
+                continue;
+            }
+            let score = 1.0 / (1.0 + distance.max(0.0));
+            hits.push(CapabilityIndexHit {
+                kind: document.kind.clone(),
+                capability_id: document.capability_id.clone(),
+                contract_id: document.contract_id.clone(),
+                implementation_id: document.implementation_id.clone(),
+                plugin_id: document.plugin_id.clone(),
+                worker_id: document.worker_id.clone(),
+                function_id: document.function_id.clone(),
+                catalog_revision: document.catalog_revision,
+                schema_digest: document.schema_digest.clone(),
+                trust_tier: document.trust_tier.clone(),
+                health: document.health.clone(),
+                visibility: document.visibility.clone(),
+                effect_class: document.effect_class.clone(),
+                risk_level: document.risk_level.clone(),
+                lexical_score: lexical_score(&document, query),
+                vector_score: Some(score),
+                fused_score: score + trust_boost(&document.trust_tier),
+                matched_by: "local_vector".to_owned(),
+                snippet: snippet(&document.text, query),
+                requires_inspect: document.kind == "implementation" || document.kind == "contract",
+            });
+        }
+        hits.sort_by(|a, b| {
+            b.fused_score
+                .partial_cmp(&a.fused_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.function_id.cmp(&b.function_id))
+        });
+        Ok(hits)
+    }
+}
+
+const CAPABILITY_REGISTRY_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS capability_plugins (
+  plugin_id TEXT PRIMARY KEY,
+  manifest_json TEXT NOT NULL,
+  trust_tier TEXT NOT NULL,
+  signature_status TEXT NOT NULL,
+  conformance_state TEXT NOT NULL,
+  catalog_revision INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capability_implementations (
+  implementation_id TEXT PRIMARY KEY,
+  contract_id TEXT NOT NULL,
+  function_id TEXT NOT NULL,
+  plugin_id TEXT NOT NULL,
+  worker_id TEXT NOT NULL,
+  schema_digest TEXT NOT NULL,
+  catalog_revision INTEGER NOT NULL,
+  trust_tier TEXT NOT NULL,
+  health TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  conformance_state TEXT NOT NULL,
+  signature_status TEXT NOT NULL,
+  function_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capability_index_documents (
+  document_key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  capability_id TEXT NOT NULL,
+  contract_id TEXT NOT NULL,
+  implementation_id TEXT NOT NULL,
+  plugin_id TEXT NOT NULL,
+  worker_id TEXT NOT NULL,
+  function_id TEXT NOT NULL,
+  catalog_revision INTEGER NOT NULL,
+  schema_digest TEXT NOT NULL,
+  trust_tier TEXT NOT NULL,
+  health TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  effect_class TEXT NOT NULL,
+  risk_level TEXT NOT NULL,
+  text TEXT NOT NULL,
+  document_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capability_vector_metadata (
+  name TEXT PRIMARY KEY,
+  dimension INTEGER NOT NULL,
+  model_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  degraded_reason TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capability_bindings (
+  contract_id TEXT NOT NULL,
+  scope_kind TEXT NOT NULL,
+  scope_value TEXT NOT NULL,
+  selected_implementation TEXT NOT NULL,
+  selection_policy TEXT NOT NULL,
+  secondary_implementations_json TEXT NOT NULL DEFAULT '[]',
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  priority INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(contract_id, scope_kind, scope_value, selected_implementation)
+);
+
+CREATE TABLE IF NOT EXISTS capability_inspection_handles (
+  handle TEXT PRIMARY KEY,
+  contract_id TEXT NOT NULL,
+  implementation_id TEXT NOT NULL,
+  function_id TEXT NOT NULL,
+  catalog_revision INTEGER NOT NULL,
+  function_revision INTEGER NOT NULL,
+  schema_digest TEXT NOT NULL,
+  binding_decision_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capability_binding_decisions (
+  id TEXT PRIMARY KEY,
+  contract_id TEXT NOT NULL,
+  selected_implementation TEXT NOT NULL,
+  selected_function_id TEXT NOT NULL,
+  selection_policy TEXT NOT NULL,
+  rejected_candidates_json TEXT NOT NULL,
+  catalog_revision INTEGER NOT NULL,
+  schema_digest TEXT NOT NULL,
+  plugin_id TEXT NOT NULL,
+  worker_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capability_audit_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  trace_id TEXT,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_capability_documents_contract
+  ON capability_index_documents(contract_id);
+CREATE INDEX IF NOT EXISTS idx_capability_documents_plugin
+  ON capability_index_documents(plugin_id);
+CREATE INDEX IF NOT EXISTS idx_capability_documents_kind
+  ON capability_index_documents(kind);
+"#;
+
 /// Hybrid local index.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct HybridLocalCapabilityIndex {
     policy: CapabilitySearchPolicy,
 }
@@ -448,40 +1419,57 @@ impl HybridLocalCapabilityIndex {
         Self { policy }
     }
 
+    #[cfg(test)]
     pub(crate) fn search(
         &self,
         query: &str,
         documents: Vec<CapabilityIndexDocument>,
         limit: usize,
-    ) -> CapabilityIndexSearchResult {
+    ) -> Result<CapabilityIndexSearchResult, String> {
+        let provider = HashEmbeddingProvider::new(64);
+        self.search_with_provider(query, documents, limit, &provider)
+    }
+
+    pub(crate) fn search_with_provider(
+        &self,
+        query: &str,
+        documents: Vec<CapabilityIndexDocument>,
+        limit: usize,
+        embedding_provider: &dyn EmbeddingProvider,
+    ) -> Result<CapabilityIndexSearchResult, String> {
         let mut lexical_hits = lexical_rank(query, &documents);
         let mut status = CapabilityIndexStatus {
             lexical: self.policy.lexical,
             local_vector: self.policy.local_vector,
             cloud_embeddings: false,
             vector_store: "sqlite-vec:vec0".to_owned(),
-            embedding_model: "fastembed:AllMiniLML6V2".to_owned(),
+            embedding_model: embedding_provider.model_id().to_owned(),
             state: "ready".to_owned(),
             degraded_reason: None,
         };
 
         if self.policy.local_vector && !query.trim().is_empty() && !documents.is_empty() {
-            match vector_rank(query, &documents) {
+            match vector_rank_with_provider(query, &documents, embedding_provider) {
                 Ok(vector_hits) => {
                     lexical_hits = fuse_hits(lexical_hits, vector_hits, &documents);
                 }
                 Err(error) => {
-                    status.state = "degraded".to_owned();
-                    status.degraded_reason = Some(error);
+                    status.state = "unavailable".to_owned();
+                    status.degraded_reason = Some(error.clone());
+                    if self.policy.require_local_vector
+                        && !self.policy.allow_lexical_only_when_degraded
+                    {
+                        return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
+                    }
                 }
             }
         }
 
         lexical_hits.truncate(limit.min(self.policy.max_results.max(1)));
-        CapabilityIndexSearchResult {
+        Ok(CapabilityIndexSearchResult {
             hits: lexical_hits,
             status,
-        }
+        })
     }
 }
 
@@ -648,6 +1636,16 @@ pub(crate) fn risk_name(risk: RiskLevel) -> &'static str {
     }
 }
 
+fn risk_rank(risk: &str) -> usize {
+    match risk.to_ascii_lowercase().as_str() {
+        "low" => 0,
+        "medium" => 1,
+        "high" => 2,
+        "critical" => 3,
+        _ => usize::MAX,
+    }
+}
+
 pub(crate) fn string_field(params: &Value, key: &str) -> Option<String> {
     params
         .get(key)
@@ -663,12 +1661,163 @@ pub(crate) fn bool_field(params: &Value, key: &str) -> Option<bool> {
     params.get(key).and_then(Value::as_bool)
 }
 
+fn document_key(document: &CapabilityIndexDocument) -> String {
+    format!("{}:{}", document.kind, document.capability_id)
+}
+
+fn ready_index_status(
+    policy: &CapabilitySearchPolicy,
+    embedding_provider: &dyn EmbeddingProvider,
+) -> CapabilityIndexStatus {
+    CapabilityIndexStatus {
+        lexical: policy.lexical,
+        local_vector: policy.local_vector,
+        cloud_embeddings: false,
+        vector_store: "sqlite-vec:vec0".to_owned(),
+        embedding_model: embedding_provider.model_id().to_owned(),
+        state: "ready".to_owned(),
+        degraded_reason: None,
+    }
+}
+
+fn binding_scope_parts(
+    session_id: Option<&str>,
+    workspace_id: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    let mut scopes = Vec::new();
+    if let Some(session_id) = session_id {
+        scopes.push(("session", session_id.to_owned()));
+    }
+    if let Some(workspace_id) = workspace_id {
+        scopes.push(("workspace", workspace_id.to_owned()));
+    }
+    scopes.push(("system", "default".to_owned()));
+    scopes
+}
+
+fn binding_scope_keys(
+    contract_id: &str,
+    session_id: Option<&str>,
+    workspace_id: Option<&str>,
+) -> Vec<(String, String, String)> {
+    binding_scope_parts(session_id, workspace_id)
+        .into_iter()
+        .map(|(scope_kind, scope_value)| {
+            (contract_id.to_owned(), scope_kind.to_owned(), scope_value)
+        })
+        .collect()
+}
+
+fn aggregate_documents(
+    snapshot: &CapabilityRegistrySnapshot,
+    kind: &str,
+) -> Vec<CapabilityIndexDocument> {
+    let mut groups: BTreeMap<String, Vec<&CapabilityRegistryEntry>> = BTreeMap::new();
+    for entry in &snapshot.entries {
+        if entry.is_capability_primitive() {
+            continue;
+        }
+        let key = match kind {
+            "contract" => &entry.contract_id,
+            "plugin" => &entry.plugin_id,
+            "worker" => &entry.worker_id,
+            _ => continue,
+        };
+        groups.entry(key.clone()).or_default().push(entry);
+    }
+    groups
+        .into_iter()
+        .filter_map(|(id, entries)| {
+            let first = entries.first()?;
+            let text = entries
+                .iter()
+                .map(|entry| {
+                    format!(
+                        "{} {} {} {}",
+                        entry.contract_id,
+                        entry.implementation_id,
+                        entry.function_id,
+                        entry.search_text
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(CapabilityIndexDocument {
+                kind: kind.to_owned(),
+                capability_id: id.clone(),
+                contract_id: if kind == "contract" {
+                    id.clone()
+                } else {
+                    first.contract_id.clone()
+                },
+                implementation_id: format!("{kind}:{id}"),
+                plugin_id: if kind == "plugin" {
+                    id.clone()
+                } else {
+                    first.plugin_id.clone()
+                },
+                worker_id: if kind == "worker" {
+                    id.clone()
+                } else {
+                    first.worker_id.clone()
+                },
+                function_id: first.function_id.clone(),
+                catalog_revision: snapshot.catalog_revision,
+                schema_digest: sha256_hex(text.as_bytes()),
+                trust_tier: first.trust_tier.clone(),
+                health: "ready".to_owned(),
+                visibility: first.visibility.clone(),
+                effect_class: "pure_read".to_owned(),
+                risk_level: "low".to_owned(),
+                text,
+            })
+        })
+        .collect()
+}
+
+fn plugin_manifest_for_entry(entry: &CapabilityRegistryEntry) -> CapabilityPluginManifest {
+    CapabilityPluginManifest {
+        id: entry.plugin_id.clone(),
+        name: string_metadata(&entry.function, "pluginName")
+            .unwrap_or_else(|| entry.plugin_id.clone()),
+        version: string_metadata(&entry.function, "pluginVersion")
+            .unwrap_or_else(|| "1.0.0".to_owned()),
+        publisher: string_metadata(&entry.function, "pluginPublisher").unwrap_or_else(|| {
+            if entry.trust_tier == "first_party_signed" {
+                "tron"
+            } else {
+                "unknown"
+            }
+            .to_owned()
+        }),
+        signature_status: signature_status(&entry.function, &entry.trust_tier),
+        runtime: entry
+            .function
+            .metadata
+            .pointer("/runtimeRequirements/workerKind")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned(),
+        namespace_claims: vec![entry.function.id.namespace().to_owned()],
+        provided_contracts: vec![entry.contract_id.clone()],
+        provided_implementations: vec![entry.implementation_id.clone()],
+        requested_authorities: entry.function.required_authority.scopes.clone(),
+        trust_tier: entry.trust_tier.clone(),
+        visibility_ceiling: entry.visibility.clone(),
+        conformance_state: conformance_state(&entry.function, &entry.trust_tier),
+        docs: json!({"summary": entry.function.description}),
+        examples: examples(&entry.function),
+        search_metadata: json!({"tags": entry.function.tags}),
+    }
+}
+
 fn lexical_rank(query: &str, documents: &[CapabilityIndexDocument]) -> Vec<CapabilityIndexHit> {
     let mut hits = documents
         .iter()
         .map(|document| {
             let lexical_score = lexical_score(document, query);
             CapabilityIndexHit {
+                kind: document.kind.clone(),
                 capability_id: document.capability_id.clone(),
                 contract_id: document.contract_id.clone(),
                 implementation_id: document.implementation_id.clone(),
@@ -687,7 +1836,7 @@ fn lexical_rank(query: &str, documents: &[CapabilityIndexDocument]) -> Vec<Capab
                 fused_score: lexical_score + trust_boost(&document.trust_tier),
                 matched_by: "local_lexical".to_owned(),
                 snippet: snippet(&document.text, query),
-                requires_inspect: true,
+                requires_inspect: document.kind == "implementation" || document.kind == "contract",
             }
         })
         .filter(|hit| query.trim().is_empty() || hit.lexical_score > 0.0)
@@ -701,14 +1850,15 @@ fn lexical_rank(query: &str, documents: &[CapabilityIndexDocument]) -> Vec<Capab
     hits
 }
 
-fn vector_rank(
+fn vector_rank_with_provider(
     query: &str,
     documents: &[CapabilityIndexDocument],
+    embedding_provider: &dyn EmbeddingProvider,
 ) -> Result<Vec<CapabilityIndexHit>, String> {
     let texts = std::iter::once(query.to_owned())
         .chain(documents.iter().map(|document| document.text.clone()))
         .collect::<Vec<_>>();
-    let embeddings = local_embeddings(&texts)?;
+    let embeddings = embedding_provider.embed(&texts)?;
     let Some((query_embedding, doc_embeddings)) = embeddings.split_first() else {
         return Ok(Vec::new());
     };
@@ -719,6 +1869,7 @@ fn vector_rank(
             let document = documents.get(document_index)?;
             let score = 1.0 / (1.0 + distance.max(0.0));
             Some(CapabilityIndexHit {
+                kind: document.kind.clone(),
                 capability_id: document.capability_id.clone(),
                 contract_id: document.contract_id.clone(),
                 implementation_id: document.implementation_id.clone(),
@@ -737,7 +1888,7 @@ fn vector_rank(
                 fused_score: score + trust_boost(&document.trust_tier),
                 matched_by: "local_vector".to_owned(),
                 snippet: snippet(&document.text, query),
-                requires_inspect: true,
+                requires_inspect: document.kind == "implementation" || document.kind == "contract",
             })
         })
         .collect::<Vec<_>>();
@@ -884,44 +2035,6 @@ fn fuse_hits(
     hits
 }
 
-#[cfg(not(test))]
-fn local_embeddings(texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
-    static MODEL: std::sync::OnceLock<std::sync::Mutex<Option<fastembed::TextEmbedding>>> =
-        std::sync::OnceLock::new();
-    let model = MODEL.get_or_init(|| {
-        let init = fastembed::TextInitOptions::new(fastembed::EmbeddingModel::AllMiniLML6V2)
-            .with_show_download_progress(false);
-        std::sync::Mutex::new(fastembed::TextEmbedding::try_new(init).ok())
-    });
-    let mut guard = model
-        .lock()
-        .map_err(|_| "fastembed model mutex poisoned".to_owned())?;
-    let Some(model) = guard.as_mut() else {
-        return Err("fastembed model unavailable; local vector search degraded".to_owned());
-    };
-    model
-        .embed(texts, None)
-        .map_err(|error| format!("fastembed failed: {error}"))
-}
-
-#[cfg(test)]
-fn local_embeddings(texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
-    Ok(texts.iter().map(|text| hash_embedding(text, 64)).collect())
-}
-
-#[cfg(test)]
-fn hash_embedding(text: &str, dims: usize) -> Vec<f32> {
-    let mut out = vec![0.0; dims];
-    for token in search_tokens(text) {
-        let mut hasher = Sha256::new();
-        hasher.update(token.as_bytes());
-        let digest = hasher.finalize();
-        let idx = usize::from(digest[0]) % dims;
-        out[idx] += 1.0;
-    }
-    out
-}
-
 fn lexical_score(document: &CapabilityIndexDocument, query: &str) -> f32 {
     if query.trim().is_empty() {
         return trust_boost(&document.trust_tier);
@@ -1048,6 +2161,24 @@ fn default_context_primer_level(function: &FunctionDefinition, trust_tier: &str)
     } else {
         "catalog".to_owned()
     }
+}
+
+fn conformance_state(function: &FunctionDefinition, trust_tier: &str) -> String {
+    string_metadata(function, "conformanceState").unwrap_or_else(|| {
+        if trust_tier == "first_party_signed" {
+            "healthy".to_owned()
+        } else {
+            "candidate".to_owned()
+        }
+    })
+}
+
+fn signature_status(function: &FunctionDefinition, trust_tier: &str) -> String {
+    string_metadata(function, "signatureStatus").unwrap_or_else(|| match trust_tier {
+        "first_party_signed" | "trusted_signed" => "valid".to_owned(),
+        "session_generated" => "session_scoped".to_owned(),
+        _ => "unsigned".to_owned(),
+    })
 }
 
 fn schema_digest(function: &FunctionDefinition) -> String {
@@ -1203,6 +2334,22 @@ mod tests {
     use super::*;
     use crate::engine::{FunctionId, VisibilityScope, WorkerId};
 
+    struct FailingEmbeddingProvider;
+
+    impl EmbeddingProvider for FailingEmbeddingProvider {
+        fn model_id(&self) -> &'static str {
+            "test:failing"
+        }
+
+        fn dimensions(&self) -> usize {
+            64
+        }
+
+        fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+            Err("embedding assets unavailable".to_owned())
+        }
+    }
+
     fn test_function(id: &str) -> FunctionDefinition {
         FunctionDefinition::new(
             FunctionId::new(id).expect("function id"),
@@ -1241,15 +2388,138 @@ mod tests {
             CapabilityRegistryEntry::from_function(test_function("process::run"), 1)
                 .search_document(),
         ];
-        let result = HybridLocalCapabilityIndex::new(CapabilitySearchPolicy::default()).search(
-            "read path",
-            docs,
-            10,
-        );
+        let result = HybridLocalCapabilityIndex::new(CapabilitySearchPolicy::default())
+            .search("read path", docs, 10)
+            .expect("search");
         assert!(result.status.local_vector);
         assert_eq!(result.status.state, "ready");
         assert_eq!(result.hits[0].function_id, "filesystem::read_file");
         assert!(result.hits[0].vector_score.is_some());
+    }
+
+    #[test]
+    fn sqlite_registry_store_round_trips_documents_bindings_and_conformance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        let snapshot =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 11);
+        let policy = CapabilitySearchPolicy::default();
+        let provider = HashEmbeddingProvider::new(64);
+        let status = store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("sync");
+        assert_eq!(status.state, "ready");
+
+        let results = store
+            .search(
+                "read path",
+                &CapabilitySearchFilters::default(),
+                &policy,
+                10,
+                &provider,
+            )
+            .expect("search");
+        assert!(
+            results
+                .hits
+                .iter()
+                .any(|hit| hit.function_id == "filesystem::read_file")
+        );
+        assert_eq!(
+            store
+                .implementation_conformance_state("first_party.filesystem.v1.read_file")
+                .expect("conformance"),
+            Some("healthy".to_owned())
+        );
+        let plugin_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM capability_plugins", [], |row| {
+                row.get(0)
+            })
+            .expect("plugin count");
+        assert_eq!(plugin_count, 1);
+        store
+            .conn
+            .execute(
+                "INSERT INTO capability_bindings
+                   (contract_id, scope_kind, scope_value, selected_implementation,
+                    selection_policy, enabled, updated_at)
+                 VALUES (?1, 'system', 'default', ?2, 'test_binding', 1, ?3)",
+                rusqlite::params![
+                    "filesystem::read_file",
+                    "first_party.filesystem.v1.read_file",
+                    Utc::now().to_rfc3339()
+                ],
+            )
+            .expect("binding");
+        let binding = store
+            .active_binding("filesystem::read_file", None, None)
+            .expect("active binding")
+            .expect("binding present");
+        assert_eq!(binding.selection_policy, "test_binding");
+
+        let entry = snapshot.entries[0].clone();
+        let handle = entry.inspection_handle();
+        let decision = CapabilityBindingDecision {
+            contract_id: entry.contract_id.clone(),
+            selected_implementation: entry.implementation_id.clone(),
+            selected_function_id: entry.function_id.clone(),
+            selection_policy: "test".to_owned(),
+            rejected_candidates: Vec::new(),
+            catalog_revision: entry.catalog_revision,
+            schema_digest: entry.schema_digest.clone(),
+        };
+        store
+            .record_inspection(&handle, &entry, &decision)
+            .expect("record inspection");
+        assert!(
+            store
+                .validate_inspection(&handle.handle, &entry)
+                .expect("validate inspection")
+        );
+        let mut stale_entry = entry.clone();
+        stale_entry.schema_digest = "different".to_owned();
+        assert!(
+            !store
+                .validate_inspection(&handle.handle, &stale_entry)
+                .expect("stale inspection rejected")
+        );
+    }
+
+    #[test]
+    fn strict_registry_sync_returns_explicit_index_unavailable() {
+        let snapshot =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 1);
+        let mut store = InMemoryCapabilityRegistryStore::default();
+        let error = store
+            .sync_snapshot(
+                &snapshot,
+                &FailingEmbeddingProvider,
+                &CapabilitySearchPolicy::default(),
+            )
+            .expect_err("strict vector policy must fail");
+        assert!(error.starts_with("CAPABILITY_INDEX_UNAVAILABLE:"));
+    }
+
+    #[test]
+    fn degraded_policy_allows_lexical_only_with_status_reason() {
+        let snapshot =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 1);
+        let mut store = InMemoryCapabilityRegistryStore::default();
+        let policy = CapabilitySearchPolicy {
+            require_local_vector: false,
+            allow_lexical_only_when_degraded: true,
+            ..CapabilitySearchPolicy::default()
+        };
+        let status = store
+            .sync_snapshot(&snapshot, &FailingEmbeddingProvider, &policy)
+            .expect("degraded sync");
+        assert_eq!(status.state, "unavailable");
+        assert_eq!(
+            status.degraded_reason.as_deref(),
+            Some("embedding assets unavailable")
+        );
     }
 
     #[test]

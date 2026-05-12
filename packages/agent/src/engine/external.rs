@@ -23,7 +23,7 @@ use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, W
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation};
 use super::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use super::protocol::{
-    CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION,
+    CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
     WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
     WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent, WorkerProtocolMessage,
     WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
@@ -62,6 +62,8 @@ pub struct ExternalWorkerConnection {
     pub session_id: Option<String>,
     /// Optional workspace scope.
     pub workspace_id: Option<String>,
+    /// Scoped token policy accepted at hello time.
+    pub worker_token: ScopedWorkerToken,
     /// Current runtime health.
     pub health: WorkerHealth,
     /// Registered function ids.
@@ -136,6 +138,7 @@ impl EngineExternalWorkerRuntime {
                 "workspace-visible workers require workspaceId".to_owned(),
             ));
         }
+        validate_worker_token(&hello)?;
         let owner_actor = hello.worker.owner_actor.clone();
         let volatile = hello.registration_mode == WorkerRegistrationMode::Volatile;
         self.host.register_worker(hello.worker, volatile).await?;
@@ -151,6 +154,7 @@ impl EngineExternalWorkerRuntime {
                 default_visibility: hello.default_visibility,
                 session_id: hello.session_id,
                 workspace_id: hello.workspace_id,
+                worker_token: hello.worker_token,
                 health: WorkerHealth::Healthy,
                 functions: BTreeSet::new(),
                 triggers: BTreeSet::new(),
@@ -175,7 +179,7 @@ impl EngineExternalWorkerRuntime {
     ) -> Result<Option<WorkerProtocolMessage>> {
         match message {
             WorkerProtocolMessage::Hello(hello) => {
-                let snapshot = self.hello(hello).await?;
+                let snapshot = self.hello(*hello).await?;
                 Ok(Some(WorkerProtocolMessage::CatalogSnapshot(snapshot)))
             }
             WorkerProtocolMessage::RegisterFunction(message) => {
@@ -241,7 +245,11 @@ impl EngineExternalWorkerRuntime {
             definition.provenance.workspace_id = Some(workspace_id);
         }
         let worker = self.host.inspect_worker(&worker_id).await?;
-        validate_external_capability_metadata(&definition, &worker.namespace_claims)?;
+        validate_external_capability_metadata(
+            &definition,
+            &worker.namespace_claims,
+            &connection.worker_token,
+        )?;
         let handler = self.invokers.get(&worker_id).map(|invoker| {
             Arc::new(ExternalFunctionProxyHandler {
                 invoker: invoker.clone(),
@@ -620,9 +628,65 @@ impl EngineExternalWorkerRuntime {
     }
 }
 
+fn validate_worker_token(hello: &WorkerHello) -> Result<()> {
+    let token = &hello.worker_token;
+    if token.plugin_id.trim().is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "workerToken.pluginId is required".to_owned(),
+        ));
+    }
+    if token.namespace_claims.is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "workerToken.namespaceClaims must not be empty".to_owned(),
+        ));
+    }
+    for claim in &hello.worker.namespace_claims {
+        if !token_claims_namespace(&token.namespace_claims, claim) {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker namespace claim {claim} exceeds scoped token claims {:?}",
+                token.namespace_claims
+            )));
+        }
+    }
+    if visibility_rank(&hello.default_visibility) > visibility_rank(&token.visibility_ceiling) {
+        return Err(EngineError::PolicyViolation(format!(
+            "worker visibility {:?} exceeds token visibility ceiling {:?}",
+            hello.default_visibility, token.visibility_ceiling
+        )));
+    }
+    if let Some(expected) = token.session_id.as_deref()
+        && hello.session_id.as_deref() != Some(expected)
+    {
+        return Err(EngineError::PolicyViolation(
+            "worker sessionId does not match scoped token".to_owned(),
+        ));
+    }
+    if let Some(expected) = token.workspace_id.as_deref()
+        && hello.workspace_id.as_deref() != Some(expected)
+    {
+        return Err(EngineError::PolicyViolation(
+            "worker workspaceId does not match scoped token".to_owned(),
+        ));
+    }
+    if let Some(expires_at) = token.expires_at.as_deref() {
+        let expires_at = chrono::DateTime::parse_from_rfc3339(expires_at)
+            .map_err(|error| {
+                EngineError::PolicyViolation(format!("invalid worker token expiry: {error}"))
+            })?
+            .with_timezone(&Utc);
+        if expires_at <= Utc::now() {
+            return Err(EngineError::PolicyViolation(
+                "worker scoped token is expired".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_external_capability_metadata(
     definition: &FunctionDefinition,
     namespace_claims: &[String],
+    token: &ScopedWorkerToken,
 ) -> Result<()> {
     if !definition.visibility.is_agent_visible() {
         return Ok(());
@@ -659,6 +723,40 @@ fn validate_external_capability_metadata(
         .get("implementationId")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let plugin_id = definition
+        .metadata
+        .get("pluginId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let trust_tier = definition
+        .metadata
+        .get("trustTier")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if plugin_id != token.plugin_id {
+        return Err(EngineError::PolicyViolation(format!(
+            "external visible function {} pluginId {plugin_id} does not match scoped token plugin {}",
+            definition.id, token.plugin_id
+        )));
+    }
+    if trust_rank(trust_tier) > trust_rank(&token.trust_tier) {
+        return Err(EngineError::PolicyViolation(format!(
+            "external visible function {} trustTier {trust_tier} exceeds scoped token trust {}",
+            definition.id, token.trust_tier
+        )));
+    }
+    for scope in &definition.required_authority.scopes {
+        if !token
+            .authority_ceiling
+            .iter()
+            .any(|allowed| allowed == scope)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "external visible function {} authority scope {scope} exceeds scoped token ceiling",
+                definition.id
+            )));
+        }
+    }
     let contract_namespace = contract_id
         .split_once("::")
         .map(|(namespace, _)| namespace)
@@ -678,6 +776,33 @@ fn validate_external_capability_metadata(
         )));
     }
     Ok(())
+}
+
+fn token_claims_namespace(claims: &[String], value: &str) -> bool {
+    claims.iter().any(|claim| {
+        value == claim || value.starts_with(&format!("{claim}::")) || value.contains(claim)
+    })
+}
+
+fn visibility_rank(visibility: &WorkerVisibility) -> u8 {
+    match visibility {
+        WorkerVisibility::Session => 0,
+        WorkerVisibility::Workspace => 1,
+        WorkerVisibility::System => 2,
+    }
+}
+
+fn trust_rank(tier: &str) -> u8 {
+    match tier {
+        "first_party_signed" => 0,
+        "trusted_signed" => 1,
+        "user_installed" => 2,
+        "session_generated" => 3,
+        "external_mcp" => 4,
+        "external_openapi" => 5,
+        "untrusted" => 6,
+        _ => u8::MAX,
+    }
 }
 
 fn lifecycle_visibility(connection: &ExternalWorkerConnection) -> VisibilityScope {

@@ -4304,7 +4304,8 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
         grant("external-grant"),
     )
     .with_namespace_claim("local");
-    let hello = super::WorkerProtocolMessage::Hello(super::WorkerHello::loopback(worker.clone()));
+    let hello =
+        super::WorkerProtocolMessage::Hello(Box::new(super::WorkerHello::loopback(worker.clone())));
     let function = FunctionDefinition::new(
         fid("local::echo"),
         wid("local-worker"),
@@ -4911,6 +4912,41 @@ async fn local_external_worker_rejects_visible_functions_without_capability_meta
         error,
         EngineError::PolicyViolation(message)
             if message.contains("requires request and response schemas")
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_rejects_metadata_outside_scoped_token() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker_id = wid("local-token-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("token_local");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.worker_token.plugin_id = "session_generated.allowed-plugin".to_owned();
+    runtime.hello(hello).await.unwrap();
+    let error = runtime
+        .register_function(super::RegisterFunction {
+            definition: external_visible_function(FunctionDefinition::new(
+                fid("token_local::echo"),
+                worker_id,
+                "token bounded external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("does not match scoped token plugin")
     ));
 }
 

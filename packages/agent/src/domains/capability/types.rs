@@ -48,6 +48,30 @@ pub(crate) struct CapabilityImplementationRecord {
     pub(crate) schema_digest: String,
     pub(crate) catalog_revision: u64,
     pub(crate) provenance: Value,
+    pub(crate) conformance_state: String,
+    pub(crate) signature_status: String,
+}
+
+/// Plugin manifest that owns one or more capability implementations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityPluginManifest {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) publisher: String,
+    pub(crate) signature_status: String,
+    pub(crate) runtime: String,
+    pub(crate) namespace_claims: Vec<String>,
+    pub(crate) provided_contracts: Vec<String>,
+    pub(crate) provided_implementations: Vec<String>,
+    pub(crate) requested_authorities: Vec<String>,
+    pub(crate) trust_tier: String,
+    pub(crate) visibility_ceiling: String,
+    pub(crate) conformance_state: String,
+    pub(crate) docs: Value,
+    pub(crate) examples: Vec<Value>,
+    pub(crate) search_metadata: Value,
 }
 
 /// Policy-controlled selection from a contract to an implementation.
@@ -123,6 +147,7 @@ pub(crate) struct CapabilityIndexStatus {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CapabilityIndexHit {
+    pub(crate) kind: String,
     pub(crate) capability_id: String,
     pub(crate) contract_id: String,
     pub(crate) implementation_id: String,

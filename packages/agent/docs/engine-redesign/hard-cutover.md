@@ -8,8 +8,13 @@ architecture; providers do not have a separate execution path.
 - `/engine` accepts canonical `namespace::function` capability ids only.
 - Model providers receive exactly `search`, `inspect`, and `execute`.
 - `search`, `inspect`, and `execute` are backed by the live engine catalog and
-  capability registry.
-- Mutating invocations require explicit idempotency in the payload.
+  durable capability registry/index layer in the engine ledger database.
+- Semantic capability search uses the first-party fastembed ONNX/tokenizer
+  bundle embedded in the Rust agent binary; it does not download models or read
+  mutable runtime model files.
+- Mutating or medium/high-risk invocations require an inspection handle,
+  expected revision, expected schema digest, and explicit idempotency when the
+  target mutates.
 - Engine protocol message ids are correlation ids only.
 
 ## Server Ownership
@@ -23,6 +28,8 @@ architecture; providers do not have a separate execution path.
 - Queue, approval, stream, state, lease, compensation, cron, MCP-derived,
   external-worker, and sandbox paths are capability paths over the same engine
   primitives.
+- External/session workers must present scoped worker tokens before visible
+  functions are accepted into the catalog.
 
 ## Acceptance Gates
 
@@ -38,3 +45,5 @@ Verification must prove:
   parent invocation, idempotency, leases, and compensation metadata;
 - model tool schemas are projected from the live engine catalog at each model
   call boundary.
+- capability search fails explicitly when the required local vector index is
+  unavailable rather than silently falling back to lexical-only search.

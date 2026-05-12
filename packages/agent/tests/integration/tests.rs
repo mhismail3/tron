@@ -164,7 +164,7 @@ async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     worker_hello.session_id = Some("worker-session".to_owned());
     worker_ws
         .send(Message::text(
-            serde_json::to_string(&WorkerProtocolMessage::Hello(worker_hello)).unwrap(),
+            serde_json::to_string(&WorkerProtocolMessage::Hello(Box::new(worker_hello))).unwrap(),
         ))
         .await
         .unwrap();

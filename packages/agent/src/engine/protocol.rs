@@ -4,6 +4,10 @@
 //! `/engine/workers` socket, while the engine owns the typed JSON envelope used
 //! by local workers to register functions/triggers, receive invocations, publish
 //! stream events through `stream::publish`, and cleanly disconnect.
+//! Visible external/session workers also present a scoped worker token in
+//! `hello`; the token is the protocol-level plugin lifecycle boundary for
+//! namespace claims, authority ceilings, visibility, trust, scope binding, and
+//! signature state.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,7 +26,7 @@ pub const WORKER_PROTOCOL_VERSION: u16 = 1;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorkerProtocolMessage {
     /// Worker hello/handshake.
-    Hello(WorkerHello),
+    Hello(Box<WorkerHello>),
     /// Engine catalog snapshot.
     CatalogSnapshot(CatalogSnapshot),
     /// Worker registers one function.
@@ -132,6 +136,53 @@ impl WorkerVisibility {
     }
 }
 
+/// Engine-issued capability worker token.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopedWorkerToken {
+    /// Plugin manifest id that owns registrations made on this connection.
+    pub plugin_id: String,
+    /// Namespaces the worker may claim for functions, contracts, and implementations.
+    pub namespace_claims: Vec<String>,
+    /// Maximum authority scopes the worker may request. Empty means no extra scopes.
+    pub authority_ceiling: Vec<String>,
+    /// Maximum visibility the worker may request.
+    pub visibility_ceiling: WorkerVisibility,
+    /// Trust tier assigned by the issuing policy.
+    pub trust_tier: String,
+    /// Optional session binding.
+    pub session_id: Option<String>,
+    /// Optional workspace binding.
+    pub workspace_id: Option<String>,
+    /// Optional RFC3339 expiry timestamp.
+    pub expires_at: Option<String>,
+    /// Signature status for durable plugin policy.
+    pub signature_status: String,
+}
+
+impl ScopedWorkerToken {
+    /// Build a scoped loopback token from a worker definition.
+    #[must_use]
+    pub fn loopback(worker: &WorkerDefinition) -> Self {
+        let namespace_claims = if worker.namespace_claims.is_empty() {
+            vec![worker.id.as_str().to_owned()]
+        } else {
+            worker.namespace_claims.clone()
+        };
+        Self {
+            plugin_id: format!("session_generated.{}", worker.id.as_str()),
+            namespace_claims,
+            authority_ceiling: Vec::new(),
+            visibility_ceiling: WorkerVisibility::Session,
+            trust_tier: "session_generated".to_owned(),
+            session_id: None,
+            workspace_id: None,
+            expires_at: None,
+            signature_status: "session_scoped".to_owned(),
+        }
+    }
+}
+
 /// Worker health tracked by the local runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -216,12 +267,15 @@ pub struct WorkerHello {
     /// Human-readable supported capability labels.
     #[serde(default)]
     pub supported_capabilities: Vec<String>,
+    /// Scoped token that bounds plugin/worker registration.
+    pub worker_token: ScopedWorkerToken,
 }
 
 impl WorkerHello {
     /// Build a loopback volatile hello with session default visibility.
     #[must_use]
     pub fn loopback(worker: WorkerDefinition) -> Self {
+        let worker_token = ScopedWorkerToken::loopback(&worker);
         Self {
             protocol_version: WORKER_PROTOCOL_VERSION,
             identity: WorkerIdentity::from_worker(&worker),
@@ -234,6 +288,7 @@ impl WorkerHello {
             workspace_id: None,
             heartbeat_interval_ms: default_heartbeat_interval_ms(),
             supported_capabilities: Vec::new(),
+            worker_token,
         }
     }
 }

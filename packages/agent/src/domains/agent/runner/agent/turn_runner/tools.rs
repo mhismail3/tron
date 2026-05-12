@@ -57,6 +57,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub sequence_counter: Option<&'a AtomicI64>,
     pub provider_type: crate::shared::messages::Provider,
     pub execution_spec: Option<&'a crate::shared::profile::AgentExecutionSpec>,
+    pub profile_spec_hash: Option<&'a str>,
     /// Optional per-tool abort registry (see `TurnParams::tool_abort_registry`).
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
     /// Optional engine host used to route model-facing capability primitives.
@@ -168,6 +169,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     sequence_counter: params.sequence_counter,
                     provider_type: params.provider_type,
                     execution_spec: params.execution_spec,
+                    profile_spec_hash: params.profile_spec_hash,
                     event_persister: params.persister_arc,
                     turn: i64::from(params.turn),
                     tool_abort_registry: params.tool_abort_registry,

@@ -2,6 +2,8 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -39,6 +41,10 @@ pub struct CausalContext {
     pub delivery_mode: DeliveryMode,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
+    /// Engine-internal runtime metadata. This is not model-supplied payload and
+    /// is used to carry profile/policy context into primitive workers.
+    #[serde(default)]
+    pub runtime_metadata: BTreeMap<String, String>,
 }
 
 impl CausalContext {
@@ -63,6 +69,7 @@ impl CausalContext {
             trigger_id: None,
             delivery_mode: DeliveryMode::Sync,
             idempotency_key: None,
+            runtime_metadata: BTreeMap::new(),
         }
     }
 
@@ -112,6 +119,23 @@ impl CausalContext {
     #[must_use]
     pub fn has_scope(&self, scope: &str) -> bool {
         self.authority_scopes.iter().any(|s| s == scope)
+    }
+
+    /// Attach engine-internal runtime metadata.
+    #[must_use]
+    pub fn with_runtime_metadata(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        let _ = self.runtime_metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// Read engine-internal runtime metadata.
+    #[must_use]
+    pub fn runtime_metadata(&self, key: &str) -> Option<&str> {
+        self.runtime_metadata.get(key).map(String::as_str)
     }
 }
 

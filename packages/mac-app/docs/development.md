@@ -75,7 +75,7 @@ TRON_RELAY_SECRET=<same HMAC secret set in Wrangler>
 TRON_RELAY_ENVIRONMENT=production
 ```
 
-`bundle-agent.sh` and `scripts/tron dev` read only `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT` from that ignored file immediately before they run Cargo, so every Debug, local Release, or agent-only dev helper has the same relay config without repeating shell exports. Already-exported environment variables still take precedence, which keeps CI and one-off builds explicit.
+`bundle-agent.sh` and `scripts/tron dev` read only `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT` from that ignored file immediately before they run Cargo, so every Debug, local Release, or agent-only dev helper has the same relay config without repeating shell exports. Already-exported environment variables still take precedence, which keeps CI and one-off builds explicit. The Rust build also embeds the first-party capability-search ONNX/tokenizer assets from `packages/agent/assets/capability-search/`; no Mac build step copies a separate semantic-search model cache.
 
 The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` and `packages/agent/src/domains/transcription/implementation/sidecar/worker.py` plus `requirements.txt` into `Contents/Resources/Transcription/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization; transcription files are source files only, with the MLX venv and Parakeet model cache created later under `~/.tron/internal/transcription/` if the wizard or iOS settings enables transcription.
 

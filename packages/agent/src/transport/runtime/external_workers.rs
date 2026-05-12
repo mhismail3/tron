@@ -73,7 +73,8 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
                 continue;
             }
         };
-        if let WorkerProtocolMessage::Hello(WorkerHello { worker, .. }) = &parsed {
+        if let WorkerProtocolMessage::Hello(hello) = &parsed {
+            let WorkerHello { worker, .. } = hello.as_ref();
             worker_id = Some(worker.id.clone());
         }
         if let WorkerProtocolMessage::Result(result) = &parsed {

@@ -287,6 +287,10 @@ pub struct CapabilitySearchPolicySpec {
     pub cloud_embeddings: bool,
     /// Maximum results retained by the index layer.
     pub max_results: usize,
+    /// Whether local vector search must be available for this policy.
+    pub require_local_vector: bool,
+    /// Whether search may fall back to lexical-only when the vector index is degraded.
+    pub allow_lexical_only_when_degraded: bool,
 }
 
 impl Default for CapabilitySearchPolicySpec {
@@ -296,6 +300,8 @@ impl Default for CapabilitySearchPolicySpec {
             local_vector: true,
             cloud_embeddings: false,
             max_results: 50,
+            require_local_vector: true,
+            allow_lexical_only_when_degraded: false,
         }
     }
 }
@@ -1181,6 +1187,22 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
                 io::ErrorKind::InvalidData,
                 format!(
                     "profile `{name}` capabilitySearchPolicies.{policy_id}.maxResults must be positive"
+                ),
+            ));
+        }
+        if policy.require_local_vector && !policy.local_vector {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "profile `{name}` capabilitySearchPolicies.{policy_id}.requireLocalVector requires localVector"
+                ),
+            ));
+        }
+        if policy.require_local_vector && policy.allow_lexical_only_when_degraded {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "profile `{name}` capabilitySearchPolicies.{policy_id} cannot both require localVector and allow lexical-only degraded search"
                 ),
             ));
         }

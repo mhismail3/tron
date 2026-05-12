@@ -11,12 +11,15 @@ use sha2::{Digest, Sha256};
 
 use super::Deps;
 use super::registry::{
-    CapabilityContextPrimerPolicy, CapabilityRegistrySnapshot, CapabilitySearchFilters,
-    CapabilitySearchPolicy, HybridLocalCapabilityIndex, binding_decision, bool_field, parse_target,
+    CapabilityContextPrimerPolicy, CapabilityRegistryEntry, CapabilityRegistrySnapshot,
+    CapabilityRegistryStore, CapabilitySearchFilters, CapabilitySearchPolicy, CapabilityTarget,
+    binding_decision, bool_field, parse_target,
     render_capability_primer as render_primer_from_snapshot, requires_fresh_revision, string_field,
     u64_field,
 };
-use super::types::{CapabilityBindingDecision, CapabilityExecutionRecord};
+use super::types::{
+    CapabilityBindingDecision, CapabilityExecutionRecord, CapabilityRejectedCandidate,
+};
 use crate::engine::{
     ActorContext, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EffectClass,
     EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionQuery, FunctionRevision,
@@ -65,13 +68,58 @@ pub(crate) async fn search_value(
 
     let catalog_revision = deps.engine_host.catalog_revision().await;
     let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
-    let documents = snapshot.filtered_documents(&filters);
-    let policy = CapabilitySearchPolicy::default();
-    let index = HybridLocalCapabilityIndex::new(policy);
+    let policy = search_policy_from_runtime(invocation)?;
     let query_for_index = query.clone();
     let index_limit = cursor_offset.saturating_add(limit).saturating_add(1);
+    let store = deps.registry_store.clone();
+    let embedding_provider = deps.embedding_provider.clone();
+    let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    let filters_for_index = filters.clone();
+    let catalog_revision_value = catalog_revision.0;
     let search_result = run_blocking_task("capability.search.index", move || {
-        Ok(index.search(&query_for_index, documents, index_limit))
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        if let Err(error) = store.sync_snapshot(&snapshot, embedding_provider.as_ref(), &policy) {
+            let _ = store.record_audit_event(
+                "capability.search",
+                Some(&trace_id),
+                json!({
+                    "status": "error",
+                    "query": query_for_index,
+                    "catalogRevision": catalog_revision_value,
+                    "error": error.clone(),
+                }),
+            );
+            return Err(registry_store_error(error));
+        }
+        let result = store
+            .search(
+                &query_for_index,
+                &filters_for_index,
+                &policy,
+                index_limit,
+                embedding_provider.as_ref(),
+            )
+            .map_err(registry_store_error)?;
+        store
+            .record_audit_event(
+                "capability.search",
+                Some(&trace_id),
+                json!({
+                    "query": query_for_index,
+                    "filters": {
+                        "kind": filters_for_index.kind,
+                        "contractId": filters_for_index.contract_id,
+                        "namespace": filters_for_index.namespace,
+                        "pluginId": filters_for_index.plugin_id,
+                    },
+                    "catalogRevision": catalog_revision_value,
+                    "indexStatus": result.status.clone(),
+                }),
+            )
+            .map_err(registry_store_error)?;
+        Ok(result)
     })
     .await?;
     let next_cursor = if search_result.hits.len() > cursor_offset.saturating_add(limit) {
@@ -123,11 +171,41 @@ pub(crate) async fn inspect_value(
 ) -> Result<Value, CapabilityError> {
     let actor = actor_from_invocation(invocation)?;
     let target = resolve_target(&invocation.payload, deps, &actor).await?;
-    let details = serde_json::to_value(target.entry.inspection(target.binding_decision)).map_err(
-        |error| CapabilityError::Internal {
-            message: error.to_string(),
-        },
-    )?;
+    let inspection = target.entry.inspection(target.binding_decision.clone());
+    {
+        let store = deps.registry_store.clone();
+        let entry = target.entry.clone();
+        let decision = target.binding_decision.clone();
+        let handle = inspection.inspection_handle.clone();
+        let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+        run_blocking_task("capability.inspect.record", move || {
+            let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+                message: "capability registry store mutex poisoned".to_owned(),
+            })?;
+            store
+                .record_inspection(&handle, &entry, &decision)
+                .map_err(registry_store_error)?;
+            store
+                .record_audit_event(
+                    "capability.inspect",
+                    Some(&trace_id),
+                    json!({
+                        "contractId": decision.contract_id,
+                        "implementationId": decision.selected_implementation,
+                        "functionId": decision.selected_function_id,
+                        "catalogRevision": decision.catalog_revision,
+                        "schemaDigest": decision.schema_digest,
+                        "inspectionHandle": handle.handle,
+                    }),
+                )
+                .map_err(registry_store_error)?;
+            Ok(())
+        })
+        .await?;
+    }
+    let details = serde_json::to_value(inspection).map_err(|error| CapabilityError::Internal {
+        message: error.to_string(),
+    })?;
     let summary = render_inspection_summary(&details);
     tool_result_value(CapabilityResult {
         content: ToolResultBody::Blocks(vec![ToolResultContent::text(summary)]),
@@ -203,21 +281,55 @@ async fn execute_invoke_value(
     enforce_execution_policy(invocation, &target.binding_decision, &function)?;
 
     let expected_revision = u64_field(&invocation.payload, "expectedRevision");
-    if requires_fresh_revision(&function) && expected_revision.is_none() {
-        return Err(CapabilityError::Custom {
-            code: "INSPECTION_REQUIRED".to_owned(),
-            message: format!(
-                "{} is mutating or elevated-risk; inspect it first and pass expectedRevision={}",
-                function.id.as_str(),
-                function.revision.0
-            ),
-            details: Some(json!({
-                "functionId": function.id.as_str(),
-                "expectedRevision": function.revision.0,
-                "riskLevel": format!("{:?}", function.risk_level),
-                "effectClass": format!("{:?}", function.effect_class)
-            })),
-        });
+    let expected_schema_digest = string_field(&invocation.payload, "expectedSchemaDigest")
+        .or_else(|| string_field(&invocation.payload, "expected_schema_digest"));
+    let inspection_handle = string_field(&invocation.payload, "inspectionHandle")
+        .or_else(|| string_field(&invocation.payload, "inspection_handle"));
+    if requires_fresh_revision(&function) {
+        if expected_revision.is_none()
+            || expected_schema_digest.is_none()
+            || inspection_handle.is_none()
+        {
+            return Err(CapabilityError::Custom {
+                code: "INSPECTION_REQUIRED".to_owned(),
+                message: format!(
+                    "{} is mutating or elevated-risk; inspect it first and pass inspectionHandle, expectedRevision={}, and expectedSchemaDigest={}",
+                    function.id.as_str(),
+                    function.revision.0,
+                    target.entry.schema_digest
+                ),
+                details: Some(json!({
+                    "functionId": function.id.as_str(),
+                    "inspect": {
+                        "functionId": function.id.as_str(),
+                        "expectedRevision": function.revision.0,
+                        "expectedSchemaDigest": target.entry.schema_digest
+                    },
+                    "riskLevel": format!("{:?}", function.risk_level),
+                    "effectClass": format!("{:?}", function.effect_class)
+                })),
+            });
+        }
+        let valid_inspection = validate_inspection_handle(
+            deps,
+            inspection_handle.as_deref().unwrap_or_default(),
+            target.entry.clone(),
+        )
+        .await?;
+        if !valid_inspection {
+            return Err(CapabilityError::Custom {
+                code: "INSPECTION_HANDLE_INVALID".to_owned(),
+                message: format!(
+                    "{} requires a fresh inspection handle for the selected implementation",
+                    function.id.as_str()
+                ),
+                details: Some(json!({
+                    "functionId": function.id.as_str(),
+                    "currentRevision": function.revision.0,
+                    "currentSchemaDigest": target.entry.schema_digest,
+                })),
+            });
+        }
     }
 
     if let Some(expected) = expected_revision
@@ -234,6 +346,23 @@ async fn execute_invoke_value(
                 "functionId": function.id.as_str(),
                 "expectedRevision": expected,
                 "currentRevision": function.revision.0,
+            })),
+        });
+    }
+    if let Some(expected) = expected_schema_digest
+        && expected != target.entry.schema_digest
+    {
+        return Err(CapabilityError::Custom {
+            code: "STALE_CAPABILITY_SCHEMA".to_owned(),
+            message: format!(
+                "{} has schema digest {}, not requested digest {expected}",
+                function.id.as_str(),
+                target.entry.schema_digest
+            ),
+            details: Some(json!({
+                "functionId": function.id.as_str(),
+                "expectedSchemaDigest": expected,
+                "currentSchemaDigest": target.entry.schema_digest,
             })),
         });
     }
@@ -332,11 +461,35 @@ async fn execute_invoke_value(
         binding_decision: target.binding_decision,
         schema_digest: target.entry.schema_digest,
     };
-    let mut details = serde_json::to_value(record).map_err(|error| CapabilityError::Internal {
+    let mut details = serde_json::to_value(&record).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
     })?;
     if let Some(replayed_from) = result.replayed_from {
         details["replayedFrom"] = json!(replayed_from.as_str());
+    }
+    {
+        let store = deps.registry_store.clone();
+        let trace_id = record.trace_id.clone();
+        let audit_payload = json!({
+            "status": record.status,
+            "contractId": record.binding_decision.contract_id,
+            "implementationId": record.selected_implementation,
+            "functionId": record.function_id,
+            "catalogRevision": record.catalog_revision,
+            "functionRevision": record.function_revision,
+            "schemaDigest": record.schema_digest,
+            "childInvocations": record.child_invocations,
+        });
+        run_blocking_task("capability.execute.audit", move || {
+            let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+                message: "capability registry store mutex poisoned".to_owned(),
+            })?;
+            store
+                .record_audit_event("capability.execute", Some(&trace_id), audit_payload)
+                .map_err(registry_store_error)?;
+            Ok(())
+        })
+        .await?;
     }
 
     if let Ok(mut nested) = serde_json::from_value::<CapabilityResult>(output.clone()) {
@@ -380,7 +533,50 @@ async fn resolve_target(
     let catalog_revision = deps.engine_host.catalog_revision().await;
     let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
     let candidates = snapshot.find_candidates(&target);
-    let Some((entry, decision)) = binding_decision(&target, &candidates) else {
+    let store = deps.registry_store.clone();
+    let embedding_provider = deps.embedding_provider.clone();
+    let target_for_resolver = target.clone();
+    let actor_session_id = actor.session_id.as_deref().map(ToOwned::to_owned);
+    let actor_workspace_id = actor.workspace_id.as_deref().map(ToOwned::to_owned);
+    let resolved = run_blocking_task("capability.binding.resolve", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        let sync_policy = registry_metadata_sync_policy();
+        store
+            .sync_snapshot(&snapshot, embedding_provider.as_ref(), &sync_policy)
+            .map_err(registry_store_error)?;
+        let resolved = binding_decision_with_store(
+            store.as_mut(),
+            &target_for_resolver,
+            &candidates,
+            actor_session_id.as_deref(),
+            actor_workspace_id.as_deref(),
+        )?;
+        if let Some((entry, decision)) = &resolved {
+            store
+                .record_binding_decision(decision, entry)
+                .map_err(registry_store_error)?;
+            store
+                .record_audit_event(
+                    "capability.binding",
+                    None,
+                    json!({
+                        "contractId": decision.contract_id,
+                        "implementationId": decision.selected_implementation,
+                        "functionId": decision.selected_function_id,
+                        "selectionPolicy": decision.selection_policy,
+                        "catalogRevision": decision.catalog_revision,
+                        "schemaDigest": decision.schema_digest,
+                        "rejectedCandidates": decision.rejected_candidates,
+                    }),
+                )
+                .map_err(registry_store_error)?;
+        }
+        Ok(resolved)
+    })
+    .await?;
+    let Some((entry, decision)) = resolved else {
         return Err(CapabilityError::NotFound {
             code: "CAPABILITY_NOT_FOUND".to_owned(),
             message: "No visible healthy capability matches the requested target".to_owned(),
@@ -390,6 +586,229 @@ async fn resolve_target(
         entry,
         binding_decision: decision,
     })
+}
+
+async fn validate_inspection_handle(
+    deps: &Deps,
+    handle: &str,
+    entry: CapabilityRegistryEntry,
+) -> Result<bool, CapabilityError> {
+    let store = deps.registry_store.clone();
+    let handle = handle.to_owned();
+    run_blocking_task("capability.inspect.validate", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .validate_inspection(&handle, &entry)
+            .map_err(registry_store_error)
+    })
+    .await
+}
+
+fn binding_decision_with_store(
+    store: &mut dyn CapabilityRegistryStore,
+    target: &CapabilityTarget,
+    candidates: &[CapabilityRegistryEntry],
+    session_id: Option<&str>,
+    workspace_id: Option<&str>,
+) -> Result<Option<(CapabilityRegistryEntry, CapabilityBindingDecision)>, CapabilityError> {
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let explicit = matches!(
+        target,
+        CapabilityTarget::Function(_) | CapabilityTarget::Implementation(_)
+    );
+    if explicit {
+        let Some((entry, mut decision)) = binding_decision(target, candidates) else {
+            return Ok(None);
+        };
+        ensure_selectable(store, &entry)?;
+        decision.selection_policy = "explicit".to_owned();
+        decision.rejected_candidates = rejected_candidates_for(candidates, &entry, store)?;
+        return Ok(Some((entry, decision)));
+    }
+
+    let contract_id = candidates
+        .first()
+        .map(|entry| entry.contract_id.as_str())
+        .unwrap_or_default();
+    if let Some(binding) = store
+        .active_binding(contract_id, session_id, workspace_id)
+        .map_err(registry_store_error)?
+        && let Some(entry) = candidates
+            .iter()
+            .find(|entry| entry.implementation_id == binding.selected_implementation)
+            .cloned()
+    {
+        ensure_selectable(store, &entry)?;
+        return Ok(Some((
+            entry.clone(),
+            decision_for_entry(
+                &entry,
+                &binding.selection_policy,
+                rejected_candidates_for(candidates, &entry, store)?,
+            ),
+        )));
+    }
+
+    let tiers = [
+        ("first_party_healthy", &["first_party_signed"][..]),
+        ("trusted_healthy", &["trusted_signed"][..]),
+        (
+            "approved_external_or_session_healthy",
+            &[
+                "user_installed",
+                "session_generated",
+                "external_mcp",
+                "external_openapi",
+            ][..],
+        ),
+    ];
+    for (policy, allowed_tiers) in tiers {
+        for entry in candidates {
+            if !allowed_tiers.contains(&entry.trust_tier.as_str()) {
+                continue;
+            }
+            if is_selectable(store, entry)? {
+                return Ok(Some((
+                    entry.clone(),
+                    decision_for_entry(
+                        entry,
+                        policy,
+                        rejected_candidates_for(candidates, entry, store)?,
+                    ),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn is_selectable(
+    store: &mut dyn CapabilityRegistryStore,
+    entry: &CapabilityRegistryEntry,
+) -> Result<bool, CapabilityError> {
+    let state = store
+        .implementation_conformance_state(&entry.implementation_id)
+        .map_err(registry_store_error)?
+        .unwrap_or_else(|| "candidate".to_owned());
+    Ok(state == "healthy")
+}
+
+fn ensure_selectable(
+    store: &mut dyn CapabilityRegistryStore,
+    entry: &CapabilityRegistryEntry,
+) -> Result<(), CapabilityError> {
+    if is_selectable(store, entry)? {
+        return Ok(());
+    }
+    let state = store
+        .implementation_conformance_state(&entry.implementation_id)
+        .map_err(registry_store_error)?
+        .unwrap_or_else(|| "candidate".to_owned());
+    Err(CapabilityError::Custom {
+        code: "CAPABILITY_IMPLEMENTATION_NOT_SELECTABLE".to_owned(),
+        message: format!(
+            "{} is not binding-selectable because conformanceState={state}",
+            entry.implementation_id
+        ),
+        details: Some(json!({
+            "implementationId": entry.implementation_id,
+            "functionId": entry.function_id,
+            "conformanceState": state,
+        })),
+    })
+}
+
+fn decision_for_entry(
+    entry: &CapabilityRegistryEntry,
+    selection_policy: &str,
+    rejected_candidates: Vec<CapabilityRejectedCandidate>,
+) -> CapabilityBindingDecision {
+    CapabilityBindingDecision {
+        contract_id: entry.contract_id.clone(),
+        selected_implementation: entry.implementation_id.clone(),
+        selected_function_id: entry.function_id.clone(),
+        selection_policy: selection_policy.to_owned(),
+        rejected_candidates,
+        catalog_revision: entry.catalog_revision,
+        schema_digest: entry.schema_digest.clone(),
+    }
+}
+
+fn rejected_candidates_for(
+    candidates: &[CapabilityRegistryEntry],
+    selected: &CapabilityRegistryEntry,
+    store: &mut dyn CapabilityRegistryStore,
+) -> Result<Vec<CapabilityRejectedCandidate>, CapabilityError> {
+    candidates
+        .iter()
+        .filter(|entry| entry.implementation_id != selected.implementation_id)
+        .map(|entry| {
+            let state = store
+                .implementation_conformance_state(&entry.implementation_id)
+                .map_err(registry_store_error)?
+                .unwrap_or_else(|| "candidate".to_owned());
+            let reason = if state == "healthy" {
+                "lower_precedence_candidate".to_owned()
+            } else {
+                format!("conformance_state_{state}")
+            };
+            Ok(CapabilityRejectedCandidate {
+                implementation_id: entry.implementation_id.clone(),
+                function_id: entry.function_id.clone(),
+                reason,
+            })
+        })
+        .collect()
+}
+
+fn registry_metadata_sync_policy() -> CapabilitySearchPolicy {
+    CapabilitySearchPolicy {
+        local_vector: false,
+        require_local_vector: false,
+        ..CapabilitySearchPolicy::default()
+    }
+}
+
+fn search_policy_from_runtime(
+    invocation: &Invocation,
+) -> Result<CapabilitySearchPolicy, CapabilityError> {
+    if let Some(raw) = invocation
+        .causal_context
+        .runtime_metadata("capability.searchPolicy")
+    {
+        return serde_json::from_str(raw).map_err(|error| CapabilityError::InvalidParams {
+            message: format!("Invalid internal capability search policy metadata: {error}"),
+        });
+    }
+    if matches!(
+        invocation.causal_context.actor_kind,
+        ActorKind::System | ActorKind::Admin
+    ) {
+        return Ok(CapabilitySearchPolicy::default());
+    }
+    Err(CapabilityError::Custom {
+        code: "CAPABILITY_SEARCH_POLICY_REQUIRED".to_owned(),
+        message: "capability::search requires an active profile search policy in runtime metadata"
+            .to_owned(),
+        details: Some(json!({
+            "requiredRuntimeMetadata": "capability.searchPolicy"
+        })),
+    })
+}
+
+fn registry_store_error(error: String) -> CapabilityError {
+    if let Some(message) = error.strip_prefix("CAPABILITY_INDEX_UNAVAILABLE: ") {
+        return CapabilityError::Custom {
+            code: "CAPABILITY_INDEX_UNAVAILABLE".to_owned(),
+            message: message.to_owned(),
+            details: None,
+        };
+    }
+    CapabilityError::Internal { message: error }
 }
 
 fn actor_from_invocation(invocation: &Invocation) -> Result<ActorContext, CapabilityError> {
@@ -702,6 +1121,53 @@ mod tests {
             super::super::registry::CapabilityTarget::Implementation(value)
                 if value == "function:filesystem::read_file"
         ));
+    }
+
+    #[test]
+    fn agent_search_requires_profile_policy_runtime_metadata() {
+        let causal = CausalContext::new(
+            crate::engine::ActorId::new("agent:s1").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-tool-runtime").expect("grant id"),
+            crate::engine::TraceId::new("trace").expect("trace id"),
+        );
+        let invocation = Invocation::new_sync(
+            FunctionId::new("capability::search").expect("function id"),
+            json!({"query": "read"}),
+            causal,
+        );
+        let error = search_policy_from_runtime(&invocation).unwrap_err();
+        assert!(matches!(
+            error,
+            CapabilityError::Custom { code, .. } if code == "CAPABILITY_SEARCH_POLICY_REQUIRED"
+        ));
+    }
+
+    #[test]
+    fn agent_search_uses_internal_profile_policy_metadata() {
+        let policy = CapabilitySearchPolicy {
+            require_local_vector: false,
+            allow_lexical_only_when_degraded: true,
+            ..CapabilitySearchPolicy::default()
+        };
+        let causal = CausalContext::new(
+            crate::engine::ActorId::new("agent:s1").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-tool-runtime").expect("grant id"),
+            crate::engine::TraceId::new("trace").expect("trace id"),
+        )
+        .with_runtime_metadata(
+            "capability.searchPolicy",
+            serde_json::to_string(&policy).expect("policy json"),
+        );
+        let invocation = Invocation::new_sync(
+            FunctionId::new("capability::search").expect("function id"),
+            json!({"query": "read"}),
+            causal,
+        );
+        let parsed = search_policy_from_runtime(&invocation).expect("policy");
+        assert!(!parsed.require_local_vector);
+        assert!(parsed.allow_lexical_only_when_degraded);
     }
 
     #[test]

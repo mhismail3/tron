@@ -104,9 +104,23 @@ implementation, authority, risk, schema digest, and expected revision.
 The projection is owned by `capability::registry`: it builds revisioned
 `CapabilityRegistrySnapshot`s from the live catalog, emits typed contract /
 implementation / binding records, and ranks search results with local lexical
-matching plus local `fastembed` embeddings stored in an embedded `sqlite-vec`
-`vec0` index. If embeddings or vector indexing are unavailable, `search`
-returns lexical results with an explicit degraded index status.
+matching plus binary-embedded `fastembed` ONNX/tokenizer embeddings stored in a
+persistent `sqlite-vec` `vec0` index. Registry state is durable in the engine
+ledger database:
+plugin manifests, implementations, bindings, index documents, vector metadata,
+inspection handles, binding decisions, and audit events survive process
+restarts and are repaired from first-party manifests plus live catalog changes
+on startup. The default profile requires the local vector index; if the embedded
+model fails verification or vector tables are unavailable, `search` returns
+`CAPABILITY_INDEX_UNAVAILABLE` unless policy explicitly permits degraded
+lexical-only search.
+
+External and session-generated workers connect with scoped worker tokens. A
+token binds plugin id, namespace claims, authority ceiling, visibility ceiling,
+trust tier, session/workspace scope, expiry, and signature status before any
+visible function can register. New dynamic implementations are treated as
+candidates unless conformance/policy marks them healthy; default binding
+selection only chooses healthy implementations.
 
 The same registry renders `capabilities.primer` after active rules and before
 skill context. The default profile policy includes trusted first-party core

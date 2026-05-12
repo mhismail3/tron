@@ -8,6 +8,7 @@ use crate::domains::agent::runner::context::local_policy;
 use crate::domains::agent::runner::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::agent::runner::hooks::types::{HookAction, HookContext};
+use crate::domains::capability::registry::CapabilitySearchPolicy;
 use crate::domains::capability_support::implementations::capability_surface::{
     CapabilitySurfacePolicy, EngineToolTarget, ResolvedToolSurface,
 };
@@ -95,6 +96,8 @@ pub struct ToolExecutionContext<'a> {
     pub provider_type: Provider,
     /// Optional execution spec selected by the current session profile.
     pub execution_spec: Option<&'a crate::shared::profile::AgentExecutionSpec>,
+    /// Hash of the resolved profile spec that selected this runtime policy.
+    pub profile_spec_hash: Option<&'a str>,
     /// Optional persister for durable progress events emitted by domain-owned
     /// capabilities that report incremental progress.
     pub event_persister: Option<
@@ -350,22 +353,28 @@ pub async fn execute_tool(
         crate::shared::tools::error_result("Operation cancelled")
     } else if let (Some(engine_host), Some(target)) = (ctx.engine_host, engine_target) {
         let execution_policy_scopes = ctx.capability_policy.execution_policy_scopes();
-        execute_capability_primitive_via_engine(
-            engine_host,
-            target,
-            &tool_name,
-            &tool_call_id,
-            session_id,
-            working_directory,
-            ctx.workspace_id,
-            ctx.turn,
-            ctx.run_id,
-            ctx.trace_id,
-            ctx.parent_invocation_id,
-            &execution_policy_scopes,
-            effective_args,
-        )
-        .await
+        match primitive_runtime_metadata(ctx, &context_policy) {
+            Ok(runtime_metadata) => {
+                execute_capability_primitive_via_engine(
+                    engine_host,
+                    target,
+                    &tool_name,
+                    &tool_call_id,
+                    session_id,
+                    working_directory,
+                    ctx.workspace_id,
+                    ctx.turn,
+                    ctx.run_id,
+                    ctx.trace_id,
+                    ctx.parent_invocation_id,
+                    &execution_policy_scopes,
+                    &runtime_metadata,
+                    effective_args,
+                )
+                .await
+            }
+            Err(error) => crate::shared::tools::error_result(error),
+        }
     } else {
         return ToolExecutionResult {
             tool_call_id,
@@ -525,6 +534,61 @@ fn guardrail_capability_arguments(model_tool_name: &str, args: &Value) -> Value 
     args.clone()
 }
 
+fn primitive_runtime_metadata(
+    ctx: &ToolExecutionContext<'_>,
+    context_policy: &local_policy::ContextPolicy,
+) -> Result<Vec<(String, String)>, String> {
+    let spec = ctx
+        .execution_spec
+        .ok_or_else(|| "capability primitive runtime requires an execution spec".to_owned())?;
+    let entrypoint = spec
+        .entrypoints
+        .get("main")
+        .ok_or_else(|| "capability primitive runtime requires entrypoints.main".to_owned())?;
+    let capability_policy_id = context_policy
+        .capability_policy_id()
+        .unwrap_or(entrypoint.capability_policy.as_str());
+    let capability_policy = spec
+        .capability_policy(capability_policy_id)
+        .ok_or_else(|| format!("missing capability policy '{capability_policy_id}'"))?;
+    let search_policy_id = capability_policy
+        .search_policy
+        .as_deref()
+        .unwrap_or("hybridLocal");
+    let search_policy = spec
+        .capability_search_policy(search_policy_id)
+        .ok_or_else(|| format!("missing capability search policy '{search_policy_id}'"))?;
+    let context_primer_policy_id = capability_policy
+        .context_primer_policy
+        .as_deref()
+        .unwrap_or("coreFirstParty");
+    let serialized_search_policy =
+        serde_json::to_string(&CapabilitySearchPolicy::from_profile(search_policy))
+            .map_err(|error| format!("serialize capability search policy: {error}"))?;
+    let mut metadata = vec![
+        (
+            "capability.capabilityPolicyId".to_owned(),
+            capability_policy_id.to_owned(),
+        ),
+        (
+            "capability.searchPolicyId".to_owned(),
+            search_policy_id.to_owned(),
+        ),
+        (
+            "capability.contextPrimerPolicyId".to_owned(),
+            context_primer_policy_id.to_owned(),
+        ),
+        (
+            "capability.searchPolicy".to_owned(),
+            serialized_search_policy,
+        ),
+    ];
+    if let Some(hash) = ctx.profile_spec_hash {
+        metadata.push(("capability.profileSpecHash".to_owned(), hash.to_owned()));
+    }
+    Ok(metadata)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_capability_primitive_via_engine(
     engine_host: &EngineHostHandle,
@@ -539,6 +603,7 @@ async fn execute_capability_primitive_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     execution_policy_scopes: &[String],
+    runtime_metadata: &[(String, String)],
     effective_args: Value,
 ) -> crate::shared::tools::CapabilityResult {
     let material = stable_tool_call_material(
@@ -575,6 +640,9 @@ async fn execute_capability_primitive_via_engine(
         if !causal_context.has_scope(scope) {
             causal_context = causal_context.with_scope(scope.clone());
         }
+    }
+    for (key, value) in runtime_metadata {
+        causal_context = causal_context.with_runtime_metadata(key.clone(), value.clone());
     }
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
@@ -734,6 +802,7 @@ mod tests {
             sequence_counter: None,
             provider_type: Provider::Anthropic,
             execution_spec: Some(execution_spec),
+            profile_spec_hash: Some("test-profile-hash"),
             event_persister: None,
             turn: 1,
             tool_abort_registry: None,

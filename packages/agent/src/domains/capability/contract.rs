@@ -150,6 +150,8 @@ fn execute_request_schema() -> serde_json::Value {
             "functionId": {"type": "string"},
             "payload": {"type": "object"},
             "expectedRevision": {"type": "integer", "minimum": 1},
+            "expectedSchemaDigest": {"type": "string"},
+            "inspectionHandle": {"type": "string"},
             "idempotencyKey": {"type": "string"},
             "reason": {"type": "string"}
         }

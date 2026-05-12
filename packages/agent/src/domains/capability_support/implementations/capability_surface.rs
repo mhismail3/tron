@@ -374,3 +374,85 @@ fn parameter_schema_from_value(value: Value) -> ToolParameterSchema {
         extra: serde_json::Map::new(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::agent::runner::context::local_policy;
+    use crate::domains::catalog::function_definition_for_capability;
+    use crate::engine::{
+        ActorId, AuthorityGrantId, EffectClass, FunctionDefinition, FunctionId, WorkerDefinition,
+        WorkerId, WorkerKind,
+    };
+
+    fn worker(id: &str, namespace: &str) -> WorkerDefinition {
+        WorkerDefinition::new(
+            WorkerId::new(id).expect("worker id"),
+            WorkerKind::System,
+            ActorId::new("system").expect("actor id"),
+            AuthorityGrantId::new("engine-transport").expect("grant id"),
+        )
+        .with_namespace_claim(namespace)
+    }
+
+    fn merge_metadata(target: &mut Value, extra: Value) {
+        match (target, extra) {
+            (Value::Object(target), Value::Object(extra)) => {
+                for (key, value) in extra {
+                    let _ = target.insert(key, value);
+                }
+            }
+            (target, extra) if !extra.is_null() => {
+                *target = extra;
+            }
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_surface_contains_only_capability_primitives() {
+        let host = EngineHostHandle::new_in_memory().expect("host");
+        host.register_worker_for_setup(worker("capability", "capability"), false)
+            .expect("capability worker");
+        host.register_worker_for_setup(worker("filesystem", "filesystem"), false)
+            .expect("filesystem worker");
+        for spec in crate::domains::capability::contract::capabilities().expect("capabilities") {
+            let mut definition = function_definition_for_capability(&spec);
+            merge_metadata(
+                &mut definition.metadata,
+                crate::domains::capability::contract::model_metadata(definition.id.as_str()),
+            );
+            host.register_function_for_setup(definition, None, false)
+                .expect("capability function");
+        }
+        let mut old_builtin_like_function = FunctionDefinition::new(
+            FunctionId::new("filesystem::read_file").expect("function id"),
+            WorkerId::new("filesystem").expect("worker id"),
+            "Should not be provider-facing",
+            crate::engine::VisibilityScope::System,
+            EffectClass::PureRead,
+        );
+        old_builtin_like_function.metadata =
+            serde_json::json!({"modelToolName": "old_filesystem_read"});
+        host.register_function_for_setup(old_builtin_like_function, None, false)
+            .expect("nonprimitive function");
+
+        let context_policy = local_policy::ContextPolicy::from_resolved_parts(
+            "default",
+            crate::shared::profile::ContextPolicySpec::default(),
+            None,
+            false,
+        );
+        let surface = resolve_provider_tools(
+            &host,
+            "session-a",
+            None,
+            crate::shared::messages::Provider::Anthropic,
+            &context_policy,
+            &CapabilitySurfacePolicy::default(),
+        )
+        .await
+        .expect("surface");
+        assert_eq!(surface.all_tool_names, ["search", "inspect", "execute"]);
+    }
+}

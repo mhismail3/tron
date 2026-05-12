@@ -713,6 +713,10 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             .resolved_profile
             .as_deref()
             .map(|profile| &profile.spec),
+        profile_spec_hash: run_context
+            .resolved_profile
+            .as_deref()
+            .map(|profile| profile.spec_hash.as_str()),
         tool_abort_registry,
         engine_host,
         run_id: run_context.run_id.as_deref(),

@@ -45,7 +45,6 @@ pub mod dirs {
     pub const JOURNALS: &str = "journals";
     /// Transcription sidecar: Python venv, worker script, HuggingFace model cache.
     pub const TRANSCRIPTION: &str = "transcription";
-
     // ── Under memory/ ──
 
     /// Auto-generated session summaries.

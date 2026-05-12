@@ -280,12 +280,13 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
         "TRON_ENGINE_WORKER_ID": "Stable worker id injected by sandbox::spawn_worker",
         "TRON_ENGINE_WORKER_VISIBILITY": "session, workspace, or system",
         "TRON_ENGINE_WORKER_PROTOCOL_VERSION": protocol_version.to_string(),
+        "TRON_ENGINE_WORKER_TOKEN": "Scoped worker-token JSON injected by sandbox::spawn_worker; bounds pluginId, namespaceClaims, authorityCeiling, visibilityCeiling, trustTier, scope binding, expiry, and signatureStatus",
         "TRON_ENGINE_SESSION_ID": "Present for session-visible sandbox workers",
         "TRON_ENGINE_WORKSPACE_ID": "Present for workspace-visible sandbox workers"
     });
     let message_flow = json!([
         "Open TRON_ENGINE_WORKER_ENDPOINT as a WebSocket with Authorization: Bearer ${TRON_ENGINE_BEARER_TOKEN}.",
-        "Send a hello message with type=hello, protocolVersion, worker definition, identity, loopbackOnly=true, authPolicy=loopback_bearer, registrationMode=volatile, defaultVisibility, sessionId/workspaceId, heartbeatIntervalMs, and supportedCapabilities.",
+        "Send a hello message with type=hello, protocolVersion, worker definition, identity, loopbackOnly=true, authPolicy=loopback_bearer, registrationMode=volatile, defaultVisibility, sessionId/workspaceId, heartbeatIntervalMs, supportedCapabilities, and workerToken.",
         "Receive catalog_snapshot from the engine. This is the live catalog visible to the worker at connect time.",
         "Send register_function for every capability the worker owns. Function definition fields use snake_case; the wrapper fields use camelCase.",
         "Handle invoke messages by executing exactly the requested function id, then send result with the same invocationId.",
@@ -498,6 +499,17 @@ VISIBILITY = os.environ.get("TRON_ENGINE_WORKER_VISIBILITY", "session")
 SESSION_ID = os.environ.get("TRON_ENGINE_SESSION_ID")
 WORKSPACE_ID = os.environ.get("TRON_ENGINE_WORKSPACE_ID")
 PROTOCOL_VERSION = int(os.environ.get("TRON_ENGINE_WORKER_PROTOCOL_VERSION", "1"))
+WORKER_TOKEN = json.loads(os.environ.get("TRON_ENGINE_WORKER_TOKEN", json.dumps({
+    "pluginId": "session_generated." + WORKER_ID,
+    "namespaceClaims": [NAMESPACE],
+    "authorityCeiling": [],
+    "visibilityCeiling": VISIBILITY,
+    "trustTier": "session_generated",
+    "sessionId": SESSION_ID,
+    "workspaceId": WORKSPACE_ID,
+    "expiresAt": None,
+    "signatureStatus": "session_scoped",
+})))
 
 ENGINE_VISIBILITY = {"session": "Session", "workspace": "Workspace", "system": "System"}[VISIBILITY]
 WORKER_VISIBILITY = {"session": "session", "workspace": "workspace", "system": "system"}[VISIBILITY]
@@ -672,6 +684,7 @@ def main():
         "workspaceId": WORKSPACE_ID,
         "heartbeatIntervalMs": 5000,
         "supportedCapabilities": [FUNCTION_ID],
+        "workerToken": WORKER_TOKEN,
     })
     send_json(sock, {
         "type": "register_function",
