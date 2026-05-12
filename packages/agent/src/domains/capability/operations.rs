@@ -10,16 +10,20 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::Deps;
-use super::types::{
-    CapabilityBindingRecord, CapabilityContractRecord, CapabilityExecutionRecord,
-    CapabilityImplementationRecord, CapabilityInspectionRecord,
+use super::registry::{
+    CapabilityContextPrimerPolicy, CapabilityRegistrySnapshot, CapabilitySearchFilters,
+    CapabilitySearchPolicy, HybridLocalCapabilityIndex, binding_decision, bool_field, parse_target,
+    render_capability_primer as render_primer_from_snapshot, requires_fresh_revision, string_field,
+    u64_field,
 };
+use super::types::{CapabilityBindingDecision, CapabilityExecutionRecord};
 use crate::engine::{
     ActorContext, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EffectClass,
-    EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
-    FunctionRevision, Invocation, RiskLevel,
+    EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionQuery, FunctionRevision,
+    Invocation, RiskLevel,
 };
 use crate::shared::content::ToolResultContent;
+use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::tools::{CapabilityResult, ToolResultBody};
@@ -35,51 +39,55 @@ pub(crate) async fn search_value(
 ) -> Result<Value, CapabilityError> {
     let params = &invocation.payload;
     let query = string_field(params, "query").unwrap_or_default();
-    let namespace = string_field(params, "namespace");
     let limit = u64_field(params, "limit")
         .map(|value| value.clamp(1, MAX_LIMIT as u64) as usize)
         .unwrap_or(DEFAULT_LIMIT);
-    let include_unavailable = bool_field(params, "includeUnavailable").unwrap_or(false);
-    let max_risk = risk_field(params, "riskMax")?;
-    let effect = effect_field(params, "effect")?;
+    let cursor_offset = parse_cursor(params)?;
+    let filters = CapabilitySearchFilters {
+        kind: string_field(params, "kind"),
+        contract_id: string_field(params, "contractId")
+            .or_else(|| string_field(params, "contract_id")),
+        namespace: string_field(params, "namespace"),
+        plugin_id: string_field(params, "pluginId").or_else(|| string_field(params, "plugin_id")),
+        effect: effect_field(params, "effect")?,
+        risk_max: risk_field(params, "riskMax")?,
+        trust_tier_min: string_field(params, "trustTierMin")
+            .or_else(|| string_field(params, "trust_tier_min")),
+        include_unavailable: bool_field(params, "includeUnavailable").unwrap_or(false),
+        scope: string_field(params, "scope"),
+    };
 
     let actor = actor_from_invocation(invocation)?;
-    let mut functions = deps
+    let functions = deps
         .engine_host
-        .discover(&FunctionQuery {
-            actor: Some(actor),
-            namespace_prefix: namespace,
-            text: if query.trim().is_empty() {
-                None
-            } else {
-                Some(query.clone())
-            },
-            effect_class: effect,
-            max_risk,
-            health: if include_unavailable {
-                None
-            } else {
-                Some(FunctionHealth::Healthy)
-            },
-            ..FunctionQuery::default()
-        })
+        .discover(&filters.function_query(actor))
         .await;
-    functions.retain(|function| !is_capability_primitive(function));
-    functions.sort_by(|a, b| {
-        ranking_score(b, &query)
-            .cmp(&ranking_score(a, &query))
-            .then_with(|| a.id.as_str().cmp(b.id.as_str()))
-    });
-    functions.truncate(limit);
 
     let catalog_revision = deps.engine_host.catalog_revision().await;
-    let results = functions
-        .iter()
-        .map(|function| {
-            let projection = CapabilityProjection::from_function(function, catalog_revision.0);
-            projection.search_result(&query)
-        })
+    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
+    let documents = snapshot.filtered_documents(&filters);
+    let policy = CapabilitySearchPolicy::default();
+    let index = HybridLocalCapabilityIndex::new(policy);
+    let query_for_index = query.clone();
+    let index_limit = cursor_offset.saturating_add(limit).saturating_add(1);
+    let search_result = run_blocking_task("capability.search.index", move || {
+        Ok(index.search(&query_for_index, documents, index_limit))
+    })
+    .await?;
+    let next_cursor = if search_result.hits.len() > cursor_offset.saturating_add(limit) {
+        Some(cursor_offset.saturating_add(limit).to_string())
+    } else {
+        None
+    };
+    let page_hits = search_result
+        .hits
+        .into_iter()
+        .skip(cursor_offset)
+        .take(limit)
         .collect::<Vec<_>>();
+    let results = serde_json::to_value(&page_hits).map_err(|error| CapabilityError::Internal {
+        message: error.to_string(),
+    })?;
     let summary = render_search_summary(&query, &results);
     tool_result_value(CapabilityResult {
         content: ToolResultBody::Blocks(vec![ToolResultContent::text(summary)]),
@@ -87,15 +95,26 @@ pub(crate) async fn search_value(
             "query": query,
             "catalogRevision": catalog_revision.0,
             "results": results,
-            "searchMode": {
-                "lexical": true,
-                "localVector": false,
-                "cloudEmbeddings": false
-            }
+            "nextCursor": next_cursor,
+            "searchMode": search_result.status
         })),
         is_error: None,
         stop_turn: None,
     })
+}
+
+fn parse_cursor(params: &Value) -> Result<usize, CapabilityError> {
+    let Some(cursor) = string_field(params, "cursor") else {
+        return Ok(0);
+    };
+    let raw = cursor
+        .strip_prefix("offset:")
+        .unwrap_or(cursor.as_str())
+        .trim();
+    raw.parse::<usize>()
+        .map_err(|_| CapabilityError::InvalidParams {
+            message: format!("Unsupported capability search cursor '{cursor}'"),
+        })
 }
 
 pub(crate) async fn inspect_value(
@@ -103,14 +122,12 @@ pub(crate) async fn inspect_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let actor = actor_from_invocation(invocation)?;
-    let function = resolve_target_function(&invocation.payload, deps, &actor).await?;
-    let catalog_revision = deps.engine_host.catalog_revision().await;
-    let projection = CapabilityProjection::from_function(&function, catalog_revision.0);
-    let details = serde_json::to_value(projection.inspection(&function)).map_err(|error| {
-        CapabilityError::Internal {
+    let target = resolve_target(&invocation.payload, deps, &actor).await?;
+    let details = serde_json::to_value(target.entry.inspection(target.binding_decision)).map_err(
+        |error| CapabilityError::Internal {
             message: error.to_string(),
-        }
-    })?;
+        },
+    )?;
     let summary = render_inspection_summary(&details);
     tool_result_value(CapabilityResult {
         content: ToolResultBody::Blocks(vec![ToolResultContent::text(summary)]),
@@ -133,20 +150,57 @@ pub(crate) async fn execute_value(
     }
 }
 
+pub(crate) async fn render_capability_primer(
+    engine_host: &crate::engine::EngineHostHandle,
+    session_id: &str,
+    workspace_id: Option<&str>,
+    policy: &CapabilityContextPrimerPolicy,
+) -> Result<Option<String>, CapabilityError> {
+    let mut actor = ActorContext::new(
+        crate::engine::ActorId::new(format!("agent:{session_id}")).map_err(|error| {
+            CapabilityError::Internal {
+                message: error.to_string(),
+            }
+        })?,
+        ActorKind::Agent,
+        AuthorityGrantId::new("agent-capability-primer").map_err(|error| {
+            CapabilityError::Internal {
+                message: error.to_string(),
+            }
+        })?,
+    )
+    .with_scope("capability.search")
+    .with_scope("capability.inspect")
+    .with_scope("capability.execute")
+    .with_session_id(session_id.to_owned());
+    if let Some(workspace_id) = workspace_id {
+        actor = actor.with_workspace_id(workspace_id.to_owned());
+    }
+    let functions = engine_host
+        .discover(&FunctionQuery {
+            actor: Some(actor),
+            health: Some(FunctionHealth::Healthy),
+            ..FunctionQuery::default()
+        })
+        .await;
+    let revision = engine_host.catalog_revision().await;
+    let snapshot = CapabilityRegistrySnapshot::new(functions, revision.0);
+    Ok(render_primer_from_snapshot(&snapshot, policy))
+}
+
 async fn execute_invoke_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let actor = actor_from_invocation(invocation)?;
-    let function = resolve_target_function(&invocation.payload, deps, &actor).await?;
+    let target = resolve_target(&invocation.payload, deps, &actor).await?;
+    let function = target.entry.function.clone();
     if is_capability_primitive(&function) {
         return Err(CapabilityError::InvalidParams {
             message: "execute cannot recursively invoke capability primitives; call search or inspect directly".to_owned(),
         });
     }
-    let selected_for_policy =
-        CapabilityProjection::from_function(&function, deps.engine_host.catalog_revision().await.0);
-    enforce_execution_policy(invocation, &selected_for_policy, &function)?;
+    enforce_execution_policy(invocation, &target.binding_decision, &function)?;
 
     let expected_revision = u64_field(&invocation.payload, "expectedRevision");
     if requires_fresh_revision(&function) && expected_revision.is_none() {
@@ -250,10 +304,8 @@ async fn execute_invoke_value(
                     "functionId": function.id.as_str(),
                     "traceId": approval.trace_id.as_str()
                 },
-                "selectedImplementation": CapabilityProjection::from_function(
-                    &function,
-                    deps.engine_host.catalog_revision().await.0
-                ).implementation_id
+                "selectedImplementation": target.binding_decision.selected_implementation,
+                "bindingDecision": target.binding_decision
             })),
             is_error: Some(true),
             stop_turn: Some(true),
@@ -265,19 +317,20 @@ async fn execute_invoke_value(
     }
     let output = result.value.clone().unwrap_or(Value::Null);
     let catalog_revision = result.catalog_revision.0;
-    let selected = CapabilityProjection::from_function(&function, catalog_revision);
     let record = CapabilityExecutionRecord {
         status: "ok".to_owned(),
         trace_id: result.trace_id.as_str().to_owned(),
         root_invocation_id: invocation.id.as_str().to_owned(),
         child_invocations: vec![result.invocation_id.as_str().to_owned()],
-        selected_implementation: selected.implementation_id,
+        selected_implementation: target.binding_decision.selected_implementation.clone(),
         function_id: result.function_id.as_str().to_owned(),
         catalog_revision,
         function_revision: result.function_revision.0,
         output: output.clone(),
         approval_state: None,
-        plugin_versions: vec![selected.plugin_id],
+        plugin_versions: vec![target.entry.plugin_id.clone()],
+        binding_decision: target.binding_decision,
+        schema_digest: target.entry.schema_digest,
     };
     let mut details = serde_json::to_value(record).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
@@ -300,34 +353,23 @@ async fn execute_invoke_value(
     })
 }
 
-async fn resolve_target_function(
+struct ResolvedCapabilityTarget {
+    entry: super::registry::CapabilityRegistryEntry,
+    binding_decision: CapabilityBindingDecision,
+}
+
+async fn resolve_target(
     params: &Value,
     deps: &Deps,
     actor: &ActorContext,
-) -> Result<FunctionDefinition, CapabilityError> {
-    if let Some(function_id) = target_function_id(params) {
-        let function_id =
-            FunctionId::new(function_id).map_err(|error| CapabilityError::InvalidParams {
-                message: error.to_string(),
-            })?;
-        return deps
-            .engine_host
-            .inspect_function(&function_id, Some(actor))
-            .await
-            .map_err(engine_error_to_capability_error);
-    }
-
-    let Some(contract_id) = string_field(params, "contractId")
-        .or_else(|| string_field(params, "contract_id"))
-        .or_else(|| string_field(params, "capabilityId"))
-        .or_else(|| string_field(params, "capability_id"))
-    else {
+) -> Result<ResolvedCapabilityTarget, CapabilityError> {
+    let Some(target) = parse_target(params) else {
         return Err(CapabilityError::InvalidParams {
             message: "Pass one of functionId, implementationId, capabilityId, or contractId"
                 .to_owned(),
         });
     };
-    let mut functions = deps
+    let functions = deps
         .engine_host
         .discover(&FunctionQuery {
             actor: Some(actor.clone()),
@@ -335,50 +377,19 @@ async fn resolve_target_function(
             ..FunctionQuery::default()
         })
         .await;
-    functions.retain(|function| {
-        let projection = CapabilityProjection::from_function(function, 0);
-        projection.contract_id == contract_id
-            || projection.implementation_id == contract_id
-            || projection.capability_id() == contract_id
-            || function.id.as_str() == contract_id
-    });
-    functions.sort_by(|a, b| {
-        implementation_preference(a)
-            .cmp(&implementation_preference(b))
-            .then_with(|| a.id.as_str().cmp(b.id.as_str()))
-    });
-    functions
-        .into_iter()
-        .next()
-        .ok_or_else(|| CapabilityError::NotFound {
+    let catalog_revision = deps.engine_host.catalog_revision().await;
+    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
+    let candidates = snapshot.find_candidates(&target);
+    let Some((entry, decision)) = binding_decision(&target, &candidates) else {
+        return Err(CapabilityError::NotFound {
             code: "CAPABILITY_NOT_FOUND".to_owned(),
-            message: format!("No visible healthy capability matches '{contract_id}'"),
-        })
-}
-
-fn target_function_id(params: &Value) -> Option<String> {
-    for key in ["functionId", "function_id"] {
-        if let Some(value) = string_field(params, key) {
-            return Some(value);
-        }
-    }
-    for key in [
-        "implementationId",
-        "implementation_id",
-        "capabilityId",
-        "capability_id",
-    ] {
-        let Some(value) = string_field(params, key) else {
-            continue;
-        };
-        if let Some(function_id) = value.strip_prefix("function:") {
-            return Some(function_id.to_owned());
-        }
-        if value.contains("::") {
-            return Some(value);
-        }
-    }
-    None
+            message: "No visible healthy capability matches the requested target".to_owned(),
+        });
+    };
+    Ok(ResolvedCapabilityTarget {
+        entry,
+        binding_decision: decision,
+    })
 }
 
 fn actor_from_invocation(invocation: &Invocation) -> Result<ActorContext, CapabilityError> {
@@ -406,122 +417,6 @@ fn actor_from_invocation(invocation: &Invocation) -> Result<ActorContext, Capabi
     Ok(actor)
 }
 
-#[derive(Clone, Debug)]
-struct CapabilityProjection {
-    contract_id: String,
-    implementation_id: String,
-    plugin_id: String,
-    worker_id: String,
-    function_id: String,
-    catalog_revision: u64,
-    schema_digest: String,
-}
-
-impl CapabilityProjection {
-    fn from_function(function: &FunctionDefinition, catalog_revision: u64) -> Self {
-        let contract_id = string_metadata(function, "contractId")
-            .or_else(|| string_metadata(function, "capabilityContractId"))
-            .unwrap_or_else(|| default_contract_id(function));
-        let implementation_id = string_metadata(function, "implementationId")
-            .or_else(|| string_metadata(function, "capabilityImplementationId"))
-            .unwrap_or_else(|| format!("function:{}", function.id.as_str()));
-        let plugin_id = string_metadata(function, "pluginId")
-            .or_else(|| string_metadata(function, "domainModule"))
-            .unwrap_or_else(|| default_plugin_id(function));
-        let schema_digest = schema_digest(function);
-        Self {
-            contract_id,
-            implementation_id,
-            plugin_id,
-            worker_id: function.owner_worker.as_str().to_owned(),
-            function_id: function.id.as_str().to_owned(),
-            catalog_revision,
-            schema_digest,
-        }
-    }
-
-    fn capability_id(&self) -> String {
-        self.implementation_id.clone()
-    }
-
-    fn search_result(&self, query: &str) -> Value {
-        json!({
-            "kind": "implementation",
-            "capabilityId": self.capability_id(),
-            "contractId": self.contract_id,
-            "implementationId": self.implementation_id,
-            "pluginId": self.plugin_id,
-            "workerId": self.worker_id,
-            "functionId": self.function_id,
-            "catalogRevision": self.catalog_revision,
-            "schemaDigest": self.schema_digest,
-            "relevance": ranking_hint(&self.function_id, query),
-            "requiresInspect": true
-        })
-    }
-
-    fn inspection(&self, function: &FunctionDefinition) -> CapabilityInspectionRecord {
-        CapabilityInspectionRecord {
-            contract: CapabilityContractRecord {
-                contract_id: self.contract_id.clone(),
-                version: function.revision.0,
-                display_name: display_name(function),
-                description: function.description.clone(),
-                input_schema: function.request_schema.clone(),
-                output_schema: function.response_schema.clone(),
-                effect_class: effect_name(function.effect_class).to_owned(),
-                risk_level: risk_name(function.risk_level).to_owned(),
-                idempotency_contract: serde_json::to_value(&function.idempotency).ok(),
-                approval_contract: json!({
-                    "approvalRequired": function.required_authority.approval_required
-                }),
-                lease_contract: serde_json::to_value(&function.resource_lease).ok(),
-                compensation_contract: serde_json::to_value(&function.compensation).ok(),
-                examples: Vec::new(),
-                semantic_tags: function.tags.clone(),
-            },
-            implementation: CapabilityImplementationRecord {
-                implementation_id: self.implementation_id.clone(),
-                contract_id: self.contract_id.clone(),
-                plugin_id: self.plugin_id.clone(),
-                worker_id: self.worker_id.clone(),
-                function_id: self.function_id.clone(),
-                version: function.revision.0,
-                health: format!("{:?}", function.health),
-                visibility: function.visibility.as_str().to_owned(),
-                latency_class: "unknown".to_owned(),
-                cost_class: "unknown".to_owned(),
-                trust_tier: trust_tier(function).to_owned(),
-                authority_requirements: serde_json::to_value(&function.required_authority)
-                    .unwrap_or(Value::Null),
-                runtime_requirements: runtime_requirements(function),
-                schema_digest: self.schema_digest.clone(),
-                catalog_revision: self.catalog_revision,
-                provenance: serde_json::to_value(&function.provenance).unwrap_or(Value::Null),
-            },
-            binding: CapabilityBindingRecord {
-                contract_id: self.contract_id.clone(),
-                selected_implementation: self.implementation_id.clone(),
-                selection_policy: "direct_catalog_default".to_owned(),
-                secondary_implementations: Vec::new(),
-                enabled: true,
-            },
-            execution_requirements: json!({
-                "expectedRevision": function.revision.0,
-                "freshInspectionRequired": requires_fresh_revision(function),
-                "idempotencyKeyRequired": function.effect_class.is_mutating(),
-                "approvalRequired": function.required_authority.approval_required,
-                "timeoutMs": null,
-                "budget": null
-            }),
-            docs: json!({
-                "summary": function.description,
-                "metadata": function.metadata
-            }),
-        }
-    }
-}
-
 fn is_capability_primitive(function: &FunctionDefinition) -> bool {
     function
         .metadata
@@ -530,82 +425,9 @@ fn is_capability_primitive(function: &FunctionDefinition) -> bool {
         .unwrap_or(false)
 }
 
-fn default_contract_id(function: &FunctionDefinition) -> String {
-    function.id.as_str().to_owned()
-}
-
-fn default_plugin_id(function: &FunctionDefinition) -> String {
-    match function.owner_worker.as_str() {
-        "mcp" => "external.mcp".to_owned(),
-        worker => format!("first_party.{worker}"),
-    }
-}
-
-fn schema_digest(function: &FunctionDefinition) -> String {
-    let material = json!({
-        "functionId": function.id.as_str(),
-        "revision": function.revision.0,
-        "request": function.request_schema,
-        "response": function.response_schema,
-        "effect": effect_name(function.effect_class),
-        "risk": risk_name(function.risk_level),
-    });
-    let serialized = serde_json::to_vec(&material).unwrap_or_default();
-    sha256_hex(&serialized)
-}
-
-fn ranking_score(function: &FunctionDefinition, query: &str) -> i64 {
-    if query.trim().is_empty() {
-        return 0;
-    }
-    let haystack = searchable_text(function);
-    query
-        .split_whitespace()
-        .map(|term| {
-            let term = term.to_ascii_lowercase();
-            if function.id.as_str().to_ascii_lowercase() == term {
-                100
-            } else if function.id.as_str().to_ascii_lowercase().contains(&term) {
-                50
-            } else if haystack.contains(&term) {
-                10
-            } else {
-                0
-            }
-        })
-        .sum()
-}
-
-fn ranking_hint(function_id: &str, query: &str) -> Value {
-    json!({
-        "score": if query.trim().is_empty() { 0 } else { 1 },
-        "matchedBy": "local_lexical",
-        "snippet": function_id
-    })
-}
-
-fn searchable_text(function: &FunctionDefinition) -> String {
-    let mut text = [
-        function.id.as_str().to_owned(),
-        function.description.clone(),
-        function.tags.join(" "),
-        function.metadata.to_string(),
-    ]
-    .join(" ");
-    text.make_ascii_lowercase();
-    text
-}
-
-fn implementation_preference(function: &FunctionDefinition) -> u8 {
-    match function.owner_worker.as_str() {
-        "mcp" => 20,
-        _ => 0,
-    }
-}
-
 fn enforce_execution_policy(
     invocation: &Invocation,
-    projection: &CapabilityProjection,
+    decision: &CapabilityBindingDecision,
     function: &FunctionDefinition,
 ) -> Result<(), CapabilityError> {
     if matches!(
@@ -616,9 +438,9 @@ fn enforce_execution_policy(
     }
 
     let candidates = [
-        projection.contract_id.as_str(),
-        projection.implementation_id.as_str(),
-        projection.function_id.as_str(),
+        decision.contract_id.as_str(),
+        decision.selected_implementation.as_str(),
+        decision.selected_function_id.as_str(),
         function.id.as_str(),
     ];
     if policy_scope_matches(
@@ -633,8 +455,8 @@ fn enforce_execution_policy(
                 function.id.as_str()
             ),
             details: Some(json!({
-                "contractId": projection.contract_id,
-                "implementationId": projection.implementation_id,
+                "contractId": decision.contract_id.as_str(),
+                "implementationId": decision.selected_implementation.as_str(),
                 "functionId": function.id.as_str()
             })),
         });
@@ -653,8 +475,8 @@ fn enforce_execution_policy(
             function.id.as_str()
         ),
         details: Some(json!({
-            "contractId": projection.contract_id,
-            "implementationId": projection.implementation_id,
+            "contractId": decision.contract_id.as_str(),
+            "implementationId": decision.selected_implementation.as_str(),
             "functionId": function.id.as_str()
         })),
     })
@@ -667,10 +489,6 @@ fn policy_scope_matches(scopes: &[String], prefix: &str, candidates: &[&str]) ->
         };
         value == "*" || candidates.contains(&value)
     })
-}
-
-fn requires_fresh_revision(function: &FunctionDefinition) -> bool {
-    function.effect_class.is_mutating() || function.risk_level >= RiskLevel::Medium
 }
 
 fn child_idempotency_key(
@@ -707,8 +525,9 @@ fn child_idempotency_key(
     Ok(None)
 }
 
-fn render_search_summary(query: &str, results: &[Value]) -> String {
-    if results.is_empty() {
+fn render_search_summary(query: &str, results: &Value) -> String {
+    let result_values = results.as_array().cloned().unwrap_or_default();
+    if result_values.is_empty() {
         return if query.trim().is_empty() {
             "No visible capabilities found.".to_owned()
         } else {
@@ -717,9 +536,9 @@ fn render_search_summary(query: &str, results: &[Value]) -> String {
     }
     let mut lines = vec![format!(
         "Found {} visible capabilities. Inspect one before executing mutating or elevated-risk work.",
-        results.len()
+        result_values.len()
     )];
-    for result in results.iter().take(8) {
+    for result in result_values.iter().take(8) {
         let function_id = result
             .get("functionId")
             .and_then(Value::as_str)
@@ -768,44 +587,6 @@ fn merge_optional_details(existing: Option<Value>, extra: Value) -> Value {
     }
 }
 
-fn string_metadata(function: &FunctionDefinition, key: &str) -> Option<String> {
-    function
-        .metadata
-        .get(key)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn runtime_requirements(function: &FunctionDefinition) -> Value {
-    json!({
-        "workerKind": function.metadata.get("workerKind").cloned().unwrap_or(Value::Null),
-        "deliveryModes": function.allowed_delivery_modes.iter().map(|mode| format!("{:?}", mode)).collect::<Vec<_>>()
-    })
-}
-
-fn display_name(function: &FunctionDefinition) -> String {
-    string_metadata(function, "modelToolName")
-        .or_else(|| {
-            function
-                .id
-                .as_str()
-                .rsplit_once("::")
-                .map(|(_, name)| name.to_owned())
-        })
-        .unwrap_or_else(|| function.id.as_str().to_owned())
-}
-
-fn trust_tier(function: &FunctionDefinition) -> &'static str {
-    match function.owner_worker.as_str() {
-        "mcp" => "external_mcp",
-        worker if function.provenance.source == "system" || worker != "sandbox" => {
-            "first_party_signed"
-        }
-        "sandbox" => "session_generated",
-        _ => "untrusted",
-    }
-}
-
 fn risk_field(params: &Value, key: &str) -> Result<Option<RiskLevel>, CapabilityError> {
     let Some(value) = string_field(params, key) else {
         return Ok(None);
@@ -845,43 +626,6 @@ fn effect_field(params: &Value, key: &str) -> Result<Option<EffectClass>, Capabi
     }
 }
 
-fn effect_name(effect: EffectClass) -> &'static str {
-    match effect {
-        EffectClass::PureRead => "pure_read",
-        EffectClass::DeterministicCompute => "deterministic_compute",
-        EffectClass::DelegatedInvocation => "delegated_invocation",
-        EffectClass::IdempotentWrite => "idempotent_write",
-        EffectClass::AppendOnlyEvent => "append_only_event",
-        EffectClass::ReversibleSideEffect => "reversible_side_effect",
-        EffectClass::ExternalSideEffect => "external_side_effect",
-        EffectClass::IrreversibleSideEffect => "irreversible_side_effect",
-    }
-}
-
-fn risk_name(risk: RiskLevel) -> &'static str {
-    match risk {
-        RiskLevel::Low => "low",
-        RiskLevel::Medium => "medium",
-        RiskLevel::High => "high",
-        RiskLevel::Critical => "critical",
-    }
-}
-
-fn string_field(params: &Value, key: &str) -> Option<String> {
-    params
-        .get(key)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn u64_field(params: &Value, key: &str) -> Option<u64> {
-    params.get(key).and_then(Value::as_u64)
-}
-
-fn bool_field(params: &Value, key: &str) -> Option<bool> {
-    params.get(key).and_then(Value::as_bool)
-}
-
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -891,7 +635,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{VisibilityScope, WorkerId};
+    use crate::engine::{FunctionId, VisibilityScope, WorkerId};
 
     fn test_function(id: &str) -> FunctionDefinition {
         FunctionDefinition::new(
@@ -904,17 +648,17 @@ mod tests {
     }
 
     #[test]
-    fn projection_defaults_contract_and_implementation_from_function() {
+    fn registry_defaults_contract_and_implementation_from_function() {
         let function = test_function("filesystem::read_file");
-        let projection = CapabilityProjection::from_function(&function, 7);
-        assert_eq!(projection.contract_id, "filesystem::read_file");
+        let entry = super::super::registry::CapabilityRegistryEntry::from_function(function, 7);
+        assert_eq!(entry.contract_id, "filesystem::read_file");
         assert_eq!(
-            projection.implementation_id,
-            "function:filesystem::read_file"
+            entry.implementation_id,
+            "first_party.filesystem.v1.read_file"
         );
-        assert_eq!(projection.plugin_id, "first_party.filesystem");
-        assert_eq!(projection.catalog_revision, 7);
-        assert!(!projection.schema_digest.is_empty());
+        assert_eq!(entry.plugin_id, "first_party.filesystem");
+        assert_eq!(entry.catalog_revision, 7);
+        assert!(!entry.schema_digest.is_empty());
     }
 
     #[test]
@@ -952,10 +696,12 @@ mod tests {
     #[test]
     fn explicit_implementation_id_can_address_function_ids() {
         let params = json!({"implementationId": "function:filesystem::read_file"});
-        assert_eq!(
-            target_function_id(&params),
-            Some("filesystem::read_file".to_owned())
-        );
+        let target = parse_target(&params).expect("target");
+        assert!(matches!(
+            target,
+            super::super::registry::CapabilityTarget::Implementation(value)
+                if value == "function:filesystem::read_file"
+        ));
     }
 
     #[test]

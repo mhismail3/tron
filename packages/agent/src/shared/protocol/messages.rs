@@ -419,6 +419,9 @@ pub struct Context {
     /// Dynamic rules context from path-scoped files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_rules_context: Option<String>,
+    /// Generated compact capability catalog primer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capability_primer_context: Option<String>,
     /// Context injected by hooks. This is audited as its own context block even
     /// when provider parity requires the text to remain folded into the user
     /// message for now.
@@ -809,6 +812,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            capability_primer_context: None,
             hook_context: None,
             server_origin: None,
         };

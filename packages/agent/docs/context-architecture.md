@@ -139,8 +139,9 @@ gravity.
 - `build_turn_context` starts from `ContextManager::build_base_context`, attaches
   message history, tool schemas, server origin, skill contexts, job results, and
   dynamic rules from `RunContext`.
-- Local providers use `runtime/context/local_policy.rs` as a thin projection over
-  the active AgentExecutionSpec: reduced tool schemas including
+- Local providers use
+  `packages/agent/src/domains/agent/runner/context/local_policy.rs` as a thin
+  projection over the active AgentExecutionSpec: reduced tool schemas including
   `agent::ask_user`, no memory, no skill index, no job results, truncated rules,
   but explicit skill activation/active/removal context is retained.
 - `compose_context_audit_blocks` compiles the provider-independent audit view.
@@ -162,13 +163,14 @@ gravity.
 
 | Source | Current owner | Included when | Lifecycle | Surface | Cache class | Token accounting | Control knob |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Seeded profile system prompts | `~/.tron/profiles/default/prompts/*.md` plus `normal`/`chat`/`local` entrypoint overrides; loaded by `runtime/context/instruction_prompts` and `ContextManager` | Always, unless project/global override provides the normal core prompt; chat maps main to `chat`; local maps main to `local` | Foundation/session | Provider instructions | Foundation | `systemPrompt` bucket | Edit child profile refs/prompts; project `.tron/SYSTEM.md` |
+| Seeded profile system prompts | `~/.tron/profiles/default/prompts/*.md` plus `normal`/`chat`/`local` entrypoint overrides; loaded by profile runtime and `ContextManager` | Always, unless project/global override provides the normal core prompt; chat maps main to `chat`; local maps main to `local` | Foundation/session | Provider instructions | Foundation | `systemPrompt` bucket | Edit child profile refs/prompts; project `.tron/SYSTEM.md` |
 | Project system prompt override | `.tron/SYSTEM.md` in working directory | Normal non-chat sessions when present | Session | Provider instructions | Foundation | `systemPrompt` bucket | File contents |
 | Global user profile prompt | `~/.tron/profiles/user/prompts/core.md` | Normal non-chat sessions when project override absent | Session | Provider instructions | Foundation | `systemPrompt` bucket | File contents |
-| Project/global rules | `runtime/context/loader.rs`, `runtime/context/loader.rs`, `rules_discovery.rs` | Normal sessions; path-scoped rules can be pre-activated or dynamically activated | Session and turn | Provider instructions | Session/turn | `rules` and dynamic-rules buckets | `settings.context.rules.*`, rules files, touched paths |
-| Memory root | `runtime/memory/registry.rs`; `~/.tron/memory/MEMORY.md` | Non-local model turns | Session | Provider instructions | Session | `memory` bucket | memory capabilities and file contents |
+| Project/global rules | `packages/agent/src/domains/agent/runner/context/` | Normal sessions; path-scoped rules can be pre-activated or dynamically activated | Session and turn | Provider instructions | Session/turn | `rules` and dynamic-rules buckets | `settings.context.rules.*`, rules files, touched paths |
+| Memory root | `packages/agent/src/domains/agent/runner/memory/registry.rs`; `~/.tron/memory/MEMORY.md` | Non-local model turns | Session | Provider instructions | Session | `memory` bucket | memory capabilities and file contents |
 | Memory detail listing | `~/.tron/memory/rules/*.md` listing only | Non-local model turns, as part of memory content | Session | Provider instructions | Session | `memory` bucket | File presence/frontmatter |
 | Worktree isolation note | `agent_prompt_service.rs` plus `git-workflow` prompt | Sessions with acquired worktree | Session | Provider instructions through memory | Session | `memory` bucket | Worktree/session isolation settings |
+| Capability primer | `capability::registry` snapshot rendered by `turn_runner` | Enabled by `capabilityPolicies.*.contextPrimerPolicy`; default is core first-party capabilities | Turn | Provider instructions | Turn | included in context blocks | `capabilityContextPrimerPolicies.*` |
 | Skill index | `skills/injector.rs`; `settings.skills.showIndex` | Cloud models according to show-index policy | Session | Provider instructions | Session | `skillIndex` bucket | Skill registry and `showIndex` |
 | Skill activation directive | `prompt_runtime` skill context reconstruction | Active or newly invoked skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | `@skill`, skill events |
 | Active skill XML | `SKILL.md` resolved by `SkillRegistry` and injector | Explicitly active skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | Skill files, `@skill`, skill events |
@@ -178,7 +180,7 @@ gravity.
 | Working directory | `AgentConfig`/`ContextManager` | Every turn | Session | Provider instructions | Session | `environment` bucket | Session working directory/worktree |
 | Message history | `ContextManager` `MessageStore`, reconstructed from events | Every turn | Turn/session history | Provider messages | Turn | `messages` bucket | Session events, compaction |
 | Current user prompt | `TronAgent::run`; optional multimodal override | Current turn | Turn | Provider message | Turn | `messages` bucket | engine prompt payload, hook AddContext |
-| Tool schemas | Live engine catalog entries | Every turn; reduced for local models | Session | Provider tools | Session | `tools` bucket | Tool capability specs, denied tools, local policy |
+| Tool schemas | Live engine catalog projection of `capability::search`, `capability::inspect`, and `capability::execute` only | Every turn; reduced for local models only by capability policy | Session | Provider tools | Session | `tools` bucket | Capability primitive specs, denied capabilities, local policy |
 | Tool results | Tool executor -> `ContextManager` messages | After tool execution, next provider request | Turn/history | Provider messages | Turn | `messages` bucket | Tool behavior and compaction |
 | Compaction summaries | `compaction_engine`/event reconstruction | After compaction boundaries | Session/history | Provider messages | Session | `messages` bucket | Context compactor settings/capabilities |
 | Hook AddContext | Hook engine `UserPromptSubmit` action | Hook returns non-empty context under budget | Turn | User message content | Turn | `messages` bucket | Hook files/settings |
@@ -194,6 +196,7 @@ prompt blocks in precedence order:
 | 20 | `project.rules` | `workspace` | Instructions | Session |
 | 30 | `memory.root` | `memory` | Instructions | Session |
 | 40 | `dynamic.rules` | `profiles` | Instructions | Turn |
+| 45 | `capabilities.primer` | `profiles` | Instructions | Turn |
 | 50 | `skills.index` | `skills` | Instructions | Session |
 | 60 | `skills.activation` | `skills` | Instructions | Turn |
 | 70 | `skills.active` | `skills` | Instructions | Turn |
@@ -275,14 +278,14 @@ provider payload preview for a turn.
 The working tree shifts Tron from a code-bundled prompt/settings model to a
 profile-first home model:
 
-- Prompt files moved out of `runtime/context/system_prompts` and provider
+- Prompt files moved out of code-bundled prompt directories and provider
   prompt locations into `packages/agent/defaults/profiles/default/**`,
   which seed `~/.tron/profiles/default/**`.
 - Settings now live under `[settings]` in profile TOML. Managed defaults are in
   `~/.tron/profiles/default/profile.toml`; sparse user/app overrides are in
   `~/.tron/profiles/user/profile.toml`; environment variables remain the final
   override layer.
-- Canonical path helpers in `core/foundation/paths.rs` describe the five
+- Canonical path helpers in `packages/agent/src/shared/foundation/paths.rs` describe the five
   top-level homes: `profiles`, `skills`, `memory`, `workspace`, and `internal`.
 - Provider transports gained `audit_payload` support so the pre-transport context
   and adapted provider request can both be recorded.
@@ -298,9 +301,10 @@ profile-first home model:
 The profile-first pass deliberately removes duplicate path and behavior
 knowledge from runtime call sites:
 
-- Rust path construction resolves through `core/foundation/paths.rs`; startup
-  seeding/recovery uses `core/foundation/constitution.rs`; execution behavior
-  resolves through `core/foundation/profile.rs`.
+- Rust path construction resolves through
+  `packages/agent/src/shared/foundation/paths.rs`; startup seeding/recovery uses
+  `packages/agent/src/shared/foundation/constitution.rs`; execution behavior
+  resolves through `packages/agent/src/shared/foundation/profile.rs`.
 - Managed defaults are listed once in `constitution.rs` through a
   `managed_default!` macro whose include path and seeded path share the same
   relative source string.
@@ -330,13 +334,13 @@ These findings were the original audit gaps that drove the profile-first pass.
 
 | Finding | Why it matters | Evidence to inspect |
 | --- | --- | --- |
-| Seeded `context-blocks.toml` was incomplete | The default policy now names all emitted prompt blocks plus the audit-only tool/message blocks. | `packages/agent/defaults/profiles/default/context/context-blocks.toml`; `llm/shared/context_composition.rs` |
+| Seeded `context-blocks.toml` was incomplete | The default policy now names all emitted prompt blocks plus the audit-only tool/message blocks. | `packages/agent/defaults/profiles/default/context/context-blocks.toml`; `packages/agent/src/domains/model/providers/shared/context_composition.rs` |
 | Google system prompt appeared duplicated | Google now uses only `compose_context_parts`, so `system.prompt` is included once. | `packages/agent/src/domains/model/providers/google/provider.rs` |
-| Global rules path migration was uneven | Global rules route through `~/.tron/memory/rules`; global behavior routes through `~/.tron/profiles`. | `runtime/context/loader.rs`; `runtime/context/loader.rs`; `core/foundation/paths.rs`; `runtime/memory/registry.rs` |
+| Global rules path migration was uneven | Global rules route through `~/.tron/memory/rules`; global behavior routes through `~/.tron/profiles`. | `packages/agent/src/domains/agent/runner/context/`; `packages/agent/src/shared/foundation/paths.rs`; `packages/agent/src/domains/agent/runner/memory/registry.rs` |
 | `self-inspect` docs showed old home layout | Managed self-inspect docs now describe the five-root profile-first home. | `packages/agent/skills/self-inspect/SKILL.md`; `reference/schema.md` |
 | Audit persistence is load-bearing | If Constitution context or provider-payload audit writes fail, the turn fails before the model call. This improves replay integrity but makes audit storage availability part of the critical path. | `runtime/agent/turn_runner.rs` |
-| No user-facing audit query surface existed | `context.getAuditTrace` exposes profile refs, context blocks, blob/hash refs, cache policy, and redacted provider payload previews. | `server/capabilities/context.rs`; `server/services/context_queries.rs`; Constitution audit repo |
-| Existing users needed managed default recovery | Managed `default` files are restored from compiled defaults if missing or corrupt; user profiles fail validation and are not overwritten. | `core/foundation/constitution.rs`; `core/foundation/profile.rs` |
+| No user-facing audit query surface existed | `context::get_audit_trace` exposes profile refs, context blocks, blob/hash refs, cache policy, and redacted provider payload previews. | `packages/agent/src/domains/context/contract.rs`; `packages/agent/src/domains/context/queries/`; Constitution audit repo |
+| Existing users needed managed default recovery | Managed `default` files are restored from compiled defaults if missing or corrupt; user profiles fail validation and are not overwritten. | `packages/agent/src/shared/foundation/constitution.rs`; `packages/agent/src/shared/foundation/profile.rs` |
 
 ## Migration Retirement Status
 
@@ -367,15 +371,16 @@ Current behavior:
 | Prompt orchestration | `packages/agent/src/domains/agent/runtime/service/` | `execute_prompt_run`, prompt bootstrap, skill/hook setup |
 | Agent construction | `packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs`, `packages/agent/src/domains/agent/runner/agent/tron_agent.rs` | `AgentConfig`, tool filtering, `TronAgent::run` |
 | Single-turn execution | `packages/agent/src/domains/agent/runner/agent/turn_runner.rs` | `execute_turn`, `build_turn_context`, audit writes, stream/tool phases |
-| Context state | `runtime/context/context_manager.rs` | base context, snapshots, compaction triggers, volatile token generation |
-| Context composition | `llm/shared/context_composition.rs` | canonical block order and audit-only blocks |
-| Provider payloads | `llm/{anthropic,openai,google,kimi,minimax,ollama}` | provider-specific prompt/request adaptation and `audit_payload` |
-| Rules | `runtime/context/loader.rs`, `rules_discovery.rs`, `rules_tracker.rs`, `runtime/context/loader.rs` | discovery, merge order, activation, scoped rules |
-| Memory | `runtime/memory/registry.rs`, `server/capabilities/memory.rs` | root memory, rules listing, auto-retain |
-| Skills | `skills/registry.rs`, `skills/injector.rs`, prompt runtime helpers | index, active XML injection, event-sourced activation |
-| Settings and paths | `settings/storage/loader.rs`, `settings/types`, `core/foundation/paths.rs`, `core/foundation/constitution.rs` | defaults merge, env overrides, home contracts |
-| Persistence and audit | `events/sqlite/repositories/constitution.rs`, `events/store/event_store/constitution.rs`, migrations | audit schema, blob storage, write APIs |
-| Recovery | `runtime/orchestrator/streaming_journal.rs`, reconstructor/session state code | crash recovery and session replay |
+| Capability primer/search | `packages/agent/src/domains/capability/registry.rs` | registry projection, hybrid local index, binding decisions, primer rendering |
+| Context state | `packages/agent/src/domains/agent/runner/context/context_manager.rs` | base context, snapshots, compaction triggers, volatile token generation |
+| Context composition | `packages/agent/src/domains/model/providers/shared/context_composition.rs` | canonical block order and audit-only blocks |
+| Provider payloads | `packages/agent/src/domains/model/providers/{anthropic,openai,google,kimi,minimax,ollama}` | provider-specific prompt/request adaptation and `audit_payload` |
+| Rules | `packages/agent/src/domains/agent/runner/context/` | discovery, merge order, activation, scoped rules |
+| Memory | `packages/agent/src/domains/agent/runner/memory/registry.rs`, `packages/agent/src/domains/memory/` | root memory, rules listing, auto-retain |
+| Skills | `packages/agent/src/domains/skills/implementation/discovery/registry.rs`, `packages/agent/src/domains/skills/implementation/runtime/injector.rs`, prompt runtime helpers | index, active XML injection, event-sourced activation |
+| Settings and paths | `packages/agent/src/domains/settings/implementation/storage/loader.rs`, `packages/agent/src/domains/settings/implementation/types/`, `packages/agent/src/shared/foundation/paths.rs`, `packages/agent/src/shared/foundation/constitution.rs` | defaults merge, env overrides, home contracts |
+| Persistence and audit | `packages/agent/src/domains/session/event_store/sqlite/repositories/constitution.rs`, `packages/agent/src/domains/session/event_store/store/event_store/constitution.rs`, migrations | audit schema, blob storage, write APIs |
+| Recovery | `packages/agent/src/domains/agent/runner/orchestrator/`, reconstructor/session state code | crash recovery and session replay |
 
 ## Transparency and Control Spec
 

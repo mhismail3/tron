@@ -171,7 +171,7 @@ async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     let snapshot = read_json(&mut worker_ws).await;
     assert_eq!(snapshot["type"], "catalog_snapshot");
 
-    let function = FunctionDefinition::new(
+    let mut function = FunctionDefinition::new(
         FunctionId::new("demo::echo").unwrap(),
         tron::engine::WorkerId::new("integration-worker").unwrap(),
         "deterministic integration worker echo",
@@ -180,6 +180,23 @@ async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     )
     .with_risk(RiskLevel::Low)
     .with_provenance(Provenance::system().with_session_id("worker-session"));
+    function.request_schema = Some(json!({
+        "type": "object",
+        "additionalProperties": true
+    }));
+    function.response_schema = Some(json!({
+        "type": "object",
+        "additionalProperties": true
+    }));
+    function.metadata = json!({
+        "contractId": "demo::echo",
+        "implementationId": "session_generated.demo.echo",
+        "pluginId": "session_generated.integration-worker",
+        "trustTier": "session_generated",
+        "contextPrimerLevel": "catalog",
+        "runtimeRequirements": {"workerKind": "external", "deliveryModes": ["Sync"]},
+        "examples": []
+    });
     worker_ws
         .send(Message::text(
             serde_json::to_string(&WorkerProtocolMessage::RegisterFunction(Box::new(

@@ -101,6 +101,16 @@ model tools.
 implementations. `inspect` returns the full current contract, selected
 implementation, authority, risk, schema digest, and expected revision.
 `execute` delegates through the engine ledger to the selected function.
+The projection is owned by `capability::registry`: it builds revisioned
+`CapabilityRegistrySnapshot`s from the live catalog, emits typed contract /
+implementation / binding records, and ranks search results with local lexical
+matching plus local `fastembed` embeddings stored in an embedded `sqlite-vec`
+`vec0` index. If embeddings or vector indexing are unavailable, `search`
+returns lexical results with an explicit degraded index status.
+
+The same registry renders `capabilities.primer` after active rules and before
+skill context. The default profile policy includes trusted first-party core
+capabilities only; all-visible compact context is opt-in and budgeted.
 
 Agent-created capabilities default to session visibility. Promotion to
 workspace or system visibility goes through `/engine` `promote`, requires
@@ -122,5 +132,5 @@ Current guardrails should keep proving:
 - mutating canonical functions require schema, authority, explicit
   idempotency, risk metadata, approval metadata when required, leases when
   shared resources are touched, and compensation notes for high-risk effects;
-- stream, queue, approval, tool, MCP, cron, external-worker, and runtime paths
-  preserve causality through the engine ledger.
+- stream, queue, approval, cron, external-worker, runtime, and MCP-derived
+  capability paths preserve causality through the engine ledger.

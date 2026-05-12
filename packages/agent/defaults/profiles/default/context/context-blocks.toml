@@ -29,6 +29,13 @@ cacheClass = "turn"
 providerSurface = "instructions"
 
 [[blocks]]
+id = "capabilities.primer"
+name = "Capability Primer"
+home = "profiles"
+cacheClass = "turn"
+providerSurface = "instructions"
+
+[[blocks]]
 id = "skills.index"
 name = "Skill Index"
 home = "skills"

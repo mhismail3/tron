@@ -133,7 +133,7 @@ main.rs     Thin CLI/startup entry point
 | `app` | Startup/bootstrap + HTTP shell | `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
-| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
+| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and registry/index projection | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `capability::registry::CapabilityRegistrySnapshot`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor/product-protocol integrations | `CodexAppServerManager`, APNS senders, updater scheduler |
 | `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
@@ -290,8 +290,18 @@ Capability identity is projected from the live catalog:
 | Shape | Meaning |
 |-------|---------|
 | `contractId` | Stable abstract interface. First-party functions default to their canonical engine id unless richer plugin manifests provide explicit contracts. |
-| `implementationId` | Concrete provider. Existing catalog functions default to `function:namespace::function`. |
+| `implementationId` | Concrete provider. First-party catalog functions default to `first_party.<worker>.v<revision>.<function>`, while external/session workers must register implementation metadata within their namespace claims. |
 | `pluginId` | Owning package/domain. Existing first-party workers default to `first_party.<worker>`, while MCP defaults to `external.mcp`. |
+
+`search` runs through the capability registry, not a handwritten tool list. The
+required local baseline is lexical ranking; semantic ranking is local-only via
+`fastembed` embeddings and an embedded `sqlite-vec` `vec0` index, with
+deterministic fused ranking and explicit degraded status if embeddings or vector
+indexing are unavailable. Profile TOML selects search/context behavior through
+`capabilityPolicies.*.searchPolicy`,
+`capabilitySearchPolicies.hybridLocal`,
+`capabilityPolicies.*.contextPrimerPolicy`, and
+`capabilityContextPrimerPolicies.*`.
 
 Mutating or medium/high-risk execution requires a fresh `inspect` result and
 the returned `expectedRevision`. Mutating calls also require stable idempotency;
@@ -611,12 +621,12 @@ Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That se
 
 | Provider | Module | Auth Methods | Notes |
 |----------|--------|--------------|-------|
-| Anthropic | `llm/anthropic/` | OAuth (primary), API key | PKCE OAuth flow; cache pruning supported |
-| OpenAI    | `llm/openai/`    | OAuth, API key            | OAuth uses ChatGPT/Codex metadata; API keys use Platform `/v1/responses` metadata |
-| Google    | `llm/google/`    | OAuth, API key            | Cloud Code Assist OAuth, Gemini API key |
-| MiniMax   | `llm/minimax/`   | API key only              | — |
-| Kimi      | `llm/kimi/`      | API key only              | — |
-| Ollama    | `llm/ollama/`    | None (local)              | Requires Ollama running locally on the same Mac as the agent |
+| Anthropic | `domains/model/providers/anthropic/` | OAuth (primary), API key | PKCE OAuth flow; cache pruning supported |
+| OpenAI    | `domains/model/providers/openai/`    | OAuth, API key            | OAuth uses ChatGPT/Codex metadata; API keys use Platform `/v1/responses` metadata |
+| Google    | `domains/model/providers/google/`    | OAuth, API key            | Cloud Code Assist OAuth, Gemini API key |
+| MiniMax   | `domains/model/providers/minimax/`   | API key only              | - |
+| Kimi      | `domains/model/providers/kimi/`      | API key only              | - |
+| Ollama    | `domains/model/providers/ollama/`    | None (local)              | Requires Ollama running locally on the same Mac as the agent |
 
 ### Multi-Account
 
@@ -661,7 +671,7 @@ See [`packages/agent/src/app/onboarding/mod.rs`](packages/agent/src/app/onboardi
 
 ## Context and Compaction
 
-The context system manages the LLM's input window. Each turn assembles: system prompt + rules + skills + conversation history + tool results.
+The context system manages the LLM's input window. Each turn assembles: system prompt + rules + generated capability primer + skills + conversation history + tool results.
 
 `context::get_snapshot` and `context::get_detailed_snapshot` report the
 server-owned context total. Before a provider call this is the chars/4 local
@@ -689,10 +699,17 @@ Compaction is observable via the canonical `context::should_compact`, `context::
 ```
 System prompt    (stable, per-model)
   + Rules        (path-scoped from .claude/rules/, project-relative AGENTS.md / CLAUDE.md)
+  + Capabilities (generated from the live registry; core first-party by default)
   + Skills       (@skill references from prompt + always-on skills)
   + History      (messages since the most recent compaction boundary)
   + Pending      (current user prompt + tool results)
 ```
+
+`capabilities.primer` is rendered after active rules and before skill context.
+The default `coreFirstParty` policy includes compact schemas/examples for
+trusted first-party core capabilities. `allVisibleCompact` is available as an
+opt-in profile policy for every visible worker/plugin/MCP/OpenAPI/session
+capability under a strict budget.
 
 ### Skills
 
@@ -1137,7 +1154,7 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 8. **Production DB guard**: Startup validates the database path is `~/.tron/internal/database/tron.sqlite` only. Rejects alternate filenames, wrong directories, and symlinked paths.
 
-9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `tron.sqlite.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `events/sqlite/process_lock.rs::acquire_database_lock` called from `init_database` in `main.rs`.
+9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `tron.sqlite.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `domains/session/event_store/sqlite/process_lock.rs::acquire_database_lock` called from startup database initialization.
 
 ---
 

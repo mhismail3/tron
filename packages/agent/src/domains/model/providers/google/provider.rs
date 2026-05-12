@@ -766,6 +766,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let si = GoogleProvider::build_system_instruction(&context);
@@ -788,6 +789,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let si = GoogleProvider::build_system_instruction(&context).unwrap();
@@ -819,6 +821,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let opts = ProviderStreamOptions::default();
@@ -852,6 +855,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
 
@@ -887,6 +891,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let opts = ProviderStreamOptions::default();
@@ -958,6 +963,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let gc = provider.build_generation_config(&ProviderStreamOptions::default());
@@ -998,6 +1004,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let gc = provider.build_generation_config(&ProviderStreamOptions::default());
@@ -1034,6 +1041,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let gc = provider.build_generation_config(&ProviderStreamOptions::default());

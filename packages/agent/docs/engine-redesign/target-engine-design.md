@@ -76,9 +76,11 @@ key.
 
 Agents use stable capability primitives to interact with a live catalog:
 
-- `search` visible contracts and implementations;
+- `search` visible contracts, implementations, workers, plugins, examples, and
+  docs through the local hybrid capability index;
 - `inspect` schemas, selected implementation, authority, risk, effect, leases,
-  provenance, schema digest, and expected revision;
+  provenance, trust tier, health, schema digest, binding decision, and expected
+  revision;
 - `execute` canonical functions through direct invocation;
 - request promotion of session-scoped capabilities by executing the relevant
   engine promotion function after inspection.
@@ -87,6 +89,18 @@ The catalog is not frozen for a full turn. The provider tool surface is
 projected from the live catalog at each model-call boundary, but only the three
 capability primitives are exposed. Newly registered or removed implementations
 are reflected by `search` without changing provider schemas.
+
+The registry layer sits over the live catalog rather than replacing it.
+Every visible implementation must carry contract id, implementation id,
+plugin/domain provenance, schema digest, trust tier, runtime requirements,
+authority, approval, idempotency, and context-primer metadata. First-party
+capabilities provide those fields through their domain contract metadata;
+external/session workers are rejected when visible registrations omit schemas,
+metadata, or namespace-compliant ids.
+
+The default turn context includes a generated `capabilities.primer` block from
+the same registry. `coreFirstParty` is on by default; all-visible compact
+context is profile-configurable and remains opt-in.
 
 ## Guardrails
 
@@ -122,11 +136,14 @@ exists to do so.
 
 ## Code Ownership
 
-- Engine-generic behavior belongs in `engine`.
-- Tron domain capability handlers and specs belong in `server/capabilities`.
-- Reusable server-local dependencies belong in `server/services`.
-- Engine WebSocket framing/validation/subscription state belongs in
-  `server/transport/engine_ws.rs`.
+- Engine-generic behavior belongs in `packages/agent/src/engine`.
+- Tron domain capability specs and handlers belong in
+  `packages/agent/src/domains/*/contract.rs`, `handlers.rs`, and
+  `operations/`.
+- Reusable domain dependencies belong in each domain's `deps.rs` or
+  implementation/service modules.
+- Engine WebSocket framing, validation, and subscription state belongs in
+  `packages/agent/src/transport/`.
 - `/engine` subscriptions deliver stream records; engine streams are the source
   for live events.
 

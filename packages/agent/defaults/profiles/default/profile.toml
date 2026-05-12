@@ -702,32 +702,71 @@ skipPendingJobsBootstrap = true
 # policy and executor checks so hidden/denied capabilities cannot be called anyway.
 [capabilityPolicies.default]
 manifest = "capabilities/presentation.toml"
+searchPolicy = "hybridLocal"
+contextPrimerPolicy = "coreFirstParty"
 exposeInteractiveTools = true
 removeSpawnToolsAtMaxDepth = true
 
 [capabilityPolicies.localModel]
 allowedCapabilities = ["search", "inspect", "execute"]
+searchPolicy = "hybridLocal"
+contextPrimerPolicy = "coreFirstParty"
 exposeInteractiveTools = true
 removeSpawnToolsAtMaxDepth = true
 
 [capabilityPolicies.none]
 allowedCapabilities = []
+searchPolicy = "hybridLocal"
+contextPrimerPolicy = "disabled"
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
 
 [capabilityPolicies.subagentInherited]
+searchPolicy = "hybridLocal"
+contextPrimerPolicy = "coreFirstParty"
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
 
 [capabilityPolicies.unattended]
 deniedCapabilities = []
+searchPolicy = "hybridLocal"
+contextPrimerPolicy = "coreFirstParty"
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
 
 [capabilityPolicies.conflictResolver]
 allowedCapabilities = ["search", "inspect", "execute"]
+searchPolicy = "hybridLocal"
+contextPrimerPolicy = "coreFirstParty"
 exposeInteractiveTools = false
 removeSpawnToolsAtMaxDepth = true
+
+[capabilitySearchPolicies.hybridLocal]
+lexical = true
+localVector = true
+cloudEmbeddings = false
+maxResults = 50
+
+[capabilityContextPrimerPolicies.coreFirstParty]
+enabled = true
+mode = "coreFirstParty"
+maxTokens = 1800
+includeExamples = true
+includeCompactSchemas = true
+
+[capabilityContextPrimerPolicies.allVisibleCompact]
+enabled = true
+mode = "allVisibleCompact"
+maxTokens = 2400
+includeExamples = false
+includeCompactSchemas = true
+
+[capabilityContextPrimerPolicies.disabled]
+enabled = false
+mode = "coreFirstParty"
+maxTokens = 0
+includeExamples = false
+includeCompactSchemas = false
 
 # Permission policies describe privilege inheritance. Child processes should not
 # gain filesystem, model, or auth authority beyond their parent/profile unless a

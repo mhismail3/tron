@@ -303,6 +303,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         }
     }

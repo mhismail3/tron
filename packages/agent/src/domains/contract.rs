@@ -1,5 +1,10 @@
 //! Generic capability-contract builders.
 //!
+//! Domain contracts are the first-party plugin manifest for in-process workers:
+//! they declare the canonical function id, schema, authority, risk/effect, and
+//! capability metadata that the registry projects into contracts,
+//! implementations, search documents, and the generated capability primer.
+//!
 //! Domain `contract.rs` files own their function inventory, schemas, risk,
 //! authority, idempotency, lease, compensation, and stream metadata. This
 //! module contains only method-agnostic construction helpers used to turn those
@@ -226,10 +231,54 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     if let Some(schema) = &spec.response_schema {
         definition = definition.with_response_schema(schema.clone());
     }
+    let plugin_id = format!("first_party.{}", spec.domain_module);
+    let implementation_id = format!(
+        "{plugin_id}.v{}.{}",
+        definition.revision.0,
+        spec.operation_key.as_str()
+    );
+    let context_primer_level = if matches!(
+        spec.function_id.as_str(),
+        "capability::search"
+            | "capability::inspect"
+            | "capability::execute"
+            | "filesystem::list_dir"
+            | "filesystem::read_file"
+            | "filesystem::write_file"
+            | "filesystem::edit_file"
+            | "filesystem::find"
+            | "filesystem::glob"
+            | "filesystem::search_text"
+            | "filesystem::diff"
+            | "filesystem::apply_patch"
+            | "process::run"
+            | "web::search"
+            | "web::fetch"
+            | "agent::status"
+            | "agent::submit_answers"
+            | "sandbox::spawn_worker"
+            | "sandbox::list_spawned_workers"
+            | "sandbox::stop_spawned_worker"
+            | "worker::protocol_guide"
+    ) {
+        "core"
+    } else {
+        "catalog"
+    };
     definition.metadata = json!({
         "operationKey": spec.operation_key.as_str(),
         "domainWorker": spec.domain_worker.as_str(),
         "canonicalCapability": spec.function_id.as_str(),
+        "contractId": spec.function_id.as_str(),
+        "implementationId": implementation_id,
+        "pluginId": plugin_id,
+        "trustTier": "first_party_signed",
+        "contextPrimerLevel": context_primer_level,
+        "runtimeRequirements": {
+            "workerKind": "in_process",
+            "deliveryModes": definition.allowed_delivery_modes.iter().map(|mode| mode.as_str()).collect::<Vec<_>>()
+        },
+        "examples": [],
         "domainAuthorityScope": spec.authority_scope,
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "domainModule": spec.domain_module,

@@ -273,62 +273,85 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
         .map(|(namespace, _)| namespace)
         .filter(|namespace| !namespace.is_empty())
         .unwrap_or("demo");
+    let protocol_version = crate::engine::protocol::WORKER_PROTOCOL_VERSION;
+    let environment = json!({
+        "TRON_ENGINE_WORKER_ENDPOINT": "Absolute WebSocket endpoint injected by sandbox::spawn_worker, for example ws://127.0.0.1:9847/engine/workers",
+        "TRON_ENGINE_BEARER_TOKEN": "Bearer token injected by sandbox::spawn_worker; send it as Authorization: Bearer <token>",
+        "TRON_ENGINE_WORKER_ID": "Stable worker id injected by sandbox::spawn_worker",
+        "TRON_ENGINE_WORKER_VISIBILITY": "session, workspace, or system",
+        "TRON_ENGINE_WORKER_PROTOCOL_VERSION": protocol_version.to_string(),
+        "TRON_ENGINE_SESSION_ID": "Present for session-visible sandbox workers",
+        "TRON_ENGINE_WORKSPACE_ID": "Present for workspace-visible sandbox workers"
+    });
+    let message_flow = json!([
+        "Open TRON_ENGINE_WORKER_ENDPOINT as a WebSocket with Authorization: Bearer ${TRON_ENGINE_BEARER_TOKEN}.",
+        "Send a hello message with type=hello, protocolVersion, worker definition, identity, loopbackOnly=true, authPolicy=loopback_bearer, registrationMode=volatile, defaultVisibility, sessionId/workspaceId, heartbeatIntervalMs, and supportedCapabilities.",
+        "Receive catalog_snapshot from the engine. This is the live catalog visible to the worker at connect time.",
+        "Send register_function for every capability the worker owns. Function definition fields use snake_case; the wrapper fields use camelCase.",
+        "Handle invoke messages by executing exactly the requested function id, then send result with the same invocationId.",
+        "Send heartbeat messages before the heartbeat interval expires.",
+        "Send disconnect before clean exit. Volatile functions/triggers are removed from the live catalog."
+    ]);
+    let read_only_echo_minimum = json!({
+        "id": function_id,
+        "revision": 1,
+        "owner_worker": worker_id,
+        "description": "Echo one payload through an external sandbox worker",
+        "request_schema": {"type":"object","additionalProperties":true},
+        "response_schema": {"type":"object","additionalProperties":true},
+        "opaque_response": false,
+        "tags": ["demo", "echo", "sandbox-worker"],
+        "visibility": "Session",
+        "effect_class": "PureRead",
+        "risk_level": "Low",
+        "idempotency": null,
+        "resource_lease": null,
+        "compensation": null,
+        "required_authority": {"scopes": [], "approval_required": false},
+        "allowed_delivery_modes": ["Sync"],
+        "health": "Healthy",
+        "provenance": {"created_by": "system", "source": "sandbox-worker", "session_id": null, "workspace_id": null},
+        "metadata": {
+            "contractId": function_id,
+            "implementationId": format!("session_generated.{namespace}.demo_echo"),
+            "pluginId": format!("session_generated.{worker_id}"),
+            "trustTier": "session_generated",
+            "contextPrimerLevel": "catalog",
+            "runtimeRequirements": {"workerKind": "sandbox", "deliveryModes": ["Sync"]},
+            "examples": [{"payload": {"hello": "world"}}],
+            "modelToolName": "demo_echo",
+            "streamTopics": []
+        }
+    });
+    let function_definition_shape = json!({
+        "definitionFieldCase": "snake_case",
+        "wrapperFieldCase": "camelCase",
+        "workerKinds": ["External", "Sandbox"],
+        "visibility": ["Session", "Workspace", "System"],
+        "effectClass": ["PureRead", "DeterministicCompute", "IdempotentWrite", "AppendOnlyEvent", "ReversibleSideEffect", "ExternalSideEffect", "IrreversibleSideEffect"],
+        "riskLevel": ["Low", "Medium", "High", "Critical"],
+        "functionHealth": ["Healthy", "Degraded", "Unhealthy", "Unknown"],
+        "deliveryMode": ["Sync", "Void", "Enqueue"],
+        "readOnlyEchoMinimum": read_only_echo_minimum
+    });
+    let rules = json!([
+        "Use this guide instead of searching Tron source when asked to register a worker or create capabilities.",
+        "Every executable unit is a canonical namespace::function registered by exactly one worker.",
+        "Worker registrations appear in catalog::list and capability::search after catalog change propagation.",
+        "Mutating functions must declare idempotency and require callers to provide stable idempotency keys.",
+        "Streams must be published through the worker protocol publish_stream message or stream::publish, never by writing directly to client sockets.",
+        "Use sandbox::stop_spawned_worker or worker::disconnect to remove volatile capabilities."
+    ]);
 
     Ok(json!({
-        "protocolVersion": crate::engine::protocol::WORKER_PROTOCOL_VERSION,
+        "protocolVersion": protocol_version,
         "endpoint": "/engine/workers",
         "requestedLanguage": requested_language,
         "templateLanguage": "python",
         "templateLanguageReason": "The current local sandbox worker template is Python because it runs with the standard library only and needs no package install step. JavaScript/TypeScript requests receive this Python template intentionally.",
-        "environment": {
-            "TRON_ENGINE_WORKER_ENDPOINT": "Absolute WebSocket endpoint injected by sandbox::spawn_worker, for example ws://127.0.0.1:9847/engine/workers",
-            "TRON_ENGINE_BEARER_TOKEN": "Bearer token injected by sandbox::spawn_worker; send it as Authorization: Bearer <token>",
-            "TRON_ENGINE_WORKER_ID": "Stable worker id injected by sandbox::spawn_worker",
-            "TRON_ENGINE_WORKER_VISIBILITY": "session, workspace, or system",
-            "TRON_ENGINE_WORKER_PROTOCOL_VERSION": crate::engine::protocol::WORKER_PROTOCOL_VERSION.to_string(),
-            "TRON_ENGINE_SESSION_ID": "Present for session-visible sandbox workers",
-            "TRON_ENGINE_WORKSPACE_ID": "Present for workspace-visible sandbox workers"
-        },
-        "messageFlow": [
-            "Open TRON_ENGINE_WORKER_ENDPOINT as a WebSocket with Authorization: Bearer ${TRON_ENGINE_BEARER_TOKEN}.",
-            "Send a hello message with type=hello, protocolVersion, worker definition, identity, loopbackOnly=true, authPolicy=loopback_bearer, registrationMode=volatile, defaultVisibility, sessionId/workspaceId, heartbeatIntervalMs, and supportedCapabilities.",
-            "Receive catalog_snapshot from the engine. This is the live catalog visible to the worker at connect time.",
-            "Send register_function for every capability the worker owns. Function definition fields use snake_case; the wrapper fields use camelCase.",
-            "Handle invoke messages by executing exactly the requested function id, then send result with the same invocationId.",
-            "Send heartbeat messages before the heartbeat interval expires.",
-            "Send disconnect before clean exit. Volatile functions/triggers are removed from the live catalog."
-        ],
-        "functionDefinitionShape": {
-            "definitionFieldCase": "snake_case",
-            "wrapperFieldCase": "camelCase",
-            "workerKinds": ["External", "Sandbox"],
-            "visibility": ["Session", "Workspace", "System"],
-            "effectClass": ["PureRead", "DeterministicCompute", "IdempotentWrite", "AppendOnlyEvent", "ReversibleSideEffect", "ExternalSideEffect", "IrreversibleSideEffect"],
-            "riskLevel": ["Low", "Medium", "High", "Critical"],
-            "functionHealth": ["Healthy", "Degraded", "Unhealthy", "Unknown"],
-            "deliveryMode": ["Sync", "Void", "Enqueue"],
-            "readOnlyEchoMinimum": {
-                "id": function_id,
-                "revision": 1,
-                "owner_worker": worker_id,
-                "description": "Echo one payload through an external sandbox worker",
-                "request_schema": {"type":"object","additionalProperties":true},
-                "response_schema": {"type":"object","additionalProperties":true},
-                "opaque_response": false,
-                "tags": ["demo", "echo", "sandbox-worker"],
-                "visibility": "Session",
-                "effect_class": "PureRead",
-                "risk_level": "Low",
-                "idempotency": null,
-                "resource_lease": null,
-                "compensation": null,
-                "required_authority": {"scopes": [], "approval_required": false},
-                "allowed_delivery_modes": ["Sync"],
-                "health": "Healthy",
-                "provenance": {"created_by": "system", "source": "sandbox-worker", "session_id": null, "workspace_id": null},
-                "metadata": {"modelToolName": "demo_echo", "streamTopics": []}
-            }
-        },
+        "environment": environment,
+        "messageFlow": message_flow,
+        "functionDefinitionShape": function_definition_shape,
         "pythonTemplate": python_worker_template(&worker_id, &function_id, namespace),
         "spawnWorkerPayloadExample": {
             "workerId": worker_id,
@@ -339,14 +362,7 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
             "visibility": "session",
             "timeoutMs": 10000
         },
-        "rules": [
-            "Use this guide instead of searching Tron source when asked to register a worker or create capabilities.",
-            "Every executable unit is a canonical namespace::function registered by exactly one worker.",
-            "Worker registrations appear in catalog::list and engine_discover after catalog change propagation.",
-            "Mutating functions must declare idempotency and require callers to provide stable idempotency keys.",
-            "Streams must be published through the worker protocol publish_stream message or stream::publish, never by writing directly to client sockets.",
-            "Use sandbox::stop_spawned_worker or worker::disconnect to remove volatile capabilities."
-        ]
+        "rules": rules
     }))
 }
 
@@ -622,7 +638,17 @@ def function_definition():
         "allowed_delivery_modes": ["Sync"],
         "health": "Healthy",
         "provenance": scoped_provenance(),
-        "metadata": {"modelToolName": "demo_echo", "streamTopics": []},
+        "metadata": {
+            "contractId": FUNCTION_ID,
+            "implementationId": "session_generated." + NAMESPACE + ".demo_echo",
+            "pluginId": "session_generated." + WORKER_ID,
+            "trustTier": "session_generated",
+            "contextPrimerLevel": "catalog",
+            "runtimeRequirements": {"workerKind": "sandbox", "deliveryModes": ["Sync"]},
+            "examples": [{"payload": {"hello": "world"}}],
+            "modelToolName": "demo_echo",
+            "streamTopics": []
+        },
     }
 
 

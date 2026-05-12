@@ -242,6 +242,26 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             };
         }
     };
+    let capability_primer_context = match build_capability_primer_context(
+        engine_host,
+        session_id,
+        workspace_id,
+        &resolved_profile.spec,
+        &context_policy,
+    )
+    .await
+    {
+        Ok(context) => context,
+        Err(error) => {
+            warn!(
+                session_id,
+                turn,
+                error = %error,
+                "capability primer generation failed; continuing without primer"
+            );
+            None
+        }
+    };
 
     // 3. Build context (base from CM, external fields from RunContext/params)
     let context = build_turn_context(
@@ -250,6 +270,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         server_origin,
         &context_policy,
         tool_surface.tools.clone(),
+        capability_primer_context,
     );
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
@@ -808,6 +829,7 @@ fn build_turn_context(
     server_origin: Option<&str>,
     context_policy: &local_policy::ContextPolicy,
     tool_surface: Vec<crate::shared::tools::Tool>,
+    capability_primer_context: Option<String>,
 ) -> Context {
     let is_local = context_policy.is_local();
 
@@ -845,6 +867,7 @@ fn build_turn_context(
         .dynamic_rules_context
         .clone()
         .or(context.dynamic_rules_context);
+    context.capability_primer_context = capability_primer_context;
 
     if context_policy.strip_memory() {
         context.memory_content = None;
@@ -893,6 +916,38 @@ fn build_turn_context(
     }
 
     context
+}
+
+async fn build_capability_primer_context(
+    engine_host: Option<&crate::engine::EngineHostHandle>,
+    session_id: &str,
+    workspace_id: Option<&str>,
+    execution_spec: &crate::shared::profile::AgentExecutionSpec,
+    context_policy: &local_policy::ContextPolicy,
+) -> Result<Option<String>, crate::shared::server::errors::CapabilityError> {
+    let Some(host) = engine_host else {
+        return Ok(None);
+    };
+    let capability_policy_id = context_policy.capability_policy_id().unwrap_or("default");
+    let Some(capability_policy) = execution_spec.capability_policy(capability_policy_id) else {
+        return Ok(None);
+    };
+    let primer_policy_id = capability_policy
+        .context_primer_policy
+        .as_deref()
+        .unwrap_or("coreFirstParty");
+    let Some(profile_policy) = execution_spec.context_primer_policy(primer_policy_id) else {
+        return Ok(None);
+    };
+    let policy = crate::domains::capability::registry::CapabilityContextPrimerPolicy {
+        enabled: profile_policy.enabled,
+        mode: profile_policy.mode.clone(),
+        max_tokens: profile_policy.max_tokens,
+        include_examples: profile_policy.include_examples,
+        include_compact_schemas: profile_policy.include_compact_schemas,
+    };
+    crate::domains::capability::render_capability_primer(host, session_id, workspace_id, &policy)
+        .await
 }
 
 async fn resolve_provider_tool_surface(

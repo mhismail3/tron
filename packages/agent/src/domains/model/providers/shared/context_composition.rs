@@ -22,11 +22,12 @@ use crate::shared::messages::Context;
 /// 2. `rules_content` (with `"# Project Rules\n\n"` header)
 /// 3. `memory_content`
 /// 4. `dynamic_rules_context` (with `"# Active Rules\n\n"` header)
-/// 5. `skill_index_context` (lightweight index of all available skills)
-/// 6. `skill_context` (full content of explicitly invoked skills)
-/// 7. `skill_removal_context` (one-turn deactivation notice)
-/// 8. `job_results_context` (completed background processes + subagents)
-/// 9. `working_directory` (appended as `"Current working directory: <path>"`)
+/// 5. `capability_primer_context` (generated compact live capability catalog)
+/// 6. `skill_index_context` (lightweight index of all available skills)
+/// 7. `skill_context` (full content of explicitly invoked skills)
+/// 8. `skill_removal_context` (one-turn deactivation notice)
+/// 9. `job_results_context` (completed background processes + subagents)
+/// 10. `working_directory` (appended as `"Current working directory: <path>"`)
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
     compose_context_blocks(context)
         .into_iter()
@@ -91,6 +92,19 @@ pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
             format!("# Active Rules\n\n{dynamic}"),
             ContextCacheClass::Turn,
             40,
+        ));
+    }
+
+    if let Some(ref capabilities) = context.capability_primer_context
+        && !capabilities.is_empty()
+    {
+        blocks.push(context_block_for_text(
+            "capabilities.primer",
+            "Capability Primer",
+            TronHome::Profiles,
+            capabilities.clone(),
+            ContextCacheClass::Turn,
+            45,
         ));
     }
 
@@ -268,7 +282,8 @@ pub struct GroupedContextParts {
 ///
 /// **Stable** (1h cache TTL): `system_prompt`, `rules_content`, `memory_content`,
 /// `skill_index_context`
-/// **Volatile** (5m cache TTL): `dynamic_rules_context`, `skill_context`,
+/// **Volatile** (5m cache TTL): `dynamic_rules_context`,
+/// `capability_primer_context`, `skill_context`,
 /// `skill_removal_context`, `job_results_context`
 pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
     let mut stable = Vec::new();
@@ -308,6 +323,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: Some("Rule: no console.log".into()),
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         }
     }
@@ -332,6 +348,24 @@ mod tests {
     }
 
     #[test]
+    fn capability_primer_follows_dynamic_rules_before_skills() {
+        let ctx = Context {
+            dynamic_rules_context: Some("Rule: inspect before writes".into()),
+            capability_primer_context: Some("# Capability Primer".into()),
+            skill_index_context: Some("# Available Skills".into()),
+            skill_context: Some("<skills>active</skills>".into()),
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert_eq!(parts.len(), 4);
+        assert!(parts[0].starts_with("# Active Rules"));
+        assert!(parts[0].contains("inspect before writes"));
+        assert_eq!(parts[1], "# Capability Primer");
+        assert_eq!(parts[2], "# Available Skills");
+        assert_eq!(parts[3], "<skills>active</skills>");
+    }
+
+    #[test]
     fn compose_parts_empty_context() {
         let ctx = Context {
             system_prompt: None,
@@ -347,6 +381,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
@@ -369,6 +404,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
@@ -392,6 +428,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
@@ -475,6 +512,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
@@ -498,6 +536,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
@@ -587,6 +626,7 @@ mod tests {
             job_results_context: None,
             dynamic_rules_context: None,
             hook_context: None,
+            capability_primer_context: None,
             server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);

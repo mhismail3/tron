@@ -259,6 +259,9 @@ pub struct RunContext {
     /// Dynamic rules context from path-scoped files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_rules_context: Option<String>,
+    /// Generated compact capability catalog primer for this turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capability_primer_context: Option<String>,
     /// Hook-injected context, kept separate for audit/context policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hook_context: Option<String>,
@@ -459,6 +462,7 @@ mod tests {
         assert!(ctx.job_results.is_none());
         assert!(ctx.reasoning_level.is_none());
         assert!(ctx.dynamic_rules_context.is_none());
+        assert!(ctx.capability_primer_context.is_none());
     }
 
     #[test]

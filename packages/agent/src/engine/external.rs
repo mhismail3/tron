@@ -28,7 +28,9 @@ use super::protocol::{
     WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent, WorkerProtocolMessage,
     WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
-use super::types::{DeliveryMode, FunctionHealth, VisibilityScope, WorkerLifecycleState};
+use super::types::{
+    DeliveryMode, FunctionDefinition, FunctionHealth, VisibilityScope, WorkerLifecycleState,
+};
 
 const WORKER_LIFECYCLE_TOPIC: &str = "worker.lifecycle";
 
@@ -238,6 +240,8 @@ impl EngineExternalWorkerRuntime {
         if let Some(workspace_id) = connection.workspace_id.clone() {
             definition.provenance.workspace_id = Some(workspace_id);
         }
+        let worker = self.host.inspect_worker(&worker_id).await?;
+        validate_external_capability_metadata(&definition, &worker.namespace_claims)?;
         let handler = self.invokers.get(&worker_id).map(|invoker| {
             Arc::new(ExternalFunctionProxyHandler {
                 invoker: invoker.clone(),
@@ -614,6 +618,66 @@ impl EngineExternalWorkerRuntime {
         self.host.register_worker(worker, false).await?;
         Ok(())
     }
+}
+
+fn validate_external_capability_metadata(
+    definition: &FunctionDefinition,
+    namespace_claims: &[String],
+) -> Result<()> {
+    if !definition.visibility.is_agent_visible() {
+        return Ok(());
+    }
+    if definition.request_schema.is_none() || definition.response_schema.is_none() {
+        return Err(EngineError::PolicyViolation(format!(
+            "external visible function {} requires request and response schemas",
+            definition.id
+        )));
+    }
+    let required = [
+        "contractId",
+        "implementationId",
+        "pluginId",
+        "trustTier",
+        "contextPrimerLevel",
+        "runtimeRequirements",
+    ];
+    for key in required {
+        if definition.metadata.get(key).is_none() {
+            return Err(EngineError::PolicyViolation(format!(
+                "external visible function {} requires capability metadata `{key}`",
+                definition.id
+            )));
+        }
+    }
+    let contract_id = definition
+        .metadata
+        .get("contractId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let implementation_id = definition
+        .metadata
+        .get("implementationId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let contract_namespace = contract_id
+        .split_once("::")
+        .map(|(namespace, _)| namespace)
+        .unwrap_or(contract_id);
+    let claims_match = |value: &str| {
+        namespace_claims.iter().any(|claim| {
+            value == claim || value.starts_with(&format!("{claim}::")) || value.contains(claim)
+        })
+    };
+    if !claims_match(definition.id.namespace())
+        || !claims_match(contract_namespace)
+        || !claims_match(implementation_id)
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "external visible function {} metadata must stay within namespace claims {:?}",
+            definition.id, namespace_claims
+        )));
+    }
+    Ok(())
 }
 
 fn lifecycle_visibility(connection: &ExternalWorkerConnection) -> VisibilityScope {

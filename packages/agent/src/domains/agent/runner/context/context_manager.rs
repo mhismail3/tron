@@ -809,6 +809,7 @@ impl ContextManager {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: self.get_dynamic_rules_content().map(String::from),
+            capability_primer_context: None,
             hook_context: None,
             server_origin: None,
         }

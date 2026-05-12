@@ -40,6 +40,8 @@ primitives over that same catalog.
 Every canonical function definition must declare:
 
 - function id and owning worker;
+- contract id, implementation id, plugin/domain id, trust tier, runtime
+  requirements, and context-primer level metadata when visible to agents;
 - request and response schema;
 - effect class and risk level;
 - visibility and health;

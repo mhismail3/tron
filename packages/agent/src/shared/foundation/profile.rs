@@ -62,6 +62,10 @@ pub struct ProfileDocument {
     pub context_policies: HashMap<String, ContextPolicySpec>,
     /// Capability visibility and presentation policies.
     pub capability_policies: HashMap<String, CapabilityPolicySpec>,
+    /// Capability search policies.
+    pub capability_search_policies: HashMap<String, CapabilitySearchPolicySpec>,
+    /// Capability context-primer policies.
+    pub capability_context_primer_policies: HashMap<String, CapabilityContextPrimerPolicySpec>,
     /// Permission and inheritance policies.
     pub permission_policies: HashMap<String, PermissionPolicySpec>,
     /// Provider-specific presentation/adaptation policies.
@@ -257,6 +261,10 @@ pub struct ContextPolicySpec {
 pub struct CapabilityPolicySpec {
     /// Optional policy manifest file.
     pub manifest: Option<String>,
+    /// Search policy used by capability::search.
+    pub search_policy: Option<String>,
+    /// Context primer policy used for generated capability context.
+    pub context_primer_policy: Option<String>,
     /// Strict allowlist of capability ids.
     pub allowed_capabilities: Option<Vec<String>>,
     /// Capability ids denied by this policy.
@@ -265,6 +273,59 @@ pub struct CapabilityPolicySpec {
     pub expose_interactive_tools: Option<bool>,
     /// Whether spawn/wait capabilities are removed at max depth.
     pub remove_spawn_tools_at_max_depth: Option<bool>,
+}
+
+/// Capability search policy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct CapabilitySearchPolicySpec {
+    /// Whether local lexical search is enabled.
+    pub lexical: bool,
+    /// Whether local vector search is enabled.
+    pub local_vector: bool,
+    /// Cloud embeddings are intentionally unsupported for core search.
+    pub cloud_embeddings: bool,
+    /// Maximum results retained by the index layer.
+    pub max_results: usize,
+}
+
+impl Default for CapabilitySearchPolicySpec {
+    fn default() -> Self {
+        Self {
+            lexical: true,
+            local_vector: true,
+            cloud_embeddings: false,
+            max_results: 50,
+        }
+    }
+}
+
+/// Generated capability context-primer policy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct CapabilityContextPrimerPolicySpec {
+    /// Whether the primer block is rendered.
+    pub enabled: bool,
+    /// `coreFirstParty` or `allVisibleCompact`.
+    pub mode: String,
+    /// Approximate token budget.
+    pub max_tokens: usize,
+    /// Whether examples may be rendered when metadata provides them.
+    pub include_examples: bool,
+    /// Whether compact payload schema hints may be rendered.
+    pub include_compact_schemas: bool,
+}
+
+impl Default for CapabilityContextPrimerPolicySpec {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mode: "coreFirstParty".to_owned(),
+            max_tokens: 1800,
+            include_examples: true,
+            include_compact_schemas: true,
+        }
+    }
 }
 
 /// Permission inheritance policy.
@@ -458,6 +519,27 @@ impl AgentExecutionSpec {
     #[must_use]
     pub fn capability_policy(&self, name: &str) -> Option<&CapabilityPolicySpec> {
         self.document.capability_policies.get(name)
+    }
+
+    /// Capability search policy by id.
+    #[must_use]
+    pub fn capability_search_policy(&self, name: &str) -> Option<&CapabilitySearchPolicySpec> {
+        self.document.capability_search_policies.get(name)
+    }
+
+    /// Capability context-primer policy by id.
+    #[must_use]
+    pub fn capability_context_primer_policy(
+        &self,
+        name: &str,
+    ) -> Option<&CapabilityContextPrimerPolicySpec> {
+        self.document.capability_context_primer_policies.get(name)
+    }
+
+    /// Context-primer policy by id.
+    #[must_use]
+    pub fn context_primer_policy(&self, name: &str) -> Option<&CapabilityContextPrimerPolicySpec> {
+        self.document.capability_context_primer_policies.get(name)
     }
 
     /// Local context policy, if any, matching provider id.
@@ -1053,12 +1135,66 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
                 manifest,
             )?;
         }
+        if let Some(search_policy) = &policy.search_policy {
+            validate_policy_ref(
+                name,
+                "capabilitySearchPolicies",
+                search_policy,
+                &spec.capability_search_policies,
+            )?;
+        }
+        if let Some(context_primer_policy) = &policy.context_primer_policy {
+            validate_policy_ref(
+                name,
+                "capabilityContextPrimerPolicies",
+                context_primer_policy,
+                &spec.capability_context_primer_policies,
+            )?;
+        }
         validate_tool_overlap(
             name,
             policy_id,
             policy.allowed_capabilities.as_deref(),
             &policy.denied_capabilities,
         )?;
+    }
+
+    for (policy_id, policy) in &spec.capability_search_policies {
+        if !policy.lexical && !policy.local_vector {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "profile `{name}` capabilitySearchPolicies.{policy_id} disables both lexical and localVector search"
+                ),
+            ));
+        }
+        if policy.cloud_embeddings {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "profile `{name}` capabilitySearchPolicies.{policy_id}.cloudEmbeddings must remain false"
+                ),
+            ));
+        }
+        if policy.max_results == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "profile `{name}` capabilitySearchPolicies.{policy_id}.maxResults must be positive"
+                ),
+            ));
+        }
+    }
+
+    for (policy_id, policy) in &spec.capability_context_primer_policies {
+        if !matches!(policy.mode.as_str(), "coreFirstParty" | "allVisibleCompact") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "profile `{name}` capabilityContextPrimerPolicies.{policy_id}.mode must be coreFirstParty or allVisibleCompact"
+                ),
+            ));
+        }
     }
 
     for (provider, policy) in &spec.provider_policies {
@@ -1276,6 +1412,7 @@ const KNOWN_CONTEXT_BLOCKS: &[&str] = &[
     "project.rules",
     "memory.root",
     "dynamic.rules",
+    "capabilities.primer",
     "skills.index",
     "skills.activation",
     "skills.active",

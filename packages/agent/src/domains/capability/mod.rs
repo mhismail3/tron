@@ -12,6 +12,7 @@
 //! | `deps` | Narrow dependency bundle for catalog and invocation access |
 //! | `handlers` | Declarative operation bindings for `search`, `inspect`, and `execute` |
 //! | `operations` | Catalog projection, binding resolution, and delegated execution |
+//! | `registry` | Catalog-backed capability records, binding decisions, search index, and primer rendering |
 //! | `types` | Typed contract, implementation, binding, inspection, and execution records |
 //!
 //! # INVARIANT: the model-facing surface is tiny
@@ -24,9 +25,10 @@ pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 mod operations;
+pub(crate) mod registry;
 mod types;
 pub(crate) use deps::Deps;
-pub(crate) use operations::{execute_value, inspect_value, search_value};
+pub(crate) use operations::{execute_value, inspect_value, render_capability_primer, search_value};
 
 use serde_json::Value;
 

@@ -68,8 +68,80 @@ pub(crate) struct CapabilityInspectionRecord {
     pub(crate) contract: CapabilityContractRecord,
     pub(crate) implementation: CapabilityImplementationRecord,
     pub(crate) binding: CapabilityBindingRecord,
+    pub(crate) binding_decision: CapabilityBindingDecision,
+    pub(crate) inspection_handle: CapabilityInspectionHandle,
     pub(crate) execution_requirements: Value,
     pub(crate) docs: Value,
+}
+
+/// Freshness handle returned by inspect and required by elevated-risk execute.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityInspectionHandle {
+    pub(crate) handle: String,
+    pub(crate) catalog_revision: u64,
+    pub(crate) function_revision: u64,
+    pub(crate) schema_digest: String,
+}
+
+/// One implementation rejected during binding resolution.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityRejectedCandidate {
+    pub(crate) implementation_id: String,
+    pub(crate) function_id: String,
+    pub(crate) reason: String,
+}
+
+/// Auditable binding resolution decision.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityBindingDecision {
+    pub(crate) contract_id: String,
+    pub(crate) selected_implementation: String,
+    pub(crate) selected_function_id: String,
+    pub(crate) selection_policy: String,
+    pub(crate) rejected_candidates: Vec<CapabilityRejectedCandidate>,
+    pub(crate) catalog_revision: u64,
+    pub(crate) schema_digest: String,
+}
+
+/// Local capability index health/status.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityIndexStatus {
+    pub(crate) lexical: bool,
+    pub(crate) local_vector: bool,
+    pub(crate) cloud_embeddings: bool,
+    pub(crate) vector_store: String,
+    pub(crate) embedding_model: String,
+    pub(crate) state: String,
+    pub(crate) degraded_reason: Option<String>,
+}
+
+/// Search hit returned by `capability::search`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityIndexHit {
+    pub(crate) capability_id: String,
+    pub(crate) contract_id: String,
+    pub(crate) implementation_id: String,
+    pub(crate) plugin_id: String,
+    pub(crate) worker_id: String,
+    pub(crate) function_id: String,
+    pub(crate) catalog_revision: u64,
+    pub(crate) schema_digest: String,
+    pub(crate) trust_tier: String,
+    pub(crate) health: String,
+    pub(crate) visibility: String,
+    pub(crate) effect_class: String,
+    pub(crate) risk_level: String,
+    pub(crate) lexical_score: f32,
+    pub(crate) vector_score: Option<f32>,
+    pub(crate) fused_score: f32,
+    pub(crate) matched_by: String,
+    pub(crate) snippet: String,
+    pub(crate) requires_inspect: bool,
 }
 
 /// Direct execution result metadata recorded by `capability::execute`.
@@ -87,4 +159,6 @@ pub(crate) struct CapabilityExecutionRecord {
     pub(crate) output: Value,
     pub(crate) approval_state: Option<Value>,
     pub(crate) plugin_versions: Vec<String>,
+    pub(crate) binding_decision: CapabilityBindingDecision,
+    pub(crate) schema_digest: String,
 }

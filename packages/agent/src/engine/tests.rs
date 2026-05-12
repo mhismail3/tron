@@ -89,6 +89,38 @@ fn read_function(id: &str, owner: &str) -> FunctionDefinition {
     )
 }
 
+fn external_visible_function(mut function: FunctionDefinition) -> FunctionDefinition {
+    let namespace = function.id.namespace().to_owned();
+    let local_name = function
+        .id
+        .as_str()
+        .split_once("::")
+        .map(|(_, local)| local)
+        .unwrap_or(function.id.as_str())
+        .to_owned();
+    function.request_schema = Some(json!({
+        "type": "object",
+        "additionalProperties": true
+    }));
+    function.response_schema = Some(json!({
+        "type": "object",
+        "additionalProperties": true
+    }));
+    function.metadata = json!({
+        "contractId": function.id.as_str(),
+        "implementationId": format!("session_generated.{namespace}.{local_name}"),
+        "pluginId": format!("session_generated.{}", function.owner_worker.as_str()),
+        "trustTier": "session_generated",
+        "contextPrimerLevel": "catalog",
+        "runtimeRequirements": {
+            "workerKind": "external",
+            "deliveryModes": ["Sync"]
+        },
+        "examples": []
+    });
+    function
+}
+
 fn write_function(id: &str, owner: &str) -> FunctionDefinition {
     FunctionDefinition::new(
         fid(id),
@@ -4283,7 +4315,7 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
     .with_provenance(Provenance::system().with_session_id("session-a"));
     let register =
         super::WorkerProtocolMessage::RegisterFunction(Box::new(super::RegisterFunction {
-            definition: function,
+            definition: external_visible_function(function),
             default_visibility: VisibilityScope::Session,
         }));
     if let super::WorkerProtocolMessage::RegisterFunction(message) = &register {
@@ -4815,7 +4847,7 @@ async fn local_external_worker_runtime_registers_session_functions_and_disconnec
     .with_provenance(Provenance::system().with_session_id("session-a"));
     runtime
         .register_function(super::RegisterFunction {
-            definition: function,
+            definition: external_visible_function(function),
             default_visibility: VisibilityScope::Session,
         })
         .await
@@ -4843,6 +4875,42 @@ async fn local_external_worker_runtime_registers_session_functions_and_disconnec
     assert!(matches!(
         handle.inspect_function(&fid("local::echo"), None).await,
         Err(EngineError::NotFound { .. })
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_rejects_visible_functions_without_capability_metadata() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker_id = wid("local-invalid-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("invalid_local");
+    runtime
+        .hello(super::WorkerHello::loopback(worker))
+        .await
+        .unwrap();
+    let error = runtime
+        .register_function(super::RegisterFunction {
+            definition: FunctionDefinition::new(
+                fid("invalid_local::echo"),
+                worker_id,
+                "invalid external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            ),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("requires request and response schemas")
     ));
 }
 
@@ -4876,14 +4944,16 @@ async fn local_external_worker_lifecycle_events_publish_through_streams_and_trac
     runtime.hello(hello).await.unwrap();
     runtime
         .register_function(super::RegisterFunction {
-            definition: FunctionDefinition::new(
-                fid("lifecycle_local::echo"),
-                worker_id.clone(),
-                "lifecycle external function",
-                VisibilityScope::Session,
-                EffectClass::PureRead,
-            )
-            .with_provenance(Provenance::system().with_session_id("session-a")),
+            definition: external_visible_function(
+                FunctionDefinition::new(
+                    fid("lifecycle_local::echo"),
+                    worker_id.clone(),
+                    "lifecycle external function",
+                    VisibilityScope::Session,
+                    EffectClass::PureRead,
+                )
+                .with_provenance(Provenance::system().with_session_id("session-a")),
+            ),
             default_visibility: VisibilityScope::Session,
         })
         .await
@@ -4976,14 +5046,16 @@ async fn local_external_worker_runtime_registers_executable_proxy_handler() {
         .unwrap();
     runtime
         .register_function(super::RegisterFunction {
-            definition: FunctionDefinition::new(
-                fid("local_exec::echo"),
-                worker_id,
-                "executable external function",
-                VisibilityScope::Session,
-                EffectClass::PureRead,
-            )
-            .with_provenance(Provenance::system().with_session_id("session-a")),
+            definition: external_visible_function(
+                FunctionDefinition::new(
+                    fid("local_exec::echo"),
+                    worker_id,
+                    "executable external function",
+                    VisibilityScope::Session,
+                    EffectClass::PureRead,
+                )
+                .with_provenance(Provenance::system().with_session_id("session-a")),
+            ),
             default_visibility: VisibilityScope::Session,
         })
         .await
@@ -5047,13 +5119,13 @@ async fn local_external_worker_durable_disconnect_marks_functions_unhealthy() {
         .unwrap();
     runtime
         .register_function(super::RegisterFunction {
-            definition: FunctionDefinition::new(
+            definition: external_visible_function(FunctionDefinition::new(
                 fid("durable_local::echo"),
                 worker_id.clone(),
                 "durable external function",
                 VisibilityScope::Session,
                 EffectClass::PureRead,
-            ),
+            )),
             default_visibility: VisibilityScope::Session,
         })
         .await
@@ -5176,14 +5248,16 @@ async fn local_external_worker_heartbeat_timeout_unregisters_volatile_capabiliti
         .unwrap();
     runtime
         .register_function(super::RegisterFunction {
-            definition: FunctionDefinition::new(
-                fid("timeout_local::echo"),
-                worker_id.clone(),
-                "timeout external function",
-                VisibilityScope::Session,
-                EffectClass::PureRead,
-            )
-            .with_provenance(Provenance::system().with_session_id("session-a")),
+            definition: external_visible_function(
+                FunctionDefinition::new(
+                    fid("timeout_local::echo"),
+                    worker_id.clone(),
+                    "timeout external function",
+                    VisibilityScope::Session,
+                    EffectClass::PureRead,
+                )
+                .with_provenance(Provenance::system().with_session_id("session-a")),
+            ),
             default_visibility: VisibilityScope::Session,
         })
         .await
