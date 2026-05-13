@@ -157,7 +157,7 @@ impl CapabilitySearchFilters {
 
     fn allows_document(&self, document: &CapabilityIndexDocument) -> bool {
         if let Some(kind) = &self.kind
-            && document.kind != *kind
+            && !document_kind_matches(kind, &document.kind)
         {
             return false;
         }
@@ -202,6 +202,18 @@ impl CapabilitySearchFilters {
             return false;
         }
         true
+    }
+}
+
+fn document_kind_matches(filter: &str, document_kind: &str) -> bool {
+    match filter.trim().to_ascii_lowercase().as_str() {
+        "function" | "functions" => document_kind == "implementation",
+        "capability" | "capabilities" => matches!(document_kind, "contract" | "implementation"),
+        "contract" | "contracts" => document_kind == "contract",
+        "implementation" | "implementations" => document_kind == "implementation",
+        "plugin" | "plugins" => document_kind == "plugin",
+        "worker" | "workers" => document_kind == "worker",
+        other => document_kind == other,
     }
 }
 
@@ -3424,6 +3436,41 @@ mod tests {
         assert_eq!(result.status.state, "ready");
         assert_eq!(result.hits[0].function_id, "filesystem::read_file");
         assert!(result.hits[0].vector_score.is_some());
+    }
+
+    #[test]
+    fn search_kind_function_matches_runnable_implementations() {
+        let snapshot = CapabilityRegistrySnapshot::new(vec![test_function("process::run")], 1);
+        let mut store = InMemoryCapabilityRegistryStore::default();
+        let provider = HashEmbeddingProvider::new(64);
+        let policy = CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        };
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("sync");
+        let results = store
+            .search(
+                "process run",
+                &CapabilitySearchFilters {
+                    kind: Some("function".to_owned()),
+                    include_unavailable: true,
+                    ..CapabilitySearchFilters::default()
+                },
+                &policy,
+                10,
+                &provider,
+            )
+            .expect("search");
+        assert!(
+            results
+                .hits
+                .iter()
+                .any(|hit| { hit.kind == "implementation" && hit.function_id == "process::run" }),
+            "function searches should include runnable implementation documents"
+        );
     }
 
     #[test]

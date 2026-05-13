@@ -320,7 +320,9 @@ Engine Console/admin status refreshes synchronously update registry metadata,
 then warm the persistent vector index on a detached path. Operator search can
 request an explicit degraded lexical mode while the local model or vector rows
 warm up; the response reports `ready`, `unavailable`, or degraded status so the
-UI never silently pretends semantic search ran.
+UI never silently pretends semantic search ran. Search kind filters accept the
+public document kinds plus `function` as the runnable implementation view, so
+agents can ask for worker functions without knowing the registry document name.
 
 Mutating or medium/high-risk execution requires a fresh `inspect` result and
 the returned `inspectionHandle`, `expectedRevision`, and
