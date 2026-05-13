@@ -326,7 +326,11 @@ agents can ask for worker functions without knowing the registry document name.
 
 Mutating or medium/high-risk execution requires a fresh `inspect` result and
 the returned `inspectionHandle`, `expectedRevision`, and
-`expectedSchemaDigest`. Mutating calls also require stable idempotency; model
+`expectedSchemaDigest`; `inspect` surfaces these both in structured
+`executionRequirements` and in the text result so provider models can copy them
+directly into the next `execute` call. The same inspect summary calls out the
+required payload fields from the selected contract schema, so agents do not have
+to infer the nested `execute.payload` shape from raw JSON alone. Mutating calls also require stable idempotency; model
 capability invocations derive a child key from the parent call when one is not passed
 explicitly. External/session workers connect with a scoped `workerToken` that
 bounds plugin id, namespace claims, authority ceiling, visibility ceiling,

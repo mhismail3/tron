@@ -27,6 +27,10 @@
 //! `capability::status`, `capability::plugin_list`, and
 //! `capability::policy_validate` are normal catalog functions for operator
 //! clients and are never marked with model-facing capability metadata.
+//! `inspect` is the only source of freshness material for mutating or
+//! elevated-risk execution; its model-facing summary and structured
+//! `executionRequirements` must both expose the same `inspectionHandle`,
+//! `expectedRevision`, and `expectedSchemaDigest` values.
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!

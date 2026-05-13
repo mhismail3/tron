@@ -909,25 +909,13 @@ async fn execute_invoke_value(
             || expected_schema_digest.is_none()
             || inspection_handle.is_none()
         {
-            return Err(CapabilityError::Custom {
-                code: "INSPECTION_REQUIRED".to_owned(),
-                message: format!(
-                    "{} is mutating or elevated-risk; inspect it first and pass inspectionHandle, expectedRevision={}, and expectedSchemaDigest={}",
-                    function.id.as_str(),
-                    function.revision.0,
-                    target.entry.schema_digest
-                ),
-                details: Some(json!({
-                    "functionId": function.id.as_str(),
-                    "inspect": {
-                        "functionId": function.id.as_str(),
-                        "expectedRevision": function.revision.0,
-                        "expectedSchemaDigest": target.entry.schema_digest
-                    },
-                    "riskLevel": format!("{:?}", function.risk_level),
-                    "effectClass": format!("{:?}", function.effect_class)
-                })),
-            });
+            return Err(missing_inspection_requirements_error(
+                &function,
+                &target.entry,
+                expected_revision,
+                expected_schema_digest.as_deref(),
+                inspection_handle.as_deref(),
+            ));
         }
         let valid_inspection = validate_inspection_handle(
             deps,
@@ -1145,25 +1133,13 @@ async fn execute_program_value(
         || expected_schema_digest.is_none()
         || inspection_handle.is_none()
     {
-        return Err(CapabilityError::Custom {
-            code: "INSPECTION_REQUIRED".to_owned(),
-            message: format!(
-                "{} is high-risk; inspect it first and pass inspectionHandle, expectedRevision={}, and expectedSchemaDigest={}",
-                function.id.as_str(),
-                function.revision.0,
-                target.entry.schema_digest
-            ),
-            details: Some(json!({
-                "functionId": function.id.as_str(),
-                "inspect": {
-                    "functionId": function.id.as_str(),
-                    "expectedRevision": function.revision.0,
-                    "expectedSchemaDigest": target.entry.schema_digest
-                },
-                "riskLevel": format!("{:?}", function.risk_level),
-                "effectClass": format!("{:?}", function.effect_class)
-            })),
-        });
+        return Err(missing_inspection_requirements_error(
+            &function,
+            &target.entry,
+            expected_revision,
+            expected_schema_digest.as_deref(),
+            inspection_handle.as_deref(),
+        ));
     }
     let valid_inspection = validate_inspection_handle(
         deps,
@@ -2308,16 +2284,116 @@ fn render_search_summary(query: &str, results: &Value) -> String {
 fn render_inspection_summary(details: &Value) -> String {
     let implementation = &details["implementation"];
     let contract = &details["contract"];
+    let requirements = &details["executionRequirements"];
     let function_id = implementation["functionId"].as_str().unwrap_or("<unknown>");
     let contract_id = contract["contractId"].as_str().unwrap_or("<unknown>");
     let effect = contract["effectClass"].as_str().unwrap_or("unknown");
     let risk = contract["riskLevel"].as_str().unwrap_or("unknown");
-    let expected = details["executionRequirements"]["expectedRevision"]
+    let expected_revision = requirements["expectedRevision"]
         .as_u64()
         .unwrap_or_default();
-    format!(
-        "{contract_id} is implemented by {function_id}. effect={effect}, risk={risk}, expectedRevision={expected}."
-    )
+    let mut summary = format!(
+        "{contract_id} is implemented by {function_id}. effect={effect}, risk={risk}, expectedRevision={expected_revision}."
+    );
+
+    if requirements["freshInspectionRequired"]
+        .as_bool()
+        .unwrap_or(false)
+    {
+        let inspection_handle = requirements["inspectionHandle"]
+            .as_str()
+            .unwrap_or("<missing>");
+        let expected_schema_digest = requirements["expectedSchemaDigest"]
+            .as_str()
+            .unwrap_or("<missing>");
+        summary.push_str("\nBefore execute, copy these freshness fields exactly:");
+        summary.push_str(&format!("\n- inspectionHandle={inspection_handle}"));
+        summary.push_str(&format!("\n- expectedRevision={expected_revision}"));
+        summary.push_str(&format!(
+            "\n- expectedSchemaDigest={expected_schema_digest}"
+        ));
+    }
+
+    let required_payload_fields = required_payload_fields(contract);
+    if !required_payload_fields.is_empty() {
+        summary.push_str(&format!(
+            "\nExecute payload must include: {}.",
+            required_payload_fields.join(", ")
+        ));
+    }
+
+    if requirements["idempotencyKeyRequired"]
+        .as_bool()
+        .unwrap_or(false)
+    {
+        summary.push_str(
+            "\n- idempotencyKey is required; choose a stable key for this intended action.",
+        );
+    }
+
+    if requirements["approvalRequired"].as_bool().unwrap_or(false) {
+        summary.push_str("\n- approvalRequired=true; execution may pause for user approval.");
+    }
+
+    summary
+}
+
+fn required_payload_fields(contract: &Value) -> Vec<String> {
+    contract["inputSchema"]["required"]
+        .as_array()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn missing_inspection_requirements_error(
+    function: &FunctionDefinition,
+    entry: &CapabilityRegistryEntry,
+    expected_revision: Option<u64>,
+    expected_schema_digest: Option<&str>,
+    inspection_handle: Option<&str>,
+) -> CapabilityError {
+    let mut missing_fields = Vec::new();
+    if inspection_handle.is_none() {
+        missing_fields.push("inspectionHandle");
+    }
+    if expected_revision.is_none() {
+        missing_fields.push("expectedRevision");
+    }
+    if expected_schema_digest.is_none() {
+        missing_fields.push("expectedSchemaDigest");
+    }
+
+    CapabilityError::Custom {
+        code: "INSPECTION_REQUIRED".to_owned(),
+        message: format!(
+            "{} is mutating or elevated-risk; inspect it first and copy inspectionHandle, expectedRevision={}, and expectedSchemaDigest={} into execute",
+            function.id.as_str(),
+            function.revision.0,
+            entry.schema_digest
+        ),
+        details: Some(json!({
+            "functionId": function.id.as_str(),
+            "missingFields": missing_fields,
+            "inspect": {
+                "functionId": function.id.as_str(),
+                "expectedRevision": function.revision.0,
+                "expectedSchemaDigest": entry.schema_digest,
+                "copyFieldsFromInspection": [
+                    "inspectionHandle",
+                    "expectedRevision",
+                    "expectedSchemaDigest"
+                ]
+            },
+            "riskLevel": format!("{:?}", function.risk_level),
+            "effectClass": format!("{:?}", function.effect_class)
+        })),
+    }
 }
 
 fn capability_result_value(result: CapabilityResult) -> Result<Value, CapabilityError> {
@@ -2471,6 +2547,102 @@ mod tests {
             super::super::registry::CapabilityTarget::Capability(value)
                 if value == "process::run"
         ));
+    }
+
+    #[test]
+    fn inspection_summary_surfaces_copyable_execute_requirements() {
+        let details = json!({
+            "contract": {
+                "contractId": "process::run",
+                "effectClass": "external_side_effect",
+                "riskLevel": "high",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["command"]
+                }
+            },
+            "implementation": {
+                "functionId": "process::run"
+            },
+            "executionRequirements": {
+                "approvalRequired": true,
+                "expectedRevision": 1,
+                "expectedSchemaDigest": "digest-123",
+                "freshInspectionRequired": true,
+                "idempotencyKeyRequired": true,
+                "inspectionHandle": "capability-inspection:v1:test"
+            }
+        });
+
+        let summary = render_inspection_summary(&details);
+
+        assert!(summary.contains("inspectionHandle=capability-inspection:v1:test"));
+        assert!(summary.contains("expectedRevision=1"));
+        assert!(summary.contains("expectedSchemaDigest=digest-123"));
+        assert!(summary.contains("Execute payload must include: command."));
+        assert!(summary.contains("idempotencyKey is required"));
+        assert!(summary.contains("approvalRequired=true"));
+    }
+
+    #[test]
+    fn missing_inspection_error_reports_exact_missing_execute_fields() {
+        let mut function = test_function("process::run");
+        function.effect_class = EffectClass::ExternalSideEffect;
+        function.risk_level = RiskLevel::High;
+        let entry =
+            super::super::registry::CapabilityRegistryEntry::from_function(function.clone(), 303);
+
+        let error = missing_inspection_requirements_error(&function, &entry, Some(1), None, None);
+
+        match error {
+            CapabilityError::Custom {
+                code,
+                message,
+                details: Some(details),
+            } => {
+                assert_eq!(code, "INSPECTION_REQUIRED");
+                assert!(message.contains("copy inspectionHandle"));
+                assert_eq!(
+                    details["missingFields"],
+                    json!(["inspectionHandle", "expectedSchemaDigest"])
+                );
+                assert_eq!(details["inspect"]["functionId"], json!("process::run"));
+                assert_eq!(details["inspect"]["expectedRevision"], json!(1));
+                assert_eq!(
+                    details["inspect"]["expectedSchemaDigest"],
+                    json!(entry.schema_digest)
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inspection_summary_keeps_low_risk_capabilities_concise() {
+        let details = json!({
+            "contract": {
+                "contractId": "filesystem::read_file",
+                "effectClass": "pure_read",
+                "riskLevel": "low"
+            },
+            "implementation": {
+                "functionId": "filesystem::read_file"
+            },
+            "executionRequirements": {
+                "approvalRequired": false,
+                "expectedRevision": 1,
+                "expectedSchemaDigest": "digest-read",
+                "freshInspectionRequired": false,
+                "idempotencyKeyRequired": false,
+                "inspectionHandle": "capability-inspection:v1:read"
+            }
+        });
+
+        let summary = render_inspection_summary(&details);
+
+        assert!(summary.contains("filesystem::read_file is implemented by filesystem::read_file"));
+        assert!(!summary.contains("inspectionHandle="));
+        assert!(!summary.contains("idempotencyKey is required"));
     }
 
     #[test]

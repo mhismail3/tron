@@ -248,7 +248,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
             "capabilitySchema": {
                 "name": "inspect",
-                "description": "Inspect one capability contract or implementation, including schemas, authority, risk, provenance, idempotency, and expected revision.",
+                "description": "Inspect one capability contract or implementation, including schemas, authority, risk, provenance, idempotency, and copyable execute freshness fields.",
                 "parameters": inspect_request_schema()
             }
         }),
@@ -259,7 +259,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
             "capabilitySchema": {
                 "name": "execute",
-                "description": "Execute a live capability by contract, implementation, capability, or function id. Inspect first for mutating or elevated-risk work.",
+                "description": "Execute a live capability by contract, implementation, capability, or function id. Mutating or elevated-risk work requires the inspectionHandle, expectedRevision, and expectedSchemaDigest returned by inspect.",
                 "parameters": execute_request_schema()
             }
         }),
@@ -323,10 +323,10 @@ fn execute_request_schema() -> serde_json::Value {
             "allowedImplementations": {"type": "array", "items": {"type": "string"}},
             "timeoutMs": {"type": "integer", "minimum": 10, "maximum": 30000},
             "budget": {"type": "object"},
-            "expectedRevision": {"type": "integer", "minimum": 1},
-            "expectedSchemaDigest": {"type": "string"},
-            "inspectionHandle": {"type": "string"},
-            "idempotencyKey": {"type": "string"},
+            "expectedRevision": {"type": "integer", "minimum": 1, "description": "Freshness revision copied from inspect.executionRequirements for mutating or elevated-risk work."},
+            "expectedSchemaDigest": {"type": "string", "description": "Schema digest copied from inspect.executionRequirements for mutating or elevated-risk work."},
+            "inspectionHandle": {"type": "string", "description": "Fresh inspection handle copied from inspect.executionRequirements for mutating or elevated-risk work."},
+            "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key required for mutating child work."},
             "reason": {"type": "string"}
         }
     })
