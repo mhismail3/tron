@@ -4,11 +4,14 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 //! Model listing, model switching, and reasoning-level mutation operation
 //! bodies live in `operations/`; provider catalog helpers remain in `catalog.rs`.
+//! Provider-native stream and function-call details are isolated under
+//! `provider_protocol` before being converted to canonical capability history.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
+pub mod provider_protocol;
 pub mod providers;
 pub(crate) use deps::Deps;
 pub use providers::*;

@@ -16,8 +16,8 @@
 //! | `embeddings` | Embedded first-party ONNX/tokenizer provider for offline local search |
 //! | `handlers` | Declarative operation bindings for model primitives plus capability admin/console functions |
 //! | `operations` | Catalog projection, binding resolution, delegated execution, plugin lifecycle, policy, and audit operations |
-//! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, and primer rendering |
-//! | `types` | Typed contract, implementation, binding, inspection, and execution records |
+//! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, program runs, and primer rendering |
+//! | `types` | Typed contract, implementation, binding, inspection, execution, and program-run records |
 //!
 //! # INVARIANT: the model-facing surface is tiny
 //!
@@ -41,14 +41,14 @@ pub(crate) mod embeddings;
 pub(crate) mod handlers;
 mod operations;
 pub(crate) mod registry;
-mod types;
+pub(crate) mod types;
 pub(crate) use deps::Deps;
 pub(crate) use operations::{
     audit_query_value, binding_list_value, binding_set_value, conformance_run_value, execute_value,
     implementation_set_state_value, inspect_value, plugin_inspect_value, plugin_install_value,
     plugin_list_value, plugin_promote_value, plugin_set_state_value, plugin_update_value,
-    policy_get_value, policy_update_value, policy_validate_value, registry_snapshot_value,
-    render_capability_primer, search_value, status_value,
+    policy_get_value, policy_update_value, policy_validate_value, program_run_list_value,
+    registry_snapshot_value, render_capability_primer, search_value, status_value,
 };
 
 use serde_json::Value;

@@ -74,6 +74,7 @@ struct CapabilityStatusDTO: Codable, Equatable, Sendable {
     var inspectionHandles: Int? = nil
     var bindingDecisions: Int? = nil
     var auditEvents: Int? = nil
+    var programRuns: Int? = nil
     var indexStatus: CapabilityIndexStatusDTO? = nil
     var snapshot: CapabilityRegistrySnapshotDTO? = nil
 }
@@ -90,6 +91,7 @@ struct CapabilityRegistrySnapshotDTO: Codable, Equatable, Sendable {
     var implementations: [CapabilityImplementationDTO]?
     var bindings: [CapabilityBindingDTO]?
     var documents: [CapabilityIndexDocumentDTO]?
+    var programRuns: [CapabilityProgramRunDTO]?
 }
 
 struct CapabilityContractDTO: Codable, Equatable, Sendable {
@@ -289,6 +291,43 @@ struct CapabilityExecutionDTO: Codable, Equatable, Sendable {
     var schemaDigest: String?
 }
 
+struct CapabilityProgramExecutionDTO: Codable, Equatable, Sendable {
+    var status: String?
+    var output: AnyCodable?
+    var error: AnyCodable?
+    var traceId: String?
+    var programRunId: String?
+    var codeHash: String?
+    var argsHash: String?
+    var childInvocations: [String]?
+    var selectedImplementations: [String]?
+    var approvalState: AnyCodable?
+    var artifacts: [AnyCodable]?
+    var logs: [String]?
+}
+
+struct CapabilityProgramRunDTO: Codable, Equatable, Sendable, Identifiable {
+    var id: String { programRunId ?? "\(traceId ?? "program")-\(codeHash ?? "unknown")" }
+    var programRunId: String?
+    var status: String?
+    var traceId: String?
+    var codeHash: String?
+    var argsHash: String?
+    var limits: AnyCodable?
+    var allowedContracts: [String]?
+    var allowedImplementations: [String]?
+    var childInvocations: [String]?
+    var selectedImplementations: [String]?
+    var approvalState: AnyCodable?
+    var artifacts: AnyCodable?
+    var logs: AnyCodable?
+    var error: AnyCodable?
+    var payloadSummary: AnyCodable?
+    var createdAt: String?
+    var updatedAt: String?
+    var redacted: Bool?
+}
+
 // MARK: - Admin / Audit
 
 struct CapabilityPluginInspectDTO: Codable, Equatable, Sendable {
@@ -305,6 +344,18 @@ struct CapabilityAuditQueryDTO: Encodable, Sendable {
 
 struct CapabilityAuditQueryResultDTO: Codable, Equatable, Sendable {
     var events: [CapabilityAuditEventDTO]
+    var redacted: Bool?
+}
+
+struct CapabilityProgramRunQueryDTO: Encodable, Sendable {
+    var traceId: String?
+    var status: String?
+    var limit: Int?
+    var revealPayloads: Bool?
+}
+
+struct CapabilityProgramRunQueryResultDTO: Codable, Equatable, Sendable {
+    var programRuns: [CapabilityProgramRunDTO]
     var redacted: Bool?
 }
 

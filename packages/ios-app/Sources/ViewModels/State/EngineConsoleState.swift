@@ -18,6 +18,8 @@ final class EngineConsoleState {
     private(set) var status: CapabilityStatusDTO?
     private(set) var registry: CapabilityRegistrySnapshotDTO?
     private(set) var audit: CapabilityAuditQueryResultDTO?
+    private(set) var programRuns: CapabilityProgramRunQueryResultDTO?
+    private(set) var policies: CapabilityPolicyGetDTO?
     private(set) var cachedSnapshot: EngineConsoleCacheSnapshot?
     var selectedInspection: CapabilityInspectionDTO?
     private(set) var searchResults: [CapabilityIndexHitDTO] = []
@@ -47,13 +49,20 @@ final class EngineConsoleState {
             let audit = try await engineClient.capability.auditQuery(
                 CapabilityAuditQueryDTO(eventType: nil, traceId: nil, limit: 50, revealPayloads: false)
             )
+            let programRuns = try await engineClient.capability.programRunList(
+                CapabilityProgramRunQueryDTO(traceId: nil, status: nil, limit: 50, revealPayloads: false)
+            )
+            let policies = try await engineClient.capability.getPolicy()
             self.status = status
             self.registry = registry
             self.audit = audit
+            self.programRuns = programRuns
+            self.policies = policies
             let snapshot = EngineConsoleCache.makeSnapshot(
                 status: status,
                 registry: registry,
-                audit: audit
+                audit: audit,
+                programRuns: programRuns
             )
             try? cache.save(snapshot)
             cachedSnapshot = snapshot
@@ -107,6 +116,36 @@ final class EngineConsoleState {
                 state: state,
                 reason: "ios_engine_console",
                 idempotencyKey: .userAction("capability.implementation_state")
+            )
+            await refresh()
+        } catch {
+            loadState = .failed(error.localizedDescription)
+        }
+    }
+
+    func setPluginState(pluginId: String, state: String) async {
+        guard !isMutatingDisabled else { return }
+        do {
+            _ = try await engineClient.capability.setPluginState(
+                pluginId: pluginId,
+                state: state,
+                reason: "ios_engine_console",
+                idempotencyKey: .userAction("capability.plugin_state")
+            )
+            await refresh()
+        } catch {
+            loadState = .failed(error.localizedDescription)
+        }
+    }
+
+    func runConformance(pluginId: String, implementationId: String? = nil) async {
+        guard !isMutatingDisabled else { return }
+        do {
+            _ = try await engineClient.capability.runConformance(
+                pluginId: pluginId,
+                implementationId: implementationId,
+                reason: "ios_engine_console",
+                idempotencyKey: .userAction("capability.conformance")
             )
             await refresh()
         } catch {

@@ -40,4 +40,60 @@ struct CapabilityClientTests {
 
         #expect(result.dictionaryValue?["updated"] as? Bool == true)
     }
+
+    @Test("program execute invokes capability execute with JavaScript schema")
+    func executeProgramUsesCapabilityPrimitive() async throws {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://localhost:8082")!)
+        let client = CapabilityClient(transport: transport)
+        transport.writeHandler = { functionId, payload, idempotencyKey, options in
+            #expect(functionId.rawValue == "capability::execute")
+            #expect(idempotencyKey.rawValue.contains("test.program"))
+            #expect(options.context?.authorityScopes.contains("capability.execute") == true)
+            let fields = Dictionary(
+                uniqueKeysWithValues: Mirror(reflecting: payload).children.compactMap { child in
+                    child.label.map { ($0, child.value) }
+                }
+            )
+            #expect(fields["mode"] as? String == "program")
+            #expect(fields["language"] as? String == "javascript")
+            #expect(fields["code"] as? String == "return args;")
+            return CapabilityPrimitiveResultDTO(
+                content: nil,
+                details: AnyCodable([
+                    "status": "ok",
+                    "programRunId": "program_run_test",
+                    "codeHash": "code",
+                    "argsHash": "args",
+                    "childInvocations": [],
+                    "selectedImplementations": []
+                ]),
+                isError: nil,
+                stopTurn: nil
+            )
+        }
+
+        let result = try await client.executeProgram(
+            code: "return args;",
+            idempotencyKey: .userAction("test.program")
+        )
+
+        #expect(result.programRunId == "program_run_test")
+    }
+
+    @Test("program run list invokes capability admin read path")
+    func programRunListUsesCapabilityAdminReadScope() async throws {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://localhost:8082")!)
+        let client = CapabilityClient(transport: transport)
+        transport.readHandler = { functionId, _, options in
+            #expect(functionId.rawValue == "capability::program_run_list")
+            #expect(options.context?.authorityScopes.contains("capability.admin.read") == true)
+            return CapabilityProgramRunQueryResultDTO(programRuns: [], redacted: true)
+        }
+
+        let result = try await client.programRunList()
+
+        #expect(result.redacted == true)
+    }
 }

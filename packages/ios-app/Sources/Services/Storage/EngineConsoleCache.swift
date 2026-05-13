@@ -7,6 +7,7 @@ struct EngineConsoleCacheSnapshot: Codable, Equatable, Sendable {
     var workerSummaries: [CapabilityIndexDocumentDTO]
     var recentAuditRows: [CapabilityAuditEventDTO]
     var recentTraceSummaries: [CapabilityAuditEventDTO]
+    var recentProgramRuns: [CapabilityProgramRunDTO]
     var indexStatus: CapabilityIndexStatusDTO?
     var fetchedAt: Date
 
@@ -49,7 +50,8 @@ final class EngineConsoleCache {
     static func makeSnapshot(
         status: CapabilityStatusDTO?,
         registry: CapabilityRegistrySnapshotDTO?,
-        audit: CapabilityAuditQueryResultDTO?
+        audit: CapabilityAuditQueryResultDTO?,
+        programRuns: CapabilityProgramRunQueryResultDTO? = nil
     ) -> EngineConsoleCacheSnapshot {
         let workers = registry?.documents?.filter { $0.kind == "worker" } ?? []
         let traces = audit?.events.filter { event in
@@ -62,6 +64,7 @@ final class EngineConsoleCache {
             workerSummaries: workers,
             recentAuditRows: audit?.events ?? [],
             recentTraceSummaries: traces,
+            recentProgramRuns: programRuns?.programRuns ?? registry?.programRuns ?? [],
             indexStatus: status?.indexStatus,
             fetchedAt: Date()
         )

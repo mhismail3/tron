@@ -76,12 +76,14 @@ store raw secret values.
 ## Rendering Rules
 
 The current Engine Console renders overview, capability search/inspect, plugin
-summaries, binding summaries, and redacted audit rows. Future generated execute
-forms and result renderers should use contract and implementation metadata, not
-retired built-in-name dispatch. First-party capabilities may provide presentation hints,
-but those hints are advisory metadata attached to capability records.
+lifecycle summaries, worker health, binding summaries, profile policies,
+redacted audit rows, trace summaries, primer inputs, and redacted program-run
+records. Generated invoke/program forms and result renderers use contract and
+implementation metadata, not retired built-in-name dispatch. First-party
+capabilities may provide presentation hints, but those hints are advisory
+metadata attached to capability records.
 
-Provider protocol terminology is confined to adapter and transcript payloads.
+Provider protocol terminology is confined to provider-boundary and transcript payloads.
 Capability UI surfaces use `CapabilityIdentity` and registry DTOs as the active
 model; events without capability identity are diagnostics, not inputs to
 retired-name mapping.

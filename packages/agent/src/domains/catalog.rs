@@ -137,6 +137,7 @@ fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     specs.extend(super::notifications::contract::capabilities()?);
     specs.extend(super::plan::contract::capabilities()?);
     specs.extend(super::process::contract::capabilities()?);
+    specs.extend(super::program::contract::capabilities()?);
     specs.extend(super::prompt_library::contract::capabilities()?);
     specs.extend(super::repo::contract::capabilities()?);
     specs.extend(super::sandbox::contract::capabilities()?);

@@ -3,7 +3,8 @@
 //! The registry is deliberately layered over the engine catalog. The catalog is
 //! still the source of truth for live functions, health, visibility, authority,
 //! and invocation; this module gives the capability primitives a stable
-//! contract/implementation vocabulary plus a search index boundary.
+//! contract/implementation vocabulary, search index boundary, and durable audit
+//! records for binding, inspection, execution, and program runs.
 
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -21,6 +22,7 @@ use super::types::{
     CapabilityBindingDecision, CapabilityBindingRecord, CapabilityContractRecord,
     CapabilityImplementationRecord, CapabilityIndexHit, CapabilityIndexStatus,
     CapabilityInspectionHandle, CapabilityInspectionRecord, CapabilityPluginManifest,
+    CapabilityProgramRunRecord,
 };
 use crate::engine::{
     ActorContext, EffectClass, FunctionDefinition, FunctionHealth, FunctionQuery, RiskLevel,
@@ -557,6 +559,16 @@ pub(crate) trait CapabilityRegistryStore: Send {
         payload: Value,
     ) -> Result<(), String>;
 
+    fn record_program_run(&mut self, record: &CapabilityProgramRunRecord) -> Result<(), String>;
+
+    fn program_run_query(
+        &self,
+        trace_id: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+        reveal_payloads: bool,
+    ) -> Result<Value, String>;
+
     fn admin_status(&self) -> Result<Value, String>;
 
     fn registry_snapshot(&self) -> Result<Value, String>;
@@ -612,6 +624,7 @@ pub(crate) struct InMemoryCapabilityRegistryStore {
     implementations: BTreeMap<String, Value>,
     inspections: BTreeMap<String, (String, u64, String)>,
     audits: Vec<Value>,
+    program_runs: BTreeMap<String, Value>,
 }
 
 impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
@@ -776,6 +789,41 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
         Ok(())
     }
 
+    fn record_program_run(&mut self, record: &CapabilityProgramRunRecord) -> Result<(), String> {
+        let mut value = serde_json::to_value(record)
+            .map_err(|error| format!("serialize program run: {error}"))?;
+        value["createdAt"] = json!(Utc::now().to_rfc3339());
+        let _ = self
+            .program_runs
+            .insert(record.program_run_id.clone(), value);
+        Ok(())
+    }
+
+    fn program_run_query(
+        &self,
+        trace_id: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+        reveal_payloads: bool,
+    ) -> Result<Value, String> {
+        let runs = self
+            .program_runs
+            .values()
+            .rev()
+            .filter(|run| {
+                trace_id.is_none_or(|expected| {
+                    run.get("traceId").and_then(Value::as_str) == Some(expected)
+                }) && status.is_none_or(|expected| {
+                    run.get("status").and_then(Value::as_str) == Some(expected)
+                })
+            })
+            .take(limit)
+            .cloned()
+            .map(|run| redact_program_run(run, reveal_payloads))
+            .collect::<Vec<_>>();
+        Ok(json!({ "programRuns": runs, "redacted": !reveal_payloads }))
+    }
+
     fn admin_status(&self) -> Result<Value, String> {
         Ok(json!({
             "plugins": self.plugins.len(),
@@ -783,6 +831,7 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
             "bindings": self.bindings.len(),
             "documents": self.documents.len(),
             "auditEvents": self.audits.len(),
+            "programRuns": self.program_runs.len(),
             "indexStatus": {
                 "state": "memory",
                 "lexical": true,
@@ -801,6 +850,7 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
             "implementations": self.implementations.values().cloned().collect::<Vec<_>>(),
             "bindings": self.bindings.values().cloned().collect::<Vec<_>>(),
             "documents": self.documents.values().cloned().collect::<Vec<_>>(),
+            "programRuns": self.program_runs.values().cloned().collect::<Vec<_>>(),
         }))
     }
 
@@ -1428,6 +1478,116 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
         Ok(())
     }
 
+    fn record_program_run(&mut self, record: &CapabilityProgramRunRecord) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO capability_program_runs(
+                    program_run_id, status, trace_id, code_hash, args_hash,
+                    limits_json, allowed_contracts_json, allowed_implementations_json,
+                    child_invocations_json, selected_implementations_json, approval_state_json,
+                    artifacts_json, logs_json, error_json, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+                 ON CONFLICT(program_run_id) DO UPDATE SET
+                    status = excluded.status,
+                    trace_id = excluded.trace_id,
+                    code_hash = excluded.code_hash,
+                    args_hash = excluded.args_hash,
+                    limits_json = excluded.limits_json,
+                    allowed_contracts_json = excluded.allowed_contracts_json,
+                    allowed_implementations_json = excluded.allowed_implementations_json,
+                    child_invocations_json = excluded.child_invocations_json,
+                    selected_implementations_json = excluded.selected_implementations_json,
+                    approval_state_json = excluded.approval_state_json,
+                    artifacts_json = excluded.artifacts_json,
+                    logs_json = excluded.logs_json,
+                    error_json = excluded.error_json,
+                    updated_at = excluded.updated_at",
+                params![
+                    record.program_run_id,
+                    record.status,
+                    record.trace_id,
+                    record.code_hash,
+                    record.args_hash,
+                    serde_json::to_string(&record.limits)
+                        .map_err(|error| format!("serialize program limits: {error}"))?,
+                    serde_json::to_string(&record.allowed_contracts)
+                        .map_err(|error| format!("serialize allowed contracts: {error}"))?,
+                    serde_json::to_string(&record.allowed_implementations)
+                        .map_err(|error| format!("serialize allowed implementations: {error}"))?,
+                    serde_json::to_string(&record.child_invocations)
+                        .map_err(|error| format!("serialize child invocations: {error}"))?,
+                    serde_json::to_string(&record.selected_implementations)
+                        .map_err(|error| format!("serialize selected implementations: {error}"))?,
+                    serde_json::to_string(&record.approval_state)
+                        .map_err(|error| format!("serialize approval state: {error}"))?,
+                    serde_json::to_string(&record.artifacts)
+                        .map_err(|error| format!("serialize artifacts: {error}"))?,
+                    serde_json::to_string(&record.logs)
+                        .map_err(|error| format!("serialize logs: {error}"))?,
+                    serde_json::to_string(&record.error)
+                        .map_err(|error| format!("serialize program error: {error}"))?,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|error| format!("record program run: {error}"))?;
+        Ok(())
+    }
+
+    fn program_run_query(
+        &self,
+        trace_id: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+        reveal_payloads: bool,
+    ) -> Result<Value, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT program_run_id, status, trace_id, code_hash, args_hash,
+                        limits_json, allowed_contracts_json, allowed_implementations_json,
+                        child_invocations_json, selected_implementations_json, approval_state_json,
+                        artifacts_json, logs_json, error_json, created_at, updated_at
+                 FROM capability_program_runs
+                 WHERE (?1 IS NULL OR trace_id = ?1)
+                   AND (?2 IS NULL OR status = ?2)
+                 ORDER BY updated_at DESC
+                 LIMIT ?3",
+            )
+            .map_err(|error| format!("prepare program run query: {error}"))?;
+        let rows = stmt
+            .query_map(params![trace_id, status, limit as i64], |row| {
+                let limits = json_from_row(row.get::<_, String>(5)?);
+                let approval_state = json_from_row(row.get::<_, String>(10)?);
+                Ok(json!({
+                    "programRunId": row.get::<_, String>(0)?,
+                    "status": row.get::<_, String>(1)?,
+                    "traceId": row.get::<_, String>(2)?,
+                    "codeHash": row.get::<_, String>(3)?,
+                    "argsHash": row.get::<_, String>(4)?,
+                    "limits": limits,
+                    "allowedContracts": json_from_row(row.get::<_, String>(6)?),
+                    "allowedImplementations": json_from_row(row.get::<_, String>(7)?),
+                    "childInvocations": json_from_row(row.get::<_, String>(8)?),
+                    "selectedImplementations": json_from_row(row.get::<_, String>(9)?),
+                    "approvalState": approval_state,
+                    "artifacts": json_from_row(row.get::<_, String>(11)?),
+                    "logs": json_from_row(row.get::<_, String>(12)?),
+                    "error": json_from_row(row.get::<_, String>(13)?),
+                    "createdAt": row.get::<_, String>(14)?,
+                    "updatedAt": row.get::<_, String>(15)?,
+                }))
+            })
+            .map_err(|error| format!("query program runs: {error}"))?;
+        let mut runs = Vec::new();
+        for row in rows {
+            runs.push(redact_program_run(
+                row.map_err(|error| format!("read program run: {error}"))?,
+                reveal_payloads,
+            ));
+        }
+        Ok(json!({ "programRuns": runs, "redacted": !reveal_payloads }))
+    }
+
     fn admin_status(&self) -> Result<Value, String> {
         let count = |table: &str| -> Result<i64, String> {
             self.conn
@@ -1483,6 +1643,7 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             "inspectionHandles": count("capability_inspection_handles")?,
             "bindingDecisions": count("capability_binding_decisions")?,
             "auditEvents": count("capability_audit_events")?,
+            "programRuns": count("capability_program_runs")?,
             "indexStatus": vector,
         }))
     }
@@ -1493,6 +1654,7 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             "implementations": query_implementations(&self.conn)?,
             "bindings": query_bindings(&self.conn)?,
             "documents": query_json_column(&self.conn, "SELECT document_json FROM capability_index_documents ORDER BY kind, capability_id")?,
+            "programRuns": self.program_run_query(None, None, 100, false)?["programRuns"].clone(),
         }))
     }
 
@@ -1894,6 +2056,10 @@ where
     Ok(values)
 }
 
+fn json_from_row(raw: String) -> Value {
+    serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null)
+}
+
 fn redact_audit_event(mut event: Value, reveal_payloads: bool) -> Value {
     if reveal_payloads {
         event["redacted"] = json!(false);
@@ -1909,6 +2075,45 @@ fn redact_audit_event(mut event: Value, reveal_payloads: bool) -> Value {
     });
     event["redacted"] = json!(true);
     event
+}
+
+fn redact_program_run(mut run: Value, reveal_payloads: bool) -> Value {
+    if reveal_payloads {
+        run["redacted"] = json!(false);
+        return run;
+    }
+    let log_count = run
+        .get("logs")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
+    let artifact_count = run
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
+    run["payloadSummary"] = json!({
+        "programRunId": run.get("programRunId").cloned().unwrap_or(Value::Null),
+        "status": run.get("status").cloned().unwrap_or(Value::Null),
+        "traceId": run.get("traceId").cloned().unwrap_or(Value::Null),
+        "codeHash": run.get("codeHash").cloned().unwrap_or(Value::Null),
+        "argsHash": run.get("argsHash").cloned().unwrap_or(Value::Null),
+        "childInvocations": run.get("childInvocations").cloned().unwrap_or_else(|| json!([])),
+        "selectedImplementations": run.get("selectedImplementations").cloned().unwrap_or_else(|| json!([])),
+        "approvalState": run.get("approvalState").cloned().unwrap_or(Value::Null),
+        "logCount": log_count,
+        "artifactCount": artifact_count,
+    });
+    run["logs"] = json!({"redacted": true, "count": log_count});
+    run["artifacts"] = json!({"redacted": true, "count": artifact_count});
+    run["error"] = run
+        .get("error")
+        .cloned()
+        .filter(|value| !value.is_null())
+        .map(|error| audit_payload_summary(&error))
+        .unwrap_or(Value::Null);
+    run["redacted"] = json!(true);
+    run
 }
 
 fn audit_payload_summary(payload: &Value) -> Value {
@@ -2052,12 +2257,35 @@ CREATE TABLE IF NOT EXISTS capability_audit_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS capability_program_runs (
+  program_run_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  trace_id TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  args_hash TEXT NOT NULL,
+  limits_json TEXT NOT NULL,
+  allowed_contracts_json TEXT NOT NULL,
+  allowed_implementations_json TEXT NOT NULL,
+  child_invocations_json TEXT NOT NULL,
+  selected_implementations_json TEXT NOT NULL,
+  approval_state_json TEXT NOT NULL,
+  artifacts_json TEXT NOT NULL,
+  logs_json TEXT NOT NULL,
+  error_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_capability_documents_contract
   ON capability_index_documents(contract_id);
 CREATE INDEX IF NOT EXISTS idx_capability_documents_plugin
   ON capability_index_documents(plugin_id);
 CREATE INDEX IF NOT EXISTS idx_capability_documents_kind
   ON capability_index_documents(kind);
+CREATE INDEX IF NOT EXISTS idx_capability_program_runs_trace
+  ON capability_program_runs(trace_id);
+CREATE INDEX IF NOT EXISTS idx_capability_program_runs_status
+  ON capability_program_runs(status);
 "#;
 
 /// Hybrid local index.

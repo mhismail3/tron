@@ -49,6 +49,10 @@ sqlite-vec = "=0.1.9"
 # Local embeddings / capability search
 fastembed = { version = "5.13.4", default-features = false, features = ["ort-download-binaries-rustls-tls"] }
 
+# Sandboxed program execution
+rquickjs = "0.11.0"
+rquickjs-serde = "0.5.0"
+
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

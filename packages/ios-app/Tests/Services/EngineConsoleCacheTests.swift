@@ -46,6 +46,7 @@ struct EngineConsoleCacheTests {
                 )
             ],
             recentTraceSummaries: [],
+            recentProgramRuns: [],
             indexStatus: CapabilityIndexStatusDTO(
                 lexical: true,
                 localVector: true,

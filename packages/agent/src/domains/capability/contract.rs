@@ -35,6 +35,7 @@ pub(crate) const IMPLEMENTATION_SET_STATE_FUNCTION_ID: &str =
 pub(crate) const POLICY_GET_FUNCTION_ID: &str = "capability::policy_get";
 pub(crate) const POLICY_VALIDATE_FUNCTION_ID: &str = "capability::policy_validate";
 pub(crate) const POLICY_UPDATE_FUNCTION_ID: &str = "capability::policy_update";
+pub(crate) const PROGRAM_RUN_LIST_FUNCTION_ID: &str = "capability::program_run_list";
 
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
@@ -172,6 +173,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             policy_update_request_schema(),
             admin_result_schema(),
         )?,
+        admin_read_contract(
+            PROGRAM_RUN_LIST_FUNCTION_ID,
+            "capability.admin.read",
+            program_run_list_request_schema(),
+            admin_result_schema(),
+        )?,
     ])
 }
 
@@ -303,12 +310,19 @@ fn execute_request_schema() -> serde_json::Value {
         "required": ["mode"],
         "additionalProperties": false,
         "properties": {
-            "mode": {"type": "string", "enum": ["invoke"]},
+            "mode": {"type": "string", "enum": ["invoke", "program"]},
             "capabilityId": {"type": "string"},
             "contractId": {"type": "string"},
             "implementationId": {"type": "string"},
             "functionId": {"type": "string"},
             "payload": {"type": "object"},
+            "language": {"type": "string", "enum": ["javascript"]},
+            "code": {"type": "string", "description": "JavaScript function body used only with mode='program'."},
+            "args": {"type": "object"},
+            "allowedContracts": {"type": "array", "items": {"type": "string"}},
+            "allowedImplementations": {"type": "array", "items": {"type": "string"}},
+            "timeoutMs": {"type": "integer", "minimum": 10, "maximum": 30000},
+            "budget": {"type": "object"},
             "expectedRevision": {"type": "integer", "minimum": 1},
             "expectedSchemaDigest": {"type": "string"},
             "inspectionHandle": {"type": "string"},
@@ -354,6 +368,19 @@ fn audit_query_request_schema() -> serde_json::Value {
         "properties": {
             "eventType": {"type": "string"},
             "traceId": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            "revealPayloads": {"type": "boolean"}
+        }
+    })
+}
+
+fn program_run_list_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "traceId": {"type": "string"},
+            "status": {"type": "string", "enum": ["ok", "error", "approval_required", "paused", "failed"]},
             "limit": {"type": "integer", "minimum": 1, "maximum": 200},
             "revealPayloads": {"type": "boolean"}
         }

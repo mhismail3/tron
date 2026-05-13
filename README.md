@@ -148,6 +148,11 @@ contains executable operation bodies. Runtime support is split the same way in
 domain-owned folders such as `domains/agent/runner/*`,
 `domains/agent/runtime/*`, `domains/session/event_store/*`,
 `domains/capability_support/implementations/*`, and `domains/worktree/implementation/*`.
+`domains/program/*` owns the QuickJS program executor worker. Provider-native
+stream/function-call argument parsing and provider-specific invocation id
+remapping are isolated under `domains/model/provider_protocol/*` before any
+canonical capability history reaches the runner, ledger, registry, audit, or
+iOS DTO layers.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -278,7 +283,7 @@ primitives registered by the `domains::capability` worker:
 |-----------|-------------|
 | `search` | Search the live catalog for contracts, implementations, workers, plugins, examples, and docs visible to the current actor/session/workspace. |
 | `inspect` | Inspect one capability contract and selected implementation, including schemas, risk, authority, idempotency, approval, leases, compensation, provenance, schema digest, and expected revision. |
-| `execute` | Invoke a selected capability through the engine ledger. |
+| `execute` | Invoke a selected capability through the engine ledger, or run a bounded JavaScript program that composes capabilities through the same primitive surface. |
 
 Filesystem, code search, shell/process, web, plugin source, iOS/app interaction, display,
 notifications, subagents, and sandbox workers are not provider-facing built-ins.
@@ -319,6 +324,19 @@ bounds plugin id, namespace claims, authority ceiling, visibility ceiling,
 trust tier, scope binding, expiry, and signature status before their functions
 can enter the capability registry.
 
+`execute` program mode is implemented by the first-party
+`program::run_javascript` worker. It uses a QuickJS runtime through a
+Tron-owned executor trait, freezes the JavaScript host surface to
+`tools.search`, `tools.inspect`, `tools.execute`, and denies filesystem,
+network, process, import, environment, secret, mutable-clock, native-module,
+and arbitrary host-object access. Program requests carry explicit limits for
+timeout, memory, stack, output/log bytes, child-call count, recursion depth,
+allowed contracts/implementations, and risk budget. Child approvals pause the
+run; programs cannot self-approve or recursively invoke program mode. Every run
+is recorded in the capability registry store with code/args hashes, limits,
+child invocations, selected implementations, approval state, artifacts, logs,
+trace id, and final status.
+
 Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block tells agents to inspect `process::run` before using standard `git` commands and to defer risky or publishing operations to the user.
 
 The same capability worker also registers operator/admin functions for native
@@ -327,7 +345,7 @@ provider-facing primitives:
 
 | Function family | Functions |
 |-----------------|-----------|
-| Status/snapshot/audit | `capability::status`, `capability::registry_snapshot`, `capability::audit_query` |
+| Status/snapshot/audit | `capability::status`, `capability::registry_snapshot`, `capability::audit_query`, `capability::program_run_list` |
 | Bindings | `capability::binding_list`, `capability::binding_set` |
 | Plugins/conformance | `capability::plugin_list`, `capability::plugin_inspect`, `capability::plugin_install`, `capability::plugin_update`, `capability::plugin_set_state`, `capability::plugin_promote`, `capability::conformance_run` |
 | Implementations/policy | `capability::implementation_set_state`, `capability::policy_get`, `capability::policy_validate`, `capability::policy_update` |
@@ -793,7 +811,7 @@ Engine ledger rows, streams, state, queues, approvals, resource leases, compensa
 | `engine_state_entries`, `engine_queue_items`, `engine_approvals`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
 | `capability_plugins`, `capability_implementations`, `capability_bindings` | Durable capability registry layer over the live catalog: plugin manifests, concrete implementations, conformance state, signature status, and policy-selected bindings |
 | `capability_index_documents`, `capability_vector_metadata` | Search documents and persistent local vector-index metadata for hybrid capability search |
-| `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events` | Fresh inspect handles plus auditable records for binding resolution and search/inspect/execute lifecycle decisions |
+| `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events`, `capability_program_runs` | Fresh inspect handles plus auditable records for binding resolution, program runs, and search/inspect/execute lifecycle decisions |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 | `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row; `bundle_id` lets the relay send Beta-scheme tokens to the correct APNs topic) |
@@ -850,7 +868,7 @@ packages/ios-app/Sources/
 - **Capability-native chat UI**: active work is rendered as `capabilityInvocation` / `capabilityResult` content from capability identity and schema/result metadata. Retired capability descriptors, old built-in names, and plugin source-specific capability sheets are not active UI routes.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
 - **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; engine-native clients discover the live endpoint by invoking `codex_app::status` and do not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
-- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, plugin manifests, bindings, vector index state, and redacted audit rows. It invokes capability admin functions rather than hardcoded capability descriptors. `EngineConsoleCache` stores read-only summaries for disconnected browsing; mutations stay server-authoritative and are disabled by the console state while offline.
+- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, plugin manifests, workers, bindings, policies, vector index state, redacted audit rows, trace summaries, primer inputs, and program runs. It invokes capability admin functions rather than hardcoded capability descriptors. `EngineConsoleCache` stores read-only summaries for disconnected browsing; mutations stay server-authoritative and are disabled by the console state while offline.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.

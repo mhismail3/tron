@@ -380,7 +380,7 @@ fn capability_registry_authority_stays_deleted() {
     ] {
         assert!(
             !capability_executor_source.contains(retired_runtime_term),
-            "agent capability executor must not reintroduce the retired runtime bridge"
+            "agent capability executor must not reintroduce the retired runtime path"
         );
     }
 }
@@ -444,6 +444,7 @@ fn retired_capability_event_surface_stays_deleted() {
 fn provider_tool_terms_stay_inside_protocol_boundaries() {
     let repo_root = repo_root();
     let allowed_prefixes = [
+        "packages/agent/src/domains/model/provider_protocol/",
         "packages/agent/src/domains/model/providers/",
         "packages/agent/src/domains/mcp/product_protocol/",
         "packages/agent/tests/threat_model_invariants.rs",

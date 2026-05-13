@@ -69,6 +69,7 @@ pub mod model;
 pub mod notifications;
 pub mod plan;
 pub mod process;
+pub mod program;
 pub mod prompt_library;
 pub mod registration;
 pub mod repo;

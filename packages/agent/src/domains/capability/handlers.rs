@@ -5,7 +5,7 @@ use super::{
     execute_value, implementation_set_state_value, inspect_value, plugin_inspect_value,
     plugin_install_value, plugin_list_value, plugin_promote_value, plugin_set_state_value,
     plugin_update_value, policy_get_value, policy_update_value, policy_validate_value,
-    registry_snapshot_value, search_value, status_value,
+    program_run_list_value, registry_snapshot_value, search_value, status_value,
 };
 use crate::domains::bindings::operation_bindings;
 
@@ -69,6 +69,9 @@ operation_bindings! {
         },
         "policy_update" => |invocation, deps| {
             policy_update_value(invocation, deps).await
+        },
+        "program_run_list" => |invocation, deps| {
+            program_run_list_value(invocation, deps).await
         },
     ];
 }

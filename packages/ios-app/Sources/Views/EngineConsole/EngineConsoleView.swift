@@ -6,8 +6,13 @@ struct EngineConsoleView: View {
         case overview = "Overview"
         case capabilities = "Capabilities"
         case plugins = "Plugins"
+        case workers = "Workers"
         case bindings = "Bindings"
+        case policies = "Policies"
         case audit = "Audit"
+        case traces = "Traces"
+        case primer = "Primer"
+        case programRuns = "Program Runs"
     }
 
     let engineClient: EngineClient
@@ -28,7 +33,7 @@ struct EngineConsoleView: View {
                     Text(section.rawValue).tag(section)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
@@ -68,10 +73,20 @@ struct EngineConsoleView: View {
             capabilities
         case .plugins:
             plugins
+        case .workers:
+            workers
         case .bindings:
             bindings
+        case .policies:
+            policies
         case .audit:
             audit
+        case .traces:
+            traces
+        case .primer:
+            primer
+        case .programRuns:
+            programRuns
         }
     }
 
@@ -86,6 +101,7 @@ struct EngineConsoleView: View {
                 metricRow("Implementations", countText(state.status?.implementations, cached: nil))
                 metricRow("Bindings", countText(state.status?.bindings, cached: nil))
                 metricRow("Audit Rows", countText(state.status?.auditEvents, cached: state.cachedSnapshot?.recentAuditRows.count))
+                metricRow("Program Runs", countText(state.status?.programRuns, cached: state.cachedSnapshot?.recentProgramRuns.count))
             }
             Section {
                 switch state.loadState {
@@ -141,8 +157,40 @@ struct EngineConsoleView: View {
                     metricRow("Signature", plugin.signatureStatus ?? "unknown")
                     metricRow("Conformance", plugin.conformanceState ?? "unknown")
                     metricRow("Namespaces", plugin.namespaceClaims?.joined(separator: ", ") ?? "none")
+                    if !state.isMutatingDisabled {
+                        HStack {
+                            Button("Run Conformance") {
+                                Task { await state.runConformance(pluginId: plugin.id) }
+                            }
+                            Spacer()
+                            Button("Disable", role: .destructive) {
+                                Task { await state.setPluginState(pluginId: plugin.id, state: "disabled") }
+                            }
+                            .disabled(plugin.conformanceState == "disabled")
+                        }
+                    }
                 } header: {
                     Text(plugin.id)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var workers: some View {
+        List {
+            let workers = state.registry?.documents?.filter { $0.kind == "worker" } ?? state.cachedSnapshot?.workerSummaries ?? []
+            ForEach(workers.indices, id: \.self) { index in
+                let worker = workers[index]
+                Section {
+                    metricRow("Worker", worker.workerId ?? "unknown")
+                    metricRow("Plugin", worker.pluginId ?? "unknown")
+                    metricRow("Health", worker.health ?? "unknown")
+                    metricRow("Visibility", worker.visibility ?? "unknown")
+                    metricRow("Catalog", worker.catalogRevision.map(String.init) ?? "unknown")
+                } header: {
+                    Text(worker.capabilityId ?? worker.workerId ?? "worker")
                 }
             }
         }
@@ -167,6 +215,26 @@ struct EngineConsoleView: View {
         .scrollContentBackground(.hidden)
     }
 
+    private var policies: some View {
+        List {
+            ForEach((state.policies?.capabilityPolicies ?? [:]).keys.sorted(), id: \.self) { id in
+                if let policy = state.policies?.capabilityPolicies?[id] {
+                    Section {
+                        metricRow("Search", policy.searchPolicy ?? "default")
+                        metricRow("Primer", policy.contextPrimerPolicy ?? "default")
+                        metricRow("Allowed", (policy.allowedCapabilities ?? []).joined(separator: ", "))
+                        metricRow("Denied", (policy.deniedCapabilities ?? []).joined(separator: ", "))
+                        metricRow("Interactive", (policy.exposeInteractiveCapabilities ?? false) ? "yes" : "no")
+                    } header: {
+                        Text(id)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
     private var audit: some View {
         List {
             ForEach(state.audit?.events ?? state.cachedSnapshot?.recentAuditRows ?? []) { event in
@@ -181,6 +249,73 @@ struct EngineConsoleView: View {
                     }
                 } header: {
                     Text(event.eventType ?? event.id ?? "audit")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var traces: some View {
+        List {
+            ForEach(state.audit?.events.filter { $0.traceId?.isEmpty == false } ?? state.cachedSnapshot?.recentTraceSummaries ?? []) { event in
+                Section {
+                    metricRow("Event", event.eventType ?? "unknown")
+                    metricRow("Created", event.createdAt ?? "unknown")
+                    metricRow("Redacted", (event.redacted ?? true) ? "yes" : "no")
+                } header: {
+                    Text(event.traceId ?? "trace")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var primer: some View {
+        List {
+            Section("Profile") {
+                metricRow("Name", state.status?.serverProfile?.profileName ?? "unknown")
+                metricRow("Hash", state.status?.serverProfile?.profileHash ?? "unknown")
+            }
+            Section("Index") {
+                metricRow("State", state.status?.indexStatus?.state ?? cachedIndexState)
+                metricRow("Embedding", state.status?.indexStatus?.embeddingModel ?? "unavailable")
+                metricRow("Vector Store", state.status?.indexStatus?.vectorStore ?? "unknown")
+                metricRow("Degraded", state.status?.indexStatus?.degradedReason ?? "no")
+            }
+            Section("Core Primer Inputs") {
+                let core = state.registry?.implementations?.filter { implementation in
+                    implementation.trustTier == "first_party_signed"
+                        && implementation.conformanceState == "healthy"
+                } ?? []
+                ForEach(core.prefix(80), id: \.implementationId) { implementation in
+                    metricRow(implementation.contractId ?? implementation.implementationId, implementation.functionId ?? "")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var programRuns: some View {
+        List {
+            ForEach(state.programRuns?.programRuns ?? state.cachedSnapshot?.recentProgramRuns ?? []) { run in
+                Section {
+                    metricRow("Status", run.status ?? "unknown")
+                    metricRow("Trace", run.traceId ?? "unknown")
+                    metricRow("Code Hash", run.codeHash ?? "unknown")
+                    metricRow("Args Hash", run.argsHash ?? "unknown")
+                    metricRow("Children", String(run.childInvocations?.count ?? 0))
+                    metricRow("Selected", (run.selectedImplementations ?? []).joined(separator: ", "))
+                    metricRow("Redacted", (run.redacted ?? true) ? "yes" : "no")
+                    if let summary = run.payloadSummary?.dictionaryValue {
+                        ForEach(summary.keys.sorted(), id: \.self) { key in
+                            metricRow(key, String(describing: summary[key] ?? ""))
+                        }
+                    }
+                } header: {
+                    Text(run.programRunId ?? "program")
                 }
             }
         }

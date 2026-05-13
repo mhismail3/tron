@@ -90,10 +90,57 @@ final class CapabilityClient: EngineDomainClient {
         return try decodeDetails(CapabilityExecutionDTO.self, from: result)
     }
 
+    func executeProgram(
+        code: String,
+        args: [String: AnyCodable] = [:],
+        allowedContracts: [String] = [],
+        allowedImplementations: [String] = [],
+        timeoutMs: UInt64? = nil,
+        budget: AnyCodable? = nil,
+        reason: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> CapabilityProgramExecutionDTO {
+        _ = try requireTransport().requireConnection()
+        let result: CapabilityPrimitiveResultDTO = try await invokeWrite(
+            "capability::execute",
+            ProgramExecuteParams(
+                mode: "program",
+                language: "javascript",
+                code: code,
+                args: args,
+                allowedContracts: allowedContracts,
+                allowedImplementations: allowedImplementations,
+                timeoutMs: timeoutMs,
+                budget: budget,
+                idempotencyKey: idempotencyKey.rawValue,
+                reason: reason
+            ),
+            idempotencyKey: idempotencyKey,
+            context: primitiveContext
+        )
+        return try decodeDetails(CapabilityProgramExecutionDTO.self, from: result)
+    }
+
     func auditQuery(_ query: CapabilityAuditQueryDTO) async throws -> CapabilityAuditQueryResultDTO {
         _ = try requireTransport().requireConnection()
         return try await invokeRead(
             "capability::audit_query",
+            query,
+            context: readContext
+        )
+    }
+
+    func programRunList(
+        _ query: CapabilityProgramRunQueryDTO = CapabilityProgramRunQueryDTO(
+            traceId: nil,
+            status: nil,
+            limit: 50,
+            revealPayloads: false
+        )
+    ) async throws -> CapabilityProgramRunQueryResultDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "capability::program_run_list",
             query,
             context: readContext
         )
@@ -356,6 +403,19 @@ private struct ExecuteParams: Encodable {
     let expectedRevision: UInt64?
     let expectedSchemaDigest: String?
     let inspectionHandle: String?
+    let idempotencyKey: String
+    let reason: String?
+}
+
+private struct ProgramExecuteParams: Encodable {
+    let mode: String
+    let language: String
+    let code: String
+    let args: [String: AnyCodable]
+    let allowedContracts: [String]
+    let allowedImplementations: [String]
+    let timeoutMs: UInt64?
+    let budget: AnyCodable?
     let idempotencyKey: String
     let reason: String?
 }

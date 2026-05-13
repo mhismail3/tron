@@ -188,3 +188,23 @@ pub(crate) struct CapabilityExecutionRecord {
     pub(crate) binding_decision: CapabilityBindingDecision,
     pub(crate) schema_digest: String,
 }
+
+/// Durable record for one sandboxed program execution.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityProgramRunRecord {
+    pub(crate) program_run_id: String,
+    pub(crate) status: String,
+    pub(crate) trace_id: String,
+    pub(crate) code_hash: String,
+    pub(crate) args_hash: String,
+    pub(crate) limits: Value,
+    pub(crate) allowed_contracts: Vec<String>,
+    pub(crate) allowed_implementations: Vec<String>,
+    pub(crate) child_invocations: Vec<String>,
+    pub(crate) selected_implementations: Vec<String>,
+    pub(crate) approval_state: Option<Value>,
+    pub(crate) artifacts: Vec<Value>,
+    pub(crate) logs: Vec<String>,
+    pub(crate) error: Option<Value>,
+}

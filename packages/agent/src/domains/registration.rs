@@ -35,7 +35,7 @@ use crate::domains::worker::{
 use crate::domains::{
     agent, auth, blob, browser, capability, codex_app, context, cron, device, display, events,
     filesystem, git, import, job, logs, mcp, memory, message, model, notifications, plan, process,
-    prompt_library, repo, sandbox, session, settings, skills, system, transcription, tree,
+    program, prompt_library, repo, sandbox, session, settings, skills, system, transcription, tree,
     voice_notes, web, worktree,
 };
 
@@ -88,6 +88,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         notifications::worker_module(&deps)?,
         plan::worker_module(&deps)?,
         process::worker_module(&deps)?,
+        program::worker_module(&deps)?,
         prompt_library::worker_module(&deps)?,
         tree::worker_module(&deps)?,
         repo::worker_module(&deps)?,

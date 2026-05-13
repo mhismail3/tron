@@ -25,8 +25,8 @@ use super::types::{
 };
 use crate::engine::{
     ActorContext, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EffectClass,
-    EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionQuery, FunctionRevision,
-    Invocation, RiskLevel,
+    EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
+    FunctionRevision, Invocation, RiskLevel,
 };
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -227,6 +227,7 @@ pub(crate) async fn execute_value(
     let mode = string_field(&invocation.payload, "mode").unwrap_or_else(|| "invoke".to_owned());
     match mode.as_str() {
         "invoke" => execute_invoke_value(invocation, deps).await,
+        "program" => execute_program_value(invocation, deps).await,
         other => Err(CapabilityError::InvalidParams {
             message: format!("Unsupported capability execute mode '{other}'"),
         }),
@@ -324,6 +325,48 @@ pub(crate) async fn audit_query_value(
         json!({
             "eventType": event_type,
             "traceId": trace_id,
+            "limit": limit,
+            "revealPayloads": reveal_payloads,
+        }),
+    )
+    .await?;
+    Ok(result)
+}
+
+pub(crate) async fn program_run_list_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let trace_id = string_field(&invocation.payload, "traceId");
+    let status = string_field(&invocation.payload, "status");
+    let limit = u64_field(&invocation.payload, "limit")
+        .map(|value| value.clamp(1, 200) as usize)
+        .unwrap_or(50);
+    let reveal_payloads = bool_field(&invocation.payload, "revealPayloads").unwrap_or(false);
+    let store = deps.registry_store.clone();
+    let trace_id_for_query = trace_id.clone();
+    let status_for_query = status.clone();
+    let result = run_blocking_task("capability.program_run_list", move || {
+        let store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .program_run_query(
+                trace_id_for_query.as_deref(),
+                status_for_query.as_deref(),
+                limit,
+                reveal_payloads,
+            )
+            .map_err(registry_store_error)
+    })
+    .await?;
+    record_admin_audit(
+        deps,
+        invocation,
+        "capability.program_run_list",
+        json!({
+            "traceId": trace_id,
+            "status": status,
             "limit": limit,
             "revealPayloads": reveal_payloads,
         }),
@@ -1044,6 +1087,121 @@ async fn execute_invoke_value(
         details: Some(details),
         is_error: None,
         stop_turn: None,
+    })
+}
+
+async fn execute_program_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let language = string_field(&invocation.payload, "language").ok_or_else(|| {
+        CapabilityError::InvalidParams {
+            message: "execute mode 'program' requires language='javascript'".to_owned(),
+        }
+    })?;
+    if language != "javascript" {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute mode 'program' currently supports JavaScript only".to_owned(),
+        });
+    }
+    let code = string_field(&invocation.payload, "code").ok_or_else(|| {
+        CapabilityError::InvalidParams {
+            message: "execute mode 'program' requires code".to_owned(),
+        }
+    })?;
+    if code.trim().is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute mode 'program' requires non-empty code".to_owned(),
+        });
+    }
+    if invocation.causal_context.idempotency_key.is_none()
+        && string_field(&invocation.payload, "idempotencyKey")
+            .or_else(|| string_field(&invocation.payload, "idempotency_key"))
+            .is_none()
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute mode 'program' requires idempotencyKey or a model invocation idempotency context".to_owned(),
+        });
+    }
+    let mut program_payload = json!({
+        "language": language,
+        "code": code,
+        "args": invocation.payload.get("args").cloned().unwrap_or_else(|| json!({})),
+        "allowedContracts": invocation.payload.get("allowedContracts").cloned().unwrap_or_else(|| json!([])),
+        "allowedImplementations": invocation.payload.get("allowedImplementations").cloned().unwrap_or_else(|| json!([])),
+        "budget": invocation.payload.get("budget").cloned().unwrap_or(Value::Null),
+        "reason": string_field(&invocation.payload, "reason"),
+    });
+    if let Some(timeout_ms) = u64_field(&invocation.payload, "timeoutMs") {
+        program_payload["timeoutMs"] = json!(timeout_ms);
+    }
+    if let Some(key) = string_field(&invocation.payload, "idempotencyKey")
+        .or_else(|| string_field(&invocation.payload, "idempotency_key"))
+    {
+        program_payload["idempotencyKey"] = json!(key);
+    }
+    let function_id = FunctionId::new(
+        crate::domains::program::contract::RUN_JAVASCRIPT_FUNCTION_ID,
+    )
+    .map_err(|error| CapabilityError::Internal {
+        message: error.to_string(),
+    })?;
+    let mut causal_context = invocation
+        .causal_context
+        .clone()
+        .with_parent_invocation(invocation.id.clone())
+        .with_scope("program.execute");
+    if let Some(key) = string_field(&invocation.payload, "idempotencyKey")
+        .or_else(|| string_field(&invocation.payload, "idempotency_key"))
+    {
+        causal_context = causal_context.with_idempotency_key(key);
+    }
+    let child = Invocation::new_sync(function_id, program_payload, causal_context);
+    let result = deps.engine_host.invoke(child).await;
+    if let Some(error) = result.error {
+        return Err(engine_error_to_capability_error(error));
+    }
+    let details = result.value.unwrap_or(Value::Null);
+    let program_status = details
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("ok")
+        .to_owned();
+    {
+        let store = deps.registry_store.clone();
+        let trace_id = result.trace_id.as_str().to_owned();
+        let audit_payload = json!({
+            "status": program_status.clone(),
+            "mode": "program",
+            "functionId": crate::domains::program::contract::RUN_JAVASCRIPT_FUNCTION_ID,
+            "programRunId": details.get("programRunId").cloned().unwrap_or(Value::Null),
+            "codeHash": details.get("codeHash").cloned().unwrap_or(Value::Null),
+            "argsHash": details.get("argsHash").cloned().unwrap_or(Value::Null),
+            "childInvocations": details.get("childInvocations").cloned().unwrap_or_else(|| json!([])),
+        });
+        run_blocking_task("capability.execute.program.audit", move || {
+            let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+                message: "capability registry store mutex poisoned".to_owned(),
+            })?;
+            store
+                .record_audit_event("capability.execute.program", Some(&trace_id), audit_payload)
+                .map_err(registry_store_error)
+        })
+        .await?;
+    }
+    let is_error = program_status != "ok";
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
+            "Program run {} {}.",
+            details
+                .get("programRunId")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>"),
+            program_status
+        ))]),
+        details: Some(details),
+        is_error: is_error.then_some(true),
+        stop_turn: is_error.then_some(true),
     })
 }
 

@@ -9,9 +9,9 @@
 //! - [`models`] — Model registry, ID constants, provider detection, capability queries
 //! - [`sse`] — Shared SSE line parser for HTTP streaming responses
 //! - [`retry`] — Stream retry with exponential backoff + jitter
-//! - [`capability_parsing`] — Robust JSON parsing for capability invocation arguments
+//! - [`provider_protocol::capability_parsing`] — Robust JSON parsing for provider capability invocation arguments
 //! - [`context_composition`] — Context part ordering and stable/volatile grouping
-//! - [`id_remapping`] — Capability invocation ID format conversion between providers
+//! - [`provider_protocol::id_remapping`] — Capability invocation ID format conversion between providers
 //! - [`stream_common`] — Shared [`stream_common::StreamAccumulator`] for delta processing
 //!
 //! # Architecture
@@ -28,8 +28,6 @@
 #![deny(unsafe_code)]
 
 pub mod anthropic;
-#[path = "shared/capability_parsing.rs"]
-pub mod capability_parsing;
 #[path = "shared/context_composition.rs"]
 pub mod context_composition;
 #[path = "shared/error_parsing.rs"]
@@ -38,8 +36,6 @@ pub mod factory;
 pub mod google;
 #[path = "shared/health.rs"]
 pub mod health;
-#[path = "shared/id_remapping.rs"]
-pub mod id_remapping;
 pub mod kimi;
 pub mod minimax;
 pub mod models;
@@ -57,14 +53,15 @@ pub mod stream_common;
 pub mod stream_pipeline;
 pub mod tokens;
 
-pub use capability_parsing::{
-    CapabilityCallContext, is_valid_capability_call_arguments, parse_capability_call_arguments,
+pub use crate::domains::model::provider_protocol::remap_invocation_id;
+pub use crate::domains::model::provider_protocol::{
+    CapabilityCallContext, IdFormat, build_invocation_id_mapping, capability_parsing, id_remapping,
+    is_valid_capability_call_arguments, parse_capability_call_arguments,
 };
 pub use context_composition::{
     GroupedContextParts, compose_context_parts, compose_context_parts_grouped,
 };
 pub use health::ProviderHealthTracker;
-pub use id_remapping::{IdFormat, build_invocation_id_mapping, remap_invocation_id};
 pub use models::model_ids;
 pub use models::registry::{
     all_model_ids, detect_provider_from_model, is_model_supported, model_context_window,
