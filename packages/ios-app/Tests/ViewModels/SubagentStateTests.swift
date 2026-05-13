@@ -17,13 +17,13 @@ final class SubagentStateTests: XCTestCase {
     // MARK: - Helper
 
     private func spawnDefault(
-        toolCallId: String = "tc-1",
+        invocationId: String = "tc-1",
         sessionId: String = "sub-1",
         task: String = "Do something",
         model: String? = "claude-sonnet-4-5",
         blocking: Bool = false
     ) {
-        sut.trackSpawn(toolCallId: toolCallId, subagentSessionId: sessionId, task: task, model: model, blocking: blocking)
+        sut.trackSpawn(invocationId: invocationId, subagentSessionId: sessionId, task: task, model: model, blocking: blocking)
     }
 
     // MARK: - 1A: Mutation + selectedSubagent Sync
@@ -32,7 +32,7 @@ final class SubagentStateTests: XCTestCase {
         spawnDefault()
         let data = sut.subagents["sub-1"]
         XCTAssertNotNil(data)
-        XCTAssertEqual(data?.toolCallId, "tc-1")
+        XCTAssertEqual(data?.invocationId, "tc-1")
         XCTAssertEqual(data?.subagentSessionId, "sub-1")
         XCTAssertEqual(data?.task, "Do something")
         XCTAssertEqual(data?.model, "claude-sonnet-4-5")
@@ -44,7 +44,7 @@ final class SubagentStateTests: XCTestCase {
         spawnDefault(blocking: true)
         XCTAssertEqual(sut.subagents["sub-1"]?.blocking, true)
 
-        spawnDefault(toolCallId: "tc-2", sessionId: "sub-2", blocking: false)
+        spawnDefault(invocationId: "tc-2", sessionId: "sub-2", blocking: false)
         XCTAssertEqual(sut.subagents["sub-2"]?.blocking, false)
     }
 
@@ -68,7 +68,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testUpdateStatus_doesNotSyncSelectedSubagent_whenDifferent() {
         spawnDefault()
-        spawnDefault(toolCallId: "tc-2", sessionId: "sub-2")
+        spawnDefault(invocationId: "tc-2", sessionId: "sub-2")
         sut.showDetails(for: "sub-2")
 
         sut.updateStatus(subagentSessionId: "sub-1", status: .running, currentTurn: 10)
@@ -177,7 +177,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testClearAll_removesEverything() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "hello"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "hello"]), timestamp: "2026-01-01T00:00:00Z")
         sut.showDetails(for: "sub-1")
 
         sut.clearAll()
@@ -187,62 +187,51 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertFalse(sut.showDetailSheet)
     }
 
-    // MARK: - 1B: Event Type Normalization
+    // MARK: - 1B: Capability-Native Forwarded Events
 
-    func testAddForwardedEvent_toolStart_dotFormat() {
+    func testAddForwardedEvent_capabilityStarted() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool.start", eventData: AnyCodable(["toolName": "bash", "toolCallId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1)
-        XCTAssertEqual(events.first?.type, .tool)
+        XCTAssertEqual(events.first?.type, .capabilityInvocation)
     }
 
-    func testAddForwardedEvent_toolStart_underscoreFormat() {
+    func testAddForwardedEvent_retiredToolStartFormat_isIgnored() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_start", eventData: AnyCodable(["toolName": "read", "toolCallId": "t2"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool" + "_start", eventData: AnyCodable(["modelToolName": "read", "invocationId": "t2"]), timestamp: "2026-01-01T00:00:00Z")
+        let events = sut.getEvents(for: "sub-1")
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func testAddForwardedEvent_retiredToolDotFormat_isIgnored() {
+        spawnDefault()
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool" + ".call", eventData: AnyCodable(["modelToolName": "edit", "invocationId": "t3"]), timestamp: "2026-01-01T00:00:00Z")
+        let events = sut.getEvents(for: "sub-1")
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func testAddForwardedEvent_capabilityCompleted() {
+        spawnDefault()
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["success": true, "invocationId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1)
-        XCTAssertEqual(events.first?.type, .tool)
     }
 
-    func testAddForwardedEvent_toolStart_agentPrefixFormat() {
+    func testAddForwardedEvent_textDelta() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.tool_start", eventData: AnyCodable(["toolName": "edit", "toolCallId": "t3"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "hello"]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1)
-        XCTAssertEqual(events.first?.type, .tool)
+        XCTAssertEqual(events.first?.type, .output)
     }
 
-    func testAddForwardedEvent_toolEnd_allFormats() {
-        for eventType in ["tool_end", "tool.end", "agent.tool_end"] {
-            sut.clearAll()
-            spawnDefault()
-            sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: eventType, eventData: AnyCodable(["success": true, "toolCallId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
-            let events = sut.getEvents(for: "sub-1")
-            XCTAssertEqual(events.count, 1, "Failed for eventType: \(eventType)")
-        }
-    }
-
-    func testAddForwardedEvent_textDelta_allFormats() {
-        for eventType in ["text_delta", "text.delta", "agent.text_delta"] {
-            sut.clearAll()
-            spawnDefault()
-            sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: eventType, eventData: AnyCodable(["delta": "hello"]), timestamp: "2026-01-01T00:00:00Z")
-            let events = sut.getEvents(for: "sub-1")
-            XCTAssertEqual(events.count, 1, "Failed for eventType: \(eventType)")
-            XCTAssertEqual(events.first?.type, .output)
-        }
-    }
-
-    func testAddForwardedEvent_thinkingDelta_allFormats() {
-        for eventType in ["thinking_delta", "thinking.delta", "agent.thinking_delta"] {
-            sut.clearAll()
-            spawnDefault()
-            sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: eventType, eventData: AnyCodable(["delta": "hmm"]), timestamp: "2026-01-01T00:00:00Z")
-            let events = sut.getEvents(for: "sub-1")
-            XCTAssertEqual(events.count, 1, "Failed for eventType: \(eventType)")
-            XCTAssertEqual(events.first?.type, .thinking)
-        }
+    func testAddForwardedEvent_thinkingDelta() {
+        spawnDefault()
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.thinking_delta", eventData: AnyCodable(["delta": "hmm"]), timestamp: "2026-01-01T00:00:00Z")
+        let events = sut.getEvents(for: "sub-1")
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.type, .thinking)
     }
 
     func testAddForwardedEvent_unknownType_isIgnored() {
@@ -254,24 +243,24 @@ final class SubagentStateTests: XCTestCase {
 
     func testAddForwardedEvent_emptyDelta_isIgnored() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": ""]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": ""]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertTrue(events.isEmpty)
     }
 
-    func testAddForwardedEvent_toolStartThenEnd_mergesEvents() {
+    func testAddForwardedEvent_capabilityStartedThenCompleted_mergesEvents() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_start", eventData: AnyCodable(["toolName": "bash", "toolCallId": "tc-100"]), timestamp: "2026-01-01T00:00:00Z")
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_end", eventData: AnyCodable(["success": true, "toolCallId": "tc-100", "result": "output"]), timestamp: "2026-01-01T00:00:01Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "tc-100"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["success": true, "invocationId": "tc-100", "result": "output"]), timestamp: "2026-01-01T00:00:01Z")
 
         let events = sut.getEvents(for: "sub-1")
-        XCTAssertEqual(events.count, 1, "tool_end should merge into tool_start, not add a new event")
+        XCTAssertEqual(events.count, 1, "capability completion should merge into started event, not add a new event")
         XCTAssertFalse(events.first?.isRunning ?? true)
     }
 
-    func testAddForwardedEvent_toolEndWithoutStart_createsStandaloneEvent() {
+    func testAddForwardedEvent_capabilityCompletedWithoutStart_createsStandaloneEvent() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_end", eventData: AnyCodable(["success": false, "toolCallId": "orphan"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["success": false, "invocationId": "orphan"]), timestamp: "2026-01-01T00:00:00Z")
 
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1)
@@ -280,8 +269,8 @@ final class SubagentStateTests: XCTestCase {
 
     func testAddForwardedEvent_textDelta_appendsToExistingOutput() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "Hello "]), timestamp: "2026-01-01T00:00:00Z")
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "World"]), timestamp: "2026-01-01T00:00:01Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "Hello "]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "World"]), timestamp: "2026-01-01T00:00:01Z")
 
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1, "Consecutive text deltas should merge into single output event")
@@ -290,11 +279,11 @@ final class SubagentStateTests: XCTestCase {
     func testAddForwardedEvent_textDelta_afterTool_createsNewOutputBlock() {
         spawnDefault()
         // First output block
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "First"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "First"]), timestamp: "2026-01-01T00:00:00Z")
         // Tool interrupts
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_start", eventData: AnyCodable(["toolName": "bash", "toolCallId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
         // Second output block after tool
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "Second"]), timestamp: "2026-01-01T00:00:02Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "Second"]), timestamp: "2026-01-01T00:00:02Z")
 
         let events = sut.getEvents(for: "sub-1")
         let outputEvents = events.filter { $0.type == .output }
@@ -303,35 +292,35 @@ final class SubagentStateTests: XCTestCase {
 
     func testAddForwardedEvent_thinkingDelta_onlyAddsOnce() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "thinking_delta", eventData: AnyCodable(["delta": "hmm"]), timestamp: "2026-01-01T00:00:00Z")
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "thinking_delta", eventData: AnyCodable(["delta": "more thinking"]), timestamp: "2026-01-01T00:00:01Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.thinking_delta", eventData: AnyCodable(["delta": "hmm"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.thinking_delta", eventData: AnyCodable(["delta": "more thinking"]), timestamp: "2026-01-01T00:00:01Z")
 
         let events = sut.getEvents(for: "sub-1")
         let thinkingEvents = events.filter { $0.type == .thinking }
         XCTAssertEqual(thinkingEvents.count, 1, "Multiple thinking deltas should only create one thinking indicator")
     }
 
-    func testAddForwardedEvent_toolStart_finalizesRunningOutputEvents() {
+    func testAddForwardedEvent_capabilityStart_finalizesRunningOutputEvents() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "Running text"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "Running text"]), timestamp: "2026-01-01T00:00:00Z")
 
         // Verify output is running
         let beforeEvents = sut.subagentEvents["sub-1"] ?? []
         XCTAssertTrue(beforeEvents.last?.isRunning ?? false)
 
-        // Tool start should finalize running output
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_start", eventData: AnyCodable(["toolName": "bash", "toolCallId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
+        // Capability start should finalize running output
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
 
         let afterEvents = sut.subagentEvents["sub-1"] ?? []
         let outputEvent = afterEvents.first(where: { $0.type == .output })
-        XCTAssertFalse(outputEvent?.isRunning ?? true, "tool_start should finalize running output events")
+        XCTAssertFalse(outputEvent?.isRunning ?? true, "capability.invocation.started should finalize running output events")
     }
 
     // MARK: - 1C: ISO8601 Formatter Caching
 
     func testAddForwardedEvent_parsesTimestamp() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "test"]), timestamp: "2026-06-15T10:30:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "test"]), timestamp: "2026-06-15T10:30:00Z")
 
         let events = sut.subagentEvents["sub-1"] ?? []
         XCTAssertNotNil(events.first?.timestamp)
@@ -340,7 +329,7 @@ final class SubagentStateTests: XCTestCase {
     func testAddForwardedEvent_invalidTimestamp_fallsToCurrentDate() {
         spawnDefault()
         let before = Date()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "text_delta", eventData: AnyCodable(["delta": "test"]), timestamp: "not-a-date")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "test"]), timestamp: "not-a-date")
         let after = Date()
 
         let events = sut.subagentEvents["sub-1"] ?? []
@@ -352,17 +341,17 @@ final class SubagentStateTests: XCTestCase {
 
     // MARK: - 1D: Query/Helper Tests
 
-    func testGetSubagentByToolCallId_returnsCorrectSubagent() {
-        spawnDefault(toolCallId: "tc-1", sessionId: "sub-1")
-        spawnDefault(toolCallId: "tc-2", sessionId: "sub-2")
+    func testGetSubagentByInvocationId_returnsCorrectSubagent() {
+        spawnDefault(invocationId: "tc-1", sessionId: "sub-1")
+        spawnDefault(invocationId: "tc-2", sessionId: "sub-2")
 
-        let result = sut.getSubagentByToolCallId("tc-2")
+        let result = sut.getSubagentByInvocationId("tc-2")
         XCTAssertEqual(result?.subagentSessionId, "sub-2")
     }
 
-    func testGetSubagentByToolCallId_returnsNil_whenNotFound() {
+    func testGetSubagentByInvocationId_returnsNil_whenNotFound() {
         spawnDefault()
-        XCTAssertNil(sut.getSubagentByToolCallId("nonexistent"))
+        XCTAssertNil(sut.getSubagentByInvocationId("nonexistent"))
     }
 
     func testHasRunningSubagents_true_whenRunning() {
@@ -391,7 +380,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testShowDetailsWithData_addsToTrackedIfNew() {
         let data = SubagentToolData(
-            toolCallId: "tc-ext",
+            invocationId: "tc-ext",
             subagentSessionId: "sub-ext",
             task: "External task",
             model: nil,
@@ -421,18 +410,28 @@ final class SubagentStateTests: XCTestCase {
 
     func testGetEvents_returnsReversed() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_start", eventData: AnyCodable(["toolName": "bash", "toolCallId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool_start", eventData: AnyCodable(["toolName": "read", "toolCallId": "t2"]), timestamp: "2026-01-01T00:00:01Z")
+        sut.addForwardedEvent(
+            subagentSessionId: "sub-1",
+            eventType: "capability.invocation.started",
+            eventData: AnyCodable(["modelToolName": "execute", "contractId": "process::run", "invocationId": "t1"]),
+            timestamp: "2026-01-01T00:00:00Z"
+        )
+        sut.addForwardedEvent(
+            subagentSessionId: "sub-1",
+            eventType: "capability.invocation.started",
+            eventData: AnyCodable(["modelToolName": "execute", "contractId": "filesystem::read_file", "invocationId": "t2"]),
+            timestamp: "2026-01-01T00:00:01Z"
+        )
 
         let events = sut.getEvents(for: "sub-1")
-        // Reversed = newest first, so "read" should be first
-        XCTAssertTrue(events.first?.title.contains("Read") ?? false,
-                       "Events should be in reverse order (newest first)")
+        // Reversed = newest first, so the read-file capability should be first.
+        XCTAssertEqual(events.first?.invocationId, "t2")
+        XCTAssertTrue(events.first?.title.contains("Read File") ?? false)
     }
 
     func testPopulateFromReconstruction_addsSubagent() {
         let data = SubagentToolData(
-            toolCallId: "tc-r",
+            invocationId: "tc-r",
             subagentSessionId: "sub-r",
             task: "Reconstructed",
             model: "claude-haiku-3",
@@ -458,7 +457,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testTrackSpawn_withHookSpawnType() {
         sut.trackSpawn(
-            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            invocationId: "hook-1", subagentSessionId: "sub-hook",
             task: "Generate title", model: nil, spawnType: .hook
         )
         XCTAssertEqual(sut.subagents["sub-hook"]?.spawnType, .hook)
@@ -471,7 +470,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testHasRunningSubagents_falseForHookOnly() {
         sut.trackSpawn(
-            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            invocationId: "hook-1", subagentSessionId: "sub-hook",
             task: "Generate title", model: nil, spawnType: .hook
         )
         XCTAssertFalse(sut.hasRunningSubagents,
@@ -481,7 +480,7 @@ final class SubagentStateTests: XCTestCase {
     func testHasRunningSubagents_mixedTypes_hookAndCompletedTool() {
         // Running hook + completed tool → false
         sut.trackSpawn(
-            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            invocationId: "hook-1", subagentSessionId: "sub-hook",
             task: "Generate title", model: nil, spawnType: .hook
         )
         spawnDefault()
@@ -495,7 +494,7 @@ final class SubagentStateTests: XCTestCase {
     func testHasRunningSubagents_mixedTypes_toolRunning() {
         // Running tool + running hook → true (tool counts)
         sut.trackSpawn(
-            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            invocationId: "hook-1", subagentSessionId: "sub-hook",
             task: "Generate title", model: nil, spawnType: .hook
         )
         spawnDefault()
@@ -504,7 +503,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testComplete_hookSubagent_doesNotAffectHasRunning() {
         sut.trackSpawn(
-            toolCallId: "hook-1", subagentSessionId: "sub-hook",
+            invocationId: "hook-1", subagentSessionId: "sub-hook",
             task: "Generate title", model: nil, spawnType: .hook
         )
         XCTAssertFalse(sut.hasRunningSubagents)
@@ -523,8 +522,8 @@ final class SubagentStateTests: XCTestCase {
         for i in 0..<510 {
             sut.addForwardedEvent(
                 subagentSessionId: "sub-1",
-                eventType: "tool_start",
-                eventData: AnyCodable(["toolName": "bash", "toolCallId": "t\(i)"]),
+                eventType: "capability.invocation.started",
+                eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t\(i)"]),
                 timestamp: "2026-01-01T00:00:00Z"
             )
         }

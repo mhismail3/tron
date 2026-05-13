@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A connection status pill that appears at the bottom of the chat when connection issues occur.
-/// Matches the visual style of CommandToolChip — glass capsule, tinted text, blur transitions.
+/// Glass capsule with tinted text and blur transitions.
 ///
 /// Uses a single `displayedState: ConnectionState?` to drive both visibility and content.
 /// When nil → pill is hidden. When non-nil → pill is shown with that state's content.

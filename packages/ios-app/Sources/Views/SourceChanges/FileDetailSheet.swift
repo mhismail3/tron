@@ -52,8 +52,8 @@ struct FileDetailSheet: View {
     }
 
     var body: some View {
-        ToolDetailSheetContainer(
-            toolName: file.fileName,
+        CapabilityDetailSheetContainer(
+            modelToolName: file.fileName,
             iconName: fileIcon,
             accent: .tronTeal,
             iconColor: langColor
@@ -160,7 +160,7 @@ struct FileDetailSheet: View {
     @ViewBuilder
     private var diffContent: some View {
         if let diff = file.diff, !diff.isEmpty {
-            let lines = EditDiffParser.parse(from: diff)
+            let lines = SourceDiffParser.parse(from: diff)
             if lines.isEmpty {
                 noContentView(SourceControlMetadata.noChangeLabel(for: file.changeStatus))
             } else {
@@ -171,8 +171,8 @@ struct FileDetailSheet: View {
         }
     }
 
-    private func diffScrollView(lines: [EditDiffLine]) -> some View {
-        let lineNumWidth = EditDiffParser.lineNumberWidth(for: lines)
+    private func diffScrollView(lines: [SourceDiffLine]) -> some View {
+        let lineNumWidth = SourceDiffParser.lineNumberWidth(for: lines)
 
         return GeometryReader { geometry in
             ScrollView(.vertical, showsIndicators: true) {
@@ -204,7 +204,7 @@ struct FileDetailSheet: View {
         }
     }
 
-    private func diffLineRow(_ line: EditDiffLine, lineNumWidth: CGFloat) -> some View {
+    private func diffLineRow(_ line: SourceDiffLine, lineNumWidth: CGFloat) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text(line.lineNum.map(String.init) ?? "")
                 .font(TronTypography.code(size: TronTypography.sizeSM, weight: .medium))
@@ -253,7 +253,7 @@ struct FileDetailSheet: View {
         } else if let contentLines = SourceControlMetadata.extractFileContent(from: file.diff) {
             let numbered = contentLines.enumerated().map { (lineNumber: $0.offset + 1, content: $0.element) }
             ScrollView {
-                ToolCodeBlock(
+                CapabilityCodeBlock(
                     title: "Contents",
                     lines: numbered,
                     accent: langColor,
@@ -268,7 +268,7 @@ struct FileDetailSheet: View {
             let rawLines = diff.components(separatedBy: "\n")
             let numbered = rawLines.enumerated().map { (lineNumber: $0.offset + 1, content: $0.element) }
             ScrollView {
-                ToolCodeBlock(
+                CapabilityCodeBlock(
                     title: "Raw Diff",
                     lines: numbered,
                     accent: langColor,

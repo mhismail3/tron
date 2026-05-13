@@ -55,10 +55,10 @@ pub const PROVIDER_REQUEST_DURATION_SECONDS: &str = "provider_request_duration_s
 pub const PROVIDER_TTFT_SECONDS: &str = "provider_ttft_seconds";
 /// Provider degraded state (gauge, labels: provider). 1 = degraded, 0 = healthy.
 pub const PROVIDER_DEGRADED: &str = "provider_degraded";
-/// Tool executions total (counter, labels: tool).
-pub const TOOL_EXECUTIONS_TOTAL: &str = "tool_executions_total";
-/// Tool execution duration seconds (histogram, labels: tool).
-pub const TOOL_EXECUTION_DURATION_SECONDS: &str = "tool_execution_duration_seconds";
+/// Capability invocations total (counter, labels: capability).
+pub const CAPABILITY_INVOCATIONS_TOTAL: &str = "capability_invocations_total";
+/// Capability invocation duration seconds (histogram, labels: capability).
+pub const CAPABILITY_INVOCATION_DURATION_SECONDS: &str = "capability_invocation_duration_seconds";
 /// LLM tokens total (counter, labels: provider, direction).
 pub const LLM_TOKENS_TOTAL: &str = "llm_tokens_total";
 /// Active sessions (gauge).
@@ -108,8 +108,8 @@ mod tests {
             PROVIDER_REQUEST_DURATION_SECONDS,
             PROVIDER_TTFT_SECONDS,
             PROVIDER_DEGRADED,
-            TOOL_EXECUTIONS_TOTAL,
-            TOOL_EXECUTION_DURATION_SECONDS,
+            CAPABILITY_INVOCATIONS_TOTAL,
+            CAPABILITY_INVOCATION_DURATION_SECONDS,
             LLM_TOKENS_TOTAL,
             SESSIONS_ACTIVE,
             COMPACTION_TOTAL,

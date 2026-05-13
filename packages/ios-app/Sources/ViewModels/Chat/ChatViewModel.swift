@@ -3,7 +3,7 @@ import PhotosUI
 import UIKit
 
 // MARK: - Chat View Model
-// Note: ToolCallRecord is defined in EventStoreManager.swift
+// Note: CapabilityInvocationRecord is defined in EventStoreManager.swift
 
 @Observable
 @MainActor
@@ -105,15 +105,15 @@ final class ChatViewModel {
     let pullUpPanelState = PullUpPanelState()
     // MARK: - Protocol Conformance (Context Protocols)
 
-    /// Whether AskUserQuestion was called in the current turn (ToolEventContext, TurnLifecycleContext)
+    /// Whether AskUserQuestion was called in the current turn (CapabilityInvocationContext, TurnLifecycleContext)
     var askUserQuestionCalledInTurn: Bool {
         get { askUserQuestionState.calledInTurn }
         set { askUserQuestionState.calledInTurn = newValue }
     }
 
-    /// Make a tool visible for rendering (ToolEventContext)
-    func makeToolVisible(_ toolCallId: String) {
-        animationCoordinator.makeToolVisible(toolCallId)
+    /// Make a tool visible for rendering (CapabilityInvocationContext)
+    func makeCapabilityInvocationVisible(_ invocationId: String) {
+        animationCoordinator.makeCapabilityInvocationVisible(invocationId)
     }
 
     /// Logging methods (LoggingContext)
@@ -187,12 +187,12 @@ final class ChatViewModel {
 
     /// Coordinates pill morph animations, message cascade timing, and tool staggering
     let animationCoordinator = AnimationCoordinator()
-    /// Ensures tool calls appear in order and batches UI updates for 60fps
+    /// Ensures capability invocations appear in order and batches UI updates for 60fps
     let uiUpdateQueue = UIUpdateQueue()
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
-    /// Coordinates tool event handling (start/end) for tool messages and UI updates
-    let toolEventCoordinator = ToolEventCoordinator()
+    /// Coordinates capability invocation event handling (start/end) for capability invocation messages and UI updates
+    let toolEventCoordinator = CapabilityInvocationCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
     /// Coordinates AskUserQuestion event handling and user interaction
@@ -215,8 +215,8 @@ final class ChatViewModel {
     let messageIndex = MessageIndex()
     var currentToolMessages: [UUID: ChatMessage] = [:]
 
-    /// Track tool calls for the current turn (for display purposes)
-    var currentTurnToolCalls: [ToolCallRecord] = []
+    /// Track capability invocations for the current turn (for display purposes)
+    var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
 
     let audioRecorder: AudioRecorder
 
@@ -397,18 +397,18 @@ final class ChatViewModel {
                     // This callback is for tool ordering confirmation
                     logger.verbose("UIUpdateQueue: Turn boundary processed (turn=\(data.turnNumber), isStart=\(data.isStart))", category: .events)
 
-                case .toolStart(let data):
-                    // Tool start was already added to messages in handleToolStart
+                case .capabilityStart(let data):
+                    // Capability start was already added to messages in handleCapabilityInvocationStarted
                     // Here we trigger the staggered animation appearance
-                    animationCoordinator.queueToolStart(toolCallId: data.toolCallId)
-                    logger.verbose("UIUpdateQueue: Tool start queued for animation: \(data.toolName)", category: .events)
+                    animationCoordinator.queueCapabilityInvocationStart(invocationId: data.invocationId)
+                    logger.verbose("UIUpdateQueue: Capability start queued for animation: \(data.modelToolName)", category: .events)
 
-                case .toolEnd(let data):
-                    // Tool end arrives here in guaranteed order (earlier tools first)
+                case .capabilityEnd(let data):
+                    // Capability end arrives here in guaranteed order (earlier tools first)
                     // Find and update the tool message
-                    processOrderedToolEnd(data)
-                    animationCoordinator.markToolComplete(toolCallId: data.toolCallId)
-                    logger.verbose("UIUpdateQueue: Tool end processed in order: \(data.toolCallId)", category: .events)
+                    processOrderedCapabilityInvocationCompleted(data)
+                    animationCoordinator.markCapabilityInvocationComplete(invocationId: data.invocationId)
+                    logger.verbose("UIUpdateQueue: Capability end processed in order: \(data.invocationId)", category: .events)
 
                 case .messageAppend, .textDelta:
                     // These are handled separately via direct streaming path
@@ -418,20 +418,20 @@ final class ChatViewModel {
         }
     }
 
-    /// Process a tool end update that has been ordered by UIUpdateQueue
-    private func processOrderedToolEnd(_ data: UIUpdateQueue.ToolEndData) {
-        // Find the tool message by toolCallId (O(1) via index, then a bounded scan)
-        if let index = messageIndex.index(forToolCallId: data.toolCallId)
-            ?? MessageFinder.lastIndexOfToolUse(toolCallId: data.toolCallId, in: messages) {
-            if case .toolUse(var tool) = messages[index].content {
-                tool.status = data.success ? .success : .error
-                tool.result = data.result
-                tool.durationMs = data.durationMs
-                tool.details = data.details
-                tool.streamingOutput = nil
-                tool.progressMessage = nil
-                tool.progressPercent = nil
-                messages[index].content = .toolUse(tool)
+    /// Process a capability end update that has been ordered by UIUpdateQueue
+    private func processOrderedCapabilityInvocationCompleted(_ data: UIUpdateQueue.ToolEndData) {
+        // Find the tool message by invocationId (O(1) via index, then a bounded scan)
+        if let index = messageIndex.index(forCapabilityInvocationId: data.invocationId)
+            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: data.invocationId, in: messages) {
+            if case .capabilityInvocation(var invocation) = messages[index].content {
+                invocation.status = data.success ? .success : .error
+                invocation.result = data.result
+                invocation.durationMs = data.durationMs
+                invocation.details = data.details
+                invocation.progressMessage = nil
+                invocation.progressPercent = nil
+                invocation.identity = data.identity
+                messages[index].content = .capabilityInvocation(invocation)
                 messageIndex.didUpdate(messages[index], at: index)
 
                 // Decrement running tool counter (clamp to 0 for catch-up scenarios)
@@ -714,7 +714,7 @@ final class ChatViewModel {
     }
 
     /// Counter-based running tool detection — O(1) instead of O(n*m) scan.
-    /// Incremented in tool start handler, decremented in processOrderedToolEnd and tool end handler.
+    /// Incremented in capability start handler, decremented in processOrderedCapabilityInvocationCompleted and capability end handler.
     /// Reset on turn start and disconnect.
     var runningToolCount: Int = 0
 

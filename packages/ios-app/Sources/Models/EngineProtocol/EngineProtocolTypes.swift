@@ -147,7 +147,7 @@ struct EngineProtocolResponseFrame: Decodable {
     let catalogRevision: UInt64?
 }
 
-struct EngineInvokeEnvelope<R: Decodable>: Decodable {
+struct EngineFunctionCallEnvelope<R: Decodable>: Decodable {
     let catalogRevision: UInt64?
     let child: EngineChildInvocation<R>
 }

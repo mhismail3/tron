@@ -19,7 +19,7 @@ struct ContentView: View {
     // Deep link navigation from TronMobileApp
     @Binding var deepLinkSessionId: String?
     @Binding var deepLinkScrollTarget: ScrollTarget?
-    @Binding var deepLinkNotificationToolCallId: String?
+    @Binding var deepLinkNotificationInvocationId: String?
 
     @State private var coordinator: ContentViewCoordinator?
     @State private var selectedSessionId: String?
@@ -38,7 +38,7 @@ struct ContentView: View {
 
     // Notification inbox
     @State private var showNotificationSheet = false
-    @State private var notificationAutoOpenToolCallId: String?
+    @State private var notificationAutoOpenInvocationId: String?
 
     var body: some View {
         mainContent
@@ -128,18 +128,18 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .pendingShareContent)) { _ in
                 handlePendingShare()
             }
-            .onChange(of: deepLinkNotificationToolCallId) { _, newToolCallId in
-                guard let toolCallId = newToolCallId else { return }
-                notificationAutoOpenToolCallId = toolCallId
+            .onChange(of: deepLinkNotificationInvocationId) { _, newInvocationId in
+                guard let invocationId = newInvocationId else { return }
+                notificationAutoOpenInvocationId = invocationId
                 showNotificationSheet = true
-                deepLinkNotificationToolCallId = nil
+                deepLinkNotificationInvocationId = nil
             }
             .sheet(isPresented: $showNotificationSheet, onDismiss: {
-                notificationAutoOpenToolCallId = nil
+                notificationAutoOpenInvocationId = nil
             }) {
                 NotificationListSheet(
                     notificationStore: notificationStore,
-                    autoOpenToolCallId: notificationAutoOpenToolCallId,
+                    autoOpenInvocationId: notificationAutoOpenInvocationId,
                     onGoToSession: { sessionId in
                         showNotificationSheet = false
                         navigationMode = .agents

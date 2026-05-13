@@ -1,6 +1,6 @@
 //! Streaming journal — per-turn append-only WAL for crash recovery.
 //!
-//! Each active LLM turn writes streaming deltas (text, thinking, tool calls) to a
+//! Each active LLM turn writes streaming deltas (text, thinking, capability invocations) to a
 //! journal file at `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`.
 //! On normal completion the journal is deleted. If the server crashes mid-turn,
 //! orphaned journals are discovered on next startup and their content is persisted
@@ -11,7 +11,7 @@
 //! JSON lines with compact keys for write efficiency:
 //! - `{"t":"text","c":"delta content"}`
 //! - `{"t":"thinking","c":"delta content"}`
-//! - `{"t":"tool_use","c":"{...}"}`  (JSON-encoded tool call)
+//! - `{"t":"tool_use","c":"{...}"}`  (JSON-encoded capability invocation)
 //!
 //! Each `append_delta` writes one line and flushes, providing crash safety to
 //! line granularity.
@@ -51,7 +51,7 @@ pub struct RecoveredTurn {
     pub accumulated_text: String,
     /// Accumulated thinking/reasoning content from all thinking deltas.
     pub accumulated_thinking: String,
-    /// Partial tool call data recovered from the journal.
+    /// Partial capability invocation data recovered from the journal.
     pub tool_calls: Vec<serde_json::Value>,
 }
 

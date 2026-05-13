@@ -108,5 +108,5 @@ struct SubagentResultsListSheet: View {
 // MARK: - Identifiable conformance for sheet(item:)
 
 extension SubagentToolData: Identifiable {
-    var id: String { hasSubagentSession ? subagentSessionId : toolCallId }
+    var id: String { hasSubagentSession ? subagentSessionId : invocationId }
 }

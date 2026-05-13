@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::domains::mcp::types::{McpContentBlock, McpToolResult};
 use crate::shared::tools::{CapabilityResult, ToolResultBody};
 
-/// Convert an MCP tool result to a `CapabilityResult` payload used by `execute`.
+/// Convert an MCP capability result to a `CapabilityResult` payload used by `execute`.
 pub fn mcp_result_to_tron_result(
     result: &McpToolResult,
     server: &str,

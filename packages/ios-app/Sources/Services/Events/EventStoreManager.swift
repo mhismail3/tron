@@ -5,10 +5,10 @@ import Foundation
 
 // MARK: - Tool Call Record (for persistence)
 
-/// Tracks tool calls during a turn for event-sourced persistence
-struct ToolCallRecord {
-    let toolCallId: String
-    let toolName: String
+/// Tracks capability invocations during a turn for event-sourced persistence
+struct CapabilityInvocationRecord {
+    let invocationId: String
+    let modelToolName: String
     var arguments: String
     var result: String?
     var isError: Bool = false
@@ -186,23 +186,21 @@ final class EventStoreManager {
                 dashboardStreamManager.handleEvent(.thinkingDelta, sessionId: sessionId)
             }
 
-        case ToolStartPlugin.eventType:
+        case CapabilityInvocationStartedPlugin.eventType:
             if let sessionId = event.sessionId,
-               let result = event.getResult() as? ToolStartPlugin.Result {
-                // SpawnSubagent tools have dedicated subagent lifecycle events
-                // (subagentSpawned/subagentCompleted) — suppress tool chips to avoid duplicates
-                guard result.toolName != "SpawnSubagent" else { break }
+               let result = event.getResult() as? CapabilityInvocationStartedPlugin.Result {
+                guard result.identity.contractId != "agent::spawn_subagent" else { break }
                 dashboardStreamManager.handleEvent(
-                    .toolStart(toolName: result.toolName, toolCallId: result.toolCallId, arguments: result.arguments),
+                    .capabilityStart(identity: result.identity, invocationId: result.invocationId, arguments: result.arguments),
                     sessionId: sessionId)
             }
 
-        case ToolEndPlugin.eventType:
+        case CapabilityInvocationCompletedPlugin.eventType:
             if let sessionId = event.sessionId,
-               let result = event.getResult() as? ToolEndPlugin.Result {
-                guard result.toolName != "SpawnSubagent" else { break }
+               let result = event.getResult() as? CapabilityInvocationCompletedPlugin.Result {
+                guard result.identity.contractId != "agent::spawn_subagent" else { break }
                 dashboardStreamManager.handleEvent(
-                    .toolEnd(toolName: result.toolName, toolCallId: result.toolCallId, success: result.success, durationMs: result.duration),
+                    .capabilityEnd(identity: result.identity, invocationId: result.invocationId, success: result.success, durationMs: result.duration),
                     sessionId: sessionId)
             }
 
@@ -210,7 +208,7 @@ final class EventStoreManager {
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SubagentSpawnedPlugin.Result {
                 dashboardStreamManager.handleEvent(
-                    .subagentSpawned(task: result.task, toolCallId: result.toolCallId, subagentSessionId: result.subagentSessionId, spawnType: result.spawnType),
+                    .subagentSpawned(task: result.task, invocationId: result.invocationId, subagentSessionId: result.subagentSessionId, spawnType: result.spawnType),
                     sessionId: sessionId)
             }
 

@@ -7,9 +7,9 @@ enum DashboardEvent {
     case turnStart
     case textDelta(delta: String)
     case thinkingDelta
-    case toolStart(toolName: String, toolCallId: String?, arguments: [String: AnyCodable]?)
-    case toolEnd(toolName: String?, toolCallId: String?, success: Bool, durationMs: Int?)
-    case subagentSpawned(task: String, toolCallId: String?, subagentSessionId: String, spawnType: String?)
+    case capabilityStart(identity: CapabilityIdentity, invocationId: String?, arguments: [String: AnyCodable]?)
+    case capabilityEnd(identity: CapabilityIdentity, invocationId: String?, success: Bool, durationMs: Int?)
+    case subagentSpawned(task: String, invocationId: String?, subagentSessionId: String, spawnType: String?)
     case subagentCompleted(turns: Int, durationMs: Int?, subagentSessionId: String, spawnType: String?)
     case subagentFailed(error: String, subagentSessionId: String, spawnType: String?)
     case turnFailed(error: String)

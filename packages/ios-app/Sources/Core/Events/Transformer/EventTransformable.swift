@@ -32,7 +32,7 @@ protocol EventTransformable {
     /// Workspace this event belongs to
     var workspaceId: String { get }
 
-    /// Event type (e.g., "message.user", "tool.call")
+    /// Event type (e.g., "message.user", "capability.invocation.started")
     var type: String { get }
 
     /// ISO 8601 timestamp when event occurred

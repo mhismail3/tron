@@ -3,18 +3,17 @@ import Foundation
 // MARK: - Message Extensions
 
 extension ChatMessage {
-    /// Extract the toolCallId from this message if it contains a tool (toolUse or toolResult).
-    /// Returns nil for non-tool messages.
-    var toolCallId: String? {
+    /// Extract the transport invocationId/capability invocation id from this message.
+    var invocationId: String? {
         switch content {
-        case .toolUse(let data):
-            return data.toolCallId
-        case .toolResult(let data):
-            return data.toolCallId
+        case .capabilityInvocation(let data):
+            return data.id
+        case .capabilityResult(let data):
+            return data.id
         case .askUserQuestion(let data):
-            return data.toolCallId
+            return data.invocationId
         case .engineApproval(let data):
-            return data.toolCallId
+            return data.invocationId
         default:
             return nil
         }

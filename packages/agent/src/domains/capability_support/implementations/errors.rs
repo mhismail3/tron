@@ -1,13 +1,13 @@
-//! Tool error types.
+//! Capability error types.
 //!
-//! Unified error enum for all tool execution failures. Each variant maps to
+//! Unified error enum for all capability invocation failures. Each variant maps to
 //! a specific user-facing error message format.
 
 use std::io;
 
 use thiserror::Error;
 
-/// Errors that can occur during tool execution.
+/// Errors that can occur during capability invocation.
 #[derive(Debug, Error)]
 pub enum ToolError {
     /// Parameter validation failed.

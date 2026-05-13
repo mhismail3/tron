@@ -38,13 +38,13 @@ flowchart TD
     Start["main.rs startup"] --> Home["ensure_tron_home / profile seed + managed default recovery"]
     Home --> ProfileRuntime["ProfileRuntime: compile active AgentExecutionSpec"]
     ProfileRuntime --> Settings["settings snapshot from resolved profile + user overlay + env overrides"]
-    Settings --> Services["EventStore, Orchestrator, ProviderFactory, ToolFactory, SkillRegistry, MemoryRegistry"]
+    Settings --> Services["EventStore, Orchestrator, ProviderFactory, CapabilityRegistry, SkillRegistry, MemoryRegistry"]
     Services --> PromptCap["agent::prompt engine capability"]
     PromptCap --> Reconstruct["Session reconstruction from events"]
     Reconstruct --> Bootstrap["Prompt bootstrap: rules, rules index, pending jobs, process/subagent/user-job results"]
     Bootstrap --> Memory["MemoryRegistry: MEMORY.md + rules/*.md listing"]
     Memory --> AgentFactory["AgentFactory::create_agent"]
-    AgentFactory --> ContextManager["ContextManager seeded with system prompt, rules, memory, messages, tools"]
+    AgentFactory --> ContextManager["ContextManager seeded with system prompt, rules, memory, messages, capability surface"]
     ContextManager --> UserMessage["TronAgent::run adds current user message"]
     UserMessage --> Turn["turn_runner::execute_turn"]
     Turn --> Compose["build_turn_context + compose_context_blocks"]
@@ -237,8 +237,7 @@ The event log remains the durable source for conversation history and most
 runtime reconstruction:
 
 - `message.user`, `message.assistant`, and `message.system` reconstruct history.
-- `tool.call` and `tool.result` preserve tool phases and create later tool
-  result messages.
+- `capability.invocation.started` and `capability.invocation.completed` preserve capability invocation phases and create later result messages.
 - `rules.loaded`, `rules.indexed`, and `rules.activated` explain rules context.
 - `skill.activated`, `skill.deactivated`, and `skills.cleared` explain skill
   context.
@@ -387,7 +386,7 @@ Current behavior:
 ### What can be inspected today
 
 - Context token snapshots through context capabilities.
-- Session history, tool calls/results, compaction events, skill events, rules
+- Session history, capability invocations/results, compaction events, skill events, rules
   events, and errors through the event log.
 - Raw database state through read-only `sqlite3` against
   `~/.tron/internal/database/log.db`.

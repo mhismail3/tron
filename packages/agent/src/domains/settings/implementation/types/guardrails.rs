@@ -1,6 +1,6 @@
 //! Guardrail settings.
 //!
-//! Optional safety rules for tool execution — pattern matching, path
+//! Optional safety rules for capability invocation — pattern matching, path
 //! protection, resource limits, and audit configuration.
 
 use std::collections::HashMap;

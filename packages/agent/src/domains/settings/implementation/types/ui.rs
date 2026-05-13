@@ -126,7 +126,7 @@ pub struct IconSettings {
     pub tool_running: String,
     /// Tool success indicator.
     pub tool_success: String,
-    /// Tool error indicator.
+    /// Capability error indicator.
     pub tool_error: String,
     /// Ready state indicator.
     pub ready: String,

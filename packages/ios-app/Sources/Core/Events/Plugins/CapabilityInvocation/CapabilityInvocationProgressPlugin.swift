@@ -1,0 +1,95 @@
+import Foundation
+
+/// Plugin for handling long-running tool progress heartbeats.
+/// Delivers optional status messages + completion fractions for tools like
+/// Bash (stdout tail), WebFetch (bytes downloaded), and SpawnSubagent
+/// (child turn count).
+enum CapabilityInvocationProgressPlugin: DispatchableEventPlugin {
+    static let eventType = "capability.invocation.progress"
+
+    // MARK: - Event Data
+
+    struct EventData: StandardEventData {
+        let type: String
+        let sessionId: String?
+        let timestamp: String?
+        let data: DataPayload
+
+        struct DataPayload: Decodable, Sendable {
+            let invocationId: String
+            let message: String?
+            let percent: Double?
+            let modelToolName: String?
+            let contractId: String?
+            let implementationId: String?
+            let functionId: String?
+            let pluginId: String?
+            let workerId: String?
+            let schemaDigest: String?
+            let catalogRevision: UInt64?
+            let trustTier: String?
+            let riskLevel: String?
+            let effectClass: String?
+            let traceId: String?
+            let rootInvocationId: String?
+            let bindingDecisionId: String?
+
+            var identity: CapabilityIdentity {
+                CapabilityIdentity(
+                    modelToolName: modelToolName,
+                    contractId: contractId,
+                    implementationId: implementationId,
+                    functionId: functionId,
+                    pluginId: pluginId,
+                    workerId: workerId,
+                    schemaDigest: schemaDigest,
+                    catalogRevision: catalogRevision,
+                    trustTier: trustTier,
+                    riskLevel: riskLevel,
+                    effectClass: effectClass,
+                    traceId: traceId,
+                    rootInvocationId: rootInvocationId,
+                    bindingDecisionId: bindingDecisionId
+                )
+            }
+        }
+    }
+
+    // MARK: - Result
+
+    struct Result: EventResult {
+        let invocationId: String
+        let message: String?
+        let percent: Double?
+        let identity: CapabilityIdentity
+
+        init(
+            invocationId: String,
+            message: String?,
+            percent: Double?,
+            identity: CapabilityIdentity? = nil
+        ) {
+            self.invocationId = invocationId
+            self.message = message
+            self.percent = percent
+            self.identity = identity ?? CapabilityIdentity()
+        }
+    }
+
+    // MARK: - Protocol Implementation
+
+    static func transform(_ event: EventData) -> (any EventResult)? {
+        Result(
+            invocationId: event.data.invocationId,
+            message: event.data.message,
+            percent: event.data.percent,
+            identity: event.data.identity
+        )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleCapabilityInvocationProgress(r)
+    }
+}

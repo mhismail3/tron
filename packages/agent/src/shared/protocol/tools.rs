@@ -1,7 +1,7 @@
 //! Tool definition and result types.
 //!
 //! Defines the schema for tools that the agent can invoke, plus the result
-//! type returned by tool execution.
+//! type returned by capability invocation.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,10 +44,10 @@ pub struct Tool {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tool result
+// Capability result
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Content in a tool result — either a plain string or structured content blocks.
+/// Content in a capability result — either a plain string or structured content blocks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolResultBody {
@@ -57,7 +57,7 @@ pub enum ToolResultBody {
     Blocks(Vec<ToolResultContent>),
 }
 
-/// Result of a tool execution.
+/// Result of a capability invocation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityResult {

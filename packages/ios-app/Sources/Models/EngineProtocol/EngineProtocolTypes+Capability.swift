@@ -17,6 +17,38 @@ struct CapabilityIdentity: Codable, Equatable, Hashable, Sendable {
     var traceId: String?
     var rootInvocationId: String?
     var bindingDecisionId: String?
+
+    init(
+        modelToolName: String? = nil,
+        contractId: String? = nil,
+        implementationId: String? = nil,
+        functionId: String? = nil,
+        pluginId: String? = nil,
+        workerId: String? = nil,
+        schemaDigest: String? = nil,
+        catalogRevision: UInt64? = nil,
+        trustTier: String? = nil,
+        riskLevel: String? = nil,
+        effectClass: String? = nil,
+        traceId: String? = nil,
+        rootInvocationId: String? = nil,
+        bindingDecisionId: String? = nil
+    ) {
+        self.modelToolName = modelToolName
+        self.contractId = contractId
+        self.implementationId = implementationId
+        self.functionId = functionId
+        self.pluginId = pluginId
+        self.workerId = workerId
+        self.schemaDigest = schemaDigest
+        self.catalogRevision = catalogRevision
+        self.trustTier = trustTier
+        self.riskLevel = riskLevel
+        self.effectClass = effectClass
+        self.traceId = traceId
+        self.rootInvocationId = rootInvocationId
+        self.bindingDecisionId = bindingDecisionId
+    }
 }
 
 struct CapabilityIndexStatusDTO: Codable, Equatable, Sendable {

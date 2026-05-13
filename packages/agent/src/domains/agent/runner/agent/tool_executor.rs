@@ -16,7 +16,9 @@ use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
     InvocationId, TraceId,
 };
-use crate::shared::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
+use crate::shared::events::{
+    BaseEvent, CapabilityEventIdentity, HookResult as EventHookResult, TronEvent,
+};
 use crate::shared::messages::Provider;
 use crate::shared::messages::ToolCall;
 use serde_json::{Value, json};
@@ -57,7 +59,160 @@ fn traced_base(
     )
 }
 
-/// Shared dependencies for tool execution (extracted to reduce parameter count).
+fn string_metadata(function: &crate::engine::FunctionDefinition, key: &str) -> Option<String> {
+    function
+        .metadata
+        .get(key)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn primitive_capability_identity(
+    model_tool_name: &str,
+    target: &EngineToolTarget,
+    catalog_revision: u64,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+) -> CapabilityEventIdentity {
+    let function = &target.function;
+    let function_id = function.id.as_str().to_owned();
+    CapabilityEventIdentity {
+        model_tool_name: Some(model_tool_name.to_owned()),
+        contract_id: string_metadata(function, "contractId")
+            .or_else(|| string_metadata(function, "capabilityContractId"))
+            .or_else(|| Some(function_id.clone())),
+        implementation_id: string_metadata(function, "implementationId")
+            .or_else(|| string_metadata(function, "capabilityImplementationId"))
+            .or_else(|| Some(format!("function:{function_id}"))),
+        function_id: Some(function_id),
+        plugin_id: string_metadata(function, "pluginId"),
+        worker_id: Some(function.owner_worker.as_str().to_owned()),
+        schema_digest: None,
+        catalog_revision: Some(catalog_revision),
+        trust_tier: string_metadata(function, "trustTier"),
+        risk_level: Some(format!("{:?}", function.risk_level)),
+        effect_class: Some(format!("{:?}", function.effect_class)),
+        trace_id: trace_id.map(|id| id.as_str().to_owned()),
+        root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
+        binding_decision_id: None,
+    }
+}
+
+fn capability_identity_from_result(
+    model_tool_name: &str,
+    base_identity: &CapabilityEventIdentity,
+    result: &crate::shared::tools::CapabilityResult,
+) -> CapabilityEventIdentity {
+    let Some(details) = result.details.as_ref() else {
+        return base_identity.clone();
+    };
+    let binding = details.get("bindingDecision");
+    CapabilityEventIdentity {
+        model_tool_name: Some(model_tool_name.to_owned()),
+        contract_id: binding
+            .and_then(|value| value.get("contractId"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| base_identity.contract_id.clone()),
+        implementation_id: details
+            .get("selectedImplementation")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                binding
+                    .and_then(|value| value.get("selectedImplementation"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| base_identity.implementation_id.clone()),
+        function_id: details
+            .get("functionId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                binding
+                    .and_then(|value| value.get("selectedFunctionId"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| base_identity.function_id.clone()),
+        plugin_id: details
+            .get("pluginVersions")
+            .and_then(Value::as_array)
+            .and_then(|plugins| plugins.first())
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| base_identity.plugin_id.clone()),
+        worker_id: base_identity.worker_id.clone(),
+        schema_digest: details
+            .get("schemaDigest")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                binding
+                    .and_then(|value| value.get("schemaDigest"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| base_identity.schema_digest.clone()),
+        catalog_revision: details
+            .get("catalogRevision")
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                binding
+                    .and_then(|value| value.get("catalogRevision"))
+                    .and_then(Value::as_u64)
+            })
+            .or(base_identity.catalog_revision),
+        trust_tier: base_identity.trust_tier.clone(),
+        risk_level: base_identity.risk_level.clone(),
+        effect_class: base_identity.effect_class.clone(),
+        trace_id: details
+            .get("traceId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| base_identity.trace_id.clone()),
+        root_invocation_id: details
+            .get("rootInvocationId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| base_identity.root_invocation_id.clone()),
+        binding_decision_id: binding
+            .and_then(|value| value.get("decisionId"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| base_identity.binding_decision_id.clone()),
+    }
+}
+
+fn execution_request_target(args: &Value) -> (Option<String>, Option<String>, Option<String>) {
+    let direct = args
+        .get("mode")
+        .and_then(Value::as_str)
+        .is_none_or(|mode| mode == "invoke");
+    if !direct {
+        return (None, None, None);
+    }
+    let payload = args.get("payload").unwrap_or(args);
+    let contract_id = payload
+        .get("contractId")
+        .or_else(|| payload.get("contract_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let implementation_id = payload
+        .get("implementationId")
+        .or_else(|| payload.get("implementation_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let function_id = payload
+        .get("functionId")
+        .or_else(|| payload.get("function_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    (contract_id, implementation_id, function_id)
+}
+
+/// Shared dependencies for capability invocation (extracted to reduce parameter count).
 pub struct ToolExecutionContext<'a> {
     /// Live engine-catalog tool surface resolved for this turn.
     pub tool_surface: &'a ResolvedToolSurface,
@@ -103,17 +258,17 @@ pub struct ToolExecutionContext<'a> {
     pub event_persister: Option<
         &'a Arc<crate::domains::agent::runner::orchestrator::event_persister::EventPersister>,
     >,
-    /// Turn number this tool call belongs to. Copied into each progress event
+    /// Turn number this capability invocation belongs to. Copied into each progress event
     /// so iOS can attribute progress after disconnect/reconnect.
     pub turn: i64,
-    /// Optional per-call abort registry. When `Some`, each model tool call registers
+    /// Optional per-call abort registry. When `Some`, each model capability invocation registers
     /// a child `CancellationToken` so `agent.abortTool` can cancel one capability
     /// primitive without aborting the whole turn. When `None`, the turn-level
     /// `cancel` token is passed through unchanged.
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
     /// Optional engine host for routing model-facing capability primitives.
     pub engine_host: Option<&'a EngineHostHandle>,
-    /// Stable run id used for model tool-call idempotency.
+    /// Stable run id used for model capability-invocation idempotency.
     pub run_id: Option<&'a str>,
     /// Trace inherited from the owning agent run-turn invocation.
     pub trace_id: Option<&'a TraceId>,
@@ -121,7 +276,7 @@ pub struct ToolExecutionContext<'a> {
     pub parent_invocation_id: Option<&'a InvocationId>,
 }
 
-/// Execute a single tool call through the full pipeline.
+/// Execute a single capability invocation through the full pipeline.
 ///
 /// Pipeline: guardrails → pre-hooks → execute → post-hooks → result
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
@@ -154,6 +309,13 @@ pub async fn execute_tool(
 
     let stops_turn = engine_target.is_some_and(|target| target.stops_turn);
     let is_interactive = engine_target.is_some_and(|target| target.is_interactive);
+    let primitive_identity = primitive_capability_identity(
+        &tool_name,
+        engine_target.expect("checked above"),
+        ctx.tool_surface.catalog_revision.0,
+        ctx.trace_id,
+        ctx.parent_invocation_id,
+    );
 
     // 1a. Provider-scoped allow-list. Local models only see a subset of tool
     // schemas; if the model hallucinates a call to a hidden tool, refuse
@@ -309,28 +471,50 @@ pub async fn execute_tool(
         }
     }
 
-    // 4. Emit ToolExecutionStart
+    // 4. Emit CapabilityInvocationStarted
     if let Some(counter) = ctx.sequence_counter {
         let _ = ctx.emitter.emit_sequenced(
-            TronEvent::ToolExecutionStart {
+            TronEvent::CapabilityInvocationStarted {
                 base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                 tool_call_id: tool_call_id.clone(),
                 tool_name: tool_name.clone(),
                 arguments: effective_args.as_object().cloned(),
+                capability_identity: primitive_identity.clone(),
             },
             counter,
         );
     } else {
-        let _ = ctx.emitter.emit(TronEvent::ToolExecutionStart {
+        let _ = ctx.emitter.emit(TronEvent::CapabilityInvocationStarted {
             base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
             arguments: effective_args.as_object().cloned(),
+            capability_identity: primitive_identity.clone(),
         });
+    }
+    if tool_name == "execute" {
+        let (requested_contract_id, requested_implementation_id, requested_function_id) =
+            execution_request_target(&effective_args);
+        if requested_implementation_id.is_none() && requested_function_id.is_none() {
+            let event = TronEvent::CapabilityResolution {
+                base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
+                tool_call_id: tool_call_id.clone(),
+                model_tool_name: tool_name.clone(),
+                requested_contract_id,
+                requested_implementation_id,
+                requested_function_id,
+                capability_identity: primitive_identity.clone(),
+            };
+            if let Some(counter) = ctx.sequence_counter {
+                let _ = ctx.emitter.emit_sequenced(event, counter);
+            } else {
+                let _ = ctx.emitter.emit(event);
+            }
+        }
     }
     debug!(
         tool_name,
-        tool_call_id, session_id, "tool execution started"
+        tool_call_id, session_id, "capability invocation started"
     );
 
     // 5. Execute the capability primitive.
@@ -390,33 +574,37 @@ pub async fn execute_tool(
     };
 
     let duration_ms = duration_ceil_ms(start.elapsed());
+    let resolved_identity =
+        capability_identity_from_result(&tool_name, &primitive_identity, &tool_result);
 
-    // Record tool metrics
-    counter!("tool_executions_total", "tool" => tool_name.clone()).increment(1);
-    histogram!("tool_execution_duration_seconds", "tool" => tool_name.clone())
+    // Record capability invocation metrics
+    counter!("capability_invocations_total", "capability" => tool_name.clone()).increment(1);
+    histogram!("capability_invocation_duration_seconds", "capability" => tool_name.clone())
         .record(start.elapsed().as_secs_f64());
 
-    // 6. Emit ToolExecutionEnd
+    // 6. Emit CapabilityInvocationCompleted
     if let Some(counter) = ctx.sequence_counter {
         let _ = ctx.emitter.emit_sequenced(
-            TronEvent::ToolExecutionEnd {
+            TronEvent::CapabilityInvocationCompleted {
                 base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
                 tool_call_id: tool_call_id.clone(),
                 tool_name: tool_name.clone(),
                 duration: duration_ms,
                 is_error: tool_result.is_error,
                 result: Some(tool_result.clone()),
+                capability_identity: resolved_identity.clone(),
             },
             counter,
         );
     } else {
-        let _ = ctx.emitter.emit(TronEvent::ToolExecutionEnd {
+        let _ = ctx.emitter.emit(TronEvent::CapabilityInvocationCompleted {
             base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
             duration: duration_ms,
             is_error: tool_result.is_error,
             result: Some(tool_result.clone()),
+            capability_identity: resolved_identity,
         });
     }
     debug!(tool = %tool_name, duration_ms, "tool executed");
@@ -617,7 +805,7 @@ async fn execute_capability_primitive_via_engine(
         &effective_args,
     );
     let fingerprint = sha256_hex(material.as_bytes());
-    let idempotency_key = format!("model-tool-call:v1:{fingerprint}");
+    let idempotency_key = format!("model-capability-invocation:v1:{fingerprint}");
     let function_id = target.function_id.clone();
     let actor_id = match ActorId::new(format!("agent:{session_id}")) {
         Ok(id) => id,
@@ -672,7 +860,7 @@ async fn execute_capability_primitive_via_engine(
     };
     serde_json::from_value(value).unwrap_or_else(|error| {
         crate::shared::tools::error_result(format!(
-            "Engine tool invocation returned invalid tool result for {function_id}: {error}"
+            "Engine tool invocation returned invalid capability result for {function_id}: {error}"
         ))
     })
 }
@@ -989,7 +1177,7 @@ mod tests {
 
         let mut args = serde_json::Map::new();
         args.insert("value".to_owned(), Value::String("hello".to_owned()));
-        let call = ToolCall::new("tool-call-1", "execute", args);
+        let call = ToolCall::new("capability-invocation-1", "execute", args);
         let result = execute_tool(&call, "session-1", "/tmp/worktree", &ctx).await;
 
         assert_eq!(result.result.is_error, None);
@@ -1006,14 +1194,14 @@ mod tests {
             Some("run-1"),
             "session-1",
             1,
-            "tool-call-1",
+            "capability-invocation-1",
             "execute",
             "/tmp/worktree",
             None,
             &json!({"value": "hello"}),
         );
         let expected_key = format!(
-            "model-tool-call:v1:{}",
+            "model-capability-invocation:v1:{}",
             sha256_hex(expected_material.as_bytes())
         );
         assert_eq!(

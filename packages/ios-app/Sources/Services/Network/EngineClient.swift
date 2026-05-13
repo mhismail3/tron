@@ -138,9 +138,9 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var auth: AuthClient = AuthClient(transport: self)
 
-    /// MCP server management client (status, add, remove, enable, disable, restart, reload)
+    /// plugin source server management client (status, add, remove, enable, disable, restart, reload)
     @ObservationIgnored
-    lazy var mcp: MCPClient = MCPClient(transport: self)
+    lazy var pluginSources: PluginSourceClient = PluginSourceClient(transport: self)
 
     /// Server-owned Codex App Server lifecycle discovery.
     @ObservationIgnored
@@ -408,8 +408,8 @@ final class EngineClient: EngineTransport {
             NotificationCenter.default.post(name: .authDidUpdate, object: nil)
         }
 
-        // Handle MCP status changed — notify observers so MCP servers page refreshes
-        if eventType == MCPStatusChangedPlugin.eventType {
+        // Handle plugin source status changed — notify observers so plugin source servers page refreshes
+        if eventType == PluginSourceStatusChangedPlugin.eventType {
             NotificationCenter.default.post(name: .mcpStatusChanged, object: nil)
         }
 
@@ -418,9 +418,9 @@ final class EngineClient: EngineTransport {
         // the same thin-client notification path APNs uses. APNs is still the
         // background transport; this foreground path keeps the notification
         // bell current without adding a second server API.
-        if eventType == ToolEndPlugin.eventType,
-           let result = eventV2.getResult() as? ToolEndPlugin.Result,
-           result.toolName?.lowercased() == "notifyapp" {
+        if eventType == CapabilityInvocationCompletedPlugin.eventType,
+           let result = eventV2.getResult() as? CapabilityInvocationCompletedPlugin.Result,
+           result.modelToolName?.lowercased() == "notifyapp" {
             logger.info(
                 "NotifyApp tool completion received from engine stream; refreshing notification inbox",
                 category: .notification

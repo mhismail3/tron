@@ -32,7 +32,7 @@ struct ConsolidatedAnalytics {
     let turns: [TurnData]
     let totalCost: Double
     let totalTurns: Int
-    let totalToolCalls: Int
+    let totalCapabilityInvocations: Int
     let totalErrors: Int
     let avgLatency: Int
 
@@ -285,7 +285,7 @@ struct ConsolidatedAnalytics {
 
         // Sequential array — each message.assistant appends a new entry (no collisions).
         // turnNumberToLatestIndex maps turn number → latest array index so that
-        // stream.turn_end / tool.call / errors route to the correct entry.
+        // stream.turn_end / capability.invocation.started / errors route to the correct entry.
         // Cleared on detected "turn reset" so multi-model conversations (where
         // each model restarts turn numbering at 1) get distinct entries.
         var turnEntries: [TurnAccumulator] = []
@@ -397,17 +397,17 @@ struct ConsolidatedAnalytics {
                     turnEntries[index].model = model
                 }
 
-            case .toolCall:
+            case .capabilityInvocationStarted:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value),
-                      let toolName = event.payload["name"]?.value as? String,
+                      let modelToolName = event.payload["name"]?.value as? String,
                       let index = turnNumberToLatestIndex[turn] else { continue }
 
-                if !turnEntries[index].tools.contains(toolName) {
-                    turnEntries[index].tools.append(toolName)
+                if !turnEntries[index].tools.contains(modelToolName) {
+                    turnEntries[index].tools.append(modelToolName)
                 }
                 totalTools += 1
 
-            case .errorAgent, .errorProvider, .errorTool:
+            case .errorAgent, .errorProvider, .errorCapability:
                 let errorMsg = (event.payload["error"]?.value as? String) ?? "Unknown error"
                 if let turn = Self.extractInt(event.payload["turn"]?.value),
                    let index = turnNumberToLatestIndex[turn] {
@@ -451,7 +451,7 @@ struct ConsolidatedAnalytics {
 
         self.totalCost = self.turns.reduce(0) { $0 + $1.cost }
         self.totalTurns = self.turns.count
-        self.totalToolCalls = totalTools
+        self.totalCapabilityInvocations = totalTools
         self.totalErrors = totalErrs
         self.avgLatency = latencyCount > 0 ? latencySum / latencyCount : 0
     }

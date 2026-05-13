@@ -292,7 +292,7 @@ struct AnalyticsCardView: View {
 @available(iOS 26.0, *)
 struct HistoryCardView: View {
     var totalTurns: Int
-    var totalToolCalls: Int
+    var totalCapabilityInvocations: Int
     var onTap: (() -> Void)?
 
     var body: some View {
@@ -309,10 +309,10 @@ struct HistoryCardView: View {
                     .foregroundStyle(.tronCoral)
             }
 
-            // Row 2: tool calls
+            // Row 2: capability invocations
             HStack {
                 Spacer()
-                Text("\(totalToolCalls) tool \(totalToolCalls == 1 ? "call" : "calls")")
+                Text("\(totalCapabilityInvocations) capability \(totalCapabilityInvocations == 1 ? "call" : "calls")")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
             }
@@ -320,4 +320,3 @@ struct HistoryCardView: View {
         .cardChrome(.tronCoral, onTap: onTap)
     }
 }
-

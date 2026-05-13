@@ -202,7 +202,7 @@ settings live as sparse `[settings]` overrides in
 settings grid tiles and are enabled only after the active server connects and
 `settings.get` returns real values. The main Settings sheet starts at the medium detent and
 uses a 3x3 launcher grid: App, Server, and Providers for settings surfaces;
-Agent, Context, and MCP for agent behavior; then Clear Prompt History, Archive
+Agent, Context, and Plugin Sources for agent behavior; then Clear Prompt History, Archive
 All Sessions, and Reset All Settings as the red destructive row with no separate
 Danger Zone header. All nine tiles share the same compact icon size; the green
 surface and behavior tiles are slightly taller with left-aligned emerald titles,
@@ -210,7 +210,7 @@ top-right icons, and short softer descriptive copy. A thin muted divider separat
 those destination rows from the destructive row, which sizes to its two-line red
 labels and top-right icons. When the paired server is unavailable or
 server-backed settings have not loaded, the launcher collapses to a two-column
-App and Server row, hides Providers, Agent, Context, and MCP, and shows the
+App and Server row, hides Providers, Agent, Context, and Plugin Sources, and shows the
 server-unavailable card immediately below that row before the destructive
 actions.
 Device-only preferences such as onboarding completion,

@@ -161,16 +161,16 @@ final class SessionEventTests: XCTestCase {
             parentId: nil,
             sessionId: "session-1",
             workspaceId: "/test",
-            type: "tool.call",
+            type: "capability.invocation.started",
             timestamp: ISO8601DateFormatter().string(from: Date()),
             sequence: 1,
             payload: [
-                "toolName": AnyCodable("Bash"),
+                "modelToolName": AnyCodable("Bash"),
                 "arguments": AnyCodable(["command": "ls -la"])
             ]
         )
 
-        XCTAssertNotNil(event.payload["toolName"])
+        XCTAssertNotNil(event.payload["modelToolName"])
         XCTAssertNotNil(event.payload["arguments"])
     }
 }

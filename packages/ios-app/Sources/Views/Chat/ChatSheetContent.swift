@@ -98,8 +98,8 @@ struct ChatSheetContent: View {
                 )
             )
 
-        case .commandToolDetail(let data):
-            commandToolDetailSheet(snapshot: data)
+        case .capabilityInvocationDetail(let data):
+            capabilityInvocationDetailSheet(snapshot: data)
 
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
@@ -111,47 +111,15 @@ struct ChatSheetContent: View {
     // MARK: - Sheet Builders
 
     @ViewBuilder
-    private func commandToolDetailSheet(snapshot: CommandToolChipData) -> some View {
-        // Look up live data from viewModel.messages so streaming output updates in real-time
-        let liveData: CommandToolChipData = {
-            if let index = MessageFinder.lastIndexOfToolUse(toolCallId: snapshot.id, in: viewModel.messages),
-               case .toolUse(let tool) = viewModel.messages[index].content {
-                return CommandToolChipData(from: tool)
+    private func capabilityInvocationDetailSheet(snapshot: CapabilityInvocationData) -> some View {
+        let liveData: CapabilityInvocationData = {
+            if let index = MessageFinder.lastIndexOfCapabilityInvocation(id: snapshot.id, in: viewModel.messages),
+               case .capabilityInvocation(let invocation) = viewModel.messages[index].content {
+                return invocation
             }
             return snapshot
         }()
-        switch liveData.normalizedName {
-        case "read":
-            ReadToolDetailSheet(data: liveData)
-        case "write":
-            WriteToolDetailSheet(data: liveData)
-        case "edit":
-            EditToolDetailSheet(data: liveData)
-        case "bash":
-            BashToolDetailSheet(data: liveData, engineClient: engineClient, sessionId: sessionId)
-        case "wait":
-            WaitToolDetailSheet(data: liveData, viewModel: viewModel, engineClient: engineClient, sessionId: sessionId)
-        case "glob", "find":
-            GlobToolDetailSheet(data: liveData)
-        case "search":
-            SearchToolDetailSheet(data: liveData)
-        case "webfetch":
-            WebFetchToolDetailSheet(data: liveData)
-        case "websearch":
-            WebSearchToolDetailSheet(data: liveData)
-        case "computeruse":
-            ComputerUseToolDetailSheet(data: liveData)
-        case "display":
-            DisplayToolDetailSheet(data: liveData)
-        case "mcpsearch":
-            McpSearchToolDetailSheet(data: liveData)
-        case "mcpcall":
-            McpCallToolDetailSheet(data: liveData)
-        case "managejob":
-            ManageJobToolDetailSheet(data: liveData)
-        default:
-            CommandToolDetailSheet(data: liveData, onOpenURL: { _ in })
-        }
+        CapabilityInvocationDetailSheet(data: liveData)
     }
 
     @ViewBuilder

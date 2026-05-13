@@ -1,7 +1,7 @@
 //! Guardrail evaluation engine.
 //!
 //! The central engine that manages rule registration, evaluation ordering,
-//! and audit logging. Evaluates tool calls against registered rules and
+//! and audit logging. Evaluates capability invocations against registered rules and
 //! returns block/warn/audit decisions.
 
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ use super::types::{
 
 /// Main guardrail evaluation engine.
 ///
-/// Holds registered rules, evaluates tool calls against them in priority order,
+/// Holds registered rules, evaluates capability invocations against them in priority order,
 /// and optionally logs all evaluations to an audit logger.
 pub struct GuardrailEngine {
     rules: HashMap<String, GuardrailRule>,
@@ -118,7 +118,7 @@ impl GuardrailEngine {
         rule.base().enabled
     }
 
-    /// Evaluate a tool call against all applicable rules.
+    /// Evaluate a capability invocation against all applicable rules.
     ///
     /// Returns a [`GuardrailEvaluation`] with block/warn/audit decisions.
     /// All applicable rules are evaluated (even after a block), for comprehensive

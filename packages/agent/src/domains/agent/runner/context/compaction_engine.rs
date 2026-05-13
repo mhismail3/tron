@@ -62,7 +62,7 @@ pub trait CompactionDeps: Send + Sync {
 /// Manages context compaction to stay within context window limits.
 ///
 /// Uses turn-based preservation: keeps the last N user turns (each turn
-/// being a user prompt plus all responses/tool-results until the next
+/// being a user prompt plus all responses/capability-results until the next
 /// user message), capped by a maximum token budget.
 pub struct CompactionEngine<D: CompactionDeps> {
     /// Compaction threshold ratio (0–1). Also used as the token budget

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Processed Event Item
 
-/// Represents either a single event or a merged tool call+result pair for turn event display.
+/// Represents either a single event or a merged capability invocation+result pair for turn event display.
 struct ProcessedEventItem: Identifiable {
     enum Kind {
         case single(SessionEvent)
@@ -30,7 +30,7 @@ private let postTurnEventTypes: Set<SessionEventType> = [
 ]
 
 /// Splits a turn's events into main content and post-turn lifecycle events,
-/// merging tool call/result pairs into single items.
+/// merging capability invocation/result pairs into single items.
 func processEventsForTurn(_ turn: TurnGroup) -> (main: [ProcessedEventItem], postTurn: [ProcessedEventItem]) {
     let events = turn.events
     let lastAssistantIndex = events.lastIndex(where: { $0.eventType == .messageAssistant })
@@ -38,7 +38,7 @@ func processEventsForTurn(_ turn: TurnGroup) -> (main: [ProcessedEventItem], pos
     let lastMainIndex: Int
     if let lai = lastAssistantIndex {
         let afterAssistant = events[lai...]
-        if let lastToolResult = afterAssistant.lastIndex(where: { $0.eventType == .toolResult }) {
+        if let lastToolResult = afterAssistant.lastIndex(where: { $0.eventType == .capabilityInvocationCompleted }) {
             lastMainIndex = lastToolResult
         } else {
             lastMainIndex = lai
@@ -54,16 +54,16 @@ func processEventsForTurn(_ turn: TurnGroup) -> (main: [ProcessedEventItem], pos
 
     var mainItems: [ProcessedEventItem] = []
     var resultByCallId: [String: SessionEvent] = [:]
-    for event in mainEvents where event.eventType == .toolResult {
-        if let callId = event.payload.string("toolCallId") {
+    for event in mainEvents where event.eventType == .capabilityInvocationCompleted {
+        if let callId = event.payload.string("invocationId") {
             resultByCallId[callId] = event
         }
     }
 
     for event in mainEvents {
-        if event.eventType == .toolResult { continue }
-        if event.eventType == .toolCall {
-            let callId = event.payload.string("toolCallId") ?? event.id
+        if event.eventType == .capabilityInvocationCompleted { continue }
+        if event.eventType == .capabilityInvocationStarted {
+            let callId = event.payload.string("invocationId") ?? event.id
             let result = resultByCallId[callId]
             mainItems.append(ProcessedEventItem(kind: .mergedTool(call: event, result: result)))
         } else {

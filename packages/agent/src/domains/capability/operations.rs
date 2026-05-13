@@ -1269,6 +1269,7 @@ fn decision_for_entry(
     rejected_candidates: Vec<CapabilityRejectedCandidate>,
 ) -> CapabilityBindingDecision {
     CapabilityBindingDecision {
+        decision_id: format!("binding_decision_{}", uuid::Uuid::now_v7()),
         contract_id: entry.contract_id.clone(),
         selected_implementation: entry.implementation_id.clone(),
         selected_function_id: entry.function_id.clone(),
@@ -1869,7 +1870,7 @@ fn child_idempotency_key(
     if required {
         return Err(CapabilityError::InvalidParams {
             message: format!(
-                "{} mutates state; pass idempotencyKey or invoke through a model tool call with engine idempotency",
+                "{} mutates state; pass idempotencyKey or invoke through a model capability invocation with engine idempotency",
                 function.id.as_str()
             ),
         });

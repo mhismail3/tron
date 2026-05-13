@@ -19,7 +19,7 @@ use tracing::debug;
 use crate::shared::content::AssistantContent;
 use crate::shared::messages::{Message, ToolResultMessageContent};
 
-/// Content for synthetic tool results when execution was interrupted.
+/// Content for synthetic capability results when execution was interrupted.
 const INTERRUPTED_CONTENT: &str = "[Interrupted]";
 
 /// Content for placeholder user message when conversation doesn't start with user.
@@ -32,7 +32,7 @@ const CONTINUED_CONTENT: &str = "[Continued]";
 /// - Empty messages filtered out
 /// - Thinking-only assistant messages (unsigned, display-only) filtered out
 /// - Duplicate `tool_use` IDs deduplicated
-/// - Synthetic tool results injected for unmatched `tool_use` blocks
+/// - Synthetic capability results injected for unmatched `tool_use` blocks
 /// - Placeholder user message prepended if first message isn't user
 pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
     // PHASE 1: Filter invalid messages, deduplicate tool_use IDs
@@ -110,11 +110,11 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                 ..
             } => {
                 if tool_call_id.is_empty() {
-                    debug!("Removed tool result with empty tool_call_id");
+                    debug!("Removed capability result with empty tool_call_id");
                     continue;
                 }
                 if !is_valid_tool_result_content(content) {
-                    debug!(tool_call_id = %tool_call_id, "Removed empty tool result");
+                    debug!(tool_call_id = %tool_call_id, "Removed empty capability result");
                     continue;
                 }
                 valid.push(msg);
@@ -122,7 +122,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
         }
     }
 
-    // PHASE 2: Collect existing tool result IDs
+    // PHASE 2: Collect existing capability result IDs
     let existing_result_ids: HashSet<&str> = valid
         .iter()
         .filter_map(|msg| {
@@ -134,7 +134,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
         })
         .collect();
 
-    // PHASE 3: Inject synthetic tool results for unmatched tool_use blocks
+    // PHASE 3: Inject synthetic capability results for unmatched tool_use blocks
     // Group missing IDs by assistant message index
     let mut missing_by_index: HashMap<usize, Vec<String>> = HashMap::new();
     for (tool_use_id, assistant_idx) in &tool_use_locations {
@@ -154,7 +154,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
         if let Some(missing_ids) = missing_by_index.get(&assistant_idx) {
             // Insert in reverse to maintain original tool_use order
             for tool_call_id in missing_ids.iter().rev() {
-                debug!(tool_call_id = %tool_call_id, "Injected synthetic tool result for interrupted execution");
+                debug!(tool_call_id = %tool_call_id, "Injected synthetic capability result for interrupted execution");
                 valid.insert(
                     assistant_idx + 1,
                     Message::ToolResult {
@@ -202,7 +202,7 @@ fn is_valid_user_content(content: &crate::shared::messages::UserMessageContent) 
     }
 }
 
-/// Check if tool result content is non-empty.
+/// Check if capability result content is non-empty.
 fn is_valid_tool_result_content(content: &ToolResultMessageContent) -> bool {
     match content {
         ToolResultMessageContent::Text(_) => true,
@@ -334,14 +334,14 @@ mod tests {
         }
     }
 
-    // ── Phase 2-3: Synthetic tool results ────────────────────────────────
+    // ── Phase 2-3: Synthetic capability results ────────────────────────────────
 
     #[test]
     fn unmatched_tool_use_gets_synthetic_result() {
         let messages = vec![
             Message::user("hello"),
             assistant_with_content(vec![tool_use("tc-1", "execute")]),
-            // No tool result for tc-1
+            // No capability result for tc-1
         ];
         let result = sanitize_messages(messages);
         assert_eq!(result.len(), 3);
@@ -359,7 +359,7 @@ mod tests {
                 assert_eq!(text, "[Interrupted]");
             }
         } else {
-            panic!("Expected synthetic tool result");
+            panic!("Expected synthetic capability result");
         }
     }
 

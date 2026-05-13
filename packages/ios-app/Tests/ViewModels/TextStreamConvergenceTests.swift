@@ -108,7 +108,7 @@ final class TextStreamConvergenceTests: XCTestCase {
     func testServerExtractsOnlyTextBlocksSkippingToolUse() {
         // When the server emits message.assistant with interleaved
         // text + tool_use blocks, textContent returns only the text.
-        // Tool_use blocks render via tool.call events (handled live by
+        // Tool_use blocks render via capability.invocation.started events (handled live by
         // a different plugin); they MUST NOT contribute to the text
         // message otherwise the live path (which does NOT include
         // tool_use in receivedText) would diverge.

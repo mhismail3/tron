@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A forwarded event from a subagent (tool call, text output, etc.)
+/// A forwarded event from a subagent (capability invocation, text output, etc.)
 /// Equatable conformance enables efficient SwiftUI diffing for smooth updates.
 struct SubagentEventItem: Identifiable, Equatable {
     let id: UUID
@@ -8,9 +8,9 @@ struct SubagentEventItem: Identifiable, Equatable {
     var type: SubagentEventItemType
     var title: String
     var detail: String?
-    /// For tool events, tracks the tool call ID for merging start/end
-    var toolCallId: String?
-    /// For tool events, tracks if tool is still running
+    /// For capability invocation events, tracks the capability invocation ID for merging start/end
+    var invocationId: String?
+    /// For capability invocation events, tracks if tool is still running
     var isRunning: Bool
 
     init(
@@ -19,7 +19,7 @@ struct SubagentEventItem: Identifiable, Equatable {
         type: SubagentEventItemType,
         title: String,
         detail: String? = nil,
-        toolCallId: String? = nil,
+        invocationId: String? = nil,
         isRunning: Bool = false
     ) {
         self.id = id
@@ -27,7 +27,7 @@ struct SubagentEventItem: Identifiable, Equatable {
         self.type = type
         self.title = title
         self.detail = detail
-        self.toolCallId = toolCallId
+        self.invocationId = invocationId
         self.isRunning = isRunning
     }
 
@@ -41,7 +41,7 @@ struct SubagentEventItem: Identifiable, Equatable {
 }
 
 enum SubagentEventItemType: Equatable {
-    case tool       // Combined tool start/end
+    case capabilityInvocation  // Combined capability invocation start/completion
     case output     // Accumulated text output
     case thinking
 }
@@ -80,19 +80,12 @@ final class SubagentState {
         }
     }
 
-    /// Normalize event type strings to canonical dot-separated form.
-    /// Handles: "tool_start", "tool.start", "agent.tool_start" -> "tool.start"
-    private static func normalizeEventType(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "agent.", with: "")
-           .replacingOccurrences(of: "_", with: ".")
-    }
-
     // MARK: - Subagent Lifecycle
 
     /// Track a newly spawned subagent
-    func trackSpawn(toolCallId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false, spawnType: SubagentSpawnType = .toolAgent) {
+    func trackSpawn(invocationId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false, spawnType: SubagentSpawnType = .toolAgent) {
         var data = SubagentToolData(
-            toolCallId: toolCallId,
+            invocationId: invocationId,
             subagentSessionId: subagentSessionId,
             task: task,
             model: model,
@@ -184,7 +177,7 @@ final class SubagentState {
     }
 
     /// Show details for a subagent using data directly (for persisted/resumed sessions)
-    /// This is used when the subagent data comes from persisted tool events
+    /// This is used when the subagent data comes from persisted capability invocation events
     /// rather than live WebSocket events tracked in the subagents dictionary
     func showDetails(with data: SubagentToolData) {
         // Update the tracked subagent if not already present (for consistency)
@@ -231,14 +224,14 @@ final class SubagentState {
             subagentEvents[subagentSessionId] = []
         }
 
-        switch Self.normalizeEventType(eventType) {
-        case "tool.start":
-            handleForwardedToolStart(sessionId: subagentSessionId, data: dataDict, date: date)
-        case "tool.end":
-            handleForwardedToolEnd(sessionId: subagentSessionId, data: dataDict, date: date)
-        case "text.delta":
+        switch eventType {
+        case "capability.invocation.started":
+            handleForwardedCapabilityStarted(sessionId: subagentSessionId, data: dataDict, date: date)
+        case "capability.invocation.completed":
+            handleForwardedCapabilityCompleted(sessionId: subagentSessionId, data: dataDict, date: date)
+        case "agent.text_delta":
             handleForwardedTextDelta(sessionId: subagentSessionId, data: dataDict, date: date)
-        case "thinking.delta":
+        case "agent.thinking_delta":
             handleForwardedThinkingDelta(sessionId: subagentSessionId, date: date)
         default:
             break
@@ -249,9 +242,9 @@ final class SubagentState {
 
     // MARK: - Forwarded Event Handlers
 
-    private func handleForwardedToolStart(sessionId: String, data: [String: Any], date: Date) {
-        let toolName = data["toolName"] as? String ?? "unknown"
-        let toolCallId = data["toolCallId"] as? String
+    private func handleForwardedCapabilityStarted(sessionId: String, data: [String: Any], date: Date) {
+        let identity = CapabilityIdentity(payload: data)
+        let invocationId = data["invocationId"] as? String
 
         // Finalize any running output events
         if let events = subagentEvents[sessionId] {
@@ -265,35 +258,43 @@ final class SubagentState {
 
         let item = SubagentEventItem(
             timestamp: date,
-            type: .tool,
-            title: SubagentEventFormatter.formatToolTitle(toolName),
+            type: .capabilityInvocation,
+            title: SubagentEventFormatter.formatCapabilityTitle(identity),
             detail: nil,
-            toolCallId: toolCallId,
+            invocationId: invocationId,
             isRunning: true
         )
         subagentEvents[sessionId]?.append(item)
     }
 
-    private func handleForwardedToolEnd(sessionId: String, data: [String: Any], date: Date) {
+    private func handleForwardedCapabilityCompleted(sessionId: String, data: [String: Any], date: Date) {
         let success = data["success"] as? Bool ?? true
-        let toolCallId = data["toolCallId"] as? String
-        let toolName = data["toolName"] as? String
+        let invocationId = data["invocationId"] as? String
+        let identity = CapabilityIdentity(payload: data)
         let result = data["result"] as? String ?? data["output"] as? String ?? ""
 
-        if let toolCallId,
-           let index = subagentEvents[sessionId]?.lastIndex(where: { $0.toolCallId == toolCallId }) {
+        if let invocationId,
+           let index = subagentEvents[sessionId]?.lastIndex(where: { $0.invocationId == invocationId }) {
             subagentEvents[sessionId]?[index].isRunning = false
-            subagentEvents[sessionId]?[index].detail = SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success)
+            subagentEvents[sessionId]?[index].detail = SubagentEventFormatter.formatCapabilityResult(
+                identity: identity,
+                result: result,
+                success: success
+            )
             if !success {
                 subagentEvents[sessionId]?[index].title += " ✗"
             }
         } else {
             let item = SubagentEventItem(
                 timestamp: date,
-                type: .tool,
-                title: SubagentEventFormatter.formatToolTitle(toolName) + (success ? "" : " ✗"),
-                detail: SubagentEventFormatter.formatToolResult(toolName: toolName, result: result, success: success),
-                toolCallId: toolCallId,
+                type: .capabilityInvocation,
+                title: SubagentEventFormatter.formatCapabilityTitle(identity) + (success ? "" : " ✗"),
+                detail: SubagentEventFormatter.formatCapabilityResult(
+                    identity: identity,
+                    result: result,
+                    success: success
+                ),
+                invocationId: invocationId,
                 isRunning: false
             )
             subagentEvents[sessionId]?.append(item)
@@ -395,13 +396,13 @@ final class SubagentState {
 
         for message in messages {
             switch message.content {
-            case .toolUse(let tool):
+            case .capabilityInvocation(let invocation):
                 let item = SubagentEventItem(
                     timestamp: message.timestamp,
-                    type: .tool,
-                    title: SubagentEventFormatter.formatToolTitle(tool.toolName),
-                    detail: SubagentEventFormatter.formatToolResult(toolName: tool.toolName, result: tool.result ?? "", success: tool.status != .error),
-                    toolCallId: tool.toolCallId,
+                    type: .capabilityInvocation,
+                    title: SubagentEventFormatter.formatCapabilityTitle(invocation.identity),
+                    detail: SubagentEventFormatter.formatCapabilityResult(invocation: invocation),
+                    invocationId: invocation.id,
                     isRunning: false
                 )
                 items.append(item)
@@ -435,9 +436,9 @@ final class SubagentState {
         subagents[sessionId]
     }
 
-    /// Get subagent data by tool call ID
-    func getSubagentByToolCallId(_ toolCallId: String) -> SubagentToolData? {
-        subagents.values.first { $0.toolCallId == toolCallId }
+    /// Get subagent data by capability invocation ID
+    func getSubagentByInvocationId(_ invocationId: String) -> SubagentToolData? {
+        subagents.values.first { $0.invocationId == invocationId }
     }
 
     /// Check if there are any running user-facing subagents (tool agents).

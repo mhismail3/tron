@@ -239,7 +239,7 @@ struct AgentControlView: View {
                     // History card
                     HistoryCardView(
                         totalTurns: cachedTurnGroups.count,
-                        totalToolCalls: cachedAnalytics.totalToolCalls,
+                        totalCapabilityInvocations: cachedAnalytics.totalCapabilityInvocations,
                         onTap: { showHistory = true }
                     )
                     .padding(.horizontal)

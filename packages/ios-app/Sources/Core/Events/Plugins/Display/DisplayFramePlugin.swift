@@ -16,7 +16,7 @@ enum DisplayFramePlugin: DispatchableEventPlugin {
 
         struct DataPayload: Decodable, Sendable {
             let streamId: String?
-            let toolCallId: String?
+            let invocationId: String?
             let data: String?       // base64 JPEG
             let frameId: Int?
             let width: Int?
@@ -28,7 +28,7 @@ enum DisplayFramePlugin: DispatchableEventPlugin {
 
     struct Result: EventResult {
         let streamId: String
-        let toolCallId: String
+        let invocationId: String
         let image: UIImage
         let frameId: Int
         let width: Int
@@ -40,7 +40,7 @@ enum DisplayFramePlugin: DispatchableEventPlugin {
     static func transform(_ event: EventData) -> (any EventResult)? {
         guard let payload = event.data,
               let streamId = payload.streamId,
-              let toolCallId = payload.toolCallId,
+              let invocationId = payload.invocationId,
               let b64 = payload.data,
               let imageData = Data(base64Encoded: b64),
               let image = UIImage(data: imageData) else {
@@ -49,7 +49,7 @@ enum DisplayFramePlugin: DispatchableEventPlugin {
 
         return Result(
             streamId: streamId,
-            toolCallId: toolCallId,
+            invocationId: invocationId,
             image: image,
             frameId: payload.frameId ?? 0,
             width: payload.width ?? 0,

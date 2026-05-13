@@ -24,16 +24,16 @@ final class UIUpdateQueue {
 
     enum UpdateType {
         case turnBoundary(TurnBoundaryData)
-        case toolStart(ToolStartData)
-        case toolEnd(ToolEndData)
+        case capabilityStart(ToolStartData)
+        case capabilityEnd(ToolEndData)
         case messageAppend(MessageAppendData)
         case textDelta(TextDeltaData)
 
         var priority: Int {
             switch self {
             case .turnBoundary: return Config.priorityTurnBoundary
-            case .toolStart: return Config.priorityToolStart
-            case .toolEnd: return Config.priorityToolEnd
+            case .capabilityStart: return Config.priorityToolStart
+            case .capabilityEnd: return Config.priorityToolEnd
             case .messageAppend: return Config.priorityMessageAppend
             case .textDelta: return Config.priorityTextDelta
             }
@@ -46,19 +46,36 @@ final class UIUpdateQueue {
     }
 
     struct ToolStartData {
-        let toolCallId: String
-        let toolName: String
+        let invocationId: String
+        let modelToolName: String
         let arguments: String
         let timestamp: Date
     }
 
     struct ToolEndData {
-        let toolCallId: String
+        let invocationId: String
         let success: Bool
         let result: String
         let durationMs: Int?
         /// Structured result details from server (tool-specific shape)
         let details: [String: AnyCodable]?
+        let identity: CapabilityIdentity
+
+        init(
+            invocationId: String,
+            success: Bool,
+            result: String,
+            durationMs: Int?,
+            details: [String: AnyCodable]?,
+            identity: CapabilityIdentity? = nil
+        ) {
+            self.invocationId = invocationId
+            self.success = success
+            self.result = result
+            self.durationMs = durationMs
+            self.details = details
+            self.identity = identity ?? CapabilityIdentity()
+        }
     }
 
     struct MessageAppendData {
@@ -84,14 +101,14 @@ final class UIUpdateQueue {
 
     // MARK: - Tool Enqueueing
 
-    /// Register a tool call start
-    func enqueueToolStart(_ data: ToolStartData) {
-        enqueue(.toolStart(data))
+    /// Register a capability invocation start
+    func enqueueCapabilityInvocationStart(_ data: ToolStartData) {
+        enqueue(.capabilityStart(data))
     }
 
-    /// Register a tool call end
+    /// Register a capability invocation end
     func enqueueToolEnd(_ data: ToolEndData) {
-        enqueue(.toolEnd(data))
+        enqueue(.capabilityEnd(data))
     }
 
     // MARK: - General Enqueueing

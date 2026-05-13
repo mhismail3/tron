@@ -311,14 +311,14 @@ final class AskUserQuestionTests: XCTestCase {
         )
 
         let toolData = AskUserQuestionToolData(
-            toolCallId: "call_123",
+            invocationId: "call_123",
             params: params,
             answers: [:],
             status: .pending,
             result: nil
         )
 
-        XCTAssertEqual(toolData.toolCallId, "call_123")
+        XCTAssertEqual(toolData.invocationId, "call_123")
         XCTAssertEqual(toolData.params.questions.count, 1)
         XCTAssertTrue(toolData.answers.isEmpty)
         XCTAssertEqual(toolData.status, .pending)
@@ -328,7 +328,7 @@ final class AskUserQuestionTests: XCTestCase {
     /// Test tool data status transitions (async mode)
     func testAskUserQuestionToolDataStatusTransitions() throws {
         var toolData = AskUserQuestionToolData(
-            toolCallId: "call_123",
+            invocationId: "call_123",
             params: AskUserQuestionParams(questions: [], context: nil),
             answers: [:],
             status: .pending,
@@ -343,7 +343,7 @@ final class AskUserQuestionTests: XCTestCase {
 
         // Test superseded status
         var toolData2 = AskUserQuestionToolData(
-            toolCallId: "call_456",
+            invocationId: "call_456",
             params: AskUserQuestionParams(questions: [], context: nil),
             answers: [:],
             status: .pending,
@@ -358,7 +358,7 @@ final class AskUserQuestionTests: XCTestCase {
         let params = AskUserQuestionParams(questions: [], context: nil)
 
         let data1 = AskUserQuestionToolData(
-            toolCallId: "call_123",
+            invocationId: "call_123",
             params: params,
             answers: [:],
             status: .pending,
@@ -366,7 +366,7 @@ final class AskUserQuestionTests: XCTestCase {
         )
 
         let data2 = AskUserQuestionToolData(
-            toolCallId: "call_123",
+            invocationId: "call_123",
             params: params,
             answers: [:],
             status: .pending,
@@ -374,7 +374,7 @@ final class AskUserQuestionTests: XCTestCase {
         )
 
         let data3 = AskUserQuestionToolData(
-            toolCallId: "call_456",
+            invocationId: "call_456",
             params: params,
             answers: [:],
             status: .pending,

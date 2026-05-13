@@ -135,7 +135,7 @@ are not enabled until remote-machine path semantics are verified.
 - `failed` with "failed to verify installed Codex CLI": install Codex on the
   paired Mac and ensure `codex` is on the LaunchAgent shell `PATH`.
 - `failed` with "failed to start": check executable permissions and process
-  launch failures after the compatibility probe passes.
+  launch failures after the startup capability probe passes.
 - `failed` with "exited during startup": check for an old Codex CLI, unsupported
   App Server flags, auth flag changes, or a non-Tron process occupying the
   configured port. Tron cleans up stale managed children that use its own token

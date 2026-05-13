@@ -658,7 +658,7 @@ final class EngineConnection {
         options: EngineInvocationOptions
     ) async throws -> R {
         let requestId = UUID().uuidString
-        let message = EngineInvokeFrame(
+        let message = EngineFunctionCallFrame(
             id: requestId,
             functionId: functionId.rawValue,
             payload: payload,
@@ -668,7 +668,7 @@ final class EngineConnection {
         )
         let startTime = CFAbsoluteTimeGetCurrent()
         logger.logEngineRequest(functionId: functionId.rawValue, payload: payload, id: requestId)
-        let envelope: EngineInvokeEnvelope<R> = try await sendResponseMessage(
+        let envelope: EngineFunctionCallEnvelope<R> = try await sendResponseMessage(
             message,
             id: requestId,
             operation: functionId.rawValue,
@@ -1143,7 +1143,7 @@ struct EngineHelloResult: Decodable, Equatable, Sendable {
     let currentCatalogRevision: UInt64
 }
 
-private struct EngineInvokeFrame<P: Encodable>: Encodable {
+private struct EngineFunctionCallFrame<P: Encodable>: Encodable {
     let type = "invoke"
     let id: String
     let functionId: String

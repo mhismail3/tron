@@ -179,7 +179,7 @@ impl EventStore {
     /// Delete a message by appending a `message.deleted` event.
     ///
     /// The target event must be a message event (`message.user`, `message.assistant`,
-    /// or `tool.result`). The original event is never modified — deletion is recorded
+    /// or `capability.invocation.completed`). The original event is never modified — deletion is recorded
     /// as a new event and applied during message reconstruction.
     #[tracing::instrument(skip(self), fields(session_id, target_event_id))]
     pub fn delete_message(
@@ -200,10 +200,10 @@ impl EventStore {
 
             if !matches!(
                 target_type,
-                EventType::MessageUser | EventType::MessageAssistant | EventType::ToolResult
+                EventType::MessageUser | EventType::MessageAssistant | EventType::CapabilityInvocationCompleted
             ) {
                 return Err(EventStoreError::InvalidOperation(format!(
-                    "Cannot delete event of type '{}' — only message and tool result events can be deleted",
+                    "Cannot delete event of type '{}' — only message and capability result events can be deleted",
                     target.event_type
                 )));
             }

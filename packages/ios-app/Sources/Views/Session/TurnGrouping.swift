@@ -20,7 +20,7 @@ struct TurnGroup: Identifiable, Equatable {
         if let preview = userMessagePreview ?? assistantMessagePreview {
             return preview
         }
-        // Fall back to first tool name if the turn is tool-use-only
+        // Fall back to first model tool name if the turn is tool-use-only
         return TurnGrouping.extractToolUsePreview(from: events)
     }
 
@@ -254,12 +254,12 @@ enum TurnGrouping {
         return nil
     }
 
-    /// Extracts a preview from tool.call events when no message text is available.
+    /// Extracts a preview from capability invocation events when no message text is available.
     static func extractToolUsePreview(from events: [SessionEvent]) -> String? {
         for event in events {
-            guard event.eventType == .toolCall else { continue }
+            guard event.eventType == .capabilityInvocationStarted else { continue }
             if let name = event.payload["name"]?.value as? String, !name.isEmpty {
-                return "Tool use: \(name)"
+                return "Capability invocation: \(name)"
             }
         }
         // Also check assistant message content blocks for inline tool_use
@@ -269,7 +269,7 @@ enum TurnGrouping {
                 for block in contentArray {
                     if block["type"] as? String == "tool_use",
                        let name = block["name"] as? String, !name.isEmpty {
-                        return "Tool use: \(name)"
+                        return "Capability invocation: \(name)"
                     }
                 }
             }

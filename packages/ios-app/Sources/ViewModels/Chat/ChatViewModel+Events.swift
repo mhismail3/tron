@@ -76,41 +76,43 @@ extension ChatViewModel {
         logger.verbose("Thinking delta: +\(delta.count) chars, total: \(accumulatedText.count)", category: .events)
     }
 
-    func handleToolGenerating(_ pluginResult: ToolGeneratingPlugin.Result) {
-        toolEventCoordinator.handleToolGenerating(pluginResult, context: self)
+    func handleCapabilityInvocationGenerating(_ pluginResult: CapabilityInvocationGeneratingPlugin.Result) {
+        toolEventCoordinator.handleCapabilityInvocationGenerating(pluginResult, context: self)
     }
 
-    func handleToolStart(_ pluginResult: ToolStartPlugin.Result) {
+    func handleCapabilityInvocationStarted(_ pluginResult: CapabilityInvocationStartedPlugin.Result) {
         // Delegate directly to coordinator (tool classification absorbed)
-        toolEventCoordinator.handleToolStart(pluginResult, context: self)
+        toolEventCoordinator.handleCapabilityInvocationStarted(pluginResult, context: self)
     }
 
-    func handleToolOutput(_ result: ToolOutputPlugin.Result) {
-        guard let index = messageIndex.index(forToolCallId: result.toolCallId)
-            ?? MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) else { return }
+    func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result) {
+        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
 
-        if case .toolUse(var tool) = messages[index].content {
-            let accumulated = (tool.streamingOutput ?? "") + result.output
-            let (truncated, _) = ResultTruncation.truncate(accumulated)
-            tool.streamingOutput = truncated
-            messages[index].content = .toolUse(tool)
+        if case .capabilityInvocation(var invocation) = messages[index].content {
+            let accumulated = (invocation.logs.last ?? "") + result.output
+            invocation.logs = [String(accumulated.prefix(24_000))]
+            messages[index].content = .capabilityInvocation(invocation)
         }
     }
 
-    func handleToolProgress(_ result: ToolProgressPlugin.Result) {
-        guard let index = messageIndex.index(forToolCallId: result.toolCallId)
-            ?? MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) else { return }
+    func handleCapabilityInvocationProgress(_ result: CapabilityInvocationProgressPlugin.Result) {
+        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
 
-        if case .toolUse(var tool) = messages[index].content {
-            if let msg = result.message { tool.progressMessage = msg }
-            if let pct = result.percent { tool.progressPercent = pct }
-            messages[index].content = .toolUse(tool)
+        if case .capabilityInvocation(var invocation) = messages[index].content {
+            if let msg = result.message { invocation.progressMessage = msg }
+            if let pct = result.percent { invocation.progressPercent = pct }
+            if result.identity.stableCapabilityId != "capability" {
+                invocation.identity = result.identity
+            }
+            messages[index].content = .capabilityInvocation(invocation)
         }
     }
 
-    func handleToolEnd(_ pluginResult: ToolEndPlugin.Result) {
+    func handleCapabilityInvocationCompleted(_ pluginResult: CapabilityInvocationCompletedPlugin.Result) {
         // Delegate directly to coordinator
-        toolEventCoordinator.handleToolEnd(pluginResult, context: self)
+        toolEventCoordinator.handleCapabilityInvocationCompleted(pluginResult, context: self)
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {

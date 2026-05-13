@@ -3,9 +3,9 @@
 //! Two event families:
 //!
 //! - **[`StreamEvent`]**: Low-level LLM streaming events from a provider
-//!   (text deltas, thinking deltas, tool call construction, done/error).
+//!   (text deltas, thinking deltas, capability invocation construction, done/error).
 //! - **[`TronEvent`]**: High-level agent lifecycle events with session context
-//!   (agent start/end, turn boundaries, tool execution, hooks, compaction).
+//!   (agent start/end, turn boundaries, capability invocation, hooks, compaction).
 //!
 //! `StreamEvent` is purely in-memory (never persisted). `TronEvent` is
 //! published through engine streams and may be recorded as session events.
@@ -21,6 +21,76 @@ use serde_json::Value;
 
 use crate::shared::messages::{TokenUsage, ToolCall};
 use crate::shared::tools::CapabilityResult;
+
+/// Capability identity attached to provider protocol tool events.
+///
+/// `capability.invocation.started` / `capability.invocation.completed` are current capability event labels,
+/// but active UI identity must come from these fields. The model-facing name is
+/// intentionally separate from the resolved contract/implementation so an
+/// `execute` call can render the concrete capability after binding resolution.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityEventIdentity {
+    /// Provider-visible primitive name (`search`, `inspect`, or `execute`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_tool_name: Option<String>,
+    /// Stable abstract capability contract id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_id: Option<String>,
+    /// Concrete implementation selected for execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub implementation_id: Option<String>,
+    /// Engine function id backing the selected implementation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_id: Option<String>,
+    /// Plugin or domain manifest that owns the implementation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+    /// Worker that registered the selected function.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_id: Option<String>,
+    /// Digest of the selected function schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_digest: Option<String>,
+    /// Engine catalog revision used for resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_revision: Option<u64>,
+    /// Trust tier assigned by registry/plugin policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_tier: Option<String>,
+    /// Capability risk level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk_level: Option<String>,
+    /// Capability effect class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_class: Option<String>,
+    /// Trace id correlating stream, ledger, and audit records.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Root invocation id for the capability execution tree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_invocation_id: Option<String>,
+    /// Durable binding decision id selected by the registry resolver.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_decision_id: Option<String>,
+}
+
+impl CapabilityEventIdentity {
+    /// Build identity for a model-facing primitive before binding resolution.
+    #[must_use]
+    pub fn with_model_tool(name: impl Into<String>) -> Self {
+        Self {
+            model_tool_name: Some(name.into()),
+            ..Self::default()
+        }
+    }
+
+    /// Whether this identity carries no capability metadata.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StreamEvent — LLM provider streaming events
@@ -79,20 +149,20 @@ pub enum StreamEvent {
         signature: Option<String>,
     },
 
-    /// Tool call started.
+    /// Capability invocation started.
     #[serde(rename = "toolcall_start")]
     ToolCallStart {
-        /// Tool call ID.
-        #[serde(rename = "toolCallId")]
+        /// Capability invocation ID.
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
         /// Tool name.
         name: String,
     },
 
-    /// Incremental tool call argument JSON.
+    /// Incremental capability invocation argument JSON.
     #[serde(rename = "toolcall_delta")]
     ToolCallDelta {
-        /// Tool call ID.
+        /// Capability invocation ID.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
         /// Partial JSON arguments.
@@ -100,10 +170,10 @@ pub enum StreamEvent {
         arguments_delta: String,
     },
 
-    /// Tool call fully constructed.
+    /// Capability invocation fully constructed.
     #[serde(rename = "toolcall_end")]
     ToolCallEnd {
-        /// Complete tool call.
+        /// Complete capability invocation.
         #[serde(rename = "toolCall")]
         tool_call: ToolCall,
     },
@@ -219,10 +289,10 @@ impl BaseEvent {
     }
 }
 
-/// Tool call summary in a batch event.
+/// Capability invocation summary in a batch event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallSummary {
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub id: String,
     /// Tool name.
     pub name: String,
@@ -420,7 +490,7 @@ tron_events! {
         partial_content: Option<String>,
     } => "agent.turn_failed",
 
-    /// LLM response finished streaming (before tool execution).
+    /// LLM response finished streaming (before capability invocation).
     ResponseComplete {
         turn: u32,
         #[serde(rename = "stopReason")]
@@ -444,74 +514,98 @@ tron_events! {
         content: String,
     } => "message_update",
 
-    // -- Tool execution --
+    // -- Capability invocation --
 
-    /// All tool calls from the model's response (before execution).
-    ToolUseBatch {
+    /// All capability invocations from the model's response (before execution).
+    CapabilityInvocationBatch {
         #[serde(rename = "toolCalls")]
         tool_calls: Vec<ToolCallSummary>,
-    } => "tool_use_batch",
+    } => "capability.invocation.batch",
 
-    /// Tool execution started.
-    ToolExecutionStart {
-        #[serde(rename = "toolCallId")]
+    /// Capability invocation started.
+    CapabilityInvocationStarted {
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
-        #[serde(rename = "toolName")]
+        #[serde(rename = "modelToolName")]
         tool_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         arguments: Option<serde_json::Map<String, Value>>,
-    } => "tool_execution_start",
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.invocation.started",
 
-    /// Tool execution progress update.
-    ToolExecutionUpdate {
-        #[serde(rename = "toolCallId")]
+    /// Capability invocation progress update.
+    CapabilityInvocationOutput {
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
         update: String,
-    } => "tool_execution_update",
+    } => "capability.invocation.output",
 
-    /// Long-running tool progress heartbeat.
+    /// Long-running capability progress heartbeat.
     ///
     /// Carries an optional human-readable status message (shown as chip
     /// subtitle) and an optional 0.0–1.0 completion fraction.
-    ToolExecutionProgress {
-        #[serde(rename = "toolCallId")]
+    CapabilityInvocationProgress {
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         percent: Option<f64>,
-    } => "tool_execution_progress",
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.invocation.progress",
 
-    /// Tool execution completed.
-    ToolExecutionEnd {
-        #[serde(rename = "toolCallId")]
+    /// Capability binding resolution update for an `execute` primitive call.
+    CapabilityResolution {
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
-        #[serde(rename = "toolName")]
+        #[serde(rename = "modelToolName")]
+        model_tool_name: String,
+        #[serde(rename = "requestedContractId", skip_serializing_if = "Option::is_none")]
+        requested_contract_id: Option<String>,
+        #[serde(rename = "requestedImplementationId", skip_serializing_if = "Option::is_none")]
+        requested_implementation_id: Option<String>,
+        #[serde(rename = "requestedFunctionId", skip_serializing_if = "Option::is_none")]
+        requested_function_id: Option<String>,
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.resolution",
+
+    /// Capability invocation completed.
+    CapabilityInvocationCompleted {
+        #[serde(rename = "invocationId")]
+        tool_call_id: String,
+        #[serde(rename = "modelToolName")]
         tool_name: String,
         duration: u64,
         #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<CapabilityResult>,
-    } => "tool_execution_end",
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.invocation.completed",
 
-    /// Tool call argument delta (during streaming).
-    ToolCallArgumentDelta {
-        #[serde(rename = "toolCallId")]
+    /// Capability invocation argument delta (during streaming).
+    CapabilityInvocationArgumentDelta {
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
-        #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "modelToolName", skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
         #[serde(rename = "argumentsDelta")]
         arguments_delta: String,
-    } => "toolcall_delta",
+    } => "capability.invocation.arguments_delta",
 
-    /// Tool call generating (before arguments streamed).
-    ToolCallGenerating {
-        #[serde(rename = "toolCallId")]
+    /// Capability invocation generating (before arguments streamed).
+    CapabilityInvocationGenerating {
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
-        #[serde(rename = "toolName")]
+        #[serde(rename = "modelToolName")]
         tool_name: String,
-    } => "toolcall_generating",
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.invocation.generating",
 
     // -- Hooks --
 
@@ -521,9 +615,9 @@ tron_events! {
         hook_names: Vec<String>,
         #[serde(rename = "hookEvent")]
         hook_event: String,
-        #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "modelToolName", skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
-        #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "invocationId", skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
     } => "hook_triggered",
 
@@ -538,9 +632,9 @@ tron_events! {
         duration: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "modelToolName", skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
-        #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "invocationId", skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
     } => "hook_completed",
 
@@ -888,7 +982,7 @@ tron_events! {
         max_turns: u32,
         #[serde(rename = "spawnDepth")]
         spawn_depth: u32,
-        #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "invocationId", skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
         #[serde(rename = "blockingTimeoutMs", skip_serializing_if = "Option::is_none")]
         blocking_timeout_ms: Option<u64>,
@@ -1208,8 +1302,8 @@ tron_events! {
         /// Stream identifier.
         #[serde(rename = "streamId")]
         stream_id: String,
-        /// Tool call that initiated the stream.
-        #[serde(rename = "toolCallId")]
+        /// Capability invocation that initiated the stream.
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
         /// Base64-encoded JPEG frame data.
         data: String,
@@ -1235,8 +1329,8 @@ tron_events! {
         kind: String,
         /// Whether the process was started in the background.
         background: bool,
-        /// Tool call that spawned this process.
-        #[serde(rename = "toolCallId")]
+        /// Capability invocation that spawned this process.
+        #[serde(rename = "invocationId")]
         tool_call_id: String,
     } => "process_spawned",
 
@@ -1288,7 +1382,7 @@ tron_events! {
         reason: String,
         /// Human-readable label.
         label: String,
-        /// Tool call that spawned this job.
+        /// Capability invocation that spawned this job.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
     } => "job_backgrounded",
@@ -1325,15 +1419,16 @@ impl TronEvent {
         self.base().parent_invocation_id.as_deref()
     }
 
-    /// Whether this is a tool execution event.
+    /// Whether this is a capability invocation event.
     #[must_use]
-    pub fn is_tool_execution(&self) -> bool {
+    pub fn is_capability_invocation(&self) -> bool {
         matches!(
             self,
-            Self::ToolExecutionStart { .. }
-                | Self::ToolExecutionUpdate { .. }
-                | Self::ToolExecutionProgress { .. }
-                | Self::ToolExecutionEnd { .. }
+            Self::CapabilityInvocationStarted { .. }
+                | Self::CapabilityInvocationOutput { .. }
+                | Self::CapabilityInvocationProgress { .. }
+                | Self::CapabilityResolution { .. }
+                | Self::CapabilityInvocationCompleted { .. }
         )
     }
 }
@@ -1495,7 +1590,7 @@ mod tests {
         };
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["type"], "toolcall_start");
-        assert_eq!(json["toolCallId"], "tc-1");
+        assert_eq!(json["invocationId"], "tc-1");
         assert_eq!(json["name"], "execute");
     }
 
@@ -1698,14 +1793,59 @@ mod tests {
     }
 
     #[test]
-    fn tron_event_tool_execution_start() {
-        let e = TronEvent::ToolExecutionStart {
+    fn tron_event_capability_invocation_started() {
+        let e = TronEvent::CapabilityInvocationStarted {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc-1".into(),
             tool_name: "execute".into(),
             arguments: None,
+            capability_identity: CapabilityEventIdentity {
+                model_tool_name: Some("execute".into()),
+                contract_id: Some("filesystem::read_file".into()),
+                implementation_id: Some("first_party.filesystem.v1.read_file".into()),
+                function_id: Some("filesystem::read_file".into()),
+                plugin_id: Some("first_party.filesystem".into()),
+                worker_id: Some("filesystem-worker".into()),
+                schema_digest: Some("sha256:test".into()),
+                catalog_revision: Some(7),
+                trust_tier: Some("first_party_signed".into()),
+                risk_level: Some("low".into()),
+                effect_class: Some("read".into()),
+                trace_id: Some("trace-test".into()),
+                root_invocation_id: Some("root-test".into()),
+                binding_decision_id: Some("binding-test".into()),
+            },
         };
-        assert!(e.is_tool_execution());
+        assert!(e.is_capability_invocation());
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["modelToolName"], "execute");
+        assert_eq!(json["contractId"], "filesystem::read_file");
+        assert_eq!(
+            json["implementationId"],
+            "first_party.filesystem.v1.read_file"
+        );
+        assert_eq!(json["schemaDigest"], "sha256:test");
+        assert_eq!(json["catalogRevision"], 7);
+        assert_eq!(json["bindingDecisionId"], "binding-test");
+    }
+
+    #[test]
+    fn tron_event_binding_resolution_is_capability_invocation_event() {
+        let e = TronEvent::CapabilityResolution {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc-1".into(),
+            model_tool_name: "execute".into(),
+            requested_contract_id: Some("filesystem::read_file".into()),
+            requested_implementation_id: None,
+            requested_function_id: None,
+            capability_identity: CapabilityEventIdentity::with_model_tool("execute"),
+        };
+        assert!(e.is_capability_invocation());
+        assert_eq!(e.event_type(), "capability.resolution");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["type"], "capability.resolution");
+        assert_eq!(json["invocationId"], "tc-1");
+        assert_eq!(json["requestedContractId"], "filesystem::read_file");
     }
 
     #[test]
@@ -1842,45 +1982,58 @@ mod tests {
                 base: base.clone(),
                 content: "c".into(),
             },
-            TronEvent::ToolUseBatch {
+            TronEvent::CapabilityInvocationBatch {
                 base: base.clone(),
                 tool_calls: vec![],
             },
-            TronEvent::ToolExecutionStart {
+            TronEvent::CapabilityInvocationStarted {
                 base: base.clone(),
                 tool_call_id: "id".into(),
                 tool_name: "n".into(),
                 arguments: None,
+                capability_identity: CapabilityEventIdentity::default(),
             },
-            TronEvent::ToolExecutionUpdate {
+            TronEvent::CapabilityInvocationOutput {
                 base: base.clone(),
                 tool_call_id: "id".into(),
                 update: "u".into(),
             },
-            TronEvent::ToolExecutionProgress {
+            TronEvent::CapabilityInvocationProgress {
                 base: base.clone(),
                 tool_call_id: "id".into(),
                 message: Some("msg".into()),
                 percent: Some(0.5),
+                capability_identity: CapabilityEventIdentity::default(),
             },
-            TronEvent::ToolExecutionEnd {
+            TronEvent::CapabilityResolution {
+                base: base.clone(),
+                tool_call_id: "id".into(),
+                model_tool_name: "execute".into(),
+                requested_contract_id: Some("filesystem::read_file".into()),
+                requested_implementation_id: None,
+                requested_function_id: None,
+                capability_identity: CapabilityEventIdentity::with_model_tool("execute"),
+            },
+            TronEvent::CapabilityInvocationCompleted {
                 base: base.clone(),
                 tool_call_id: "id".into(),
                 tool_name: "n".into(),
                 duration: 0,
                 is_error: None,
                 result: None,
+                capability_identity: CapabilityEventIdentity::default(),
             },
-            TronEvent::ToolCallArgumentDelta {
+            TronEvent::CapabilityInvocationArgumentDelta {
                 base: base.clone(),
                 tool_call_id: "id".into(),
                 tool_name: None,
                 arguments_delta: "d".into(),
             },
-            TronEvent::ToolCallGenerating {
+            TronEvent::CapabilityInvocationGenerating {
                 base: base.clone(),
                 tool_call_id: "id".into(),
                 tool_name: "n".into(),
+                capability_identity: CapabilityEventIdentity::default(),
             },
             TronEvent::HookTriggered {
                 base: base.clone(),
@@ -2440,7 +2593,7 @@ mod tests {
 
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["streamId"], "stream-1");
-        assert_eq!(json["toolCallId"], "call-1");
+        assert_eq!(json["invocationId"], "call-1");
         assert_eq!(json["data"], "base64jpeg");
         assert_eq!(json["frameId"], 42);
         assert_eq!(json["width"], 1280);
@@ -2482,7 +2635,7 @@ mod tests {
         assert_eq!(json["label"], "cargo build");
         assert_eq!(json["kind"], "shell");
         assert_eq!(json["background"], true);
-        assert_eq!(json["toolCallId"], "tc-1");
+        assert_eq!(json["invocationId"], "tc-1");
     }
 
     #[test]

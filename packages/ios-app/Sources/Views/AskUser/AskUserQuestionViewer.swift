@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - AskUserQuestion Tool Viewer
 
-/// In-chat viewer for AskUserQuestion tool calls
+/// In-chat viewer for AskUserQuestion capability invocations
 /// Compact chip style matching SkillChip - glassy capsule with status colors
 /// Uses async model: pending → answered or superseded
 @available(iOS 26.0, *)
@@ -117,7 +117,7 @@ struct AskUserQuestionToolViewer: View {
         // Pending - single question
         AskUserQuestionToolViewer(
             data: AskUserQuestionToolData(
-                toolCallId: "call_1",
+                invocationId: "call_1",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(
@@ -144,7 +144,7 @@ struct AskUserQuestionToolViewer: View {
         // Pending - multiple questions
         AskUserQuestionToolViewer(
             data: AskUserQuestionToolData(
-                toolCallId: "call_2",
+                invocationId: "call_2",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(
@@ -182,7 +182,7 @@ struct AskUserQuestionToolViewer: View {
         // Answered
         AskUserQuestionToolViewer(
             data: AskUserQuestionToolData(
-                toolCallId: "call_3",
+                invocationId: "call_3",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(
@@ -213,7 +213,7 @@ struct AskUserQuestionToolViewer: View {
         // Superseded
         AskUserQuestionToolViewer(
             data: AskUserQuestionToolData(
-                toolCallId: "call_4",
+                invocationId: "call_4",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(

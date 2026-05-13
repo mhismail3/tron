@@ -50,7 +50,7 @@ struct EngineApprovalResult: Codable, Equatable {
 /// Server-owned approval state rendered as an in-chat chip.
 struct EngineApprovalToolData: Equatable {
     /// Stable UI identity derived from the engine approval id.
-    let toolCallId: String
+    let invocationId: String
     /// Engine approval id when this chip represents an approval primitive event.
     let engineApprovalId: String?
     /// Canonical engine function whose pending approval produced this chip.
@@ -66,7 +66,7 @@ struct EngineApprovalToolData: Equatable {
     var result: EngineApprovalResult?
 
     init(
-        toolCallId: String,
+        invocationId: String,
         params: EngineApprovalParams,
         status: EngineApprovalChipStatus,
         decision: EngineApprovalUserDecision? = nil,
@@ -75,7 +75,7 @@ struct EngineApprovalToolData: Equatable {
         engineApprovalId: String? = nil,
         engineFunctionId: String? = nil
     ) {
-        self.toolCallId = toolCallId
+        self.invocationId = invocationId
         self.engineApprovalId = engineApprovalId
         self.engineFunctionId = engineFunctionId
         self.params = params

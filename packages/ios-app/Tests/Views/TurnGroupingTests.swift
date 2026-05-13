@@ -43,8 +43,8 @@ struct TurnGroupingTests {
         let events = [
             makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("Hello")]),
             makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.call", sequence: 3, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.result", sequence: 4, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.completed", sequence: 4, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups.count == 1)
@@ -58,7 +58,7 @@ struct TurnGroupingTests {
         let events = [
             makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("First")]),
             makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.call", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
             makeEvent(type: "message.user", sequence: 4, payload: ["content": AnyCodable("Second")]),
             makeEvent(type: "message.assistant", sequence: 5, payload: makePayload(turn: 2)),
         ]
@@ -114,7 +114,7 @@ struct TurnGroupingTests {
         let events = [
             makeEvent(id: "a", type: "message.user", sequence: 1),
             makeEvent(id: "b", type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(id: "c", type: "tool.call", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(id: "c", type: "capability.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
         #expect(groups[0].events.map(\.id) == ["a", "b", "c"])
@@ -276,18 +276,18 @@ struct TurnGroupingTests {
             // Turn 1
             makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Create test files")]),
             makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.call", sequence: 5, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.result", sequence: 6, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.call", sequence: 7, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.result", sequence: 8, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.started", sequence: 5, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.completed", sequence: 6, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.started", sequence: 7, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.completed", sequence: 8, payload: makePayload(turn: 1)),
             // Hook between turns (no turn in payload)
             makeEvent(type: "hook.result", sequence: 9),
             makeEvent(type: "worktree.commit", sequence: 10),
             // Turn 2
             makeEvent(type: "message.user", sequence: 11, payload: ["content": AnyCodable("Now edit them")]),
             makeEvent(type: "message.assistant", sequence: 12, payload: makePayload(turn: 2)),
-            makeEvent(type: "tool.call", sequence: 13, payload: makePayload(turn: 2)),
-            makeEvent(type: "tool.result", sequence: 14, payload: makePayload(turn: 2)),
+            makeEvent(type: "capability.invocation.started", sequence: 13, payload: makePayload(turn: 2)),
+            makeEvent(type: "capability.invocation.completed", sequence: 14, payload: makePayload(turn: 2)),
         ]
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
 
@@ -297,12 +297,12 @@ struct TurnGroupingTests {
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 2)
 
-        // Turn 1: user + assistant + 2 tool calls + 2 tool results + hook + worktree.commit
+        // Turn 1: user + assistant + 2 capability invocations + 2 tool results + hook + worktree.commit
         #expect(groups[1].turnNumber == 1)
         #expect(groups[1].events.count == 8)
         #expect(groups[1].userMessagePreview == "Create test files")
 
-        // Turn 2: user + assistant + tool call + tool result
+        // Turn 2: user + assistant + capability invocation + tool result
         #expect(groups[2].turnNumber == 2)
         #expect(groups[2].events.count == 4)
         #expect(groups[2].userMessagePreview == "Now edit them")
@@ -650,15 +650,15 @@ struct TurnGroupingTests {
             makeEvent(type: "session.start", sequence: 0),
             makeEvent(type: "skills::activated", sequence: 1),
             makeEvent(type: "worktree.acquired", sequence: 2),
-            // Prompt 1: 3 turns with tool calls
+            // Prompt 1: 3 turns with capability invocations
             makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Ingest all of them into the knowledge base")]),
             makeEvent(type: "hook.llm_result", sequence: 4),
             makeEvent(type: "message.assistant", sequence: 5, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.call", sequence: 6, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.result", sequence: 7),
+            makeEvent(type: "capability.invocation.started", sequence: 6, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.completed", sequence: 7),
             makeEvent(type: "message.assistant", sequence: 8, payload: makePayload(turn: 2)),
-            makeEvent(type: "tool.call", sequence: 9, payload: makePayload(turn: 2)),
-            makeEvent(type: "tool.result", sequence: 10),
+            makeEvent(type: "capability.invocation.started", sequence: 9, payload: makePayload(turn: 2)),
+            makeEvent(type: "capability.invocation.completed", sequence: 10),
             makeEvent(type: "message.assistant", sequence: 11, payload: makePayload(turn: 3)),
             // Inter-prompt events
             makeEvent(type: "hook.llm_result", sequence: 12),
@@ -666,9 +666,9 @@ struct TurnGroupingTests {
             // Prompt 2: 2 turns, turn numbers reset
             makeEvent(type: "message.user", sequence: 14, payload: ["content": AnyCodable("Now tag all bookmarks")]),
             makeEvent(type: "message.assistant", sequence: 15, payload: makePayload(turn: 1)),
-            makeEvent(type: "tool.call", sequence: 16, payload: makePayload(turn: 1)),
+            makeEvent(type: "capability.invocation.started", sequence: 16, payload: makePayload(turn: 1)),
             makeEvent(type: "notification.process_result", sequence: 17),
-            makeEvent(type: "tool.result", sequence: 18),
+            makeEvent(type: "capability.invocation.completed", sequence: 18),
             makeEvent(type: "message.assistant", sequence: 19, payload: makePayload(turn: 2)),
             // Inter-prompt events
             makeEvent(type: "hook.llm_result", sequence: 20),

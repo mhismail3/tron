@@ -4,6 +4,7 @@
 //! All payloads use `camelCase` field naming for DTO parity with
 //! TypeScript and iOS.
 
+pub mod capability_invocation;
 pub mod compact;
 pub mod config;
 pub mod context;
@@ -25,7 +26,6 @@ pub mod streaming;
 pub mod subagent;
 pub mod todo;
 pub mod token_usage;
-pub mod tool;
 pub mod turn;
 pub mod worktree;
 

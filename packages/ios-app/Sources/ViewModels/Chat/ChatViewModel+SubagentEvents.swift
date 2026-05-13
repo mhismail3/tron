@@ -22,7 +22,7 @@ extension ChatViewModel {
         }
 
         subagentState.trackSpawn(
-            toolCallId: result.toolCallId ?? result.subagentSessionId,
+            invocationId: result.invocationId ?? result.subagentSessionId,
             subagentSessionId: result.subagentSessionId,
             task: result.task,
             model: result.model,
@@ -31,7 +31,7 @@ extension ChatViewModel {
         )
 
         updateToolMessageToSubagentChip(
-            toolCallId: result.toolCallId ?? result.subagentSessionId,
+            invocationId: result.invocationId ?? result.subagentSessionId,
             subagentSessionId: result.subagentSessionId
         )
     }
@@ -138,13 +138,13 @@ extension ChatViewModel {
 
     // MARK: - Subagent Helpers
 
-    private func updateToolMessageToSubagentChip(toolCallId: String, subagentSessionId: String) {
+    private func updateToolMessageToSubagentChip(invocationId: String, subagentSessionId: String) {
         guard let data = subagentState.getSubagent(sessionId: subagentSessionId) else {
             logger.warning("No subagent data found for session \(subagentSessionId)", category: .chat)
             return
         }
 
-        if let index = MessageFinder.indexOfSpawnSubagentTool(toolCallId: toolCallId, in: messages) {
+        if let index = MessageFinder.indexOfSpawnSubagentTool(invocationId: invocationId, in: messages) {
             messages[index].content = .subagent(data)
             logger.debug("Converted tool message to subagent chip for \(subagentSessionId)", category: .chat)
         }

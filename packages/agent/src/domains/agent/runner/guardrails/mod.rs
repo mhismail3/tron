@@ -1,4 +1,4 @@
-//! Synchronous rule engine that evaluates tool calls against safety rules
+//! Synchronous rule engine that evaluates capability invocations against safety rules
 //! before execution. Three tiers: core (immutable, always active), standard
 //! (can be disabled by settings), custom (user-defined). Five rule types:
 //! pattern, path, resource, context, composite. Three severities: block

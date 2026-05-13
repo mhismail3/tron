@@ -87,7 +87,7 @@ extension ChatViewModel: ConnectionContext {
         removeFromMessages { runningToolIds.contains($0.id) }
         // Clear turn tracking state
         thinkingMessageId = nil
-        currentTurnToolCalls.removeAll()
+        currentTurnCapabilityInvocations.removeAll()
         currentToolMessages.removeAll()
         // Reset thinking accumulators so stale content doesn't bleed through
         thinkingState.seedCatchUpThinking("", isStreaming: false)

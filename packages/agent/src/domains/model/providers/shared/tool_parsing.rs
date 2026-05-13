@@ -1,24 +1,24 @@
 //! # Tool Call Argument Parsing
 //!
-//! Safe JSON parsing for tool call arguments received from LLM providers.
+//! Safe JSON parsing for capability invocation arguments received from LLM providers.
 //! Handles malformed JSON gracefully — returns empty object rather than erroring,
-//! since incomplete tool calls are common during streaming.
+//! since incomplete capability invocations are common during streaming.
 
 use serde_json::{Map, Value};
 use tracing::debug;
 
-/// Context for logging when tool call parsing fails.
+/// Context for logging when capability invocation parsing fails.
 #[derive(Clone, Debug, Default)]
 pub struct ToolCallContext {
-    /// The tool call ID (for correlation).
+    /// The capability invocation ID (for correlation).
     pub tool_call_id: Option<String>,
     /// The capability id.
     pub tool_name: Option<String>,
-    /// The provider that generated this tool call.
+    /// The provider that generated this capability invocation.
     pub provider: Option<String>,
 }
 
-/// Parse tool call arguments JSON string into a `Map`.
+/// Parse capability invocation arguments JSON string into a `Map`.
 ///
 /// Fails open: returns an empty map on parse failure rather than propagating
 /// errors, since the agent can still attempt to execute the tool with no args.
@@ -47,7 +47,7 @@ pub fn parse_tool_call_arguments(
                 tool_name = context.and_then(|c| c.tool_name.as_deref()),
                 provider = context.and_then(|c| c.provider.as_deref()),
                 parsed_type = other.to_string().chars().take(20).collect::<String>(),
-                "Tool call arguments parsed as non-object, wrapping"
+                "Capability invocation arguments parsed as non-object, wrapping"
             );
             Map::new()
         }
@@ -58,14 +58,14 @@ pub fn parse_tool_call_arguments(
                 provider = context.and_then(|c| c.provider.as_deref()),
                 error = %e,
                 args_preview = crate::shared::text::truncate_str(trimmed, 100),
-                "Failed to parse tool call arguments, returning empty object"
+                "Failed to parse capability invocation arguments, returning empty object"
             );
             Map::new()
         }
     }
 }
 
-/// Validate that a string is valid tool call arguments JSON.
+/// Validate that a string is valid capability invocation arguments JSON.
 ///
 /// Returns `true` if the string is valid JSON that parses to an object,
 /// or if the string is empty/null (treated as valid empty args).

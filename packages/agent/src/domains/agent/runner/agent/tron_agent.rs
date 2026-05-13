@@ -298,7 +298,7 @@ impl TronAgent {
                 exited_via_break = true;
                 break;
             }
-            // Continue looping (tool calls executed, more turns needed)
+            // Continue looping (capability invocations executed, more turns needed)
         }
 
         // If the loop ended because turn >= max_turns (not via break),
@@ -416,7 +416,7 @@ impl TronAgent {
     }
 
     /// Inject the per-tool cancellation registry (owned by the orchestrator).
-    /// Each in-flight tool call gets a child of `abort_token`; `agent.abortTool`
+    /// Each in-flight capability invocation gets a child of `abort_token`; `agent.abortTool`
     /// cancels that child without touching siblings or the turn itself.
     pub fn set_tool_abort_registry(&mut self, registry: Arc<ToolAbortRegistry>) {
         self.tool_abort_registry = Some(registry);

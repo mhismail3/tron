@@ -47,7 +47,7 @@ enum MyEventPlugin: DispatchableEventPlugin {
 | Category | Location | Events |
 |----------|----------|--------|
 | Streaming | `Plugins/Streaming/` | text_delta, thinking_delta, turn_start, turn_end, agent_turn |
-| Tool | `Plugins/Tool/` | tool_start, tool_end |
+| Capability invocation | `Plugins/CapabilityInvocation/` | `capability.invocation.*` and `capability.resolution` transport labels carrying capability identity |
 | Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, context_cleared, message_deleted, skill_deactivated, turn_failed |
 | Session | `Plugins/Session/` | connected |
 | Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
@@ -62,8 +62,8 @@ All plugins registered at app startup:
 // EventRegistry.swift
 func registerAll() {
     register(TextDeltaPlugin.self)
-    register(ToolStartPlugin.self)
-    register(ToolEndPlugin.self)
+    register(CapabilityInvocationStartedPlugin.self)
+    register(CapabilityInvocationCompletedPlugin.self)
     // ... all plugins
 }
 ```
@@ -92,9 +92,9 @@ Handlers are split into domain-specific protocols:
     func handleThinkingDelta(_ delta: String)
 }
 
-@MainActor protocol ToolEventHandler: AnyObject {
-    func handleToolStart(_ result: ToolStartPlugin.Result)
-    func handleToolEnd(_ result: ToolEndPlugin.Result)
+@MainActor protocol CapabilityInvocationEventHandler: AnyObject {
+    func handleCapabilityInvocationStarted(_ result: CapabilityInvocationStartedPlugin.Result)
+    func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result)
 }
 
 // ... TurnLifecycleEventHandler, ContextEventHandler, BrowserEventHandler,
@@ -102,7 +102,7 @@ Handlers are split into domain-specific protocols:
 
 // Composed target — ChatViewModel conforms to this
 @MainActor protocol EventDispatchTarget:
-    StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
+    StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
     TaskEventHandler, EventDispatchLogger {}
 ```
@@ -131,7 +131,7 @@ Reconstructs chat history from stored events.
 |------|---------|
 | `UnifiedEventTransformer.swift` | Main transformation logic |
 | `Handlers/MessageHandlers.swift` | Message event handling |
-| `Handlers/ToolHandlers.swift` | Tool event handling |
+| `Handlers/CapabilityInvocationHandlers.swift` | Transport event handling for capability invocation/result records |
 | `Reconstruction/` | State tracking during transform |
 
 ### Transformation Flow
@@ -163,13 +163,25 @@ protocol EventTransformable {
 Note: `sessionId`, `timestamp`, and `sequence` are non-optional. Both `RawEvent`
 and `SessionEvent` conform trivially since they already have all required fields.
 
-### Shared First-Pass Helper: buildToolMaps
+### Shared First-Pass Helper: buildCapabilityInvocationMaps
 
 Both `transformPersistedEvents` and `reconstructSessionState` run a shared first
-pass over the event array via `buildToolMaps(from:)`. This builds lookup
-dictionaries for tool calls, tool results, and consumed subagent event IDs so
-that downstream handlers can resolve `tool_use` content blocks and filter
+pass over the event array via `buildCapabilityInvocationMaps(from:)`. This builds lookup
+dictionaries for transport-level `capability.invocation.started` / `capability.invocation.completed` rows and consumed
+subagent event IDs so downstream handlers can resolve provider `tool_use`
+content blocks into capability-native invocation messages and filter
 already-consumed notifications in a single pass.
+
+`capability.invocation.started`, `capability.invocation.progress`, and
+`capability.invocation.completed` are capability lifecycle labels, not renderer
+dispatch keys. Payloads carry `CapabilityIdentity` fields when available:
+`modelToolName`, `contractId`, `implementationId`, `functionId`, `pluginId`,
+`workerId`, `schemaDigest`, `catalogRevision`, `trustTier`, `riskLevel`,
+`effectClass`, `traceId`, `rootInvocationId`, and `bindingDecisionId`. Active
+chat, dashboard, and detail views render from those fields and generic
+schema/result metadata. Unsupported or malformed clean-slate events become
+client diagnostics; the app does not synthesize capability identity from retired
+built-in names.
 
 ### Payload Compatibility
 
@@ -177,7 +189,7 @@ History reconstruction must accept the payload shape emitted by the server, not
 only the shape used by local tests. In particular, persisted `message.user`
 events from prompt and subagent paths may contain only `content`; their `turn`
 field is optional during reconstruction. Renderable persisted event types are
-guarded by transformer fixtures so messages, tool chips, notifications, memory
+guarded by transformer fixtures so messages, capability invocation chips, notifications, memory
 cards, errors, and configuration chips keep reconstructing when payload contracts
 change. The test suite also requires every persisted event type to have an
 explicit reconstruction disposition: rendered, state-handled, consumed through

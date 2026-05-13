@@ -18,12 +18,6 @@ final class MockAgentClientForRepository {
     var abortCallCount = 0
     var abortError: Error?
 
-    // Send Tool Result
-    var sendToolResultCallCount = 0
-    var lastSendToolResultSessionId: String?
-    var lastSendToolResultToolCallId: String?
-    var sendToolResultError: Error?
-
     func sendPrompt(
         _ prompt: String,
         images: [ImageAttachment]?,
@@ -45,15 +39,6 @@ final class MockAgentClientForRepository {
     func abort() async throws {
         abortCallCount += 1
         if let error = abortError {
-            throw error
-        }
-    }
-
-    func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
-        sendToolResultCallCount += 1
-        lastSendToolResultSessionId = sessionId
-        lastSendToolResultToolCallId = toolCallId
-        if let error = sendToolResultError {
             throw error
         }
     }
@@ -148,48 +133,6 @@ final class DefaultAgentRepositoryTests: XCTestCase {
             XCTFail("Expected error to be thrown")
         } catch {
             XCTAssertEqual(mockClient.abortCallCount, 1)
-        }
-    }
-
-    // MARK: - Send Tool Result Tests
-
-    func test_sendToolResult_passesParameters() async throws {
-        // Given
-        let answer = AskUserQuestionAnswer(
-            questionId: "q1",
-            selectedValues: ["answer1"],
-            otherValue: nil
-        )
-        let result = AskUserQuestionResult(
-            answers: [answer],
-            complete: true,
-            submittedAt: ISO8601DateFormatter().string(from: Date())
-        )
-
-        // When
-        try await mockClient.sendToolResult(sessionId: "session-123", toolCallId: "tool-456", result: result)
-
-        // Then
-        XCTAssertEqual(mockClient.sendToolResultCallCount, 1)
-        XCTAssertEqual(mockClient.lastSendToolResultSessionId, "session-123")
-        XCTAssertEqual(mockClient.lastSendToolResultToolCallId, "tool-456")
-    }
-
-    func test_sendToolResult_throwsError() async throws {
-        // Given
-        mockClient.sendToolResultError = NSError(domain: "Test", code: 1, userInfo: nil)
-        let result = AskUserQuestionResult(
-            answers: [],
-            complete: false,
-            submittedAt: ISO8601DateFormatter().string(from: Date())
-        )
-
-        // When/Then
-        do {
-            try await mockClient.sendToolResult(sessionId: "session-123", toolCallId: "tool-456", result: result)
-            XCTFail("Expected error to be thrown")
-        } catch {
-            XCTAssertEqual(mockClient.sendToolResultCallCount, 1)
         }
     }
 

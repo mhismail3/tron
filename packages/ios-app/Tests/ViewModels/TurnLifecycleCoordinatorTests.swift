@@ -74,8 +74,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartClearsPreviousTurnToolTracking() {
         // Given
-        mockContext.currentTurnToolCalls = [
-            ToolCallRecord(toolCallId: "tool1", toolName: "Bash", arguments: "{}")
+        mockContext.currentTurnCapabilityInvocations = [
+            CapabilityInvocationRecord(invocationId: "tool1", modelToolName: "Bash", arguments: "{}")
         ]
         mockContext.currentToolMessages = [UUID(): makeTextMessage("test")]
 
@@ -84,7 +84,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.currentTurnToolCalls.isEmpty)
+        XCTAssertTrue(mockContext.currentTurnCapabilityInvocations.isEmpty)
         XCTAssertTrue(mockContext.currentToolMessages.isEmpty)
     }
 
@@ -177,7 +177,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     }
 
     func testTurnEndUsesFirstTextMessageIdWhenStreamingFinalizedEarly() {
-        // Given - streaming was finalized before turn end (e.g., before tool call)
+        // Given - streaming was finalized before turn end (e.g., before capability invocation)
         let firstTextId = UUID()
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = firstTextId
@@ -272,12 +272,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
         let toolUseMessage = ChatMessage(
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "Bash",
-                toolCallId: "tc-1",
-                arguments: "{}",
-                status: .running
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .running))
         )
         mockContext.messages = [toolUseMessage]
 
@@ -306,12 +301,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
         let toolUseMessage = ChatMessage(
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "Bash",
-                toolCallId: "tc-1",
-                arguments: "{}",
-                status: .success
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .success))
         )
         let textMessage = ChatMessage(role: .assistant, content: .text("some response"))
         mockContext.messages = [toolUseMessage, textMessage]
@@ -331,7 +321,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     }
 
     func testTurnEndAssignsMetadataToLastToolInParallelTools() {
-        // Given - turn with [text, tool1, tool2, tool3] — parallel tool calls
+        // Given - turn with [text, tool1, tool2, tool3] — parallel capability invocations
         // This is the bug case: stats must go on the LAST tool, not the text or first tool
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = nil
@@ -339,15 +329,9 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.currentModel = "claude-opus-4-6"
 
         let textMessage = ChatMessage(role: .assistant, content: .text("Let me search for that."))
-        let tool1 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
-            toolName: "Search", toolCallId: "tc-1", arguments: "{}", status: .success
-        )))
-        let tool2 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
-            toolName: "Search", toolCallId: "tc-2", arguments: "{}", status: .success
-        )))
-        let tool3 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
-            toolName: "Search", toolCallId: "tc-3", arguments: "{}", status: .success
-        )))
+        let tool1 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .success)))
+        let tool2 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-2", status: .success)))
+        let tool3 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-3", status: .success)))
         mockContext.messages = [textMessage, tool1, tool2, tool3]
 
         // When
@@ -376,12 +360,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.turnStartMessageIndex = 0
         mockContext.currentModel = "claude-opus-4-6"
 
-        let tool1 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
-            toolName: "Bash", toolCallId: "tc-1", arguments: "{}", status: .success
-        )))
-        let tool2 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
-            toolName: "Read", toolCallId: "tc-2", arguments: "{}", status: .success
-        )))
+        let tool1 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .success)))
+        let tool2 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-2", status: .success)))
         mockContext.messages = [tool1, tool2]
 
         // When
@@ -444,8 +424,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     func testCompleteClearsToolTracking() {
         // Given
         mockContext.currentToolMessages = [UUID(): makeTextMessage("test")]
-        mockContext.currentTurnToolCalls = [
-            ToolCallRecord(toolCallId: "tool1", toolName: "Bash", arguments: "{}")
+        mockContext.currentTurnCapabilityInvocations = [
+            CapabilityInvocationRecord(invocationId: "tool1", modelToolName: "Bash", arguments: "{}")
         ]
 
         // When
@@ -453,7 +433,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
         // Then
         XCTAssertTrue(mockContext.currentToolMessages.isEmpty)
-        XCTAssertTrue(mockContext.currentTurnToolCalls.isEmpty)
+        XCTAssertTrue(mockContext.currentTurnCapabilityInvocations.isEmpty)
     }
 
     func testCompleteTriggersContextRefresh() async throws {
@@ -531,7 +511,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var messages: [ChatMessage] = []
     let messageIndex = MessageIndex()
     var currentToolMessages: [UUID: ChatMessage] = [:]
-    var currentTurnToolCalls: [ToolCallRecord] = []
+    var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
     var askUserQuestionCalledInTurn: Bool = false
     var thinkingMessageId: UUID?
     var turnStartMessageIndex: Int?

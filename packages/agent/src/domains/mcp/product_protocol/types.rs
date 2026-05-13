@@ -83,12 +83,12 @@ pub struct McpToolResult {
     /// Content blocks returned by the tool.
     #[serde(default)]
     pub content: Vec<McpContentBlock>,
-    /// Whether the tool execution resulted in an error.
+    /// Whether the capability invocation resulted in an error.
     #[serde(default)]
     pub is_error: bool,
 }
 
-/// Content block in MCP tool results.
+/// Content block in MCP capability results.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum McpContentBlock {
@@ -133,7 +133,7 @@ pub struct McpServerConfig {
     /// HTTP URL for HTTP transport (alternative to stdio).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    /// Per-tool-call timeout in milliseconds.
+    /// Per-capability-invocation timeout in milliseconds.
     #[serde(default = "default_tool_timeout", alias = "tool_timeout_ms")]
     pub tool_timeout_ms: u64,
     /// Whether this server is enabled. Disabled servers are not started.

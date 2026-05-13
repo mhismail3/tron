@@ -18,7 +18,7 @@ enum SubagentSpawnedPlugin: DispatchableEventPlugin {
             let task: String
             let model: String?
             let workingDirectory: String?
-            let toolCallId: String?
+            let invocationId: String?
             let blocking: Bool?
             let spawnType: String?
         }
@@ -31,7 +31,7 @@ enum SubagentSpawnedPlugin: DispatchableEventPlugin {
         let task: String
         let model: String?
         let workingDirectory: String?
-        let toolCallId: String?
+        let invocationId: String?
         let blocking: Bool
         let spawnType: String?
     }
@@ -44,7 +44,7 @@ enum SubagentSpawnedPlugin: DispatchableEventPlugin {
             task: event.data.task,
             model: event.data.model,
             workingDirectory: event.data.workingDirectory,
-            toolCallId: event.data.toolCallId,
+            invocationId: event.data.invocationId,
             blocking: event.data.blocking ?? false,
             spawnType: event.data.spawnType
         )

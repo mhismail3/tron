@@ -10,7 +10,7 @@ final class EventIconProviderTests: XCTestCase {
         let rawValues = [
             "session.start", "session.end", "session.fork", "session.branch",
             "message.user", "message.assistant", "message.system",
-            "tool.call", "tool.result",
+            "capability.invocation.started", "capability.invocation.completed",
             "stream.text_delta", "stream.thinking_delta", "stream.thinking_complete",
             "stream.turn_start", "stream.turn_end",
             "config.model_switch", "config.prompt_update", "config.reasoning_level",
@@ -22,7 +22,7 @@ final class EventIconProviderTests: XCTestCase {
             "context.cleared",
             "metadata.update", "metadata.tag",
             "file.read", "file.write", "file.edit",
-            "error.agent", "error.tool", "error.provider",
+            "error.agent", "error.capability", "error.provider",
             "worktree.acquired", "worktree.commit", "worktree.released",
             "worktree.merged", "worktree.renamed",
             "subagent.spawned", "subagent.completed", "subagent.failed",
@@ -142,7 +142,7 @@ final class EventIconProviderTests: XCTestCase {
     func testToolResult_errorPayload_hasXmarkIcon() {
         let payload: [String: AnyCodable] = ["isError": AnyCodable(true)]
         XCTAssertEqual(
-            EventIconProvider.iconName(for: .toolResult, payload: payload),
+            EventIconProvider.iconName(for: .capabilityInvocationCompleted, payload: payload),
             "xmark.circle.fill"
         )
     }
@@ -150,14 +150,14 @@ final class EventIconProviderTests: XCTestCase {
     func testToolResult_successPayload_hasCheckmarkIcon() {
         let payload: [String: AnyCodable] = ["isError": AnyCodable(false)]
         XCTAssertEqual(
-            EventIconProvider.iconName(for: .toolResult, payload: payload),
+            EventIconProvider.iconName(for: .capabilityInvocationCompleted, payload: payload),
             "checkmark.circle.fill"
         )
     }
 
     func testToolResult_noPayload_hasCheckmarkIcon() {
         XCTAssertEqual(
-            EventIconProvider.iconName(for: .toolResult),
+            EventIconProvider.iconName(for: .capabilityInvocationCompleted),
             "checkmark.circle.fill"
         )
     }
@@ -165,14 +165,14 @@ final class EventIconProviderTests: XCTestCase {
     func testToolResult_errorPayload_hasErrorColor() {
         let payload: [String: AnyCodable] = ["isError": AnyCodable(true)]
         XCTAssertEqual(
-            EventIconProvider.color(for: .toolResult, payload: payload),
+            EventIconProvider.color(for: .capabilityInvocationCompleted, payload: payload),
             .tronError
         )
     }
 
     func testToolResult_successPayload_hasSuccessColor() {
         XCTAssertEqual(
-            EventIconProvider.color(for: .toolResult),
+            EventIconProvider.color(for: .capabilityInvocationCompleted),
             .tronSuccess
         )
     }

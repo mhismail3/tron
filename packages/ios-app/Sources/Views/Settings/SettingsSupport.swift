@@ -56,7 +56,7 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
         case .context:
             return "Context"
         case .mcpServers:
-            return "MCP"
+            return "Plugin Sources"
         }
     }
 
@@ -71,7 +71,7 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
         case .context:
             return "Compaction, memory retention, skills, and rules"
         case .mcpServers:
-            return "Configure external tool servers"
+            return "Configure external capability sources"
         }
     }
 }
@@ -182,7 +182,7 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         case .context:
             return "Compaction, memory, skills"
         case .mcpServers:
-            return "External tool servers"
+            return "External capability sources"
         }
     }
 

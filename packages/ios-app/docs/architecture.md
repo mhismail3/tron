@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-12 (engine thin-client boundary, capability-native Engine Console, server-owned storage/observability settings, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-12 (capability-native chat/dashboard/event rendering, engine thin-client boundary, capability-native Engine Console, server-owned storage/observability settings, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -10,6 +10,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Event-sourced state reconstruction
 - Push notifications for background alerts
 - Voice transcription input
+- Capability-native invocation/result rendering for the live `search` / `inspect` / `execute` harness
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A separate Codex mode that connects directly to a Tron-managed `codex app-server` on the active paired machine without using Tron agent sessions
@@ -47,7 +48,6 @@ Sources/
 │   ├── Observability/      # DiagnosticsRedactor shared with Mac
 │   ├── Onboarding/         # Pairing validator/probe/persistor
 │   ├── PairingURLParser.swift  # tron://pair?host&port&token&label parser + builder
-│   ├── Parsing/            # Tool result parsers (delegated by ToolResultParser)
 │   ├── Settings/           # PairedServerStore (local server list + active id)
 │   └── Storage/            # KeychainItem, PairedServerTokenStore, EngineConsoleCache
 ├── ViewModels/             # View state management
@@ -60,7 +60,8 @@ Sources/
     ├── CodexApp/           # Codex dashboard, full-screen thread detail, setup/status, approvals
     ├── Chat/               # Core chat interface
     ├── EngineConsole/      # Capability registry/plugin/binding/audit console
-    ├── Tools/              # Tool chips + detail sheets
+    ├── Capabilities/       # Generic capability invocation chips, detail sheets, and result rendering
+    ├── Tools/              # Shared support views still used by capability/source-control surfaces
     ├── Components/         # Reusable UI components
     └── ...                 # Feature-specific views
 ```
@@ -89,21 +90,21 @@ Coordinators contain stateless logic. Context protocols define the interface:
 ```swift
 // Protocol (what coordinator needs)
 @MainActor
-protocol ToolEventContext: AnyObject {
-    var activeTools: [String: ToolState] { get set }
-    func updateToolState(_ id: String, state: ToolState)
+protocol CapabilityEventContext: AnyObject {
+    var activeInvocations: [String: CapabilityInvocationState] { get set }
+    func updateInvocationState(_ id: String, state: CapabilityInvocationState)
 }
 
 // Coordinator (stateless logic)
 @MainActor
-final class ToolEventCoordinator {
-    func handleToolStart(context: ToolEventContext, event: ToolStartEvent) {
-        context.activeTools[event.toolId] = .running
+final class CapabilityEventCoordinator {
+    func handleCapabilityStart(context: CapabilityEventContext, event: CapabilityStartEvent) {
+        context.activeInvocations[event.invocationId] = .running
     }
 }
 
 // ViewModel extension (provides context)
-extension ChatViewModel: ToolEventContext { ... }
+extension ChatViewModel: CapabilityEventContext { ... }
 ```
 
 ### Event Plugin System
@@ -118,6 +119,15 @@ Live:   WebSocket → EventRegistry → Plugin → EventDispatchCoordinator → 
 Stored: EventDatabase → Transformer → ChatMessage array
 Console: /engine invoke(capability::*) → CapabilityClient → EngineConsoleState → EngineConsoleView
 ```
+
+Live/stored `capability.invocation.started`, `capability.invocation.progress`,
+and `capability.invocation.completed` names are capability lifecycle labels.
+Active chat, dashboard, detail sheets, and history reconstruction render
+capability invocations from `CapabilityIdentity`
+metadata (`contractId`, `implementationId`, `pluginId`, schema digest, catalog
+revision, trust/risk/effect, trace, and binding decision). Clean-slate local
+storage means unsupported or malformed events are treated as diagnostics rather
+than normalized through retired names.
 
 ### @Observable State Objects
 
@@ -153,7 +163,7 @@ final class SubagentState {
 ## Engine Client Boundary
 
 The iOS app is a thin `/engine` client. It never owns Tron capability routing,
-tool execution, session mutation policy, or stream delivery rules. Write calls
+implementation execution, session mutation policy, or stream delivery rules. Write calls
 carry an explicit `EngineInvocationContext` when the capability is scoped to a
 session or workspace, and live session subscriptions send explicit stream
 filters (`sessionId` and, when known, `workspaceId`) so the server can enforce
@@ -182,7 +192,7 @@ worker ownership stay server-side. Before sending prompt-producing agent writes,
 the client awaits the `events.session` subscription; if that cannot be
 established, it does not start server work that the UI cannot observe.
 Foreground notification inbox updates follow the same thin-client rule:
-`NotifyApp` tool completions delivered over `/engine` refresh the inbox, while
+notification capability completions delivered over `/engine` refresh the inbox, while
 APNs remains the background device-delivery transport.
 
 ### Capability Console Boundary
@@ -192,7 +202,7 @@ architecture. It calls `capability::status`, `capability::registry_snapshot`,
 `capability::audit_query`, binding functions, plugin functions, conformance, and
 policy functions through `CapabilityClient`; it never reads a hardcoded tool
 descriptor catalog. `EngineConsoleState` owns refresh, search, inspect,
-mutation gating, and disconnected cache fallback. The server remains the source
+mutation gating, and disconnected read-only cache snapshots. The server remains the source
 of truth for policy, authority, approval, audit redaction, plugin lifecycle, and
 binding selection.
 
@@ -401,14 +411,14 @@ the returned server-authoritative metadata for the active paired origin.
 | State object | `ViewModels/State/` |
 | Coordinator | `ViewModels/Handlers/` |
 | Engine Console surface | `Views/EngineConsole/` |
-| Tool chip+sheet | `Views/Tools/<ToolName>/` |
+| Capability chip+sheet | `Views/Capabilities/` |
 | Reusable component | `Views/Components/` |
 
 Settings pages live under `Views/Settings/Pages/` and are launched from the
 main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. Its first grid row launches the surface-oriented
 settings: App, Server, and Providers. Its second row launches agent-behavior
-settings: Agent, Context, and MCP. The third row holds the destructive actions
+settings: Agent, Context, and Plugin Sources. The third row holds the destructive actions
 without a separate Danger Zone header, while keeping those tiles error-red. All
 main-grid icons use the shared settings tile size. A thin muted divider separates
 the green destination rows from the destructive actions. The surface and behavior
@@ -422,7 +432,7 @@ Server-backed settings are grouped by behavior owner: Servers covers
 pairing/security/transcription/updates, Providers covers auth credentials, Agent
 covers execution lifecycle including hooks, prompt-history capture/retention,
 queued-message delivery, and protected branches, Context covers
-compaction/memory/skills/rules, and MCP covers external tools. Low-level hook
+compaction/memory/skills/rules, and Plugin Sources covers external capability sources. Low-level hook
 `add_context` budgeting stays an internal server fuse, not an end-user Agent
 setting. Source-control action sheets expose merge, push, branch, and upstream
 choices at the moment of action rather than through a separate source-control
@@ -446,7 +456,7 @@ iOS does not reliably attach files through a default-mail-app handoff.
 When the active paired server cannot be reached, Settings keeps local paired
 server management visible but hides server-backed controls until the connection
 returns and settings reload. The main sheet keeps App and Server visible,
-removes Providers, Agent, Context, and MCP from the launcher grid, moves the
+removes Providers, Agent, Context, and Plugin Sources from the launcher grid, moves the
 warning card above the destructive row, and disables destructive server-coupled
 actions such as clearing prompt history and archiving all sessions. The Servers
 sheet turns its top summary card

@@ -2,7 +2,7 @@
 //!
 //! [`StreamAccumulator`] encapsulates the repeated delta-processing logic shared
 //! across Anthropic, OpenAI, and Google stream handlers: text accumulation,
-//! thinking accumulation, tool call argument buffering, and token tracking.
+//! thinking accumulation, capability invocation argument buffering, and token tracking.
 //!
 //! Each provider handler owns a `StreamAccumulator` and delegates the mechanical
 //! accumulation work to it, keeping only provider-specific event parsing and
@@ -13,10 +13,10 @@ use serde_json::Map;
 use crate::shared::events::StreamEvent;
 use crate::shared::messages::ToolCall;
 
-/// In-progress tool call being accumulated from streaming deltas.
+/// In-progress capability invocation being accumulated from streaming deltas.
 #[derive(Clone, Debug)]
 pub struct ToolCallAccumulator {
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub id: String,
     /// Tool name.
     pub name: String,
@@ -26,7 +26,7 @@ pub struct ToolCallAccumulator {
 
 /// Shared accumulator for LLM stream delta processing.
 ///
-/// Tracks text, thinking, signature, and tool call state across streaming
+/// Tracks text, thinking, signature, and capability invocation state across streaming
 /// deltas, emitting the appropriate [`StreamEvent`]s at each transition.
 #[derive(Clone, Debug)]
 pub struct StreamAccumulator {
@@ -40,7 +40,7 @@ pub struct StreamAccumulator {
     pub text_started: bool,
     /// Whether a `ThinkingStart` event has been emitted.
     pub thinking_started: bool,
-    /// In-progress tool calls keyed by tool call ID.
+    /// In-progress capability invocations keyed by capability invocation ID.
     tool_calls: Vec<ToolCallAccumulator>,
     /// Input token count.
     pub input_tokens: u64,
@@ -136,7 +136,7 @@ impl StreamAccumulator {
         self.accumulated_signature.push_str(sig);
     }
 
-    /// Start tracking a new tool call. Emits `ToolCallStart`.
+    /// Start tracking a new capability invocation. Emits `ToolCallStart`.
     pub fn start_tool_call(&mut self, id: String, name: String) -> Vec<StreamEvent> {
         let events = vec![StreamEvent::ToolCallStart {
             tool_call_id: id.clone(),
@@ -150,7 +150,7 @@ impl StreamAccumulator {
         events
     }
 
-    /// Append argument JSON delta to a tool call. Emits `ToolCallDelta`.
+    /// Append argument JSON delta to a capability invocation. Emits `ToolCallDelta`.
     pub fn append_tool_args(&mut self, id: &str, delta: &str) -> Vec<StreamEvent> {
         if let Some(tc) = self.tool_calls.iter_mut().find(|tc| tc.id == id) {
             tc.args.push_str(delta);
@@ -163,16 +163,16 @@ impl StreamAccumulator {
         }
     }
 
-    /// Finish a tool call by ID. Parses accumulated args and emits `ToolCallEnd`.
+    /// Finish a capability invocation by ID. Parses accumulated args and emits `ToolCallEnd`.
     ///
-    /// Returns the events and removes the tool call from the active set.
+    /// Returns the events and removes the capability invocation from the active set.
     pub fn finish_tool_call(&mut self, id: &str) -> Vec<StreamEvent> {
         let pos = self.tool_calls.iter().position(|tc| tc.id == id);
         let Some(idx) = pos else {
             return vec![];
         };
         let tc = self.tool_calls.remove(idx);
-        // INVARIANT: a provider never emits partial JSON on a tool call —
+        // INVARIANT: a provider never emits partial JSON on a capability invocation —
         // parse failures here indicate an upstream bug (stream chunk lost,
         // wire corruption, or a provider quirk). Log so the operator has
         // a signal; downstream still tries the tool with empty args.
@@ -193,7 +193,7 @@ impl StreamAccumulator {
         vec![StreamEvent::ToolCallEnd { tool_call }]
     }
 
-    /// Finish a tool call with pre-parsed arguments and optional thought signature.
+    /// Finish a capability invocation with pre-parsed arguments and optional thought signature.
     pub fn finish_tool_call_with(
         &mut self,
         id: &str,
@@ -262,12 +262,12 @@ impl StreamAccumulator {
         }
     }
 
-    /// Get a reference to the accumulated tool calls.
+    /// Get a reference to the accumulated capability invocations.
     pub fn tool_calls(&self) -> &[ToolCallAccumulator] {
         &self.tool_calls
     }
 
-    /// Get a mutable reference to a tool call by ID.
+    /// Get a mutable reference to a capability invocation by ID.
     pub fn tool_call_mut(&mut self, id: &str) -> Option<&mut ToolCallAccumulator> {
         self.tool_calls.iter_mut().find(|tc| tc.id == id)
     }
@@ -406,7 +406,7 @@ mod tests {
         assert_eq!(acc.accumulated_signature, "part1_part2");
     }
 
-    // ── tool call lifecycle ─────────────────────────────────────────
+    // ── capability invocation lifecycle ─────────────────────────────────────────
 
     #[test]
     fn start_tool_call_emits_start_event() {

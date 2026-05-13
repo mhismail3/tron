@@ -2,9 +2,9 @@
 //!
 //! Converts core [`Context`] messages into Anthropic Messages API format.
 //! Handles:
-//! - User/assistant/tool-result message conversion
+//! - User/assistant/capability-result message conversion
 //! - Thinking block signature handling (only include with signature)
-//! - Tool call ID remapping for cross-provider DTO parity
+//! - Capability invocation ID remapping for cross-provider DTO parity
 //! - System prompt construction with cache breakpoints (all auth types)
 //! - Tool definitions with cache control
 
@@ -40,7 +40,7 @@ pub fn convert_context(
     Vec<AnthropicMessageParam>,
     Option<Vec<AnthropicTool>>,
 ) {
-    // Build tool call ID mapping for cross-provider DTO parity.
+    // Build capability invocation ID mapping for cross-provider DTO parity.
     let id_mapping = build_id_mapping(&context.messages);
 
     // Convert messages
@@ -55,7 +55,7 @@ pub fn convert_context(
     (system, messages, tools)
 }
 
-/// Build tool call ID mapping from messages for cross-provider DTO parity.
+/// Build capability invocation ID mapping from messages for cross-provider DTO parity.
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
     let mut all_tool_calls = Vec::new();
     for msg in messages {
@@ -72,7 +72,7 @@ fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
 
 /// Convert conversation messages to Anthropic format.
 ///
-/// Builds tool call ID remapping internally, converting OpenAI-format
+/// Builds capability invocation ID remapping internally, converting OpenAI-format
 /// IDs to Anthropic format (`toolu_remap_N`).
 pub fn convert_messages(messages: &[Message]) -> Vec<AnthropicMessageParam> {
     let id_mapping = build_id_mapping(messages);
@@ -288,7 +288,7 @@ fn convert_assistant_content(
     }
 }
 
-/// Convert a tool result message to Anthropic format.
+/// Convert a capability result message to Anthropic format.
 fn convert_tool_result(
     tool_call_id: &str,
     content: &ToolResultMessageContent,
@@ -320,7 +320,7 @@ fn convert_tool_result(
     }
 }
 
-/// Convert a tool result content block to Anthropic JSON.
+/// Convert a capability result content block to Anthropic JSON.
 fn convert_tool_result_content(content: &ToolResultContent) -> Value {
     match content {
         ToolResultContent::Text { text } => json!({"type": "text", "text": text}),
@@ -613,7 +613,7 @@ mod tests {
         );
     }
 
-    // ── Tool result conversion ───────────────────────────────────────────
+    // ── Capability result conversion ───────────────────────────────────────────
 
     #[test]
     fn convert_tool_result_text() {
@@ -969,7 +969,7 @@ mod tests {
         assert!(merged.is_empty());
     }
 
-    // ── Full flow: tool results merge into single user message ──────────
+    // ── Full flow: capability results merge into single user message ──────────
 
     #[test]
     fn full_flow_multiple_tool_results_become_single_user_message() {

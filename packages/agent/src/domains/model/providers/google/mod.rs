@@ -11,7 +11,7 @@
 //! | Module                | Content |
 //! |-----------------------|---------|
 //! | [`provider`]          | [`GoogleProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::provider`]); stream orchestration, retry, and tool translation |
-//! | [`message_converter`] | `Vec<Message>` → Gemini `contents` array; handles tool calls, tool results, and multimodal parts |
+//! | [`message_converter`] | `Vec<Message>` → Gemini `contents` array; handles capability invocations, capability results, and multimodal parts |
 //! | [`stream_handler`]    | Gemini SSE `v1beta/{model}:streamGenerateContent` → `StreamEvent` sequence ([`crate::shared::events`]) |
 //! | [`types`]             | [`GoogleAuth`] (API key), [`GoogleConfig`] (model + generation parameters) |
 //!

@@ -21,7 +21,7 @@ enum MessageHandlers {
         guard let parsed = UserMessagePayload(from: payload) else { return nil }
 
         // Skip tool_result context messages - they're LLM conversation context,
-        // not displayable user messages. Tool results are displayed via tool.result events.
+        // not displayable user messages. Capability results are displayed via capability.invocation.completed events.
         if parsed.isToolResultContext {
             return nil
         }
@@ -62,7 +62,7 @@ enum MessageHandlers {
     /// Transform message.assistant event into a ChatMessage.
     ///
     /// This handler extracts only TEXT content from assistant messages.
-    /// Tool blocks are handled separately by tool.call/tool.result events
+    /// Tool blocks are handled separately by capability.invocation.started/capability.invocation.completed events
     /// or by the interleaved content processor.
     static func transformAssistantMessage(
         _ payload: [String: AnyCodable],
@@ -73,7 +73,7 @@ enum MessageHandlers {
         }
 
         // CRITICAL: Only extract TEXT from assistant messages
-        // Tool blocks are handled by tool.call/tool.result events
+        // Tool blocks are handled by capability.invocation.started/capability.invocation.completed events
         guard let text = parsed.textContent, !text.isEmpty else { return nil }
 
         return ChatMessage(

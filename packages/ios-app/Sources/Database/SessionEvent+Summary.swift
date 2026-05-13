@@ -66,16 +66,22 @@ extension SessionEvent {
 
             return parts.joined(separator: " • ")
 
-        case .toolCall:
-            let name = payload.string("name") ?? "unknown"
+        case .capabilityInvocationStarted:
+            let name = payload.string("contractId") ??
+                payload.string("functionId") ??
+                payload.string("implementationId") ??
+                payload.string("modelToolName") ??
+                payload.string("name") ??
+                "unknown"
+            let displayName = formatCapabilityName(name)
             let args = payload.dict("arguments") ?? [:]
-            let keyArg = extractKeyArgument(toolName: name, from: args)
+            let keyArg = extractKeyArgument(modelToolName: name, from: args)
             if !keyArg.isEmpty {
-                return "\(name): \(keyArg)"
+                return "\(displayName): \(keyArg)"
             }
-            return name
+            return displayName
 
-        case .toolResult:
+        case .capabilityInvocationCompleted:
             let isError = payload.bool("isError") ?? false
             let duration = payload.int("duration")
             let status = isError ? "error" : "success"
@@ -110,9 +116,9 @@ extension SessionEvent {
             }
             return "\(provider) error"
 
-        case .errorTool:
-            let toolName = payload.string("toolName") ?? "tool"
-            return "\(toolName) failed"
+        case .errorCapability:
+            let modelToolName = payload.string("modelToolName") ?? "tool"
+            return "\(modelToolName) failed"
 
         case .configModelSwitch:
             let from = payload.string("previousModel")?.shortModelName ?? "?"
@@ -320,28 +326,37 @@ extension SessionEvent {
     }
 
     /// Helper to extract key argument for tool display
-    func extractKeyArgument(toolName: String, from args: [String: Any]) -> String {
-        switch ToolKind(toolName: toolName) {
-        case .read, .write, .edit:
+    func extractKeyArgument(modelToolName: String, from args: [String: Any]) -> String {
+        if modelToolName.hasPrefix("filesystem::") {
             if let path = args["file_path"] as? String ?? args["path"] as? String {
                 return URL(fileURLWithPath: path).lastPathComponent
             }
-        case .bash:
+        } else if modelToolName.hasPrefix("process::") {
             if let cmd = args["command"] as? String {
                 return String(cmd.prefix(25))
             }
-        case .search:
+        } else if modelToolName.contains("search") {
             if let pattern = args["pattern"] as? String {
                 return "\"\(String(pattern.prefix(20)))\""
             }
-        case .glob:
+        } else if modelToolName.contains("glob") {
             if let pattern = args["pattern"] as? String {
                 return pattern
             }
-        default:
-            break
         }
         return ""
+    }
+
+    func formatCapabilityName(_ name: String) -> String {
+        let tail = name.split(separator: "::").last.map(String.init) ?? name
+        return tail
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { word in
+                guard let first = word.first else { return "" }
+                return first.uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ")
     }
 
     func formatLatency(_ ms: Int) -> String {

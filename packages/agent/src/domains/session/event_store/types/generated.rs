@@ -29,12 +29,12 @@ define_events! {
         MessageQueued => "message.queued" => payloads::message_ops::MessageQueuedPayload,
         /// Queued message consumed or cancelled.
         MessageDequeued => "message.dequeued" => payloads::message_ops::MessageDequeuedPayload,
-        /// Tool call from the model.
-        ToolCall => "tool.call" => payloads::tool::ToolCallPayload,
-        /// Tool execution result.
-        ToolResult => "tool.result" => payloads::tool::ToolResultPayload,
-        /// Tool execution progress update (long-running tools only).
-        ToolProgress => "tool.progress" => payloads::tool::ToolProgressPayload,
+        /// Capability invocation started.
+        CapabilityInvocationStarted => "capability.invocation.started" => payloads::capability_invocation::CapabilityInvocationStartedPayload,
+        /// Capability invocation completed.
+        CapabilityInvocationCompleted => "capability.invocation.completed" => payloads::capability_invocation::CapabilityInvocationCompletedPayload,
+        /// Capability invocation progress update.
+        CapabilityInvocationProgress => "capability.invocation.progress" => payloads::capability_invocation::CapabilityInvocationProgressPayload,
         /// Text delta during streaming.
         StreamTextDelta => "stream.text_delta" => payloads::streaming::StreamTextDeltaPayload,
         /// Thinking delta during streaming.
@@ -99,8 +99,8 @@ define_events! {
         WorktreeRenamed => "worktree.renamed" => payloads::worktree::WorktreeRenamedPayload,
         /// Agent-level error.
         ErrorAgent => "error.agent" => payloads::error::ErrorAgentPayload,
-        /// Tool execution error.
-        ErrorTool => "error.tool" => payloads::error::ErrorToolPayload,
+        /// Capability invocation error.
+        ErrorCapability => "error.capability" => payloads::error::ErrorCapabilityPayload,
         /// Provider (LLM) error.
         ErrorProvider => "error.provider" => payloads::error::ErrorProviderPayload,
         /// Subagent spawned.
@@ -189,7 +189,7 @@ define_events! {
         /// Whether this is a streaming event (`stream.*`).
         is_streaming_type => [StreamTextDelta, StreamThinkingDelta, StreamTurnStart, StreamTurnEnd],
         /// Whether this is an error event (`error.*`).
-        is_error_type => [ErrorAgent, ErrorTool, ErrorProvider],
+        is_error_type => [ErrorAgent, ErrorCapability, ErrorProvider],
         /// Whether this is a config event (`config.*`).
         is_config_type => [ConfigModelSwitch, ConfigPromptUpdate, ConfigReasoningLevel],
         /// Whether this is a worktree event (`worktree.*`).
@@ -236,9 +236,18 @@ mod tests {
         (EventType::MessageDeleted, "message.deleted"),
         (EventType::MessageQueued, "message.queued"),
         (EventType::MessageDequeued, "message.dequeued"),
-        (EventType::ToolCall, "tool.call"),
-        (EventType::ToolResult, "tool.result"),
-        (EventType::ToolProgress, "tool.progress"),
+        (
+            EventType::CapabilityInvocationStarted,
+            "capability.invocation.started",
+        ),
+        (
+            EventType::CapabilityInvocationCompleted,
+            "capability.invocation.completed",
+        ),
+        (
+            EventType::CapabilityInvocationProgress,
+            "capability.invocation.progress",
+        ),
         (EventType::StreamTextDelta, "stream.text_delta"),
         (EventType::StreamThinkingDelta, "stream.thinking_delta"),
         (EventType::StreamTurnStart, "stream.turn_start"),
@@ -275,7 +284,7 @@ mod tests {
         (EventType::WorktreeMerged, "worktree.merged"),
         (EventType::WorktreeRenamed, "worktree.renamed"),
         (EventType::ErrorAgent, "error.agent"),
-        (EventType::ErrorTool, "error.tool"),
+        (EventType::ErrorCapability, "error.capability"),
         (EventType::ErrorProvider, "error.provider"),
         (EventType::SubagentSpawned, "subagent.spawned"),
         (EventType::SubagentStatusUpdate, "subagent.status_update"),
@@ -468,7 +477,7 @@ mod tests {
         assert!(EventType::MessageAssistant.is_message_type());
         assert!(EventType::MessageSystem.is_message_type());
         assert!(!EventType::MessageDeleted.is_message_type());
-        assert!(!EventType::ToolCall.is_message_type());
+        assert!(!EventType::CapabilityInvocationStarted.is_message_type());
     }
 
     #[test]
@@ -483,9 +492,9 @@ mod tests {
     #[test]
     fn is_error_type() {
         assert!(EventType::ErrorAgent.is_error_type());
-        assert!(EventType::ErrorTool.is_error_type());
+        assert!(EventType::ErrorCapability.is_error_type());
         assert!(EventType::ErrorProvider.is_error_type());
-        assert!(!EventType::ToolResult.is_error_type());
+        assert!(!EventType::CapabilityInvocationCompleted.is_error_type());
     }
 
     #[test]
@@ -524,7 +533,10 @@ mod tests {
     fn domain_extraction() {
         assert_eq!(EventType::SessionStart.domain(), "session");
         assert_eq!(EventType::MessageUser.domain(), "message");
-        assert_eq!(EventType::ToolCall.domain(), "tool");
+        assert_eq!(
+            EventType::CapabilityInvocationStarted.domain(),
+            "capability"
+        );
         assert_eq!(EventType::StreamTextDelta.domain(), "stream");
         assert_eq!(EventType::ConfigModelSwitch.domain(), "config");
         assert_eq!(EventType::CompactBoundary.domain(), "compact");

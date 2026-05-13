@@ -71,7 +71,7 @@ extension SessionEvent {
 
             return lines.isEmpty ? nil : lines.joined(separator: "\n")
 
-        case .toolCall:
+        case .capabilityInvocationStarted:
             let name = (payload["name"]?.value as? String) ?? "unknown"
             let turn = (payload["turn"]?.value as? Int) ?? 0
             var lines = ["Tool: \(name)", "Turn: \(turn)"]
@@ -85,7 +85,7 @@ extension SessionEvent {
             }
             return lines.joined(separator: "\n")
 
-        case .toolResult:
+        case .capabilityInvocationCompleted:
             var lines: [String] = []
 
             // Duration
@@ -109,7 +109,7 @@ extension SessionEvent {
             }
             return lines.joined(separator: "\n")
 
-        case .errorAgent, .errorProvider, .errorTool:
+        case .errorAgent, .errorProvider, .errorCapability:
             var lines: [String] = []
 
             // Error message

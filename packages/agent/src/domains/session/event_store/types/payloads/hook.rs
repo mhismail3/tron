@@ -13,7 +13,7 @@ pub struct HookTriggeredPayload {
     /// Tool name (for tool-related hooks).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
-    /// Tool call ID.
+    /// Capability invocation ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     /// Timestamp.
@@ -39,7 +39,7 @@ pub struct HookCompletedPayload {
     /// Tool name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
-    /// Tool call ID.
+    /// Capability invocation ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     /// Timestamp.

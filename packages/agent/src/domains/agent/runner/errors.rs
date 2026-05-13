@@ -11,8 +11,8 @@ pub enum RuntimeError {
     #[error("Provider error: {0}")]
     Provider(#[from] crate::domains::model::providers::provider::ProviderError),
 
-    /// Tool execution error.
-    #[error("Tool error: {tool_name}: {message}")]
+    /// Capability invocation error.
+    #[error("Capability error: {tool_name}: {message}")]
     Tool {
         /// Tool name.
         tool_name: String,
@@ -133,7 +133,7 @@ mod tests {
             tool_name: "execute".into(),
             message: "command failed".into(),
         };
-        assert_eq!(err.to_string(), "Tool error: execute: command failed");
+        assert_eq!(err.to_string(), "Capability error: execute: command failed");
     }
 
     #[test]

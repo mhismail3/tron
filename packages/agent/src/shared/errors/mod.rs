@@ -6,7 +6,7 @@
 //! - [`SessionError`]: Session lifecycle failures (create, resume, fork, run)
 //! - [`PersistenceError`]: Database/storage errors with table and operation context
 //! - [`ProviderError`]: LLM provider errors with status code and retry info
-//! - [`ToolError`]: Tool execution failures with capability id and call ID
+//! - [`ToolError`]: Capability invocation failures with capability id and call ID
 //! - [`ErrorCollector`]: Accumulates errors from fire-and-forget operations
 //!
 //! The error parsing utilities in [`parse`] classify raw error strings into
@@ -45,7 +45,7 @@ pub enum TronError {
     #[error("{0}")]
     Provider(#[from] ProviderError),
 
-    /// Tool execution error.
+    /// Capability invocation error.
     #[error("{0}")]
     Tool(#[from] ToolError),
 
@@ -464,13 +464,13 @@ impl ProviderError {
 // ToolError
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Tool execution error.
+/// Capability invocation error.
 #[derive(Debug, Error)]
 #[error("Tool {tool_name} (call {tool_call_id}) failed: {message}")]
 pub struct ToolError {
     /// Tool name.
     pub tool_name: String,
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub tool_call_id: String,
     /// Human-readable message.
     pub message: String,
@@ -484,7 +484,7 @@ pub struct ToolError {
 }
 
 impl ToolError {
-    /// Create a new tool error.
+    /// Create a new capability error.
     #[must_use]
     pub fn new(
         tool_name: impl Into<String>,

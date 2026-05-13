@@ -78,8 +78,8 @@ Immutable append-only event log with denormalized indexed fields.
 | `content_blob_id` | TEXT FK→blobs | Large content in blob storage |
 | `workspace_id` | TEXT NOT NULL | |
 | `role` | TEXT | 'user' / 'assistant' / 'system' |
-| `tool_name` | TEXT | Tool identifier |
-| `tool_call_id` | TEXT | For tool call/result pairing |
+| `capability_name` | TEXT | Capability model-facing primitive or resolved contract identifier |
+| `invocation_id` | TEXT | For capability invocation/result pairing |
 | `turn` | INTEGER | Turn number within session |
 | `input_tokens` | INTEGER | Per-event token count |
 | `output_tokens` | INTEGER | |
@@ -203,7 +203,7 @@ Stored in `events.type`. Each has a typed JSON payload.
 |----------|-------|
 | Session | `session.start`, `session.end`, `session.fork` |
 | Messages | `message.user`, `message.assistant`, `message.system`, `message.deleted` |
-| Tools | `tool.call`, `tool.result` |
+| Capabilities | `capability.invocation.started`, `capability.invocation.completed`, `capability.invocation.progress` |
 | Streaming | `stream.text_delta`, `stream.thinking_delta`, `stream.turn_start`, `stream.turn_end` |
 | Config | `config.model_switch`, `config.prompt_update`, `config.reasoning_level` |
 | Notifications | `notification.interrupted`, `notification.subagent_result`, `subagent.results_consumed` |
@@ -214,7 +214,7 @@ Stored in `events.type`. Each has a typed JSON payload.
 | Metadata | `metadata.update`, `metadata.tag` |
 | Files | `file.read`, `file.write`, `file.edit` |
 | Worktree | `worktree.acquired`, `worktree.commit`, `worktree.released`, `worktree.merged` |
-| Errors | `error.agent`, `error.tool`, `error.provider` |
+| Errors | `error.agent`, `error.capability`, `error.provider` |
 | Subagent | `subagent.spawned`, `subagent.status_update`, `subagent.completed`, `subagent.failed` |
 | Todo | `todo.write` |
 | Turn | `turn.failed` |

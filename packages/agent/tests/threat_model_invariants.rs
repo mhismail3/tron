@@ -361,15 +361,15 @@ fn tool_registry_authority_stays_deleted() {
         !crate_root
             .join(["src/domains/", "tools", "/operations/execution.rs"].concat())
             .exists(),
-        "legacy tool execution handler must stay deleted"
+        "legacy capability invocation handler must stay deleted"
     );
-    let tool_execution =
+    let tool_executor_source =
         std::fs::read_to_string(crate_root.join("src/domains/agent/runner/agent/tool_executor.rs"))
             .expect("failed to read agent tool executor");
     assert!(
-        tool_execution.contains("\"search\"")
-            && tool_execution.contains("\"inspect\"")
-            && tool_execution.contains("\"execute\""),
+        tool_executor_source.contains("\"search\"")
+            && tool_executor_source.contains("\"inspect\"")
+            && tool_executor_source.contains("\"execute\""),
         "agent tool executor must route only the three capability primitives"
     );
     for retired_runtime_term in [
@@ -378,9 +378,54 @@ fn tool_registry_authority_stays_deleted() {
         concat!("Tron", "Tool"),
     ] {
         assert!(
-            !tool_execution.contains(retired_runtime_term),
+            !tool_executor_source.contains(retired_runtime_term),
             "agent tool executor must not reintroduce the retired runtime bridge"
         );
+    }
+}
+
+#[test]
+fn retired_tool_event_surface_stays_deleted() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+
+    let forbidden_exact = [
+        concat!("tool", ".", "call"),
+        concat!("tool", ".", "result"),
+        concat!("tool", ".", "progress"),
+        concat!("error", ".", "tool"),
+        concat!("tool", "_", "start"),
+        concat!("tool", "_", "end"),
+        concat!("tool", ".", "start"),
+        concat!("tool", ".", "end"),
+        concat!("agent", ".", "tool", "_"),
+        concat!("tool", "::", "result"),
+        concat!("Mcp", "Search"),
+        concat!("Mcp", "Call"),
+        concat!("Engine", "Discover"),
+        concat!("Engine", "Inspect"),
+        concat!("Engine", "Invoke"),
+        concat!("Engine", "Watch"),
+    ];
+
+    for root in [
+        crate_root.join("src"),
+        crate_root.join("tests"),
+        repo_root.join("README.md"),
+        repo_root.join("packages/agent/docs"),
+        repo_root.join("packages/agent/skills/self-inspect/reference"),
+    ] {
+        for path in files_to_scan(&root) {
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            for needle in &forbidden_exact {
+                assert!(
+                    !content.contains(needle),
+                    "{} must not reintroduce retired tool event/execution marker `{needle}`",
+                    path.strip_prefix(&repo_root).unwrap_or(&path).display()
+                );
+            }
+        }
     }
 }
 

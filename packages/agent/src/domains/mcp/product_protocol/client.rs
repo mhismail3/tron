@@ -109,7 +109,7 @@ pub struct McpClient {
     transport: Mutex<Transport>,
     /// Auto-incrementing request ID.
     next_id: AtomicU64,
-    /// Tool call timeout.
+    /// Capability invocation timeout.
     tool_timeout_ms: u64,
     /// Protocol version negotiated with the server.
     pub negotiated_version: Mutex<Option<String>>,
@@ -392,8 +392,8 @@ impl McpClient {
 
         serde_json::from_value(result.clone()).map_err(|e| McpError {
             server: self.name.clone(),
-            kind: McpErrorKind::Protocol(format!("bad tool result: {e}")),
-            message: format!("Failed to parse tool result: {e}"),
+            kind: McpErrorKind::Protocol(format!("bad capability result: {e}")),
+            message: format!("Failed to parse capability result: {e}"),
         })
     }
 

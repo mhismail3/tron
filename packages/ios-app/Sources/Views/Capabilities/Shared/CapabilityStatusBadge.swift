@@ -1,0 +1,53 @@
+import SwiftUI
+
+// MARK: - Status Badge
+
+/// Glass pill for capability invocation status.
+@available(iOS 26.0, *)
+struct CapabilityStatusBadge: View {
+    let status: CapabilityInvocationStatus
+
+    private var statusColor: Color {
+        switch status {
+        case .generating, .running, .approvalRequired: return .tronAmber
+        case .success: return .tronSuccess
+        case .error, .unavailable: return .tronError
+        }
+    }
+
+    private var statusLabel: String {
+        switch status {
+        case .generating: return "Resolving"
+        case .running: return "Running"
+        case .approvalRequired: return "Approval"
+        case .success: return "Completed"
+        case .error: return "Failed"
+        case .unavailable: return "Unavailable"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if status == .generating || status == .running {
+                ProgressView()
+                    .scaleEffect(0.55)
+                    .tint(statusColor)
+            } else {
+                Image(systemName: status.iconName)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
+                    .foregroundStyle(statusColor)
+            }
+            Text(statusLabel)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                .foregroundStyle(statusColor)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.tint(statusColor.opacity(0.25)), in: Capsule())
+        }
+        .accessibilityElement(children: .combine)
+    }
+}

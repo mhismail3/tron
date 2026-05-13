@@ -27,7 +27,7 @@ pub struct StreamState {
     pub acc: StreamAccumulator,
     /// Current content block type being accumulated.
     pub current_block_type: Option<BlockType>,
-    /// Tool call ID for the current `tool_use` block.
+    /// Capability invocation ID for the current `tool_use` block.
     pub current_tool_call_id: Option<String>,
     /// Cache creation tokens.
     pub cache_creation_tokens: u64,

@@ -153,8 +153,8 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertTrue(event.summary.contains("unknown"))
     }
 
-    func testToolCall_showsToolName() {
-        let event = makeEvent(type: "tool.call", payload: [
+    func testCapabilityInvocation_showsModelToolName() {
+        let event = makeEvent(type: "capability.invocation.started", payload: [
             "name": AnyCodable("Read"),
             "arguments": AnyCodable(["file_path": "/foo/bar.swift"]),
         ])
@@ -162,7 +162,7 @@ final class SessionEventSummaryTests: XCTestCase {
     }
 
     func testToolResult_success_showsDuration() {
-        let event = makeEvent(type: "tool.result", payload: [
+        let event = makeEvent(type: "capability.invocation.completed", payload: [
             "isError": AnyCodable(false),
             "duration": AnyCodable(522),
         ])
@@ -170,7 +170,7 @@ final class SessionEventSummaryTests: XCTestCase {
     }
 
     func testToolResult_error_showsError() {
-        let event = makeEvent(type: "tool.result", payload: [
+        let event = makeEvent(type: "capability.invocation.completed", payload: [
             "isError": AnyCodable(true),
         ])
         XCTAssertEqual(event.summary, "error")

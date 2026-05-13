@@ -6,14 +6,14 @@ enum MessageRole: String, Codable, Equatable {
     case user
     case assistant
     case system
-    case toolResult
+    case capability
 
     var displayName: String {
         switch self {
         case .user: return "You"
         case .assistant: return "Tron"
         case .system: return "System"
-        case .toolResult: return "Tool"
+        case .capability: return "Capability"
         }
     }
 }

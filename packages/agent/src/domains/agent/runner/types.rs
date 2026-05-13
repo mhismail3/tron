@@ -288,7 +288,7 @@ pub struct TurnResult {
     /// Error message if turn failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Number of tool calls executed.
+    /// Number of capability invocations executed.
     pub tool_calls_executed: usize,
     /// Token usage for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -371,13 +371,13 @@ impl Default for RunResult {
     }
 }
 
-/// Result of tool execution pipeline.
+/// Result of capability invocation pipeline.
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ToolExecutionResult {
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub tool_call_id: String,
-    /// Tool result.
+    /// Capability result.
     pub result: crate::shared::tools::CapabilityResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
@@ -396,7 +396,7 @@ pub struct ToolExecutionResult {
 pub struct StreamResult {
     /// Full assistant message.
     pub message: crate::shared::events::AssistantMessage,
-    /// Extracted tool calls.
+    /// Extracted capability invocations.
     pub tool_calls: Vec<crate::shared::messages::ToolCall>,
     /// Stop reason string from LLM.
     pub stop_reason: String,

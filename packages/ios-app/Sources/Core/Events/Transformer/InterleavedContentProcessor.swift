@@ -3,7 +3,7 @@ import Foundation
 /// Processor for transforming interleaved content blocks in assistant messages.
 ///
 /// This handles the critical path of converting message.assistant events with
-/// mixed content blocks (text, thinking, tool_use) into properly ordered
+/// mixed content blocks (text, thinking, provider tool_use) into properly ordered
 /// ChatMessage arrays while preserving streaming order.
 ///
 /// ## Streaming Order Preservation
@@ -13,19 +13,20 @@ import Foundation
 /// ```
 /// This processor preserves that order exactly, producing:
 /// ```
-/// [ThinkingMsg, TextMsg, ToolMsg, TextMsg, ToolMsg]
+/// [ThinkingMsg, TextMsg, CapabilityInvocationMsg, TextMsg, CapabilityInvocationMsg]
 /// ```
 ///
 /// ## Content Block Types
 /// - `thinking`: Extended thinking content (rendered in ThinkingContentView)
 /// - `text`: Regular text response
-/// - `tool_use`: Tool invocation (combined with tool.call/tool.result data)
+/// - `tool_use`: Provider content block for a capability invocation (combined with capability.invocation.started/completed data)
 ///
-/// ## Interactive Tool Handling
-/// `AskUserQuestion` is transformed via a dedicated transformer that reads
-/// server-enriched status fields directly from the tool.call payload. Engine
-/// approvals are not model tools; they render from `approval.pending` /
-/// `approval.resolved` stream events and session reconstruction records.
+/// ## Interactive Capability Handling
+/// `agent::ask_user` is transformed via a dedicated interaction view only when
+/// the server-enriched capability identity says the invocation is that
+/// contract. Engine approvals are not model tools; they render from
+/// `approval.pending` / `approval.resolved` stream events and session
+/// reconstruction records.
 enum InterleavedContentProcessor {
 
     /// Transform an assistant message's content blocks into ChatMessages.
@@ -33,14 +34,14 @@ enum InterleavedContentProcessor {
     /// - Parameters:
     ///   - payload: The message.assistant event payload
     ///   - timestamp: Event timestamp
-    ///   - toolCalls: Map of toolCallId -> ToolCallPayload for tool details
-    ///   - toolResults: Map of toolCallId -> ToolResultPayload for results
+    ///   - startedInvocations: Map of invocation id -> started payload
+    ///   - completedInvocations: Map of invocation id -> completed payload
     /// - Returns: Array of ChatMessages in content block order
     static func transform(
         payload: [String: AnyCodable],
         timestamp: Date,
-        toolCalls: [String: ToolCallPayload],
-        toolResults: [String: ToolResultPayload]
+        startedInvocations: [String: CapabilityInvocationStartedPayload],
+        completedInvocations: [String: CapabilityInvocationCompletedPayload]
     ) -> [ChatMessage] {
         guard let parsed = AssistantMessagePayload(from: payload) else {
             return []
@@ -78,15 +79,18 @@ enum InterleavedContentProcessor {
                     messages.append(message)
                 }
             } else if blockType == ContentBlockType.toolUse.rawValue, let toolUseId = block["id"] as? String {
-                let toolCall = toolCalls[toolUseId]
-                let result = toolResults[toolUseId]
-                let toolName = toolCall?.name ?? (block["name"] as? String) ?? "Unknown"
+                let started = startedInvocations[toolUseId]
+                let result = completedInvocations[toolUseId]
+                let modelToolName = started?.name ?? (block["name"] as? String) ?? "Unknown"
 
-                // Check if this is AskUserQuestion - handle specially
-                if toolName == "AskUserQuestion" {
+                let resolvedIdentity = [result?.identity, started?.identity]
+                    .compactMap { $0 }
+                    .first { !$0.isEmpty }
+
+                if resolvedIdentity?.isAskUserCapability == true {
                     if let askUserMessage = AskUserQuestionTransformer.transform(
                         toolUseId: toolUseId,
-                        toolCall: toolCall,
+                        toolCall: started,
                         contentBlock: block,
                         timestamp: timestamp,
                         tokenRecord: nil,  // Stats only shown on text messages
@@ -102,9 +106,9 @@ enum InterleavedContentProcessor {
                 if let message = processToolUseBlock(
                     block,
                     toolUseId: toolUseId,
-                    toolCall: toolCall,
+                    toolCall: started,
                     result: result,
-                    toolName: toolName,
+                    modelToolName: modelToolName,
                     timestamp: timestamp,
                     parsed: parsed
                 ) {
@@ -116,7 +120,7 @@ enum InterleavedContentProcessor {
 
         // Attach turn metadata (tokenRecord, model, latency, thinking) to the LAST
         // message so the stats line renders after all content in the turn — not
-        // between text and first tool, or between parallel tool calls.
+        // between text and first tool, or between parallel capability invocations.
         if !messages.isEmpty {
             let lastIdx = messages.count - 1
             messages[lastIdx].tokenRecord = effectiveTokenRecord
@@ -175,20 +179,20 @@ enum InterleavedContentProcessor {
     private static func processToolUseBlock(
         _ block: [String: Any],
         toolUseId: String,
-        toolCall: ToolCallPayload?,
-        result: ToolResultPayload?,
-        toolName: String,
+        toolCall: CapabilityInvocationStartedPayload?,
+        result: CapabilityInvocationCompletedPayload?,
+        modelToolName: String,
         timestamp: Date,
         parsed: AssistantMessagePayload
     ) -> ChatMessage? {
         let turn = toolCall?.turn ?? parsed.turn
 
         // Determine status based on result
-        let status: ToolStatus
+        let status: CapabilityInvocationStatus
         if let result = result {
             status = result.isError ? .error : .success
         } else {
-            TronLogger.shared.warning("[RECONSTRUCT] tool_use \(toolName) id=\(toolUseId) has no matching tool.result — will show as running", category: .session)
+            TronLogger.shared.warning("[RECONSTRUCT] tool_use \(modelToolName) id=\(toolUseId) has no matching capability.invocation.completed — will show as running", category: .session)
             status = .running
         }
 
@@ -200,23 +204,28 @@ enum InterleavedContentProcessor {
             resultContent = nil
         }
 
-        // Arguments: use tool.call string if available, else serialize content block input
-        let arguments = ToolArgumentExtractor.extractArguments(
+        // Arguments: use capability.invocation.started string if available, else serialize content block input
+        let arguments = CapabilityArgumentExtractor.extractArguments(
             toolCall: toolCall,
             contentBlock: block
         ) ?? "{}"
 
+        let identity = [result?.identity, toolCall?.identity]
+            .compactMap { $0 }
+            .first { !$0.isEmpty }
+            ?? CapabilityIdentity()
+
         // Metadata is set after the loop on the last message (see transform())
         return ChatMessage(
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: toolName,
-                toolCallId: toolUseId,
-                arguments: arguments,
+            content: .capabilityInvocation(CapabilityInvocationData(
+                id: toolUseId,
                 status: status,
+                arguments: arguments,
                 result: resultContent,
+                details: result?.details,
                 durationMs: result?.durationMs,
-                details: result?.details
+                identity: identity
             )),
             timestamp: timestamp,
             tokenRecord: nil,

@@ -2,7 +2,7 @@
 //!
 //! Deserializes Ollama's native `/api/chat` streaming format (newline-delimited
 //! JSON, NOT SSE) and maps chunks to Tron's `StreamEvent` types. Handles text,
-//! thinking content, and tool calls.
+//! thinking content, and capability invocations.
 //!
 //! # Why native API, not OpenAI-compatible?
 //!
@@ -15,7 +15,7 @@
 //! - No SSE `data:` prefix — raw JSON per line (NDJSON)
 //! - Thinking: `message.thinking` (not `reasoning` or `reasoning_content`)
 //! - Content: `message.content` (not `choices[].delta.content`)
-//! - Tool calls arrive complete in a single chunk (not streamed across chunks)
+//! - Capability invocations arrive complete in a single chunk (not streamed across chunks)
 //! - Done: `"done": true` + `"done_reason"` (not `finish_reason`)
 //! - Usage: `prompt_eval_count` / `eval_count` in the final chunk
 
@@ -56,20 +56,20 @@ pub struct OllamaMessage {
     pub content: String,
     /// Thinking/reasoning content delta.
     pub thinking: Option<String>,
-    /// Tool calls (arrive complete in a single chunk).
+    /// Capability invocations (arrive complete in a single chunk).
     pub tool_calls: Option<Vec<OllamaToolCall>>,
 }
 
-/// A tool call from the native API (arrives complete, not streamed).
+/// A capability invocation from the native API (arrives complete, not streamed).
 #[derive(Debug, Deserialize)]
 pub struct OllamaToolCall {
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub id: Option<String>,
     /// Function details.
     pub function: OllamaToolCallFunction,
 }
 
-/// Function details within a native API tool call.
+/// Function details within a native API capability invocation.
 #[derive(Debug, Deserialize)]
 pub struct OllamaToolCallFunction {
     /// Function name.
@@ -173,9 +173,9 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         });
     }
 
-    // Process tool calls (arrive complete in native API)
+    // Process capability invocations (arrive complete in native API)
     if let Some(ref tool_calls) = chunk.message.tool_calls {
-        // End thinking/text blocks before tool calls
+        // End thinking/text blocks before capability invocations
         if state.in_thinking {
             state.in_thinking = false;
             let thinking = std::mem::take(&mut state.thinking_text);
@@ -240,7 +240,7 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         }
 
         let stop_reason = map_done_reason(chunk.done_reason.as_deref());
-        // Check if tool calls were emitted — override stop reason
+        // Check if capability invocations were emitted — override stop reason
         let has_tools = state
             .content_blocks
             .iter()
@@ -258,7 +258,7 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
     events
 }
 
-/// Generate a simple random ID for tool calls without an ID.
+/// Generate a simple random ID for capability invocations without an ID.
 fn rand_id() -> u32 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn done_with_tool_calls_overrides_stop_reason() {
         let mut state = OllamaStreamState::new();
-        // Emit tool calls first
+        // Emit capability invocations first
         let tc_chunk = OllamaChatChunk {
             message: OllamaMessage {
                 content: String::new(),
@@ -556,7 +556,7 @@ mod tests {
             eval_count: None,
         };
         let _ = process_chunk(&tc_chunk, &mut state);
-        // Ollama sends done_reason: "stop" even for tool calls
+        // Ollama sends done_reason: "stop" even for capability invocations
         let events = process_chunk(&done_chunk("stop", 100, 50), &mut state);
         if let Some(StreamEvent::Done { stop_reason, .. }) = events
             .iter()

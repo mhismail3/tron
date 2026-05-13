@@ -142,11 +142,11 @@ mod session_event_tests {
     }
 
     #[test]
-    fn typed_payload_tool_call() {
+    fn typed_payload_capability_invocation_started() {
         let event = make_event(
-            EventType::ToolCall,
+            EventType::CapabilityInvocationStarted,
             json!({
-                "toolCallId": "tc-1",
+                "invocationId": "tc-1",
                 "name": "execute",
                 "arguments": {"command": "ls"},
                 "turn": 1
@@ -154,20 +154,20 @@ mod session_event_tests {
         );
         let payload = event.typed_payload().unwrap();
         match payload {
-            SessionEventPayload::ToolCall(p) => {
+            SessionEventPayload::CapabilityInvocationStarted(p) => {
                 assert_eq!(p.tool_call_id, "tc-1");
                 assert_eq!(p.name, "execute");
             }
-            other => panic!("expected ToolCall, got {other:?}"),
+            other => panic!("expected CapabilityInvocationStarted, got {other:?}"),
         }
     }
 
     #[test]
-    fn typed_payload_tool_result() {
+    fn typed_payload_capability_invocation_completed() {
         let event = make_event(
-            EventType::ToolResult,
+            EventType::CapabilityInvocationCompleted,
             json!({
-                "toolCallId": "tc-1",
+                "invocationId": "tc-1",
                 "content": "file.txt",
                 "isError": false,
                 "duration": 250
@@ -175,12 +175,12 @@ mod session_event_tests {
         );
         let payload = event.typed_payload().unwrap();
         match payload {
-            SessionEventPayload::ToolResult(p) => {
+            SessionEventPayload::CapabilityInvocationCompleted(p) => {
                 assert_eq!(p.tool_call_id, "tc-1");
                 assert!(!p.is_error);
                 assert_eq!(p.duration, 250);
             }
-            other => panic!("expected ToolResult, got {other:?}"),
+            other => panic!("expected CapabilityInvocationCompleted, got {other:?}"),
         }
     }
 
@@ -359,12 +359,12 @@ mod session_event_tests {
                 json!({"targetEventId": "e", "targetType": "message.user"}),
             ),
             (
-                EventType::ToolCall,
-                json!({"toolCallId": "tc", "name": "execute", "arguments": {}, "turn": 1}),
+                EventType::CapabilityInvocationStarted,
+                json!({"invocationId": "tc", "name": "execute", "arguments": {}, "turn": 1}),
             ),
             (
-                EventType::ToolResult,
-                json!({"toolCallId": "tc", "content": "ok", "isError": false, "duration": 100}),
+                EventType::CapabilityInvocationCompleted,
+                json!({"invocationId": "tc", "content": "ok", "isError": false, "duration": 100}),
             ),
             (EventType::StreamTurnStart, json!({"turn": 1})),
             (
@@ -465,8 +465,8 @@ mod session_event_tests {
                 json!({"error": "e", "recoverable": true}),
             ),
             (
-                EventType::ErrorTool,
-                json!({"toolName": "t", "toolCallId": "tc", "error": "e"}),
+                EventType::ErrorCapability,
+                json!({"modelToolName": "execute", "invocationId": "tc", "error": "e"}),
             ),
             (
                 EventType::ErrorProvider,
@@ -556,7 +556,7 @@ mod type_guard_tests {
         assert!(EventType::MessageUser.is_message_type());
         assert!(EventType::MessageAssistant.is_message_type());
         assert!(EventType::MessageSystem.is_message_type());
-        assert!(!EventType::ToolCall.is_message_type());
+        assert!(!EventType::CapabilityInvocationStarted.is_message_type());
     }
 
     #[test]
@@ -576,16 +576,25 @@ mod type_guard_tests {
     #[test]
     fn error_guards() {
         assert!(EventType::ErrorAgent.is_error_type());
-        assert!(EventType::ErrorTool.is_error_type());
+        assert!(EventType::ErrorCapability.is_error_type());
         assert!(EventType::ErrorProvider.is_error_type());
-        assert!(!EventType::ToolResult.is_error_type());
+        assert!(!EventType::CapabilityInvocationCompleted.is_error_type());
     }
 
     #[test]
     fn tool_guards() {
-        assert_eq!(EventType::ToolCall, EventType::ToolCall);
-        assert_eq!(EventType::ToolResult, EventType::ToolResult);
-        assert_ne!(EventType::ToolCall, EventType::ToolResult);
+        assert_eq!(
+            EventType::CapabilityInvocationStarted,
+            EventType::CapabilityInvocationStarted
+        );
+        assert_eq!(
+            EventType::CapabilityInvocationCompleted,
+            EventType::CapabilityInvocationCompleted
+        );
+        assert_ne!(
+            EventType::CapabilityInvocationStarted,
+            EventType::CapabilityInvocationCompleted
+        );
     }
 
     #[test]

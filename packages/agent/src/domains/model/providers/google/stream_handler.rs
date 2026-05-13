@@ -5,7 +5,7 @@
 //! transitions, function call extraction, safety blocks, and token usage.
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
-//! shared `stream_common` module. Tool call handling remains provider-specific
+//! shared `stream_common` module. Capability invocation handling remains provider-specific
 //! because Gemini delivers complete function calls (not streamed argument deltas).
 
 use std::collections::HashSet;
@@ -22,19 +22,19 @@ use super::types::{GeminiPart, GeminiStreamChunk, HarmProbability, SafetyRating}
 pub struct StreamState {
     /// Shared delta accumulator for text, thinking, and token tracking.
     pub acc: StreamAccumulator,
-    /// Accumulated tool calls (Google-specific: complete, not streamed).
+    /// Accumulated capability invocations (Google-specific: complete, not streamed).
     pub tool_calls: Vec<ToolCallState>,
-    /// Counter for generating unique tool call IDs.
+    /// Counter for generating unique capability invocation IDs.
     pub tool_call_index: u32,
-    /// Unique prefix for tool call ID generation (Gemini doesn't provide IDs).
+    /// Unique prefix for capability invocation ID generation (Gemini doesn't provide IDs).
     pub unique_prefix: String,
-    /// Set of tool call IDs already completed (to avoid duplicates).
+    /// Set of capability invocation IDs already completed (to avoid duplicates).
     pub completed_tool_ids: HashSet<String>,
 }
 
-/// State for an in-progress tool call.
+/// State for an in-progress capability invocation.
 pub struct ToolCallState {
-    /// Generated tool call ID.
+    /// Generated capability invocation ID.
     pub id: String,
     /// Function name.
     pub name: String,
@@ -251,7 +251,7 @@ fn handle_finish(
         content.push(AssistantContent::text(&state.acc.accumulated_text));
     }
 
-    // Add tool calls as ToolUse content blocks
+    // Add capability invocations as ToolUse content blocks
     for tc in &state.tool_calls {
         let arguments: Map<String, serde_json::Value> = match &tc.args {
             serde_json::Value::Object(map) => map.clone(),
@@ -620,7 +620,7 @@ mod tests {
         let events = handle_finish("STOP", None, &mut state);
         match events.last().unwrap() {
             StreamEvent::Done { message, .. } => {
-                // Tool calls appear in the content as ToolUse blocks
+                // Capability invocations appear in the content as ToolUse blocks
                 let tool_uses: Vec<_> =
                     message.content.iter().filter(|c| c.is_tool_use()).collect();
                 assert_eq!(tool_uses.len(), 1);

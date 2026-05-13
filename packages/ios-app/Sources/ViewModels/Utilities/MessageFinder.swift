@@ -18,44 +18,42 @@ enum MessageFinder {
         messages.firstIndex(where: { $0.eventId == eventId })
     }
 
-    // MARK: - By Tool Call ID
+    // MARK: - By Capability Invocation ID
 
-    /// Find LAST message index with matching toolCallId in toolUse content.
-    static func lastIndexOfToolUse(toolCallId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find LAST message index with matching invocation id.
+    static func lastIndexOfCapabilityInvocation(id: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
-            if case .toolUse(let tool) = message.content {
-                return tool.toolCallId == toolCallId
+            if case .capabilityInvocation(let invocation) = message.content {
+                return invocation.id == id
             }
             return false
         })
     }
 
-    /// Find LAST message index with matching toolCallId in toolResult content.
-    static func lastIndexOfToolResult(toolCallId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find LAST orphan capability result with matching invocation id.
+    static func lastIndexOfCapabilityResult(id: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
-            if case .toolResult(let result) = message.content {
-                return result.toolCallId == toolCallId
+            if case .capabilityResult(let result) = message.content {
+                return result.id == id
             }
             return false
         })
     }
 
-    /// Check if a message with this toolCallId already exists (toolUse, toolResult, or subagent).
-    /// Used to prevent duplicate tool messages during catch-up + streaming.
-    /// Includes `.subagent` because reconstruction converts SpawnSubagent `.toolUse` → `.subagent`.
-    static func hasToolMessage(toolCallId: String, in messages: [ChatMessage]) -> Bool {
+    /// Check if a message with this invocation id already exists.
+    static func hasCapabilityInvocationMessage(invocationId: String, in messages: [ChatMessage]) -> Bool {
         messages.contains(where: { message in
             switch message.content {
-            case .toolUse(let tool):
-                return tool.toolCallId == toolCallId
-            case .toolResult(let result):
-                return result.toolCallId == toolCallId
+            case .capabilityInvocation(let invocation):
+                return invocation.id == invocationId
+            case .capabilityResult(let result):
+                return result.id == invocationId
             case .subagent(let data):
-                return data.toolCallId == toolCallId
+                return data.invocationId == invocationId
             case .askUserQuestion(let data):
-                return data.toolCallId == toolCallId
+                return data.invocationId == invocationId
             case .engineApproval(let data):
-                return data.toolCallId == toolCallId
+                return data.invocationId == invocationId
             default:
                 return false
             }
@@ -64,11 +62,11 @@ enum MessageFinder {
 
     // MARK: - By AskUserQuestion
 
-    /// Find LAST message index with matching toolCallId in askUserQuestion content.
-    static func lastIndexOfAskUserQuestion(toolCallId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find LAST message index with matching invocationId in askUserQuestion content.
+    static func lastIndexOfAskUserQuestion(invocationId: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
             if case .askUserQuestion(let data) = message.content {
-                return data.toolCallId == toolCallId
+                return data.invocationId == invocationId
             }
             return false
         })
@@ -76,11 +74,11 @@ enum MessageFinder {
 
     // MARK: - By EngineApproval
 
-    /// Find LAST message index with matching toolCallId in engineApproval content.
-    static func lastIndexOfEngineApproval(toolCallId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find LAST message index with matching invocationId in engineApproval content.
+    static func lastIndexOfEngineApproval(invocationId: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
             if case .engineApproval(let data) = message.content {
-                return data.toolCallId == toolCallId
+                return data.invocationId == invocationId
             }
             return false
         })
@@ -98,11 +96,13 @@ enum MessageFinder {
         })
     }
 
-    /// Find message index for SpawnSubagent tool by toolCallId.
-    static func indexOfSpawnSubagentTool(toolCallId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find message index for SpawnSubagent tool by invocationId.
+    static func indexOfSpawnSubagentTool(invocationId: String, in messages: [ChatMessage]) -> Int? {
         messages.firstIndex(where: { message in
-            if case .toolUse(let tool) = message.content {
-                return tool.toolCallId == toolCallId && tool.toolName == "SpawnSubagent"
+            if case .capabilityInvocation(let invocation) = message.content {
+                return invocation.id == invocationId
+                    && (invocation.identity.contractId == "agent::spawn_subagent"
+                        || invocation.identity.functionId == "agent::spawn_subagent")
             }
             return false
         })

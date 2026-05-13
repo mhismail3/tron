@@ -119,7 +119,7 @@ struct EngineApprovalChipView: View {
     VStack(spacing: 16) {
         EngineApprovalChipView(
             data: EngineApprovalToolData(
-                toolCallId: "call_1",
+                invocationId: "call_1",
                 params: EngineApprovalParams(
                     action: "Install ffmpeg via brew",
                     reason: "Needed for video processing",
@@ -132,7 +132,7 @@ struct EngineApprovalChipView: View {
 
         EngineApprovalChipView(
             data: EngineApprovalToolData(
-                toolCallId: "call_2",
+                invocationId: "call_2",
                 params: EngineApprovalParams(
                     action: "Deploy to production",
                     reason: "Release v2.0",
@@ -145,7 +145,7 @@ struct EngineApprovalChipView: View {
 
         EngineApprovalChipView(
             data: EngineApprovalToolData(
-                toolCallId: "call_3",
+                invocationId: "call_3",
                 params: EngineApprovalParams(
                     action: "Install ffmpeg",
                     reason: "Needed",
@@ -158,7 +158,7 @@ struct EngineApprovalChipView: View {
 
         EngineApprovalChipView(
             data: EngineApprovalToolData(
-                toolCallId: "call_4",
+                invocationId: "call_4",
                 params: EngineApprovalParams(
                     action: "Delete ~/project/",
                     reason: "Cleanup",
@@ -171,7 +171,7 @@ struct EngineApprovalChipView: View {
 
         EngineApprovalChipView(
             data: EngineApprovalToolData(
-                toolCallId: "call_5",
+                invocationId: "call_5",
                 params: EngineApprovalParams(
                     action: "Modify config",
                     reason: "Settings",

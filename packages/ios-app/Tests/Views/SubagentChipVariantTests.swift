@@ -22,7 +22,7 @@ final class SubagentChipVariantTests: XCTestCase {
         duration: Int? = nil
     ) -> SubagentToolData {
         SubagentToolData(
-            toolCallId: "call_1",
+            invocationId: "call_1",
             subagentSessionId: sessionId,
             task: "anything",
             model: "claude-sonnet-4",

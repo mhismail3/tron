@@ -1,6 +1,6 @@
 //! Converts [`Context`] messages to Gemini API format.
 //!
-//! Handles text, images, PDFs, tool calls (with `thoughtSignature`), and tool results.
+//! Handles text, images, PDFs, capability invocations (with `thoughtSignature`), and capability results.
 //! Sanitizes JSON schemas by removing unsupported properties (`additionalProperties`, `$schema`).
 
 use crate::domains::model::providers::id_remapping::{
@@ -17,11 +17,11 @@ use super::types::{
 
 /// Placeholder thought signature for historical function calls from other providers.
 ///
-/// When a tool call doesn't have a thought signature (e.g., it came from Anthropic
+/// When a capability invocation doesn't have a thought signature (e.g., it came from Anthropic
 /// or `OpenAI`), this placeholder is used to satisfy the Gemini 3 validator.
 const SKIP_THOUGHT_SIGNATURE: &str = "skip_thought_signature_validator";
 
-/// Collect all tool call IDs from assistant messages for cross-provider remapping.
+/// Collect all capability invocation IDs from assistant messages for cross-provider remapping.
 fn collect_tool_call_ids(messages: &[Message]) -> Vec<String> {
     messages
         .iter()
@@ -44,7 +44,7 @@ fn collect_tool_call_ids(messages: &[Message]) -> Vec<String> {
 
 /// Convert context messages to Gemini API content format.
 ///
-/// Builds a tool call ID mapping for cross-provider remapping, then converts
+/// Builds a capability invocation ID mapping for cross-provider remapping, then converts
 /// each message to `GeminiContent` with appropriate parts.
 pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
     let messages = &context.messages;
@@ -144,7 +144,7 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
     contents
 }
 
-/// Extract text from tool result message content.
+/// Extract text from capability result message content.
 fn extract_tool_result_text(content: &ToolResultMessageContent) -> String {
     match content {
         ToolResultMessageContent::Text(text) => text.clone(),
@@ -266,7 +266,7 @@ pub fn sanitize_schema_for_gemini(schema: &serde_json::Value) -> serde_json::Val
     }
 }
 
-/// Truncate tool result content if it exceeds the max length.
+/// Truncate capability result content if it exceeds the max length.
 fn truncate_tool_result(content: &str) -> String {
     if content.len() <= TOOL_RESULT_MAX_LENGTH {
         content.to_string()

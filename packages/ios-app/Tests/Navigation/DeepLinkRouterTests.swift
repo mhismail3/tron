@@ -13,19 +13,19 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleNotificationWithToolCallId_OpensNotification() {
-        // toolCallId takes priority — routes to notification inbox
+    func testHandleNotificationWithInvocationId_OpensNotification() {
+        // invocation id takes priority — routes to notification inbox
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
-            "toolCallId": "toolu_abc"
+            "invocationId": "cap_abc"
         ])
 
-        XCTAssertEqual(router.pendingIntent, .notification(toolCallId: "toolu_abc"))
+        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
     }
 
     func testHandleNotificationWithEventId_IgnoresEventId() {
-        // Scroll-to-tool functionality is disabled - eventId is ignored
+        // Scroll-to-capability functionality is disabled - eventId is ignored
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
@@ -36,12 +36,12 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleNotificationWithMissingSessionId_ButHasToolCallId() {
-        // toolCallId alone is enough to open the notification inbox
+    func testHandleNotificationWithMissingSessionId_ButHasInvocationId() {
+        // invocation id alone is enough to open the notification inbox
         let router = DeepLinkRouter()
-        router.handle(notificationPayload: ["toolCallId": "toolu_abc"])
+        router.handle(notificationPayload: ["invocationId": "cap_abc"])
 
-        XCTAssertEqual(router.pendingIntent, .notification(toolCallId: "toolu_abc"))
+        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
     }
 
     func testHandleNotificationWithNoIds() {
@@ -51,16 +51,16 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertNil(router.pendingIntent)
     }
 
-    func testHandleNotificationWithBothIds_ToolCallIdTakesPriority() {
-        // toolCallId takes priority over sessionId and eventId
+    func testHandleNotificationWithBothIds_InvocationIdTakesPriority() {
+        // invocation id takes priority over sessionId and eventId
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
-            "toolCallId": "toolu_abc",
+            "invocationId": "cap_abc",
             "eventId": "evt_xyz"
         ])
 
-        XCTAssertEqual(router.pendingIntent, .notification(toolCallId: "toolu_abc"))
+        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
     }
 
     // MARK: - URL Scheme Handling
@@ -73,10 +73,10 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleURLWithToolQuery_IgnoresToolQuery() {
-        // Scroll-to-tool functionality is disabled - tool query param is ignored
+    func testHandleURLWithCapabilityQuery_IgnoresCapabilityQuery() {
+        // Scroll-to-capability functionality is disabled - capability query param is ignored
         let router = DeepLinkRouter()
-        let url = URL(string: "tron://session/sess_123?tool=toolu_abc")!
+        let url = URL(string: "tron://session/sess_123?capability=cap_abc")!
 
         XCTAssertTrue(router.handle(url: url))
         // Should just open session without scroll target
@@ -84,7 +84,7 @@ final class DeepLinkRouterTests: XCTestCase {
     }
 
     func testHandleURLWithEventQuery_IgnoresEventQuery() {
-        // Scroll-to-tool functionality is disabled - event query param is ignored
+        // Scroll-to-capability functionality is disabled - event query param is ignored
         let router = DeepLinkRouter()
         let url = URL(string: "tron://session/sess_123?event=evt_xyz")!
 
@@ -173,9 +173,9 @@ final class DeepLinkRouterTests: XCTestCase {
     // MARK: - ScrollTarget Equatable
 
     func testScrollTargetEquatable() {
-        XCTAssertEqual(ScrollTarget.toolCall(id: "abc"), ScrollTarget.toolCall(id: "abc"))
-        XCTAssertNotEqual(ScrollTarget.toolCall(id: "abc"), ScrollTarget.toolCall(id: "xyz"))
-        XCTAssertNotEqual(ScrollTarget.toolCall(id: "abc"), ScrollTarget.event(id: "abc"))
+        XCTAssertEqual(ScrollTarget.capabilityInvocation(id: "abc"), ScrollTarget.capabilityInvocation(id: "abc"))
+        XCTAssertNotEqual(ScrollTarget.capabilityInvocation(id: "abc"), ScrollTarget.capabilityInvocation(id: "xyz"))
+        XCTAssertNotEqual(ScrollTarget.capabilityInvocation(id: "abc"), ScrollTarget.event(id: "abc"))
         XCTAssertEqual(ScrollTarget.bottom, ScrollTarget.bottom)
     }
 
@@ -183,8 +183,8 @@ final class DeepLinkRouterTests: XCTestCase {
 
     func testNavigationIntentEquatable() {
         XCTAssertEqual(
-            NavigationIntent.session(id: "sess_1", scrollTo: .toolCall(id: "abc")),
-            NavigationIntent.session(id: "sess_1", scrollTo: .toolCall(id: "abc"))
+            NavigationIntent.session(id: "sess_1", scrollTo: .capabilityInvocation(id: "abc")),
+            NavigationIntent.session(id: "sess_1", scrollTo: .capabilityInvocation(id: "abc"))
         )
         XCTAssertNotEqual(
             NavigationIntent.session(id: "sess_1", scrollTo: nil),

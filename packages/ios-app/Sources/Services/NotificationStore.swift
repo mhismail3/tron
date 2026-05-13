@@ -50,7 +50,7 @@ final class NotificationStore {
                     notifications[index] = NotificationDTO(
                         eventId: n.eventId,
                         sessionId: n.sessionId,
-                        toolCallId: n.toolCallId,
+                        invocationId: n.invocationId,
                         timestamp: n.timestamp,
                         title: n.title,
                         body: n.body,
@@ -96,7 +96,7 @@ final class NotificationStore {
                 return NotificationDTO(
                     eventId: n.eventId,
                     sessionId: n.sessionId,
-                    toolCallId: n.toolCallId,
+                    invocationId: n.invocationId,
                     timestamp: n.timestamp,
                     title: n.title,
                     body: n.body,

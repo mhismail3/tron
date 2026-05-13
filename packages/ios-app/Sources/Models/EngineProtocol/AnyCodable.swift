@@ -183,6 +183,17 @@ extension Dictionary where Key == String, Value == AnyCodable {
         return nil
     }
 
+    /// Get UInt64 value for protocol revision fields.
+    func uint64(_ key: String) -> UInt64? {
+        guard let raw = self[key]?.value else { return nil }
+        if let value = raw as? UInt64 { return value }
+        if let value = raw as? Int, value >= 0 { return UInt64(value) }
+        if let value = raw as? Double, value >= 0 {
+            return UInt64(exactly: value.rounded(.towardZero))
+        }
+        return nil
+    }
+
     /// Get double value for key. Widens from Int.
     func double(_ key: String) -> Double? {
         guard let raw = self[key]?.value else { return nil }

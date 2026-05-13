@@ -150,8 +150,8 @@ final class SessionEventForkableTests: XCTestCase {
 
     // MARK: - Non-forkable event types
 
-    func testToolCall_isNotForkable() {
-        let event = makeEvent(type: "tool.call", payload: [
+    func testCapabilityInvocation_isNotForkable() {
+        let event = makeEvent(type: "capability.invocation.started", payload: [
             "name": AnyCodable("Bash"),
             "arguments": AnyCodable(["command": "ls"]),
         ])
@@ -159,7 +159,7 @@ final class SessionEventForkableTests: XCTestCase {
     }
 
     func testToolResult_isNotForkable() {
-        let event = makeEvent(type: "tool.result", payload: [
+        let event = makeEvent(type: "capability.invocation.completed", payload: [
             "content": AnyCodable("file1.txt\nfile2.txt"),
             "isError": AnyCodable(false),
         ])

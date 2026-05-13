@@ -1,6 +1,6 @@
 //! Stream accumulator state and event handlers.
 //!
-//! `StreamState` accumulates content blocks (text, thinking, tool calls) as
+//! `StreamState` accumulates content blocks (text, thinking, capability invocations) as
 //! they arrive from the LLM stream. Two handler methods—`handle_normal_event`
 //! and `handle_drain_event`—classify each `StreamEvent` into a `StreamAction`
 //! that the caller (`process_stream`) uses to drive the select loop.
@@ -62,7 +62,7 @@ pub(super) struct StreamState {
     pub(super) thinking_signature: Option<String>,
     pub(super) stream_start: Instant,
     pub(super) ttft_ms: Option<u64>,
-    /// When true, skip all content events (text, thinking, tool calls) but keep
+    /// When true, skip all content events (text, thinking, capability invocations) but keep
     /// reading the stream to capture token usage from the Done event.
     pub(super) draining: bool,
 }
@@ -192,18 +192,22 @@ impl StreamState {
 
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
-                TronEvent::ToolCallGenerating {
+                TronEvent::CapabilityInvocationGenerating {
                     base: trace_context.base_event(session_id),
                     tool_call_id,
-                    tool_name: name,
+                    tool_name: name.clone(),
+                    capability_identity:
+                        crate::shared::events::CapabilityEventIdentity::with_model_tool(name),
                 },
                 counter,
             );
         } else {
-            let _ = emitter.emit(TronEvent::ToolCallGenerating {
+            let _ = emitter.emit(TronEvent::CapabilityInvocationGenerating {
                 base: trace_context.base_event(session_id),
                 tool_call_id,
-                tool_name: name,
+                tool_name: name.clone(),
+                capability_identity:
+                    crate::shared::events::CapabilityEventIdentity::with_model_tool(name),
             });
         }
     }
@@ -220,7 +224,7 @@ impl StreamState {
         self.current_tool_args.push_str(&arguments_delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
-                TronEvent::ToolCallArgumentDelta {
+                TronEvent::CapabilityInvocationArgumentDelta {
                     base: trace_context.base_event(session_id),
                     tool_call_id,
                     tool_name: self.current_tool_name.clone(),
@@ -229,7 +233,7 @@ impl StreamState {
                 counter,
             );
         } else {
-            let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
+            let _ = emitter.emit(TronEvent::CapabilityInvocationArgumentDelta {
                 base: trace_context.base_event(session_id),
                 tool_call_id,
                 tool_name: self.current_tool_name.clone(),
@@ -370,7 +374,7 @@ impl StreamState {
 
     /// Handle a stream event during normal (non-drain) processing.
     ///
-    /// Accumulates text, thinking, and tool call content. When a tool in
+    /// Accumulates text, thinking, and capability invocation content. When a tool in
     /// `turn_stopping_tools` completes, sets `self.draining = true` so the
     /// caller switches to `handle_drain_event` on subsequent events.
     pub(super) fn handle_normal_event(
@@ -474,7 +478,7 @@ impl StreamState {
                 if let Some(j) = journal {
                     if let Ok(serialized) = serde_json::to_string(&tool_call) {
                         if let Err(e) = j.append_delta("tool_use", &serialized) {
-                            tracing::warn!(session_id, error = %e, "journal write failed for tool call");
+                            tracing::warn!(session_id, error = %e, "journal write failed for capability invocation");
                         }
                     }
                 }
@@ -544,7 +548,7 @@ impl StreamState {
     }
 }
 
-/// Finalize an in-progress tool call from accumulated deltas.
+/// Finalize an in-progress capability invocation from accumulated deltas.
 pub(super) fn finalize_tool_call(
     tool_calls: &mut Vec<ToolCall>,
     current_id: &mut Option<String>,
@@ -565,7 +569,7 @@ pub(super) fn finalize_tool_call(
                     tool_call_id = %id,
                     error = %e,
                     args_preview = %preview,
-                    "malformed tool call arguments, using empty map"
+                    "malformed capability invocation arguments, using empty map"
                 );
                 Map::new()
             }

@@ -9,9 +9,9 @@
 //! - [`models`] — Model registry, ID constants, provider detection, capability queries
 //! - [`sse`] — Shared SSE line parser for HTTP streaming responses
 //! - [`retry`] — Stream retry with exponential backoff + jitter
-//! - [`tool_parsing`] — Robust JSON parsing for tool call arguments
+//! - [`tool_parsing`] — Robust JSON parsing for capability invocation arguments
 //! - [`context_composition`] — Context part ordering and stable/volatile grouping
-//! - [`id_remapping`] — Tool call ID format conversion between providers
+//! - [`id_remapping`] — Capability invocation ID format conversion between providers
 //! - [`stream_common`] — Shared [`stream_common::StreamAccumulator`] for delta processing
 //!
 //! # Architecture

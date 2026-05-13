@@ -294,7 +294,7 @@ impl AnthropicProvider {
                 info!(
                     elapsed_ms = %now_ms().saturating_sub(self.last_api_call_ms),
                     message_count = msg_count,
-                    "[CACHE] Cold — pruned old tool results"
+                    "[CACHE] Cold — pruned old capability results"
                 );
             } else {
                 debug!(

@@ -1,37 +1,56 @@
 use crate::shared::content::ToolResultContent;
-use crate::shared::events::TronEvent;
+use crate::shared::events::{CapabilityEventIdentity, TronEvent};
 use crate::shared::tools::ToolResultBody;
 use serde_json::json;
 
 use super::routed::{ProjectedEvent, session_scoped, set_opt};
 
+fn set_identity(data: &mut serde_json::Value, identity: &CapabilityEventIdentity) {
+    if identity.is_empty() {
+        return;
+    }
+    if let Ok(value) = serde_json::to_value(identity)
+        && let Some(fields) = value.as_object()
+        && let Some(target) = data.as_object_mut()
+    {
+        target.extend(fields.clone());
+    }
+}
+
 pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
-        TronEvent::ToolExecutionStart {
+        TronEvent::CapabilityInvocationStarted {
             tool_name,
             tool_call_id,
             arguments,
+            capability_identity,
             ..
         } => {
             let mut data = json!({
-                "toolName": tool_name,
-                "toolCallId": tool_call_id,
+                "modelToolName": tool_name,
+                "invocationId": tool_call_id,
             });
             set_opt(&mut data, "arguments", arguments);
-            Some(session_scoped(event, "agent.tool_start", Some(data)))
+            set_identity(&mut data, capability_identity);
+            Some(session_scoped(
+                event,
+                "capability.invocation.started",
+                Some(data),
+            ))
         }
-        TronEvent::ToolExecutionEnd {
+        TronEvent::CapabilityInvocationCompleted {
             tool_name,
             tool_call_id,
             duration,
             is_error,
             result,
+            capability_identity,
             ..
         } => {
             let success = !is_error.unwrap_or(false);
             let mut data = json!({
-                "toolName": tool_name,
-                "toolCallId": tool_call_id,
+                "modelToolName": tool_name,
+                "invocationId": tool_call_id,
                 "duration": duration,
                 "success": success,
             });
@@ -56,61 +75,104 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                     data["details"] = details.clone();
                 }
             }
-            Some(session_scoped(event, "agent.tool_end", Some(data)))
+            set_identity(&mut data, capability_identity);
+            Some(session_scoped(
+                event,
+                "capability.invocation.completed",
+                Some(data),
+            ))
         }
-        TronEvent::ToolExecutionUpdate {
+        TronEvent::CapabilityInvocationOutput {
             tool_call_id,
             update,
             ..
         } => Some(session_scoped(
             event,
-            "agent.tool_output",
+            "capability.invocation.output",
             Some(json!({
-                "toolCallId": tool_call_id,
+                "invocationId": tool_call_id,
                 "output": update,
             })),
         )),
-        TronEvent::ToolExecutionProgress {
+        TronEvent::CapabilityInvocationProgress {
             tool_call_id,
             message,
             percent,
+            capability_identity,
             ..
         } => {
-            let mut data = json!({ "toolCallId": tool_call_id });
+            let mut data = json!({ "invocationId": tool_call_id });
             set_opt(&mut data, "message", message);
             set_opt(&mut data, "percent", percent);
-            Some(session_scoped(event, "agent.tool_progress", Some(data)))
+            set_identity(&mut data, capability_identity);
+            Some(session_scoped(
+                event,
+                "capability.invocation.progress",
+                Some(data),
+            ))
         }
-        TronEvent::ToolUseBatch { tool_calls, .. } => Some(session_scoped(
+        TronEvent::CapabilityResolution {
+            tool_call_id,
+            model_tool_name,
+            requested_contract_id,
+            requested_implementation_id,
+            requested_function_id,
+            capability_identity,
+            ..
+        } => {
+            let mut data = json!({
+                "invocationId": tool_call_id,
+                "modelToolName": model_tool_name,
+            });
+            set_opt(&mut data, "requestedContractId", requested_contract_id);
+            set_opt(
+                &mut data,
+                "requestedImplementationId",
+                requested_implementation_id,
+            );
+            set_opt(&mut data, "requestedFunctionId", requested_function_id);
+            set_identity(&mut data, capability_identity);
+            Some(session_scoped(event, "capability.resolution", Some(data)))
+        }
+        TronEvent::CapabilityInvocationBatch { tool_calls, .. } => Some(session_scoped(
             event,
-            "agent.tool_use_batch",
+            "capability.invocation.batch",
             Some(json!({ "toolCalls": tool_calls })),
         )),
-        TronEvent::ToolCallArgumentDelta {
+        TronEvent::CapabilityInvocationArgumentDelta {
             tool_call_id,
             tool_name,
             arguments_delta,
             ..
         } => {
             let mut data = json!({
-                "toolCallId": tool_call_id,
+                "invocationId": tool_call_id,
                 "argumentsDelta": arguments_delta,
             });
-            set_opt(&mut data, "toolName", tool_name);
-            Some(session_scoped(event, "agent.toolcall_delta", Some(data)))
+            set_opt(&mut data, "modelToolName", tool_name);
+            Some(session_scoped(
+                event,
+                "capability.invocation.arguments_delta",
+                Some(data),
+            ))
         }
-        TronEvent::ToolCallGenerating {
+        TronEvent::CapabilityInvocationGenerating {
             tool_call_id,
             tool_name,
+            capability_identity,
             ..
-        } => Some(session_scoped(
-            event,
-            "agent.tool_generating",
-            Some(json!({
-                "toolCallId": tool_call_id,
-                "toolName": tool_name,
-            })),
-        )),
+        } => {
+            let mut data = json!({
+                "invocationId": tool_call_id,
+                "modelToolName": tool_name,
+            });
+            set_identity(&mut data, capability_identity);
+            Some(session_scoped(
+                event,
+                "capability.invocation.generating",
+                Some(data),
+            ))
+        }
         TronEvent::JobBackgrounded {
             job_id,
             reason,
@@ -124,7 +186,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "jobId": job_id,
                 "reason": reason,
                 "label": label,
-                "toolCallId": tool_call_id,
+                "invocationId": tool_call_id,
             })),
         )),
         _ => None,

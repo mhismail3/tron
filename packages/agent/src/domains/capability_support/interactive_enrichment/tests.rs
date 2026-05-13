@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 fn make_tool_call(name: &str, id: &str, args: Value) -> Value {
     json!({
-        "type": "tool.call",
+        "type": "capability.invocation.started",
         "toolName": name,
         "toolCallId": id,
         "payload": {

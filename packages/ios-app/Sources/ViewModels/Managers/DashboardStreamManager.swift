@@ -4,8 +4,8 @@ import SwiftUI
 
 /// Per-session ring buffer of recent activity lines for dashboard display.
 /// Capped at `maxStreamBufferLines` to bound memory. Text deltas coalesce into a single
-/// `.text` line until a non-text event arrives. Each tool call gets its own
-/// `.toolStart` line with summary, duration, and status.
+/// `.text` line until a non-text event arrives. Each capability invocation gets its own
+/// `.capabilityStart` line with summary, duration, and status.
 struct SessionStreamBuffer {
     private(set) var lines: [ActivityLine] = []
     private(set) var isActive: Bool = true
@@ -47,64 +47,60 @@ struct SessionStreamBuffer {
         }
     }
 
-    // MARK: - Tool Events
+    // MARK: - Capability Events
 
-    mutating func addToolStart(name: String, toolCallId: String? = nil, arguments: [String: AnyCodable]?) {
+    mutating func addCapabilityStart(identity: CapabilityIdentity, invocationId: String? = nil, arguments: [String: AnyCodable]?) {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let descriptor = ToolDescriptorCatalog.descriptor(for: name)
         let argsJSON = Self.serializeArguments(arguments)
-        let toolSummary = descriptor.summaryExtractor(argsJSON)
+        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelToolName ?? "capability"
 
         let line = ActivityLine(
-            kind: .toolStart,
+            kind: .capabilityStart,
             text: name,
-            icon: descriptor.icon,
-            iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
-            toolName: name,
-            displayName: descriptor.displayName,
-            summary: toolSummary.isEmpty ? nil : toolSummary,
+            icon: CapabilityPresentation.symbol(for: identity),
+            iconColor: CapabilityColor.fromCapability(identity),
+            modelToolName: name,
+            displayName: CapabilityPresentation.title(for: identity),
+            summary: argsJSON == "{}" ? nil : argsJSON,
             status: .running,
-            toolCallId: toolCallId
+            invocationId: invocationId,
+            capabilityIdentity: identity
         )
         appendLine(line)
     }
 
-    mutating func addToolEnd(name: String?, toolCallId: String? = nil, success: Bool, durationMs: Int? = nil) {
+    mutating func addCapabilityEnd(identity: CapabilityIdentity, invocationId: String? = nil, success: Bool, durationMs: Int? = nil) {
         guard isActive else { return }
         currentTextLineIndex = nil
 
         let formattedDuration = durationMs.map { Self.formatDuration($0) }
 
-        // 1. Match by toolCallId (exact — handles concurrent same-name tools)
-        if let toolCallId,
-           let idx = lines.lastIndex(where: { $0.kind == .toolStart && $0.toolCallId == toolCallId }) {
+        if let invocationId,
+           let idx = lines.lastIndex(where: { $0.kind == .capabilityStart && $0.invocationId == invocationId }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
             return
         }
 
-        // 2. Fall back to name matching (only matches still-running tools)
-        if let name,
-           let idx = lines.lastIndex(where: { $0.kind == .toolStart && $0.toolName == name && $0.status == .running }) {
+        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelToolName ?? "capability"
+        if let idx = lines.lastIndex(where: { $0.kind == .capabilityStart && $0.modelToolName == name && $0.status == .running }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
             return
         }
 
-        // 3. Fallback: create a new toolEnd line if no matching toolStart found
-        let toolName = name ?? "Tool"
-        let descriptor = ToolDescriptorCatalog.descriptor(for: toolName)
         let line = ActivityLine(
-            kind: .toolEnd,
-            text: toolName,
-            icon: descriptor.icon,
-            iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
-            toolName: toolName,
-            displayName: descriptor.displayName,
+            kind: .capabilityEnd,
+            text: name,
+            icon: CapabilityPresentation.symbol(for: identity),
+            iconColor: CapabilityColor.fromCapability(identity),
+            modelToolName: name,
+            displayName: CapabilityPresentation.title(for: identity),
             duration: formattedDuration,
-            status: success ? .success : .error
+            status: success ? .success : .error,
+            capabilityIdentity: identity
         )
         appendLine(line)
     }
@@ -130,7 +126,7 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        // Replace the most recent pending spawn line (like toolEnd replaces toolStart)
+        // Replace the most recent pending spawn line (like capabilityEnd replaces capabilityStart)
         if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
             lines[idx] = ActivityLine(
                 kind: .subagentDone,
@@ -214,9 +210,9 @@ struct SessionStreamBuffer {
         }
     }
 
-    // MARK: - Tool Metadata (delegates to ToolDescriptorCatalog)
+    // MARK: - Capability Metadata
 
-    /// Serialize AnyCodable arguments to JSON string for ToolDescriptorCatalog's summaryExtractor.
+    /// Serialize AnyCodable arguments to a compact JSON summary.
     static func serializeArguments(_ arguments: [String: AnyCodable]?) -> String {
         guard let args = arguments else { return "{}" }
         let dict = args.mapValues { $0.value }
@@ -235,7 +231,7 @@ struct SessionStreamBuffer {
 /// blocks post-completion events from leaking into cards.
 ///
 /// Text deltas are batched at ~60fps to avoid choppy re-renders. Structural
-/// events (tool start/end, completion) flush immediately for responsiveness.
+/// events (capability start/end, completion) flush immediately for responsiveness.
 @Observable
 @MainActor
 final class DashboardStreamManager {
@@ -297,12 +293,12 @@ final class DashboardStreamManager {
             handleTextDelta(sessionId: sessionId, delta: delta)
         case .thinkingDelta:
             handleThinkingDelta(sessionId: sessionId)
-        case .toolStart(let name, let id, let args):
-            handleToolStart(sessionId: sessionId, toolName: name, toolCallId: id, arguments: args)
-        case .toolEnd(let name, let id, let success, let ms):
-            handleToolEnd(sessionId: sessionId, toolName: name, toolCallId: id, success: success, durationMs: ms)
-        case .subagentSpawned(let task, let toolCallId, let subId, let spawnType):
-            handleSubagentSpawned(sessionId: sessionId, task: task, toolCallId: toolCallId, subagentSessionId: subId, spawnType: spawnType)
+        case .capabilityStart(let identity, let id, let args):
+            handleCapabilityStart(sessionId: sessionId, identity: identity, invocationId: id, arguments: args)
+        case .capabilityEnd(let identity, let id, let success, let ms):
+            handleCapabilityEnd(sessionId: sessionId, identity: identity, invocationId: id, success: success, durationMs: ms)
+        case .subagentSpawned(let task, let invocationId, let subId, let spawnType):
+            handleSubagentSpawned(sessionId: sessionId, task: task, invocationId: invocationId, subagentSessionId: subId, spawnType: spawnType)
         case .subagentCompleted(let turns, let durationMs, let subId, let spawnType):
             handleSubagentCompleted(sessionId: sessionId, turns: turns, durationMs: durationMs, subagentSessionId: subId, spawnType: spawnType)
         case .subagentFailed(let error, let subId, let spawnType):
@@ -331,19 +327,19 @@ final class DashboardStreamManager {
         flushSession(sessionId)
     }
 
-    func handleToolStart(sessionId: String, toolName: String, toolCallId: String? = nil, arguments: [String: AnyCodable]?) {
+    func handleCapabilityStart(sessionId: String, identity: CapabilityIdentity, invocationId: String? = nil, arguments: [String: AnyCodable]?) {
         guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addToolStart(name: toolName, toolCallId: toolCallId, arguments: arguments)
+        pendingBuffers[sessionId]?.addCapabilityStart(identity: identity, invocationId: invocationId, arguments: arguments)
         flushSession(sessionId)
     }
 
-    func handleToolEnd(sessionId: String, toolName: String?, toolCallId: String? = nil, success: Bool, durationMs: Int? = nil) {
+    func handleCapabilityEnd(sessionId: String, identity: CapabilityIdentity, invocationId: String? = nil, success: Bool, durationMs: Int? = nil) {
         guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addToolEnd(name: toolName, toolCallId: toolCallId, success: success, durationMs: durationMs)
+        pendingBuffers[sessionId]?.addCapabilityEnd(identity: identity, invocationId: invocationId, success: success, durationMs: durationMs)
         flushSession(sessionId)
     }
 
-    func handleSubagentSpawned(sessionId: String, task: String, toolCallId: String?, subagentSessionId: String, spawnType: String?) {
+    func handleSubagentSpawned(sessionId: String, task: String, invocationId: String?, subagentSessionId: String, spawnType: String?) {
         // Wire contract: server emits a known spawnType for every subagent
         // event. An unknown/missing value indicates a schema drift — log and
         // treat conservatively as `.toolAgent` so the activity still renders.
@@ -446,7 +442,7 @@ final class DashboardStreamManager {
     }
 
     /// Flush a single session's pending buffer to the observed `buffers` immediately.
-    /// Used for structural events (tool start/end, errors) that should appear instantly.
+    /// Used for structural events (capability start/end, errors) that should appear instantly.
     private func flushSession(_ sessionId: String) {
         dirtySessionIds.remove(sessionId)
         if let pending = pendingBuffers[sessionId] {

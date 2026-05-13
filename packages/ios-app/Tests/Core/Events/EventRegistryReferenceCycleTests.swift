@@ -66,8 +66,8 @@ struct EventRegistryReferenceCycleTests {
         "TextDeltaPlugin",
         "TurnStartPlugin",
         "TurnEndPlugin",
-        "ToolStartPlugin",
-        "ToolEndPlugin",
+        "CapabilityInvocationStartedPlugin",
+        "CapabilityInvocationCompletedPlugin",
         "SubagentSpawnedPlugin",
     ]
 

@@ -479,7 +479,7 @@ done
     }
 
     // -----------------------------------------------------------------------
-    // Edge case: error result from tool call
+    // Edge case: error result from capability invocation
     // -----------------------------------------------------------------------
 
     #[tokio::test]

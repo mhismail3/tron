@@ -60,10 +60,10 @@ pub struct ClaudeRecord {
     /// Git branch at time of record.
     pub git_branch: Option<String>,
 
-    /// Tool-use ID being responded to (on tool-result `user` records).
+    /// Tool-use ID being responded to (on capability-result `user` records).
     pub source_tool_use_id: Option<String>,
 
-    /// UUID of the assistant record that issued the tool call.
+    /// UUID of the assistant record that issued the capability invocation.
     #[serde(rename = "sourceToolAssistantUUID")]
     pub source_tool_assistant_uuid: Option<String>,
 
@@ -157,7 +157,7 @@ impl ClaudeRecord {
         RecordKind::parse(&self.record_type)
     }
 
-    /// Whether this is a user record containing a tool result.
+    /// Whether this is a user record containing a capability result.
     pub fn is_tool_result(&self) -> bool {
         if self.kind() != RecordKind::User {
             return false;

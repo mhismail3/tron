@@ -10,7 +10,7 @@ extension ChatViewModel: TurnLifecycleContext {
     // Most properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
     // - currentToolMessages: [UUID: ChatMessage]
-    // - currentTurnToolCalls: [ToolCallRecord]
+    // - currentTurnCapabilityInvocations: [CapabilityInvocationRecord]
     // - askUserQuestionCalledInTurn: Bool (via askUserQuestionState)
     // - thinkingMessageId: UUID?
     // - turnStartMessageIndex: Int?

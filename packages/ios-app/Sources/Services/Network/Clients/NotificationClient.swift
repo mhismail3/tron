@@ -60,7 +60,7 @@ private struct NotificationMarkAllReadParams: Encodable {
 struct NotificationDTO: Codable, Identifiable {
     let eventId: String
     let sessionId: String
-    let toolCallId: String?
+    let invocationId: String?
     let timestamp: String
     let title: String
     let body: String

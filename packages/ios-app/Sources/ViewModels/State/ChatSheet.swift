@@ -61,8 +61,8 @@ enum ChatSheet: Identifiable, Equatable {
     case thinkingDetail(String)
     case providerErrorDetail(ProviderErrorDetailData)
 
-    // Command tool detail
-    case commandToolDetail(CommandToolChipData)
+    // Capability detail
+    case capabilityInvocationDetail(CapabilityInvocationData)
 
 
     var id: String {
@@ -86,11 +86,11 @@ enum ChatSheet: Identifiable, Equatable {
         case .subagentResultsList:
             return "subagentResultsList"
         case .notifyApp(let data):
-            return "notifyApp-\(data.toolCallId)"
+            return "notifyApp-\(data.invocationId)"
         case .thinkingDetail:
             return "thinking"
-        case .commandToolDetail(let data):
-            return "commandTool-\(data.id)"
+        case .capabilityInvocationDetail(let data):
+            return "capability-\(data.id)"
         case .providerErrorDetail:
             return "providerError"
         }
@@ -119,10 +119,10 @@ enum ChatSheet: Identifiable, Equatable {
         case (.subagentResultsList, .subagentResultsList):
             return true
         case (.notifyApp(let data1), .notifyApp(let data2)):
-            return data1.toolCallId == data2.toolCallId
+            return data1.invocationId == data2.invocationId
         case (.thinkingDetail(let content1), .thinkingDetail(let content2)):
             return content1 == content2
-        case (.commandToolDetail(let data1), .commandToolDetail(let data2)):
+        case (.capabilityInvocationDetail(let data1), .capabilityInvocationDetail(let data2)):
             return data1.id == data2.id
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2

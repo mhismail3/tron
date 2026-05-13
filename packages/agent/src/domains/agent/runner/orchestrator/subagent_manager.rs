@@ -154,7 +154,7 @@ pub struct SubagentManager {
     /// Worktree coordinator for subagent isolation (each subagent gets its own worktree).
     worktree_coordinator: std::sync::OnceLock<Arc<crate::domains::worktree::WorktreeCoordinator>>,
     /// Engine host used by child agents to resolve live provider tool schemas
-    /// and route tool execution through canonical capabilities.
+    /// and route capability invocation through canonical capabilities.
     engine_host: std::sync::OnceLock<crate::engine::EngineHostHandle>,
     /// Self-reference for passing to child agents (set after wrapping in Arc).
     self_ref: std::sync::OnceLock<std::sync::Weak<Self>>,

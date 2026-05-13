@@ -28,7 +28,7 @@ pub const DEFAULT_MODEL: &str = "gpt-5.5";
 /// Default max output tokens for unknown models.
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 128_000;
 
-/// Maximum length for tool result output strings (16 KB).
+/// Maximum length for capability result output strings (16 KB).
 ///
 /// The Codex endpoint has a per-output size limit. Results exceeding this
 /// threshold are truncated with a `[truncated]` marker.
@@ -2444,7 +2444,7 @@ pub enum ResponsesInputItem {
         /// JSON-encoded arguments.
         arguments: String,
     },
-    /// Function call output (tool result).
+    /// Function call output (capability result).
     #[serde(rename = "function_call_output")]
     FunctionCallOutput {
         /// Call ID this result corresponds to.
@@ -2637,7 +2637,7 @@ pub enum SseEventType {
     /// Streaming text content.
     #[serde(rename = "response.output_text.delta")]
     OutputTextDelta,
-    /// New output item (tool call or reasoning started).
+    /// New output item (capability invocation or reasoning started).
     #[serde(rename = "response.output_item.added")]
     OutputItemAdded,
     /// Output item finished.

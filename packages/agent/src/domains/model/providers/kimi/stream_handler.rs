@@ -1,7 +1,7 @@
 //! Kimi SSE stream handler — `chat.completion.chunk` → `StreamEvent`.
 //!
 //! Deserializes OpenAI-format SSE chunks and maps them to Tron's `StreamEvent`
-//! types. Handles text, reasoning content, and tool call streaming.
+//! types. Handles text, reasoning content, and capability invocation streaming.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -38,22 +38,22 @@ pub struct ChunkDelta {
     pub content: Option<String>,
     /// Reasoning/thinking content (mutually exclusive with `content` per delta).
     pub reasoning_content: Option<String>,
-    /// Tool calls being constructed.
+    /// Capability invocations being constructed.
     pub tool_calls: Option<Vec<ChunkToolCall>>,
 }
 
-/// A tool call delta within a streaming chunk.
+/// A capability invocation delta within a streaming chunk.
 #[derive(Debug, Deserialize)]
 pub struct ChunkToolCall {
-    /// Tool call index (for multiple concurrent tool calls).
+    /// Capability invocation index (for multiple concurrent capability invocations).
     pub index: u32,
-    /// Tool call ID (present in the first delta for this tool call).
+    /// Capability invocation ID (present in the first delta for this capability invocation).
     pub id: Option<String>,
     /// Function details.
     pub function: Option<ChunkToolCallFunction>,
 }
 
-/// Function details within a tool call delta.
+/// Function details within a capability invocation delta.
 #[derive(Debug, Deserialize)]
 pub struct ChunkToolCallFunction {
     /// Function name (present in the first delta).
@@ -73,7 +73,7 @@ pub struct ChunkUsage {
 
 // ─── Stream state ──────────────────────────────────────────────────────────
 
-/// Active tool call being accumulated.
+/// Active capability invocation being accumulated.
 #[derive(Debug, Clone)]
 struct ActiveToolCall {
     id: String,
@@ -92,7 +92,7 @@ pub struct KimiStreamState {
     thinking_text: String,
     /// Accumulated text content.
     text_content: String,
-    /// Active tool calls by index.
+    /// Active capability invocations by index.
     active_tools: Vec<Option<ActiveToolCall>>,
     /// Token usage from the final chunk.
     usage: Option<TokenUsage>,
@@ -181,9 +181,9 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
             });
         }
 
-        // Process tool calls
+        // Process capability invocations
         if let Some(ref tool_calls) = choice.delta.tool_calls {
-            // End thinking/text blocks before tool calls
+            // End thinking/text blocks before capability invocations
             if state.in_thinking {
                 state.in_thinking = false;
                 let thinking = std::mem::take(&mut state.thinking_text);
@@ -214,7 +214,7 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 }
 
                 if let Some(ref id) = tc.id {
-                    // First delta for this tool call — start
+                    // First delta for this capability invocation — start
                     let name = tc
                         .function
                         .as_ref()
@@ -301,7 +301,7 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
         });
     }
 
-    // End any open tool calls
+    // End any open capability invocations
     for slot in &mut state.active_tools {
         if let Some(active) = slot.take() {
             let arguments: Map<String, Value> =
@@ -433,7 +433,7 @@ mod tests {
     fn tool_call_stream() {
         let mut state = KimiStreamState::new();
 
-        // First chunk: tool call start with name
+        // First chunk: capability invocation start with name
         let chunk = ChatCompletionChunk {
             choices: vec![ChunkChoice {
                 delta: ChunkDelta {
@@ -655,7 +655,7 @@ mod tests {
         // Thinking
         let _ = process_chunk(&thinking_chunk("planning..."), &mut state);
 
-        // Tool call — should end thinking first
+        // Capability invocation — should end thinking first
         let chunk = ChatCompletionChunk {
             choices: vec![ChunkChoice {
                 delta: ChunkDelta {
@@ -742,11 +742,11 @@ mod tests {
         };
         let events = process_chunk(&chunk3, &mut state);
 
-        let tool_end = events
+        let capability_completed = events
             .iter()
             .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
-        assert!(tool_end.is_some());
-        if let StreamEvent::ToolCallEnd { tool_call } = tool_end.unwrap() {
+        assert!(capability_completed.is_some());
+        if let StreamEvent::ToolCallEnd { tool_call } = capability_completed.unwrap() {
             assert_eq!(tool_call.name, "execute");
             assert_eq!(tool_call.arguments["cmd"], "ls");
         }

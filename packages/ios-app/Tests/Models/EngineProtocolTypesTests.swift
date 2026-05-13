@@ -161,10 +161,14 @@ final class SessionTypesTests: XCTestCase {
             "role": "assistant",
             "content": "Hello, how can I help?",
             "timestamp": "2026-01-26T00:00:00.000Z",
-            "toolUse": [
+            "capabilityInvocations": [
                 {
-                    "toolName": "Read",
-                    "toolCallId": "toolu_123",
+                    "id": "toolu_123",
+                    "identity": {
+                        "modelToolName": "execute",
+                        "contractId": "filesystem::read_file",
+                        "functionId": "filesystem::read_file"
+                    },
                     "input": {"file_path": "/test.txt"},
                     "result": "file contents",
                     "isError": false
@@ -177,8 +181,9 @@ final class SessionTypesTests: XCTestCase {
 
         XCTAssertEqual(message.id, "msg_123")
         XCTAssertEqual(message.role, "assistant")
-        XCTAssertEqual(message.toolUse?.count, 1)
-        XCTAssertEqual(message.toolUse?[0].toolName, "Read")
+        XCTAssertEqual(message.capabilityInvocations?.count, 1)
+        XCTAssertEqual(message.capabilityInvocations?[0].id, "toolu_123")
+        XCTAssertEqual(message.capabilityInvocations?[0].identity?.contractId, "filesystem::read_file")
     }
 }
 
@@ -629,7 +634,7 @@ final class ModelTypesExtendedTests: XCTestCase {
 @MainActor
 final class EngineProtocolBaseTypesTests: XCTestCase {
 
-    func testEngineInvokeEncoding() throws {
+    func testEngineFunctionCallEncoding() throws {
         struct TestParams: Encodable {
             let name: String
             let value: Int
@@ -660,7 +665,7 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         XCTAssertEqual(payload["value"] as? Int, 42)
     }
 
-    func testEngineInvokeResponseDecoding() throws {
+    func testEngineFunctionCallResponseDecoding() throws {
         struct TestResult: Decodable {
             let data: String
         }
@@ -675,7 +680,7 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         {"type":"response","id":"123","ok":true,"result":{"catalogRevision":7,"child":{"value":{"data":"hello"}}},"error":null}
         """.data(using: .utf8)!
 
-        let response = try JSONDecoder().decode(Response<EngineInvokeEnvelope<TestResult>>.self, from: json)
+        let response = try JSONDecoder().decode(Response<EngineFunctionCallEnvelope<TestResult>>.self, from: json)
 
         XCTAssertEqual(response.id, "123")
         XCTAssertTrue(response.ok)

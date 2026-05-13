@@ -13,11 +13,11 @@ struct DiagnosticsBundleBuilderTests {
             parentId: "parent-raw",
             sessionId: "session-raw",
             workspaceId: "workspace-raw",
-            type: "tool.call",
+            type: "capability.invocation.started",
             timestamp: "2026-04-29T21:00:00Z",
             sequence: 1,
             payload: [
-                "toolName": AnyCodable("Read"),
+                "modelToolName": AnyCodable("Read"),
                 "durationMs": AnyCodable(42),
                 "arguments": AnyCodable(#"{"path":"/Users/alice/project/file.swift"}"#),
                 "prompt": AnyCodable("secret prompt body"),
@@ -27,7 +27,7 @@ struct DiagnosticsBundleBuilderTests {
 
         let summary = DiagnosticsEventSanitizer.summarize(event)
         #expect(summary.idHash != "event-raw")
-        #expect(summary.payload["toolName"]?.stringValue == "Read")
+        #expect(summary.payload["modelToolName"]?.stringValue == "Read")
         #expect(summary.payload["durationMs"]?.intValue == 42)
         #expect(summary.payload["arguments"] == nil)
         #expect(summary.payload["prompt"] == nil)
@@ -41,7 +41,7 @@ struct DiagnosticsBundleBuilderTests {
             parentId: nil,
             sessionId: "session-raw",
             workspaceId: "workspace-raw",
-            type: "error.tool",
+            type: "error.capability",
             timestamp: "2026-04-29T21:00:00Z",
             sequence: 2,
             payload: [
@@ -186,11 +186,11 @@ struct DiagnosticsBundleBuilderTests {
             parentId: sequence == 0 ? nil : "event-\(sequence - 1)",
             sessionId: "session-raw",
             workspaceId: "workspace-raw",
-            type: "tool.call",
+            type: "capability.invocation.started",
             timestamp: "2026-04-29T21:00:00Z",
             sequence: sequence,
             payload: [
-                "toolName": AnyCodable("Read"),
+                "modelToolName": AnyCodable("Read"),
                 "prompt": AnyCodable("secret prompt body"),
                 "arguments": AnyCodable(#"{"path":"/Users/alice/project/file.swift"}"#),
             ]

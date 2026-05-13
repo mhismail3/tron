@@ -47,7 +47,7 @@ extension ChatViewModel {
         // Populate SubagentState from reconstructed subagent results
         for result in state.subagentResults {
             var data = SubagentToolData(
-                toolCallId: result.subagentSessionId,
+                invocationId: result.subagentSessionId,
                 subagentSessionId: result.subagentSessionId,
                 task: result.task,
                 model: nil,
@@ -63,21 +63,23 @@ extension ChatViewModel {
             subagentState.populateFromReconstruction(data)
         }
 
-        // Convert SpawnSubagent tool messages to subagent chips using lifecycle events
+        // Convert subagent capability invocations to subagent chips using lifecycle events.
         guard !state.subagentSpawns.isEmpty else { return }
 
-        var spawnByToolCallId: [String: ReconstructedState.SubagentSpawnInfo] = [:]
+        var spawnByInvocationId: [String: ReconstructedState.SubagentSpawnInfo] = [:]
         for spawn in state.subagentSpawns {
-            if let toolCallId = spawn.toolCallId {
-                spawnByToolCallId[toolCallId] = spawn
+            if let invocationId = spawn.invocationId {
+                spawnByInvocationId[invocationId] = spawn
             }
         }
 
         for i in allReconstructedMessages.indices {
-            guard case .toolUse(let tool) = allReconstructedMessages[i].content,
-                  tool.toolName == "SpawnSubagent" else { continue }
+            guard case .capabilityInvocation(let invocation) = allReconstructedMessages[i].content,
+                  invocation.identity.contractId == "agent::spawn_subagent"
+                    || invocation.identity.functionId == "agent::spawn_subagent"
+            else { continue }
 
-            guard let spawn = spawnByToolCallId[tool.toolCallId] else { continue }
+            guard let spawn = spawnByInvocationId[invocation.id] else { continue }
             let sessionId = spawn.subagentSessionId
 
             let completion = state.subagentCompletions[sessionId]
@@ -85,7 +87,7 @@ extension ChatViewModel {
             let status: SubagentStatus = completion != nil ? .completed : (failure != nil ? .failed : .running)
 
             var subagentData = SubagentToolData(
-                toolCallId: tool.toolCallId,
+                invocationId: invocation.id,
                 subagentSessionId: sessionId,
                 task: spawn.task,
                 model: completion?.model ?? spawn.model,
@@ -262,4 +264,3 @@ extension ChatViewModel {
         appendToMessages(message)
     }
 }
-

@@ -42,8 +42,8 @@ final class EventTypeRegistryTests: XCTestCase {
         XCTAssertTrue(t.isMetadataOnly)
     }
 
-    func testToolCallClassification() {
-        let t = PersistedEventType.toolCall
+    func testCapabilityInvocationClassification() {
+        let t = PersistedEventType.capabilityInvocationStarted
         XCTAssertTrue(t.rendersAsChatMessage)
         XCTAssertTrue(t.affectsSessionState)
         XCTAssertFalse(t.isStreamingEvent)
@@ -51,7 +51,7 @@ final class EventTypeRegistryTests: XCTestCase {
     }
 
     func testToolResultClassification() {
-        let t = PersistedEventType.toolResult
+        let t = PersistedEventType.capabilityInvocationCompleted
         XCTAssertTrue(t.rendersAsChatMessage)
         XCTAssertTrue(t.affectsSessionState)
         XCTAssertFalse(t.isStreamingEvent)
@@ -134,7 +134,7 @@ final class EventTypeRegistryTests: XCTestCase {
         XCTAssertEqual(snapshot["stream.text_delta"]?["rendersAsChatMessage"] as? Bool, false)
         XCTAssertEqual(snapshot["file.read"]?["isMetadataOnly"] as? Bool, true)
         XCTAssertEqual(snapshot["session.end"]?["rendersAsChatMessage"] as? Bool, false)
-        XCTAssertEqual(snapshot["tool.call"]?["affectsSessionState"] as? Bool, true)
+        XCTAssertEqual(snapshot["capability.invocation.started"]?["affectsSessionState"] as? Bool, true)
         XCTAssertEqual(snapshot["error.agent"]?["rendersAsChatMessage"] as? Bool, true)
         XCTAssertEqual(snapshot["error.agent"]?["affectsSessionState"] as? Bool, true)
         XCTAssertEqual(snapshot["compact.boundary"]?["rendersAsChatMessage"] as? Bool, true)

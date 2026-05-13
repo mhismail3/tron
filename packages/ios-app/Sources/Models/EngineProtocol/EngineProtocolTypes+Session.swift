@@ -156,12 +156,12 @@ struct HistoryMessage: Decodable, Identifiable {
     let role: String
     let content: String
     let timestamp: String
-    let toolUse: [ToolUseInfo]?
+    let capabilityInvocations: [CapabilityInvocationInfo]?
 }
 
-struct ToolUseInfo: Decodable {
-    let toolName: String
-    let toolCallId: String
+struct CapabilityInvocationInfo: Decodable {
+    let id: String
+    let identity: CapabilityIdentity?
     let input: [String: AnyCodable]?
     let result: String?
     let isError: Bool?

@@ -37,7 +37,7 @@ pub struct EngineToolTarget {
     pub stops_turn: bool,
     /// Whether this tool is interactive.
     pub is_interactive: bool,
-    /// How this tool is scheduled relative to other tool calls in the same turn.
+    /// How this tool is scheduled relative to other capability invocations in the same turn.
     pub execution_mode: ExecutionMode,
 }
 
@@ -177,7 +177,7 @@ pub(crate) async fn resolve_provider_tools(
     })
 }
 
-/// Resolve the canonical engine function for a model tool call.
+/// Resolve the canonical engine function for a model capability invocation.
 /// List model-facing capability ids visible to an agent actor before profile
 /// policy filtering. Used for skill deny-list expansion.
 pub(crate) async fn list_model_tool_names(

@@ -4,8 +4,8 @@ import Foundation
 
 /// Represents a scroll target within a session
 enum ScrollTarget: Equatable {
-    /// Scroll to a specific tool call by ID
-    case toolCall(id: String)
+    /// Scroll to a specific capability invocation by ID
+    case capabilityInvocation(id: String)
     /// Scroll to a specific event by ID
     case event(id: String)
     /// Scroll to bottom (default behavior)
@@ -23,7 +23,7 @@ enum NavigationIntent: Equatable {
     /// Navigate to voice notes
     case voiceNotes
     /// Open the notification inbox, optionally auto-opening a specific notification
-    case notification(toolCallId: String)
+    case notification(invocationId: String)
     /// Process pending shared content from Share Extension
     case share
 }
@@ -52,10 +52,10 @@ final class DeepLinkRouter {
     /// Handle notification payload from AppDelegate
     /// - Parameter notificationPayload: The userInfo dictionary from the notification
     func handle(notificationPayload: [AnyHashable: Any]) {
-        // If toolCallId is present, open the notification inbox with that notification
-        if let toolCallId = notificationPayload["toolCallId"] as? String {
-            pendingIntent = .notification(toolCallId: toolCallId)
-            TronLogger.shared.info("Deep link intent set: notification toolCallId=\(toolCallId)", category: .notification)
+        // If invocationId is present, open the notification inbox with that notification.
+        if let invocationId = notificationPayload["invocationId"] as? String {
+            pendingIntent = .notification(invocationId: invocationId)
+            TronLogger.shared.info("Deep link intent set: notification invocationId=\(invocationId)", category: .notification)
             return
         }
 
@@ -119,7 +119,7 @@ final class DeepLinkRouter {
 
     /// Handle session URL (tron://session/{sessionId})
     /// The session ID is the first path component after the host.
-    /// NOTE: Scroll-to-tool functionality (via ?tool= or ?event= query params) is disabled for now.
+    /// NOTE: Scroll-to-capability functionality (via ?capability= or ?event= query params) is disabled for now.
     private func handleSessionURL(url: URL) -> Bool {
         // Path components include "/" as first element, then the actual path segments
         // e.g., tron://session/sess_123 has path="/sess_123", pathComponents=["/", "sess_123"]
@@ -130,8 +130,8 @@ final class DeepLinkRouter {
             return false
         }
 
-        // NOTE: Scroll-to-tool functionality is disabled for now due to complexity.
-        // Query params like ?tool= and ?event= are ignored.
+        // NOTE: Scroll-to-capability functionality is disabled for now due to complexity.
+        // Query params like ?capability= and ?event= are ignored.
         pendingIntent = .session(id: sessionId, scrollTo: nil)
         TronLogger.shared.info("Deep link intent set: session=\(sessionId)", category: .notification)
         return true

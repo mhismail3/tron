@@ -38,7 +38,7 @@ use crate::domains::worktree::types::ConflictedFile;
 
 /// Grace period (ms) granted to the subagent to drain its turn after
 /// wall-clock cancellation — the turn-abort path needs to unwind
-/// model/tool calls, emit the final event, and release the tracker
+/// model/capability invocations, emit the final event, and release the tracker
 /// notify before `reconcile_completed_merge` runs. Without this drain
 /// the reconciler may observe an in-flight merge state.
 const CANCEL_DRAIN_MS: u64 = 30_000;

@@ -44,7 +44,7 @@ use crate::domains::import::tree::linearize;
 ///
 /// Warnings never block the import; they're surfaced to the user so they
 /// know the resulting session may differ from the source file (missing
-/// tool results, dropped records, etc.).
+/// capability results, dropped records, etc.).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportWarningKind {
     /// A line in the source JSONL failed to parse.
@@ -53,7 +53,7 @@ pub enum ImportWarningKind {
         line_number: usize,
     },
     /// A `tool_result` block references a `tool_use_id` that never
-    /// appeared as a tool call. The result will be written with no
+    /// appeared as a capability invocation. The result will be written with no
     /// matching call — reconstruction may render it as an orphan.
     OrphanToolResult {
         /// The `tool_use_id` that had no matching call.
@@ -96,7 +96,7 @@ impl ImportWarning {
 
     fn orphan_tool_result(tool_call_id: String) -> Self {
         let message = format!(
-            "Tool result references tool_use_id '{tool_call_id}' but no matching tool call was found in the session."
+            "Capability result references tool_use_id '{tool_call_id}' but no matching capability invocation was found in the session."
         );
         Self {
             kind: ImportWarningKind::OrphanToolResult { tool_call_id },
@@ -106,7 +106,7 @@ impl ImportWarning {
 
     fn orphan_tool_use(tool_call_id: String) -> Self {
         let message = format!(
-            "Tool call '{tool_call_id}' has no matching result — the turn may have been interrupted."
+            "Capability invocation '{tool_call_id}' has no matching result — the turn may have been interrupted."
         );
         Self {
             kind: ImportWarningKind::OrphanToolUse { tool_call_id },
@@ -202,7 +202,7 @@ pub(crate) fn validate_and_prepare(path: &Path) -> Result<ValidatedImport, Impor
         return Err(ImportError::EmptySession);
     }
 
-    // Detect orphan tool calls / results BEFORE transform, so the
+    // Detect orphan capability invocations / results BEFORE transform, so the
     // warnings carry the original `tool_use_id`s without depending on
     // transformer output ordering.
     warnings.extend(detect_tool_orphans(&assembled));

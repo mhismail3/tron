@@ -35,7 +35,7 @@ impl InProcessFunctionHandler for McpToolFunctionHandler {
         let tron_result = mcp_result_to_tron_result(&result, &self.server, &self.tool);
         serde_json::to_value(tron_result).map_err(|error| {
             crate::engine::EngineError::HandlerFailed(format!(
-                "failed to serialize MCP tool result: {error}"
+                "failed to serialize MCP capability result: {error}"
             ))
         })
     }

@@ -14,9 +14,9 @@ import SwiftUI
 /// Standalone section headers (no container background) match that x via
 /// `iconColumnLeading`.
 ///
-/// Sibling section views (SystemPromptSection, ToolsSection, RulesSection,
-/// CollapsibleSkillsSection) also reference these constants so the alignment
-/// cannot drift if any single value is changed.
+/// Sibling section views (SystemPromptSection, CapabilitiesSection,
+/// RulesSection, CollapsibleSkillsSection) also reference these constants so the
+/// alignment cannot drift if any single value is changed.
 enum ContextLayout {
     static let outerPadding: CGFloat = 16
     static let rowInnerPadding: CGFloat = 12
@@ -153,7 +153,7 @@ struct ContextDetailView: View {
                     }
 
                     if snapshot.breakdown.tools > 0 {
-                        ToolsSection(
+                        CapabilitiesSection(
                             toolsContent: snapshot.toolsContent,
                             tokens: snapshot.breakdown.tools
                         )

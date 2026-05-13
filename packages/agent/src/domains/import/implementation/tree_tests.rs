@@ -201,7 +201,7 @@ fn turn_assignment_tool_results_inherit_turn() {
 
     let result = linearize(records);
     assert_eq!(result.len(), 3);
-    assert_eq!(result[2].turn, 1); // tool result inherits turn
+    assert_eq!(result[2].turn, 1); // capability result inherits turn
 }
 
 #[test]

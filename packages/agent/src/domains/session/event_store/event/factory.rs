@@ -295,7 +295,7 @@ mod tests {
 
         let evt3 = chain
             .append(
-                EventType::ToolCall,
+                EventType::CapabilityInvocationStarted,
                 serde_json::json!({"toolName": "process::run"}),
             )
             .unwrap();

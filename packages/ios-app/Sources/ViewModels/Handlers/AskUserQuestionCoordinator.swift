@@ -83,11 +83,11 @@ final class AskUserQuestionCoordinator {
             submittedAt: DateParser.now
         )
 
-        context.logInfo("Preparing AskUserQuestion submission for toolCallId=\(data.toolCallId)")
+        context.logInfo("Preparing AskUserQuestion submission for invocationId=\(data.invocationId)")
 
         // Update the chip status to .answered immediately
         updateMessageToAnswered(
-            toolCallId: data.toolCallId,
+            invocationId: data.invocationId,
             result: result,
             answers: answers,
             context: context
@@ -151,7 +151,7 @@ final class AskUserQuestionCoordinator {
                data.status == .pending {
                 data.status = .superseded
                 context.messages[i].content = .askUserQuestion(data)
-                context.logInfo("Marked AskUserQuestion \(data.toolCallId) as superseded")
+                context.logInfo("Marked AskUserQuestion \(data.invocationId) as superseded")
             }
         }
     }
@@ -159,12 +159,12 @@ final class AskUserQuestionCoordinator {
     // MARK: - Private Helpers
 
     private func updateMessageToAnswered(
-        toolCallId: String,
+        invocationId: String,
         result: AskUserQuestionResult,
         answers: [AskUserQuestionAnswer],
         context: AskUserQuestionContext
     ) {
-        if let index = MessageFinder.lastIndexOfAskUserQuestion(toolCallId: toolCallId, in: context.messages) {
+        if let index = MessageFinder.lastIndexOfAskUserQuestion(invocationId: invocationId, in: context.messages) {
             if case .askUserQuestion(var toolData) = context.messages[index].content {
                 toolData.status = .answered
                 toolData.result = result

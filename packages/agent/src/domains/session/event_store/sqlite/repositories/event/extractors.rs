@@ -7,7 +7,7 @@ pub(crate) fn extract_role(event: &SessionEvent) -> Option<String> {
         EventType::MessageUser => Some("user".to_string()),
         EventType::MessageAssistant => Some("assistant".to_string()),
         EventType::MessageSystem => Some("system".to_string()),
-        EventType::ToolResult => Some("tool".to_string()),
+        EventType::CapabilityInvocationCompleted => Some("tool".to_string()),
         _ => None,
     }
 }

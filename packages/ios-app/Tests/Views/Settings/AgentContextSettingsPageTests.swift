@@ -23,7 +23,7 @@ struct AgentContextSettingsPageTests {
         #expect(ServerSettingsCategory.context.title == "Context")
         #expect(ServerSettingsCategory.context.icon == "gauge.with.dots.needle.67percent")
         #expect(ServerSettingsCategory.context.subtitle == "Compaction, memory retention, skills, and rules")
-        #expect(ServerSettingsCategory.mcpServers.title == "MCP")
+        #expect(ServerSettingsCategory.mcpServers.title == "Plugin Sources")
         #expect(MainSettingsGridDestination.surfaceRow == [
             .app,
             .server,
@@ -47,12 +47,12 @@ struct AgentContextSettingsPageTests {
         #expect(MainSettingsGridDestination.behaviorRow.map(\.title) == [
             "Agent",
             "Context",
-            "MCP",
+            "Plugin Sources",
         ])
         #expect(MainSettingsGridDestination.behaviorRow.map(\.description) == [
             "Hooks, prompts, queueing",
             "Compaction, memory, skills",
-            "External tool servers",
+            "External capability sources",
         ])
         #expect(MainSettingsGridDestination.unavailableRow == [
             .app,

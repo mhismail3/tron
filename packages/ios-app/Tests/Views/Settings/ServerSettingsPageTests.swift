@@ -16,16 +16,18 @@ struct ServerSettingsPageTests {
         #expect(SettingsLabels.updates == "Updates")
     }
 
-    @Test("server-backed settings show Codex, transcription, then updates")
+    @Test("server-backed settings show Codex, transcription, updates, then diagnostics")
     func serverBackedSettingsOrder() {
         #expect(ConnectionSettingsServerBackedSection.loadedOrder == [
             .codexAppServer,
             .transcriptionSidecar,
             .updates,
+            .diagnostics,
         ])
         #expect(ConnectionSettingsServerBackedSection.codexAppServer.title == "Codex App Server")
         #expect(ConnectionSettingsServerBackedSection.transcriptionSidecar.title == "Transcription Sidecar")
         #expect(ConnectionSettingsServerBackedSection.updates.title == "Updates")
+        #expect(ConnectionSettingsServerBackedSection.diagnostics.title == "Engine Diagnostics")
     }
 
     @Test("paired server menu uses server-specific actions")
@@ -239,9 +241,12 @@ struct ServerSettingsPageTests {
         ])
     }
 
-    @Test("loaded server settings put update controls at the bottom")
-    func loadedServerSettingsPutUpdateControlsAtBottom() {
-        #expect(ConnectionSettingsServerBackedSection.loadedOrder.last == .updates)
+    @Test("loaded server settings keep diagnostics after update controls")
+    func loadedServerSettingsKeepDiagnosticsAfterUpdateControls() {
+        #expect(ConnectionSettingsServerBackedSection.loadedOrder.suffix(2) == [
+            .updates,
+            .diagnostics,
+        ])
     }
 
     @Test("update settings share one section header with separate controls")

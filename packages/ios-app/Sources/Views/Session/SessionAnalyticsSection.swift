@@ -102,7 +102,7 @@ struct SessionAnalyticsSection: View {
         HStack(spacing: 4) {
             statItem(value: "\(analytics.totalTurns)", label: "Turns")
             statItem(value: analytics.avgLatency == 0 ? "-" : DurationFormatter.format(analytics.avgLatency, style: .compact), label: "Latency")
-            statItem(value: "\(analytics.totalToolCalls)", label: "Tools")
+            statItem(value: "\(analytics.totalCapabilityInvocations)", label: "Capabilities")
             statItem(
                 value: "\(analytics.totalErrors)",
                 label: "Errors",

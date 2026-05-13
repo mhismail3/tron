@@ -8,8 +8,8 @@ struct ProcessStateTests {
 
     // MARK: - Helpers
 
-    private func makeSpawnResult(processId: String = "proc-1", label: String = "sleep 10", kind: String = "shell", toolCallId: String = "tc-1") -> ProcessSpawnedPlugin.Result {
-        ProcessSpawnedPlugin.Result(processId: processId, label: label, kind: kind, background: true, toolCallId: toolCallId)
+    private func makeSpawnResult(processId: String = "proc-1", label: String = "sleep 10", kind: String = "shell", invocationId: String = "tc-1") -> ProcessSpawnedPlugin.Result {
+        ProcessSpawnedPlugin.Result(processId: processId, label: label, kind: kind, background: true, invocationId: invocationId)
     }
 
     private func makeCompletedResult(processId: String = "proc-1", label: String = "sleep 10", success: Bool = true, exitCode: Int? = 0, durationMs: Int = 10_000) -> ProcessCompletedPlugin.Result {

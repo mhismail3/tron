@@ -9,9 +9,9 @@
 //!
 //! | Module                | Content |
 //! |-----------------------|---------|
-//! | [`provider`]          | [`OpenAIProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::provider`]); stream, retry, tool call parsing |
-//! | [`message_converter`] | `Vec<Message>` → Responses `input` array with role mapping and tool-result normalisation |
-//! | [`stream_handler`]    | OpenAI SSE → `StreamEvent` ([`crate::shared::events`]); handles output deltas, tool calls, and terminal events |
+//! | [`provider`]          | [`OpenAIProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::provider`]); stream, retry, capability invocation parsing |
+//! | [`message_converter`] | `Vec<Message>` → Responses `input` array with role mapping and capability-result normalisation |
+//! | [`stream_handler`]    | OpenAI SSE → `StreamEvent` ([`crate::shared::events`]); handles output deltas, capability invocations, and terminal events |
 //! | [`types`]             | [`OpenAIAuth`], [`OpenAIConfig`], [`ApiEndpoint`], and endpoint-aware model profiles |
 //!
 //! ## Re-exports
@@ -34,11 +34,11 @@
 //!   `model.switch` rejects them so users cannot newly select retired IDs.
 //!   Non-streaming Pro/preview records stay hidden and are rejected before a
 //!   request is sent.
-//! - Tool calls arrive as streaming deltas over multiple SSE events.
+//! - Capability invocations arrive as streaming deltas over multiple SSE events.
 //!   [`stream_handler`] accumulates them until the closing `finish_reason`
 //!   before emitting a single `StreamEvent::ToolCall` — the orchestrator
-//!   never sees a partial tool call.
-//! - The converter normalises tool results into Responses input items so the
+//!   never sees a partial capability invocation.
+//! - The converter normalises capability results into Responses input items so the
 //!   provider can resume multi-turn tool loops without leaking provider-specific
 //!   payload details into the runtime.
 

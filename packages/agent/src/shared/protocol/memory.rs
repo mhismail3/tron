@@ -33,7 +33,7 @@ pub struct SessionMemory {
     pub ended_at: Option<String>,
     /// Conversation messages.
     pub messages: Vec<Message>,
-    /// Tool calls made during the session.
+    /// Capability invocations made during the session.
     pub tool_calls: Vec<ToolCall>,
     /// Working directory path.
     pub working_directory: String,

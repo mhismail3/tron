@@ -69,25 +69,25 @@ tags:
 
 Tools referenced in `allowedTools`, `deniedTools`, or in the skill content must be valid Tron tool names.
 
-**Available tools:**
+**Available capability contracts:**
 
-| Category | Tools |
-|----------|-------|
-| Filesystem | `Read`, `Write`, `Edit`, `Find` |
-| System | `Bash` |
-| Search | `Search` |
-| Web | `WebFetch`, `WebSearch` |
-| Interactive | `AskUserQuestion`, `GetConfirmation`, `Display`, `ComputerUse`, `NotifyApp` |
-| Subagent | `SpawnSubagent`, `WaitForAgents` |
-| MCP | `McpSearch`, `McpCall` |
+| Category | Capability contracts |
+|----------|----------------------|
+| Filesystem | `filesystem::read_file`, `filesystem::write_file`, `filesystem::edit_file`, `filesystem::find` |
+| Process | `process::run`, `process::start_job`, `process::wait`, `process::cancel` |
+| Search | `filesystem::search_text`, `capability::search` |
+| Web | `web::fetch`, `web::search` |
+| Interactive | `agent::ask_user`, `agent::request_approval`, `display::show`, `browser::computer_action`, `notifications::send` |
+| Agent | `agent::spawn_subagent`, `sandbox::spawn_worker`, `sandbox::stop_spawned_worker` |
+| Plugin sources | MCP/OpenAPI capabilities appear as normal plugin-provided implementations discovered through `capability::search` and invoked through `capability::execute`. |
 
 **Import translation table:**
 
 | External name | Tron equivalent | Notes |
 |--------------|-----------------|-------|
-| `Grep` / `rg` | `Search` | Tron's Search covers grep, ripgrep, AST search |
-| `Glob` | `Find` | Tron's Find covers glob/file pattern matching |
-| `Agent` / `Subagent` | `SpawnSubagent` | |
+| `Grep` / `rg` | `filesystem::search_text` | Search across file contents through the filesystem capability plugin |
+| `Glob` | `filesystem::find` | File discovery is owned by the filesystem capability plugin |
+| `Agent` / `Subagent` | `agent::spawn_subagent` | |
 | `TodoWrite` / `TodoRead` | *(remove)* | Not available in Tron |
 | `WebBrowser` / `Browser` | `ComputerUse` | Screenshot, click, type, scroll |
 | `Cat` / `Head` / `Tail` | `Read` | |

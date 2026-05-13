@@ -69,49 +69,15 @@ struct MessageBubble: View {
                 onTap?(.thinking(visible))
             }
 
-        case .toolUse(let tool):
-            // Handle subagent tools specially using ToolResultParser
-            switch ToolKind(toolName: tool.toolName) {
-            case .spawnSubagent:
-                if let chipData = ToolResultParser.parseSpawnSubagent(from: tool) {
-                    SubagentChip(data: chipData, variant: .spawn) {
-                        onTap?(.subagent(chipData))
-                    }
-                } else {
-                    ToolResultRouter(tool: tool)
-                }
-            case .waitForSubagent:
-                // Render with .wait variant so the chip reads
-                // "Waiting for agent #<id>" and is visually
-                // distinguishable from the earlier Spawn chip.
-                if let chipData = ToolResultParser.parseWaitForSubagent(from: tool) {
-                    SubagentChip(data: chipData, variant: .wait) {
-                        onTap?(.subagent(chipData))
-                    }
-                } else {
-                    ToolResultRouter(tool: tool)
-                }
-            case .notifyApp:
-                if let chipData = ToolResultParser.parseNotifyApp(from: tool) {
-                    NotifyAppChip(data: chipData) {
-                        onTap?(.notifyApp(chipData))
-                    }
-                } else {
-                    ToolResultRouter(tool: tool)
-                }
-            case .askUserQuestion:
-                ToolResultRouter(tool: tool)
-            default:
-                let chipData = CommandToolChipData(from: tool)
-                CommandToolChip(
-                    data: chipData,
-                    onTap: { onTap?(.commandTool(chipData)) },
-                    onCancel: { onTap?(.cancelCommandTool(toolCallId: chipData.id)) }
-                )
-            }
+        case .capabilityInvocation(let invocation):
+            CapabilityInvocationChip(
+                data: invocation,
+                onTap: { onTap?(.capabilityInvocation(invocation)) },
+                onCancel: { onTap?(.cancelCapabilityInvocation(id: invocation.id)) }
+            )
 
-        case .toolResult(let result):
-            StandaloneToolResultView(result: result)
+        case .capabilityResult(let result):
+            CapabilityInvocationResultView(result: result)
 
         case .error(let errorMessage):
             ErrorContentView(message: errorMessage)
@@ -223,6 +189,30 @@ struct SubagentResultsDeliveredChipView: View {
         .background(Color.tronSurface.opacity(colorScheme == .light ? 0.85 : 0.6))
         .clipShape(Capsule())
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+// MARK: - Error Content View
+
+private struct ErrorContentView: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronError)
+
+            Text(message)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronError)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.tronError.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

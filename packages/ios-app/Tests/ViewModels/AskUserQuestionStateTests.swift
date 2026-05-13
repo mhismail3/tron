@@ -19,7 +19,7 @@ final class AskUserQuestionStateTests: XCTestCase {
         let question = createTestQuestion(id: "q1", question: "Test question?")
         let params = AskUserQuestionParams(questions: [question], context: nil)
         let data = AskUserQuestionToolData(
-            toolCallId: "tc-123",
+            invocationId: "tc-123",
             params: params,
             answers: [:],
             status: .pending
@@ -27,7 +27,7 @@ final class AskUserQuestionStateTests: XCTestCase {
 
         state.currentData = data
         XCTAssertNotNil(state.currentData)
-        XCTAssertEqual(state.currentData?.toolCallId, "tc-123")
+        XCTAssertEqual(state.currentData?.invocationId, "tc-123")
     }
 
     func testAnswersTracking() {
@@ -66,7 +66,7 @@ final class AskUserQuestionStateTests: XCTestCase {
         let state = AskUserQuestionState()
         state.showSheet = true
         state.currentData = AskUserQuestionToolData(
-            toolCallId: "tc-123",
+            invocationId: "tc-123",
             params: AskUserQuestionParams(questions: [], context: nil),
             answers: [:],
             status: .pending

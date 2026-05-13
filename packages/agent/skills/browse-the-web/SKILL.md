@@ -199,7 +199,7 @@ agent-browser hover "nav > ul > li:nth-child(2)" --session main
 ### Basic page interaction
 
 ```bash
-# 1. Start live stream (Display tool call, not bash)
+# 1. Start live stream (display capability, not shell)
 # Display(type="stream", action="start", streamId="browser", title="Browser")
 
 # 2. Navigate
@@ -304,7 +304,7 @@ When you're done with browser automation:
    agent-browser close --session main
    ```
 
-2. Stop the display stream (Display tool call):
+2. Stop the display stream (display capability):
    ```
    Display(type="stream", action="stop", streamId="browser")
    ```

@@ -32,12 +32,12 @@ enum NotificationInboxFilter: String, CaseIterable, Identifiable {
 
 /// Sheet listing all recent notifications (last 50) with unread ones visually distinguished.
 ///
-/// Supports an optional `autoOpenToolCallId` for deep link auto-open — when set,
+/// Supports an optional `autoOpenInvocationId` for deep link auto-open — when set,
 /// the matching notification detail is automatically presented.
 @available(iOS 26.0, *)
 struct NotificationListSheet: View {
     let notificationStore: NotificationStore
-    var autoOpenToolCallId: String? = nil
+    var autoOpenInvocationId: String? = nil
     var onGoToSession: ((String) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -92,9 +92,9 @@ struct NotificationListSheet: View {
         .task {
             await notificationStore.refresh()
             // Auto-open matching notification for deep link
-            if !didAutoOpen, let toolCallId = autoOpenToolCallId {
+            if !didAutoOpen, let invocationId = autoOpenInvocationId {
                 didAutoOpen = true
-                if let match = notificationStore.notifications.first(where: { $0.toolCallId == toolCallId }) {
+                if let match = notificationStore.notifications.first(where: { $0.invocationId == invocationId }) {
                     selectedNotification = match
                 }
             }

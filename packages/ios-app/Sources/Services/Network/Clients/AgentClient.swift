@@ -128,7 +128,7 @@ final class AgentClient: EngineDomainClient {
 
     // MARK: - Confirmation/Answer Submission
 
-    /// Submit answers for an AskUserQuestion tool call.
+    /// Submit answers for an AskUserQuestion capability invocation.
     /// Server constructs the prompt and spawns a prompt run (or queues if busy).
     func submitAnswers(
         questions: [AnswerSubmission],
@@ -157,13 +157,13 @@ final class AgentClient: EngineDomainClient {
         logger.info("Aborted agent", category: .chat)
     }
 
-    /// Abort a single in-flight tool call without aborting the rest of the turn.
+    /// Abort a single in-flight capability invocation without aborting the rest of the turn.
     /// Returns `true` when the server cancelled a registered tool, `false` when
     /// the tool had already finished or no call matched the id.
     @discardableResult
-    func abortTool(toolCallId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
+    func abortTool(invocationId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
         let (_, sessionId) = try requireTransport().requireSession()
-        let params = AgentAbortToolParams(sessionId: sessionId, toolCallId: toolCallId)
+        let params = AgentAbortToolParams(sessionId: sessionId, invocationId: invocationId)
         let result: AgentAbortToolResult = try await invokeWrite(
             "agent::abort_tool",
             params,
@@ -171,33 +171,10 @@ final class AgentClient: EngineDomainClient {
             context: sessionInvocationContext(sessionId)
         )
         logger.info(
-            "Aborted tool call \(toolCallId): aborted=\(result.aborted)",
+            "Aborted capability invocation \(invocationId): aborted=\(result.aborted)",
             category: .chat
         )
         return result.aborted
     }
 
-    // MARK: - Tool Result Methods
-
-    /// Send a tool result for interactive tools like AskUserQuestion.
-    /// This unblocks the agent which is waiting for user input.
-    func sendToolResult(
-        sessionId: String,
-        toolCallId: String,
-        result: AskUserQuestionResult,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws {
-        try await requireTransport().ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
-        let params = ToolResultParams(sessionId: sessionId, toolCallId: toolCallId, result: result)
-        logger.info("[TOOL_RESULT] Sending tool result: sessionId=\(sessionId), toolCallId=\(toolCallId)", category: .session)
-
-        let response: ToolResultResponse = try await invokeWrite(
-            "tool::result",
-            params,
-            idempotencyKey: idempotencyKey,
-            context: sessionInvocationContext(sessionId)
-        )
-
-        logger.info("[TOOL_RESULT] Tool result sent successfully: success=\(response.success)", category: .session)
-    }
 }

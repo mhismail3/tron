@@ -20,24 +20,24 @@ final class AnimationCoordinatorTests: XCTestCase {
     // MARK: - Initial State Tests
 
     func test_initialState_noToolsVisible() {
-        XCTAssertTrue(coordinator.visibleToolCallIds.isEmpty)
+        XCTAssertTrue(coordinator.visibleInvocationIds.isEmpty)
     }
 
     // MARK: - Tool Call Staggering Tests
 
-    func test_queueToolStart_makesToolVisible() {
+    func test_queueCapabilityInvocationStart_makesToolVisible() {
         // When
-        coordinator.queueToolStart(toolCallId: "tool-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
 
         // Then
         XCTAssertTrue(coordinator.isToolVisible("tool-1"))
     }
 
-    func test_queueToolStart_queuesMultipleTools() {
+    func test_queueCapabilityInvocationStart_queuesMultipleTools() {
         // When
-        coordinator.queueToolStart(toolCallId: "tool-1")
-        coordinator.queueToolStart(toolCallId: "tool-2")
-        coordinator.queueToolStart(toolCallId: "tool-3")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-2")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-3")
 
         // Then
         XCTAssertTrue(coordinator.isToolVisible("tool-1"))
@@ -45,17 +45,17 @@ final class AnimationCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isToolVisible("tool-3"))
     }
 
-    func test_markToolComplete_makesToolVisible() {
+    func test_markCapabilityInvocationComplete_makesToolVisible() {
         // When
-        coordinator.markToolComplete(toolCallId: "tool-1")
+        coordinator.markCapabilityInvocationComplete(invocationId: "tool-1")
 
         // Then
         XCTAssertTrue(coordinator.isToolVisible("tool-1"))
     }
 
-    func test_makeToolVisible_directlyAddsToolId() {
+    func test_makeCapabilityInvocationVisible_directlyAddsToolId() {
         // When
-        coordinator.makeToolVisible("tool-direct")
+        coordinator.makeCapabilityInvocationVisible("tool-direct")
 
         // Then
         XCTAssertTrue(coordinator.isToolVisible("tool-direct"))
@@ -63,8 +63,8 @@ final class AnimationCoordinatorTests: XCTestCase {
 
     func test_resetToolState_clearsPendingButKeepsVisible() {
         // Given - some tools visible
-        coordinator.queueToolStart(toolCallId: "tool-1")
-        coordinator.queueToolStart(toolCallId: "tool-2")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-2")
 
         // When
         coordinator.resetToolState()
@@ -76,8 +76,8 @@ final class AnimationCoordinatorTests: XCTestCase {
 
     func test_fullReset_clearsAllToolState() {
         // Given
-        coordinator.queueToolStart(toolCallId: "tool-1")
-        coordinator.queueToolStart(toolCallId: "tool-2")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "tool-2")
 
         // When
         coordinator.fullReset()
@@ -85,7 +85,7 @@ final class AnimationCoordinatorTests: XCTestCase {
         // Then
         XCTAssertFalse(coordinator.isToolVisible("tool-1"))
         XCTAssertFalse(coordinator.isToolVisible("tool-2"))
-        XCTAssertTrue(coordinator.visibleToolCallIds.isEmpty)
+        XCTAssertTrue(coordinator.visibleInvocationIds.isEmpty)
     }
 
     func test_isToolVisible_returnsFalseForUnknownTool() {

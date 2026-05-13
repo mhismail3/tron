@@ -112,7 +112,7 @@ pub enum AssistantContent {
     /// Tool use content.
     #[serde(rename = "tool_use")]
     ToolUse {
-        /// Tool call ID.
+        /// Capability invocation ID.
         id: String,
         /// Tool name.
         name: String,
@@ -124,7 +124,7 @@ pub enum AssistantContent {
     },
 }
 
-/// Content that can appear in tool result messages.
+/// Content that can appear in capability result messages.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ToolResultContent {
@@ -253,13 +253,13 @@ impl AssistantContent {
 }
 
 impl ToolResultContent {
-    /// Create a text tool result content block.
+    /// Create a text capability result content block.
     #[must_use]
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
 
-    /// Create an image tool result content block.
+    /// Create an image capability result content block.
     #[must_use]
     pub fn image(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
         Self::Image {
@@ -285,7 +285,7 @@ pub fn extract_text_from_user_content(content: &[UserContent]) -> String {
         .join("\n")
 }
 
-/// Extract text from tool result content blocks.
+/// Extract text from capability result content blocks.
 pub fn extract_text_from_tool_result_content(content: &[ToolResultContent]) -> String {
     content
         .iter()

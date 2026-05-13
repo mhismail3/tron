@@ -4,7 +4,7 @@ use serde_json::Value;
 use serde_json::json;
 
 /// Extract the list of `(questionId, questionText)` pairs from an
-/// agent::ask_user tool.call event's payload arguments.
+/// agent::ask_user capability.invocation.started event's payload arguments.
 pub(super) fn extract_questions(tool_call_event: &Value) -> Vec<(String, String)> {
     let Some(payload) = tool_call_event.get("payload") else {
         return vec![];

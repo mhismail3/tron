@@ -1,13 +1,13 @@
 //! # `OpenAI` Message Converter
 //!
 //! Converts between Tron message format and `OpenAI` Responses API format.
-//! Handles tool call ID remapping for cross-provider DTO parity.
+//! Handles capability invocation ID remapping for cross-provider DTO parity.
 //!
 //! Key behaviors:
 //! - User messages → `input_text` / `input_image` content
 //! - Assistant text → `output_text` content
-//! - Tool calls → `function_call` items with remapped IDs
-//! - Tool results → `function_call_output` items (truncated at 16k)
+//! - Capability invocations → `function_call` items with remapped IDs
+//! - Capability results → `function_call_output` items (truncated at 16k)
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
 use crate::domains::model::providers::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
@@ -21,13 +21,13 @@ use super::types::{
 
 /// Convert Tron messages to Responses API input format.
 ///
-/// Tool call IDs from other providers (e.g., Anthropic's `toolu_` prefix)
+/// Capability invocation IDs from other providers (e.g., Anthropic's `toolu_` prefix)
 /// are remapped to `OpenAI`-compatible `call_` format for cross-provider support.
 #[must_use]
 pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputItem> {
     let mut input = Vec::new();
 
-    // Build tool call ID mapping for cross-provider switching
+    // Build capability invocation ID mapping for cross-provider switching
     let all_tool_call_ids = collect_tool_call_ids(messages);
     let id_refs: Vec<&str> = all_tool_call_ids.iter().map(String::as_str).collect();
     let id_mapping = build_tool_call_id_mapping(&id_refs, IdFormat::OpenAi);
@@ -165,7 +165,7 @@ pub fn generate_tool_clarification_message(
         ## Important Rules\n\
         1. You MUST provide ALL required parameters when calling tools - never call with empty arguments\n\
         2. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
-        3. Confidently interpret and explain results from tool calls - you have full context of what was returned\n\
+        3. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
         4. Be helpful, accurate, and efficient when working with code\n\
         5. Inspect/read existing files through capabilities before changing them\n\
         6. Make targeted, minimal edits rather than rewriting entire files",
@@ -177,7 +177,7 @@ pub fn generate_tool_clarification_message(
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Collect all tool call IDs from assistant messages.
+/// Collect all capability invocation IDs from assistant messages.
 fn collect_tool_call_ids(messages: &[Message]) -> Vec<String> {
     let mut ids = Vec::new();
     for msg in messages {
@@ -267,7 +267,7 @@ fn convert_assistant_message(
         });
     }
 
-    // Convert tool calls to function_call items
+    // Convert capability invocations to function_call items
     for block in content {
         if let AssistantContent::ToolUse {
             id,
@@ -287,7 +287,7 @@ fn convert_assistant_message(
     }
 }
 
-/// Convert a tool result to a Responses API `function_call_output` item.
+/// Convert a capability result to a Responses API `function_call_output` item.
 fn convert_tool_result(
     tool_call_id: &str,
     content: &ToolResultMessageContent,

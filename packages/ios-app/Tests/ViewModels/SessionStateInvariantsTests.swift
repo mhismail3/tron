@@ -99,10 +99,10 @@ final class SessionStateInvariantsTests: XCTestCase {
             role: .assistant,
             content: .text("")
         )
-        vm.currentTurnToolCalls.append(
-            ToolCallRecord(
-                toolCallId: "t",
-                toolName: "Bash",
+        vm.currentTurnCapabilityInvocations.append(
+            CapabilityInvocationRecord(
+                invocationId: "t",
+                modelToolName: "Bash",
                 arguments: ""
             )
         )
@@ -111,7 +111,7 @@ final class SessionStateInvariantsTests: XCTestCase {
 
         XCTAssertNil(vm.thinkingMessageId)
         XCTAssertTrue(vm.currentToolMessages.isEmpty)
-        XCTAssertTrue(vm.currentTurnToolCalls.isEmpty)
+        XCTAssertTrue(vm.currentTurnCapabilityInvocations.isEmpty)
     }
 
     /// A completed `session::reconstruct` response is server-authoritative.
@@ -128,7 +128,7 @@ final class SessionStateInvariantsTests: XCTestCase {
         vm.thinkingMessageId = thinking.id
         let toolId = UUID()
         vm.currentToolMessages[toolId] = ChatMessage(id: toolId, role: .assistant, content: .text(""))
-        vm.currentTurnToolCalls.append(ToolCallRecord(toolCallId: "t", toolName: "Bash", arguments: "{}"))
+        vm.currentTurnCapabilityInvocations.append(CapabilityInvocationRecord(invocationId: "t", modelToolName: "Bash", arguments: "{}"))
 
         vm.reconcileCompletedReconstructionState()
 
@@ -137,7 +137,7 @@ final class SessionStateInvariantsTests: XCTestCase {
         XCTAssertFalse(vm.pullUpPanelState.awaitingSuggestions)
         XCTAssertNil(vm.postProcessingTimeoutTask)
         XCTAssertTrue(vm.currentToolMessages.isEmpty)
-        XCTAssertTrue(vm.currentTurnToolCalls.isEmpty)
+        XCTAssertTrue(vm.currentTurnCapabilityInvocations.isEmpty)
         guard case .thinking(_, _, let isStreaming) = vm.messages[0].content else {
             return XCTFail("expected thinking message")
         }

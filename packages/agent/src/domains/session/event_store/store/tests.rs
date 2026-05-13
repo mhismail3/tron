@@ -589,7 +589,7 @@ fn events_without_token_usage_dont_affect_counters() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::ToolResult,
+            event_type: EventType::CapabilityInvocationCompleted,
             payload: serde_json::json!({"toolCallId": "t1", "content": "ok"}),
             parent_id: None,
             sequence: None,
@@ -1258,7 +1258,7 @@ fn agentic_loop() {
         .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
-    // Turn 1: user → assistant(tool_use) → turn_end → tool.result → assistant(end_turn) → turn_end
+    // Turn 1: user → assistant(tool_use) → turn_end → capability.invocation.completed → assistant(end_turn) → turn_end
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -1298,7 +1298,7 @@ fn agentic_loop() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::ToolResult,
+            event_type: EventType::CapabilityInvocationCompleted,
             payload: serde_json::json!({
                 "toolCallId": "tool_1",
                 "content": "file1.txt\nfile2.txt",
@@ -1910,7 +1910,7 @@ fn get_state_at_head_with_agentic_loop() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::ToolResult,
+            event_type: EventType::CapabilityInvocationCompleted,
             payload: serde_json::json!({"toolCallId": "c1", "content": "output", "isError": false}),
             parent_id: None,
             sequence: None,
@@ -2593,7 +2593,7 @@ fn get_activity_summary_tool_use_with_result() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::ToolResult,
+            event_type: EventType::CapabilityInvocationCompleted,
             payload: serde_json::json!({"toolCallId": "call_1", "isError": false, "duration": 150}),
             parent_id: None,
             sequence: None,

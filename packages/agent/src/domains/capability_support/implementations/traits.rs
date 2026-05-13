@@ -177,7 +177,7 @@ pub struct NotifyResult {
     /// A non-fatal user/agent-visible caveat that the delivery path
     /// wants to surface without erroring out. Set by the stub delegate
     /// when push service is not configured — `success` stays `false`
-    /// (nothing was actually delivered) but the tool result flags the
+    /// (nothing was actually delivered) but the capability result flags the
     /// condition so the agent can tell the user "push isn't set up".
     /// Real delegates leave this `None` by design.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -203,9 +203,9 @@ pub enum ProcessKind {
 /// Lifecycle state of a managed process.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessState {
-    /// Running in the foreground (tool call is awaiting it).
+    /// Running in the foreground (capability invocation is awaiting it).
     Foreground,
-    /// Promoted to background (tool call returned, process continues).
+    /// Promoted to background (capability invocation returned, process continues).
     Background,
     /// Completed successfully.
     Completed,
@@ -292,7 +292,7 @@ pub struct ProcessInfo {
     pub elapsed_ms: u64,
     /// Session that owns this process.
     pub session_id: String,
-    /// Tool call that spawned this process.
+    /// Capability invocation that spawned this process.
     pub tool_call_id: String,
 }
 
@@ -310,7 +310,7 @@ pub trait ProcessManagerOps: Send + Sync {
         task: std::pin::Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
     ) -> Result<ManagedProcessHandle, ToolError>;
 
-    /// Promote a foreground process to background. Unblocks the awaiting tool call.
+    /// Promote a foreground process to background. Unblocks the awaiting capability invocation.
     fn promote_to_background(&self, process_id: &str) -> Result<(), ToolError>;
 
     /// Cancel a running process (any state).

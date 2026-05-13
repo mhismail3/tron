@@ -641,7 +641,7 @@ fn trigger_compaction_callback() {
     assert!(called.load(std::sync::atomic::Ordering::SeqCst));
 }
 
-// -- tool result processing --
+// -- capability result processing --
 
 #[test]
 fn process_small_tool_result() {

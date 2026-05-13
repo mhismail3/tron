@@ -8,7 +8,7 @@ extension Notification.Name {
     static let serverSettingsDidChange = Notification.Name("tron.serverSettingsDidChange")
     /// Posted when auth.json changes on the server.
     static let authDidUpdate = Notification.Name("tron.authDidUpdate")
-    /// Posted when MCP server status changes.
+    /// Posted when plugin source server status changes.
     static let mcpStatusChanged = Notification.Name("tron.mcpStatusChanged")
 }
 

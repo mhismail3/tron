@@ -31,7 +31,7 @@ pub struct AssembledAssistant {
 /// Items produced by the assembler, ready for transformation.
 #[derive(Debug)]
 pub enum AssembledItem {
-    /// A user message (may be a tool result, meta, or normal message).
+    /// A user message (may be a capability result, meta, or normal message).
     UserMessage {
         /// The original record.
         record: ClaudeRecord,

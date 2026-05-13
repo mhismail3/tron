@@ -232,7 +232,7 @@ struct SettingsView: View {
                 autoMarkRead: $autoMarkRead
             )
         case .mcpServers:
-            MCPServersPage(
+            PluginSourcesPage(
                 settingsState: settingsState,
                 updateServerSetting: updateServerSetting
             )

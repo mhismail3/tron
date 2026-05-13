@@ -83,11 +83,11 @@ final class EngineApprovalCoordinator {
             submittedAt: DateParser.now
         )
 
-        context.logInfo("Preparing EngineApproval decision=\(decision.rawValue) for toolCallId=\(data.toolCallId)")
+        context.logInfo("Preparing EngineApproval decision=\(decision.rawValue) for invocationId=\(data.invocationId)")
 
         // Update the chip status immediately (visible while sheet animates away)
         updateMessageToDecided(
-            toolCallId: data.toolCallId,
+            invocationId: data.invocationId,
             decision: decision,
             note: note,
             result: result,
@@ -148,13 +148,13 @@ final class EngineApprovalCoordinator {
     // MARK: - Private Helpers
 
     private func updateMessageToDecided(
-        toolCallId: String,
+        invocationId: String,
         decision: EngineApprovalUserDecision,
         note: String?,
         result: EngineApprovalResult,
         context: EngineApprovalContext
     ) {
-        if let index = MessageFinder.lastIndexOfEngineApproval(toolCallId: toolCallId, in: context.messages) {
+        if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: invocationId, in: context.messages) {
             if case .engineApproval(var toolData) = context.messages[index].content {
                 toolData.status = decision == .approved ? .approved : .denied
                 toolData.decision = decision

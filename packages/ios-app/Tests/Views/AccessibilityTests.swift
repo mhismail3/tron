@@ -6,22 +6,22 @@ import SwiftUI
 @MainActor
 struct AccessibilityTests {
 
-    @Test("chipAccessibility produces correct label with tool and status")
+    @Test("chipAccessibility produces correct label with capability and status")
     func chipAccessibilityToolAndStatus() {
         // The modifier should produce "Tool, Status" when summary is empty
-        let label = chipAccessibilityLabel(tool: "Bash", status: "Completed", summary: "")
-        #expect(label == "Bash, Completed")
+        let label = chipAccessibilityLabel(tool: "Run", status: "Completed", summary: "")
+        #expect(label == "Run, Completed")
     }
 
     @Test("chipAccessibility produces correct label with tool, status, and summary")
     func chipAccessibilityWithSummary() {
-        let label = chipAccessibilityLabel(tool: "Read", status: "Completed", summary: "config.json")
-        #expect(label == "Read, Completed, config.json")
+        let label = chipAccessibilityLabel(tool: "Read File", status: "Completed", summary: "config.json")
+        #expect(label == "Read File, Completed, config.json")
     }
 
     @Test("chipAccessibility empty summary does not produce trailing comma")
     func chipAccessibilityEmptySummary() {
-        let label = chipAccessibilityLabel(tool: "Write", status: "Failed", summary: "")
+        let label = chipAccessibilityLabel(tool: "Write File", status: "Failed", summary: "")
         #expect(!label.hasSuffix(", "))
         #expect(!label.hasSuffix(","))
     }
@@ -30,16 +30,16 @@ struct AccessibilityTests {
     func chipAccessibilityWithEnumLabels() {
         // Verify all status enums produce valid labels through the helper
         let statuses: [(String, String)] = [
-            ("Bash", CommandToolStatus.success.label),
+            ("Run", "Completed"),
             ("Subagent", SubagentStatus.completed.label),
             ("Notify", NotifyAppStatus.sent.label),
-            ("Wait", CommandToolStatus.success.label),
+            ("Wait", "Completed"),
         ]
 
         for (tool, status) in statuses {
             let label = chipAccessibilityLabel(tool: tool, status: status, summary: "")
             #expect(!label.isEmpty, "Label for \(tool) should not be empty")
-            #expect(label.contains(tool), "Label should contain tool name")
+            #expect(label.contains(tool), "Label should contain model tool name")
             #expect(label.contains(status), "Label should contain status")
         }
     }

@@ -12,16 +12,11 @@ struct MessageIndexTests {
         ChatMessage(id: id, role: .assistant, content: .text(text))
     }
 
-    private func makeToolMessage(id: UUID = UUID(), toolCallId: String) -> ChatMessage {
+    private func makeCapabilityMessage(id: UUID = UUID(), invocationId: String) -> ChatMessage {
         ChatMessage(
             id: id,
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "Bash",
-                toolCallId: toolCallId,
-                arguments: "{}",
-                status: .running
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: invocationId, status: .running))
         )
     }
 
@@ -86,27 +81,27 @@ struct MessageIndexTests {
         #expect(index.index(for: m3.id) == 2) // shifted right
     }
 
-    // MARK: - toolCallId index
+    // MARK: - invocationId index
 
-    @Test("toolCallId index tracks tool use messages")
-    func toolCallIdIndex_tracksToolUse() {
+    @Test("invocationId index tracks tool use messages")
+    func invocationIdIndex_tracksToolUse() {
         let index = MessageIndex()
-        let tool = makeToolMessage(toolCallId: "toolu_abc")
+        let tool = makeCapabilityMessage(invocationId: "toolu_abc")
 
         index.didAppend(tool, at: 0)
 
-        #expect(index.index(forToolCallId: "toolu_abc") == 0)
+        #expect(index.index(forCapabilityInvocationId: "toolu_abc") == 0)
     }
 
-    @Test("toolCallId index removed when message removed")
-    func toolCallIdIndex_removedOnRemove() {
+    @Test("invocationId index removed when message removed")
+    func invocationIdIndex_removedOnRemove() {
         let index = MessageIndex()
-        let tool = makeToolMessage(toolCallId: "toolu_abc")
+        let tool = makeCapabilityMessage(invocationId: "toolu_abc")
 
         index.didAppend(tool, at: 0)
         index.didRemove(tool, at: 0, newTotalCount: 0)
 
-        #expect(index.index(forToolCallId: "toolu_abc") == nil)
+        #expect(index.index(forCapabilityInvocationId: "toolu_abc") == nil)
     }
 
     // MARK: - Edge cases
@@ -117,7 +112,7 @@ struct MessageIndexTests {
         index.rebuild(from: [])
 
         #expect(index.index(for: UUID()) == nil)
-        #expect(index.index(forToolCallId: "anything") == nil)
+        #expect(index.index(forCapabilityInvocationId: "anything") == nil)
     }
 
     @Test("handles duplicate ids — last one wins")
@@ -137,7 +132,7 @@ struct MessageIndexTests {
     func clearMessages_clearsIndex() {
         let index = MessageIndex()
         let m1 = makeMessage()
-        let tool = makeToolMessage(toolCallId: "toolu_xyz")
+        let tool = makeCapabilityMessage(invocationId: "toolu_xyz")
 
         index.didAppend(m1, at: 0)
         index.didAppend(tool, at: 1)
@@ -145,7 +140,7 @@ struct MessageIndexTests {
         index.clear()
 
         #expect(index.index(for: m1.id) == nil)
-        #expect(index.index(forToolCallId: "toolu_xyz") == nil)
+        #expect(index.index(forCapabilityInvocationId: "toolu_xyz") == nil)
     }
 
     @Test("index correct after bulk load via rebuild")
@@ -154,7 +149,7 @@ struct MessageIndexTests {
         var messages: [ChatMessage] = []
         for i in 0..<100 {
             if i % 10 == 0 {
-                messages.append(makeToolMessage(toolCallId: "tool_\(i)"))
+                messages.append(makeCapabilityMessage(invocationId: "tool_\(i)"))
             } else {
                 messages.append(makeMessage())
             }
@@ -166,9 +161,9 @@ struct MessageIndexTests {
             #expect(index.index(for: msg.id) == i)
         }
 
-        #expect(index.index(forToolCallId: "tool_0") == 0)
-        #expect(index.index(forToolCallId: "tool_50") == 50)
-        #expect(index.index(forToolCallId: "tool_90") == 90)
+        #expect(index.index(forCapabilityInvocationId: "tool_0") == 0)
+        #expect(index.index(forCapabilityInvocationId: "tool_50") == 50)
+        #expect(index.index(forCapabilityInvocationId: "tool_90") == 90)
     }
 
     @Test("didInsertAtFront shifts all existing indices")

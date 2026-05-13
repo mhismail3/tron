@@ -8,7 +8,7 @@ use crate::domains::capability_support::implementations::capability_surface::{
 use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::shared::events::ActivatedRuleInfo;
 use crate::shared::messages::{Message, ToolResultMessageContent};
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
@@ -62,7 +62,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
     /// Optional engine host used to route model-facing capability primitives.
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
-    /// Stable run id used for runtime tool-call idempotency.
+    /// Stable run id used for runtime capability-invocation idempotency.
     pub run_id: Option<&'a str>,
     pub trace_id: Option<&'a crate::engine::TraceId>,
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
@@ -75,6 +75,94 @@ pub(super) struct ToolPhaseOutcome {
     pub activated_rules: Vec<ActivatedRuleInfo>,
 }
 
+fn target_identity_json(
+    tool_name: &str,
+    tool_surface: &ResolvedToolSurface,
+    trace_id: Option<&crate::engine::TraceId>,
+    parent_invocation_id: Option<&crate::engine::InvocationId>,
+) -> Value {
+    let Some(target) = tool_surface.targets_by_name.get(tool_name) else {
+        return json!({ "modelToolName": tool_name });
+    };
+    let function = &target.function;
+    let metadata_string = |key: &str| {
+        function
+            .metadata
+            .get(key)
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    };
+    let function_id = function.id.as_str().to_owned();
+    json!({
+        "modelToolName": tool_name,
+        "contractId": metadata_string("contractId")
+            .or_else(|| metadata_string("capabilityContractId"))
+            .unwrap_or_else(|| function_id.clone()),
+        "implementationId": metadata_string("implementationId")
+            .or_else(|| metadata_string("capabilityImplementationId"))
+            .unwrap_or_else(|| format!("function:{function_id}")),
+        "functionId": function_id,
+        "pluginId": metadata_string("pluginId"),
+        "workerId": function.owner_worker.as_str(),
+        "catalogRevision": tool_surface.catalog_revision.0,
+        "trustTier": metadata_string("trustTier"),
+        "riskLevel": format!("{:?}", function.risk_level),
+        "effectClass": format!("{:?}", function.effect_class),
+        "traceId": trace_id.map(|id| id.as_str()),
+        "rootInvocationId": parent_invocation_id.map(|id| id.as_str()),
+    })
+}
+
+fn result_identity_json(
+    tool_name: &str,
+    base_identity: Value,
+    result: &ToolExecutionResult,
+) -> Value {
+    let mut identity = base_identity.as_object().cloned().unwrap_or_default();
+    let Some(details) = result.result.details.as_ref() else {
+        return Value::Object(identity);
+    };
+    if let Some(binding) = details.get("bindingDecision") {
+        for (from, to) in [
+            ("contractId", "contractId"),
+            ("selectedImplementation", "implementationId"),
+            ("selectedFunctionId", "functionId"),
+            ("schemaDigest", "schemaDigest"),
+            ("catalogRevision", "catalogRevision"),
+            ("decisionId", "bindingDecisionId"),
+        ] {
+            if let Some(value) = binding.get(from) {
+                identity.insert(to.to_owned(), value.clone());
+            }
+        }
+    }
+    for key in [
+        "schemaDigest",
+        "catalogRevision",
+        "traceId",
+        "rootInvocationId",
+    ] {
+        if let Some(value) = details.get(key) {
+            identity.insert(key.to_owned(), value.clone());
+        }
+    }
+    if let Some(value) = details.get("selectedImplementation") {
+        identity.insert("implementationId".to_owned(), value.clone());
+    }
+    if let Some(value) = details.get("functionId") {
+        identity.insert("functionId".to_owned(), value.clone());
+    }
+    if let Some(plugin) = details
+        .get("pluginVersions")
+        .and_then(Value::as_array)
+        .and_then(|plugins| plugins.first())
+    {
+        identity.insert("pluginId".to_owned(), plugin.clone());
+    }
+    identity.insert("modelToolName".to_owned(), json!(tool_name));
+    Value::Object(identity)
+}
+
 pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhaseOutcome {
     if params.stream_result.tool_calls.is_empty() {
         return ToolPhaseOutcome::default();
@@ -82,8 +170,8 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
 
-    // INVARIANT: persist tool.call events BEFORE broadcasting ToolUseBatch
-    // so iOS subscribers cannot see a batch of tool calls that are missing
+    // INVARIANT: persist capability.invocation.started events BEFORE broadcasting CapabilityInvocationBatch
+    // so iOS subscribers cannot see a batch of capability invocations that are missing
     // from session history. Synchronous append surfaces any DB failure here
     // instead of deferring it to a background warning.
     let mut persist_failed = false;
@@ -92,20 +180,34 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
             let seq = params
                 .sequence_counter
                 .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
+            let mut payload = json!({
+                "toolCallId": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "turn": params.turn,
+                "runId": params.run_id,
+                "traceId": params.trace_id.map(|id| id.as_str()),
+                "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
+                "toolCatalogRevision": params.tool_surface.catalog_revision.0,
+            });
+            if let (Some(payload), Some(identity)) = (
+                payload.as_object_mut(),
+                target_identity_json(
+                    &tool_call.name,
+                    params.tool_surface,
+                    params.trace_id,
+                    params.parent_invocation_id,
+                )
+                .as_object()
+                .cloned(),
+            ) {
+                payload.extend(identity);
+            }
             if let Err(error) = persister
                 .append_with_sequence(
                     params.session_id,
-                    EventType::ToolCall,
-                    json!({
-                            "toolCallId": tool_call.id,
-                            "name": tool_call.name,
-                        "arguments": tool_call.arguments,
-                        "turn": params.turn,
-                        "runId": params.run_id,
-                        "traceId": params.trace_id.map(|id| id.as_str()),
-                        "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                        "toolCatalogRevision": params.tool_surface.catalog_revision.0,
-                    }),
+                    EventType::CapabilityInvocationStarted,
+                    payload,
                     seq,
                 )
                 .await
@@ -115,7 +217,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     turn = params.turn,
                     tool_call_id = %tool_call.id,
                     error = %error,
-                    "failed to persist tool-call event; skipping broadcast + execution"
+                    "failed to persist capability-invocation event; skipping broadcast + execution"
                 );
                 persist_failed = true;
                 break;
@@ -130,7 +232,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         return ToolPhaseOutcome::default();
     }
 
-    persistence::emit_tool_use_batch(
+    persistence::emit_capability_invocation_batch(
         params.emitter,
         params.session_id,
         &params.stream_result.tool_calls,
@@ -187,12 +289,12 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     )
                     .await;
 
-                    // Persist tool.result synchronously (await the DB write)
+                    // Persist capability.invocation.completed synchronously (await the DB write)
                     // so failures surface immediately and the agent sees a
                     // consistent history when it resumes after a crash. A
                     // background fire-and-forget here could silently drop
                     // the result under pressure or on DB error, leaving iOS
-                    // with a live-stream ToolExecutionEnd event that has no
+                    // with a live-stream CapabilityInvocationCompleted event that has no
                     // matching row in session history.
                     //
                     // The broadcast-vs-persist ordering (broadcast is
@@ -207,22 +309,37 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                         let seq = params
                             .sequence_counter
                             .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
+                        let base_identity = target_identity_json(
+                            &tool_call.name,
+                            params.tool_surface,
+                            params.trace_id,
+                            params.parent_invocation_id,
+                        );
+                        let mut payload = json!({
+                            "toolCallId": tool_call.id,
+                            "name": tool_call.name,
+                            "content": result_text,
+                            "isError": is_error,
+                            "duration": result.duration_ms,
+                            "details": result.result.details,
+                            "runId": params.run_id,
+                            "traceId": params.trace_id.map(|id| id.as_str()),
+                            "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
+                            "toolCatalogRevision": params.tool_surface.catalog_revision.0,
+                        });
+                        if let (Some(payload), Some(identity)) = (
+                            payload.as_object_mut(),
+                            result_identity_json(&tool_call.name, base_identity, &result)
+                                .as_object()
+                                .cloned(),
+                        ) {
+                            payload.extend(identity);
+                        }
                         if let Err(error) = persister
                             .append_with_sequence(
                                 params.session_id,
-                                EventType::ToolResult,
-                                json!({
-                                    "toolCallId": tool_call.id,
-                                    "name": tool_call.name,
-                                    "content": result_text,
-                                    "isError": is_error,
-                                    "duration": result.duration_ms,
-                                    "details": result.result.details,
-                                    "runId": params.run_id,
-                                    "traceId": params.trace_id.map(|id| id.as_str()),
-                                    "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                                    "toolCatalogRevision": params.tool_surface.catalog_revision.0,
-                                }),
+                                EventType::CapabilityInvocationCompleted,
+                                payload,
                                 seq,
                             )
                             .await
@@ -232,7 +349,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                                 turn = params.turn,
                                 tool_call_id = %tool_call.id,
                                 error = %error,
-                                "failed to persist tool-result event"
+                                "failed to persist capability-result event"
                             );
                         }
                     }
@@ -269,7 +386,7 @@ async fn process_tool_results(
         let result_content = extract_result_content(&exec_result);
         let is_error = exec_result.result.is_error.unwrap_or(false);
 
-        // tool.result persistence is handled per-tool inside the execution future
+        // capability.invocation.completed persistence is handled per-tool inside the execution future
         // (before join_all) so the DB reflects completion immediately.
 
         // Add full content (including images) to LLM conversation context
@@ -318,7 +435,7 @@ async fn process_tool_results(
     outcome
 }
 
-/// Build execution waves from tool calls, respecting serialization groups.
+/// Build execution waves from capability invocations, respecting serialization groups.
 ///
 /// - Parallel tools all go in wave 0
 /// - Serialized tools in the same group spread across ascending waves
@@ -365,7 +482,7 @@ pub(super) fn build_execution_waves(
     waves
 }
 
-/// Extract text-only content from a tool result (for event persistence — no images in DB).
+/// Extract text-only content from a capability result (for event persistence — no images in DB).
 fn extract_result_text(exec_result: &ToolExecutionResult) -> String {
     match &exec_result.result.content {
         crate::shared::tools::ToolResultBody::Text(text) => text.clone(),
@@ -380,7 +497,7 @@ fn extract_result_text(exec_result: &ToolExecutionResult) -> String {
     }
 }
 
-/// Extract full content from a tool result, preserving image blocks for the LLM.
+/// Extract full content from a capability result, preserving image blocks for the LLM.
 ///
 /// If no images are present, flattens to `Text` for efficiency.
 /// When images exist, returns `Blocks` so the LLM can see them.

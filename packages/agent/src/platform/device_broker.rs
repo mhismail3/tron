@@ -21,7 +21,7 @@ use crate::shared::server::events::ServerEventPayload;
 ///
 /// # Flow
 ///
-/// 1. Tool calls `broker.request(method, params)`.
+/// 1. Capability invocations `broker.request(method, params)`.
 /// 2. Broker generates a `requestId`, stores a oneshot sender, and broadcasts
 ///    a `device.request` event to the session stream.
 /// 3. iOS receives the event, dispatches to a local handler, and sends the

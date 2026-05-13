@@ -1,11 +1,11 @@
-//! Tool-call tracker — manages pending tool results via oneshot channels.
+//! Tool-call tracker — manages pending capability results via oneshot channels.
 
 use std::collections::HashMap;
 
 use serde_json::Value;
 use tokio::sync::oneshot;
 
-/// Tracks pending tool calls and routes results back to the agent loop.
+/// Tracks pending capability invocations and routes results back to the agent loop.
 pub struct ToolCallTracker {
     pending: HashMap<String, oneshot::Sender<Value>>,
 }
@@ -18,15 +18,15 @@ impl ToolCallTracker {
         }
     }
 
-    /// Register a tool call, returning a receiver that will deliver the result.
+    /// Register a capability invocation, returning a receiver that will deliver the result.
     pub fn register(&mut self, tool_call_id: &str) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
         let _ = self.pending.insert(tool_call_id.to_string(), tx);
         rx
     }
 
-    /// Resolve a pending tool call with a result value.
-    /// Returns `true` if the tool call was found and resolved, `false` otherwise.
+    /// Resolve a pending capability invocation with a result value.
+    /// Returns `true` if the capability invocation was found and resolved, `false` otherwise.
     pub fn resolve(&mut self, tool_call_id: &str, value: Value) -> bool {
         if let Some(tx) = self.pending.remove(tool_call_id) {
             tx.send(value).is_ok()
@@ -35,17 +35,17 @@ impl ToolCallTracker {
         }
     }
 
-    /// Check if a tool call is pending.
+    /// Check if a capability invocation is pending.
     pub fn has_pending(&self, tool_call_id: &str) -> bool {
         self.pending.contains_key(tool_call_id)
     }
 
-    /// Number of pending tool calls.
+    /// Number of pending capability invocations.
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
 
-    /// Cancel all pending tool calls (drops senders, receivers will get errors).
+    /// Cancel all pending capability invocations (drops senders, receivers will get errors).
     pub fn cancel_all(&mut self) {
         self.pending.clear();
     }

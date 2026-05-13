@@ -10,7 +10,7 @@ final class DisplayStreamStateTests: XCTestCase {
         let state = DisplayStreamState()
         XCTAssertNil(state.activeStreamId)
         XCTAssertNil(state.streamFrameImage)
-        XCTAssertNil(state.streamToolCallId)
+        XCTAssertNil(state.streamInvocationId)
         XCTAssertFalse(state.showStreamSheet)
         XCTAssertFalse(state.hasAutoOpenedStream)
         XCTAssertNil(state.stoppedStreamId)
@@ -37,7 +37,7 @@ final class DisplayStreamStateTests: XCTestCase {
         let state = DisplayStreamState()
         state.activeStreamId = "stream-1"
         state.streamFrameImage = UIImage()
-        state.streamToolCallId = "tool-1"
+        state.streamInvocationId = "tool-1"
         state.showStreamSheet = true
         state.hasAutoOpenedStream = true
         state.stoppedStreamId = "stream-0"
@@ -46,7 +46,7 @@ final class DisplayStreamStateTests: XCTestCase {
 
         XCTAssertNil(state.activeStreamId)
         XCTAssertNil(state.streamFrameImage)
-        XCTAssertNil(state.streamToolCallId)
+        XCTAssertNil(state.streamInvocationId)
         XCTAssertFalse(state.showStreamSheet)
         XCTAssertFalse(state.hasAutoOpenedStream)
         XCTAssertNil(state.stoppedStreamId)
@@ -58,14 +58,14 @@ final class DisplayStreamStateTests: XCTestCase {
         let state = DisplayStreamState()
         state.activeStreamId = "stream-1"
         state.streamFrameImage = UIImage()
-        state.streamToolCallId = "tool-1"
+        state.streamInvocationId = "tool-1"
         state.hasAutoOpenedStream = true
 
         state.endStream()
 
         XCTAssertNil(state.activeStreamId)
         XCTAssertNotNil(state.streamFrameImage)
-        XCTAssertEqual(state.streamToolCallId, "tool-1")
+        XCTAssertEqual(state.streamInvocationId, "tool-1")
         XCTAssertTrue(state.hasAutoOpenedStream)
     }
 
@@ -106,17 +106,17 @@ final class DisplayStreamStateTests: XCTestCase {
     func testHandleFrameSetsStateCorrectly() {
         let state = DisplayStreamState()
         let image = UIImage()
-        let accepted = state.handleFrame(streamId: "s1", image: image, toolCallId: "t1")
+        let accepted = state.handleFrame(streamId: "s1", image: image, invocationId: "t1")
 
         XCTAssertTrue(accepted)
         XCTAssertEqual(state.activeStreamId, "s1")
         XCTAssertIdentical(state.streamFrameImage, image)
-        XCTAssertEqual(state.streamToolCallId, "t1")
+        XCTAssertEqual(state.streamInvocationId, "t1")
     }
 
     func testHandleFrameAutoOpensSheetOnce() {
         let state = DisplayStreamState()
-        let _ = state.handleFrame(streamId: "s1", image: UIImage(), toolCallId: "t1")
+        let _ = state.handleFrame(streamId: "s1", image: UIImage(), invocationId: "t1")
 
         XCTAssertTrue(state.showStreamSheet)
         XCTAssertTrue(state.hasAutoOpenedStream)
@@ -124,9 +124,9 @@ final class DisplayStreamStateTests: XCTestCase {
 
     func testHandleFrameDoesNotReopenAfterFirstAutoOpen() {
         let state = DisplayStreamState()
-        let _ = state.handleFrame(streamId: "s1", image: UIImage(), toolCallId: "t1")
+        let _ = state.handleFrame(streamId: "s1", image: UIImage(), invocationId: "t1")
         state.showStreamSheet = false  // User dismissed
-        let _ = state.handleFrame(streamId: "s1", image: UIImage(), toolCallId: "t1")
+        let _ = state.handleFrame(streamId: "s1", image: UIImage(), invocationId: "t1")
 
         XCTAssertFalse(state.showStreamSheet)
     }
@@ -135,7 +135,7 @@ final class DisplayStreamStateTests: XCTestCase {
         let state = DisplayStreamState()
         state.stoppedStreamId = "s1"
 
-        let accepted = state.handleFrame(streamId: "s1", image: UIImage(), toolCallId: "t1")
+        let accepted = state.handleFrame(streamId: "s1", image: UIImage(), invocationId: "t1")
 
         XCTAssertFalse(accepted)
         XCTAssertNil(state.activeStreamId)
@@ -145,26 +145,26 @@ final class DisplayStreamStateTests: XCTestCase {
         let state = DisplayStreamState()
         state.stoppedStreamId = "s1"
 
-        let accepted = state.handleFrame(streamId: "s2", image: UIImage(), toolCallId: "t2")
+        let accepted = state.handleFrame(streamId: "s2", image: UIImage(), invocationId: "t2")
 
         XCTAssertTrue(accepted)
         XCTAssertEqual(state.activeStreamId, "s2")
     }
 
-    func testHandleFrameWithNilToolCallId() {
+    func testHandleFrameWithNilInvocationId() {
         let state = DisplayStreamState()
-        let accepted = state.handleFrame(streamId: "s1", image: UIImage(), toolCallId: nil)
+        let accepted = state.handleFrame(streamId: "s1", image: UIImage(), invocationId: nil)
 
         XCTAssertTrue(accepted)
-        XCTAssertNil(state.streamToolCallId)
+        XCTAssertNil(state.streamInvocationId)
     }
 
     func testHandleFrameSubsequentFrameDoesNotAutoOpen() {
         let state = DisplayStreamState()
-        let _ = state.handleFrame(streamId: "s1", image: UIImage(), toolCallId: "t1")
+        let _ = state.handleFrame(streamId: "s1", image: UIImage(), invocationId: "t1")
         // activeStreamId is already "s1", so next frame is NOT a new stream
         let image2 = UIImage()
-        let _ = state.handleFrame(streamId: "s1", image: image2, toolCallId: "t1")
+        let _ = state.handleFrame(streamId: "s1", image: image2, invocationId: "t1")
 
         // showStreamSheet should remain true from first auto-open, not re-triggered
         XCTAssertTrue(state.showStreamSheet)

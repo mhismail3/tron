@@ -13,7 +13,7 @@
 //! - **Child CancellationTokens**: Each process gets its own token. Tools are
 //!   responsible for passing session cancel through their future closure.
 //! - **Oneshot promotion**: Foreground processes can be promoted to background
-//!   via a oneshot channel that unblocks the awaiting tool call.
+//!   via a oneshot channel that unblocks the awaiting capability invocation.
 
 use std::pin::Pin;
 use std::sync::Arc;

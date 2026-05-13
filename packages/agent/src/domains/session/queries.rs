@@ -253,7 +253,11 @@ impl SessionQueryService {
                     message: format!("Session '{session_id_for_history}' not found"),
                 })?;
 
-            let message_types = ["message.user", "message.assistant", "tool.result"];
+            let message_types = [
+                "message.user",
+                "message.assistant",
+                "capability.invocation.completed",
+            ];
             let type_strs: Vec<&str> = message_types.to_vec();
             let events = event_store
                 .get_events_by_type(&session_id_for_history, &type_strs, None)
@@ -283,7 +287,7 @@ impl SessionQueryService {
                     let role = match event.event_type.as_str() {
                         "message.user" => "user",
                         "message.assistant" => "assistant",
-                        "tool.result" => "tool",
+                        "capability.invocation.completed" => "tool",
                         _ => "unknown",
                     };
                     let content =
@@ -305,7 +309,7 @@ impl SessionQueryService {
                     if let Some(ref tool_name) = event.tool_name {
                         message["toolUse"] = json!({ "name": tool_name });
                     }
-                    if event.event_type == "tool.result" {
+                    if event.event_type == "capability.invocation.completed" {
                         if let Some(tool_call_id) = content.get("toolCallId") {
                             message["toolCallId"] = tool_call_id.clone();
                         }

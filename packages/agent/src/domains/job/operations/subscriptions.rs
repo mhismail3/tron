@@ -71,20 +71,24 @@ pub(crate) async fn run_subscriber(
         let (chunks, new_offset) = buffer.read_from(offset);
         offset = new_offset;
         for chunk in chunks {
-            let _ = emitter.emit(crate::shared::events::TronEvent::ToolExecutionUpdate {
-                base: crate::shared::events::BaseEvent::now(session_id),
-                tool_call_id: tool_call_id.to_owned(),
-                update: chunk,
-            });
+            let _ = emitter.emit(
+                crate::shared::events::TronEvent::CapabilityInvocationOutput {
+                    base: crate::shared::events::BaseEvent::now(session_id),
+                    tool_call_id: tool_call_id.to_owned(),
+                    update: chunk,
+                },
+            );
         }
         if buffer.is_closed() {
             let (final_chunks, _) = buffer.read_from(offset);
             for chunk in final_chunks {
-                let _ = emitter.emit(crate::shared::events::TronEvent::ToolExecutionUpdate {
-                    base: crate::shared::events::BaseEvent::now(session_id),
-                    tool_call_id: tool_call_id.to_owned(),
-                    update: chunk,
-                });
+                let _ = emitter.emit(
+                    crate::shared::events::TronEvent::CapabilityInvocationOutput {
+                        base: crate::shared::events::BaseEvent::now(session_id),
+                        tool_call_id: tool_call_id.to_owned(),
+                        update: chunk,
+                    },
+                );
             }
             break;
         }

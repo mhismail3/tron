@@ -2,7 +2,7 @@ import XCTest
 import UIKit
 @testable import TronMobile
 
-/// Tests for AskUserQuestionCoordinator - handles AskUserQuestion tool events and user interaction
+/// Tests for AskUserQuestionCoordinator - handles AskUserQuestion capability invocation events and user interaction
 /// Uses TDD: Tests written first, then implementation follows
 @MainActor
 final class AskUserQuestionCoordinatorTests: XCTestCase {
@@ -32,7 +32,7 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         // Then: Sheet should be shown with data
         XCTAssertTrue(mockContext.askUserQuestionState.showSheet)
         XCTAssertNotNil(mockContext.askUserQuestionState.currentData)
-        XCTAssertEqual(mockContext.askUserQuestionState.currentData?.toolCallId, "tc-123")
+        XCTAssertEqual(mockContext.askUserQuestionState.currentData?.invocationId, "tc-123")
     }
 
     func testOpenSheetForAnsweredQuestion() {
@@ -308,9 +308,9 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
     func testMarkPendingQuestionsAsSuperseded() {
         // Given: Multiple messages with pending questions
-        let data1 = createTestToolData(status: .pending, toolCallId: "tc-1")
-        let data2 = createTestToolData(status: .pending, toolCallId: "tc-2")
-        let data3 = createTestToolData(status: .answered, toolCallId: "tc-3")
+        let data1 = createTestToolData(status: .pending, invocationId: "tc-1")
+        let data2 = createTestToolData(status: .pending, invocationId: "tc-2")
+        let data3 = createTestToolData(status: .answered, invocationId: "tc-3")
 
         mockContext.messages = [
             ChatMessage(role: .assistant, content: .askUserQuestion(data1)),
@@ -324,9 +324,9 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         // Then: Pending questions should be superseded, answered should remain
         for message in mockContext.messages {
             if case .askUserQuestion(let data) = message.content {
-                if data.toolCallId == "tc-1" || data.toolCallId == "tc-2" {
+                if data.invocationId == "tc-1" || data.invocationId == "tc-2" {
                     XCTAssertEqual(data.status, .superseded)
-                } else if data.toolCallId == "tc-3" {
+                } else if data.invocationId == "tc-3" {
                     XCTAssertEqual(data.status, .answered)
                 }
             }
@@ -357,7 +357,7 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func createTestToolData(status: AskUserQuestionStatus, toolCallId: String = "tc-123") -> AskUserQuestionToolData {
+    private func createTestToolData(status: AskUserQuestionStatus, invocationId: String = "tc-123") -> AskUserQuestionToolData {
         let question = AskUserQuestion(
             id: "q1",
             question: "Test question?",
@@ -371,7 +371,7 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         )
         let params = AskUserQuestionParams(questions: [question], context: nil)
         return AskUserQuestionToolData(
-            toolCallId: toolCallId,
+            invocationId: invocationId,
             params: params,
             answers: [:],
             status: status,

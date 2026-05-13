@@ -149,7 +149,7 @@ fn validate_reports_orphan_tool_result() {
     )
     .unwrap();
 
-    // assistant with ONE tool call
+    // assistant with ONE capability invocation
     writeln!(
         f,
         "{}",
@@ -219,7 +219,7 @@ fn validate_reports_orphan_tool_result() {
 
 #[test]
 fn validate_reports_orphan_tool_use_alone() {
-    // Interrupted-turn fixture: tool call but no result.
+    // Interrupted-turn fixture: capability invocation but no result.
     let dir = tempdir().unwrap();
     let file = dir.path().join("interrupted.jsonl");
     let mut f = std::fs::File::create(&file).unwrap();

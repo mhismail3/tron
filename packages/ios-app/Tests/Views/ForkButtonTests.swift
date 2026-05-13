@@ -41,15 +41,15 @@ struct ForkButtonStateTests {
         #expect(event.isForkable == true)
     }
 
-    @Test("Tool call events are not forkable")
+    @Test("Capability invocation events are not forkable")
     func toolCallNotForkable() {
-        let event = makeEvent(type: "tool.call")
+        let event = makeEvent(type: "capability.invocation.started")
         #expect(event.isForkable == false)
     }
 
-    @Test("Tool result events are not forkable")
+    @Test("Capability result events are not forkable")
     func toolResultNotForkable() {
-        let event = makeEvent(type: "tool.result")
+        let event = makeEvent(type: "capability.invocation.completed")
         #expect(event.isForkable == false)
     }
 
@@ -96,7 +96,7 @@ struct ForkButtonStateTests {
 
     @Test("forkButtonState returns .hidden for non-forkable event")
     func hiddenForNonForkable() {
-        let event = makeEvent(sessionId: "session-1", type: "tool.call")
+        let event = makeEvent(sessionId: "session-1", type: "capability.invocation.started")
         let state = deriveForkButtonState(
             event: event,
             sessionId: "session-1",

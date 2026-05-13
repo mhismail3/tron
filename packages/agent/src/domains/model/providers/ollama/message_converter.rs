@@ -1,10 +1,10 @@
 //! Message format conversion: Tron messages → Ollama native `/api/chat` format.
 //!
 //! Ollama's native API is similar to OpenAI chat completions but differs in two
-//! key ways for tool calling:
+//! key ways for capability invocationing:
 //!
-//! - **Tool call arguments** are JSON objects, not JSON-encoded strings.
-//! - **Tool result messages** use `tool_name` (function name) instead of `tool_call_id`.
+//! - **Capability invocation arguments** are JSON objects, not JSON-encoded strings.
+//! - **Capability result messages** use `tool_name` (function name) instead of `tool_call_id`.
 //!
 //! This module converts Tron's internal message types to the native wire format.
 
@@ -30,10 +30,10 @@ pub struct ChatMessage {
     /// Message content (text or multimodal blocks).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<Value>,
-    /// Tool calls made by the assistant.
+    /// Capability invocations made by the assistant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
-    /// Tool name (for tool result messages).
+    /// Tool name (for capability result messages).
     ///
     /// Ollama's native `/api/chat` uses `tool_name` (the function name) to match
     /// results to calls, not `tool_call_id` like OpenAI's API.
@@ -41,10 +41,10 @@ pub struct ChatMessage {
     pub tool_name: Option<String>,
 }
 
-/// A tool call in Ollama's native format.
+/// A capability invocation in Ollama's native format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatToolCall {
-    /// Unique tool call ID.
+    /// Unique capability invocation ID.
     pub id: String,
     /// Always `"function"`.
     #[serde(rename = "type")]
@@ -53,7 +53,7 @@ pub struct ChatToolCall {
     pub function: ChatFunction,
 }
 
-/// Function name + arguments in a tool call.
+/// Function name + arguments in a capability invocation.
 ///
 /// Uses `Value` (not `String`) for `arguments` because Ollama's native `/api/chat`
 /// endpoint expects a JSON object, not a JSON-encoded string like OpenAI's API.
@@ -88,7 +88,7 @@ pub struct ChatFunctionDef {
 
 // ─── Conversion functions ────────────────────────────────────────────────────
 
-/// Build a tool call ID mapping for all messages (Anthropic → OpenAI format).
+/// Build a capability invocation ID mapping for all messages (Anthropic → OpenAI format).
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
     let mut ids = Vec::new();
 
@@ -238,9 +238,9 @@ fn convert_assistant_message(
     })
 }
 
-/// Convert a tool result to chat format.
+/// Convert a capability result to chat format.
 ///
-/// Ollama's native `/api/chat` matches tool results to calls via `tool_name`
+/// Ollama's native `/api/chat` matches capability results to calls via `tool_name`
 /// (the function name), not `tool_call_id` like OpenAI's API.
 fn convert_tool_result(tool_name: &str, content: &ToolResultMessageContent) -> ChatMessage {
     let text = match content {
@@ -265,7 +265,7 @@ fn convert_tool_result(tool_name: &str, content: &ToolResultMessageContent) -> C
     }
 }
 
-/// Build a mapping from tool call IDs (both original and remapped) to function names.
+/// Build a mapping from capability invocation IDs (both original and remapped) to function names.
 ///
 /// Ollama's native API uses `tool_name` on result messages, so we need to recover
 /// the function name for each `ToolResult` by scanning the preceding assistant messages.
@@ -460,7 +460,7 @@ mod tests {
             result[1].content,
             Some(Value::String("command output".into()))
         );
-        // Native Ollama API: tool results use tool_name, not tool_call_id
+        // Native Ollama API: capability results use tool_name, not tool_call_id
         assert_eq!(result[1].tool_name, Some("execute".into()));
     }
 
@@ -706,7 +706,7 @@ mod tests {
         }
     }
 
-    // ── Phase 2: Tool results use tool_name ─────────────────────────────
+    // ── Phase 2: Capability results use tool_name ─────────────────────────────
 
     #[test]
     fn tool_result_has_tool_name() {
@@ -862,7 +862,7 @@ mod tests {
         // User message
         assert_eq!(wire[0]["role"], "user");
 
-        // Assistant message with tool call — arguments is an object
+        // Assistant message with capability invocation — arguments is an object
         assert_eq!(wire[1]["role"], "assistant");
         assert!(wire[1]["tool_calls"][0]["function"]["arguments"].is_object());
         assert_eq!(
@@ -870,7 +870,7 @@ mod tests {
             "echo hello"
         );
 
-        // Tool result — uses tool_name, no tool_call_id
+        // Capability result — uses tool_name, no tool_call_id
         assert_eq!(wire[2]["role"], "tool");
         assert_eq!(wire[2]["tool_name"], "execute");
         assert_eq!(wire[2]["content"], "hello");
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn tool_result_orphaned_id_unknown_marker() {
-        // ToolResult with no matching assistant tool call → mark as "unknown".
+        // ToolResult with no matching assistant capability invocation → mark as "unknown".
         let messages = vec![Message::ToolResult {
             tool_call_id: "orphan_id".into(),
             content: ToolResultMessageContent::Text("result".into()),
@@ -985,7 +985,7 @@ mod tests {
             result[0].content,
             Some(Value::String("I'll search for that.".into()))
         );
-        // Tool call preserved with object arguments
+        // Capability invocation preserved with object arguments
         let tc = result[0].tool_calls.as_ref().unwrap();
         assert_eq!(tc[0].function.name, "search");
         assert_eq!(tc[0].function.arguments, json!({"q": "rust"}));

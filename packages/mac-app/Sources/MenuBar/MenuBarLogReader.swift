@@ -113,7 +113,7 @@ enum MenuBarLogReader {
         guard json["ok"] as? Bool != false else {
             return .error("logs::recent failed")
         }
-        guard let envelope = try? JSONDecoder().decode(EngineInvokeResponseEnvelope<RecentLogsResult>.self, from: data),
+        guard let envelope = try? JSONDecoder().decode(EngineFunctionCallResponseEnvelope<RecentLogsResult>.self, from: data),
               let result = envelope.result.child.value else {
             return .malformed
         }
@@ -144,15 +144,15 @@ enum MenuBarLogReader {
     }
 }
 
-private struct EngineInvokeResponseEnvelope<Result: Decodable & Equatable>: Decodable, Equatable {
-    var result: EngineInvokeResult<Result>
+private struct EngineFunctionCallResponseEnvelope<Result: Decodable & Equatable>: Decodable, Equatable {
+    var result: EngineFunctionCallResult<Result>
 }
 
-private struct EngineInvokeResult<Result: Decodable & Equatable>: Decodable, Equatable {
-    var child: EngineInvokeChild<Result>
+private struct EngineFunctionCallResult<Result: Decodable & Equatable>: Decodable, Equatable {
+    var child: EngineFunctionCallChild<Result>
 }
 
-private struct EngineInvokeChild<Result: Decodable & Equatable>: Decodable, Equatable {
+private struct EngineFunctionCallChild<Result: Decodable & Equatable>: Decodable, Equatable {
     var value: Result?
 }
 

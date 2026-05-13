@@ -65,20 +65,20 @@ struct ProcessedEventItemTests {
 
     // MARK: - Tool Call Merging
 
-    @Test("Tool call with matching result merges into single item")
+    @Test("Capability invocation with matching result merges into single item")
     func toolCallWithResult() {
         let callId = "call-123"
         let callEvent = makeEvent(
             id: "evt-call",
-            type: "tool.call",
+            type: "capability.invocation.started",
             sequence: 2,
-            payload: ["toolCallId": AnyCodable(callId)]
+            payload: ["invocationId": AnyCodable(callId)]
         )
         let resultEvent = makeEvent(
             id: "evt-result",
-            type: "tool.result",
+            type: "capability.invocation.completed",
             sequence: 3,
-            payload: ["toolCallId": AnyCodable(callId)]
+            payload: ["invocationId": AnyCodable(callId)]
         )
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
@@ -103,15 +103,15 @@ struct ProcessedEventItemTests {
         }
     }
 
-    @Test("In-progress tool call after completed tool goes to post-turn boundary")
+    @Test("In-progress capability invocation after completed tool goes to post-turn boundary")
     func toolCallInProgressAfterCompletedTool() {
-        // When a completed tool call+result exists, a subsequent in-progress call
+        // When a completed capability invocation+result exists, a subsequent in-progress call
         // falls past the lastMainIndex (= last toolResult index) into post-turn
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
-            makeEvent(id: "call-done", type: "tool.call", sequence: 2, payload: ["toolCallId": AnyCodable("done")]),
-            makeEvent(id: "result-done", type: "tool.result", sequence: 3, payload: ["toolCallId": AnyCodable("done")]),
-            makeEvent(id: "call-pending", type: "tool.call", sequence: 4, payload: ["toolCallId": AnyCodable("pending")]),
+            makeEvent(id: "call-done", type: "capability.invocation.started", sequence: 2, payload: ["invocationId": AnyCodable("done")]),
+            makeEvent(id: "result-done", type: "capability.invocation.completed", sequence: 3, payload: ["invocationId": AnyCodable("done")]),
+            makeEvent(id: "call-pending", type: "capability.invocation.started", sequence: 4, payload: ["invocationId": AnyCodable("pending")]),
         ]
         let turn = makeTurn(events: events)
         let (main, _) = processEventsForTurn(turn)
@@ -130,31 +130,31 @@ struct ProcessedEventItemTests {
         }
     }
 
-    @Test("Sole tool call without result goes to post-turn boundary")
-    func soleToolCallWithoutResult() {
-        // When the only tool call has no result, lastMainIndex = assistant index
-        // so the tool call falls into post-turn (and gets filtered out as non-lifecycle)
+    @Test("Sole capability invocation without result goes to post-turn boundary")
+    func soleCapabilityInvocationWithoutResult() {
+        // When the only capability invocation has no result, lastMainIndex = assistant index
+        // so the capability invocation falls into post-turn (and gets filtered out as non-lifecycle)
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
-            makeEvent(id: "evt-call", type: "tool.call", sequence: 2, payload: ["toolCallId": AnyCodable("call-456")]),
+            makeEvent(id: "evt-call", type: "capability.invocation.started", sequence: 2, payload: ["invocationId": AnyCodable("call-456")]),
         ]
         let turn = makeTurn(events: events)
         let (main, postTurn) = processEventsForTurn(turn)
 
-        // Only the assistant message in main (tool call is post-boundary, filtered out)
+        // Only the assistant message in main (capability invocation is post-boundary, filtered out)
         #expect(main.count == 1)
-        #expect(postTurn.isEmpty) // tool.call is not in postTurnTypes set
+        #expect(postTurn.isEmpty) // capability.invocation.started is not in postTurnTypes set
     }
 
-    @Test("Tool results without matching calls are dropped from main items")
+    @Test("Capability results without matching calls are dropped from main items")
     func orphanedToolResultDropped() {
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
             makeEvent(
                 id: "orphan-result",
-                type: "tool.result",
+                type: "capability.invocation.completed",
                 sequence: 2,
-                payload: ["toolCallId": AnyCodable("nonexistent-call")]
+                payload: ["invocationId": AnyCodable("nonexistent-call")]
             ),
         ]
         let turn = makeTurn(events: events)
@@ -206,8 +206,8 @@ struct ProcessedEventItemTests {
         let events = [
             makeEvent(type: "message.user", sequence: 1),
             makeEvent(type: "message.assistant", sequence: 2),
-            makeEvent(type: "tool.call", sequence: 3, payload: ["toolCallId": AnyCodable(callId)]),
-            makeEvent(type: "tool.result", sequence: 4, payload: ["toolCallId": AnyCodable(callId)]),
+            makeEvent(type: "capability.invocation.started", sequence: 3, payload: ["invocationId": AnyCodable(callId)]),
+            makeEvent(type: "capability.invocation.completed", sequence: 4, payload: ["invocationId": AnyCodable(callId)]),
             makeEvent(type: "config.model_switch", sequence: 5),
         ]
         let turn = makeTurn(events: events)
@@ -221,14 +221,14 @@ struct ProcessedEventItemTests {
 
     // MARK: - Multiple Tool Calls
 
-    @Test("Multiple sequential tool calls each correctly paired")
-    func multipleToolCalls() {
+    @Test("Multiple sequential capability invocations each correctly paired")
+    func multipleCapabilityInvocations() {
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
-            makeEvent(id: "call-a", type: "tool.call", sequence: 2, payload: ["toolCallId": AnyCodable("id-a")]),
-            makeEvent(id: "result-a", type: "tool.result", sequence: 3, payload: ["toolCallId": AnyCodable("id-a")]),
-            makeEvent(id: "call-b", type: "tool.call", sequence: 4, payload: ["toolCallId": AnyCodable("id-b")]),
-            makeEvent(id: "result-b", type: "tool.result", sequence: 5, payload: ["toolCallId": AnyCodable("id-b")]),
+            makeEvent(id: "call-a", type: "capability.invocation.started", sequence: 2, payload: ["invocationId": AnyCodable("id-a")]),
+            makeEvent(id: "result-a", type: "capability.invocation.completed", sequence: 3, payload: ["invocationId": AnyCodable("id-a")]),
+            makeEvent(id: "call-b", type: "capability.invocation.started", sequence: 4, payload: ["invocationId": AnyCodable("id-b")]),
+            makeEvent(id: "result-b", type: "capability.invocation.completed", sequence: 5, payload: ["invocationId": AnyCodable("id-b")]),
         ]
         let turn = makeTurn(events: events)
         let (main, postTurn) = processEventsForTurn(turn)
@@ -250,23 +250,23 @@ struct ProcessedEventItemTests {
         #expect(toolItems[1].1 == "result-b")
     }
 
-    @Test("In-progress tool call after completed tools goes to post-turn boundary")
-    func inProgressToolCallPostBoundary() {
+    @Test("In-progress capability invocation after completed tools goes to post-turn boundary")
+    func inProgressCapabilityInvocationPostBoundary() {
         // call-c at index 5 is past the lastMainIndex (last toolResult at index 4)
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
-            makeEvent(id: "call-a", type: "tool.call", sequence: 2, payload: ["toolCallId": AnyCodable("id-a")]),
-            makeEvent(id: "result-a", type: "tool.result", sequence: 3, payload: ["toolCallId": AnyCodable("id-a")]),
-            makeEvent(id: "call-b", type: "tool.call", sequence: 4, payload: ["toolCallId": AnyCodable("id-b")]),
-            makeEvent(id: "result-b", type: "tool.result", sequence: 5, payload: ["toolCallId": AnyCodable("id-b")]),
-            makeEvent(id: "call-c", type: "tool.call", sequence: 6, payload: ["toolCallId": AnyCodable("id-c")]),
+            makeEvent(id: "call-a", type: "capability.invocation.started", sequence: 2, payload: ["invocationId": AnyCodable("id-a")]),
+            makeEvent(id: "result-a", type: "capability.invocation.completed", sequence: 3, payload: ["invocationId": AnyCodable("id-a")]),
+            makeEvent(id: "call-b", type: "capability.invocation.started", sequence: 4, payload: ["invocationId": AnyCodable("id-b")]),
+            makeEvent(id: "result-b", type: "capability.invocation.completed", sequence: 5, payload: ["invocationId": AnyCodable("id-b")]),
+            makeEvent(id: "call-c", type: "capability.invocation.started", sequence: 6, payload: ["invocationId": AnyCodable("id-c")]),
         ]
         let turn = makeTurn(events: events)
         let (main, postTurn) = processEventsForTurn(turn)
 
-        // call-c goes past boundary, tool.call not in postTurnTypes → filtered out
+        // call-c goes past boundary, capability.invocation.started not in postTurnTypes → filtered out
         #expect(main.count == 3) // assistant + 2 merged completed tools
-        #expect(postTurn.isEmpty) // tool.call is not a lifecycle event type
+        #expect(postTurn.isEmpty) // capability.invocation.started is not a lifecycle event type
     }
 
     // MARK: - ID Generation
@@ -274,7 +274,7 @@ struct ProcessedEventItemTests {
     @Test("ProcessedEventItem IDs are unique and correctly prefixed")
     func itemIds() {
         let singleEvent = makeEvent(id: "evt-1", type: "message.user")
-        let callEvent = makeEvent(id: "evt-2", type: "tool.call", payload: ["toolCallId": AnyCodable("tc-1")])
+        let callEvent = makeEvent(id: "evt-2", type: "capability.invocation.started", payload: ["invocationId": AnyCodable("tc-1")])
 
         let single = ProcessedEventItem(kind: .single(singleEvent))
         let merged = ProcessedEventItem(kind: .mergedTool(call: callEvent, result: nil))

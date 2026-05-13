@@ -327,7 +327,7 @@ struct MiniChatActivityView: View {
         case .text:
             MiniMessageRow(text: line.text, isUser: false)
 
-        case .toolStart, .toolEnd:
+        case .capabilityStart, .capabilityEnd:
             MiniToolChip(
                 name: line.displayName ?? line.text,
                 icon: line.icon ?? "gearshape",

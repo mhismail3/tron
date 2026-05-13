@@ -27,7 +27,7 @@ These rules apply at ALL times, in every phase, without exception.
 
 **Read-only discipline.** Bash is for exploration only — git log, git diff, ls, curl, and similar read-only commands. Never modify files or state through Bash.
 
-**Filesystem hygiene.** All artifacts go under `~/.tron/workspace/`. Use absolute paths — `~` does not expand in Write tool calls. Use the correct subdirectory:
+**Filesystem hygiene.** All artifacts go under `~/.tron/workspace/`. Use absolute paths — `~` does not expand in filesystem capability calls. Use the correct subdirectory:
 
 ```
 ~/.tron/workspace/

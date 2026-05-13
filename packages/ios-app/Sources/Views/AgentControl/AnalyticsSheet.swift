@@ -156,7 +156,7 @@ struct AnalyticsSheet: View {
             let statColumns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 4)
             LazyVGrid(columns: statColumns, alignment: .leading, spacing: 0) {
                 if turnData.toolCount > 0 {
-                    statItem(value: "\(turnData.toolCount)", label: "Tools")
+                    statItem(value: "\(turnData.toolCount)", label: "Capabilities")
                 }
                 if turnData.latency > 0 {
                     statItem(value: DurationFormatter.format(turnData.latency, style: .compact), label: "Latency")

@@ -274,7 +274,7 @@ fn content_preview(content: Option<&Value>, max_len: usize) -> String {
                     .get("name")
                     .and_then(Value::as_str)
                     .map(|name| format!("[tool: {name}]")),
-                Some("tool_result") => Some("[tool result]".to_owned()),
+                Some("tool_result") => Some("[capability result]".to_owned()),
                 _ => None,
             })
             .collect::<Vec<String>>()
@@ -293,9 +293,10 @@ fn import_warning_to_json(warning: &crate::domains::import::ImportWarning) -> Va
         crate::domains::import::ImportWarningKind::UnparseableLine { line_number } => {
             ("unparseable-line", json!({ "lineNumber": line_number }))
         }
-        crate::domains::import::ImportWarningKind::OrphanToolResult { tool_call_id } => {
-            ("orphan-tool-result", json!({ "toolCallId": tool_call_id }))
-        }
+        crate::domains::import::ImportWarningKind::OrphanToolResult { tool_call_id } => (
+            "orphan-capability-result",
+            json!({ "toolCallId": tool_call_id }),
+        ),
         crate::domains::import::ImportWarningKind::OrphanToolUse { tool_call_id } => {
             ("orphan-tool-use", json!({ "toolCallId": tool_call_id }))
         }

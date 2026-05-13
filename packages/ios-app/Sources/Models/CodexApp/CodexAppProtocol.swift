@@ -314,7 +314,7 @@ enum CodexThreadItem: Decodable, Equatable, Sendable {
     case reasoning(id: String, summary: [String], content: [String])
     case commandExecution(id: String, command: String, cwd: String?, status: String, aggregatedOutput: String?, exitCode: Int?)
     case fileChange(id: String, status: String, changes: [String]?)
-    case mcpToolCall(id: String, server: String?, tool: String?, status: String, error: String?)
+    case mcpCapabilityInvocation(id: String, server: String?, tool: String?, status: String, error: String?)
     case webSearch(id: String, query: String?, status: String)
     case other(id: String, type: String, text: String?)
 
@@ -358,8 +358,8 @@ enum CodexThreadItem: Decodable, Equatable, Sendable {
                 status: try container.decodeIfPresent(String.self, forKey: .status) ?? "unknown",
                 changes: Self.decodeFileChangeSummaries(container)
             )
-        case "mcpToolCall":
-            self = .mcpToolCall(
+        case "mcpCapabilityInvocation":
+            self = .mcpCapabilityInvocation(
                 id: id,
                 server: try container.decodeIfPresent(String.self, forKey: .server),
                 tool: try container.decodeIfPresent(String.self, forKey: .tool),

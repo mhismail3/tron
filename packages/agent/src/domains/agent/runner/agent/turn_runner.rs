@@ -114,10 +114,10 @@ pub struct TurnParams<'a> {
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
     /// Optional per-tool abort registry. Threaded into `ToolExecutionContext`
-    /// so each in-flight tool call registers a child `CancellationToken` that
+    /// so each in-flight capability invocation registers a child `CancellationToken` that
     /// `agent.abortTool` can cancel independently of the turn token.
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
-    /// Optional engine host for engine-owned tool execution.
+    /// Optional engine host for engine-owned capability invocation.
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
 }
 

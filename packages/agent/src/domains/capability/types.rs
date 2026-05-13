@@ -121,6 +121,7 @@ pub(crate) struct CapabilityRejectedCandidate {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CapabilityBindingDecision {
+    pub(crate) decision_id: String,
     pub(crate) contract_id: String,
     pub(crate) selected_implementation: String,
     pub(crate) selected_function_id: String,

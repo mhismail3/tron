@@ -7,8 +7,8 @@ import SwiftUI
 enum ActivityLineKind: String, Codable, Equatable, CaseIterable, Sendable {
     case text
     case userPrompt
-    case toolStart
-    case toolEnd
+    case capabilityStart
+    case capabilityEnd
     case subagentSpawn
     case subagentDone
     case subagentFailed
@@ -25,11 +25,11 @@ enum ActivityLineStatus: String, Codable, Equatable, CaseIterable, Sendable {
     case error
 }
 
-// MARK: - Tool Color
+// MARK: - Capability Color
 
-/// Type-safe tool color that bridges between ToolDescriptor string names and SwiftUI colors.
-/// Replaces the stringly-typed `iconColorName` → `String.resolvedToolColor` pattern.
-enum ToolColor: String, Codable, Equatable, CaseIterable, Sendable {
+/// Type-safe capability color that bridges between ToolDescriptor string names and SwiftUI colors.
+/// Replaces the stringly-typed `iconColorName` → `String.resolvedCapabilityColor` pattern.
+enum CapabilityColor: String, Codable, Equatable, CaseIterable, Sendable {
     case tronSlate
     case tronPink
     case orange
@@ -66,7 +66,18 @@ enum ToolColor: String, Codable, Equatable, CaseIterable, Sendable {
 
     /// Parse from a ToolDescriptor `iconColorName` string. Falls back to `.tronTextMuted`.
     init(fromDescriptorName name: String) {
-        self = ToolColor(rawValue: name) ?? .tronTextMuted
+        self = CapabilityColor(rawValue: name) ?? .tronTextMuted
+    }
+
+    static func fromCapability(_ identity: CapabilityIdentity) -> CapabilityColor {
+        switch identity.riskLevel?.lowercased() {
+        case "critical", "high":
+            return .tronError
+        case "medium":
+            return .tronAmber
+        default:
+            return .tronInfo
+        }
     }
 }
 
@@ -89,22 +100,23 @@ enum DashboardConstants {
 /// Unified type used by both live streaming buffers and persisted card data.
 ///
 /// `id` is excluded from Codable — generated fresh on decode for SwiftUI identity.
-/// `toolCallId` is transient (live streaming only) and excluded from Codable.
+/// `invocationId` is transient (live streaming only) and excluded from Codable.
 struct ActivityLine: Identifiable, Codable, Sendable {
     let id: UUID
     let kind: ActivityLineKind
     var text: String
     var icon: String?
-    var iconColor: ToolColor?
-    var toolName: String?
+    var iconColor: CapabilityColor?
+    var modelToolName: String?
     var displayName: String?
     var summary: String?
     var duration: String?
     var status: ActivityLineStatus?
+    var capabilityIdentity: CapabilityIdentity?
 
-    /// Transient: only used during live streaming for tool start/end matching.
+    /// Transient: only used during live streaming for capability start/end matching.
     /// Not persisted or encoded.
-    var toolCallId: String?
+    var invocationId: String?
 
     // MARK: - Memberwise Init
 
@@ -112,31 +124,33 @@ struct ActivityLine: Identifiable, Codable, Sendable {
         kind: ActivityLineKind,
         text: String,
         icon: String? = nil,
-        iconColor: ToolColor? = nil,
-        toolName: String? = nil,
+        iconColor: CapabilityColor? = nil,
+        modelToolName: String? = nil,
         displayName: String? = nil,
         summary: String? = nil,
         duration: String? = nil,
         status: ActivityLineStatus? = nil,
-        toolCallId: String? = nil
+        invocationId: String? = nil,
+        capabilityIdentity: CapabilityIdentity? = nil
     ) {
         self.id = UUID()
         self.kind = kind
         self.text = text
         self.icon = icon
         self.iconColor = iconColor
-        self.toolName = toolName
+        self.modelToolName = modelToolName
         self.displayName = displayName
         self.summary = summary
         self.duration = duration
         self.status = status
-        self.toolCallId = toolCallId
+        self.invocationId = invocationId
+        self.capabilityIdentity = capabilityIdentity
     }
 
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case kind, text, icon, iconColor, toolName, displayName, summary, duration, status
+        case kind, text, icon, iconColor, modelToolName, displayName, summary, duration, status, capabilityIdentity
     }
 
     init(from decoder: Decoder) throws {
@@ -145,17 +159,18 @@ struct ActivityLine: Identifiable, Codable, Sendable {
         self.kind = try c.decode(ActivityLineKind.self, forKey: .kind)
         self.text = try c.decode(String.self, forKey: .text)
         self.icon = try c.decodeIfPresent(String.self, forKey: .icon)
-        self.iconColor = try c.decodeIfPresent(ToolColor.self, forKey: .iconColor)
-        self.toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
+        self.iconColor = try c.decodeIfPresent(CapabilityColor.self, forKey: .iconColor)
+        self.modelToolName = try c.decodeIfPresent(String.self, forKey: .modelToolName)
         self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
         self.summary = try c.decodeIfPresent(String.self, forKey: .summary)
         self.duration = try c.decodeIfPresent(String.self, forKey: .duration)
         self.status = try c.decodeIfPresent(ActivityLineStatus.self, forKey: .status)
-        self.toolCallId = nil
+        self.capabilityIdentity = try c.decodeIfPresent(CapabilityIdentity.self, forKey: .capabilityIdentity)
+        self.invocationId = nil
     }
 }
 
-// MARK: - Equatable (exclude id and toolCallId)
+// MARK: - Equatable (exclude id and invocationId)
 
 extension ActivityLine: Equatable {
     static func == (lhs: ActivityLine, rhs: ActivityLine) -> Bool {
@@ -163,10 +178,11 @@ extension ActivityLine: Equatable {
         lhs.text == rhs.text &&
         lhs.icon == rhs.icon &&
         lhs.iconColor == rhs.iconColor &&
-        lhs.toolName == rhs.toolName &&
+        lhs.modelToolName == rhs.modelToolName &&
         lhs.displayName == rhs.displayName &&
         lhs.summary == rhs.summary &&
         lhs.duration == rhs.duration &&
-        lhs.status == rhs.status
+        lhs.status == rhs.status &&
+        lhs.capabilityIdentity == rhs.capabilityIdentity
     }
 }

@@ -278,12 +278,12 @@ version normally skip that review wait and move straight to group assignment.
 3. Add navigation in parent view or sheet coordinator
 4. Add deep link route if applicable
 
-### Adding a Tool Visualization
+### Adding Capability Presentation
 
-1. Create chip in `Views/Tools/<ToolName>/<Name>Chip.swift`
-2. Create detail sheet in same folder
-3. Add case in `ToolChipFactory.swift`
-4. Add sheet case in `SheetCoordinator`
+1. Add schema or result presentation hints to the capability metadata.
+2. Reuse the generated capability chip, detail sheet, and result renderer.
+3. Add a reusable renderer under `Views/Capabilities/` only when metadata-driven rendering is not expressive enough.
+4. Add focused tests for the schema/result shape and the sheet route.
 
 ### Updating Event Handling
 

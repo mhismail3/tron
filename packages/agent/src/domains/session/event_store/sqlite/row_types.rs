@@ -98,7 +98,7 @@ pub struct EventRow {
     pub role: Option<String>,
     /// Denormalized capability id.
     pub tool_name: Option<String>,
-    /// Denormalized tool call ID.
+    /// Denormalized capability invocation ID.
     pub tool_call_id: Option<String>,
     /// Denormalized turn number.
     pub turn: Option<i64>,

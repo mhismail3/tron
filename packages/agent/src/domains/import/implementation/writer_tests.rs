@@ -74,7 +74,7 @@ fn write_sample_session(dir: &Path) -> std::path::PathBuf {
         }
     })).unwrap();
 
-    // Tool result
+    // Capability result
     writeln!(f, "{}", json!({
         "type": "user",
         "uuid": "tr1",

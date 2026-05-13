@@ -81,8 +81,8 @@ enum SessionEventType: String, Codable, Sendable {
     case messageAssistant = "message.assistant"
     case messageSystem = "message.system"
 
-    case toolCall = "tool.call"
-    case toolResult = "tool.result"
+    case capabilityInvocationStarted = "capability.invocation.started"
+    case capabilityInvocationCompleted = "capability.invocation.completed"
 
     case streamTextDelta = "stream.text_delta"
     case streamThinkingDelta = "stream.thinking_delta"
@@ -123,7 +123,7 @@ enum SessionEventType: String, Codable, Sendable {
     case fileEdit = "file.edit"
 
     case errorAgent = "error.agent"
-    case errorTool = "error.tool"
+    case errorCapability = "error.capability"
     case errorProvider = "error.provider"
 
     // Worktree

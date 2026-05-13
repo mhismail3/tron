@@ -14,13 +14,6 @@ protocol AgentClientProtocol {
 
     func abort(idempotencyKey: EngineIdempotencyKey) async throws
 
-    func sendToolResult(
-        sessionId: String,
-        toolCallId: String,
-        result: AskUserQuestionResult,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws
-
     // Session-scoped skill methods
     func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult
     func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult

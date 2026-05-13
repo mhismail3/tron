@@ -15,7 +15,7 @@ enum JobBackgroundedPlugin: DispatchableEventPlugin {
             let jobId: String?
             let reason: String?
             let label: String?
-            let toolCallId: String?
+            let invocationId: String?
         }
     }
 
@@ -23,7 +23,7 @@ enum JobBackgroundedPlugin: DispatchableEventPlugin {
         let jobId: String
         let reason: String
         let label: String
-        let toolCallId: String
+        let invocationId: String
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
@@ -31,7 +31,7 @@ enum JobBackgroundedPlugin: DispatchableEventPlugin {
               let jobId = payload.jobId,
               let reason = payload.reason,
               let label = payload.label,
-              let toolCallId = payload.toolCallId else {
+              let invocationId = payload.invocationId else {
             return nil
         }
 
@@ -39,7 +39,7 @@ enum JobBackgroundedPlugin: DispatchableEventPlugin {
             jobId: jobId,
             reason: reason,
             label: label,
-            toolCallId: toolCallId
+            invocationId: invocationId
         )
     }
 

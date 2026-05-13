@@ -6,7 +6,7 @@
 //!
 //! ## Crash Recovery
 //!
-//! When a server connection is lost (detected on tool call failure), the manager
+//! When a server connection is lost (detected on capability invocation failure), the manager
 //! attempts automatic restart with exponential backoff. After
 //! [`MAX_CONSECUTIVE_FAILURES`] consecutive failures, the server is marked
 //! [`McpServerHealth::Failed`] and its capabilities are disabled until manual restart.
@@ -164,7 +164,7 @@ impl McpServerManager {
         Ok((client, tool_defs))
     }
 
-    /// Record a successful tool call for a server (resets failure counters).
+    /// Record a successful capability invocation for a server (resets failure counters).
     pub fn record_success(&mut self, server_name: &str) {
         if let Some(state) = self.servers.get_mut(server_name) {
             if state.health == McpServerHealth::Degraded {
@@ -176,7 +176,7 @@ impl McpServerManager {
         }
     }
 
-    /// Record a failed tool call. Returns the new health state.
+    /// Record a failed capability invocation. Returns the new health state.
     ///
     /// Increments the failure counter (saturating on u32 overflow) and
     /// transitions health:
@@ -212,7 +212,7 @@ impl McpServerManager {
         }
     }
 
-    /// Auto-restart attempt from the tool-call recovery path.
+    /// Auto-restart attempt from the capability-invocation recovery path.
     ///
     /// Refuses with [`McpErrorKind::PermanentlyFailed`] if the server is
     /// already `Failed` — the caller must surface the error to the user and

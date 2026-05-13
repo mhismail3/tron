@@ -109,7 +109,7 @@ branded_id! {
 }
 
 branded_id! {
-    /// Unique identifier for a tool call within a turn.
+    /// Unique identifier for a capability invocation within a turn.
     ToolCallId
 }
 

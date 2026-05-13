@@ -188,7 +188,7 @@ impl SessionReconstructService {
         // 5. Convert events to wire format
         let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
 
-        // 5a. Enrich agent::ask_user tool.call events with server-parsed
+        // 5a. Enrich agent::ask_user capability.invocation.started events with server-parsed
         // status so iOS can render them without scanning event history.
         crate::domains::capability_support::interactive_enrichment::enrich_interactive_tool_statuses(
             &mut wire_events,
@@ -237,16 +237,16 @@ impl SessionReconstructService {
 
     /// Reconcile in-flight accumulator state against persisted events.
     ///
-    /// When any tool has progressed past "generating" status, tool execution has
+    /// When any tool has progressed past "generating" status, capability invocation has
     /// started, which means `message.assistant` was persisted (tools only execute
     /// after persist). In that case, text and thinking in the accumulator duplicate
     /// the persisted event — strip them from the response to prevent iOS duplication.
     ///
-    /// Tool calls and tool_ref items are always preserved since they carry live
+    /// Capability invocations and tool_ref items are always preserved since they carry live
     /// status (running/completed, streamingOutput, startedAt) not in persisted events.
     fn reconcile_in_flight(text: String, tool_calls: Value, content_sequence: Value) -> Value {
         // Detect if message.assistant has been persisted for this turn.
-        // Any tool past "generating" means tool execution started → message.assistant persisted.
+        // Any tool past "generating" means capability invocation started → message.assistant persisted.
         let tools_executing = tool_calls
             .as_array()
             .map(|calls| {
@@ -324,7 +324,7 @@ mod tests {
         // Streaming cleared
         assert!(result["streaming"].is_null());
 
-        // Tool calls preserved with full detail
+        // Capability invocations preserved with full detail
         let tools = result["toolCalls"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["status"], "running");
@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(seq[1]["toolCallId"], "tc_2");
         assert!(result["streaming"].is_null());
 
-        // Both tool calls preserved
+        // Both capability invocations preserved
         assert_eq!(result["toolCalls"].as_array().unwrap().len(), 2);
     }
 

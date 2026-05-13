@@ -1,4 +1,4 @@
-//! Enrich agent::ask_user `tool.call` events during session reconstruction
+//! Enrich agent::ask_user `capability.invocation.started` events during session reconstruction
 //! with their parsed status from subsequent `message.user` events.
 //!
 //! ## Why server-side
@@ -12,7 +12,7 @@
 //! Since the server generates the answer text prefix in the canonical
 //! `agent::submit_answers` engine function, the server is the authoritative
 //! source for the parse. Enrichment runs here, injects structured fields into
-//! the `tool.call` wire payload, and iOS just reads them.
+//! the `capability.invocation.started` wire payload, and iOS just reads them.
 //!
 //! ## Wire format (what iOS reads)
 //!
@@ -53,25 +53,25 @@ use payload::{build_user_message_metadata, find_first_user_message_after, inject
 use questions::{extract_questions, parse_answers};
 use subagent::enrich_subagent_result_messages;
 
-/// Enrich agent::ask_user `tool.call` events in place.
+/// Enrich agent::ask_user `capability.invocation.started` events in place.
 ///
-/// Walks the events array, finds each interactive tool call, searches for
+/// Walks the events array, finds each interactive capability invocation, searches for
 /// the first subsequent `message.user` event, and injects the parsed status
-/// into the tool call's `payload` object. Non-interactive tool calls and
+/// into the capability invocation's `payload` object. Non-interactive capability invocations and
 /// all other event types are left untouched.
 ///
 /// The matching `message.user` event also gets back-filled with the same
 /// structured `messageKind` + decision/count fields that the live path
 /// emits via `build_user_event_payload`.
 pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
-    // First pass: collect positions of interactive tool.call events so we
+    // First pass: collect positions of interactive capability.invocation.started events so we
     // can mutate them afterward without running into borrow-checker issues
     // from simultaneous iteration + mutation.
     let positions: Vec<(usize, String)> = events
         .iter()
         .enumerate()
         .filter_map(|(i, e)| {
-            if e.get("type").and_then(Value::as_str)? != "tool.call" {
+            if e.get("type").and_then(Value::as_str)? != "capability.invocation.started" {
                 return None;
             }
             let name = e.get("toolName").and_then(Value::as_str)?.to_string();

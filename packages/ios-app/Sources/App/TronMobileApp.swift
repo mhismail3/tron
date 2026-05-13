@@ -37,7 +37,7 @@ struct TronMobileApp: App {
     // Deep link navigation state
     @State private var deepLinkSessionId: String?
     @State private var deepLinkScrollTarget: ScrollTarget?
-    @State private var deepLinkNotificationToolCallId: String?
+    @State private var deepLinkNotificationInvocationId: String?
 
     init() {
         TronFontLoader.registerFonts()
@@ -93,9 +93,9 @@ struct TronMobileApp: App {
                 case .voiceNotes:
                     NotificationCenter.default.post(name: .navigationModeAction, object: NavigationMode.voiceNotes)
                     TronLogger.shared.info("Deep link to voice notes", category: .notification)
-                case .notification(let toolCallId):
-                    deepLinkNotificationToolCallId = toolCallId
-                    TronLogger.shared.info("Deep link to notification inbox: toolCallId=\(toolCallId)", category: .notification)
+                case .notification(let invocationId):
+                    deepLinkNotificationInvocationId = invocationId
+                    TronLogger.shared.info("Deep link to notification inbox: invocationId=\(invocationId)", category: .notification)
                 case .share:
                     NotificationCenter.default.post(name: .pendingShareContent, object: nil)
                     TronLogger.shared.info("Deep link to share", category: .notification)
@@ -205,7 +205,7 @@ struct TronMobileApp: App {
         ContentView(
             deepLinkSessionId: $deepLinkSessionId,
             deepLinkScrollTarget: $deepLinkScrollTarget,
-            deepLinkNotificationToolCallId: $deepLinkNotificationToolCallId
+            deepLinkNotificationInvocationId: $deepLinkNotificationInvocationId
         )
         .environment(\.dependencies, container)
         .environment(\.interactionPolicy, container.interactionPolicy)

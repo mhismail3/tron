@@ -54,7 +54,7 @@ metadata; it should not map retired tool names into capability identity.
 - capability search and inspect
 - redacted audit query refresh
 - implementation state changes
-- offline cache fallback
+- read-only stale cache snapshots
 
 When the server is disconnected, the state object loads
 `EngineConsoleCache.Snapshot` and marks it stale. Mutations must stay disabled
@@ -78,9 +78,10 @@ store raw secret values.
 The current Engine Console renders overview, capability search/inspect, plugin
 summaries, binding summaries, and redacted audit rows. Future generated execute
 forms and result renderers should use contract and implementation metadata, not
-old tool-name dispatch. First-party capabilities may provide presentation hints,
+retired built-in-name dispatch. First-party capabilities may provide presentation hints,
 but those hints are advisory metadata attached to capability records.
 
-Historical session events that still use provider protocol terminology may be
-shown in chat for backward compatibility, but new capability UI surfaces should
-use `CapabilityIdentity` and registry DTOs as the active model.
+Provider protocol terminology is confined to adapter and transcript payloads.
+Capability UI surfaces use `CapabilityIdentity` and registry DTOs as the active
+model; events without capability identity are diagnostics, not inputs to
+retired-name mapping.

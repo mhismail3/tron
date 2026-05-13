@@ -271,7 +271,7 @@ struct EngineApprovalSheet: View {
 #Preview("Pending - Low Risk") {
     EngineApprovalSheet(
         toolData: EngineApprovalToolData(
-            toolCallId: "call_1",
+            invocationId: "call_1",
             params: EngineApprovalParams(
                 action: "Install ffmpeg via brew",
                 reason: "The video processing task requires ffmpeg for format conversion.",
@@ -288,7 +288,7 @@ struct EngineApprovalSheet: View {
 #Preview("Pending - High Risk") {
     EngineApprovalSheet(
         toolData: EngineApprovalToolData(
-            toolCallId: "call_2",
+            invocationId: "call_2",
             params: EngineApprovalParams(
                 action: "Deploy v2.0 to production",
                 reason: "All tests pass and the release branch is ready. This will affect live users.",
@@ -305,7 +305,7 @@ struct EngineApprovalSheet: View {
 #Preview("Approved - Read Only") {
     EngineApprovalSheet(
         toolData: EngineApprovalToolData(
-            toolCallId: "call_3",
+            invocationId: "call_3",
             params: EngineApprovalParams(
                 action: "Install ffmpeg via brew",
                 reason: "Needed for video processing",

@@ -23,18 +23,18 @@ pub struct ChatMessage {
     /// Text content (mutually exclusive with structured content).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<Value>,
-    /// Tool calls made by the assistant.
+    /// Capability invocations made by the assistant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
-    /// Tool call ID (only for role=tool).
+    /// Capability invocation ID (only for role=tool).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
 }
 
-/// A tool call in chat completions format.
+/// A capability invocation in chat completions format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatToolCall {
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub id: String,
     /// Always `"function"`.
     #[serde(rename = "type")]
@@ -43,7 +43,7 @@ pub struct ChatToolCall {
     pub function: ChatFunction,
 }
 
-/// Function details within a tool call.
+/// Function details within a capability invocation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatFunction {
     /// Function name.
@@ -123,7 +123,7 @@ pub fn convert_tools(tools: &[Tool]) -> Vec<ChatToolDef> {
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
-/// Build ID mapping for tool calls that need format conversion.
+/// Build ID mapping for capability invocations that need format conversion.
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
     let mut ids = Vec::new();
 
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn tool_result_message() {
         let msgs = vec![
-            // Need an assistant message first with the tool call for ID mapping
+            // Need an assistant message first with the capability invocation for ID mapping
             Message::Assistant {
                 content: vec![AssistantContent::ToolUse {
                     id: "call_abc".into(),

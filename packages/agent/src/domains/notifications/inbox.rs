@@ -91,7 +91,7 @@ impl NotificationInboxService {
                  JOIN sessions s ON s.id = e.session_id
                  LEFT JOIN notification_read_state nrs ON nrs.event_id = e.id
                  WHERE e.tool_name = 'NotifyApp'
-                   AND e.type = 'tool.call'
+                   AND e.type = 'capability.invocation.started'
                  ORDER BY e.timestamp DESC
                  LIMIT ?1",
             )
@@ -185,7 +185,7 @@ impl NotificationInboxService {
                  SELECT e.id, datetime('now')
                  FROM events e
                  WHERE e.tool_name = 'NotifyApp'
-                   AND e.type = 'tool.call'
+                   AND e.type = 'capability.invocation.started'
                    AND e.session_id = ?1
                    AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
                 params![sid],
@@ -196,7 +196,7 @@ impl NotificationInboxService {
                  SELECT e.id, datetime('now')
                  FROM events e
                  WHERE e.tool_name = 'NotifyApp'
-                   AND e.type = 'tool.call'
+                   AND e.type = 'capability.invocation.started'
                    AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
                 params![],
             )
@@ -299,7 +299,7 @@ mod tests {
         assert_eq!(
             conn.execute(
                 "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-                 VALUES (?1, ?2, ?3, 'tool.call', ?4, ?5, 'ws_1', 'NotifyApp', ?6)",
+                 VALUES (?1, ?2, ?3, 'capability.invocation.started', ?4, ?5, 'ws_1', 'NotifyApp', ?6)",
                 rusqlite::params![event_id, session_id, seq, timestamp, payload.as_str(), tool_call_id],
             )
             .unwrap(),
@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(
             conn.execute(
                 "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-                 VALUES ('evt_bad', 'sess_user', 1, 'tool.call', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'NotifyApp', 'tc_bad')",
+                 VALUES ('evt_bad', 'sess_user', 1, 'capability.invocation.started', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'NotifyApp', 'tc_bad')",
                 [],
             )
             .unwrap(),

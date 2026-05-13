@@ -288,7 +288,7 @@ impl CompactionHandler {
     }
 
     /// Record a process command for progress-signal detection.
-    /// Called by `turn_runner` after each process tool execution.
+    /// Called by `turn_runner` after each process capability invocation.
     pub fn record_process_command(&self, command: &str) {
         self.pending_process_commands
             .lock()

@@ -22,9 +22,9 @@ enum EventIconProvider {
             return "gearshape.fill"
         case .messageDeleted:
             return "trash.fill"
-        case .toolCall:
+        case .capabilityInvocationStarted:
             return "wrench.and.screwdriver"
-        case .toolResult:
+        case .capabilityInvocationCompleted:
             if isError(payload) {
                 return "xmark.circle.fill"
             }
@@ -45,7 +45,7 @@ enum EventIconProvider {
             return "slider.horizontal.3"
         case .fileRead, .fileWrite, .fileEdit:
             return "doc.fill"
-        case .errorAgent, .errorTool:
+        case .errorAgent, .errorCapability:
             return "exclamationmark.triangle.fill"
         case .errorProvider:
             return "arrow.clockwise.circle"
@@ -115,9 +115,9 @@ enum EventIconProvider {
             return .tronTextMuted
         case .messageDeleted:
             return .tronError
-        case .toolCall:
+        case .capabilityInvocationStarted:
             return .tronCyan
-        case .toolResult:
+        case .capabilityInvocationCompleted:
             if isError(payload) {
                 return .tronError
             }
@@ -138,7 +138,7 @@ enum EventIconProvider {
             return .tronPurple
         case .fileRead, .fileWrite, .fileEdit:
             return .tronCyan
-        case .errorAgent, .errorTool:
+        case .errorAgent, .errorCapability:
             return .tronError
         case .errorProvider:
             return .tronError

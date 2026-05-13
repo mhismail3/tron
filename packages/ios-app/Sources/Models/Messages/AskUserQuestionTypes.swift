@@ -37,7 +37,7 @@ struct AskUserQuestion: Codable, Identifiable, Equatable {
     }
 }
 
-/// Parameters for the AskUserQuestion tool call
+/// Parameters for the AskUserQuestion capability invocation
 struct AskUserQuestionParams: Codable, Equatable {
     /// Array of questions (1-5)
     let questions: [AskUserQuestion]
@@ -86,9 +86,9 @@ enum AskUserQuestionStatus: Equatable {
 
 /// Tool data for AskUserQuestion tracking (in-chat state)
 struct AskUserQuestionToolData: Equatable {
-    /// The tool call ID from the agent
-    let toolCallId: String
-    /// The question parameters (mutable: set to placeholder during .generating, updated on tool_start)
+    /// The capability invocation ID from the agent
+    let invocationId: String
+    /// The question parameters (mutable: set to placeholder during .generating, updated on capability.invocation.started)
     var params: AskUserQuestionParams
     /// Current answers keyed by question ID
     var answers: [String: AskUserQuestionAnswer]

@@ -46,7 +46,7 @@ Use this to define the "recent window": the last 5 turns, i.e. `turn > (latest_t
 
 ```sql
 SELECT turn, sequence, type, datetime(timestamp) as time,
-  tool_name, model, role, input_tokens, output_tokens, latency_ms,
+  capability_name, model, role, input_tokens, output_tokens, latency_ms,
   substr(payload, 1, 300) as payload_preview
 FROM events
 WHERE session_id = 'SESSION_ID'
@@ -63,7 +63,7 @@ SELECT sequence, turn, datetime(timestamp) as time, type,
   json_extract(payload, '$.error.message') as error_msg,
   json_extract(payload, '$.error.code') as error_code,
   json_extract(payload, '$.error.type') as error_type,
-  tool_name,
+  capability_name,
   substr(payload, 1, 500) as full_payload
 FROM events
 WHERE session_id = 'SESSION_ID'
@@ -86,7 +86,7 @@ Using `level_num >= 40` captures both warnings and errors — warnings are often
 ## Step 5: Tool Call Analysis
 
 ```sql
-SELECT e1.sequence as call_seq, e1.turn, e1.tool_name,
+SELECT e1.sequence as call_seq, e1.turn, e1.capability_name,
   datetime(e1.timestamp) as called_at,
   substr(e1.payload, 1, 200) as call_preview,
   e2.sequence as result_seq,
@@ -95,25 +95,25 @@ SELECT e1.sequence as call_seq, e1.turn, e1.tool_name,
   substr(e2.payload, 1, 300) as result_preview
 FROM events e1
 LEFT JOIN events e2 ON e2.session_id = e1.session_id
-  AND e2.tool_call_id = e1.tool_call_id
-  AND e2.type = 'tool.result'
+  AND e2.invocation_id = e1.invocation_id
+  AND e2.type = 'capability.invocation.completed'
 WHERE e1.session_id = 'SESSION_ID'
-  AND e1.type = 'tool.call'
+  AND e1.type = 'capability.invocation.started'
   AND e1.turn > (SELECT MAX(turn) - 5 FROM events WHERE session_id = 'SESSION_ID')
 ORDER BY e1.sequence;
 ```
 
-### Failed tool calls specifically
+### Failed capability invocations specifically
 
 ```sql
-SELECT e1.turn, e1.tool_name, datetime(e1.timestamp) as time,
+SELECT e1.turn, e1.capability_name, datetime(e1.timestamp) as time,
   e2.payload as error_payload
 FROM events e1
 JOIN events e2 ON e2.session_id = e1.session_id
-  AND e2.tool_call_id = e1.tool_call_id
-  AND e2.type = 'tool.result'
+  AND e2.invocation_id = e1.invocation_id
+  AND e2.type = 'capability.invocation.completed'
 WHERE e1.session_id = 'SESSION_ID'
-  AND e1.type = 'tool.call'
+  AND e1.type = 'capability.invocation.started'
   AND json_extract(e2.payload, '$.isError') = 1
 ORDER BY e1.sequence;
 ```
@@ -188,11 +188,11 @@ Write a markdown report to `~/.tron/workspace/reports/YYYY-MM-DD-session-debug.m
 
 ## Tool Call Analysis
 
-**Total tool calls (last 5 turns)**: {count}
-**Failed tool calls**: {count}
+**Total capability invocations (last 5 turns)**: {count}
+**Failed capability invocations**: {count}
 
 ### Failed Tools
-{table of failed tool calls with name, turn, error message — or "None"}
+{table of failed capability invocations with name, turn, error message — or "None"}
 
 ### All Tool Calls (Last 5 Turns)
 | Turn | Tool | Duration | Error? |

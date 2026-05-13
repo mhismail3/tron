@@ -43,7 +43,7 @@ enum ApprovalPendingPlugin: DispatchableEventPlugin {
         var functionId: String { approval.functionId }
         var sessionId: String? { approval.sessionId }
         var workspaceId: String? { approval.workspaceId }
-        var toolCallId: String { "engine-approval:\(approval.approvalId)" }
+        var invocationId: String { "engine-approval:\(approval.approvalId)" }
         var actionText: String {
             ApprovalEventText.action(functionId: approval.functionId, payload: approval.payload)
         }
@@ -89,7 +89,7 @@ enum ApprovalResolvedPlugin: DispatchableEventPlugin {
         var functionId: String { approval.functionId }
         var sessionId: String? { approval.sessionId }
         var workspaceId: String? { approval.workspaceId }
-        var toolCallId: String { "engine-approval:\(approval.approvalId)" }
+        var invocationId: String { "engine-approval:\(approval.approvalId)" }
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {

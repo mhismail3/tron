@@ -45,7 +45,7 @@ impl AgentCommandService {
         Ok(json!({ "aborted": aborted }))
     }
 
-    /// Abort a single in-flight tool call without aborting the surrounding turn.
+    /// Abort a single in-flight capability invocation without aborting the surrounding turn.
     ///
     /// Returns `{ "aborted": true }` if the tool was in flight (its child
     /// `CancellationToken` was cancelled) or `{ "aborted": false }` when

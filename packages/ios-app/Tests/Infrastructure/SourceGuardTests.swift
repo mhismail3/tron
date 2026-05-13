@@ -160,6 +160,101 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Capability-native UI has no legacy active tool models")
+    func testCapabilityNativeUIHasNoLegacyActiveToolModels() throws {
+        let forbidden: [(String, String)] = [
+            ("Tool" + "Descriptor" + "Catalog", "retired descriptor catalog"),
+            ("Tool" + "Kind", "retired tool-kind enum"),
+            ("Tool" + "Use" + "Data", "retired active invocation model"),
+            ("Tool" + "Result" + "Data", "retired active result model"),
+            ("Command" + "Tool" + "Chip", "retired command-tool chip"),
+            ("Command" + "Tool" + "Status", "retired command-tool status"),
+            ("Legacy" + "Tool", "legacy tool compatibility naming"),
+            ("Tool" + "Fallback", "tool fallback compatibility naming"),
+            ("Compatibility" + "Tool", "tool compatibility naming"),
+            ("tool" + "." + "call", "retired capability event type"),
+            ("tool" + "." + "result", "retired capability event type"),
+            ("tool" + "." + "progress", "retired capability event type"),
+            ("error" + "." + "tool", "retired capability error event type"),
+            ("tool" + "_" + "start", "retired capability forwarded event type"),
+            ("tool" + "_" + "end", "retired capability forwarded event type"),
+            ("tool" + "." + "start", "retired capability forwarded event type"),
+            ("tool" + "." + "end", "retired capability forwarded event type"),
+            ("agent" + "." + "tool" + "_", "retired live stream event prefix"),
+            ("tool" + "::" + "result", "retired interaction-response function"),
+            ("tool" + "Call" + "Id", "retired invocation identifier spelling"),
+            ("Tool" + "Call", "retired invocation identifier/model spelling"),
+            ("tool " + "call", "retired invocation wording"),
+            ("tool" + "Start", "retired dashboard activity kind"),
+            ("tool" + "End", "retired dashboard activity kind"),
+            ("Tool" + "Color", "retired dashboard color model"),
+            ("with" + "Fallback" + "Model" + "Tool" + "Name", "old-name capability identity substitution"),
+            ("modelToolName ?? " + "tool" + "Name", "old-name model tool substitution"),
+            (#"payload["modelToolName"] as? String ?? payload["# + "tool" + #"Name"]"#, "old-name payload identity substitution"),
+            ("CapabilityIdentity(modelToolName: " + "tool" + "Name", "old-name identity synthesis"),
+            ("Tool" + "Payloads", "retired payload file/type naming"),
+            ("Tool" + "Handlers", "retired event handler naming"),
+            ("Tool" + "Event" + "Coordinator", "retired event coordinator naming"),
+            ("Tool" + "Argument" + "Extractor", "retired argument extractor naming"),
+            ("MCP" + "Client", "retired MCP source client naming"),
+            ("MCP" + "Servers" + "Page", "retired MCP settings page naming"),
+            ("Engine" + "Invoke", "retired engine meta-tool naming"),
+            ("Mcp" + "Search" + "Tool", "retired plugin source search UI"),
+            ("Mcp" + "Call" + "Tool", "retired plugin source call UI"),
+            ("Read" + "Tool" + "Detail", "retired first-party detail sheet"),
+            ("Bash" + "Tool" + "Detail", "retired first-party detail sheet"),
+            ("Write" + "Tool" + "Detail", "retired first-party detail sheet"),
+            ("Edit" + "Tool" + "Detail", "retired first-party detail sheet"),
+            ("Web" + "Search" + "Tool", "retired web-search tool UI"),
+            ("Web" + "Fetch" + "Tool", "retired web-fetch tool UI"),
+            ("Display" + "Tool" + "Detail", "retired display tool detail sheet"),
+            ("tool" + "Name == " + #""AskUserQuestion""#, "old-name interaction detection"),
+            (#""name": "# + #""AskUserQuestion""#, "old-name interaction fixture identity"),
+            (#""name":"# + #""AskUserQuestion""#, "old-name interaction fixture identity"),
+            (#""name": AnyCodable("# + #""AskUserQuestion""#, "old-name interaction event identity"),
+            ("tool" + "Name: " + #""AskUserQuestion""#, "old-name interaction event identity"),
+            (".tool" + "Use(", "retired message content case"),
+            (".tool" + "Result(", "retired message content case"),
+            ("command" + "Tool" + "Detail", "retired chat sheet route"),
+            ("cancel" + "Command" + "Tool", "retired tap action")
+        ]
+
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+
+        for root in sourceRoots {
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                Issue.record("Could not enumerate \(root.path)")
+                continue
+            }
+
+            while let any = enumerator.nextObject() {
+                guard let url = any as? URL else { continue }
+                guard url.pathExtension == "swift" else { continue }
+                if url.path == #filePath { continue }
+
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbidden {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
+
     @Test("Push registration requests permission after engine pairing")
     func testPushRegistrationRequestsPermissionAfterPairing() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

@@ -2,7 +2,7 @@ import Foundation
 
 /// Handlers for transforming error events into ChatMessages.
 ///
-/// Handles: error.agent, error.tool, error.provider
+/// Handles: error.agent, error.capability, error.provider
 enum ErrorHandlers {
 
     /// Transform error.agent event into a ChatMessage.
@@ -27,17 +27,17 @@ enum ErrorHandlers {
         )
     }
 
-    /// Transform error.tool event into a ChatMessage.
+    /// Transform error.capability event into a ChatMessage.
     ///
-    /// Tool errors represent failures during tool execution.
-    /// Includes tool name, error message, and optional error code.
-    static func transformToolError(
+    /// Capability errors represent failures during capability execution.
+    /// Includes model tool name, error message, and optional error code.
+    static func transformCapabilityError(
         _ payload: [String: AnyCodable],
         timestamp: Date
     ) -> ChatMessage? {
-        guard let parsed = ToolErrorPayload(from: payload) else { return nil }
+        guard let parsed = CapabilityErrorPayload(from: payload) else { return nil }
 
-        var errorText = "Tool '\(parsed.toolName)' failed: \(parsed.error)"
+        var errorText = "Capability '\(parsed.modelToolName)' failed: \(parsed.error)"
         if let code = parsed.code {
             errorText = "[\(code)] \(errorText)"
         }

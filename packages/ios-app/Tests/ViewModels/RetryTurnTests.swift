@@ -64,11 +64,7 @@ final class RetryTurnTests: XCTestCase {
         // retry doesn't silently grab something the user never typed.
         viewModel.messages = [
             ChatMessage(role: .user, content: .text("older prompt")),
-            ChatMessage(role: .user, content: .toolResult(ToolResultData(
-                toolCallId: "toolu_abc",
-                content: "tool output",
-                isError: false
-            ))),
+            ChatMessage(role: .user, content: .capabilityResult(testCapabilityResult(id: "toolu_abc", content: "tool output"))),
         ]
 
         let found = viewModel.findLastUserTextMessage()
@@ -103,11 +99,7 @@ final class RetryTurnTests: XCTestCase {
         // User has only ever submitted attachments / tool responses — no
         // text to re-issue. Retry must refuse.
         viewModel.messages = [
-            ChatMessage(role: .user, content: .toolResult(ToolResultData(
-                toolCallId: "t1",
-                content: "ok",
-                isError: false
-            ))),
+            ChatMessage(role: .user, content: .capabilityResult(testCapabilityResult(id: "t1", content: "ok"))),
         ]
 
         XCTAssertNil(viewModel.findLastUserTextMessage())

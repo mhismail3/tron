@@ -21,9 +21,9 @@ enum PersistedEventType: String, CaseIterable {
     case messageAssistant = "message.assistant"
     case messageSystem = "message.system"
 
-    // Tool execution
-    case toolCall = "tool.call"
-    case toolResult = "tool.result"
+    // Capability execution
+    case capabilityInvocationStarted = "capability.invocation.started"
+    case capabilityInvocationCompleted = "capability.invocation.completed"
 
     // Streaming (for real-time reconstruction)
     case streamTextDelta = "stream.text_delta"
@@ -78,7 +78,7 @@ enum PersistedEventType: String, CaseIterable {
 
     // Error events
     case errorAgent = "error.agent"
-    case errorTool = "error.tool"
+    case errorCapability = "error.capability"
     case errorProvider = "error.provider"
 
     // Subagent lifecycle
@@ -121,9 +121,9 @@ enum PersistedEventType: String, CaseIterable {
         case .messageUser:             return .init(true,    true,    false,   false,  "User message")
         case .messageAssistant:        return .init(true,    true,    false,   false,  "Assistant message")
         case .messageSystem:           return .init(true,    true,    false,   false,  "System message")
-        // Tool execution
-        case .toolCall:                return .init(true,    true,    false,   false,  "Tool call")
-        case .toolResult:              return .init(true,    true,    false,   false,  "Tool result")
+        // Capability execution
+        case .capabilityInvocationStarted: return .init(true, true, false, false, "Capability invocation")
+        case .capabilityInvocationCompleted: return .init(true, true, false, false, "Capability result")
         // Streaming
         case .streamTextDelta:         return .init(false,   false,   true,    true,   "Text delta")
         case .streamThinkingDelta:     return .init(false,   false,   true,    true,   "Thinking delta")
@@ -166,7 +166,7 @@ enum PersistedEventType: String, CaseIterable {
         case .worktreeRenamed:         return .init(false,   true,    false,   true,   "Branch renamed")
         // Errors
         case .errorAgent:              return .init(true,    true,    false,   false,  "Agent error")
-        case .errorTool:               return .init(true,    false,   false,   false,  "Tool error")
+        case .errorCapability:               return .init(true,    false,   false,   false,  "Capability error")
         case .errorProvider:           return .init(true,    false,   false,   false,  "Provider error")
         // Subagents
         case .subagentSpawned:         return .init(false,   true,    false,   false,  "Subagent spawned")
@@ -232,11 +232,11 @@ enum ContentBlockType: String {
 }
 
 // =============================================================================
-// MARK: - Tool Call Status (from server ToolCallEvent)
+// MARK: - Tool Call Status (from server CapabilityInvocationEvent)
 // =============================================================================
 
-/// Status of a tool call execution.
-enum ToolCallStatus: String {
+/// Status of a capability invocation execution.
+enum CapabilityInvocationStatusDTO: String {
     case generating = "generating"
     case running = "running"
     case completed = "completed"

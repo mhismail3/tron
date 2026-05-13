@@ -1,15 +1,28 @@
 import Foundation
 
 /// Lightweight server-side activity summary line.
-/// Enriched client-side with ToolDescriptorCatalog for icons, colors, display names, and argument summaries.
+/// Enriched client-side with capability identity metadata.
 struct ServerActivityLine: Decodable, Hashable, Sendable {
     let kind: String
     let text: String?
-    let toolName: String?
     let toolArgs: AnyCodable?
     let durationMs: Int?
     let isError: Bool?
     let turns: Int?
+    let modelToolName: String?
+    let contractId: String?
+    let implementationId: String?
+    let functionId: String?
+    let pluginId: String?
+    let workerId: String?
+    let schemaDigest: String?
+    let catalogRevision: UInt64?
+    let trustTier: String?
+    let riskLevel: String?
+    let effectClass: String?
+    let traceId: String?
+    let rootInvocationId: String?
+    let bindingDecisionId: String?
 
     func toActivityLine() -> ActivityLine {
         switch kind {
@@ -20,19 +33,18 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
         case "thinking":
             return ActivityLine(kind: .thinking, text: "Thinking")
         case "tool":
-            let name = toolName ?? "unknown"
-            let descriptor = ToolDescriptorCatalog.descriptor(for: name)
+            let identity = capabilityIdentity
+            let name = identity.stableCapabilityId
             let argsJSON = serializeArgs(toolArgs)
-            let summary = descriptor.summaryExtractor(argsJSON)
             let durationStr = durationMs.map { SessionStreamBuffer.formatDuration($0) }
             return ActivityLine(
-                kind: .toolStart,
+                kind: .capabilityStart,
                 text: name,
-                icon: descriptor.icon,
-                iconColor: ToolColor(fromDescriptorName: descriptor.iconColorName),
-                toolName: name,
-                displayName: descriptor.displayName,
-                summary: summary.isEmpty ? nil : summary,
+                icon: CapabilityPresentation.symbol(for: identity),
+                iconColor: CapabilityColor.fromCapability(identity),
+                modelToolName: name,
+                displayName: CapabilityPresentation.title(for: identity),
+                summary: argsJSON == "{}" ? nil : argsJSON,
                 duration: durationStr,
                 status: (isError == true) ? .error : .success
             )
@@ -45,6 +57,25 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
         default:
             return ActivityLine(kind: .text, text: text ?? "")
         }
+    }
+
+    private var capabilityIdentity: CapabilityIdentity {
+        CapabilityIdentity(
+            modelToolName: modelToolName,
+            contractId: contractId,
+            implementationId: implementationId,
+            functionId: functionId,
+            pluginId: pluginId,
+            workerId: workerId,
+            schemaDigest: schemaDigest,
+            catalogRevision: catalogRevision,
+            trustTier: trustTier,
+            riskLevel: riskLevel,
+            effectClass: effectClass,
+            traceId: traceId,
+            rootInvocationId: rootInvocationId,
+            bindingDecisionId: bindingDecisionId
+        )
     }
 
     private func serializeArgs(_ args: AnyCodable?) -> String {

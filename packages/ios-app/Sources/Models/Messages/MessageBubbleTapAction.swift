@@ -10,11 +10,11 @@ enum MessageBubbleTapAction {
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
     case subagent(SubagentToolData)
     case notifyApp(NotifyAppChipData)
-    case commandTool(CommandToolChipData)
-    /// User tapped the cancel button on a running command-tool chip.
-    /// Handler should call `agent.abortTool(toolCallId:)` to cooperatively abort
-    /// the in-flight tool without aborting the rest of the turn.
-    case cancelCommandTool(toolCallId: String)
+    case capabilityInvocation(CapabilityInvocationData)
+    /// User tapped the cancel button on a running capability chip.
+    /// Handler should call `agent.abortTool(invocationId:)` to cooperatively abort
+    /// the in-flight invocation without aborting the rest of the turn.
+    case cancelCapabilityInvocation(id: String)
     case subagentResult(sessionId: String)
     case subagentResultsReady(results: [SubagentResultEntry])
     case providerError(ProviderErrorDetailData)

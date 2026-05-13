@@ -1,8 +1,9 @@
 import Foundation
 
 // ARCHITECTURE: ~591 lines — dual-path transformer (persisted events + live streaming
-// events) producing ChatMessages. Both paths share block-building logic for text, tool
-// calls, and thinking content. Splitting would duplicate the shared content-block assembly.
+// events) producing ChatMessages. Both paths share block-building logic for text,
+// capability invocations, and thinking content. Splitting would duplicate the shared
+// content-block assembly.
 
 // =============================================================================
 // MARK: - Unified Event Transformer
@@ -19,14 +20,14 @@ import Foundation
 ///
 /// The server sends `message.assistant` events with content blocks in exact
 /// streaming order via `currentTurnContentSequence`. This preserves the interleaving
-/// of text and tool calls as they appeared during streaming:
+/// of text and capability invocations as they appeared during streaming:
 ///
 /// ```
 /// [text: "I'll run sleep 3...", tool_use: {id: "t1"}, text: "Done!", ...]
 /// ```
 ///
-/// Tool details come from separate `tool.call` events (name, arguments, turn).
-/// Tool results come from `tool.result` events. Both are combined when rendering
+/// Capability details come from separate `capability.invocation.started` events (identity, arguments, turn).
+/// Capability results come from `capability.invocation.completed` events. Both are combined when rendering
 /// tool_use content blocks from the message.assistant.
 ///
 /// ## Usage
@@ -51,11 +52,11 @@ struct UnifiedEventTransformer {
     /// including `RawEvent` (from server engine protocol) and `SessionEvent` (from SQLite).
     ///
     /// Events are sorted by sequence number, then turn number within each turn
-    /// (text before tools) to preserve the logical order of Claude's responses.
+    /// (text before capability invocations) to preserve the logical order of Claude's responses.
     ///
-    /// **Important**: Tool calls (`tool.call`) are combined with their results
-    /// (`tool.result`) into a single message. This matches the streaming UI
-    /// behavior where tool calls show their results inline.
+    /// **Important**: Capability invocations (`capability.invocation.started`) are combined with their results
+    /// (`capability.invocation.completed`) into a single message. This matches the streaming UI
+    /// behavior where capability invocations show their results inline.
     ///
     /// - Parameter events: Events conforming to EventTransformable
     /// - Returns: Array of ChatMessages in chronological order
@@ -63,22 +64,22 @@ struct UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = EventSorter.sortBySequence(events)
 
-        // Build maps for tool calls, results, and subagent notification filtering
-        let maps = buildToolMaps(from: sorted)
-        let toolCalls = maps.toolCalls
-        let toolResults = maps.toolResults
+        // Build maps for capability invocations, results, and subagent notification filtering.
+        let maps = buildCapabilityInvocationMaps(from: sorted)
+        let startedInvocations = maps.startedInvocations
+        let completedInvocations = maps.completedInvocations
         let consumedSubagentEventIds = maps.consumedSubagentEventIds
         let lastTurnEndSequence = maps.lastTurnEndSequence
 
-        TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(toolCalls.count) tool.call, \(toolResults.count) tool.result from \(sorted.count) events", category: .session)
+        TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(startedInvocations.count) capability.invocation.started, \(completedInvocations.count) capability.invocation.completed from \(sorted.count) events", category: .session)
 
         // Transform events, processing message.assistant content blocks in order
         var messages: [ChatMessage] = []
         for event in sorted {
-            // Skip tool.call, tool.result, and stream.thinking_complete —
+            // Skip capability.invocation.started, capability.invocation.completed, and stream.thinking_complete —
             // all are processed via message.assistant content blocks
-            if event.type == PersistedEventType.toolCall.rawValue ||
-               event.type == PersistedEventType.toolResult.rawValue ||
+            if event.type == PersistedEventType.capabilityInvocationStarted.rawValue ||
+               event.type == PersistedEventType.capabilityInvocationCompleted.rawValue ||
                event.type == PersistedEventType.streamThinkingComplete.rawValue {
                 continue
             }
@@ -97,8 +98,8 @@ struct UnifiedEventTransformer {
                 let interleaved = InterleavedContentProcessor.transform(
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
-                    toolCalls: toolCalls,
-                    toolResults: toolResults
+                    startedInvocations: startedInvocations,
+                    completedInvocations: completedInvocations
                 )
                 messages.append(contentsOf: interleaved)
             } else {
@@ -145,10 +146,10 @@ struct UnifiedEventTransformer {
             return MessageHandlers.transformAssistantMessage(payload, timestamp: ts)
         case .messageSystem:
             return MessageHandlers.transformSystemMessage(payload, timestamp: ts)
-        case .toolCall:
-            return ToolHandlers.transformToolCall(payload, timestamp: ts)
-        case .toolResult:
-            return ToolHandlers.transformToolResult(payload, timestamp: ts)
+        case .capabilityInvocationStarted:
+            return CapabilityInvocationHandlers.transformInvocationStarted(payload, timestamp: ts)
+        case .capabilityInvocationCompleted:
+            return CapabilityInvocationHandlers.transformInvocationCompleted(payload, timestamp: ts)
         case .notificationInterrupted:
             return SystemEventHandlers.transformInterrupted(payload, timestamp: ts)
         case .notificationSubagentResult:
@@ -159,8 +160,8 @@ struct UnifiedEventTransformer {
             return ConfigHandlers.transformReasoningLevelChange(payload, timestamp: ts)
         case .errorAgent:
             return ErrorHandlers.transformAgentError(payload, timestamp: ts)
-        case .errorTool:
-            return ErrorHandlers.transformToolError(payload, timestamp: ts)
+        case .errorCapability:
+            return ErrorHandlers.transformCapabilityError(payload, timestamp: ts)
         case .errorProvider:
             return ErrorHandlers.transformProviderError(payload, timestamp: ts)
         case .turnFailed:
@@ -187,31 +188,31 @@ struct UnifiedEventTransformer {
     }
 
     // =========================================================================
-    // MARK: - Tool Map Collection (shared between transform and reconstruct)
+    // MARK: - Capability Invocation Map Collection (shared between transform and reconstruct)
     // =========================================================================
 
     /// Result of the first-pass collection over events.
     /// Both `transformPersistedEvents` and `reconstructSessionState` need these maps
-    /// to resolve tool_use content blocks and filter consumed notifications.
-    struct ToolMapResult {
-        var toolCalls: [String: ToolCallPayload] = [:]
-        var toolResults: [String: ToolResultPayload] = [:]
+    /// to resolve provider `tool_use` content blocks and filter consumed notifications.
+    struct CapabilityInvocationMapResult {
+        var startedInvocations: [String: CapabilityInvocationStartedPayload] = [:]
+        var completedInvocations: [String: CapabilityInvocationCompletedPayload] = [:]
         var consumedSubagentEventIds: Set<String> = []
         var lastTurnEndSequence: Int = -1
     }
 
-    /// Single-pass collection of tool calls, tool results, consumed subagent notification IDs,
+    /// Single-pass collection of started/completed capability invocations, consumed subagent notification IDs,
     /// and the last turn_end sequence number from a sorted event array.
-    static func buildToolMaps<E: EventTransformable>(from events: [E]) -> ToolMapResult {
-        var result = ToolMapResult()
+    static func buildCapabilityInvocationMaps<E: EventTransformable>(from events: [E]) -> CapabilityInvocationMapResult {
+        var result = CapabilityInvocationMapResult()
         for event in events {
-            if event.type == PersistedEventType.toolCall.rawValue,
-               let payload = ToolCallPayload(from: event.payload) {
-                result.toolCalls[payload.toolCallId] = payload
+            if event.type == PersistedEventType.capabilityInvocationStarted.rawValue,
+               let payload = CapabilityInvocationStartedPayload(from: event.payload) {
+                result.startedInvocations[payload.invocationId] = payload
             }
-            if event.type == PersistedEventType.toolResult.rawValue,
-               let payload = ToolResultPayload(from: event.payload) {
-                result.toolResults[payload.toolCallId] = payload
+            if event.type == PersistedEventType.capabilityInvocationCompleted.rawValue,
+               let payload = CapabilityInvocationCompletedPayload(from: event.payload) {
+                result.completedInvocations[payload.invocationId] = payload
             }
             if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
                let ids = event.payload["consumedEventIds"]?.value as? [Any] {
@@ -256,7 +257,7 @@ extension UnifiedEventTransformer {
     /// - Extended state (file activity, worktree, compaction, etc.)
     ///
     /// **Two-Pass Reconstruction**:
-    /// - Pass 1: Collect deleted event IDs, tool maps, and config state
+    /// - Pass 1: Collect deleted event IDs, capability invocation maps, and config state
     /// - Pass 2: Build messages while filtering deleted events
     ///
     /// **AskUserQuestion Status Detection**:
@@ -279,10 +280,10 @@ extension UnifiedEventTransformer {
         // would incorrectly interleave parent and forked events
         let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
-        // PASS 1: Collect tool maps (shared), plus deleted event IDs and config state (reconstruct-only)
-        let maps = buildToolMaps(from: sorted)
-        let toolCalls = maps.toolCalls
-        let toolResults = maps.toolResults
+        // PASS 1: Collect capability invocation maps (shared), plus deleted event IDs and config state (reconstruct-only).
+        let maps = buildCapabilityInvocationMaps(from: sorted)
+        let startedInvocations = maps.startedInvocations
+        let completedInvocations = maps.completedInvocations
         let consumedSubagentEventIds = maps.consumedSubagentEventIds
         let lastTurnEndSequence = maps.lastTurnEndSequence
 
@@ -319,7 +320,7 @@ extension UnifiedEventTransformer {
                     state.sessionInfo.initialModel = payload.model
                 }
 
-            case .toolResult, .toolCall, .streamThinkingComplete:
+            case .capabilityInvocationCompleted, .capabilityInvocationStarted, .streamThinkingComplete:
                 // Skip - processed via message.assistant content blocks
                 break
 
@@ -327,8 +328,8 @@ extension UnifiedEventTransformer {
                 var interleaved = InterleavedContentProcessor.transform(
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
-                    toolCalls: toolCalls,
-                    toolResults: toolResults
+                    startedInvocations: startedInvocations,
+                    completedInvocations: completedInvocations
                 )
                 if !interleaved.isEmpty {
                     interleaved[0].eventId = event.id
@@ -374,7 +375,7 @@ extension UnifiedEventTransformer {
                  .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillDeactivated, .skillsCleared,
                  .rulesLoaded, .rulesActivated,
-                 .errorAgent, .errorTool, .errorProvider, .turnFailed,
+                 .errorAgent, .errorCapability, .errorProvider, .turnFailed,
                  .memoryRetained, .memoryAutoRetainFailed:
                 if var message = transformPersistedEvent(event) {
                     if eventType == .messageUser {
@@ -480,7 +481,7 @@ extension UnifiedEventTransformer {
                 subagentSessionId: sessionId,
                 task: payload["task"]?.value as? String ?? "",
                 model: payload["model"]?.value as? String ?? "unknown",
-                toolCallId: payload["toolCallId"]?.value as? String,
+                invocationId: payload["invocationId"]?.value as? String,
                 blocking: payload["blocking"]?.value as? Bool ?? false,
                 spawnType: payload["spawnType"]?.value as? String
             ))

@@ -691,8 +691,10 @@ fn spawn_child_event_forwarder(
 fn activity_text(event: &TronEvent) -> Option<String> {
     match event {
         TronEvent::TurnStart { turn, .. } => Some(format!("Turn {turn} started")),
-        TronEvent::ToolExecutionStart { tool_name, .. } => Some(format!("Executing {tool_name}")),
-        TronEvent::ToolExecutionEnd {
+        TronEvent::CapabilityInvocationStarted { tool_name, .. } => {
+            Some(format!("Executing {tool_name}"))
+        }
+        TronEvent::CapabilityInvocationCompleted {
             tool_name,
             duration,
             ..
@@ -704,17 +706,17 @@ fn activity_text(event: &TronEvent) -> Option<String> {
 fn forwarded_subagent_event(event: &TronEvent) -> Option<Value> {
     match event {
         TronEvent::MessageUpdate { content, .. } => Some(json!({
-            "type": "text_delta",
+            "type": "agent.text_delta",
             "data": { "delta": content },
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })),
-        TronEvent::ToolExecutionStart {
+        TronEvent::CapabilityInvocationStarted {
             tool_call_id,
             tool_name,
             arguments,
             ..
         } => Some(json!({
-            "type": "tool_start",
+            "type": "capability.invocation.started",
             "data": {
                 "toolCallId": tool_call_id,
                 "toolName": tool_name,
@@ -722,7 +724,7 @@ fn forwarded_subagent_event(event: &TronEvent) -> Option<Value> {
             },
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })),
-        TronEvent::ToolExecutionEnd {
+        TronEvent::CapabilityInvocationCompleted {
             tool_call_id,
             tool_name,
             is_error,
@@ -748,7 +750,7 @@ fn forwarded_subagent_event(event: &TronEvent) -> Option<Value> {
                         .join(""),
                 });
             Some(json!({
-                "type": "tool_end",
+                "type": "capability.invocation.completed",
                 "data": {
                     "toolCallId": tool_call_id,
                     "toolName": tool_name,

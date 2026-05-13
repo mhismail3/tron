@@ -28,11 +28,6 @@ struct AgentClientTests {
         var getStateModel = "claude-opus-4-20250514"
         var getStateShouldThrow = false
 
-        var sendToolResultCallCount = 0
-        var sendToolResultSessionId: String?
-        var sendToolResultToolCallId: String?
-        var sendToolResultShouldThrow = false
-
         var activateSkillCallCount = 0
         var lastActivatedSkill: String?
         var deactivateSkillCallCount = 0
@@ -57,18 +52,6 @@ struct AgentClientTests {
         func abort(idempotencyKey: EngineIdempotencyKey) async throws {
             abortCallCount += 1
             if abortShouldThrow { throw TestError.mockError }
-        }
-
-        func sendToolResult(
-            sessionId: String,
-            toolCallId: String,
-            result: AskUserQuestionResult,
-            idempotencyKey: EngineIdempotencyKey
-        ) async throws {
-            sendToolResultCallCount += 1
-            sendToolResultSessionId = sessionId
-            sendToolResultToolCallId = toolCallId
-            if sendToolResultShouldThrow { throw TestError.mockError }
         }
 
         func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult {
@@ -209,9 +192,6 @@ struct AgentClientTests {
             case "agent::abort_tool":
                 #expect((payload as? AgentAbortToolParams)?.sessionId == sessionId)
                 return AgentAbortToolResult(aborted: true)
-            case "tool::result":
-                #expect((payload as? ToolResultParams)?.sessionId == sessionId)
-                return ToolResultResponse(success: true)
             default:
                 throw EngineConnectionError.invalidResponse
             }
@@ -226,15 +206,8 @@ struct AgentClientTests {
         _ = try await client.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults.test"))
         _ = try await client.submitAnswers(questions: [], idempotencyKey: .userAction("agent.submitAnswers.test"))
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
-        _ = try await client.abortTool(toolCallId: "tool-1", idempotencyKey: .userAction("agent.abortTool.test"))
-        try await client.sendToolResult(
-            sessionId: sessionId,
-            toolCallId: "tool-2",
-            result: Self.makeTestResult(),
-            idempotencyKey: .userAction("tool.result.test")
-        )
-
-        #expect(transport.ensureSessionEventSubscriptionCallCount == 7)
+        _ = try await client.abortTool(invocationId: "tool-1", idempotencyKey: .userAction("agent.abortTool.test"))
+        #expect(transport.ensureSessionEventSubscriptionCallCount == 6)
         #expect(transport.operationOrder.prefix(2) == [
             "subscribe:\(sessionId)",
             "write:agent::prompt"
@@ -249,8 +222,7 @@ struct AgentClientTests {
             "agent::deliver_subagent_results",
             "agent::submit_answers",
             "agent::abort",
-            "agent::abort_tool",
-            "tool::result"
+            "agent::abort_tool"
         ])
     }
 
@@ -327,51 +299,4 @@ struct AgentClientTests {
         }
     }
 
-    // MARK: - Send Tool Result Tests
-
-    // MARK: - Helper to create test AskUserQuestionResult
-
-    static func makeTestResult() -> AskUserQuestionResult {
-        let json = """
-        {
-            "answers": [{"questionId": "q1", "selectedValues": ["answer"]}],
-            "complete": true,
-            "submittedAt": "2024-01-01T00:00:00Z"
-        }
-        """
-        return try! JSONDecoder().decode(AskUserQuestionResult.self, from: json.data(using: .utf8)!)
-    }
-
-    @Test("Send tool result calls correctly")
-    func testSendToolResult_calls() async throws {
-        let mock = MockAgentClient()
-        let result = Self.makeTestResult()
-
-        try await mock.sendToolResult(
-            sessionId: "session-123",
-            toolCallId: "tool-456",
-            result: result,
-            idempotencyKey: .userAction("tool.result.test")
-        )
-
-        #expect(mock.sendToolResultCallCount == 1)
-        #expect(mock.sendToolResultSessionId == "session-123")
-        #expect(mock.sendToolResultToolCallId == "tool-456")
-    }
-
-    @Test("Send tool result throws on error")
-    func testSendToolResult_throwsOnError() async throws {
-        let mock = MockAgentClient()
-        mock.sendToolResultShouldThrow = true
-        let result = Self.makeTestResult()
-
-        await #expect(throws: MockAgentClient.TestError.self) {
-            try await mock.sendToolResult(
-                sessionId: "session-123",
-                toolCallId: "tool-456",
-                result: result,
-                idempotencyKey: .userAction("tool.result.test")
-            )
-        }
-    }
 }

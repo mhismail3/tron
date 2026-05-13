@@ -80,12 +80,12 @@ struct ServerSettings: Decodable {
     let promptHistoryMaxAgeDays: Int
     let promptHistoryAutoPrune: Bool
 
-    // MARK: - MCP
+    // MARK: - plugin source
 
     /// Proactive schema-refresh TTL in milliseconds. `0` disables.
-    /// When non-zero, each `McpCall` re-fetches `tools/list` from the target
-    /// server if its cached tool set is older than this TTL, detecting schema
-    /// drift and rebuilding the tool index.
+    /// When non-zero, plugin-source-derived capability plugins refresh the target
+    /// server's `tools/list` metadata when the cached schema set is older
+    /// than this TTL.
     let mcpSchemaRefreshTtlMs: UInt64
 
     // MARK: - Observability And Storage
@@ -98,7 +98,7 @@ struct ServerSettings: Decodable {
     let storageMaxDatabaseMb: UInt64
 
     private enum CodingKeys: String, CodingKey {
-        case server, context, session, hooks, skills, memory, git, promptLibrary, mcp
+        case server, context, session, hooks, skills, memory, git, promptLibrary, pluginSources
         case observability, storage
     }
 
@@ -312,8 +312,8 @@ struct ServerSettings: Decodable {
             promptHistoryAutoPrune = true
         }
 
-        // mcp.*
-        if let mcpContainer = try? container.nestedContainer(keyedBy: McpKeys.self, forKey: .mcp) {
+        // pluginSources.*
+        if let mcpContainer = try? container.nestedContainer(keyedBy: McpKeys.self, forKey: .pluginSources) {
             mcpSchemaRefreshTtlMs = (try? mcpContainer.decodeIfPresent(UInt64.self, forKey: .schemaRefreshTtlMs)) ?? 30_000
         } else {
             mcpSchemaRefreshTtlMs = 30_000
@@ -608,7 +608,7 @@ struct ServerSettingsUpdate: Encodable {
         var schemaRefreshTtlMs: UInt64?
     }
 
-    var mcp: McpUpdate?
+    var pluginSources: McpUpdate?
 
     struct ObservabilityUpdate: Encodable {
         var logLevel: String?

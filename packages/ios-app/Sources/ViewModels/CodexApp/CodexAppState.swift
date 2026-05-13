@@ -408,7 +408,7 @@ enum CodexAppReducer {
             return .command(id: id, command: command, cwd: cwd, status: status, output: output)
         case .fileChange(let id, let status, let changes):
             return .fileChange(id: id, status: status, summary: changes?.joined(separator: "\n"))
-        case .mcpToolCall(let id, let server, let tool, let status, let error):
+        case .mcpCapabilityInvocation(let id, let server, let tool, let status, let error):
             return .mcpTool(id: id, server: server, tool: tool, status: status, detail: error)
         case .webSearch(let id, let query, let status):
             return .webSearch(id: id, query: query, status: status)

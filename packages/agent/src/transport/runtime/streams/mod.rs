@@ -9,7 +9,7 @@
 //! folders own capability behavior.
 //! Engine trace context carried by the source `TronEvent` is copied into both
 //! the persisted engine stream row and the neutral payload so observability can
-//! follow an agent turn through streamed UI events, tool execution, queues, and
+//! follow an agent turn through streamed UI events, capability invocation, queues, and
 //! downstream capabilities.
 
 use std::sync::Arc;

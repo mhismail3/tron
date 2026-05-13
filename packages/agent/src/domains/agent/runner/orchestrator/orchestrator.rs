@@ -133,7 +133,7 @@ pub struct Orchestrator {
     session_manager: Arc<SessionManager>,
     broadcast: Arc<EventEmitter>,
     run_registry: Arc<RunRegistry>,
-    /// Tool call tracker shared with tool-result capabilities.
+    /// Capability invocation tracker shared with capability-result capabilities.
     tool_tracker: Mutex<ToolCallTracker>,
     /// Accumulates in-progress turn content for session resume catch-up.
     turn_accumulators: Arc<TurnAccumulatorMap>,
@@ -452,7 +452,7 @@ impl Orchestrator {
         self.session_manager.active_count() < MAX_CONCURRENT_SESSIONS
     }
 
-    /// Register a tool call, returning a receiver for the result.
+    /// Register a capability invocation, returning a receiver for the result.
     pub fn register_tool_call(
         &self,
         tool_call_id: &str,
@@ -460,12 +460,12 @@ impl Orchestrator {
         self.tool_tracker.lock().register(tool_call_id)
     }
 
-    /// Resolve a pending tool call with a result. Returns true if found.
+    /// Resolve a pending capability invocation with a result. Returns true if found.
     pub fn resolve_tool_call(&self, tool_call_id: &str, value: serde_json::Value) -> bool {
         self.tool_tracker.lock().resolve(tool_call_id, value)
     }
 
-    /// Check if a tool call is pending.
+    /// Check if a capability invocation is pending.
     pub fn has_pending_tool_call(&self, tool_call_id: &str) -> bool {
         self.tool_tracker.lock().has_pending(tool_call_id)
     }
@@ -491,7 +491,7 @@ impl Orchestrator {
             }
         }
 
-        // Cancel all pending tool calls
+        // Cancel all pending capability invocations
         self.tool_tracker.lock().cancel_all();
 
         // Clear all sequence counters and compaction handlers
@@ -685,7 +685,7 @@ mod tests {
         assert!(!t2_token.is_cancelled());
     }
 
-    // --- Tool call tracker tests ---
+    // --- Capability invocation tracker tests ---
 
     #[tokio::test]
     async fn tool_call_register_and_resolve() {

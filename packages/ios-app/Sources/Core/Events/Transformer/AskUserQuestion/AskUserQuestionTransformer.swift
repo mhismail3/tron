@@ -2,23 +2,23 @@ import Foundation
 
 /// Transformer for AskUserQuestion tool_use content blocks.
 ///
-/// Reads server-enriched status fields from the tool.call payload
+/// Reads server-enriched status fields from the capability.invocation.started payload
 /// (`toolStatus`, `parsedAnswers`) injected by `session::reconstruct`
-/// enrichment. For live WebSocket events (where the tool.call hasn't been
+/// enrichment. For live WebSocket events (where the capability.invocation.started hasn't been
 /// enriched yet), status defaults to `.generating`.
 enum AskUserQuestionTransformer {
 
     /// Transform an AskUserQuestion tool_use content block into a ChatMessage.
     static func transform(
         toolUseId: String,
-        toolCall: ToolCallPayload?,
+        toolCall: CapabilityInvocationStartedPayload?,
         contentBlock: [String: Any],
         timestamp: Date,
         tokenRecord: TokenRecord?,
         model: String?,
         turn: Int
     ) -> ChatMessage? {
-        guard let argumentsJson = ToolArgumentExtractor.extractArguments(
+        guard let argumentsJson = CapabilityArgumentExtractor.extractArguments(
             toolCall: toolCall,
             contentBlock: contentBlock
         ) else {
@@ -32,7 +32,7 @@ enum AskUserQuestionTransformer {
             return nil
         }
 
-        // Read enriched fields from the server-provided tool.call payload.
+        // Read enriched fields from the server-provided capability.invocation.started payload.
         let payload = toolCall?.rawPayload ?? [:]
         let (status, answers) = decodeEnrichment(from: payload)
 
@@ -45,7 +45,7 @@ enum AskUserQuestionTransformer {
             : nil
 
         let toolData = AskUserQuestionToolData(
-            toolCallId: toolUseId,
+            invocationId: toolUseId,
             params: params,
             answers: answers,
             status: status,

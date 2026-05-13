@@ -11,7 +11,7 @@ final class ProcessState {
         let id: String  // processId
         let label: String
         let kind: String
-        let toolCallId: String
+        let invocationId: String
         let startedAt: Date
         var status: Status
         var exitCode: Int?
@@ -52,7 +52,7 @@ final class ProcessState {
             id: result.processId,
             label: result.label,
             kind: result.kind,
-            toolCallId: result.toolCallId,
+            invocationId: result.invocationId,
             startedAt: Date(),
             status: .running
         )

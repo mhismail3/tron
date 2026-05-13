@@ -9,7 +9,7 @@
 //!
 //! | Module          | Content |
 //! |-----------------|---------|
-//! | [`persistence`] | Accumulate `StreamEvent`s during a turn and emit the final persisted payload (assistant message, tool calls) in the session event DTO shape |
+//! | [`persistence`] | Accumulate `StreamEvent`s during a turn and emit the final persisted payload (assistant message, capability invocations) in the session event DTO shape |
 //!
 //! ## Module Position
 //!

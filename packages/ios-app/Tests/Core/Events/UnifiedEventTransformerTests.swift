@@ -74,6 +74,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
             if augmented["stopReason"] == nil { augmented["stopReason"] = AnyCodable("end_turn") }
         case "message.system":
             if augmented["source"] == nil { augmented["source"] = AnyCodable("compaction") }
+        case PersistedEventType.capabilityInvocationStarted.rawValue:
+            if augmented["modelToolName"] == nil {
+                augmented["modelToolName"] = AnyCodable("execute")
+            }
+        case PersistedEventType.capabilityInvocationCompleted.rawValue:
+            if augmented["modelToolName"] == nil {
+                augmented["modelToolName"] = AnyCodable("execute")
+            }
         case "session.start":
             if augmented["workingDirectory"] == nil { augmented["workingDirectory"] = AnyCodable("/test/workspace") }
             if augmented["model"] == nil { augmented["model"] = AnyCodable("claude-sonnet-4") }
@@ -104,14 +112,16 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "content": AnyCodable("System note"),
                 "source": AnyCodable("compaction")
             ],
-            .toolCall: [
-                "toolCallId": AnyCodable("tool-fixture"),
+            .capabilityInvocationStarted: [
+                "invocationId": AnyCodable("tool-fixture"),
                 "name": AnyCodable("Bash"),
+                "modelToolName": AnyCodable("execute"),
                 "arguments": AnyCodable(["command": "true"]),
                 "turn": AnyCodable(1)
             ],
-            .toolResult: [
-                "toolCallId": AnyCodable("tool-fixture"),
+            .capabilityInvocationCompleted: [
+                "invocationId": AnyCodable("tool-fixture"),
+                "modelToolName": AnyCodable("execute"),
                 "content": AnyCodable("ok"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(25)
@@ -161,9 +171,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "error": AnyCodable("Agent failed"),
                 "recoverable": AnyCodable(false)
             ],
-            .errorTool: [
-                "toolName": AnyCodable("Bash"),
-                "toolCallId": AnyCodable("tool-fixture"),
+            .errorCapability: [
+                "modelToolName": AnyCodable("Bash"),
+                "invocationId": AnyCodable("tool-fixture"),
                 "error": AnyCodable("Command failed")
             ],
             .errorProvider: [
@@ -317,11 +327,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     // MARK: - Tool Call Tests
 
-    func testTransformToolCall() {
+    func testTransformCapabilityInvocation() {
         let event = rawEvent(
-            type: "tool.call",
+            type: "capability.invocation.started",
             payload: [
-                "toolCallId": AnyCodable("call_123"),
+                "invocationId": AnyCodable("call_123"),
                 "name": AnyCodable("Read"),
                 "arguments": AnyCodable(["file_path": "/src/main.ts"]),
                 "turn": AnyCodable(1)
@@ -333,11 +343,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertNotNil(message)
         XCTAssertEqual(message?.role, .assistant)
 
-        if case .toolUse(let toolUse) = message?.content {
-            XCTAssertEqual(toolUse.toolName, "Read")
-            XCTAssertEqual(toolUse.toolCallId, "call_123")
+        if case .capabilityInvocation(let invocation) = message?.content {
+            XCTAssertEqual(invocation.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation.id, "call_123")
         } else {
-            XCTFail("Expected toolUse content")
+            XCTFail("Expected capability invocation content")
         }
     }
 
@@ -345,9 +355,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testTransformToolResult() {
         let event = rawEvent(
-            type: "tool.result",
+            type: "capability.invocation.completed",
             payload: [
-                "toolCallId": AnyCodable("call_123"),
+                "invocationId": AnyCodable("call_123"),
                 "content": AnyCodable("File contents here..."),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(150)
@@ -357,21 +367,21 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let message = UnifiedEventTransformer.transformPersistedEvent(event)
 
         XCTAssertNotNil(message)
-        XCTAssertEqual(message?.role, .toolResult)
+        XCTAssertEqual(message?.role, .capability)
 
-        if case .toolResult(let result) = message?.content {
-            XCTAssertEqual(result.toolCallId, "call_123")
+        if case .capabilityResult(let result) = message?.content {
+            XCTAssertEqual(result.id, "call_123")
             XCTAssertFalse(result.isError)
         } else {
-            XCTFail("Expected toolResult content")
+            XCTFail("Expected capability result content")
         }
     }
 
     func testTransformToolResultWithError() {
         let event = rawEvent(
-            type: "tool.result",
+            type: "capability.invocation.completed",
             payload: [
-                "toolCallId": AnyCodable("call_456"),
+                "invocationId": AnyCodable("call_456"),
                 "content": AnyCodable("File not found"),
                 "isError": AnyCodable(true),
                 "duration": AnyCodable(42)
@@ -382,10 +392,10 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         XCTAssertNotNil(message)
 
-        if case .toolResult(let result) = message?.content {
+        if case .capabilityResult(let result) = message?.content {
             XCTAssertTrue(result.isError)
         } else {
-            XCTFail("Expected toolResult content")
+            XCTFail("Expected capability result content")
         }
     }
 
@@ -469,10 +479,10 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testTransformToolError() {
         let event = rawEvent(
-            type: "error.tool",
+            type: "error.capability",
             payload: [
-                "toolName": AnyCodable("Bash"),
-                "toolCallId": AnyCodable("call_789"),
+                "modelToolName": AnyCodable("Bash"),
+                "invocationId": AnyCodable("call_789"),
                 "error": AnyCodable("Command timed out"),
                 "code": AnyCodable("TIMEOUT")
             ]
@@ -594,8 +604,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let fixtures = renderableEventFixtures()
         let standaloneRenderableTypes = PersistedEventType.allCases.filter {
             $0.rendersAsChatMessage &&
-            $0 != .toolCall &&
-            $0 != .toolResult
+            $0 != .capabilityInvocationStarted &&
+            $0 != .capabilityInvocationCompleted
         }
 
         for (offset, eventType) in standaloneRenderableTypes.enumerated() {
@@ -639,8 +649,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
             .llmHookResult
         ]
         let consumedThroughAssistantMessage: Set<PersistedEventType> = [
-            .toolCall,
-            .toolResult,
+            .capabilityInvocationStarted,
+            .capabilityInvocationCompleted,
             .streamThinkingComplete
         ]
         let streamingReplayOnly: Set<PersistedEventType> = [
@@ -698,14 +708,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testTransformPersistedEventsSessionEvent() {
         // Test the new interleaved content block architecture:
         // - message.assistant contains content blocks in streaming order
-        // - tool.call events provide tool details (name, arguments, turn)
-        // - tool.result events provide results
+        // - capability.invocation.started events provide tool details (name, arguments, turn)
+        // - capability.invocation.completed events provide results
         // - The order comes from message.assistant's content array, not timestamps
         let events = [
             sessionEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hi")], timestamp: timestamp(1), sequence: 2),
-            sessionEvent(type: "tool.call", payload: ["name": AnyCodable("Read"), "toolCallId": AnyCodable("c1"), "arguments": AnyCodable([:]), "turn": AnyCodable(1)], timestamp: timestamp(2), sequence: 3),
-            sessionEvent(type: "tool.result", payload: ["toolCallId": AnyCodable("c1"), "content": AnyCodable("result"), "isError": AnyCodable(false), "duration": AnyCodable(10)], timestamp: timestamp(3), sequence: 4),
+            sessionEvent(type: "capability.invocation.started", payload: ["name": AnyCodable("Read"), "invocationId": AnyCodable("c1"), "arguments": AnyCodable([:]), "turn": AnyCodable(1)], timestamp: timestamp(2), sequence: 3),
+            sessionEvent(type: "capability.invocation.completed", payload: ["invocationId": AnyCodable("c1"), "content": AnyCodable("result"), "isError": AnyCodable(false), "duration": AnyCodable(10)], timestamp: timestamp(3), sequence: 4),
             // message.assistant content blocks reflect exact streaming order: tool_use then text
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -718,20 +728,20 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
-        // user + tool.call (from content block) + text (from content block) = 3 messages
+        // user + capability.invocation.started (from content block) + text (from content block) = 3 messages
         // Order comes from message.assistant's content array
         XCTAssertEqual(messages.count, 3)
         XCTAssertEqual(messages[0].role, .user)
-        XCTAssertEqual(messages[1].role, .assistant) // tool_use block -> tool.call with result
+        XCTAssertEqual(messages[1].role, .assistant) // tool_use block -> capability.invocation.started with result
         XCTAssertEqual(messages[2].role, .assistant) // text block
 
-        // Verify tool call has result attached
-        if case .toolUse(let toolData) = messages[1].content {
-            XCTAssertEqual(toolData.toolName, "Read")
-            XCTAssertEqual(toolData.result, "result")
-            XCTAssertEqual(toolData.status, .success)
+        // Verify capability invocation has result attached
+        if case .capabilityInvocation(let invocation) = messages[1].content {
+            XCTAssertEqual(invocation.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation.result, "result")
+            XCTAssertEqual(invocation.status, .success)
         } else {
-            XCTFail("Expected toolUse content")
+            XCTFail("Expected capability invocation content")
         }
 
         // Verify text content
@@ -747,27 +757,27 @@ final class UnifiedEventTransformerTests: XCTestCase {
         // This is the key fix: content blocks preserve exact streaming interleaving order
         let events = [
             sessionEvent(type: "message.user", payload: ["content": AnyCodable("Run sleep 3 twice")], timestamp: timestamp(0), sequence: 1),
-            // Tool calls happen during streaming
-            sessionEvent(type: "tool.call", payload: [
+            // Capability invocations happen during streaming
+            sessionEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Bash"),
-                "toolCallId": AnyCodable("tool1"),
+                "invocationId": AnyCodable("tool1"),
                 "arguments": AnyCodable(["command": "sleep 3"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(1), sequence: 2),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tool1"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tool1"),
                 "content": AnyCodable(""),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
             ], timestamp: timestamp(2), sequence: 3),
-            sessionEvent(type: "tool.call", payload: [
+            sessionEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Bash"),
-                "toolCallId": AnyCodable("tool2"),
+                "invocationId": AnyCodable("tool2"),
                 "arguments": AnyCodable(["command": "sleep 3"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(3), sequence: 4),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tool2"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tool2"),
                 "content": AnyCodable(""),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -800,13 +810,13 @@ final class UnifiedEventTransformerTests: XCTestCase {
             XCTFail("Expected text content at index 1")
         }
 
-        // Message 2: First tool call
-        if case .toolUse(let tool) = messages[2].content {
-            XCTAssertEqual(tool.toolCallId, "tool1")
-            XCTAssertEqual(tool.toolName, "Bash")
-            XCTAssertEqual(tool.result, "(no output)") // Empty result shows "(no output)"
+        // Message 2: First capability invocation
+        if case .capabilityInvocation(let invocation) = messages[2].content {
+            XCTAssertEqual(invocation.id, "tool1")
+            XCTAssertEqual(invocation.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation.result, "(no output)") // Empty result shows "(no output)"
         } else {
-            XCTFail("Expected toolUse content at index 2")
+            XCTFail("Expected capability invocation content at index 2")
         }
 
         // Message 3: "First done, running second..."
@@ -816,12 +826,12 @@ final class UnifiedEventTransformerTests: XCTestCase {
             XCTFail("Expected text content at index 3")
         }
 
-        // Message 4: Second tool call
-        if case .toolUse(let tool) = messages[4].content {
-            XCTAssertEqual(tool.toolCallId, "tool2")
-            XCTAssertEqual(tool.toolName, "Bash")
+        // Message 4: Second capability invocation
+        if case .capabilityInvocation(let invocation) = messages[4].content {
+            XCTAssertEqual(invocation.id, "tool2")
+            XCTAssertEqual(invocation.identity.modelToolName, "execute")
         } else {
-            XCTFail("Expected toolUse content at index 4")
+            XCTFail("Expected capability invocation content at index 4")
         }
 
         // Message 5: "Done!"
@@ -832,12 +842,13 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    func testToolUseWithoutMatchingToolCallEvent() {
-        // Edge case: tool_use in content blocks but NO separate tool.call event
-        // This tests the fallback code path where we use content block info directly
+    func testToolUseWithoutMatchingCapabilityInvocationEventDoesNotInferOldName() {
+        // Edge case: tool_use in content blocks but NO enriched capability event.
+        // iOS preserves the invocation shell, but must not synthesize identity
+        // from the content-block name.
         let events = [
             sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], timestamp: timestamp(0), sequence: 1),
-            // NO tool.call event - only tool_use in message.assistant content
+            // NO capability.invocation.started event - only tool_use in message.assistant content
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     ["type": "text", "text": "Let me read that file:"],
@@ -849,17 +860,18 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
-        // Should produce: user + text + tool (from content block fallback) = 3 messages
-        XCTAssertEqual(messages.count, 3, "Should have 3 messages even without tool.call event")
+        // Should produce: user + text + capability shell = 3 messages
+        XCTAssertEqual(messages.count, 3, "Should have 3 messages even without capability.invocation.started event")
 
-        // Verify the tool uses fallback data from content block
-        if case .toolUse(let tool) = messages[2].content {
-            XCTAssertEqual(tool.toolCallId, "orphan-tool-id")
-            XCTAssertEqual(tool.toolName, "Read")  // From content block
-            XCTAssertTrue(tool.arguments.contains("file_path"))  // Serialized from content block
-            XCTAssertEqual(tool.status, .running)  // No result = running
+        // Verify arguments survive, while identity remains generic.
+        if case .capabilityInvocation(let invocation) = messages[2].content {
+            XCTAssertEqual(invocation.id, "orphan-tool-id")
+            XCTAssertNil(invocation.identity.modelToolName)
+            XCTAssertTrue(invocation.identity.isEmpty)
+            XCTAssertTrue(invocation.arguments.contains("file_path"))  // Serialized from content block
+            XCTAssertEqual(invocation.status, .running)  // No result = running
         } else {
-            XCTFail("Expected toolUse content at index 2")
+            XCTFail("Expected capability invocation content at index 2")
         }
     }
 
@@ -1111,9 +1123,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
             rawEvent(type: "message.user", payload: ["content": AnyCodable("Do something")], timestamp: timestamp(1)),
-            rawEvent(type: "error.tool", payload: [
-                "toolName": AnyCodable("Bash"),
-                "toolCallId": AnyCodable("call_err1"),
+            rawEvent(type: "error.capability", payload: [
+                "modelToolName": AnyCodable("Bash"),
+                "invocationId": AnyCodable("call_err1"),
                 "error": AnyCodable("Command failed")
             ], timestamp: timestamp(2)),
             rawEvent(type: "error.provider", payload: [
@@ -1126,7 +1138,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
-        // user + error.tool + error.provider = 3 messages
+        // user + error.capability + error.provider = 3 messages
         XCTAssertEqual(state.messages.count, 3)
     }
 
@@ -1162,12 +1174,12 @@ final class UnifiedEventTransformerTests: XCTestCase {
     }
 
     func testMalformedPayloadReturnsNil() {
-        // Tool call without required toolCallId
+        // Capability invocation without required invocationId
         let event = rawEvent(
-            type: "tool.call",
+            type: "capability.invocation.started",
             payload: [
                 "name": AnyCodable("Read")
-                // Missing toolCallId and arguments
+                // Missing invocationId and arguments
             ]
         )
 
@@ -1313,23 +1325,26 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testAskUserQuestionPendingStatus() {
         // Server enrichment sets toolStatus=pending when no user response
-        // follows the tool call.
-        let toolCallId = "auq-\(UUID().uuidString)"
+        // follows the capability invocation.
+        let invocationId = "auq-\(UUID().uuidString)"
         // JSON must match AskUserQuestionParams exactly: id, question, options, mode (single/multi)
         let questionsJson = """
         {"questions":[{"id":"q1","question":"What is your name?","options":[{"label":"Alice"},{"label":"Bob"}],"mode":"single"}]}
         """
         let events = [
-            sessionEvent(type: "tool.call", payload: [
-                "name": AnyCodable("AskUserQuestion"),
-                "toolCallId": AnyCodable(toolCallId),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "name": AnyCodable("execute"),
+                "modelToolName": AnyCodable("execute"),
+                "contractId": AnyCodable("agent::ask_user"),
+                "functionId": AnyCodable("agent::ask_user"),
+                "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1),
                 "toolStatus": AnyCodable("pending")
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                    ["type": "tool_use", "id": invocationId, "name": "execute", "input": [
                         "questions": [
                             ["id": "q1", "question": "What is your name?", "options": [["label": "Alice"], ["label": "Bob"]], "mode": "single"]
                         ]
@@ -1354,15 +1369,18 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testAskUserQuestionAnsweredStatus() {
         // Server enrichment injects toolStatus + parsedAnswers into the
-        // tool.call payload. iOS reads them directly — no event scanning.
-        let toolCallId = "auq-\(UUID().uuidString)"
+        // capability.invocation.started payload. iOS reads them directly — no event scanning.
+        let invocationId = "auq-\(UUID().uuidString)"
         let questionsJson = """
         {"questions":[{"id":"q1","question":"What is your name?","options":[{"label":"Alice","description":"First option"},{"label":"Bob","description":"Second option"}],"mode":"single"}]}
         """
         let events = [
-            rawEvent(type: "tool.call", payload: [
-                "name": AnyCodable("AskUserQuestion"),
-                "toolCallId": AnyCodable(toolCallId),
+            rawEvent(type: "capability.invocation.started", payload: [
+                "name": AnyCodable("execute"),
+                "modelToolName": AnyCodable("execute"),
+                "contractId": AnyCodable("agent::ask_user"),
+                "functionId": AnyCodable("agent::ask_user"),
+                "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1),
                 "toolStatus": AnyCodable("answered"),
@@ -1372,7 +1390,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                    ["type": "tool_use", "id": invocationId, "name": "execute", "input": [
                         "questions": [
                             ["id": "q1", "question": "What is your name?", "options": [["label": "Alice", "description": "First option"], ["label": "Bob", "description": "Second option"]], "mode": "single"]
                         ]
@@ -1400,22 +1418,25 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testAskUserQuestionSupersededStatus() {
         // Server enrichment sets toolStatus=superseded when the user sent a
-        // non-matching message after the tool call.
-        let toolCallId = "auq-\(UUID().uuidString)"
+        // non-matching message after the capability invocation.
+        let invocationId = "auq-\(UUID().uuidString)"
         let questionsJson = """
         {"questions":[{"id":"q1","question":"Pick one?","options":[{"label":"A"},{"label":"B"}],"mode":"single"}]}
         """
         let events = [
-            rawEvent(type: "tool.call", payload: [
-                "name": AnyCodable("AskUserQuestion"),
-                "toolCallId": AnyCodable(toolCallId),
+            rawEvent(type: "capability.invocation.started", payload: [
+                "name": AnyCodable("execute"),
+                "modelToolName": AnyCodable("execute"),
+                "contractId": AnyCodable("agent::ask_user"),
+                "functionId": AnyCodable("agent::ask_user"),
+                "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1),
                 "toolStatus": AnyCodable("superseded")
             ], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                    ["type": "tool_use", "id": invocationId, "name": "execute", "input": [
                         "questions": [
                             ["id": "q1", "question": "Pick one?", "options": [["label": "A"], ["label": "B"]], "mode": "single"]
                         ]
@@ -1441,21 +1462,24 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testAskUserQuestionMissingEnrichmentDefaultsToGenerating() {
         // Live WebSocket events arrive without server enrichment — status
         // should default to .generating, not .pending.
-        let toolCallId = "auq-\(UUID().uuidString)"
+        let invocationId = "auq-\(UUID().uuidString)"
         let questionsJson = """
         {"questions":[{"id":"q1","question":"?","options":[{"label":"A"}],"mode":"single"}]}
         """
         let events = [
-            sessionEvent(type: "tool.call", payload: [
-                "name": AnyCodable("AskUserQuestion"),
-                "toolCallId": AnyCodable(toolCallId),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "name": AnyCodable("execute"),
+                "modelToolName": AnyCodable("execute"),
+                "contractId": AnyCodable("agent::ask_user"),
+                "functionId": AnyCodable("agent::ask_user"),
+                "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1)
                 // NOTE: No toolStatus — simulating a live (un-enriched) event
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "tool_use", "id": toolCallId, "name": "AskUserQuestion", "input": [
+                    ["type": "tool_use", "id": invocationId, "name": "execute", "input": [
                         "questions": [
                             ["id": "q1", "question": "?", "options": [["label": "A"]], "mode": "single"]
                         ]
@@ -1546,8 +1570,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testSubagentSpawnedExtraction() {
         let events = [
             sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "tool.call", payload: [
-                "toolCallId": AnyCodable("tc_1"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "invocationId": AnyCodable("tc_1"),
                 "name": AnyCodable("SpawnSubagent"),
                 "arguments": AnyCodable("{\"task\":\"Research Swift concurrency\"}"),
                 "turn": AnyCodable(1)
@@ -1556,7 +1580,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "subagentSessionId": AnyCodable("sub_sess_1"),
                 "task": AnyCodable("Research Swift concurrency"),
                 "model": AnyCodable("claude-opus-4-6"),
-                "toolCallId": AnyCodable("tc_1"),
+                "invocationId": AnyCodable("tc_1"),
                 "spawnType": AnyCodable("subsession")
             ], sequence: 3),
             sessionEvent(type: "subagent.completed", payload: [
@@ -1568,8 +1592,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "model": AnyCodable("claude-opus-4-6"),
                 "fullOutput": AnyCodable("Detailed findings...")
             ], sequence: 4),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_1"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("Research complete"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(45000)
@@ -1580,7 +1604,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         XCTAssertEqual(state.subagentSpawns.count, 1)
         XCTAssertEqual(state.subagentSpawns[0].subagentSessionId, "sub_sess_1")
-        XCTAssertEqual(state.subagentSpawns[0].toolCallId, "tc_1")
+        XCTAssertEqual(state.subagentSpawns[0].invocationId, "tc_1")
         XCTAssertEqual(state.subagentSpawns[0].task, "Research Swift concurrency")
         XCTAssertEqual(state.subagentSpawns[0].model, "claude-opus-4-6")
 
@@ -1596,8 +1620,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testSubagentFailedExtraction() {
         let events = [
             sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "tool.call", payload: [
-                "toolCallId": AnyCodable("tc_2"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "invocationId": AnyCodable("tc_2"),
                 "name": AnyCodable("SpawnSubagent"),
                 "arguments": AnyCodable("{\"task\":\"Failing task\"}"),
                 "turn": AnyCodable(1)
@@ -1606,15 +1630,15 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "subagentSessionId": AnyCodable("sub_sess_2"),
                 "task": AnyCodable("Failing task"),
                 "model": AnyCodable("claude-sonnet-4-5"),
-                "toolCallId": AnyCodable("tc_2")
+                "invocationId": AnyCodable("tc_2")
             ], sequence: 3),
             sessionEvent(type: "subagent.failed", payload: [
                 "subagentSessionId": AnyCodable("sub_sess_2"),
                 "error": AnyCodable("Max turns exceeded"),
                 "duration": AnyCodable(30000)
             ], sequence: 4),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_2"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_2"),
                 "content": AnyCodable("Agent failed: Max turns exceeded"),
                 "isError": AnyCodable(true),
                 "duration": AnyCodable(30000)
@@ -1633,14 +1657,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testMultipleParallelSubagentsExtraction() {
         let events = [
             sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "tool.call", payload: [
-                "toolCallId": AnyCodable("tc_a"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "invocationId": AnyCodable("tc_a"),
                 "name": AnyCodable("SpawnSubagent"),
                 "arguments": AnyCodable("{\"task\":\"Explore auth\"}"),
                 "turn": AnyCodable(1)
             ], sequence: 2),
-            sessionEvent(type: "tool.call", payload: [
-                "toolCallId": AnyCodable("tc_b"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "invocationId": AnyCodable("tc_b"),
                 "name": AnyCodable("SpawnSubagent"),
                 "arguments": AnyCodable("{\"task\":\"Research OAuth\"}"),
                 "turn": AnyCodable(1)
@@ -1649,13 +1673,13 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "subagentSessionId": AnyCodable("sub_a"),
                 "task": AnyCodable("Explore auth"),
                 "model": AnyCodable("claude-sonnet-4-5"),
-                "toolCallId": AnyCodable("tc_a")
+                "invocationId": AnyCodable("tc_a")
             ], sequence: 4),
             sessionEvent(type: "subagent.spawned", payload: [
                 "subagentSessionId": AnyCodable("sub_b"),
                 "task": AnyCodable("Research OAuth"),
                 "model": AnyCodable("claude-opus-4-6"),
-                "toolCallId": AnyCodable("tc_b")
+                "invocationId": AnyCodable("tc_b")
             ], sequence: 5),
             sessionEvent(type: "subagent.completed", payload: [
                 "subagentSessionId": AnyCodable("sub_a"),
@@ -1669,14 +1693,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "error": AnyCodable("Provider error"),
                 "duration": AnyCodable(5000)
             ], sequence: 7),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_a"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_a"),
                 "content": AnyCodable("Done"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(20000)
             ], sequence: 8),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_b"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_b"),
                 "content": AnyCodable("Failed"),
                 "isError": AnyCodable(true),
                 "duration": AnyCodable(5000)
@@ -1694,11 +1718,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(state.subagentFailures["sub_b"]?.error, "Provider error")
     }
 
-    func testSubagentSpawnedWithoutToolCallIdFallback() {
+    func testSubagentSpawnedWithoutInvocationIdFallback() {
         let events = [
             sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "tool.call", payload: [
-                "toolCallId": AnyCodable("tc_old"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "invocationId": AnyCodable("tc_old"),
                 "name": AnyCodable("SpawnSubagent"),
                 "arguments": AnyCodable("{\"task\":\"Old style task\"}"),
                 "turn": AnyCodable(1)
@@ -1720,15 +1744,15 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
         XCTAssertEqual(state.subagentSpawns.count, 1)
-        XCTAssertNil(state.subagentSpawns[0].toolCallId)
+        XCTAssertNil(state.subagentSpawns[0].invocationId)
         XCTAssertEqual(state.subagentSpawns[0].subagentSessionId, "sub_old")
     }
 
     func testRunningSubagentNoCompletionEvent() {
         let events = [
             sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "tool.call", payload: [
-                "toolCallId": AnyCodable("tc_run"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "invocationId": AnyCodable("tc_run"),
                 "name": AnyCodable("SpawnSubagent"),
                 "arguments": AnyCodable("{\"task\":\"Long running task\"}"),
                 "turn": AnyCodable(1)
@@ -1737,7 +1761,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "subagentSessionId": AnyCodable("sub_run"),
                 "task": AnyCodable("Long running task"),
                 "model": AnyCodable("claude-opus-4-6"),
-                "toolCallId": AnyCodable("tc_run")
+                "invocationId": AnyCodable("tc_run")
             ], sequence: 3)
         ]
 
@@ -1748,7 +1772,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertTrue(state.subagentFailures.isEmpty)
     }
 
-    func testBackgroundSubagentNoToolCall() {
+    func testBackgroundSubagentNoCapabilityInvocation() {
         let events = [
             sessionEvent(type: "session.start", payload: [:], sequence: 1),
             sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], sequence: 2),
@@ -1780,7 +1804,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "subagentSessionId": AnyCodable("sub_1"),
                 "task": AnyCodable("Blocking task"),
                 "model": AnyCodable("claude-opus-4-6"),
-                "toolCallId": AnyCodable("tc_1"),
+                "invocationId": AnyCodable("tc_1"),
                 "blocking": AnyCodable(true)
             ], sequence: 2)
         ]
@@ -1813,14 +1837,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.user", payload: [
                 "content": AnyCodable("Count files in the current directory")
             ], timestamp: timestamp(1), sequence: 2),
-            rawEvent(type: "tool.call", payload: [
+            rawEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Bash"),
-                "toolCallId": AnyCodable("tc_1"),
+                "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["command": "ls -la | wc -l"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3),
-            rawEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_1"),
+            rawEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("9"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -1847,14 +1871,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
             XCTFail("Expected text content for user message")
         }
 
-        // Second message: tool use with result
-        if case .toolUse(let tool) = messages[1].content {
-            XCTAssertEqual(tool.toolName, "Bash")
-            XCTAssertEqual(tool.toolCallId, "tc_1")
-            XCTAssertEqual(tool.result, "9")
-            XCTAssertEqual(tool.status, .success)
+        // Second message: capability invocation with result
+        if case .capabilityInvocation(let invocation) = messages[1].content {
+            XCTAssertEqual(invocation.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation.id, "tc_1")
+            XCTAssertEqual(invocation.result, "9")
+            XCTAssertEqual(invocation.status, .success)
         } else {
-            XCTFail("Expected toolUse content")
+            XCTFail("Expected capability invocation content")
         }
 
         // Third message: assistant text with markdown
@@ -1888,14 +1912,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "content": AnyCodable("Analyze the codebase")
             ], timestamp: timestamp(1), sequence: 2),
             // Turn 1
-            rawEvent(type: "tool.call", payload: [
+            rawEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Read"),
-                "toolCallId": AnyCodable("tc_1"),
+                "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["file_path": "/src/main.ts"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3),
-            rawEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_1"),
+            rawEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("const app = express();"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -1908,14 +1932,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(4), sequence: 5),
             // Turn 2
-            rawEvent(type: "tool.call", payload: [
+            rawEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Read"),
-                "toolCallId": AnyCodable("tc_2"),
+                "invocationId": AnyCodable("tc_2"),
                 "arguments": AnyCodable(["file_path": "/tsconfig.json"]),
                 "turn": AnyCodable(2)
             ], timestamp: timestamp(5), sequence: 6),
-            rawEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_2"),
+            rawEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_2"),
                 "content": AnyCodable("{\"compilerOptions\": {}}"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -1938,9 +1962,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let userMessages = messages.filter { $0.role == .user }
         XCTAssertEqual(userMessages.count, 1)
 
-        // 2 tool use messages
+        // 2 capability invocation messages
         let toolMessages = messages.filter {
-            if case .toolUse = $0.content { return true }
+            if case .capabilityInvocation = $0.content { return true }
             return false
         }
         XCTAssertEqual(toolMessages.count, 2)
@@ -1988,14 +2012,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.user", payload: [
                 "content": AnyCodable("Read a nonexistent file")
             ], timestamp: timestamp(1), sequence: 2),
-            rawEvent(type: "tool.call", payload: [
+            rawEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Read"),
-                "toolCallId": AnyCodable("tc_1"),
+                "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["file_path": "/nonexistent"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3),
-            rawEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_1"),
+            rawEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("File not found"),
                 "isError": AnyCodable(true),
                 "duration": AnyCodable(10)
@@ -2015,8 +2039,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(messages.count, 3)
 
         let toolMessages = messages.filter {
-            if case .toolUse(let tool) = $0.content {
-                return tool.status == .error
+            if case .capabilityInvocation(let invocation) = $0.content {
+                return invocation.status == .error
             }
             return false
         }
@@ -2051,14 +2075,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
         ]
 
         let events = [
-            sessionEvent(type: "tool.call", payload: [
+            sessionEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Search"),
-                "toolCallId": AnyCodable("tc_1"),
+                "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["query": "test"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_1"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("Found 3 results"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -2081,13 +2105,13 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(messages.count, 2)
 
         // Tool message (last) should have tokenRecord
-        if case .toolUse = messages[1].content {
-            XCTAssertNotNil(messages[1].tokenRecord, "tokenRecord should be attached to toolUse when no text block exists")
+        if case .capabilityInvocation = messages[1].content {
+            XCTAssertNotNil(messages[1].tokenRecord, "tokenRecord should be attached to capability invocation when no text block exists")
             XCTAssertEqual(messages[1].tokenRecord?.computed.newInputTokens, 10)
             XCTAssertEqual(messages[1].tokenRecord?.source.rawOutputTokens, 261)
             XCTAssertEqual(messages[1].tokenRecord?.source.rawCacheReadTokens, 12561)
         } else {
-            XCTFail("Expected toolUse content at index 1")
+            XCTFail("Expected capability invocation content at index 1")
         }
     }
 
@@ -2117,26 +2141,26 @@ final class UnifiedEventTransformerTests: XCTestCase {
         ]
 
         let events = [
-            sessionEvent(type: "tool.call", payload: [
+            sessionEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Read"),
-                "toolCallId": AnyCodable("tc_a"),
+                "invocationId": AnyCodable("tc_a"),
                 "arguments": AnyCodable(["file_path": "/src/a.ts"]),
                 "turn": AnyCodable(2)
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_a"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_a"),
                 "content": AnyCodable("file a contents"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
             ], timestamp: timestamp(1), sequence: 2),
-            sessionEvent(type: "tool.call", payload: [
+            sessionEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Read"),
-                "toolCallId": AnyCodable("tc_b"),
+                "invocationId": AnyCodable("tc_b"),
                 "arguments": AnyCodable(["file_path": "/src/b.ts"]),
                 "turn": AnyCodable(2)
             ], timestamp: timestamp(2), sequence: 3),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_b"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_b"),
                 "content": AnyCodable("file b contents"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -2160,18 +2184,18 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(messages.count, 3)
 
         // First tool should NOT have tokenRecord (metadata goes on last message)
-        if case .toolUse = messages[1].content {
-            XCTAssertNil(messages[1].tokenRecord, "First toolUse should NOT get tokenRecord")
+        if case .capabilityInvocation = messages[1].content {
+            XCTAssertNil(messages[1].tokenRecord, "First capability invocation should NOT get tokenRecord")
         } else {
-            XCTFail("Expected toolUse at index 1")
+            XCTFail("Expected capability invocation at index 1")
         }
 
         // Last tool (last message in turn) should have tokenRecord
-        if case .toolUse = messages[2].content {
-            XCTAssertNotNil(messages[2].tokenRecord, "Last toolUse should get tokenRecord")
+        if case .capabilityInvocation = messages[2].content {
+            XCTAssertNotNil(messages[2].tokenRecord, "Last capability invocation should get tokenRecord")
             XCTAssertEqual(messages[2].tokenRecord?.computed.newInputTokens, 13)
         } else {
-            XCTFail("Expected toolUse at index 2")
+            XCTFail("Expected capability invocation at index 2")
         }
     }
 
@@ -2201,14 +2225,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
         ]
 
         let events = [
-            sessionEvent(type: "tool.call", payload: [
+            sessionEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Bash"),
-                "toolCallId": AnyCodable("tc_x"),
+                "invocationId": AnyCodable("tc_x"),
                 "arguments": AnyCodable(["command": "echo hello"]),
                 "turn": AnyCodable(3)
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_x"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_x"),
                 "content": AnyCodable("hello"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -2240,11 +2264,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
 
         // Last message (tool) should have tokenRecord so stats render after all content
-        if case .toolUse = messages[2].content {
+        if case .capabilityInvocation = messages[2].content {
             XCTAssertNotNil(messages[2].tokenRecord, "Last message should get tokenRecord")
             XCTAssertEqual(messages[2].tokenRecord?.source.rawOutputTokens, 787)
         } else {
-            XCTFail("Expected toolUse at index 2")
+            XCTFail("Expected capability invocation at index 2")
         }
     }
 
@@ -2274,14 +2298,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
         ]
 
         let events = [
-            sessionEvent(type: "tool.call", payload: [
+            sessionEvent(type: "capability.invocation.started", payload: [
                 "name": AnyCodable("Read"),
-                "toolCallId": AnyCodable("tc_meta"),
+                "invocationId": AnyCodable("tc_meta"),
                 "arguments": AnyCodable(["file_path": "/test.ts"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_meta"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_meta"),
                 "content": AnyCodable("contents"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
@@ -2346,12 +2370,12 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "content": AnyCodable("Do something")
             ], timestamp: timestamp(0), sequence: 1),
             // Turn 1: text + tool (metadata goes on tool — the last item)
-            sessionEvent(type: "tool.call", payload: [
-                "name": AnyCodable("Read"), "toolCallId": AnyCodable("tc_1"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "name": AnyCodable("Read"), "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(1)
             ], timestamp: timestamp(1), sequence: 2),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_1"), "content": AnyCodable("contents"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_1"), "content": AnyCodable("contents"),
                 "isError": AnyCodable(false), "duration": AnyCodable(10)
             ], timestamp: timestamp(2), sequence: 3),
             sessionEvent(type: "message.assistant", payload: [
@@ -2363,12 +2387,12 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "latency": AnyCodable(1000), "tokenRecord": AnyCodable(tokenRecord1)
             ], timestamp: timestamp(3), sequence: 4),
             // Turn 2: tool only (metadata goes on tool — the only item)
-            sessionEvent(type: "tool.call", payload: [
-                "name": AnyCodable("Edit"), "toolCallId": AnyCodable("tc_2"),
+            sessionEvent(type: "capability.invocation.started", payload: [
+                "name": AnyCodable("Edit"), "invocationId": AnyCodable("tc_2"),
                 "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(2)
             ], timestamp: timestamp(4), sequence: 5),
-            sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_2"), "content": AnyCodable("edited"),
+            sessionEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_2"), "content": AnyCodable("edited"),
                 "isError": AnyCodable(false), "duration": AnyCodable(10)
             ], timestamp: timestamp(5), sequence: 6),
             sessionEvent(type: "message.assistant", payload: [
@@ -2485,15 +2509,15 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    // MARK: - buildToolMaps Tests
+    // MARK: - buildCapabilityInvocationMaps Tests
 
-    func testBuildToolMapsCollectsToolCallsAndResults() {
+    func testBuildToolMapsCollectsCapabilityInvocationsAndResults() {
         let events = [
             rawEvent(
                 id: "e1",
-                type: "tool.call",
+                type: "capability.invocation.started",
                 payload: [
-                    "toolCallId": AnyCodable("tc1"),
+                    "invocationId": AnyCodable("tc1"),
                     "name": AnyCodable("Read"),
                     "arguments": AnyCodable("{\"path\":\"/test\"}"),
                     "turn": AnyCodable(1)
@@ -2502,9 +2526,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ),
             rawEvent(
                 id: "e2",
-                type: "tool.result",
+                type: "capability.invocation.completed",
                 payload: [
-                    "toolCallId": AnyCodable("tc1"),
+                    "invocationId": AnyCodable("tc1"),
                     "content": AnyCodable("file content"),
                     "isError": AnyCodable(false),
                     "duration": AnyCodable(42)
@@ -2513,13 +2537,13 @@ final class UnifiedEventTransformerTests: XCTestCase {
             )
         ]
 
-        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
 
-        XCTAssertEqual(maps.toolCalls.count, 1)
-        XCTAssertEqual(maps.toolResults.count, 1)
-        XCTAssertEqual(maps.toolCalls["tc1"]?.name, "Read")
-        XCTAssertEqual(maps.toolResults["tc1"]?.toolCallId, "tc1")
-        XCTAssertEqual(maps.toolResults["tc1"]?.durationMs, 42)
+        XCTAssertEqual(maps.startedInvocations.count, 1)
+        XCTAssertEqual(maps.completedInvocations.count, 1)
+        XCTAssertEqual(maps.startedInvocations["tc1"]?.name, "Read")
+        XCTAssertEqual(maps.completedInvocations["tc1"]?.invocationId, "tc1")
+        XCTAssertEqual(maps.completedInvocations["tc1"]?.durationMs, 42)
     }
 
     func testBuildToolMapsCollectsConsumedSubagentIds() {
@@ -2534,7 +2558,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             )
         ]
 
-        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
 
         XCTAssertEqual(maps.consumedSubagentEventIds, Set(["notif-1", "notif-2"]))
     }
@@ -2546,27 +2570,27 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(id: "e3", type: "stream.turn_end", payload: ["turn": AnyCodable(3)], sequence: 8)
         ]
 
-        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
 
         XCTAssertEqual(maps.lastTurnEndSequence, 10)
     }
 
     func testBuildToolMapsEmptyEvents() {
-        let maps = UnifiedEventTransformer.buildToolMaps(from: [RawEvent]())
+        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: [RawEvent]())
 
-        XCTAssertTrue(maps.toolCalls.isEmpty)
-        XCTAssertTrue(maps.toolResults.isEmpty)
+        XCTAssertTrue(maps.startedInvocations.isEmpty)
+        XCTAssertTrue(maps.completedInvocations.isEmpty)
         XCTAssertTrue(maps.consumedSubagentEventIds.isEmpty)
         XCTAssertEqual(maps.lastTurnEndSequence, -1)
     }
 
-    func testBuildToolMapsDuplicateToolCallIdLastWins() {
+    func testBuildToolMapsDuplicateInvocationIdLastWins() {
         let events = [
             rawEvent(
                 id: "e1",
-                type: "tool.call",
+                type: "capability.invocation.started",
                 payload: [
-                    "toolCallId": AnyCodable("tc1"),
+                    "invocationId": AnyCodable("tc1"),
                     "name": AnyCodable("Read"),
                     "arguments": AnyCodable("{}"),
                     "turn": AnyCodable(1)
@@ -2575,9 +2599,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ),
             rawEvent(
                 id: "e2",
-                type: "tool.call",
+                type: "capability.invocation.started",
                 payload: [
-                    "toolCallId": AnyCodable("tc1"),
+                    "invocationId": AnyCodable("tc1"),
                     "name": AnyCodable("Write"),
                     "arguments": AnyCodable("{}"),
                     "turn": AnyCodable(1)
@@ -2586,30 +2610,30 @@ final class UnifiedEventTransformerTests: XCTestCase {
             )
         ]
 
-        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
 
-        XCTAssertEqual(maps.toolCalls.count, 1)
-        XCTAssertEqual(maps.toolCalls["tc1"]?.name, "Write")
+        XCTAssertEqual(maps.startedInvocations.count, 1)
+        XCTAssertEqual(maps.startedInvocations["tc1"]?.name, "Write")
     }
 
-    func testBuildToolMapsToolResultWithoutToolCallIdSkipped() {
-        // tool.result without toolCallId in payload should be gracefully skipped
+    func testBuildToolMapsToolResultWithoutInvocationIdSkipped() {
+        // capability.invocation.completed without invocationId in payload should be gracefully skipped
         let events = [
             rawEvent(
                 id: "e1",
-                type: "tool.result",
+                type: "capability.invocation.completed",
                 payload: [
                     "content": AnyCodable("some result"),
                     "isError": AnyCodable(false)
-                    // No toolCallId!
+                    // No invocationId!
                 ],
                 sequence: 1
             )
         ]
 
-        let maps = UnifiedEventTransformer.buildToolMaps(from: events)
+        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
 
-        XCTAssertTrue(maps.toolResults.isEmpty)
+        XCTAssertTrue(maps.completedInvocations.isEmpty)
     }
 
     // MARK: - compact.boundary Strict Decode Tests

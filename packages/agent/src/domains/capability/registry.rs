@@ -1387,11 +1387,7 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
                     schema_digest, plugin_id, worker_id, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
-                    format!(
-                        "binding_decision:{}:{}",
-                        Utc::now().timestamp_nanos_opt().unwrap_or_default(),
-                        decision.selected_implementation
-                    ),
+                    decision.decision_id,
                     decision.contract_id,
                     decision.selected_implementation,
                     decision.selected_function_id,
@@ -2187,6 +2183,7 @@ pub(crate) fn binding_decision(
     Some((
         selected.clone(),
         CapabilityBindingDecision {
+            decision_id: format!("binding_decision_{}", uuid::Uuid::now_v7()),
             contract_id: selected.contract_id.clone(),
             selected_implementation: selected.implementation_id.clone(),
             selected_function_id: selected.function_id.clone(),
@@ -3118,6 +3115,7 @@ mod tests {
         let entry = snapshot.entries[0].clone();
         let handle = entry.inspection_handle();
         let decision = CapabilityBindingDecision {
+            decision_id: "binding_decision_test".to_owned(),
             contract_id: entry.contract_id.clone(),
             selected_implementation: entry.implementation_id.clone(),
             selected_function_id: entry.function_id.clone(),

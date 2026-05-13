@@ -3,7 +3,7 @@
 //! Decides whether to fire the retain pipeline at the end of an agent run,
 //! based on `memory.autoRetainInterval` from settings and the session's
 //! **user-message** history. The threshold unit is a user-visible exchange,
-//! not an agent internal turn — a single prompt that spawns ten tool calls
+//! not an agent internal turn — a single prompt that spawns ten capability invocations
 //! counts as one toward the threshold.
 //!
 //! Three layers, each independently testable:

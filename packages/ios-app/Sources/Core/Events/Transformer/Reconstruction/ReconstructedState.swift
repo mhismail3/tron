@@ -258,7 +258,7 @@ extension ReconstructedState {
         let subagentSessionId: String
         let task: String
         let model: String
-        let toolCallId: String?
+        let invocationId: String?
         let blocking: Bool
         let spawnType: String?
     }

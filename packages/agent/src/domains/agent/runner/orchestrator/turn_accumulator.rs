@@ -1,7 +1,7 @@
 //! Turn accumulator — tracks in-progress turn content for session resume.
 //!
 //! When a client reconnects to a running session, `session.reconstruct` returns
-//! the accumulated text, thinking, and tool calls as `inFlight` state so the UI
+//! the accumulated text, thinking, and capability invocations as `inFlight` state so the UI
 //! can render in-progress content without waiting for the next delta.
 //!
 //! ## Lifecycle
@@ -33,9 +33,9 @@ pub enum ContentSequenceItem {
     Text(String),
     /// Accumulated thinking content.
     Thinking(String),
-    /// Reference to a tool call by ID.
+    /// Reference to a capability invocation by ID.
     ToolRef {
-        /// The tool call this item refers to.
+        /// The capability invocation this item refers to.
         tool_call_id: String,
     },
 }
@@ -56,10 +56,10 @@ impl ContentSequenceItem {
 // AccumulatedToolCall
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Snapshot of a tool call's progress within the current turn.
+/// Snapshot of a capability invocation's progress within the current turn.
 #[derive(Clone, Debug)]
 pub struct AccumulatedToolCall {
-    /// Unique identifier for this tool call.
+    /// Unique identifier for this capability invocation.
     pub tool_call_id: String,
     /// Name of the tool (e.g. "execute", "inspect").
     pub tool_name: String,
@@ -69,7 +69,7 @@ pub struct AccumulatedToolCall {
     pub status: String,
     /// Tool output text, populated on completion.
     pub result: Option<String>,
-    /// Whether the tool call ended in error.
+    /// Whether the capability invocation ended in error.
     pub is_error: bool,
     /// ISO-8601 timestamp when execution started.
     pub started_at: Option<String>,
@@ -119,7 +119,7 @@ impl AccumulatedToolCall {
 pub struct CurrentToolSnapshot {
     /// The tool's registered name (e.g. "process::run", "web::fetch").
     pub tool_name: String,
-    /// Unique ID of the in-flight tool call.
+    /// Unique ID of the in-flight capability invocation.
     pub tool_call_id: String,
     /// ISO-8601 timestamp when execution started. Lets callers compute
     /// elapsed duration without a separate clock fetch.
@@ -137,7 +137,7 @@ pub struct TurnAccumulator {
     pub text: String,
     /// Concatenated thinking/reasoning output so far.
     pub thinking: String,
-    /// All tool calls tracked in this turn.
+    /// All capability invocations tracked in this turn.
     pub tool_calls: Vec<AccumulatedToolCall>,
     /// Ordered sequence of content items (text, thinking, tool refs).
     pub content_sequence: Vec<ContentSequenceItem>,
@@ -176,7 +176,7 @@ impl TurnAccumulator {
         }
     }
 
-    /// Add a new tool call in "generating" state.
+    /// Add a new capability invocation in "generating" state.
     pub fn add_tool_generating(&mut self, tool_call_id: &str, tool_name: &str) {
         self.tool_calls.push(AccumulatedToolCall {
             tool_call_id: tool_call_id.to_string(),
@@ -194,8 +194,8 @@ impl TurnAccumulator {
         });
     }
 
-    /// Transition a tool call to "running" state.
-    pub fn update_tool_start(&mut self, tool_call_id: &str, arguments: Option<&Value>) {
+    /// Transition a capability invocation to "running" state.
+    pub fn update_capability_started(&mut self, tool_call_id: &str, arguments: Option<&Value>) {
         if let Some(tc) = self
             .tool_calls
             .iter_mut()
@@ -207,8 +207,13 @@ impl TurnAccumulator {
         }
     }
 
-    /// Transition a tool call to "completed" or "error" state.
-    pub fn update_tool_end(&mut self, tool_call_id: &str, result: Option<&str>, is_error: bool) {
+    /// Transition a capability invocation to "completed" or "error" state.
+    pub fn update_capability_completed(
+        &mut self,
+        tool_call_id: &str,
+        result: Option<&str>,
+        is_error: bool,
+    ) {
         if let Some(tc) = self
             .tool_calls
             .iter_mut()
@@ -295,26 +300,26 @@ impl TurnAccumulatorMap {
         }
     }
 
-    /// Record a new tool call in "generating" state.
+    /// Record a new capability invocation in "generating" state.
     pub fn handle_tool_generating(&self, session_id: &str, tool_call_id: &str, tool_name: &str) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.add_tool_generating(tool_call_id, tool_name);
         }
     }
 
-    /// Transition a tool call to "running" state.
-    pub fn handle_tool_start(
+    /// Transition a capability invocation to "running" state.
+    pub fn handle_capability_started(
         &self,
         session_id: &str,
         tool_call_id: &str,
         arguments: Option<&Value>,
     ) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
-            acc.update_tool_start(tool_call_id, arguments);
+            acc.update_capability_started(tool_call_id, arguments);
         }
     }
 
-    /// Append streaming output to a running tool call.
+    /// Append streaming output to a running capability invocation.
     pub fn handle_tool_output(&self, session_id: &str, tool_call_id: &str, output: &str) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id)
             && let Some(tc) = acc
@@ -328,7 +333,7 @@ impl TurnAccumulatorMap {
     }
 
     /// Record tool completion or error.
-    pub fn handle_tool_end(
+    pub fn handle_capability_completed(
         &self,
         session_id: &str,
         tool_call_id: &str,
@@ -336,7 +341,7 @@ impl TurnAccumulatorMap {
         is_error: bool,
     ) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
-            acc.update_tool_end(tool_call_id, result, is_error);
+            acc.update_capability_completed(tool_call_id, result, is_error);
         }
     }
 
@@ -367,7 +372,7 @@ impl TurnAccumulatorMap {
 
     /// Name of the tool currently executing in the session's turn,
     /// if any. Returns the tool_name of the most recently-started tool
-    /// whose status is `running` (tool.call persisted; tool.result not
+    /// whose status is `running` (capability.invocation.started persisted; capability.invocation.completed not
     /// yet). `generating` doesn't count — the LLM is still streaming
     /// the tool_use block and hasn't begun execution. Returns `None`
     /// when no turn is in flight or no tool has entered `running`.
@@ -415,22 +420,22 @@ impl TurnAccumulatorMap {
             TronEvent::ThinkingDelta { delta, .. } => {
                 self.handle_thinking_delta(session_id, delta);
             }
-            TronEvent::ToolCallGenerating {
+            TronEvent::CapabilityInvocationGenerating {
                 tool_call_id,
                 tool_name,
                 ..
             } => {
                 self.handle_tool_generating(session_id, tool_call_id, tool_name);
             }
-            TronEvent::ToolExecutionStart {
+            TronEvent::CapabilityInvocationStarted {
                 tool_call_id,
                 arguments,
                 ..
             } => {
                 let args_value = arguments.as_ref().map(|m| Value::Object(m.clone()));
-                self.handle_tool_start(session_id, tool_call_id, args_value.as_ref());
+                self.handle_capability_started(session_id, tool_call_id, args_value.as_ref());
             }
-            TronEvent::ToolExecutionEnd {
+            TronEvent::CapabilityInvocationCompleted {
                 tool_call_id,
                 is_error,
                 result,
@@ -450,14 +455,14 @@ impl TurnAccumulatorMap {
                         .collect::<Vec<_>>()
                         .join("\n"),
                 });
-                self.handle_tool_end(
+                self.handle_capability_completed(
                     session_id,
                     tool_call_id,
                     result_text.as_deref(),
                     is_error.unwrap_or(false),
                 );
             }
-            TronEvent::ToolExecutionUpdate {
+            TronEvent::CapabilityInvocationOutput {
                 tool_call_id,
                 update,
                 ..
@@ -556,21 +561,21 @@ mod tests {
     }
 
     #[test]
-    fn update_tool_start() {
+    fn update_capability_started() {
         let mut acc = TurnAccumulator::new();
         acc.add_tool_generating("tc_1", "execute");
-        acc.update_tool_start("tc_1", Some(&serde_json::json!({"command": "ls"})));
+        acc.update_capability_started("tc_1", Some(&serde_json::json!({"command": "ls"})));
         assert_eq!(acc.tool_calls[0].status, "running");
         assert!(acc.tool_calls[0].arguments.is_some());
         assert!(acc.tool_calls[0].started_at.is_some());
     }
 
     #[test]
-    fn update_tool_end_success() {
+    fn update_capability_completed_success() {
         let mut acc = TurnAccumulator::new();
         acc.add_tool_generating("tc_1", "execute");
-        acc.update_tool_start("tc_1", None);
-        acc.update_tool_end("tc_1", Some("output"), false);
+        acc.update_capability_started("tc_1", None);
+        acc.update_capability_completed("tc_1", Some("output"), false);
         assert_eq!(acc.tool_calls[0].status, "completed");
         assert_eq!(acc.tool_calls[0].result.as_deref(), Some("output"));
         assert!(!acc.tool_calls[0].is_error);
@@ -578,11 +583,11 @@ mod tests {
     }
 
     #[test]
-    fn update_tool_end_error() {
+    fn update_capability_completed_error() {
         let mut acc = TurnAccumulator::new();
         acc.add_tool_generating("tc_1", "execute");
-        acc.update_tool_start("tc_1", None);
-        acc.update_tool_end("tc_1", Some("command not found"), true);
+        acc.update_capability_started("tc_1", None);
+        acc.update_capability_completed("tc_1", Some("command not found"), true);
         assert_eq!(acc.tool_calls[0].status, "error");
         assert!(acc.tool_calls[0].is_error);
     }
@@ -590,8 +595,8 @@ mod tests {
     #[test]
     fn update_tool_unknown_id_is_noop() {
         let mut acc = TurnAccumulator::new();
-        acc.update_tool_start("unknown", None);
-        acc.update_tool_end("unknown", None, false);
+        acc.update_capability_started("unknown", None);
+        acc.update_capability_completed("unknown", None, false);
         assert!(acc.tool_calls.is_empty());
     }
 
@@ -600,9 +605,9 @@ mod tests {
         let mut acc = TurnAccumulator::new();
         acc.add_tool_generating("tc_1", "execute");
         acc.add_tool_generating("tc_2", "inspect");
-        acc.update_tool_start("tc_1", None);
-        acc.update_tool_end("tc_1", Some("ok"), false);
-        acc.update_tool_start("tc_2", None);
+        acc.update_capability_started("tc_1", None);
+        acc.update_capability_completed("tc_1", Some("ok"), false);
+        acc.update_capability_started("tc_2", None);
 
         assert_eq!(acc.tool_calls.len(), 2);
         assert_eq!(acc.tool_calls[0].status, "completed");
@@ -678,7 +683,7 @@ mod tests {
     fn tool_streaming_output_accumulates() {
         let mut acc = TurnAccumulator::new();
         acc.add_tool_generating("tc_1", "execute");
-        acc.update_tool_start("tc_1", None);
+        acc.update_capability_started("tc_1", None);
         let tc = &mut acc.tool_calls[0];
         let streaming = tc.streaming_output.get_or_insert_with(String::new);
         streaming.push_str("line 1\n");
@@ -693,7 +698,7 @@ mod tests {
     fn tool_streaming_output_included_in_json() {
         let mut acc = TurnAccumulator::new();
         acc.add_tool_generating("tc_1", "execute");
-        acc.update_tool_start("tc_1", None);
+        acc.update_capability_started("tc_1", None);
         acc.tool_calls[0].streaming_output = Some("partial output".into());
         let (_, tools, _) = acc.to_json();
         assert_eq!(tools[0]["streamingOutput"], "partial output");
@@ -766,8 +771,8 @@ mod tests {
         map.handle_text_delta("s1", "The answer is ");
         map.handle_text_delta("s1", "42");
         map.handle_tool_generating("s1", "tc_1", "execute");
-        map.handle_tool_start("s1", "tc_1", None);
-        map.handle_tool_end("s1", "tc_1", Some("output"), false);
+        map.handle_capability_started("s1", "tc_1", None);
+        map.handle_capability_completed("s1", "tc_1", Some("output"), false);
         map.handle_text_delta("s1", " and more");
 
         let (text, tools, sequence) = map.get_state("s1").unwrap();
@@ -783,7 +788,7 @@ mod tests {
         let map = TurnAccumulatorMap::new();
         map.handle_turn_start("s1");
         map.handle_tool_generating("s1", "tc_1", "execute");
-        map.handle_tool_start("s1", "tc_1", None);
+        map.handle_capability_started("s1", "tc_1", None);
         map.handle_tool_output("s1", "tc_1", "partial ");
         map.handle_tool_output("s1", "tc_1", "output");
         let (_, tools, _) = map.get_state("s1").unwrap();
@@ -869,53 +874,58 @@ mod tests {
             base: BaseEvent::now("s1"),
             turn: 1,
         });
-        map.update_from_event(&TronEvent::ToolCallGenerating {
+        map.update_from_event(&TronEvent::CapabilityInvocationGenerating {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             tool_name: "execute".into(),
+            capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
         });
-        map.update_from_event(&TronEvent::ToolExecutionStart {
+        map.update_from_event(&TronEvent::CapabilityInvocationStarted {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             tool_name: "execute".into(),
             arguments: None,
+            capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
         });
-        map.update_from_event(&TronEvent::ToolExecutionEnd {
+        map.update_from_event(&TronEvent::CapabilityInvocationCompleted {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             tool_name: "execute".into(),
             duration: 100,
             is_error: Some(false),
             result: None,
+            capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
         });
         let (_, tools, _) = map.get_state("s1").unwrap();
         assert_eq!(tools[0]["status"], "completed");
     }
 
     #[test]
-    fn update_from_tool_execution_update_event() {
+    fn update_from_capability_invocation_output_event() {
         let map = TurnAccumulatorMap::new();
         map.update_from_event(&TronEvent::TurnStart {
             base: BaseEvent::now("s1"),
             turn: 1,
         });
-        map.update_from_event(&TronEvent::ToolCallGenerating {
+        map.update_from_event(&TronEvent::CapabilityInvocationGenerating {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             tool_name: "execute".into(),
+            capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
         });
-        map.update_from_event(&TronEvent::ToolExecutionStart {
+        map.update_from_event(&TronEvent::CapabilityInvocationStarted {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             tool_name: "execute".into(),
             arguments: None,
+            capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
         });
-        map.update_from_event(&TronEvent::ToolExecutionUpdate {
+        map.update_from_event(&TronEvent::CapabilityInvocationOutput {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             update: "line 1\n".into(),
         });
-        map.update_from_event(&TronEvent::ToolExecutionUpdate {
+        map.update_from_event(&TronEvent::CapabilityInvocationOutput {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             update: "line 2\n".into(),

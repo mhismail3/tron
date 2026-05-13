@@ -740,7 +740,7 @@ pub enum SseContentBlock {
     /// Tool use block.
     #[serde(rename = "tool_use")]
     ToolUse {
-        /// Tool call ID.
+        /// Capability invocation ID.
         id: String,
         /// Tool name.
         name: String,
@@ -769,7 +769,7 @@ pub enum SseDelta {
         /// Signature fragment.
         signature: String,
     },
-    /// Tool call arguments delta.
+    /// Capability invocation arguments delta.
     #[serde(rename = "input_json_delta")]
     InputJsonDelta {
         /// Partial JSON string.

@@ -7,7 +7,7 @@ import Foundation
 ///
 /// NOTE: message.user events can contain:
 /// 1. User text prompts (displayable)
-/// 2. Tool result content blocks (LLM context, not for display - handled by tool.result events)
+/// 2. Capability result content blocks (LLM context, not for display - handled by capability.invocation.completed events)
 /// 3. Image/document content blocks (displayable as thumbnails above text)
 struct UserMessagePayload {
     let content: String
@@ -45,7 +45,7 @@ struct UserMessagePayload {
 
             if textBlocks.isEmpty && !toolResultBlocks.isEmpty {
                 // This is a tool_result context message - not for display
-                // Tool results are displayed via tool.result events
+                // Capability results are displayed via capability.invocation.completed events
                 self.content = ""
                 self.isToolResultContext = true
             } else {
@@ -141,7 +141,7 @@ struct UserMessagePayload {
 /// Server: `events/types/payloads/message.rs::AssistantMessagePayload`
 ///
 /// IMPORTANT: This payload contains ContentBlocks which may include tool_use blocks.
-/// However, tool_use blocks should be IGNORED here — they are rendered via tool.call events.
+/// However, tool_use blocks should be IGNORED here — they are rendered via capability.invocation.started events.
 ///
 /// `content`, `turn`, `model`, and `stopReason` are all non-optional on the
 /// Rust payload. Missing any of them fails decoding (`init?` returns nil)
@@ -159,7 +159,7 @@ struct AssistantMessagePayload {
     let interrupted: Bool?
 
     /// Extracts ONLY the text content, ignoring tool_use blocks.
-    /// Tool calls are rendered via separate tool.call events.
+    /// Capability invocations are rendered via separate capability.invocation.started events.
     ///
     /// INVARIANT: the trimming here (`.whitespacesAndNewlines`) MUST
     /// match `StreamingManager.finalizeStreamingMessage` so the

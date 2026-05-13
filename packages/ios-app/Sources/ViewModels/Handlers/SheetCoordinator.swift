@@ -123,9 +123,9 @@ final class SheetCoordinator {
         present(.thinkingDetail(content))
     }
 
-    /// Show command tool detail sheet
-    func showCommandToolDetail(_ data: CommandToolChipData) {
-        present(.commandToolDetail(data))
+    /// Show capability invocation detail sheet
+    func showCapabilityInvocationDetail(_ data: CapabilityInvocationData) {
+        present(.capabilityInvocationDetail(data))
     }
 
 }

@@ -76,14 +76,14 @@ struct ChatSheetTests {
     @Test("Notify app sheets with different data have different ids")
     func testNotifyAppDifferentDataHaveDifferentIds() {
         let data1 = NotifyAppChipData(
-            toolCallId: "tool1",
+            invocationId: "tool1",
             title: "Title 1",
             body: "Body",
             sheetContent: nil,
             status: .sending
         )
         let data2 = NotifyAppChipData(
-            toolCallId: "tool2",
+            invocationId: "tool2",
             title: "Title 2",
             body: "Body",
             sheetContent: nil,
@@ -116,26 +116,13 @@ struct ChatSheetTests {
         )
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
         let notifyData = NotifyAppChipData(
-            toolCallId: "tool",
+            invocationId: "tool",
             title: "Title",
             body: "Body",
             sheetContent: nil,
             status: .sending
         )
-        let commandToolData = CommandToolChipData(
-            id: "cmd_tool",
-            toolName: "Read",
-            normalizedName: "read",
-            icon: "doc.text",
-            iconColor: .green,
-            displayName: "Read",
-            summary: "file.swift",
-            status: .success,
-            durationMs: 10,
-            arguments: "{}",
-            result: nil,
-            isResultTruncated: false
-        )
+        let capabilityData = testCapabilityInvocation(id: "capability_call", status: .success)
         let providerErrorData = ProviderErrorDetailData(
             provider: "test",
             category: "rate_limit",
@@ -156,7 +143,7 @@ struct ChatSheetTests {
             .subagentDetail,
             .notifyApp(notifyData),
             .thinkingDetail("content"),
-            .commandToolDetail(commandToolData),
+            .capabilityInvocationDetail(capabilityData),
             .providerErrorDetail(providerErrorData)
         ]
 
@@ -405,7 +392,7 @@ struct SheetCoordinatorTests {
     func testShowNotifyAppCreatesCorrectSheet() {
         let coordinator = SheetCoordinator()
         let data = NotifyAppChipData(
-            toolCallId: "tool123",
+            invocationId: "tool123",
             title: "Notification",
             body: "Body text",
             sheetContent: nil,
@@ -415,7 +402,7 @@ struct SheetCoordinatorTests {
         coordinator.showNotifyApp(data)
 
         if case .notifyApp(let sheetData) = coordinator.activeSheet {
-            #expect(sheetData.toolCallId == "tool123")
+            #expect(sheetData.invocationId == "tool123")
             #expect(sheetData.title == "Notification")
         } else {
             Issue.record("Expected notifyApp sheet")

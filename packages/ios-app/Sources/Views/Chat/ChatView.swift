@@ -482,18 +482,10 @@ struct ChatView: View {
             viewModel.subagentState.showDetails(with: data)
         case .notifyApp(let data):
             sheetCoordinator.showNotifyApp(data)
-        case .commandTool(let data):
-            // Display stream tool chips open the stream sheet directly
-            // (shows live stream if active, or last frame if ended).
-            if data.normalizedName == "display",
-               let displayType = data.details?["displayType"]?.value as? String,
-               displayType == "stream" {
-                viewModel.displayStreamState.showStreamSheet = true
-            } else {
-                sheetCoordinator.showCommandToolDetail(data)
-            }
-        case .cancelCommandTool(let toolCallId):
-            viewModel.abortTool(toolCallId: toolCallId, idempotencyKey: .userAction("agent.abortTool"))
+        case .capabilityInvocation(let data):
+            sheetCoordinator.showCapabilityInvocationDetail(data)
+        case .cancelCapabilityInvocation(let id):
+            viewModel.abortTool(invocationId: id, idempotencyKey: .userAction("agent.abortTool"))
         case .subagentResult(let sid):
             viewModel.subagentState.showDetails(for: sid)
         case .subagentResultsReady:

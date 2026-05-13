@@ -82,12 +82,12 @@ impl ToolAbortRegistry {
         }
     }
 
-    /// Number of in-flight tool calls tracked (across all sessions).
+    /// Number of in-flight capability invocations tracked (across all sessions).
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// True when no tool calls are being tracked.
+    /// True when no capability invocations are being tracked.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

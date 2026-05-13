@@ -52,7 +52,7 @@ pub struct AskUserPrompt {
     pub other_placeholder: Option<String>,
 }
 
-/// Parameters for the `AskUserPrompt` tool call.
+/// Parameters for the `AskUserPrompt` capability invocation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AskUserParams {
     /// Array of questions (1–5).

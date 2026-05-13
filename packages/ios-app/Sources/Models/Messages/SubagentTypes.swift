@@ -80,8 +80,8 @@ enum SubagentSpawnType: String, Codable, Equatable {
 
 /// Data for tracking a spawned subagent (rendered as a chip in chat)
 struct SubagentToolData: Equatable {
-    /// The tool call ID from SpawnSubagent
-    let toolCallId: String
+    /// The capability invocation ID from SpawnSubagent
+    let invocationId: String
     /// Session ID of the spawned subagent
     let subagentSessionId: String
     /// Whether the server has emitted the child session id needed for

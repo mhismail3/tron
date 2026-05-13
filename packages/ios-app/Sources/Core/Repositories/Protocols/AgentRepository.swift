@@ -26,12 +26,6 @@ protocol AgentRepository: AnyObject {
     /// Send a tool result for interactive tools.
     /// - Parameters:
     ///   - sessionId: The session ID
-    ///   - toolCallId: The tool call ID to respond to
+    ///   - invocationId: The capability invocation ID to respond to
     ///   - result: The result of the user interaction
-    func sendToolResult(
-        sessionId: String,
-        toolCallId: String,
-        result: AskUserQuestionResult,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws
 }

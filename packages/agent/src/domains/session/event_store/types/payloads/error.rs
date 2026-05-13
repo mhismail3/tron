@@ -1,4 +1,4 @@
-//! Error event payloads: agent, tool, provider.
+//! Error event payloads: agent, capability, provider.
 
 use serde::{Deserialize, Serialize};
 
@@ -15,14 +15,16 @@ pub struct ErrorAgentPayload {
     pub recoverable: bool,
 }
 
-/// Payload for `error.tool` events.
+/// Payload for `error.capability` events.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ErrorToolPayload {
-    /// Tool name.
-    pub tool_name: String,
-    /// Tool call ID.
-    pub tool_call_id: String,
+pub struct ErrorCapabilityPayload {
+    /// Model-facing primitive name.
+    #[serde(rename = "modelToolName")]
+    pub model_tool_name: String,
+    /// Capability invocation ID.
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
     /// Error message.
     pub error: String,
     /// Error code.

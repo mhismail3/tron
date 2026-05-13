@@ -5,7 +5,7 @@ import Foundation
 extension ChatViewModel {
 
     /// Find the message UUID for a given scroll target.
-    /// Used by deep linking to scroll to a specific tool call or event.
+    /// Used by deep linking to scroll to a specific capability invocation or event.
     ///
     /// This method searches displayed messages first, then falls back to
     /// the full history (`allReconstructedMessages`). If the target is found
@@ -15,14 +15,14 @@ extension ChatViewModel {
     /// - Returns: The message UUID if found, nil otherwise
     func findMessageId(for target: ScrollTarget) -> UUID? {
         switch target {
-        case .toolCall(let toolCallId):
+        case .capabilityInvocation(let invocationId):
             // First search displayed messages
-            if let id = findToolCallInMessages(toolCallId, messages: messages) {
+            if let id = findCapabilityInvocationInMessages(invocationId, messages: messages) {
                 return id
             }
 
             // Fall back to full history if not in displayed window
-            if let (id, index) = findToolCallInMessagesWithIndex(toolCallId, messages: allReconstructedMessages) {
+            if let (id, index) = findCapabilityInvocationInMessagesWithIndex(invocationId, messages: allReconstructedMessages) {
                 expandWindowToInclude(index: index)
                 return id
             }
@@ -52,39 +52,38 @@ extension ChatViewModel {
 
     // MARK: - Private Helpers
 
-    /// Search for a tool call ID in a messages array
-    private func findToolCallInMessages(_ toolCallId: String, messages: [ChatMessage]) -> UUID? {
+    /// Search for a capability invocation ID in a messages array
+    private func findCapabilityInvocationInMessages(_ invocationId: String, messages: [ChatMessage]) -> UUID? {
         for message in messages {
-            if matchesToolCallId(message, toolCallId: toolCallId) {
+            if matchesCapabilityInvocationId(message, invocationId: invocationId) {
                 return message.id
             }
         }
         return nil
     }
 
-    /// Search for a tool call ID with index (for window expansion)
-    private func findToolCallInMessagesWithIndex(_ toolCallId: String, messages: [ChatMessage]) -> (UUID, Int)? {
+    /// Search for a capability invocation ID with index (for window expansion)
+    private func findCapabilityInvocationInMessagesWithIndex(_ invocationId: String, messages: [ChatMessage]) -> (UUID, Int)? {
         for (index, message) in messages.enumerated() {
-            if matchesToolCallId(message, toolCallId: toolCallId) {
+            if matchesCapabilityInvocationId(message, invocationId: invocationId) {
                 return (message.id, index)
             }
         }
         return nil
     }
 
-    /// Check if a message matches the given tool call ID.
-    /// Note: NotifyApp is handled via .toolUse since NotifyApp chip data is parsed from ToolUseData.
-    private func matchesToolCallId(_ message: ChatMessage, toolCallId: String) -> Bool {
+    /// Check if a message matches the given capability invocation ID.
+    private func matchesCapabilityInvocationId(_ message: ChatMessage, invocationId: String) -> Bool {
         switch message.content {
-        case .toolUse(let data) where data.toolCallId == toolCallId:
+        case .capabilityInvocation(let data) where data.id == invocationId:
             return true
-        case .toolResult(let data) where data.toolCallId == toolCallId:
+        case .capabilityResult(let data) where data.id == invocationId:
             return true
-        case .subagent(let data) where data.toolCallId == toolCallId:
+        case .subagent(let data) where data.invocationId == invocationId:
             return true
-        case .askUserQuestion(let data) where data.toolCallId == toolCallId:
+        case .askUserQuestion(let data) where data.invocationId == invocationId:
             return true
-        case .engineApproval(let data) where data.toolCallId == toolCallId:
+        case .engineApproval(let data) where data.invocationId == invocationId:
             return true
         default:
             return false

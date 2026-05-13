@@ -1,4 +1,4 @@
-//! Path extraction from tool call arguments.
+//! Path extraction from capability invocation arguments.
 //!
 //! Pure function that extracts file paths touched by a capability call, converts
 //! them to project-relative paths, and filters out paths outside the project.

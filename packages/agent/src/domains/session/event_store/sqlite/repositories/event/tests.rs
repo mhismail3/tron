@@ -83,7 +83,7 @@ fn insert_extracts_tool_name() {
     let event = make_event(
         "evt_1",
         1,
-        EventType::ToolCall,
+        EventType::CapabilityInvocationStarted,
         None,
         json!({"toolName": "execute", "toolCallId": "tc_1"}),
     );
@@ -209,8 +209,20 @@ fn get_ancestors_chain() {
         Some("evt_2"),
         json!({}),
     );
-    let e4 = make_event("evt_4", 4, EventType::ToolCall, Some("evt_3"), json!({}));
-    let e5 = make_event("evt_5", 5, EventType::ToolResult, Some("evt_4"), json!({}));
+    let e4 = make_event(
+        "evt_4",
+        4,
+        EventType::CapabilityInvocationStarted,
+        Some("evt_3"),
+        json!({}),
+    );
+    let e5 = make_event(
+        "evt_5",
+        5,
+        EventType::CapabilityInvocationCompleted,
+        Some("evt_4"),
+        json!({}),
+    );
 
     EventRepo::insert(&conn, &e1).unwrap();
     EventRepo::insert(&conn, &e2).unwrap();
@@ -519,7 +531,13 @@ fn get_by_types_basic() {
     .unwrap();
     EventRepo::insert(
         &conn,
-        &make_event("evt_3", 3, EventType::ToolCall, None, json!({})),
+        &make_event(
+            "evt_3",
+            3,
+            EventType::CapabilityInvocationStarted,
+            None,
+            json!({}),
+        ),
     )
     .unwrap();
 
@@ -569,7 +587,13 @@ fn get_by_workspace_and_types_basic() {
     .unwrap();
     EventRepo::insert(
         &conn,
-        &make_event("evt_2", 2, EventType::ToolCall, None, json!({})),
+        &make_event(
+            "evt_2",
+            2,
+            EventType::CapabilityInvocationStarted,
+            None,
+            json!({}),
+        ),
     )
     .unwrap();
 
@@ -624,7 +648,13 @@ fn count_by_workspace_and_types_basic() {
     .unwrap();
     EventRepo::insert(
         &conn,
-        &make_event("evt_3", 3, EventType::ToolCall, None, json!({})),
+        &make_event(
+            "evt_3",
+            3,
+            EventType::CapabilityInvocationStarted,
+            None,
+            json!({}),
+        ),
     )
     .unwrap();
 
@@ -836,7 +866,13 @@ fn get_all_by_types_basic() {
     .unwrap();
     EventRepo::insert(
         &conn,
-        &make_event("e3", 3, EventType::ToolCall, None, json!({})),
+        &make_event(
+            "e3",
+            3,
+            EventType::CapabilityInvocationStarted,
+            None,
+            json!({}),
+        ),
     )
     .unwrap();
 
@@ -895,7 +931,13 @@ fn get_all_by_types_respects_type_filter() {
     .unwrap();
     EventRepo::insert(
         &conn,
-        &make_event("e2", 2, EventType::ToolCall, None, json!({})),
+        &make_event(
+            "e2",
+            2,
+            EventType::CapabilityInvocationStarted,
+            None,
+            json!({}),
+        ),
     )
     .unwrap();
 
@@ -924,7 +966,13 @@ fn count_all_by_types_basic() {
     .unwrap();
     EventRepo::insert(
         &conn,
-        &make_event("e4", 4, EventType::ToolCall, None, json!({})),
+        &make_event(
+            "e4",
+            4,
+            EventType::CapabilityInvocationStarted,
+            None,
+            json!({}),
+        ),
     )
     .unwrap();
 

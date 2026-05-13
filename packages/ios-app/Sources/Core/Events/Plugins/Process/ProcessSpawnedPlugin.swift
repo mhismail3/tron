@@ -15,7 +15,7 @@ enum ProcessSpawnedPlugin: DispatchableEventPlugin {
             let label: String?
             let kind: String?
             let background: Bool?
-            let toolCallId: String?
+            let invocationId: String?
         }
     }
 
@@ -24,7 +24,7 @@ enum ProcessSpawnedPlugin: DispatchableEventPlugin {
         let label: String
         let kind: String
         let background: Bool
-        let toolCallId: String
+        let invocationId: String
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
@@ -39,7 +39,7 @@ enum ProcessSpawnedPlugin: DispatchableEventPlugin {
             label: label,
             kind: payload.kind ?? "shell",
             background: payload.background ?? true,
-            toolCallId: payload.toolCallId ?? ""
+            invocationId: payload.invocationId ?? ""
         )
     }
 

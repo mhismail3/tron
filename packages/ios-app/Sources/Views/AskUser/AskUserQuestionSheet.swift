@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - AskUserQuestion Sheet
 
-/// Sheet for answering AskUserQuestion tool calls
+/// Sheet for answering AskUserQuestion capability invocations
 /// Displays ONLY questions/answers - no surrounding context or agent messages
 /// Uses iOS 26 liquid glass styling
 @available(iOS 26.0, *)
@@ -413,7 +413,7 @@ struct CompactOptionRowView: View {
 #Preview("Single Question") {
     AskUserQuestionSheet(
         toolData: AskUserQuestionToolData(
-            toolCallId: "call_123",
+            invocationId: "call_123",
             params: AskUserQuestionParams(
                 questions: [
                     AskUserQuestion(
@@ -446,7 +446,7 @@ struct CompactOptionRowView: View {
 #Preview("Multiple Questions") {
     AskUserQuestionSheet(
         toolData: AskUserQuestionToolData(
-            toolCallId: "call_123",
+            invocationId: "call_123",
             params: AskUserQuestionParams(
                 questions: [
                     AskUserQuestion(

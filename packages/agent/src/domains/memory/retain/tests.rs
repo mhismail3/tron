@@ -634,7 +634,7 @@ fn assistant_tool_use(tool_name: &str, tool_id: &str) -> Message {
     assistant_tool_use_with_input(tool_name, tool_id, json!({}))
 }
 
-/// Assistant message for an `agent::ask_user` tool call with real question
+/// Assistant message for an `agent::ask_user` capability invocation with real question
 /// text (what the agent would actually send at runtime).
 fn assistant_ask_user_question(tool_id: &str, questions: &[&str]) -> Message {
     let qs: Vec<Value> = questions
@@ -821,7 +821,7 @@ fn serialize_retains_non_interactive_tool_result() {
     let out = serialize_for_memory(&msgs);
     assert!(
         out.contains("[TOOL_RESULT] file contents here"),
-        "non-interactive tool result should appear: {out}"
+        "non-interactive capability result should appear: {out}"
     );
 }
 
@@ -853,7 +853,7 @@ fn serialize_filters_multiple_interactive_in_slice() {
 
 #[test]
 fn serialize_keeps_orphan_tool_result() {
-    // Tool result whose tool_call_id has no matching tool_use in the slice.
+    // Capability result whose tool_call_id has no matching tool_use in the slice.
     // Default: preserve it — we only filter when we can confidently identify
     // the source as interactive.
     let msgs = vec![tool_result("orphan_id", "some tool output")];

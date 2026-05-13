@@ -116,7 +116,7 @@ enum SystemEvent: Equatable, Hashable {
         case .messageDeleted(let targetType):
             let typeLabel = targetType == "message.user" ? "user message" :
                            targetType == "message.assistant" ? "assistant message" :
-                           targetType == "tool.result" ? "tool result" : "message"
+                           targetType == "capability.invocation.completed" ? "capability result" : "message"
             return "Deleted \(typeLabel) from context"
         case .skillDeactivated(let skillName):
             return "\(skillName) deactivated from context"

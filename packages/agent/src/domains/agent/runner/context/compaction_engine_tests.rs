@@ -135,7 +135,7 @@ fn assistant_with_tool_use(ids: &[&str]) -> Message {
     }
 }
 
-/// Helper: create a tool result message.
+/// Helper: create a capability result message.
 fn tool_result(id: &str) -> Message {
     Message::ToolResult {
         tool_call_id: id.into(),
@@ -925,7 +925,7 @@ fn token_estimation_uses_deps() {
 }
 
 // ========================================================================
-// Integration: no orphaned tool results
+// Integration: no orphaned capability results
 // ========================================================================
 
 /// Assert that every `ToolResult` in `messages` has a preceding `Assistant`
@@ -1008,7 +1008,7 @@ async fn execute_turn_based_no_orphans() {
 // 65K context window — local-model ceiling (Ollama)
 //
 // Ollama sessions run with `num_ctx = 65_536` and the default compaction
-// threshold of 0.70. These tests pin the split-point math and tool-result
+// threshold of 0.70. These tests pin the split-point math and capability-result
 // sizer at that window so the local path is parametrically covered.
 // ========================================================================
 

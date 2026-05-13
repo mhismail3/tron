@@ -11,14 +11,14 @@
 //! | `agent_runner` | High-level agent run: skill injection → run → event ordering |
 //! | `agent_factory` | Creates `TronAgent` instances with provider/tools/hooks |
 //! | `event_persister` | Persists agent events to the event store (supports pre-assigned sequences) |
-//! | `subagent_manager` | Spawns/manages child agents for parallel tool execution |
+//! | `subagent_manager` | Spawns/manages child agents for parallel capability invocation |
 //! | `process_manager` | Centralized lifecycle management for deterministic processes |
 //! | `job_manager` | Unified `JobManagerOps` facade routing by id prefix: `proc-*` → processes, else → subagents |
 //! | `output_buffer` | Always-on capped ring buffer for streaming process stdout/stderr with on-demand replay |
 //! | `turn_accumulator` | In-memory per-session scratchpad of in-flight turn content for `session.reconstruct` |
 //! | `streaming_journal` | Per-turn append-only WAL for crash recovery of partial LLM output |
 //! | `recovery` | Startup crash recovery — persists orphaned journal content |
-//! | `tool_call_tracker` | Tracks in-flight tool calls for cancellation |
+//! | `tool_call_tracker` | Tracks in-flight capability invocations for cancellation |
 //! | `tool_abort_registry` | Per-tool `CancellationToken` registry for `agent.abortTool` |
 //!
 //! ## Event Sequencing

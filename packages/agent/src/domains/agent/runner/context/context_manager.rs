@@ -2,7 +2,7 @@
 //!
 //! [`ContextManager`] orchestrates all context-related operations:
 //! message tracking, token estimation, pre-turn validation,
-//! compaction, tool result processing, model switching, and system
+//! compaction, capability result processing, model switching, and system
 //! prompt management.
 
 use std::sync::Arc;
@@ -718,9 +718,9 @@ impl ContextManager {
         }
     }
 
-    // ── Tool result processing ──────────────────────────────────────────
+    // ── Capability result processing ──────────────────────────────────────────
 
-    /// Process a tool result, truncating if necessary.
+    /// Process a capability result, truncating if necessary.
     #[must_use]
     pub fn process_tool_result(&self, tool_call_id: &str, content: &str) -> ProcessedToolResult {
         let max_size = self.get_max_tool_result_size();
@@ -749,7 +749,7 @@ impl ContextManager {
         }
     }
 
-    /// Get maximum tool result size based on remaining context.
+    /// Get maximum capability result size based on remaining context.
     ///
     /// Reserves 8000 tokens for the model response and 10% safety margin,
     /// then converts the available tokens to chars (4 chars per token).

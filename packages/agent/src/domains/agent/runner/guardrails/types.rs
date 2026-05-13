@@ -92,7 +92,7 @@ pub struct EvaluationContext {
     /// Session ID for audit logging.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// Tool call ID.
+    /// Capability invocation ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
 }
@@ -151,7 +151,7 @@ impl RuleEvaluationResult {
     }
 }
 
-/// Final result of evaluating all applicable rules for a tool call.
+/// Final result of evaluating all applicable rules for a capability invocation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardrailEvaluation {
@@ -239,7 +239,7 @@ pub struct AuditEntryParams {
     pub session_id: Option<String>,
     /// Tool name.
     pub tool_name: String,
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub tool_call_id: Option<String>,
     /// Tool arguments (will be redacted).
     pub tool_arguments: Option<serde_json::Value>,

@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Subagent Chip Variant
 
-/// Which tool call produced this subagent chip. Controls the running-
+/// Which capability invocation produced this subagent chip. Controls the running-
 /// state label and whether the target session id is surfaced so the
 /// Wait chip is visually distinguishable from Spawn.
 ///
@@ -84,11 +84,13 @@ struct SubagentChip: View {
                     .foregroundStyle(data.status.color)
                     .lineLimit(1)
 
-                // Kind badge — "SUB" for spawn, "WAIT" for wait_for. A
-                // user seeing three running chips (Bash BG, Spawn,
-                // Wait) can tell them apart at a glance without
-                // reading each title.
-                ToolKindBadge(text: kindBadgeText, color: data.status.color)
+                Text(kindBadgeText)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .foregroundStyle(data.status.color)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(data.status.color.opacity(0.14))
+                    .clipShape(Capsule())
                     .accessibilityLabel(kindBadgeAccessibilityLabel)
 
                 if let targetIdBadge {
@@ -151,7 +153,7 @@ struct SubagentChip: View {
     VStack(spacing: 16) {
         SubagentChip(
             data: SubagentToolData(
-                toolCallId: "call_2",
+                invocationId: "call_2",
                 subagentSessionId: "sess_def456",
                 task: "Analyze codebase structure",
                 model: "claude-sonnet-4",
@@ -169,7 +171,7 @@ struct SubagentChip: View {
 
         SubagentChip(
             data: SubagentToolData(
-                toolCallId: "call_wait_1",
+                invocationId: "call_wait_1",
                 subagentSessionId: "sess_def456",
                 task: "Analyze codebase structure",
                 model: "claude-sonnet-4",
@@ -187,7 +189,7 @@ struct SubagentChip: View {
 
         SubagentChip(
             data: SubagentToolData(
-                toolCallId: "call_3",
+                invocationId: "call_3",
                 subagentSessionId: "sess_ghi789",
                 task: "Fix the bug in authentication",
                 model: "claude-sonnet-4",
@@ -205,7 +207,7 @@ struct SubagentChip: View {
 
         SubagentChip(
             data: SubagentToolData(
-                toolCallId: "call_wait_2",
+                invocationId: "call_wait_2",
                 subagentSessionId: "sess_ghi789",
                 task: "Fix the bug in authentication",
                 model: "claude-sonnet-4",
@@ -223,7 +225,7 @@ struct SubagentChip: View {
 
         SubagentChip(
             data: SubagentToolData(
-                toolCallId: "call_4",
+                invocationId: "call_4",
                 subagentSessionId: "sess_jkl012",
                 task: "Deploy to production",
                 model: "claude-sonnet-4",

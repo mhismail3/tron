@@ -1,7 +1,7 @@
 //! Context management types.
 //!
 //! Shared types for context management components: threshold levels,
-//! configuration, snapshots, compaction, tool results, and summarization.
+//! configuration, snapshots, compaction, capability results, and summarization.
 
 use crate::shared::messages::Message;
 use crate::shared::tools::Tool;
@@ -227,21 +227,21 @@ pub struct DetailedMessageInfo {
     /// Event ID (for deletion support).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_id: Option<String>,
-    /// Tool calls within assistant messages.
+    /// Capability invocations within assistant messages.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCallInfo>>,
-    /// Tool call ID (for tool result messages).
+    /// Capability invocation ID (for capability result messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
-    /// Error flag (for tool result messages).
+    /// Error flag (for capability result messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
 }
 
-/// Tool call information for detailed snapshot.
+/// Capability invocation information for detailed snapshot.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolCallInfo {
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub id: String,
     /// Tool name.
     pub name: String,
@@ -354,10 +354,10 @@ pub struct CompactionResult {
 // Tool Result Processing
 // =============================================================================
 
-/// Processed tool result (potentially truncated).
+/// Processed capability result (potentially truncated).
 #[derive(Clone, Debug)]
 pub struct ProcessedToolResult {
-    /// Tool call ID.
+    /// Capability invocation ID.
     pub tool_call_id: String,
     /// Content (possibly truncated).
     pub content: String,
@@ -494,7 +494,7 @@ pub struct CompactionTriggerInput {
     pub current_token_ratio: f64,
     /// Recent event types from the current cycle.
     pub recent_event_types: Vec<String>,
-    /// Recent process::run tool call commands.
+    /// Recent process::run capability invocation commands.
     pub recent_tool_calls: Vec<String>,
 }
 

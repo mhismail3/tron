@@ -27,8 +27,8 @@ final class EventPluginTests: XCTestCase {
         // Test a sample of plugins
         XCTAssertFalse(TextDeltaPlugin.eventType.isEmpty)
         XCTAssertFalse(ThinkingDeltaPlugin.eventType.isEmpty)
-        XCTAssertFalse(ToolStartPlugin.eventType.isEmpty)
-        XCTAssertFalse(ToolEndPlugin.eventType.isEmpty)
+        XCTAssertFalse(CapabilityInvocationStartedPlugin.eventType.isEmpty)
+        XCTAssertFalse(CapabilityInvocationCompletedPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnStartPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnEndPlugin.eventType.isEmpty)
         XCTAssertFalse(CompletePlugin.eventType.isEmpty)

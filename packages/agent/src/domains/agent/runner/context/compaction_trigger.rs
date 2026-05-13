@@ -20,7 +20,7 @@ pub struct CompactionTriggerResult {
     pub reason: String,
 }
 
-/// Progress signal patterns matched against recent process::run tool call commands.
+/// Progress signal patterns matched against recent process::run capability invocation commands.
 // SAFETY: Constant patterns validated by every test run. LazyLock ensures
 // these compile exactly once at first use; invalid regex panics immediately
 // at startup, never at runtime.
@@ -80,7 +80,7 @@ impl CompactionTrigger {
             };
         }
 
-        // 2b. Progress signals — tool call patterns
+        // 2b. Progress signals — capability invocation patterns
         let patterns = progress_patterns();
         for cmd in &input.recent_tool_calls {
             for pattern in patterns {

@@ -65,7 +65,7 @@ ORDER BY s.created_at DESC;
 ### All Events for a Session
 ```sql
 SELECT id, sequence, type, datetime(timestamp) as time, turn,
-  tool_name, model, latency_ms, substr(payload, 1, 200) as payload_preview
+  capability_name, model, latency_ms, substr(payload, 1, 200) as payload_preview
 FROM events WHERE session_id = 'SESSION_ID' ORDER BY sequence;
 ```
 
@@ -80,11 +80,11 @@ ORDER BY sequence;
 
 ### Tool Executions
 ```sql
-SELECT e.sequence, datetime(e.timestamp) as time, e.tool_name, e.type,
+SELECT e.sequence, datetime(e.timestamp) as time, e.capability_name, e.type,
   json_extract(e.payload, '$.isError') as is_error,
   json_extract(e.payload, '$.duration') as duration_ms
 FROM events e WHERE e.session_id = 'SESSION_ID'
-  AND e.type IN ('tool.call', 'tool.result')
+  AND e.type IN ('capability.invocation.started', 'capability.invocation.completed')
 ORDER BY e.sequence;
 ```
 
@@ -107,7 +107,7 @@ ORDER BY timestamp;
 
 ### Specific Turn Events
 ```sql
-SELECT sequence, type, datetime(timestamp) as time, tool_name,
+SELECT sequence, type, datetime(timestamp) as time, capability_name,
   model, input_tokens, output_tokens, latency_ms
 FROM events WHERE session_id = 'SESSION_ID' AND turn = 3
 ORDER BY sequence;
@@ -116,7 +116,7 @@ ORDER BY sequence;
 ### Events in Time Range
 ```sql
 SELECT e.session_id, e.sequence, e.type,
-  datetime(e.timestamp) as time, e.tool_name
+  datetime(e.timestamp) as time, e.capability_name
 FROM events e
 WHERE e.timestamp BETWEEN '2026-01-15T00:00:00' AND '2026-01-15T23:59:59'
 ORDER BY e.timestamp;
@@ -140,7 +140,7 @@ SELECT datetime(timestamp) as time, type,
   json_extract(payload, '$.message') as error_msg,
   json_extract(payload, '$.provider') as provider,
   json_extract(payload, '$.model') as model
-FROM events WHERE type IN ('error.provider', 'error.agent', 'error.tool', 'turn.failed')
+FROM events WHERE type IN ('error.provider', 'error.agent', 'error.capability', 'turn.failed')
 ORDER BY timestamp DESC LIMIT 20;
 ```
 

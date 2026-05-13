@@ -234,7 +234,7 @@ mod tests {
 
         let _ = store.append(&AppendOptions {
             session_id: sid,
-            event_type: EventType::ToolResult,
+            event_type: EventType::CapabilityInvocationCompleted,
             payload: serde_json::json!({"toolCallId": "toolu_01abc", "content": "File written", "isError": false}),
             parent_id: None,
             sequence: None,

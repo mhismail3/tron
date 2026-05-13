@@ -50,7 +50,7 @@ final class SettingsParityTests: XCTestCase {
         "promptHistoryMaxEntries",
         "promptHistoryMaxAgeDays",
         "promptHistoryAutoPrune",
-        // MCP
+        // plugin source
         "mcpSchemaRefreshTtlMs",
         // Engine diagnostics
         "observabilityLogLevel",

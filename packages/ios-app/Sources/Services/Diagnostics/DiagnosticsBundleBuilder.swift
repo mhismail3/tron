@@ -505,7 +505,7 @@ enum DiagnosticsEventSanitizer {
         "source",
         "status",
         "stopReason",
-        "toolName",
+        "modelToolName",
         "totalCost",
         "turn",
         "useWorktree",

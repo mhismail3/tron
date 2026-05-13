@@ -97,7 +97,7 @@ extension Color {
     static let userBubble = Color(lightHex: "#059669", darkHex: "#10B981")
     static let assistantBubble = Color(lightHex: "#EBE5DA", darkHex: "#27272A")
     static let systemBubble = Color(lightHex: "#E3DDCF", darkHex: "#3F3F46")
-    static let toolBubble = Color(lightHex: "#DBEAFE", darkHex: "#1E3A5F")
+    static let capabilityBubble = Color(lightHex: "#DBEAFE", darkHex: "#1E3A5F")
     static let errorBubble = Color(lightHex: "#FEE2E2", darkHex: "#7F1D1D")
 
     // MARK: - Overlay Colors
@@ -239,7 +239,7 @@ extension View {
         case .user: return .userBubble
         case .assistant: return .assistantBubble
         case .system: return .systemBubble
-        case .toolResult: return .toolBubble
+        case .capability: return .capabilityBubble
         }
     }
 }
@@ -593,7 +593,7 @@ extension ShapeStyle where Self == Color {
     static var userBubble: Color { .userBubble }
     static var assistantBubble: Color { .assistantBubble }
     static var systemBubble: Color { .systemBubble }
-    static var toolBubble: Color { .toolBubble }
+    static var capabilityBubble: Color { .capabilityBubble }
     static var errorBubble: Color { .errorBubble }
 
     // Special Colors

@@ -91,14 +91,14 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             completionHandler()
             return
         }
-        let toolCallId = userInfo["toolCallId"] as? String
+        let invocationId = userInfo["invocationId"] as? String
         let eventId = userInfo["eventId"] as? String
 
         // Post notification with extracted payload for deep link router
         DispatchQueue.main.async {
             var payload: [String: String] = ["sessionId": sessionId]
-            if let toolCallId = toolCallId {
-                payload["toolCallId"] = toolCallId
+            if let invocationId = invocationId {
+                payload["invocationId"] = invocationId
             }
             if let eventId = eventId {
                 payload["eventId"] = eventId

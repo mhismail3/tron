@@ -92,12 +92,12 @@ final class EventRegistry: @unchecked Sendable {
         register(TurnStartPlugin.self)
         register(TurnEndPlugin.self)
 
-        // Tool events
-        register(ToolGeneratingPlugin.self)
-        register(ToolStartPlugin.self)
-        register(ToolOutputPlugin.self)
-        register(ToolProgressPlugin.self)
-        register(ToolEndPlugin.self)
+        // Capability invocation events
+        register(CapabilityInvocationGeneratingPlugin.self)
+        register(CapabilityInvocationStartedPlugin.self)
+        register(CapabilityInvocationOutputPlugin.self)
+        register(CapabilityInvocationProgressPlugin.self)
+        register(CapabilityInvocationCompletedPlugin.self)
 
         // Lifecycle events
         register(CompletePlugin.self)
@@ -140,7 +140,7 @@ final class EventRegistry: @unchecked Sendable {
         // Server events
         register(ServerRestartingPlugin.self)
         register(AuthUpdatedPlugin.self)
-        register(MCPStatusChangedPlugin.self)
+        register(PluginSourceStatusChangedPlugin.self)
 
         // Worktree events
         register(WorktreeAcquiredPlugin.self)

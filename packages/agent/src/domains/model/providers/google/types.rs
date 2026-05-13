@@ -246,7 +246,7 @@ pub enum GeminiPart {
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
-    /// Function response (tool result).
+    /// Function response (capability result).
     FunctionResponse {
         /// The function response details.
         #[serde(rename = "functionResponse")]
@@ -742,7 +742,7 @@ pub fn is_gemini_3_model(model: &str) -> bool {
 /// Default API base URL (used for both API key and OAuth authentication).
 pub const DEFAULT_API_KEY_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
-/// Maximum tool result content length before truncation.
+/// Maximum capability result content length before truncation.
 pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;
 
 /// Default max output tokens when model info is not available.

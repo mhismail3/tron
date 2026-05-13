@@ -322,8 +322,8 @@ struct MessageDeletedNotificationView: View {
             return "user message"
         case "message.assistant":
             return "assistant message"
-        case "tool.result":
-            return "tool result"
+        case "capability.invocation.completed":
+            return "capability result"
         default:
             return "message"
         }
@@ -335,7 +335,7 @@ struct MessageDeletedNotificationView: View {
             return "person.fill.xmark"
         case "message.assistant":
             return "sparkles"
-        case "tool.result":
+        case "capability.invocation.completed":
             return "hammer.fill"
         default:
             return "trash.fill"

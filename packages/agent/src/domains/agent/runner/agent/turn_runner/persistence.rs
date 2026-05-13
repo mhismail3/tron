@@ -476,7 +476,7 @@ pub(super) async fn emit_turn_end(
     );
 }
 
-pub(super) fn emit_tool_use_batch(
+pub(super) fn emit_capability_invocation_batch(
     emitter: &Arc<EventEmitter>,
     session_id: &str,
     tool_calls: &[crate::shared::messages::ToolCall],
@@ -495,7 +495,7 @@ pub(super) fn emit_tool_use_batch(
 
     emit_maybe_sequenced(
         emitter,
-        TronEvent::ToolUseBatch {
+        TronEvent::CapabilityInvocationBatch {
             base: base_event(session_id, trace_id, parent_invocation_id),
             tool_calls: summaries,
         },

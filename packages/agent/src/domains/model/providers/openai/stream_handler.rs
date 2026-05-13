@@ -11,7 +11,7 @@
 //! - `response.completed` → `ThinkingEnd`, `TextEnd`, `ToolCallEnd`, `Done`
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
-//! shared `stream_common` module. OpenAI-specific reasoning dedup and tool call
+//! shared `stream_common` module. OpenAI-specific reasoning dedup and capability invocation
 //! handling (HashMap-based, with `parse_tool_call_arguments`) stays here.
 
 use std::collections::{HashMap, HashSet};
@@ -30,7 +30,7 @@ use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
 pub struct StreamState {
     /// Shared delta accumulator for text, thinking, and token tracking.
     pub acc: StreamAccumulator,
-    /// Tool calls by `call_id` → (id, name, `accumulated_args`).
+    /// Capability invocations by `call_id` → (id, name, `accumulated_args`).
     pub tool_calls: HashMap<String, ToolCallState>,
     /// Deduplication set for reasoning text.
     pub seen_thinking_texts: HashSet<String>,
@@ -38,7 +38,7 @@ pub struct StreamState {
     pub has_reasoning_text: bool,
 }
 
-/// State for an individual tool call being accumulated.
+/// State for an individual capability invocation being accumulated.
 #[derive(Clone, Debug)]
 pub struct ToolCallState {
     /// Call ID.
@@ -105,7 +105,7 @@ fn handle_content_part_delta(
     }
 }
 
-/// Handle `response.output_item.added` — start tool calls or reasoning items.
+/// Handle `response.output_item.added` — start capability invocations or reasoning items.
 fn handle_output_item_added(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
@@ -190,7 +190,7 @@ fn handle_reasoning_summary_text_delta(
     }
 }
 
-/// Handle `response.function_call_arguments.delta` — accumulate tool call arguments.
+/// Handle `response.function_call_arguments.delta` — accumulate capability invocation arguments.
 fn handle_function_call_args_delta(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
@@ -307,7 +307,7 @@ fn process_completed_response(
     // Emit text_end if we had text
     events.extend(state.acc.close_text(None));
 
-    // Emit toolcall_end for each tool call
+    // Emit toolcall_end for each capability invocation
     for tc in state.tool_calls.values() {
         if !tc.id.is_empty() && !tc.name.is_empty() {
             let ctx = ToolCallContext {
@@ -390,7 +390,7 @@ fn merge_reasoning_item(
     }
 }
 
-/// Merge a `function_call` output item — update or insert tool call state.
+/// Merge a `function_call` output item — update or insert capability invocation state.
 fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mut StreamState) {
     let Some(call_id) = &item.call_id else {
         return;
@@ -609,7 +609,7 @@ mod tests {
         assert!(events.is_empty());
     }
 
-    // ── Tool call streaming ────────────────────────────────────────
+    // ── Capability invocation streaming ────────────────────────────────────────
 
     #[test]
     fn emits_toolcall_start_on_function_call_added() {
@@ -847,10 +847,10 @@ mod tests {
         );
 
         let events = process_stream_event(&event, &mut state);
-        let tool_end = events
+        let capability_completed = events
             .iter()
             .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
-        assert!(tool_end.is_some());
+        assert!(capability_completed.is_some());
 
         let done = events
             .iter()
@@ -881,11 +881,11 @@ mod tests {
         };
 
         let events = process_stream_event(&event, &mut state);
-        let tool_end = events
+        let capability_completed = events
             .iter()
             .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
-        assert!(tool_end.is_some());
-        if let Some(StreamEvent::ToolCallEnd { tool_call }) = tool_end {
+        assert!(capability_completed.is_some());
+        if let Some(StreamEvent::ToolCallEnd { tool_call }) = capability_completed {
             assert_eq!(tool_call.name, "process::run");
             assert_eq!(
                 tool_call
@@ -972,11 +972,11 @@ mod tests {
         );
 
         let events = process_stream_event(&event, &mut state);
-        let tool_end = events
+        let capability_completed = events
             .iter()
             .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
-        assert!(tool_end.is_some());
-        if let Some(StreamEvent::ToolCallEnd { tool_call }) = tool_end {
+        assert!(capability_completed.is_some());
+        if let Some(StreamEvent::ToolCallEnd { tool_call }) = capability_completed {
             assert_eq!(tool_call.name, "write_file");
         }
 

@@ -322,13 +322,13 @@ struct HistorySheet: View {
     // MARK: - Merged Tool Row
 
     private func mergedToolRow(call: SessionEvent, result: SessionEvent?, turn: TurnGroup) -> some View {
-        let toolName = call.payload.string("name") ?? "unknown"
+        let modelToolName = call.payload.string("name") ?? "unknown"
         let args = call.payload.dict("arguments") ?? [:]
-        let keyArg = call.extractKeyArgument(toolName: toolName, from: args)
+        let keyArg = call.extractKeyArgument(modelToolName: modelToolName, from: args)
         let isError = result?.payload.bool("isError") ?? false
         let duration = result?.payload.int("duration")
 
-        let displayName = keyArg.isEmpty ? toolName : "\(toolName): \(keyArg)"
+        let displayName = keyArg.isEmpty ? modelToolName : "\(modelToolName): \(keyArg)"
         let statusIcon = isError ? "xmark.circle.fill" : "checkmark.circle.fill"
         let statusColor: Color = isError ? .tronError : .tronSuccess
 

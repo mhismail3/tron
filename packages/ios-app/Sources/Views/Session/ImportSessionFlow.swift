@@ -488,11 +488,11 @@ struct ImportSessionPreviewView: View {
     fileprivate enum PreviewItem {
         case userMessage(text: String)
         case userCommand(name: String)
-        case assistantMessage(text: String, toolCalls: [ToolCallChip])
-        case aggregatedToolCalls([ToolCallChip])
+        case assistantMessage(text: String, toolCalls: [CapabilityInvocationChip])
+        case aggregatedCapabilityInvocations([CapabilityInvocationChip])
     }
 
-    fileprivate struct ToolCallChip: Hashable {
+    fileprivate struct CapabilityInvocationChip: Hashable {
         let name: String
         let count: Int
     }
@@ -543,7 +543,7 @@ struct ImportSessionPreviewView: View {
     private func processAssistantRun(_ run: [ImportPreviewMessage]) -> [PreviewItem] {
         // Separate tool-only messages from messages with actual text
         var items: [PreviewItem] = []
-        var pendingToolOnly: [String] = [] // tool names from consecutive tool-only messages
+        var pendingToolOnly: [String] = [] // model model tool names from consecutive tool-only messages
 
         for msg in run {
             let parsed = parseAssistantContent(msg.contentPreview)
@@ -553,17 +553,17 @@ struct ImportSessionPreviewView: View {
             } else {
                 // Has text content — flush any pending tool-only aggregate first
                 if !pendingToolOnly.isEmpty {
-                    items.append(aggregateToolCalls(pendingToolOnly))
+                    items.append(aggregateCapabilityInvocations(pendingToolOnly))
                     pendingToolOnly = []
                 }
-                let chips = parsed.tools.map { ToolCallChip(name: $0, count: 1) }
+                let chips = parsed.tools.map { CapabilityInvocationChip(name: $0, count: 1) }
                 items.append(.assistantMessage(text: parsed.text, toolCalls: chips))
             }
         }
 
         // Flush remaining tool-only messages
         if !pendingToolOnly.isEmpty {
-            items.append(aggregateToolCalls(pendingToolOnly))
+            items.append(aggregateCapabilityInvocations(pendingToolOnly))
         }
 
         return items
@@ -588,15 +588,15 @@ struct ImportSessionPreviewView: View {
         return (cleaned, tools)
     }
 
-    private func aggregateToolCalls(_ toolNames: [String]) -> PreviewItem {
+    private func aggregateCapabilityInvocations(_ modelToolNames: [String]) -> PreviewItem {
         var counts: [String: Int] = [:]
         var order: [String] = []
-        for name in toolNames {
+        for name in modelToolNames {
             if counts[name] == nil { order.append(name) }
             counts[name, default: 0] += 1
         }
-        let chips = order.map { ToolCallChip(name: $0, count: counts[$0]!) }
-        return .aggregatedToolCalls(chips)
+        let chips = order.map { CapabilityInvocationChip(name: $0, count: counts[$0]!) }
+        return .aggregatedCapabilityInvocations(chips)
     }
 
     // MARK: - Network
@@ -674,7 +674,7 @@ private struct ImportPreviewRow: View {
             userCommandRow(name: name)
         case .assistantMessage(let text, let tools):
             assistantRow(text: text, toolCalls: tools)
-        case .aggregatedToolCalls(let tools):
+        case .aggregatedCapabilityInvocations(let tools):
             aggregatedToolRow(tools: tools)
         }
     }
@@ -711,7 +711,7 @@ private struct ImportPreviewRow: View {
     }
 
     @ViewBuilder
-    private func assistantRow(text: String, toolCalls: [ImportSessionPreviewView.ToolCallChip]) -> some View {
+    private func assistantRow(text: String, toolCalls: [ImportSessionPreviewView.CapabilityInvocationChip]) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Rectangle()
                 .fill(Color.tronEmerald)
@@ -737,7 +737,7 @@ private struct ImportPreviewRow: View {
     }
 
     @ViewBuilder
-    private func aggregatedToolRow(tools: [ImportSessionPreviewView.ToolCallChip]) -> some View {
+    private func aggregatedToolRow(tools: [ImportSessionPreviewView.CapabilityInvocationChip]) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Rectangle()
                 .fill(Color.tronEmerald)

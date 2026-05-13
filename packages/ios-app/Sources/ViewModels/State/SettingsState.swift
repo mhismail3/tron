@@ -66,11 +66,11 @@ final class SettingsState {
     /// Opportunistically prune on server startup.
     var promptHistoryAutoPrune: Bool = true
 
-    // MARK: - MCP
+    // MARK: - plugin source
 
     /// Proactive schema-refresh TTL in milliseconds. `0` disables.
-    /// Each `McpCall` re-fetches `tools/list` when the per-server cache is
-    /// older than this TTL, detecting drift and rebuilding the tool index.
+    /// plugin-source-derived capability plugins refresh `tools/list` metadata when the
+    /// per-server cache is older than this TTL.
     var mcpSchemaRefreshTtlMs: UInt64 = 30_000
 
     // MARK: - Observability And Storage

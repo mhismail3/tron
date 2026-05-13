@@ -23,57 +23,48 @@ final class ChatViewModelFindMessageTests: XCTestCase {
 
     // MARK: - Tool Call Tests
 
-    func testFindMessageIdForToolCallInToolUse() {
-        // Given: A message with toolUse content
+    func testFindMessageIdForCapabilityInvocationInToolUse() {
+        // Given: A message with capability invocation content
         let messageId = UUID()
         let message = ChatMessage(
             id: messageId,
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "NotifyApp",
-                toolCallId: "toolu_abc",
-                arguments: "{}",
-                status: .success
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_abc", status: .success))
         )
         viewModel.messages = [message]
 
-        // When: Finding message for tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_abc"))
+        // When: Finding message for capability invocation
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_abc"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForToolCallInToolResult() {
-        // Given: A message with toolResult content
+    func testFindMessageIdForCapabilityInvocationInToolResult() {
+        // Given: A message with orphan capability result content
         let messageId = UUID()
         let message = ChatMessage(
             id: messageId,
             role: .user,
-            content: .toolResult(ToolResultData(
-                toolCallId: "toolu_abc",
-                content: "Success",
-                isError: false
-            ))
+            content: .capabilityResult(testCapabilityResult(id: "toolu_abc", content: "Success"))
         )
         viewModel.messages = [message]
 
-        // When: Finding message for tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_abc"))
+        // When: Finding message for capability invocation
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_abc"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForToolCallInSubagent() {
+    func testFindMessageIdForCapabilityInvocationInSubagent() {
         // Given: A message with subagent content
         let messageId = UUID()
         let message = ChatMessage(
             id: messageId,
             role: .assistant,
             content: .subagent(SubagentToolData(
-                toolCallId: "toolu_xyz",
+                invocationId: "toolu_xyz",
                 subagentSessionId: "sess_sub",
                 task: "Do something",
                 model: nil,
@@ -83,21 +74,21 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         )
         viewModel.messages = [message]
 
-        // When: Finding message for tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_xyz"))
+        // When: Finding message for capability invocation
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_xyz"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForToolCallInAskUserQuestion() {
+    func testFindMessageIdForCapabilityInvocationInAskUserQuestion() {
         // Given: A message with askUserQuestion content
         let messageId = UUID()
         let message = ChatMessage(
             id: messageId,
             role: .assistant,
             content: .askUserQuestion(AskUserQuestionToolData(
-                toolCallId: "toolu_question",
+                invocationId: "toolu_question",
                 params: AskUserQuestionParams(
                     questions: [
                         AskUserQuestion(
@@ -121,15 +112,15 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         )
         viewModel.messages = [message]
 
-        // When: Finding message for tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_question"))
+        // When: Finding message for capability invocation
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_question"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForToolCallNotFound() {
-        // Given: A message without matching tool call ID
+    func testFindMessageIdForCapabilityInvocationNotFound() {
+        // Given: A message without matching capability invocation ID
         let message = ChatMessage(
             id: UUID(),
             role: .assistant,
@@ -137,14 +128,14 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         )
         viewModel.messages = [message]
 
-        // When: Finding message for non-existent tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_nonexistent"))
+        // When: Finding message for non-existent capability invocation
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_nonexistent"))
 
         // Then: Should return nil
         XCTAssertNil(found)
     }
 
-    func testFindMessageIdForToolCallWithMultipleMessages() {
+    func testFindMessageIdForCapabilityInvocationWithMultipleMessages() {
         // Given: Multiple messages, only one matching
         let targetId = UUID()
         viewModel.messages = [
@@ -153,18 +144,13 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             ChatMessage(
                 id: targetId,
                 role: .assistant,
-                content: .toolUse(ToolUseData(
-                    toolName: "NotifyApp",
-                    toolCallId: "toolu_target",
-                    arguments: "{}",
-                    status: .success
-                ))
+                content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_target", status: .success))
             ),
             ChatMessage(id: UUID(), role: .assistant, content: .text("Done"))
         ]
 
-        // When: Finding message for tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_target"))
+        // When: Finding message for capability invocation
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_target"))
 
         // Then: Should return the correct message ID
         XCTAssertEqual(found, targetId)
@@ -230,12 +216,12 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel.messages = []
 
         // When: Finding message
-        let foundToolCall = viewModel.findMessageId(for: .toolCall(id: "toolu_abc"))
+        let foundCapabilityInvocation = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_abc"))
         let foundEvent = viewModel.findMessageId(for: .event(id: "evt_xyz"))
         let foundBottom = viewModel.findMessageId(for: .bottom)
 
         // Then: All should return nil
-        XCTAssertNil(foundToolCall)
+        XCTAssertNil(foundCapabilityInvocation)
         XCTAssertNil(foundEvent)
         XCTAssertNil(foundBottom)
     }
@@ -248,12 +234,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "NotifyApp",
-                toolCallId: "toolu_old",
-                arguments: "{}",
-                status: .success
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_old", status: .success))
         )
 
         // Simulate pagination: old message is in full history but not displayed
@@ -267,8 +248,8 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             ChatMessage(id: UUID(), role: .assistant, content: .text("Hi")),
         ]
 
-        // When: Finding message for tool call that's in full history
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_old"))
+        // When: Finding message for capability invocation that's in full history
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_old"))
 
         // Then: Should find it in allReconstructedMessages
         XCTAssertEqual(found, targetId)
@@ -280,12 +261,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "NotifyApp",
-                toolCallId: "toolu_recent",
-                arguments: "{}",
-                status: .success
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_recent", status: .success))
         )
 
         // Message is in both arrays (as would happen normally)
@@ -295,8 +271,8 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             targetMessage,
         ]
 
-        // When: Finding message for tool call
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_recent"))
+        // When: Finding message for capability invocation
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_recent"))
 
         // Then: Should find it (displayed messages searched first)
         XCTAssertEqual(found, targetId)
@@ -328,12 +304,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "NotifyApp",
-                toolCallId: "toolu_old",
-                arguments: "{}",
-                status: .success
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_old", status: .success))
         )
 
         // Build a realistic scenario: 60 messages total, only latest 50 displayed
@@ -352,7 +323,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel.displayedMessageCount = 50
 
         // When: Finding the old message
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_old"))
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_old"))
 
         // Then: Should find it
         XCTAssertEqual(found, targetId)
@@ -367,12 +338,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let targetMessage = ChatMessage(
             id: targetId,
             role: .assistant,
-            content: .toolUse(ToolUseData(
-                toolName: "NotifyApp",
-                toolCallId: "toolu_target",
-                arguments: "{}",
-                status: .success
-            ))
+            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_target", status: .success))
         )
 
         viewModel.allReconstructedMessages = [
@@ -386,7 +352,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel.displayedMessageCount = 1
 
         // When: Finding the message
-        let found = viewModel.findMessageId(for: .toolCall(id: "toolu_target"))
+        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_target"))
 
         // Then: Should return the message ID
         XCTAssertEqual(found, targetId)

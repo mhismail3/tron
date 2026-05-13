@@ -3,17 +3,17 @@
 //! [`reconstruct_from_events`] implements a two-pass algorithm that rebuilds
 //! the message list from an ordered sequence of [`SessionEvent`]s:
 //!
-//! 1. **First pass**: collect deleted event IDs, tool call argument maps,
+//! 1. **First pass**: collect deleted event IDs, capability invocation argument maps,
 //!    reasoning level, and system prompt.
 //! 2. **Second pass**: build messages while handling deletions, compaction,
-//!    context clears, tool result injection, and consecutive-role merging.
+//!    context clears, capability result injection, and consecutive-role merging.
 //!
 //! The output is a [`ReconstructionResult`] containing messages with event IDs,
 //! aggregate token usage, turn count, and config state.
 //!
 //! ## Size note
 //!
-//! Both passes share mutable state (deleted IDs, tool call maps, message
+//! Both passes share mutable state (deleted IDs, capability invocation maps, message
 //! accumulators). Splitting them across files would require passing 8+
 //! mutable references through function boundaries with no readability gain.
 
@@ -45,7 +45,7 @@ pub struct ReconstructionResult {
     pub system_prompt: Option<String>,
 }
 
-/// Pending tool result accumulated between assistant messages.
+/// Pending capability result accumulated between assistant messages.
 struct PendingToolResult {
     tool_call_id: String,
     content: String,
@@ -58,7 +58,7 @@ struct PendingToolResult {
 /// `reconstructFromEvents` exactly:
 ///
 /// - **Pass 1**: Metadata collection (deletions, tool args, config)
-/// - **Pass 2**: Message building (merging, compaction, tool result injection)
+/// - **Pass 2**: Message building (merging, compaction, capability result injection)
 ///
 /// # Arguments
 ///
@@ -76,7 +76,7 @@ struct Metadata {
     system_prompt: Option<String>,
 }
 
-/// Pass 1: Collect deleted event IDs, tool call arguments, and config state.
+/// Pass 1: Collect deleted event IDs, capability invocation arguments, and config state.
 fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     let mut deleted_event_ids = std::collections::HashSet::new();
     let mut tool_call_args_map = std::collections::HashMap::new();
@@ -90,7 +90,7 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
                     let _ = deleted_event_ids.insert(target.to_string());
                 }
             }
-            EventType::ToolCall => {
+            EventType::CapabilityInvocationStarted => {
                 let tc_id = event.payload.get("toolCallId").and_then(Value::as_str);
                 let args = event.payload.get("arguments");
                 if let (Some(id), Some(a)) = (tc_id, args) {
@@ -155,7 +155,7 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         match event.event_type {
             EventType::CompactSummary => handle_compact_summary(event, &mut st),
             EventType::ContextCleared => handle_context_cleared(&mut st),
-            EventType::ToolResult => handle_tool_result(event, &mut st),
+            EventType::CapabilityInvocationCompleted => handle_tool_result(event, &mut st),
             EventType::MessageUser => handle_message_user(event, &mut st),
             EventType::MessageAssistant => handle_message_assistant(event, metadata, &mut st),
             _ => {}
@@ -171,8 +171,8 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
     }
 
-    // Inject synthetic error results for any unmatched tool calls.
-    // This happens when: (a) a user interrupt discards pending tool results,
+    // Inject synthetic error results for any unmatched capability invocations.
+    // This happens when: (a) a user interrupt discards pending capability results,
     // or (b) the session ended mid-tool-execution before results arrived.
     // Without this, providers like OpenAI reject the history because every
     // function_call must have a corresponding function_call_output.
@@ -223,7 +223,7 @@ fn handle_context_cleared(st: &mut BuildState) {
     st.pending_tool_results.clear();
 }
 
-/// Handle `tool.result`: accumulate for later flushing.
+/// Handle `capability.invocation.completed`: accumulate for later flushing.
 fn handle_tool_result(event: &SessionEvent, st: &mut BuildState) {
     let tc_id = event
         .payload
@@ -250,7 +250,7 @@ fn handle_tool_result(event: &SessionEvent, st: &mut BuildState) {
     });
 }
 
-/// Handle `message.user`: merge consecutive, discard pending tool results.
+/// Handle `message.user`: merge consecutive, discard pending capability results.
 fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
     st.pending_tool_results.clear();
 
@@ -273,14 +273,14 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
     accumulate_tokens(&event.payload, &mut st.tokens);
 }
 
-/// Handle `message.assistant`: restore truncated inputs, flush tool results,
+/// Handle `message.assistant`: restore truncated inputs, flush capability results,
 /// merge consecutive, track turns.
 fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut BuildState) {
     let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
     let restored_content = restore_truncated_inputs(&content, &metadata.tool_call_args_map);
     let has_tool_use = content_has_tool_use(&restored_content);
 
-    // CASE 1: Last was assistant with pending tool results → flush first
+    // CASE 1: Last was assistant with pending capability results → flush first
     if st
         .combined
         .last()
@@ -335,7 +335,7 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
 ///
 /// Scans through the reconstructed message list and, for each assistant message
 /// containing `tool_use` blocks, checks whether matching `toolResult` messages
-/// exist before the next non-toolResult message. Any unmatched tool calls get
+/// exist before the next non-toolResult message. Any unmatched capability invocations get
 /// a synthetic error result injected immediately after the assistant message.
 fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
     let mut insertions: Vec<(usize, Vec<MessageWithEventId>)> = Vec::new();
@@ -355,7 +355,7 @@ fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
                     j += 1;
                 }
 
-                // Find unmatched tool calls
+                // Find unmatched capability invocations
                 let mut synthetic = Vec::new();
                 for tc_id in &tool_use_ids {
                     if !matched_ids.contains(tc_id.as_str()) {
@@ -363,7 +363,7 @@ fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
                             message: Message {
                                 role: "toolResult".to_string(),
                                 content: Value::String(
-                                    "Tool execution was interrupted.".to_string(),
+                                    "Capability invocation was interrupted.".to_string(),
                                 ),
                                 tool_call_id: Some(tc_id.clone()),
                                 is_error: Some(true),
@@ -399,7 +399,7 @@ fn extract_tool_use_ids(content: &Value) -> Vec<String> {
     }
 }
 
-/// Flush pending tool results as `toolResult` messages.
+/// Flush pending capability results as `toolResult` messages.
 fn flush_tool_results(
     combined: &mut Vec<MessageWithEventId>,
     pending: &mut Vec<PendingToolResult>,
@@ -462,7 +462,7 @@ fn content_has_tool_use(content: &Value) -> bool {
     }
 }
 
-/// Restore truncated `tool_use` inputs from the tool call args map.
+/// Restore truncated `tool_use` inputs from the capability invocation args map.
 fn restore_truncated_inputs(
     content: &Value,
     tool_call_args_map: &std::collections::HashMap<String, Value>,
@@ -629,7 +629,7 @@ mod tests {
         assert_eq!(result.turn_count, 1);
     }
 
-    // ── Tool result output format ────────────────────────────────────
+    // ── Capability result output format ────────────────────────────────────
 
     #[test]
     fn tool_results_as_tool_result_messages() {
@@ -651,7 +651,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_123", "content": "Tool output", "isError": false}),
             ),
             ev(
@@ -700,11 +700,11 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_2", "content": "Result 2", "isError": true}),
             ),
             ev(
@@ -741,7 +741,7 @@ mod tests {
                 EventType::MessageUser,
                 serde_json::json!({"content": "Start agentic loop"}),
             ),
-            // First tool call
+            // First capability invocation
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
@@ -751,10 +751,10 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
             ),
-            // Second tool call (continuation)
+            // Second capability invocation (continuation)
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
@@ -764,7 +764,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_2", "content": "Result 2", "isError": false}),
             ),
             // Final response
@@ -808,7 +808,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Tool finished", "isError": false}),
             ),
             // No more events — simulates mid-agentic-loop resume
@@ -904,8 +904,8 @@ mod tests {
 
     #[test]
     fn user_interrupt_injects_synthetic_tool_result() {
-        // When user interrupts after tool calls, pending results are discarded
-        // but synthetic error results are injected to keep provider tool-call
+        // When user interrupts after capability invocations, pending results are discarded
+        // but synthetic error results are injected to keep provider capability-invocation
         // state well-formed.
         let events = vec![
             session_start(),
@@ -922,11 +922,11 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Result", "isError": false}),
             ),
-            // User interrupts — pending tool results are discarded, but
-            // synthetic error results keep provider tool-call state well-formed.
+            // User interrupts — pending capability results are discarded, but
+            // synthetic error results keep provider capability-invocation state well-formed.
             ev(
                 EventType::MessageUser,
                 serde_json::json!({"content": "Actually, never mind"}),
@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(msgs[2].role, "toolResult");
         assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[2].is_error, Some(true));
-        assert_eq!(msgs[2].content, "Tool execution was interrupted.");
+        assert_eq!(msgs[2].content, "Capability invocation was interrupted.");
         assert_eq!(msgs[3].role, "user");
     }
 
@@ -1033,10 +1033,10 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Result", "isError": false}),
             ),
-            // Compaction clears everything including pending tool results
+            // Compaction clears everything including pending capability results
             ev(
                 EventType::CompactSummary,
                 serde_json::json!({"summary": "Summary"}),
@@ -1046,7 +1046,7 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // Only synthetic pair (no lingering tool result)
+        // Only synthetic pair (no lingering capability result)
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
@@ -1242,7 +1242,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolCall,
+                EventType::CapabilityInvocationStarted,
                 serde_json::json!({
                     "toolCallId": "call_1",
                     "name": "BigTool",
@@ -1250,7 +1250,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Done", "isError": false}),
             ),
         ];
@@ -1444,11 +1444,11 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolCall,
+                EventType::CapabilityInvocationStarted,
                 serde_json::json!({"toolCallId": "call_1", "name": "process::run", "arguments": {"command": "ls"}}),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "file1.txt", "isError": false}),
             ),
             // Assistant calls second tool
@@ -1460,11 +1460,11 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolCall,
+                EventType::CapabilityInvocationStarted,
                 serde_json::json!({"toolCallId": "call_2", "name": "filesystem::read_file", "arguments": {"path": "file1.txt"}}),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_2", "content": "Hello World", "isError": false}),
             ),
             // Assistant gives final answer
@@ -1564,7 +1564,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "R", "isError": false}),
             ),
         ];
@@ -1681,12 +1681,12 @@ mod tests {
         assert_eq!(result[0]["arguments"]["_truncated"], true);
     }
 
-    // ── Synthetic tool results for interrupted sessions ──────────────
+    // ── Synthetic capability results for interrupted sessions ──────────────
 
     #[test]
     fn inject_synthetic_results_on_user_interrupt() {
-        // Simulates: assistant makes tool calls, results arrive, user interrupts.
-        // The user interrupt discards pending tool results, leaving unmatched
+        // Simulates: assistant makes capability invocations, results arrive, user interrupts.
+        // The user interrupt discards pending capability results, leaving unmatched
         // tool_use blocks. Synthetic error results should be injected.
         let events = vec![
             session_start(),
@@ -1704,16 +1704,16 @@ mod tests {
                     "turn": 1,
                 }),
             ),
-            // Tool results arrive but will be discarded by user interrupt
+            // Capability results arrive but will be discarded by user interrupt
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_2", "content": "Result 2", "isError": false}),
             ),
-            // User interrupt discards pending tool results
+            // User interrupt discards pending capability results
             ev(
                 EventType::MessageUser,
                 serde_json::json!({"content": "Never mind"}),
@@ -1730,7 +1730,7 @@ mod tests {
         assert_eq!(msgs[2].role, "toolResult");
         assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[2].is_error, Some(true));
-        assert_eq!(msgs[2].content, "Tool execution was interrupted.");
+        assert_eq!(msgs[2].content, "Capability invocation was interrupted.");
         assert_eq!(msgs[3].role, "toolResult");
         assert_eq!(msgs[3].tool_call_id.as_deref(), Some("call_2"));
         assert_eq!(msgs[3].is_error, Some(true));
@@ -1740,7 +1740,7 @@ mod tests {
 
     #[test]
     fn inject_synthetic_results_mid_execution() {
-        // Session ends after assistant emits tool calls but before any results arrive.
+        // Session ends after assistant emits capability invocations but before any results arrive.
         let events = vec![
             session_start(),
             ev(
@@ -1756,7 +1756,7 @@ mod tests {
                     "turn": 1,
                 }),
             ),
-            // No tool result events — session interrupted mid-execution
+            // No capability result events — session interrupted mid-execution
         ];
 
         let result = reconstruct_from_events(&events);
@@ -1767,12 +1767,12 @@ mod tests {
         assert_eq!(msgs[2].role, "toolResult");
         assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[2].is_error, Some(true));
-        assert_eq!(msgs[2].content, "Tool execution was interrupted.");
+        assert_eq!(msgs[2].content, "Capability invocation was interrupted.");
     }
 
     #[test]
     fn no_synthetic_results_when_all_matched() {
-        // Normal flow: all tool calls have matching results. No synthetics needed.
+        // Normal flow: all capability invocations have matching results. No synthetics needed.
         let events = vec![
             session_start(),
             ev(
@@ -1787,7 +1787,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Done", "isError": false}),
             ),
             ev(
@@ -1811,7 +1811,7 @@ mod tests {
 
     #[test]
     fn partial_tool_results_injects_only_missing() {
-        // One of two tool calls gets a result, the other doesn't.
+        // One of two capability invocations gets a result, the other doesn't.
         let events = vec![
             session_start(),
             ev(
@@ -1830,7 +1830,7 @@ mod tests {
             ),
             // Only call_1 gets a result
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
             ),
             ev(
@@ -1862,7 +1862,7 @@ mod tests {
 
     #[test]
     fn cross_provider_resume_with_interrupted_tool_calls() {
-        // Realistic scenario: Anthropic tool calls completed, then GPT tool calls interrupted.
+        // Realistic scenario: Anthropic capability invocations completed, then GPT capability invocations interrupted.
         let events = vec![
             session_start(),
             // User prompt
@@ -1879,7 +1879,7 @@ mod tests {
                 }),
             ),
             ev(
-                EventType::ToolResult,
+                EventType::CapabilityInvocationCompleted,
                 serde_json::json!({"toolCallId": "toolu_abc", "content": "file contents", "isError": false}),
             ),
             ev(
@@ -1905,7 +1905,7 @@ mod tests {
                     "turn": 3,
                 }),
             ),
-            // Session interrupted — no tool.result events for GPT calls
+            // Session interrupted — no capability.invocation.completed events for GPT calls
         ];
 
         let result = reconstruct_from_events(&events);
@@ -1924,7 +1924,7 @@ mod tests {
         assert_eq!(msgs[6].role, "toolResult");
         assert_eq!(msgs[6].tool_call_id.as_deref(), Some("call_gpt_1"));
         assert_eq!(msgs[6].is_error, Some(true));
-        assert_eq!(msgs[6].content, "Tool execution was interrupted.");
+        assert_eq!(msgs[6].content, "Capability invocation was interrupted.");
 
         assert_eq!(msgs[7].role, "toolResult");
         assert_eq!(msgs[7].tool_call_id.as_deref(), Some("call_gpt_2"));
@@ -1936,7 +1936,7 @@ mod tests {
     #[test]
     fn interrupted_assistant_with_tool_use_gets_synthetic_results() {
         // Server persists partial message.assistant with interrupted=true + tool_use.
-        // Reconstruction should inject synthetic tool results.
+        // Reconstruction should inject synthetic capability results.
         let events = vec![
             session_start(),
             ev(
@@ -1970,7 +1970,7 @@ mod tests {
 
     #[test]
     fn interrupted_text_only_assistant_reconstructs() {
-        // Interrupted mid-text, no tool calls — simpler case.
+        // Interrupted mid-text, no capability invocations — simpler case.
         let events = vec![
             session_start(),
             ev(

@@ -330,15 +330,15 @@ struct DetailedMessageInfo: Codable, Identifiable {
     let tokens: Int
     let summary: String
     let content: String
-    let toolCalls: [ToolCallInfo]?
-    let toolCallId: String?
+    let toolCalls: [CapabilityInvocationInfo]?
+    let invocationId: String?
     let isError: Bool?
     /// Event ID for this message (for deletion support) - nil for synthetic messages
     let eventId: String?
 
     var id: Int { index }
 
-    struct ToolCallInfo: Codable, Identifiable {
+    struct CapabilityInvocationInfo: Codable, Identifiable {
         let id: String
         let name: String
         let tokens: Int

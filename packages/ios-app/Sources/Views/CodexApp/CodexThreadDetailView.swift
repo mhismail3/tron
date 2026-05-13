@@ -303,7 +303,7 @@ private struct CodexItemRow: View {
         case .reasoning: "Reasoning"
         case .command(_, let command, _, let status, _): "\(status): \(command)"
         case .fileChange(_, let status, _): "File change \(status)"
-        case .mcpTool(_, let server, let tool, let status, _): "\(server ?? "MCP") \(tool ?? "tool") \(status)"
+        case .mcpTool(_, let server, let tool, let status, _): "\(server ?? "Plugin Source") \(tool ?? "capability") \(status)"
         case .webSearch(_, let query, let status): "Search \(status): \(query ?? "")"
         case .plan: "Plan"
         case .diff: "Diff"

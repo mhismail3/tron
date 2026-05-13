@@ -36,17 +36,4 @@ final class DefaultAgentRepository: AgentRepository {
         try await agentClient.abort(idempotencyKey: idempotencyKey)
     }
 
-    func sendToolResult(
-        sessionId: String,
-        toolCallId: String,
-        result: AskUserQuestionResult,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws {
-        try await agentClient.sendToolResult(
-            sessionId: sessionId,
-            toolCallId: toolCallId,
-            result: result,
-            idempotencyKey: idempotencyKey
-        )
-    }
 }

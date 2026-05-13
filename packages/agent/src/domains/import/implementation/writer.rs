@@ -9,7 +9,7 @@
 //! which produces BOTH the events the writer needs AND a validation
 //! report. The report is attached to the returned [`ImportResult`] so a
 //! caller sees the same warnings the dry-run surfaces (unparseable lines,
-//! orphan tool calls/results, missing model). No separate second pass —
+//! orphan capability invocations/results, missing model). No separate second pass —
 //! the validator is the single source of pipeline output.
 
 use std::path::Path;
@@ -56,7 +56,7 @@ pub struct ImportResult {
 /// session in the store, and concurrent imports of the same source file
 /// race to a single winner.
 ///
-/// Non-fatal issues (unparseable lines, orphan tool calls/results,
+/// Non-fatal issues (unparseable lines, orphan capability invocations/results,
 /// missing model) are attached to the returned [`ImportResult::warnings`]
 /// via the shared validator. The same report is available before the
 /// write via [`crate::domains::import::validate_session`].

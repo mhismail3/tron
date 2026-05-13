@@ -38,7 +38,7 @@ impl HookType {
     /// Returns `true` if this hook type defaults to blocking mode for all
     /// handlers.
     ///
-    /// Forced-blocking hooks can affect agent flow (block a tool call,
+    /// Forced-blocking hooks can affect agent flow (block a capability invocation,
     /// modify a prompt, prevent compaction). Running them in the background
     /// would create race conditions.
     ///
@@ -257,7 +257,7 @@ pub enum HookContext {
         tool_name: String,
         /// Arguments passed to the tool.
         tool_arguments: serde_json::Value,
-        /// Unique ID for this tool call.
+        /// Unique ID for this capability invocation.
         tool_call_id: String,
     },
     /// Context for [`HookType::PostToolUse`].
@@ -269,11 +269,11 @@ pub enum HookContext {
         timestamp: String,
         /// Tool that was invoked.
         tool_name: String,
-        /// Unique ID for this tool call.
+        /// Unique ID for this capability invocation.
         tool_call_id: String,
-        /// Serialized tool result.
+        /// Serialized capability result.
         result: serde_json::Value,
-        /// How long the tool call took.
+        /// How long the capability invocation took.
         duration_ms: u64,
     },
     /// Context for [`HookType::Stop`].
@@ -327,7 +327,7 @@ pub enum HookContext {
         timestamp: String,
         /// Number of messages in the session.
         message_count: u64,
-        /// Number of tool calls in the session.
+        /// Number of capability invocations in the session.
         tool_call_count: u64,
     },
     /// Context for [`HookType::UserPromptSubmit`].

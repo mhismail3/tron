@@ -34,7 +34,7 @@ extension ChatViewModel {
             )
         }
         return EngineApprovalToolData(
-            toolCallId: "engine-approval:\(approval.approvalId)",
+            invocationId: "engine-approval:\(approval.approvalId)",
             params: EngineApprovalParams(
                 action: action,
                 reason: reason,
@@ -59,7 +59,7 @@ extension ChatViewModel {
     func handleApprovalPending(_ result: ApprovalPendingPlugin.Result) {
         let data = engineApprovalToolData(from: result.approval)
 
-        if let index = MessageFinder.lastIndexOfEngineApproval(toolCallId: data.toolCallId, in: messages) {
+        if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: data.invocationId, in: messages) {
             messages[index].content = .engineApproval(data)
             logInfo("Updated engine approval chip for \(result.functionId) approvalId=\(result.approvalId)")
         } else {
@@ -72,7 +72,7 @@ extension ChatViewModel {
 
     func handleApprovalResolved(_ result: ApprovalResolvedPlugin.Result) {
         let data = engineApprovalToolData(from: result.approval)
-        if let index = MessageFinder.lastIndexOfEngineApproval(toolCallId: result.toolCallId, in: messages) {
+        if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: result.invocationId, in: messages) {
             messages[index].content = .engineApproval(data)
         } else {
             appendToMessages(ChatMessage(role: .assistant, content: .engineApproval(data)))

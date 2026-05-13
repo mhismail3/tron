@@ -69,7 +69,7 @@ pub struct StreamConfig {
     pub session_id: String,
     /// Unique stream identifier.
     pub stream_id: String,
-    /// Tool call that initiated the stream.
+    /// Capability invocation that initiated the stream.
     pub tool_call_id: String,
 }
 

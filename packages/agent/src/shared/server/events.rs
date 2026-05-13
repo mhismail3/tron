@@ -107,10 +107,10 @@ pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
         let _ = m.insert("role".into(), Value::String(role.clone()));
     }
     if let Some(ref tool_name) = row.tool_name {
-        let _ = m.insert("toolName".into(), Value::String(tool_name.clone()));
+        let _ = m.insert("modelToolName".into(), Value::String(tool_name.clone()));
     }
     if let Some(ref tool_call_id) = row.tool_call_id {
-        let _ = m.insert("toolCallId".into(), Value::String(tool_call_id.clone()));
+        let _ = m.insert("invocationId".into(), Value::String(tool_call_id.clone()));
     }
     if let Some(turn) = row.turn {
         let _ = m.insert("turn".into(), Value::Number(turn.into()));

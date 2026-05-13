@@ -104,7 +104,7 @@ impl AuditLogger {
             .collect()
     }
 
-    /// Get entries where tool execution was blocked.
+    /// Get entries where capability invocation was blocked.
     pub fn blocked_entries(&self) -> Vec<&AuditEntry> {
         self.entries
             .iter()

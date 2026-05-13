@@ -108,7 +108,7 @@ struct AgentAbortParams: Encodable {
 
 struct AgentAbortToolParams: Encodable {
     let sessionId: String
-    let toolCallId: String
+    let invocationId: String
 }
 
 struct AgentAbortToolResult: Decodable {
@@ -149,10 +149,9 @@ struct DequeueResult: Decodable {
     let ok: Bool
 }
 
-/// Tool call info for in-progress turn (used by session::reconstruct inFlight state)
-struct CurrentTurnToolCall: Decodable {
-    let toolCallId: String
-    let toolName: String
+/// Capability invocation info for in-progress turn (used by session::reconstruct inFlight state)
+struct CurrentTurnCapabilityInvocation: Decodable {
+    let invocationId: String
     let arguments: [String: AnyCodable]?
     let status: String  // "generating" | "running" | "completed" | "error"
     let result: String?
@@ -161,16 +160,30 @@ struct CurrentTurnToolCall: Decodable {
     let completedAt: String?
     /// Progressive output accumulated during execution
     let streamingOutput: String?
+    let modelToolName: String?
+    let contractId: String?
+    let implementationId: String?
+    let functionId: String?
+    let pluginId: String?
+    let workerId: String?
+    let schemaDigest: String?
+    let catalogRevision: UInt64?
+    let trustTier: String?
+    let riskLevel: String?
+    let effectClass: String?
+    let traceId: String?
+    let rootInvocationId: String?
+    let bindingDecisionId: String?
 }
 
 /// Structured content sequence item (interleaved text/thinking/tool_ref)
 enum ContentSequenceItem: Decodable {
     case text(String)
     case thinking(String)
-    case toolRef(toolCallId: String)
+    case toolRef(invocationId: String)
 
     private enum CodingKeys: String, CodingKey {
-        case type, text, thinking, toolCallId
+        case type, text, thinking, invocationId
     }
 
     init(from decoder: Decoder) throws {
@@ -182,7 +195,7 @@ enum ContentSequenceItem: Decodable {
         case "thinking":
             self = .thinking(try container.decode(String.self, forKey: .thinking))
         case "tool_ref":
-            self = .toolRef(toolCallId: try container.decode(String.self, forKey: .toolCallId))
+            self = .toolRef(invocationId: try container.decode(String.self, forKey: .invocationId))
         default:
             self = .text("")
         }

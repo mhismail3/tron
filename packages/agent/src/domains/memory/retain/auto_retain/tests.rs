@@ -478,7 +478,7 @@ async fn maybe_fire_respects_prior_retain_boundary() {
 }
 
 /// Regression guard for the bug that prompted this refactor: a single
-/// user prompt that spawns many agent iterations (tool calls) must count
+/// user prompt that spawns many agent iterations (capability invocations) must count
 /// as ONE toward the threshold, not N.
 #[tokio::test]
 async fn maybe_fire_counts_user_messages_not_agent_iterations() {
@@ -492,7 +492,7 @@ async fn maybe_fire_counts_user_messages_not_agent_iterations() {
     // One user prompt.
     append_user_message(&ctx.event_store, &sid, "research gold prices");
 
-    // Simulate the agent making many internal iterations (tool calls):
+    // Simulate the agent making many internal iterations (capability invocations):
     // 10 assistant events, 10 turn_start/turn_end pairs. None of these
     // are user exchanges — they must not count toward the threshold.
     for _ in 0..10 {
@@ -509,7 +509,7 @@ async fn maybe_fire_counts_user_messages_not_agent_iterations() {
             .append(&AppendOptions {
                 session_id: &sid,
                 event_type: EventType::MessageAssistant,
-                payload: serde_json::json!({ "content": "tool call" }),
+                payload: serde_json::json!({ "content": "capability invocation" }),
                 parent_id: None,
                 sequence: None,
             })
@@ -537,7 +537,7 @@ async fn maybe_fire_counts_user_messages_not_agent_iterations() {
         .unwrap();
     assert!(
         row.is_none(),
-        "one user prompt with ten tool calls must not cross an interval=2 threshold"
+        "one user prompt with ten capability invocations must not cross an interval=2 threshold"
     );
 
     // Send a second user message. Now we have 2 user exchanges — fires.

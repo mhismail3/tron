@@ -34,10 +34,10 @@ enum NotifyAppStatus: String, Equatable, Codable {
     }
 }
 
-/// Data for rendering a NotifyApp tool call as a compact chip
+/// Data for rendering a NotifyApp capability invocation as a compact chip
 struct NotifyAppChipData: Equatable, Identifiable {
-    /// The tool call ID from NotifyApp
-    let toolCallId: String
+    /// The capability invocation ID from NotifyApp
+    let invocationId: String
     /// Notification title
     let title: String
     /// Notification body
@@ -53,6 +53,6 @@ struct NotifyAppChipData: Equatable, Identifiable {
     /// Error message (when failed)
     var errorMessage: String?
 
-    /// Identifiable conformance uses toolCallId
-    var id: String { toolCallId }
+    /// Identifiable conformance uses invocationId
+    var id: String { invocationId }
 }

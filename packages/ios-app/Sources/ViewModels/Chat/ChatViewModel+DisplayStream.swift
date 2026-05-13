@@ -8,13 +8,13 @@ extension ChatViewModel: DisplayStreamEventHandler {
     // MARK: - Handler
 
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {
-        displayStreamState.handleFrame(streamId: result.streamId, image: result.image, toolCallId: result.toolCallId)
+        displayStreamState.handleFrame(streamId: result.streamId, image: result.image, invocationId: result.invocationId)
     }
 
     // MARK: - Stream Lifecycle
 
     /// Called when the stream ends (agent complete, frames stop arriving).
-    /// Keeps `streamFrameImage` and `streamToolCallId` so the tool chip
+    /// Keeps `streamFrameImage` and `streamInvocationId` so the tool chip
     /// can still show the last frame after the stream is over.
     func endDisplayStream() {
         displayStreamState.endStream()

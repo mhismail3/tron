@@ -1,7 +1,7 @@
 //! Message types for the Tron agent conversation model.
 //!
 //! Messages form the conversation history passed to LLM providers.
-//! Three roles: user, assistant, and tool result. Each uses distinct
+//! Three roles: user, assistant, and capability result. Each uses distinct
 //! content types appropriate to that role.
 
 use std::sync::Arc;
@@ -13,20 +13,20 @@ use crate::shared::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::shared::tools::Tool;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tool call
+// Capability invocation
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn default_tool_use() -> String {
     "tool_use".into()
 }
 
-/// A tool call emitted by the assistant.
+/// A capability invocation emitted by the assistant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     /// Discriminator — always `"tool_use"`.
     #[serde(rename = "type", default = "default_tool_use")]
     content_type: String,
-    /// Unique tool call ID.
+    /// Unique capability invocation ID.
     pub id: String,
     /// Tool name.
     pub name: String,
@@ -50,7 +50,7 @@ impl Default for ToolCall {
 }
 
 impl ToolCall {
-    /// Create a new tool call.
+    /// Create a new capability invocation.
     #[must_use]
     pub fn new(
         id: impl Into<String>,
@@ -66,7 +66,7 @@ impl ToolCall {
         }
     }
 
-    /// Create a new tool call with a thought signature.
+    /// Create a new capability invocation with a thought signature.
     #[must_use]
     pub fn with_thought_signature(mut self, sig: impl Into<String>) -> Self {
         self.thought_signature = Some(sig.into());
@@ -83,7 +83,7 @@ pub fn normalize_tool_arguments(block: &Value) -> Map<String, Value> {
     Map::new()
 }
 
-/// Normalize tool result ID — handles both `tool_use_id` and `toolCallId`.
+/// Normalize capability result ID — handles both `tool_use_id` and `toolCallId`.
 #[must_use]
 pub fn normalize_tool_result_id(block: &Value) -> String {
     block
@@ -248,7 +248,7 @@ pub enum UserMessageContent {
     Blocks(Vec<UserContent>),
 }
 
-/// Content of a tool result message — either a plain string or structured blocks.
+/// Content of a capability result message — either a plain string or structured blocks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolResultMessageContent {
@@ -289,10 +289,10 @@ pub enum Message {
         #[serde(skip_serializing_if = "Option::is_none")]
         thinking: Option<String>,
     },
-    /// Tool result message.
+    /// Capability result message.
     #[serde(rename = "toolResult")]
     ToolResult {
-        /// Tool call ID.
+        /// Capability invocation ID.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
         /// Result content.
@@ -320,7 +320,7 @@ impl Message {
         matches!(self, Self::Assistant { .. })
     }
 
-    /// Returns `true` if this is a tool result message.
+    /// Returns `true` if this is a capability result message.
     #[must_use]
     pub fn is_tool_result(&self) -> bool {
         matches!(self, Self::ToolResult { .. })

@@ -53,7 +53,7 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
     // MARK: - shouldShowBreathingLine: the "gap" states → shown
 
     func testBreathingLineShownBeforeFirstEvent() {
-        // User sent message, waiting for first thinking/text/tool event
+        // User sent message, waiting for first thinking/text/capability invocation event
         viewModel.agentPhase = .processing
         XCTAssertTrue(viewModel.shouldShowBreathingLine)
     }
@@ -107,7 +107,7 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
     func testBreathingLineHiddenDuringSubagentExecution() {
         viewModel.agentPhase = .processing
         viewModel.subagentState.trackSpawn(
-            toolCallId: "tc-1", subagentSessionId: "sub-1", task: "test", model: nil
+            invocationId: "tc-1", subagentSessionId: "sub-1", task: "test", model: nil
         )
         XCTAssertFalse(viewModel.shouldShowBreathingLine)
     }
@@ -142,7 +142,7 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         // Hook subagents (title-gen, branch-name-gen) should NOT suppress the breathing line
         viewModel.agentPhase = .processing
         viewModel.subagentState.trackSpawn(
-            toolCallId: "sub-hook-1", subagentSessionId: "sub-hook-1",
+            invocationId: "sub-hook-1", subagentSessionId: "sub-hook-1",
             task: "Generate title", model: nil, spawnType: .hook
         )
         XCTAssertTrue(viewModel.shouldShowBreathingLine,
@@ -153,7 +153,7 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         // Tool-spawned subagents should still suppress the breathing line
         viewModel.agentPhase = .processing
         viewModel.subagentState.trackSpawn(
-            toolCallId: "tc-1", subagentSessionId: "sub-1",
+            invocationId: "tc-1", subagentSessionId: "sub-1",
             task: "Explore code", model: nil, spawnType: .toolAgent
         )
         XCTAssertFalse(viewModel.shouldShowBreathingLine,
@@ -163,7 +163,7 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
     func testBreathingLineShownAfterHookSubagentCompletes() {
         viewModel.agentPhase = .processing
         viewModel.subagentState.trackSpawn(
-            toolCallId: "sub-hook-1", subagentSessionId: "sub-hook-1",
+            invocationId: "sub-hook-1", subagentSessionId: "sub-hook-1",
             task: "Generate title", model: nil, spawnType: .hook
         )
         viewModel.subagentState.complete(
@@ -177,11 +177,11 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         // Both a tool agent and a hook running — tool agent takes precedence
         viewModel.agentPhase = .processing
         viewModel.subagentState.trackSpawn(
-            toolCallId: "sub-hook-1", subagentSessionId: "sub-hook-1",
+            invocationId: "sub-hook-1", subagentSessionId: "sub-hook-1",
             task: "Generate title", model: nil, spawnType: .hook
         )
         viewModel.subagentState.trackSpawn(
-            toolCallId: "tc-1", subagentSessionId: "sub-tool-1",
+            invocationId: "tc-1", subagentSessionId: "sub-tool-1",
             task: "Explore code", model: nil, spawnType: .toolAgent
         )
         XCTAssertFalse(viewModel.shouldShowBreathingLine,
@@ -190,14 +190,14 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeToolMessage(status: ToolStatus) -> ChatMessage {
-        let tool = ToolUseData(
-            toolName: "Read",
-            toolCallId: UUID().uuidString,
-            arguments: "{}",
-            status: status,
-            result: status == .running ? nil : "ok"
+    private func makeToolMessage(status: CapabilityInvocationStatus) -> ChatMessage {
+        ChatMessage(
+            role: .assistant,
+            content: .capabilityInvocation(testCapabilityInvocation(
+                id: UUID().uuidString,
+                status: status,
+                result: status == .running ? nil : "ok"
+            ))
         )
-        return ChatMessage(role: .assistant, content: .toolUse(tool))
     }
 }

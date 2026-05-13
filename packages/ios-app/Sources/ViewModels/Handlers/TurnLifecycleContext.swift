@@ -7,7 +7,7 @@ import Foundation
 /// - LoggingContext: Logging and error display
 /// - ProcessingTrackable: Processing state and setSessionProcessing
 /// - StreamingManaging: Streaming state management
-/// - ToolStateTracking: Tool call state (currentToolMessages, currentTurnToolCalls, etc.)
+/// - ToolStateTracking: Capability invocation state (currentToolMessages, currentTurnCapabilityInvocations, etc.)
 ///
 /// Note: SessionIdentifiable was removed as sessionId is not used by TurnLifecycleCoordinator.
 /// Note: streamingText removed - passed as parameter to handleComplete instead.

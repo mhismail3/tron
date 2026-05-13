@@ -56,31 +56,31 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
     // MARK: - Tool Event Tests
 
-    func testDispatch_toolStart_callsHandleToolStart() {
-        // Given: A tool start result
-        let result = ToolStartPlugin.Result(
-            toolName: "Read",
-            toolCallId: "tool_123",
+    func testDispatch_capabilityStart_callsHandleToolStart() {
+        // Given: A capability start result
+        let result = CapabilityInvocationStartedPlugin.Result(
+            modelToolName: "Read",
+            invocationId: "tool_123",
             arguments: nil
         )
 
         // When: Dispatching
         coordinator.dispatch(
-            type: ToolStartPlugin.eventType,
+            type: CapabilityInvocationStartedPlugin.eventType,
             transform: { result },
             context: mockContext
         )
 
         // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleToolStartCalledWith?.toolCallId, "tool_123")
-        XCTAssertEqual(mockContext.handleToolStartCalledWith?.toolName, "Read")
+        XCTAssertEqual(mockContext.handleCapabilityInvocationStartedCalledWith?.invocationId, "tool_123")
+        XCTAssertEqual(mockContext.handleCapabilityInvocationStartedCalledWith?.modelToolName, "Read")
     }
 
-    func testDispatch_toolEnd_callsHandleToolEnd() {
-        // Given: A tool end result
-        let result = ToolEndPlugin.Result(
-            toolCallId: "tool_123",
-            toolName: "Read",
+    func testDispatch_capabilityEnd_callsHandleToolEnd() {
+        // Given: A capability end result
+        let result = CapabilityInvocationCompletedPlugin.Result(
+            invocationId: "tool_123",
+            modelToolName: "Read",
             success: true,
             output: "file contents",
             error: nil,
@@ -91,14 +91,14 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
         // When: Dispatching
         coordinator.dispatch(
-            type: ToolEndPlugin.eventType,
+            type: CapabilityInvocationCompletedPlugin.eventType,
             transform: { result },
             context: mockContext
         )
 
         // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleToolEndCalledWith?.toolCallId, "tool_123")
-        XCTAssertEqual(mockContext.handleToolEndCalledWith?.duration, 150)
+        XCTAssertEqual(mockContext.handleCapabilityInvocationCompletedCalledWith?.invocationId, "tool_123")
+        XCTAssertEqual(mockContext.handleCapabilityInvocationCompletedCalledWith?.duration, 150)
     }
 
     // MARK: - Turn Lifecycle Event Tests
@@ -295,7 +295,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             task: "Search for files",
             model: nil,
             workingDirectory: nil,
-            toolCallId: nil,
+            invocationId: nil,
             blocking: false,
             spawnType: nil
         )
@@ -453,10 +453,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleThinkingDeltaCalledWith: String?
 
     // MARK: - Tools
-    var handleToolGeneratingCalledWith: ToolGeneratingPlugin.Result?
-    var handleToolStartCalledWith: ToolStartPlugin.Result?
-    var handleToolProgressCalledWith: ToolProgressPlugin.Result?
-    var handleToolEndCalledWith: ToolEndPlugin.Result?
+    var handleCapabilityInvocationGeneratingCalledWith: CapabilityInvocationGeneratingPlugin.Result?
+    var handleCapabilityInvocationStartedCalledWith: CapabilityInvocationStartedPlugin.Result?
+    var handleCapabilityInvocationProgressCalledWith: CapabilityInvocationProgressPlugin.Result?
+    var handleCapabilityInvocationCompletedCalledWith: CapabilityInvocationCompletedPlugin.Result?
 
     // MARK: - Turn Lifecycle
     var handleTurnStartCalledWith: TurnStartPlugin.Result?
@@ -493,22 +493,22 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleThinkingDeltaCalledWith = delta
     }
 
-    func handleToolGenerating(_ result: ToolGeneratingPlugin.Result) {
-        handleToolGeneratingCalledWith = result
+    func handleCapabilityInvocationGenerating(_ result: CapabilityInvocationGeneratingPlugin.Result) {
+        handleCapabilityInvocationGeneratingCalledWith = result
     }
 
-    func handleToolStart(_ result: ToolStartPlugin.Result) {
-        handleToolStartCalledWith = result
+    func handleCapabilityInvocationStarted(_ result: CapabilityInvocationStartedPlugin.Result) {
+        handleCapabilityInvocationStartedCalledWith = result
     }
 
-    func handleToolOutput(_ result: ToolOutputPlugin.Result) {}
+    func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result) {}
 
-    func handleToolProgress(_ result: ToolProgressPlugin.Result) {
-        handleToolProgressCalledWith = result
+    func handleCapabilityInvocationProgress(_ result: CapabilityInvocationProgressPlugin.Result) {
+        handleCapabilityInvocationProgressCalledWith = result
     }
 
-    func handleToolEnd(_ result: ToolEndPlugin.Result) {
-        handleToolEndCalledWith = result
+    func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result) {
+        handleCapabilityInvocationCompletedCalledWith = result
     }
 
     func handleTurnStart(_ result: TurnStartPlugin.Result) {

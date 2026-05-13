@@ -13,7 +13,7 @@
 //! 4. `agent::prompt_apply` acquires the session run guard and starts
 //!    `agent::run_turn`.
 //! 5. The turn runner resolves capabilities from the live engine catalog, writes session
-//!    truth into the event store, invokes tool calls as child engine
+//!    truth into the event store, invokes capability invocations as child engine
 //!    invocations, and publishes neutral engine stream events.
 //! 6. Completion side effects, such as prompt-history capture and auto-retain,
 //!    cross domains through hidden engine functions rather than private

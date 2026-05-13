@@ -103,14 +103,14 @@ protocol StreamingManaging: AnyObject {
 
 // MARK: - Tool State Tracking
 
-/// Protocol for contexts that track tool call state during a turn.
+/// Protocol for contexts that track capability invocation state during a turn.
 @MainActor
 protocol ToolStateTracking: AnyObject {
     /// Map of current tool messages by message ID.
     var currentToolMessages: [UUID: ChatMessage] { get set }
 
-    /// Tool calls tracked for the current turn.
-    var currentTurnToolCalls: [ToolCallRecord] { get set }
+    /// Capability invocations tracked for the current turn.
+    var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] { get set }
 
     /// Whether AskUserQuestion was called in the current turn.
     var askUserQuestionCalledInTurn: Bool { get set }

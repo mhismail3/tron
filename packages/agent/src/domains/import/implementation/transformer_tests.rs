@@ -174,7 +174,10 @@ fn tool_result_user_emits_tool_result_event() {
     let result = transform(items);
 
     assert_eq!(result.events.len(), 1);
-    assert_eq!(result.events[0].event_type, EventType::ToolResult);
+    assert_eq!(
+        result.events[0].event_type,
+        EventType::CapabilityInvocationCompleted
+    );
     assert_eq!(result.events[0].payload["toolCallId"], "toolu_01");
     assert_eq!(result.events[0].payload["content"], "file contents");
     assert_eq!(result.events[0].payload["isError"], false);
@@ -232,11 +235,14 @@ fn assistant_emits_message_tool_calls_and_turn_end() {
     )];
     let result = transform(items);
 
-    // stream.turn_start + message.assistant + tool.call + stream.turn_end
+    // stream.turn_start + message.assistant + capability.invocation.started + stream.turn_end
     assert_eq!(result.events.len(), 4);
     assert_eq!(result.events[0].event_type, EventType::StreamTurnStart);
     assert_eq!(result.events[1].event_type, EventType::MessageAssistant);
-    assert_eq!(result.events[2].event_type, EventType::ToolCall);
+    assert_eq!(
+        result.events[2].event_type,
+        EventType::CapabilityInvocationStarted
+    );
     assert_eq!(result.events[3].event_type, EventType::StreamTurnEnd);
 }
 
@@ -280,7 +286,7 @@ fn assistant_tool_use_produces_tool_call_event() {
     let tc = result
         .events
         .iter()
-        .find(|e| e.event_type == EventType::ToolCall)
+        .find(|e| e.event_type == EventType::CapabilityInvocationStarted)
         .unwrap();
     assert_eq!(tc.payload["toolCallId"], "toolu_x");
     assert_eq!(tc.payload["name"], "filesystem::read_file");
@@ -307,7 +313,7 @@ fn assistant_multiple_tool_uses() {
     let tool_calls: Vec<_> = result
         .events
         .iter()
-        .filter(|e| e.event_type == EventType::ToolCall)
+        .filter(|e| e.event_type == EventType::CapabilityInvocationStarted)
         .collect();
     assert_eq!(tool_calls.len(), 3);
 }
@@ -458,17 +464,17 @@ fn full_conversation_event_sequence() {
     assert_eq!(
         types,
         vec![
-            EventType::StreamTurnStart,  // turn 1
-            EventType::MessageUser,      // "What is Rust?"
-            EventType::MessageAssistant, // thinking + text
-            EventType::StreamTurnEnd,    // turn 1 end
-            EventType::StreamTurnStart,  // turn 2
-            EventType::MessageUser,      // "Show me an example"
-            EventType::MessageAssistant, // text + tool_use
-            EventType::ToolCall,         // Write tool
-            EventType::ToolResult,       // "File written"
-            EventType::MessageAssistant, // "I created the file."
-            EventType::StreamTurnEnd,    // turn 2 end (one per turn)
+            EventType::StreamTurnStart,               // turn 1
+            EventType::MessageUser,                   // "What is Rust?"
+            EventType::MessageAssistant,              // thinking + text
+            EventType::StreamTurnEnd,                 // turn 1 end
+            EventType::StreamTurnStart,               // turn 2
+            EventType::MessageUser,                   // "Show me an example"
+            EventType::MessageAssistant,              // text + tool_use
+            EventType::CapabilityInvocationStarted,   // Write tool
+            EventType::CapabilityInvocationCompleted, // "File written"
+            EventType::MessageAssistant,              // "I created the file."
+            EventType::StreamTurnEnd,                 // turn 2 end (one per turn)
         ]
     );
 }

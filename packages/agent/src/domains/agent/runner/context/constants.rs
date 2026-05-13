@@ -17,13 +17,13 @@ pub const MIN_IMAGE_TOKENS: u32 = 85;
 pub const DEFAULT_URL_IMAGE_TOKENS: u32 = 1500;
 
 // =============================================================================
-// Context Manager — tool result budgeting
+// Context Manager — capability result budgeting
 // =============================================================================
 
-/// Minimum tokens allocated for a tool result, even under heavy context pressure.
+/// Minimum tokens allocated for a capability result, even under heavy context pressure.
 pub const TOOL_RESULT_MIN_TOKENS: u32 = 2_500;
 
-/// Maximum character length for a tool result before truncation.
+/// Maximum character length for a capability result before truncation.
 pub const TOOL_RESULT_MAX_CHARS: usize = 100_000;
 
 // =============================================================================
@@ -46,7 +46,7 @@ pub const SUMMARIZER_ASSISTANT_TEXT_LIMIT: usize = 300;
 /// Truncation limit for thinking blocks in the serialized transcript.
 pub const SUMMARIZER_THINKING_TEXT_LIMIT: usize = 500;
 
-/// Truncation limit for tool result text in the serialized transcript.
+/// Truncation limit for capability result text in the serialized transcript.
 pub const SUMMARIZER_TOOL_RESULT_TEXT_LIMIT: usize = 100;
 
 /// Timeout for the summarizer subagent (milliseconds).

@@ -12,8 +12,8 @@ final class DisplayStreamState {
     /// Current or last frame image from the stream (persists after stream ends).
     var streamFrameImage: UIImage?
 
-    /// Tool call ID that initiated the stream (persists after stream ends).
-    var streamToolCallId: String?
+    /// Capability invocation ID that initiated the stream (persists after stream ends).
+    var streamInvocationId: String?
 
     /// Whether the stream sheet is presented.
     var showStreamSheet = false
@@ -29,14 +29,14 @@ final class DisplayStreamState {
 
     /// Handle an incoming display frame. Returns false if the frame was ignored (stopped stream).
     @discardableResult
-    func handleFrame(streamId: String, image: UIImage, toolCallId: String?) -> Bool {
+    func handleFrame(streamId: String, image: UIImage, invocationId: String?) -> Bool {
         if let stopped = stoppedStreamId, stopped == streamId {
             return false
         }
         let isNewStream = (activeStreamId == nil)
         activeStreamId = streamId
         streamFrameImage = image
-        streamToolCallId = toolCallId
+        streamInvocationId = invocationId
         if isNewStream && !hasAutoOpenedStream {
             showStreamSheet = true
             hasAutoOpenedStream = true
@@ -44,7 +44,7 @@ final class DisplayStreamState {
         return true
     }
 
-    /// End the active stream. Keeps frame/toolCallId for post-stream viewing.
+    /// End the active stream. Keeps frame/invocationId for post-stream viewing.
     func endStream() {
         activeStreamId = nil
     }
@@ -66,7 +66,7 @@ final class DisplayStreamState {
         activeStreamId = nil
         stoppedStreamId = nil
         streamFrameImage = nil
-        streamToolCallId = nil
+        streamInvocationId = nil
         showStreamSheet = false
         hasAutoOpenedStream = false
     }

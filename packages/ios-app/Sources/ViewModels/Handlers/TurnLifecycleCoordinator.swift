@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Responsibilities:
 /// - Handling turn start/end events
-/// - Managing turn state (tracking indices, tool calls)
+/// - Managing turn state (tracking indices, capability invocations)
 /// - Updating message metadata with token usage
 /// - Coordinating with ThinkingState, ContextState
 /// - Managing completion state cleanup
@@ -49,9 +49,9 @@ final class TurnLifecycleCoordinator {
         context.startThinkingTurn(pluginResult.turnNumber, model: context.currentModel)
 
         // Clear tool tracking for the new turn
-        if !context.currentTurnToolCalls.isEmpty {
-            context.logDebug("Starting Turn \(pluginResult.turnNumber), clearing \(context.currentTurnToolCalls.count) completed tool records from previous turn")
-            context.currentTurnToolCalls.removeAll()
+        if !context.currentTurnCapabilityInvocations.isEmpty {
+            context.logDebug("Starting Turn \(pluginResult.turnNumber), clearing \(context.currentTurnCapabilityInvocations.count) completed tool records from previous turn")
+            context.currentTurnCapabilityInvocations.removeAll()
         }
         if !context.currentToolMessages.isEmpty {
             context.logDebug("Clearing \(context.currentToolMessages.count) tool message references from previous turn")
@@ -128,11 +128,11 @@ final class TurnLifecycleCoordinator {
                   startIndex < context.messages.count {
             // Find the LAST assistant message in this turn.
             // This ensures the stats line appears after all parallel tool chips,
-            // not between the first and second tool call.
+            // not between the first and second capability invocation.
             for i in startIndex..<context.messages.count {
                 if context.messages[i].role == .assistant {
                     switch context.messages[i].content {
-                    case .text, .toolUse, .askUserQuestion, .engineApproval:
+                    case .text, .capabilityInvocation, .askUserQuestion, .engineApproval:
                         targetIndex = i
                     default:
                         break
@@ -236,7 +236,7 @@ final class TurnLifecycleCoordinator {
         streamingText: String,
         context: TurnLifecycleContext
     ) {
-        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(context.currentTurnToolCalls.count))")
+        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(context.currentTurnCapabilityInvocations.count))")
 
         // Flush any pending UI updates to ensure all tool results are displayed
         context.flushUIUpdateQueue()
@@ -252,7 +252,7 @@ final class TurnLifecycleCoordinator {
         )
 
         context.currentToolMessages.removeAll()
-        context.currentTurnToolCalls.removeAll()
+        context.currentTurnCapabilityInvocations.removeAll()
 
         // Reset all manager states
         context.resetUIUpdateQueue()

@@ -147,10 +147,10 @@ pub struct ActivitySummaryLine {
     /// Tool input arguments, present for `tool_use` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_args: Option<Value>,
-    /// Tool execution time in milliseconds, present for `tool_use` lines.
+    /// Capability invocation time in milliseconds, present for `tool_use` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
-    /// Whether the tool call produced an error, present for `tool_use` lines.
+    /// Whether the capability invocation produced an error, present for `tool_use` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
     /// Number of agent turns, present for `subagent` lines.
@@ -580,7 +580,7 @@ impl SessionRepo {
         let mut stmt = conn.prepare(
             "SELECT type, payload, tool_call_id FROM events
              WHERE session_id = ?1
-               AND type IN ('message.user', 'message.assistant', 'tool.result',
+               AND type IN ('message.user', 'message.assistant', 'capability.invocation.completed',
                             'subagent.spawned', 'subagent.completed', 'subagent.failed')
              ORDER BY sequence ASC",
         )?;
@@ -595,10 +595,10 @@ impl SessionRepo {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        // Pass 1: collect tool result info by toolCallId
+        // Pass 1: collect capability result info by toolCallId
         let mut tool_results: HashMap<String, (bool, Option<i64>)> = HashMap::new();
         for (event_type, payload_str, _) in &rows {
-            if event_type == "tool.result" {
+            if event_type == "capability.invocation.completed" {
                 if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
                     if let Some(tcid) = payload.get("toolCallId").and_then(|v| v.as_str()) {
                         let is_error = payload

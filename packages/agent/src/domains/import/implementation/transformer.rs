@@ -3,7 +3,7 @@
 //! Transforms [`AssembledItem`]s into [`TronEventSpec`]s ready for
 //! appending to the event store. Each assembled item may produce zero
 //! or more events (e.g. an assistant message emits `message.assistant`,
-//! one `tool.call` per `tool_use` block, and `stream.turn_end`).
+//! one `capability.invocation.started` per `tool_use` block, and `stream.turn_end`).
 
 use serde_json::{Value, json};
 
@@ -244,7 +244,7 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 });
                 message_count += 1;
 
-                // tool.call events — one per tool_use block
+                // capability.invocation.started events — one per tool_use block
                 emit_tool_calls(&am, &mut events);
 
                 // Accumulate into pending turn_end (same turn adds up)
@@ -359,7 +359,7 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
     }
 }
 
-/// Emit `tool.call` events for each `tool_use` block in the assistant message.
+/// Emit `capability.invocation.started` events for each `tool_use` block in the assistant message.
 fn emit_tool_calls(am: &AssembledAssistant, events: &mut Vec<TronEventSpec>) {
     for block in &am.content_blocks {
         if block.get("type").and_then(Value::as_str) != Some("tool_use") {
@@ -378,7 +378,7 @@ fn emit_tool_calls(am: &AssembledAssistant, events: &mut Vec<TronEventSpec>) {
         let arguments = block.get("input").cloned().unwrap_or(json!({}));
 
         events.push(TronEventSpec {
-            event_type: EventType::ToolCall,
+            event_type: EventType::CapabilityInvocationStarted,
             payload: json!({
                 "toolCallId": tool_call_id,
                 "name": name,
@@ -389,7 +389,7 @@ fn emit_tool_calls(am: &AssembledAssistant, events: &mut Vec<TronEventSpec>) {
     }
 }
 
-/// Emit `tool.result` events from a `tool_result` user record.
+/// Emit `capability.invocation.completed` events from a `tool_result` user record.
 fn emit_tool_results(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>) {
     let Some(msg) = &record.message else { return };
     let Some(content) = &msg.content else { return };
@@ -420,7 +420,7 @@ fn emit_tool_results(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>) {
             .unwrap_or(false);
 
         events.push(TronEventSpec {
-            event_type: EventType::ToolResult,
+            event_type: EventType::CapabilityInvocationCompleted,
             payload: json!({
                 "toolCallId": tool_call_id,
                 "content": content_str,

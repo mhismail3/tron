@@ -471,7 +471,7 @@ async fn tool_call_generating_event_emitted() {
 
     let mut saw_generating = false;
     while let Ok(event) = rx.try_recv() {
-        if matches!(event, TronEvent::ToolCallGenerating { .. }) {
+        if matches!(event, TronEvent::CapabilityInvocationGenerating { .. }) {
             saw_generating = true;
         }
     }
@@ -575,7 +575,7 @@ async fn duplicate_tool_calls_deduped_by_id() {
     assert_eq!(
         result.tool_calls.len(),
         1,
-        "duplicate tool calls should be deduped"
+        "duplicate capability invocations should be deduped"
     );
     assert_eq!(result.tool_calls[0].id, "tc-dup");
     assert_eq!(
@@ -627,7 +627,7 @@ fn finalize_tool_call_with_empty_string() {
 
     assert!(
         tool_calls.is_empty(),
-        "empty partial arguments are ignored because providers may send the final tool-call arguments on the done item"
+        "empty partial arguments are ignored because providers may send the final capability-invocation arguments on the done item"
     );
     assert!(args.is_empty());
 }
@@ -1047,7 +1047,7 @@ async fn cancel_during_drain_returns_interrupted() {
 
     assert!(result.interrupted);
     assert_eq!(result.stop_reason, "interrupted");
-    // Tool call should still be in the result (was finalized before drain)
+    // Capability invocation should still be in the result (was finalized before drain)
     assert_eq!(result.tool_calls.len(), 1);
     assert_eq!(result.tool_calls[0].name, "agent::ask_user");
 }
