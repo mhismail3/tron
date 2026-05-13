@@ -184,7 +184,7 @@ pub(crate) struct ProgramRunResult {
     pub(crate) logs: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ProgramRuntimeError {
     pub(crate) code: String,
     pub(crate) message: String,
@@ -192,7 +192,7 @@ pub(crate) struct ProgramRuntimeError {
 }
 
 impl ProgramRuntimeError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(super) fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_owned(),
             message: message.into(),
@@ -200,7 +200,7 @@ impl ProgramRuntimeError {
         }
     }
 
-    fn with_details(mut self, details: Value) -> Self {
+    pub(super) fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);
         self
     }
@@ -392,9 +392,14 @@ fn failed_program_result(
     error: ProgramRuntimeError,
 ) -> ProgramRunResult {
     let records = child_records.lock().ok();
+    let error = records
+        .as_ref()
+        .and_then(|records| records.terminal_error.clone())
+        .unwrap_or(error);
+    let status = program_status_for_error(&error);
     let logs = logs.lock().map(|logs| logs.clone()).unwrap_or_default();
     ProgramRunResult {
-        status: "failed".to_owned(),
+        status,
         output: Value::Null,
         error: Some(json!({
             "code": error.code,
@@ -421,11 +426,24 @@ fn failed_program_result(
     }
 }
 
+fn program_status_for_error(error: &ProgramRuntimeError) -> String {
+    match error.code.as_str() {
+        "PROGRAM_APPROVAL_REQUIRED" => "paused_for_approval".to_owned(),
+        "PROGRAM_CONTRACT_NOT_ALLOWED"
+        | "PROGRAM_IMPLEMENTATION_NOT_ALLOWED"
+        | "PROGRAM_PRIMITIVE_RECURSION_DENIED"
+        | "PROGRAM_RISK_BUDGET_EXCEEDED"
+        | "PROGRAM_INVALID_RISK_BUDGET" => "policy_denied".to_owned(),
+        _ => "failed".to_owned(),
+    }
+}
+
 #[derive(Default)]
 struct ProgramChildRecords {
     child_invocations: Vec<String>,
     selected_implementations: Vec<String>,
     approval_state: Option<Value>,
+    terminal_error: Option<ProgramRuntimeError>,
 }
 
 struct ProgramChildGate {
@@ -476,6 +494,7 @@ fn host_call_json(
         gate.calls += 1;
     }
     let value = tool_host.call(primitive, payload).map_err(|error| {
+        record_terminal_error(records, error.clone());
         rquickjs::Error::new_from_js_message(
             "program",
             "capability",
@@ -490,6 +509,12 @@ fn host_call_json(
             format!("tool result is not JSON serializable: {error}"),
         )
     })
+}
+
+fn record_terminal_error(records: &Arc<Mutex<ProgramChildRecords>>, error: ProgramRuntimeError) {
+    if let Ok(mut records) = records.lock() {
+        records.terminal_error = Some(error);
+    }
 }
 
 fn record_child_result(records: &Arc<Mutex<ProgramChildRecords>>, value: &Value) {
@@ -584,7 +609,7 @@ fn js_runtime_error(stage: &str, error: rquickjs::Error) -> ProgramRuntimeError 
     ProgramRuntimeError::new("PROGRAM_RUNTIME_ERROR", format!("{stage}: {error}"))
 }
 
-fn stable_hash(bytes: &[u8]) -> String {
+pub(super) fn stable_hash(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     hasher
@@ -592,6 +617,33 @@ fn stable_hash(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+pub(super) fn failed_result_for_request(
+    request: &ProgramRunRequest,
+    status: &str,
+    error: ProgramRuntimeError,
+) -> ProgramRunResult {
+    let args_bytes = serde_json::to_vec(&request.args).unwrap_or_default();
+    let program_run_id = format!("program_run_{}", uuid::Uuid::now_v7());
+    ProgramRunResult {
+        status: status.to_owned(),
+        output: Value::Null,
+        error: Some(json!({
+            "code": error.code,
+            "message": error.message,
+            "details": error.details,
+        })),
+        trace_id: program_run_id.clone(),
+        program_run_id,
+        code_hash: stable_hash(request.code.as_bytes()),
+        args_hash: stable_hash(&args_bytes),
+        child_invocations: Vec::new(),
+        selected_implementations: Vec::new(),
+        approval_state: None,
+        artifacts: Vec::new(),
+        logs: Vec::new(),
+    }
 }
 
 pub(crate) struct EngineProgramToolHost {

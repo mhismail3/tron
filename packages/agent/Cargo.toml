@@ -19,6 +19,10 @@ doctest = false
 name = "tron"
 path = "src/main.rs"
 
+[[bin]]
+name = "tron-program-worker"
+path = "src/bin/tron-program-worker.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process", "signal", "fs", "parking_lot"] }

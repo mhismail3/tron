@@ -25,8 +25,8 @@ use super::types::{
 };
 use crate::engine::{
     ActorContext, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EffectClass,
-    EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
-    FunctionRevision, Invocation, RiskLevel,
+    EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionQuery, FunctionRevision,
+    Invocation, RiskLevel,
 };
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -1094,6 +1094,96 @@ async fn execute_program_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    let actor = actor_from_invocation(invocation)?;
+    let program_target = json!({
+        "functionId": crate::domains::program::contract::RUN_JAVASCRIPT_FUNCTION_ID
+    });
+    let target = resolve_target(&program_target, deps, &actor).await?;
+    let function = target.entry.function.clone();
+    enforce_execution_policy(invocation, &target.binding_decision, &function)?;
+    let expected_revision = u64_field(&invocation.payload, "expectedRevision");
+    let expected_schema_digest = string_field(&invocation.payload, "expectedSchemaDigest")
+        .or_else(|| string_field(&invocation.payload, "expected_schema_digest"));
+    let inspection_handle = string_field(&invocation.payload, "inspectionHandle")
+        .or_else(|| string_field(&invocation.payload, "inspection_handle"));
+    if expected_revision.is_none()
+        || expected_schema_digest.is_none()
+        || inspection_handle.is_none()
+    {
+        return Err(CapabilityError::Custom {
+            code: "INSPECTION_REQUIRED".to_owned(),
+            message: format!(
+                "{} is high-risk; inspect it first and pass inspectionHandle, expectedRevision={}, and expectedSchemaDigest={}",
+                function.id.as_str(),
+                function.revision.0,
+                target.entry.schema_digest
+            ),
+            details: Some(json!({
+                "functionId": function.id.as_str(),
+                "inspect": {
+                    "functionId": function.id.as_str(),
+                    "expectedRevision": function.revision.0,
+                    "expectedSchemaDigest": target.entry.schema_digest
+                },
+                "riskLevel": format!("{:?}", function.risk_level),
+                "effectClass": format!("{:?}", function.effect_class)
+            })),
+        });
+    }
+    let valid_inspection = validate_inspection_handle(
+        deps,
+        inspection_handle.as_deref().unwrap_or_default(),
+        target.entry.clone(),
+    )
+    .await?;
+    if !valid_inspection {
+        return Err(CapabilityError::Custom {
+            code: "INSPECTION_HANDLE_INVALID".to_owned(),
+            message: format!(
+                "{} requires a fresh inspection handle for the selected implementation",
+                function.id.as_str()
+            ),
+            details: Some(json!({
+                "functionId": function.id.as_str(),
+                "currentRevision": function.revision.0,
+                "currentSchemaDigest": target.entry.schema_digest,
+            })),
+        });
+    }
+    if let Some(expected) = expected_revision
+        && expected != function.revision.0
+    {
+        return Err(CapabilityError::Custom {
+            code: "STALE_CAPABILITY_REVISION".to_owned(),
+            message: format!(
+                "{} is at revision {}, not requested revision {expected}",
+                function.id.as_str(),
+                function.revision.0
+            ),
+            details: Some(json!({
+                "functionId": function.id.as_str(),
+                "expectedRevision": expected,
+                "currentRevision": function.revision.0,
+            })),
+        });
+    }
+    if let Some(expected) = expected_schema_digest.as_deref()
+        && expected != target.entry.schema_digest
+    {
+        return Err(CapabilityError::Custom {
+            code: "STALE_CAPABILITY_SCHEMA".to_owned(),
+            message: format!(
+                "{} has schema digest {}, not requested digest {expected}",
+                function.id.as_str(),
+                target.entry.schema_digest
+            ),
+            details: Some(json!({
+                "functionId": function.id.as_str(),
+                "expectedSchemaDigest": expected,
+                "currentSchemaDigest": target.entry.schema_digest,
+            })),
+        });
+    }
     let language = string_field(&invocation.payload, "language").ok_or_else(|| {
         CapabilityError::InvalidParams {
             message: "execute mode 'program' requires language='javascript'".to_owned(),
@@ -1140,28 +1230,44 @@ async fn execute_program_value(
     {
         program_payload["idempotencyKey"] = json!(key);
     }
-    let function_id = FunctionId::new(
-        crate::domains::program::contract::RUN_JAVASCRIPT_FUNCTION_ID,
-    )
-    .map_err(|error| CapabilityError::Internal {
-        message: error.to_string(),
-    })?;
     let mut causal_context = invocation
         .causal_context
         .clone()
         .with_parent_invocation(invocation.id.clone())
         .with_scope("program.execute");
+    causal_context.runtime_metadata.insert(
+        "rootInvocationId".to_owned(),
+        invocation.id.as_str().to_owned(),
+    );
+    causal_context.runtime_metadata.insert(
+        "bindingDecisionId".to_owned(),
+        target.binding_decision.decision_id.clone(),
+    );
     if let Some(key) = string_field(&invocation.payload, "idempotencyKey")
         .or_else(|| string_field(&invocation.payload, "idempotency_key"))
     {
         causal_context = causal_context.with_idempotency_key(key);
     }
-    let child = Invocation::new_sync(function_id, program_payload, causal_context);
+    let mut child = Invocation::new_sync(function.id.clone(), program_payload, causal_context);
+    if let Some(expected) = expected_revision {
+        child = child.expecting_revision(FunctionRevision(expected));
+    }
     let result = deps.engine_host.invoke(child).await;
     if let Some(error) = result.error {
         return Err(engine_error_to_capability_error(error));
     }
-    let details = result.value.unwrap_or(Value::Null);
+    let mut details = result.value.unwrap_or(Value::Null);
+    if let Some(object) = details.as_object_mut() {
+        object.insert(
+            "parentInvocationId".to_owned(),
+            json!(invocation.id.as_str()),
+        );
+        object.insert("rootInvocationId".to_owned(), json!(invocation.id.as_str()));
+        object.insert(
+            "bindingDecisionId".to_owned(),
+            json!(target.binding_decision.decision_id.clone()),
+        );
+    }
     let program_status = details
         .get("status")
         .and_then(Value::as_str)
@@ -1173,8 +1279,14 @@ async fn execute_program_value(
         let audit_payload = json!({
             "status": program_status.clone(),
             "mode": "program",
-            "functionId": crate::domains::program::contract::RUN_JAVASCRIPT_FUNCTION_ID,
+            "contractId": target.binding_decision.contract_id.clone(),
+            "implementationId": target.binding_decision.selected_implementation.clone(),
+            "functionId": function.id.as_str(),
+            "bindingDecision": target.binding_decision.clone(),
             "programRunId": details.get("programRunId").cloned().unwrap_or(Value::Null),
+            "parentInvocationId": details.get("parentInvocationId").cloned().unwrap_or(Value::Null),
+            "rootInvocationId": details.get("rootInvocationId").cloned().unwrap_or(Value::Null),
+            "bindingDecisionId": details.get("bindingDecisionId").cloned().unwrap_or(Value::Null),
             "codeHash": details.get("codeHash").cloned().unwrap_or(Value::Null),
             "argsHash": details.get("argsHash").cloned().unwrap_or(Value::Null),
             "childInvocations": details.get("childInvocations").cloned().unwrap_or_else(|| json!([])),

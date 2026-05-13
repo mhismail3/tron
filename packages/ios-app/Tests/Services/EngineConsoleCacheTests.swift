@@ -46,7 +46,32 @@ struct EngineConsoleCacheTests {
                 )
             ],
             recentTraceSummaries: [],
-            recentProgramRuns: [],
+            recentProgramRuns: [
+                CapabilityProgramRunDTO(
+                    programRunId: "program_run_1",
+                    parentInvocationId: "invocation_parent",
+                    rootInvocationId: "invocation_root",
+                    bindingDecisionId: "binding_decision_1",
+                    status: "ok",
+                    traceId: "trace-1",
+                    codeHash: "code",
+                    argsHash: "args",
+                    limits: nil,
+                    allowedContracts: ["filesystem::read_file"],
+                    allowedImplementations: ["first_party.filesystem.v1.read_file"],
+                    childInvocations: ["child-1"],
+                    selectedImplementations: ["first_party.filesystem.v1.read_file"],
+                    approvalState: nil,
+                    artifacts: nil,
+                    logs: nil,
+                    error: nil,
+                    compensationAttempts: nil,
+                    payloadSummary: nil,
+                    createdAt: nil,
+                    updatedAt: nil,
+                    redacted: true
+                )
+            ],
             indexStatus: CapabilityIndexStatusDTO(
                 lexical: true,
                 localVector: true,
@@ -67,5 +92,6 @@ struct EngineConsoleCacheTests {
         #expect(loaded.catalogRevision == 7)
         #expect(loaded.pluginSummaries.first?.id == "first_party.filesystem")
         #expect(loaded.recentAuditRows.first?.redacted == true)
+        #expect(loaded.recentProgramRuns.first?.bindingDecisionId == "binding_decision_1")
     }
 }

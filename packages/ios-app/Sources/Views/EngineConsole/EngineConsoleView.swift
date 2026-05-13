@@ -304,6 +304,9 @@ struct EngineConsoleView: View {
                 Section {
                     metricRow("Status", run.status ?? "unknown")
                     metricRow("Trace", run.traceId ?? "unknown")
+                    metricRow("Parent Invocation", run.parentInvocationId ?? "none")
+                    metricRow("Root Invocation", run.rootInvocationId ?? "unknown")
+                    metricRow("Binding Decision", run.bindingDecisionId ?? "none")
                     metricRow("Code Hash", run.codeHash ?? "unknown")
                     metricRow("Args Hash", run.argsHash ?? "unknown")
                     metricRow("Children", String(run.childInvocations?.count ?? 0))

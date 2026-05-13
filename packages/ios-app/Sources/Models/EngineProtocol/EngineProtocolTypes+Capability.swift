@@ -297,6 +297,9 @@ struct CapabilityProgramExecutionDTO: Codable, Equatable, Sendable {
     var error: AnyCodable?
     var traceId: String?
     var programRunId: String?
+    var parentInvocationId: String?
+    var rootInvocationId: String?
+    var bindingDecisionId: String?
     var codeHash: String?
     var argsHash: String?
     var childInvocations: [String]?
@@ -304,11 +307,15 @@ struct CapabilityProgramExecutionDTO: Codable, Equatable, Sendable {
     var approvalState: AnyCodable?
     var artifacts: [AnyCodable]?
     var logs: [String]?
+    var compensationAttempts: [AnyCodable]?
 }
 
 struct CapabilityProgramRunDTO: Codable, Equatable, Sendable, Identifiable {
     var id: String { programRunId ?? "\(traceId ?? "program")-\(codeHash ?? "unknown")" }
     var programRunId: String?
+    var parentInvocationId: String?
+    var rootInvocationId: String?
+    var bindingDecisionId: String?
     var status: String?
     var traceId: String?
     var codeHash: String?
@@ -322,6 +329,7 @@ struct CapabilityProgramRunDTO: Codable, Equatable, Sendable, Identifiable {
     var artifacts: AnyCodable?
     var logs: AnyCodable?
     var error: AnyCodable?
+    var compensationAttempts: AnyCodable?
     var payloadSummary: AnyCodable?
     var createdAt: String?
     var updatedAt: String?

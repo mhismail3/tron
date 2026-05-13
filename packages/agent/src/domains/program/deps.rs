@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use super::runtime::{ProgramExecutor, QuickJsProgramExecutor};
+use super::process::ProcessProgramExecutor;
+use super::runtime::ProgramExecutor;
 use crate::domains::capability::registry::{
     SharedCapabilityRegistryStore, open_capability_registry_store,
 };
@@ -30,7 +31,7 @@ impl Deps {
             engine_host: deps.engine_host.clone(),
             registry_store: open_capability_registry_store(storage_path)
                 .expect("program executor audit store must open"),
-            executor: Arc::new(QuickJsProgramExecutor::default()),
+            executor: Arc::new(ProcessProgramExecutor::default()),
         }
     }
 

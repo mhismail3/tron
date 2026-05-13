@@ -148,11 +148,11 @@ contains executable operation bodies. Runtime support is split the same way in
 domain-owned folders such as `domains/agent/runner/*`,
 `domains/agent/runtime/*`, `domains/session/event_store/*`,
 `domains/capability_support/implementations/*`, and `domains/worktree/implementation/*`.
-`domains/program/*` owns the QuickJS program executor worker. Provider-native
-stream/function-call argument parsing and provider-specific invocation id
-remapping are isolated under `domains/model/provider_protocol/*` before any
-canonical capability history reaches the runner, ledger, registry, audit, or
-iOS DTO layers.
+`domains/program/*` owns the parent-side program capability plus the
+`tron-program-worker` OS process runtime. Provider-native stream/function-call
+argument parsing and provider-specific invocation id remapping are isolated
+under `domains/model/provider_protocol/*` before any canonical capability
+history reaches the runner, ledger, registry, audit, or iOS DTO layers.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -325,17 +325,20 @@ trust tier, scope binding, expiry, and signature status before their functions
 can enter the capability registry.
 
 `execute` program mode is implemented by the first-party
-`program::run_javascript` worker. It uses a QuickJS runtime through a
-Tron-owned executor trait, freezes the JavaScript host surface to
-`tools.search`, `tools.inspect`, `tools.execute`, and denies filesystem,
+`program::run_javascript` worker. The parent engine spawns the
+`tron-program-worker` OS process with a stripped environment and a temporary
+working directory, then communicates over the program JSON-line protocol. The
+child process owns QuickJS, freezes the JavaScript host surface to
+`tools.search`, `tools.inspect`, `tools.execute`, and exposes no filesystem,
 network, process, import, environment, secret, mutable-clock, native-module,
-and arbitrary host-object access. Program requests carry explicit limits for
+or arbitrary host-object access. Program requests carry explicit limits for
 timeout, memory, stack, output/log bytes, child-call count, recursion depth,
 allowed contracts/implementations, and risk budget. Child approvals pause the
 run; programs cannot self-approve or recursively invoke program mode. Every run
-is recorded in the capability registry store with code/args hashes, limits,
-child invocations, selected implementations, approval state, artifacts, logs,
-trace id, and final status.
+is recorded in the capability registry store with parent/root invocation ids,
+binding decision id, code/args hashes, limits, child invocations, selected
+implementations, approval state, artifacts, logs, compensation attempts, trace
+id, and final status.
 
 Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block tells agents to inspect `process::run` before using standard `git` commands and to defer risky or publishing operations to the user.
 

@@ -2,9 +2,11 @@
 //!
 //! This domain owns Tron's first-party JavaScript program execution capability.
 //! The model still invokes it only through `capability::execute` with
-//! `mode = "program"`; this worker owns the concrete `program::run_javascript`
-//! implementation, QuickJS runtime limits, child capability host calls, audit
-//! payload shape, and tests.
+//! `mode = "program"`; the parent-side domain owns the concrete
+//! `program::run_javascript` capability while a separate first-party process
+//! owns the QuickJS runtime. Child capability calls return to the parent over
+//! the program protocol, so the engine remains the sole authority for search,
+//! inspect, execute, policy, trace, and audit.
 //!
 //! ## Submodules
 //!
@@ -13,6 +15,8 @@
 //! | `contract` | Canonical `program::run_javascript` contract and schemas |
 //! | `deps` | Narrow dependency bundle for program execution |
 //! | `handlers` | Operation binding for the program worker |
+//! | `process` | Parent-side process lifecycle and host-call protocol loop |
+//! | `protocol` | JSON-line parent/child program worker messages |
 //! | `runtime` | QuickJS runtime, limits, host-call policy, and result types |
 //!
 //! # INVARIANT: no host APIs in JavaScript
@@ -25,6 +29,8 @@
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
+pub(crate) mod process;
+pub(crate) mod protocol;
 pub(crate) mod runtime;
 
 pub(crate) use deps::Deps;
@@ -36,6 +42,12 @@ use crate::domains::worker::{DomainRegistrationContext, DomainWorkerModule};
 use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
+
+/// Entrypoint used by the `tron-program-worker` child process.
+#[must_use]
+pub fn worker_process_main() -> std::process::ExitCode {
+    process::worker_process_main()
+}
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
@@ -69,14 +81,35 @@ pub(crate) async fn run_javascript_value(
     );
     let executor = deps.executor.clone();
     let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
-    let result = run_blocking_task("program.run_javascript.quickjs", move || {
+    let parent_invocation_id = invocation
+        .causal_context
+        .parent_invocation_id
+        .as_ref()
+        .map(|id| id.as_str().to_owned());
+    let root_invocation_id = invocation
+        .causal_context
+        .runtime_metadata
+        .get("rootInvocationId")
+        .cloned()
+        .or_else(|| parent_invocation_id.clone())
+        .unwrap_or_else(|| invocation.id.as_str().to_owned());
+    let binding_decision_id = invocation
+        .causal_context
+        .runtime_metadata
+        .get("bindingDecisionId")
+        .cloned();
+    let mut result = run_blocking_task("program.run_javascript.quickjs", move || {
         executor
             .execute(request, std::sync::Arc::new(tool_host))
             .map_err(program_runtime_error)
     })
     .await?;
+    result.trace_id = trace_id.clone();
     deps.record_program_run(CapabilityProgramRunRecord {
         program_run_id: result.program_run_id.clone(),
+        parent_invocation_id: parent_invocation_id.clone(),
+        root_invocation_id: root_invocation_id.clone(),
+        binding_decision_id: binding_decision_id.clone(),
         status: result.status.clone(),
         trace_id: result.trace_id.clone(),
         code_hash: result.code_hash.clone(),
@@ -90,6 +123,7 @@ pub(crate) async fn run_javascript_value(
         artifacts: result.artifacts.clone(),
         logs: result.logs.clone(),
         error: result.error.clone(),
+        compensation_attempts: Vec::new(),
     })
     .await?;
     deps.registry_audit(
@@ -103,14 +137,22 @@ pub(crate) async fn run_javascript_value(
             "childInvocations": result.child_invocations,
             "selectedImplementations": result.selected_implementations,
             "approvalState": result.approval_state,
+            "rootInvocationId": root_invocation_id,
+            "bindingDecisionId": binding_decision_id,
         }),
     )
     .await?;
-    Ok(
+    let mut result_value =
         serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
             message: format!("serialize program execution result: {error}"),
-        })?,
-    )
+        })?;
+    if let Some(object) = result_value.as_object_mut() {
+        object.insert("parentInvocationId".to_owned(), json!(parent_invocation_id));
+        object.insert("rootInvocationId".to_owned(), json!(root_invocation_id));
+        object.insert("bindingDecisionId".to_owned(), json!(binding_decision_id));
+        object.insert("compensationAttempts".to_owned(), json!([]));
+    }
+    Ok(result_value)
 }
 
 fn program_runtime_error(error: runtime::ProgramRuntimeError) -> CapabilityError {

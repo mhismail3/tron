@@ -1482,12 +1482,17 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
         self.conn
             .execute(
                 "INSERT INTO capability_program_runs(
-                    program_run_id, status, trace_id, code_hash, args_hash,
+                    program_run_id, parent_invocation_id, root_invocation_id,
+                    binding_decision_id, status, trace_id, code_hash, args_hash,
                     limits_json, allowed_contracts_json, allowed_implementations_json,
                     child_invocations_json, selected_implementations_json, approval_state_json,
-                    artifacts_json, logs_json, error_json, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+                    artifacts_json, logs_json, error_json, compensation_attempts_json,
+                    created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?19)
                  ON CONFLICT(program_run_id) DO UPDATE SET
+                    parent_invocation_id = excluded.parent_invocation_id,
+                    root_invocation_id = excluded.root_invocation_id,
+                    binding_decision_id = excluded.binding_decision_id,
                     status = excluded.status,
                     trace_id = excluded.trace_id,
                     code_hash = excluded.code_hash,
@@ -1501,9 +1506,13 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
                     artifacts_json = excluded.artifacts_json,
                     logs_json = excluded.logs_json,
                     error_json = excluded.error_json,
+                    compensation_attempts_json = excluded.compensation_attempts_json,
                     updated_at = excluded.updated_at",
                 params![
                     record.program_run_id,
+                    record.parent_invocation_id,
+                    record.root_invocation_id,
+                    record.binding_decision_id,
                     record.status,
                     record.trace_id,
                     record.code_hash,
@@ -1526,6 +1535,9 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
                         .map_err(|error| format!("serialize logs: {error}"))?,
                     serde_json::to_string(&record.error)
                         .map_err(|error| format!("serialize program error: {error}"))?,
+                    serde_json::to_string(&record.compensation_attempts).map_err(|error| {
+                        format!("serialize compensation attempts: {error}")
+                    })?,
                     Utc::now().to_rfc3339(),
                 ],
             )
@@ -1544,9 +1556,11 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             .conn
             .prepare(
                 "SELECT program_run_id, status, trace_id, code_hash, args_hash,
+                        parent_invocation_id, root_invocation_id, binding_decision_id,
                         limits_json, allowed_contracts_json, allowed_implementations_json,
                         child_invocations_json, selected_implementations_json, approval_state_json,
-                        artifacts_json, logs_json, error_json, created_at, updated_at
+                        artifacts_json, logs_json, error_json, compensation_attempts_json,
+                        created_at, updated_at
                  FROM capability_program_runs
                  WHERE (?1 IS NULL OR trace_id = ?1)
                    AND (?2 IS NULL OR status = ?2)
@@ -1556,25 +1570,29 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             .map_err(|error| format!("prepare program run query: {error}"))?;
         let rows = stmt
             .query_map(params![trace_id, status, limit as i64], |row| {
-                let limits = json_from_row(row.get::<_, String>(5)?);
-                let approval_state = json_from_row(row.get::<_, String>(10)?);
+                let limits = json_from_row(row.get::<_, String>(8)?);
+                let approval_state = json_from_row(row.get::<_, String>(13)?);
                 Ok(json!({
                     "programRunId": row.get::<_, String>(0)?,
                     "status": row.get::<_, String>(1)?,
                     "traceId": row.get::<_, String>(2)?,
                     "codeHash": row.get::<_, String>(3)?,
                     "argsHash": row.get::<_, String>(4)?,
+                    "parentInvocationId": row.get::<_, Option<String>>(5)?,
+                    "rootInvocationId": row.get::<_, String>(6)?,
+                    "bindingDecisionId": row.get::<_, Option<String>>(7)?,
                     "limits": limits,
-                    "allowedContracts": json_from_row(row.get::<_, String>(6)?),
-                    "allowedImplementations": json_from_row(row.get::<_, String>(7)?),
-                    "childInvocations": json_from_row(row.get::<_, String>(8)?),
-                    "selectedImplementations": json_from_row(row.get::<_, String>(9)?),
+                    "allowedContracts": json_from_row(row.get::<_, String>(9)?),
+                    "allowedImplementations": json_from_row(row.get::<_, String>(10)?),
+                    "childInvocations": json_from_row(row.get::<_, String>(11)?),
+                    "selectedImplementations": json_from_row(row.get::<_, String>(12)?),
                     "approvalState": approval_state,
-                    "artifacts": json_from_row(row.get::<_, String>(11)?),
-                    "logs": json_from_row(row.get::<_, String>(12)?),
-                    "error": json_from_row(row.get::<_, String>(13)?),
-                    "createdAt": row.get::<_, String>(14)?,
-                    "updatedAt": row.get::<_, String>(15)?,
+                    "artifacts": json_from_row(row.get::<_, String>(14)?),
+                    "logs": json_from_row(row.get::<_, String>(15)?),
+                    "error": json_from_row(row.get::<_, String>(16)?),
+                    "compensationAttempts": json_from_row(row.get::<_, String>(17)?),
+                    "createdAt": row.get::<_, String>(18)?,
+                    "updatedAt": row.get::<_, String>(19)?,
                 }))
             })
             .map_err(|error| format!("query program runs: {error}"))?;
@@ -2092,10 +2110,18 @@ fn redact_program_run(mut run: Value, reveal_payloads: bool) -> Value {
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or_default();
+    let compensation_count = run
+        .get("compensationAttempts")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
     run["payloadSummary"] = json!({
         "programRunId": run.get("programRunId").cloned().unwrap_or(Value::Null),
         "status": run.get("status").cloned().unwrap_or(Value::Null),
         "traceId": run.get("traceId").cloned().unwrap_or(Value::Null),
+        "parentInvocationId": run.get("parentInvocationId").cloned().unwrap_or(Value::Null),
+        "rootInvocationId": run.get("rootInvocationId").cloned().unwrap_or(Value::Null),
+        "bindingDecisionId": run.get("bindingDecisionId").cloned().unwrap_or(Value::Null),
         "codeHash": run.get("codeHash").cloned().unwrap_or(Value::Null),
         "argsHash": run.get("argsHash").cloned().unwrap_or(Value::Null),
         "childInvocations": run.get("childInvocations").cloned().unwrap_or_else(|| json!([])),
@@ -2103,6 +2129,7 @@ fn redact_program_run(mut run: Value, reveal_payloads: bool) -> Value {
         "approvalState": run.get("approvalState").cloned().unwrap_or(Value::Null),
         "logCount": log_count,
         "artifactCount": artifact_count,
+        "compensationCount": compensation_count,
     });
     run["logs"] = json!({"redacted": true, "count": log_count});
     run["artifacts"] = json!({"redacted": true, "count": artifact_count});
@@ -2112,6 +2139,7 @@ fn redact_program_run(mut run: Value, reveal_payloads: bool) -> Value {
         .filter(|value| !value.is_null())
         .map(|error| audit_payload_summary(&error))
         .unwrap_or(Value::Null);
+    run["compensationAttempts"] = json!({"redacted": true, "count": compensation_count});
     run["redacted"] = json!(true);
     run
 }
@@ -2259,6 +2287,9 @@ CREATE TABLE IF NOT EXISTS capability_audit_events (
 
 CREATE TABLE IF NOT EXISTS capability_program_runs (
   program_run_id TEXT PRIMARY KEY,
+  parent_invocation_id TEXT,
+  root_invocation_id TEXT NOT NULL,
+  binding_decision_id TEXT,
   status TEXT NOT NULL,
   trace_id TEXT NOT NULL,
   code_hash TEXT NOT NULL,
@@ -2272,6 +2303,7 @@ CREATE TABLE IF NOT EXISTS capability_program_runs (
   artifacts_json TEXT NOT NULL,
   logs_json TEXT NOT NULL,
   error_json TEXT NOT NULL,
+  compensation_attempts_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -2286,6 +2318,8 @@ CREATE INDEX IF NOT EXISTS idx_capability_program_runs_trace
   ON capability_program_runs(trace_id);
 CREATE INDEX IF NOT EXISTS idx_capability_program_runs_status
   ON capability_program_runs(status);
+CREATE INDEX IF NOT EXISTS idx_capability_program_runs_binding
+  ON capability_program_runs(binding_decision_id);
 "#;
 
 /// Hybrid local index.
@@ -3366,6 +3400,59 @@ mod tests {
             !store
                 .validate_inspection(&handle.handle, &stale_entry)
                 .expect("stale inspection rejected")
+        );
+    }
+
+    #[test]
+    fn sqlite_program_runs_keep_trace_parent_binding_and_redaction_metadata() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        store
+            .record_program_run(&CapabilityProgramRunRecord {
+                program_run_id: "program_run_test".to_owned(),
+                parent_invocation_id: Some("invocation_parent".to_owned()),
+                root_invocation_id: "invocation_root".to_owned(),
+                binding_decision_id: Some("binding_decision_test".to_owned()),
+                status: "ok".to_owned(),
+                trace_id: "trace_test".to_owned(),
+                code_hash: "code_hash".to_owned(),
+                args_hash: "args_hash".to_owned(),
+                limits: json!({"timeoutMs": 1000}),
+                allowed_contracts: vec!["filesystem::read_file".to_owned()],
+                allowed_implementations: vec!["first_party.filesystem.v1.read_file".to_owned()],
+                child_invocations: vec!["child_invocation".to_owned()],
+                selected_implementations: vec!["first_party.filesystem.v1.read_file".to_owned()],
+                approval_state: None,
+                artifacts: vec![json!({"path": "artifact.txt"})],
+                logs: vec!["sensitive log".to_owned()],
+                error: None,
+                compensation_attempts: vec![json!({"status": "not_declared"})],
+            })
+            .expect("record program run");
+
+        let redacted = store
+            .program_run_query(Some("trace_test"), None, 10, false)
+            .expect("program runs");
+        let run = &redacted["programRuns"][0];
+        assert_eq!(run["parentInvocationId"], "invocation_parent");
+        assert_eq!(run["rootInvocationId"], "invocation_root");
+        assert_eq!(run["bindingDecisionId"], "binding_decision_test");
+        assert_eq!(run["logs"]["redacted"], true);
+        assert_eq!(run["artifacts"]["count"], 1);
+        assert_eq!(run["compensationAttempts"]["count"], 1);
+        assert_eq!(
+            run["payloadSummary"]["bindingDecisionId"],
+            "binding_decision_test"
+        );
+
+        let revealed = store
+            .program_run_query(Some("trace_test"), None, 10, true)
+            .expect("revealed program runs");
+        assert_eq!(revealed["programRuns"][0]["logs"][0], "sensitive log");
+        assert_eq!(
+            revealed["programRuns"][0]["compensationAttempts"][0]["status"],
+            "not_declared"
         );
     }
 

@@ -34,6 +34,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "programRuntime": {
                 "language": "javascript",
                 "runtime": "quickjs",
+                "isolation": "first-party OS process worker",
                 "hostAccess": "tools.search/tools.inspect/tools.execute only",
                 "approvalBoundary": "child approvals pause the program and cannot be self-approved",
                 "limits": [
@@ -98,13 +99,17 @@ fn run_javascript_response_schema() -> serde_json::Value {
             "error": {"type": ["object", "null"]},
             "traceId": {"type": "string"},
             "programRunId": {"type": "string"},
+            "parentInvocationId": {"type": ["string", "null"]},
+            "rootInvocationId": {"type": "string"},
+            "bindingDecisionId": {"type": ["string", "null"]},
             "codeHash": {"type": "string"},
             "argsHash": {"type": "string"},
             "childInvocations": {"type": "array", "items": {"type": "string"}},
             "selectedImplementations": {"type": "array", "items": {"type": "string"}},
             "approvalState": {"type": ["object", "null"]},
             "artifacts": {"type": "array"},
-            "logs": {"type": "array", "items": {"type": "string"}}
+            "logs": {"type": "array", "items": {"type": "string"}},
+            "compensationAttempts": {"type": "array"}
         }
     })
 }

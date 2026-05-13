@@ -63,10 +63,14 @@ struct CapabilityClientTests {
                 details: AnyCodable([
                     "status": "ok",
                     "programRunId": "program_run_test",
+                    "parentInvocationId": "invocation_parent",
+                    "rootInvocationId": "invocation_root",
+                    "bindingDecisionId": "binding_decision_test",
                     "codeHash": "code",
                     "argsHash": "args",
                     "childInvocations": [],
-                    "selectedImplementations": []
+                    "selectedImplementations": [],
+                    "compensationAttempts": []
                 ]),
                 isError: nil,
                 stopTurn: nil
@@ -79,6 +83,7 @@ struct CapabilityClientTests {
         )
 
         #expect(result.programRunId == "program_run_test")
+        #expect(result.bindingDecisionId == "binding_decision_test")
     }
 
     @Test("program run list invokes capability admin read path")

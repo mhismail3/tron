@@ -194,6 +194,9 @@ pub(crate) struct CapabilityExecutionRecord {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CapabilityProgramRunRecord {
     pub(crate) program_run_id: String,
+    pub(crate) parent_invocation_id: Option<String>,
+    pub(crate) root_invocation_id: String,
+    pub(crate) binding_decision_id: Option<String>,
     pub(crate) status: String,
     pub(crate) trace_id: String,
     pub(crate) code_hash: String,
@@ -207,4 +210,5 @@ pub(crate) struct CapabilityProgramRunRecord {
     pub(crate) artifacts: Vec<Value>,
     pub(crate) logs: Vec<String>,
     pub(crate) error: Option<Value>,
+    pub(crate) compensation_attempts: Vec<Value>,
 }

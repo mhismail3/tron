@@ -1,6 +1,6 @@
 # Capability UI And Engine Console
 
-> Last verified: 2026-05-12
+> Last verified: 2026-05-13
 
 The iOS capability UI is a thin client over server-owned capability records. It
 does not maintain a local tool catalog and does not choose capability bindings
@@ -38,6 +38,7 @@ They mirror the durable registry and primitive response shapes:
 - `CapabilityBindingDTO`
 - `CapabilityInspectionDTO`
 - `CapabilityExecutionDTO`
+- `CapabilityProgramRunDTO`
 - `CapabilityAuditEventDTO`
 - `CapabilityPolicyDTO`
 
@@ -78,10 +79,13 @@ store raw secret values.
 The current Engine Console renders overview, capability search/inspect, plugin
 lifecycle summaries, worker health, binding summaries, profile policies,
 redacted audit rows, trace summaries, primer inputs, and redacted program-run
-records. Generated invoke/program forms and result renderers use contract and
-implementation metadata, not retired built-in-name dispatch. First-party
-capabilities may provide presentation hints, but those hints are advisory
-metadata attached to capability records.
+records. Program-run rows include parent/root invocation ids, binding decision
+ids, trace id, hashes, selected implementations, child invocations, approval
+state, artifact/log counts, and compensation-attempt counts while payload
+details remain redacted by default. Generated invoke/program forms and result
+renderers use contract and implementation metadata, not retired built-in-name
+dispatch. First-party capabilities may provide presentation hints, but those
+hints are advisory metadata attached to capability records.
 
 Provider protocol terminology is confined to provider-boundary and transcript payloads.
 Capability UI surfaces use `CapabilityIdentity` and registry DTOs as the active
