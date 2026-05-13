@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Tool File Info Section
+// MARK: - Capability File Info Section
 
 /// Reusable file info section (icon + name + extension capsule + full path) extracted from
 /// Shared file metadata rows for source and capability detail views.

@@ -138,7 +138,7 @@ fn seed_session(store: &EventStore, parent: Option<&str>) -> String {
                     parent_session_id: Some(parent_id),
                     fork_from_event_id: None,
                     spawning_session_id: Some(parent_id),
-                    spawn_type: Some("tool"),
+                    spawn_type: Some("capability"),
                     spawn_task: Some("test"),
                     origin: None,
                     profile: None,

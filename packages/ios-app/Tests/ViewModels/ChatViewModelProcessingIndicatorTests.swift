@@ -5,7 +5,7 @@ import XCTest
 ///
 /// The breathing line ("Processing...") appears only when the model is actively
 /// thinking and NO other visual feedback is present: no text streaming, no thinking
-/// block streaming, no tool spinner, no subagent chip.
+/// block streaming, no capability spinner, no subagent chip.
 @MainActor
 final class ChatViewModelProcessingIndicatorTests: XCTestCase {
 
@@ -67,12 +67,12 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         XCTAssertTrue(viewModel.shouldShowBreathingLine)
     }
 
-    func testBreathingLineShownAfterToolCompletes() {
-        // Tool finished, model deciding next action
+    func testBreathingLineShownAfterCapabilityCompletes() {
+        // Capability finished, model deciding next action
         viewModel.agentPhase = .processing
-        let tool = makeToolMessage(status: .success)
-        viewModel.messages = [tool]
-        viewModel.currentToolMessages = [tool.id: tool]
+        let capability = makeCapabilityMessage(status: .success)
+        viewModel.messages = [capability]
+        viewModel.currentCapabilityInvocationMessages = [capability.id: capability]
         XCTAssertTrue(viewModel.shouldShowBreathingLine)
     }
 
@@ -94,13 +94,13 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         XCTAssertFalse(viewModel.shouldShowBreathingLine)
     }
 
-    func testBreathingLineHiddenDuringToolExecution() {
+    func testBreathingLineHiddenDuringCapabilityExecution() {
         viewModel.agentPhase = .processing
-        let tool = makeToolMessage(status: .running)
-        viewModel.messages = [tool]
-        viewModel.currentToolMessages = [tool.id: tool]
-        // shouldShowBreathingLine checks runningToolCount (O(1) counter), not currentToolMessages
-        viewModel.runningToolCount = 1
+        let capability = makeCapabilityMessage(status: .running)
+        viewModel.messages = [capability]
+        viewModel.currentCapabilityInvocationMessages = [capability.id: capability]
+        // shouldShowBreathingLine checks runningCapabilityInvocationCount (O(1) counter), not currentCapabilityInvocationMessages
+        viewModel.runningCapabilityInvocationCount = 1
         XCTAssertFalse(viewModel.shouldShowBreathingLine)
     }
 
@@ -114,25 +114,25 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
 
     // MARK: - shouldShowBreathingLine: mixed states
 
-    func testBreathingLineHiddenWhenOneToolRunningOneComplete() {
-        // Two tools: one done, one still running → tool spinner visible
+    func testBreathingLineHiddenWhenOneCapabilityRunningOneComplete() {
+        // Two capabilities: one done, one still running → capability spinner visible
         viewModel.agentPhase = .processing
-        let done = makeToolMessage(status: .success)
-        let running = makeToolMessage(status: .running)
+        let done = makeCapabilityMessage(status: .success)
+        let running = makeCapabilityMessage(status: .running)
         viewModel.messages = [done, running]
-        viewModel.currentToolMessages = [done.id: done, running.id: running]
-        // shouldShowBreathingLine checks runningToolCount, not currentToolMessages
-        viewModel.runningToolCount = 1
+        viewModel.currentCapabilityInvocationMessages = [done.id: done, running.id: running]
+        // shouldShowBreathingLine checks runningCapabilityInvocationCount, not currentCapabilityInvocationMessages
+        viewModel.runningCapabilityInvocationCount = 1
         XCTAssertFalse(viewModel.shouldShowBreathingLine)
     }
 
-    func testBreathingLineShownWhenAllToolsComplete() {
-        // Two tools both done → no spinner, model is thinking
+    func testBreathingLineShownWhenAllCapabilitiesComplete() {
+        // Two capabilities both done → no spinner, model is thinking
         viewModel.agentPhase = .processing
-        let done1 = makeToolMessage(status: .success)
-        let done2 = makeToolMessage(status: .success)
+        let done1 = makeCapabilityMessage(status: .success)
+        let done2 = makeCapabilityMessage(status: .success)
         viewModel.messages = [done1, done2]
-        viewModel.currentToolMessages = [done1.id: done1, done2.id: done2]
+        viewModel.currentCapabilityInvocationMessages = [done1.id: done1, done2.id: done2]
         XCTAssertTrue(viewModel.shouldShowBreathingLine)
     }
 
@@ -149,15 +149,15 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
             "Hook subagents should not suppress the breathing line")
     }
 
-    func testBreathingLineHiddenDuringToolSubagent() {
-        // Tool-spawned subagents should still suppress the breathing line
+    func testBreathingLineHiddenDuringCapabilitySubagent() {
+        // Capability-spawned subagents should still suppress the breathing line
         viewModel.agentPhase = .processing
         viewModel.subagentState.trackSpawn(
             invocationId: "tc-1", subagentSessionId: "sub-1",
-            task: "Explore code", model: nil, spawnType: .toolAgent
+            task: "Explore code", model: nil, spawnType: .capabilityAgent
         )
         XCTAssertFalse(viewModel.shouldShowBreathingLine,
-            "Tool agent subagents should suppress the breathing line")
+            "Capability agent subagents should suppress the breathing line")
     }
 
     func testBreathingLineShownAfterHookSubagentCompletes() {
@@ -173,24 +173,24 @@ final class ChatViewModelProcessingIndicatorTests: XCTestCase {
         XCTAssertTrue(viewModel.shouldShowBreathingLine)
     }
 
-    func testBreathingLineHiddenDuringToolSubagent_withConcurrentHook() {
-        // Both a tool agent and a hook running — tool agent takes precedence
+    func testBreathingLineHiddenDuringCapabilitySubagent_withConcurrentHook() {
+        // Both a capability agent and a hook running — capability agent takes precedence
         viewModel.agentPhase = .processing
         viewModel.subagentState.trackSpawn(
             invocationId: "sub-hook-1", subagentSessionId: "sub-hook-1",
             task: "Generate title", model: nil, spawnType: .hook
         )
         viewModel.subagentState.trackSpawn(
-            invocationId: "tc-1", subagentSessionId: "sub-tool-1",
-            task: "Explore code", model: nil, spawnType: .toolAgent
+            invocationId: "tc-1", subagentSessionId: "sub-capability-1",
+            task: "Explore code", model: nil, spawnType: .capabilityAgent
         )
         XCTAssertFalse(viewModel.shouldShowBreathingLine,
-            "Tool agent should suppress breathing line even with concurrent hook")
+            "Capability agent should suppress breathing line even with concurrent hook")
     }
 
     // MARK: - Helpers
 
-    private func makeToolMessage(status: CapabilityInvocationStatus) -> ChatMessage {
+    private func makeCapabilityMessage(status: CapabilityInvocationStatus) -> ChatMessage {
         ChatMessage(
             role: .assistant,
             content: .capabilityInvocation(testCapabilityInvocation(

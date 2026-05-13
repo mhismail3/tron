@@ -35,7 +35,12 @@ fn make_assistant(uuid: &str, parent: Option<&str>, ts: &str) -> ClaudeRecord {
     .unwrap()
 }
 
-fn make_tool_result(uuid: &str, parent: Option<&str>, ts: &str, prompt_id: &str) -> ClaudeRecord {
+fn make_capability_result(
+    uuid: &str,
+    parent: Option<&str>,
+    ts: &str,
+    prompt_id: &str,
+) -> ClaudeRecord {
     serde_json::from_value(json!({
         "type": "user",
         "uuid": uuid,
@@ -44,7 +49,7 @@ fn make_tool_result(uuid: &str, parent: Option<&str>, ts: &str, prompt_id: &str)
         "promptId": prompt_id,
         "message": {
             "role": "user",
-            "content": [{ "type": "tool_result", "tool_use_id": "toolu_1", "content": "ok" }]
+            "content": [{ "type": "capability_result", "capability_invocation_id": "toolu_1", "content": "ok" }]
         }
     }))
     .unwrap()
@@ -192,11 +197,11 @@ fn turn_assignment_meta_records_dont_advance() {
 }
 
 #[test]
-fn turn_assignment_tool_results_inherit_turn() {
+fn turn_assignment_capability_results_inherit_turn() {
     let records = vec![
         make_user("u1", None, "2026-01-01T00:00:00Z", "p1"),
         make_assistant("a1", Some("u1"), "2026-01-01T00:00:01Z"),
-        make_tool_result("tr1", Some("a1"), "2026-01-01T00:00:02Z", "p1"),
+        make_capability_result("tr1", Some("a1"), "2026-01-01T00:00:02Z", "p1"),
     ];
 
     let result = linearize(records);

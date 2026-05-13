@@ -119,6 +119,10 @@ pub const IMPORT_SESSION_NOT_FOUND: &str = "IMPORT_SESSION_NOT_FOUND";
 pub const IMPORT_ALREADY_IMPORTED: &str = "IMPORT_ALREADY_IMPORTED";
 /// Source session had no importable records after parsing.
 pub const IMPORT_EMPTY_SESSION: &str = "IMPORT_EMPTY_SESSION";
+/// Source session contains provider-native capability history that cannot be
+/// imported into the clean capability-only event schema.
+pub const IMPORT_UNSUPPORTED_PROVIDER_CAPABILITY_HISTORY: &str =
+    "IMPORT_UNSUPPORTED_PROVIDER_CAPABILITY_HISTORY";
 /// No Claude Code projects directory found.
 pub const IMPORT_NO_CLAUDE_DIRECTORY: &str = "IMPORT_NO_CLAUDE_DIRECTORY";
 
@@ -331,6 +335,7 @@ mod tests {
             IMPORT_SESSION_NOT_FOUND,
             IMPORT_ALREADY_IMPORTED,
             IMPORT_EMPTY_SESSION,
+            IMPORT_UNSUPPORTED_PROVIDER_CAPABILITY_HISTORY,
             IMPORT_NO_CLAUDE_DIRECTORY,
         ];
         let unique: std::collections::HashSet<_> = codes.iter().collect();

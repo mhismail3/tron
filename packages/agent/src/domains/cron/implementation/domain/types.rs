@@ -244,13 +244,13 @@ impl MisfirePolicy {
 /// is the capability that gets checked.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct ToolRestrictions {
+pub struct CapabilityRestrictions {
     /// If set, ONLY these capabilities are available (allowlist).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_capabilities: Option<Vec<String>>,
 }
 
-impl ToolRestrictions {
+impl CapabilityRestrictions {
     /// Check if a capability name is allowed under these restrictions.
     ///
     /// - `None` / empty → all allowed
@@ -262,13 +262,13 @@ impl ToolRestrictions {
         }
     }
 
-    /// Convert to a denied-tools list for `CreateAgentOpts`.
+    /// Convert to a denied-capabilities list for `CreateAgentOpts`.
     ///
-    /// Inverts the allow-list: everything in `all_tool_names` NOT in `allowed_capabilities`
+    /// Inverts the allow-list: everything in `all_model_primitive_names` NOT in `allowed_capabilities`
     /// becomes denied. Returns empty vec if no restrictions.
-    pub fn to_denied_list(&self, all_tool_names: &[String]) -> Vec<String> {
+    pub fn to_denied_list(&self, all_model_primitive_names: &[String]) -> Vec<String> {
         match &self.allowed_capabilities {
-            Some(allowed) if !allowed.is_empty() => all_tool_names
+            Some(allowed) if !allowed.is_empty() => all_model_primitive_names
                 .iter()
                 .filter(|name| !allowed.iter().any(|a| a == *name))
                 .cloned()
@@ -319,9 +319,9 @@ pub struct CronJob {
     /// Tags for filtering.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Per-job tool/capability restrictions.
+    /// Per-job capability restrictions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_restrictions: Option<ToolRestrictions>,
+    pub capability_restrictions: Option<CapabilityRestrictions>,
     /// Workspace scope.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
@@ -637,7 +637,7 @@ mod tests {
             auto_disable_after: 5,
             stuck_timeout_secs: 7200,
             tags: vec!["test".into()],
-            tool_restrictions: None,
+            capability_restrictions: None,
             workspace_id: None,
             created_at: now,
             updated_at: now,
@@ -803,53 +803,53 @@ mod tests {
         assert!(c.jobs.is_empty());
     }
 
-    // ── ToolRestrictions tests ────────────────────────────────────────
+    // ── CapabilityRestrictions tests ────────────────────────────────────────
 
     #[test]
-    fn tool_restrictions_serde_roundtrip_allowed() {
-        let tr = ToolRestrictions {
+    fn capability_restrictions_serde_roundtrip_allowed() {
+        let tr = CapabilityRestrictions {
             allowed_capabilities: Some(vec!["filesystem::read_file".into(), "Grep".into()]),
         };
         let json = serde_json::to_string(&tr).unwrap();
-        let back: ToolRestrictions = serde_json::from_str(&json).unwrap();
+        let back: CapabilityRestrictions = serde_json::from_str(&json).unwrap();
         assert_eq!(tr, back);
     }
 
     #[test]
-    fn tool_restrictions_serde_none_omitted() {
-        let tr = ToolRestrictions::default();
+    fn capability_restrictions_serde_none_omitted() {
+        let tr = CapabilityRestrictions::default();
         let json = serde_json::to_string(&tr).unwrap();
         assert_eq!(json, "{}");
     }
 
     #[test]
-    fn tool_restrictions_default_is_empty() {
-        let tr = ToolRestrictions::default();
+    fn capability_restrictions_default_is_empty() {
+        let tr = CapabilityRestrictions::default();
         assert!(tr.allowed_capabilities.is_none());
     }
 
     #[test]
-    fn tool_restrictions_serde_rejects_unknown_fields() {
+    fn capability_restrictions_serde_rejects_unknown_fields() {
         let json = r#"{"deniedCapabilities": ["process::run"], "allowedCapabilities": ["filesystem::read_file"]}"#;
-        assert!(serde_json::from_str::<ToolRestrictions>(json).is_err());
+        assert!(serde_json::from_str::<CapabilityRestrictions>(json).is_err());
 
         let json = r#"{"deniedCapabilities": ["process::run"]}"#;
-        assert!(serde_json::from_str::<ToolRestrictions>(json).is_err());
+        assert!(serde_json::from_str::<CapabilityRestrictions>(json).is_err());
 
         let json = r#"{"unknownField": true}"#;
-        assert!(serde_json::from_str::<ToolRestrictions>(json).is_err());
+        assert!(serde_json::from_str::<CapabilityRestrictions>(json).is_err());
     }
 
     #[test]
-    fn tool_restrictions_is_capability_allowed_no_restrictions() {
-        let tr = ToolRestrictions::default();
+    fn capability_restrictions_is_capability_allowed_no_restrictions() {
+        let tr = CapabilityRestrictions::default();
         assert!(tr.is_capability_allowed("process::run"));
         assert!(tr.is_capability_allowed("ShellCommand"));
     }
 
     #[test]
-    fn tool_restrictions_is_capability_allowed_allowed() {
-        let tr = ToolRestrictions {
+    fn capability_restrictions_is_capability_allowed_allowed() {
+        let tr = CapabilityRestrictions {
             allowed_capabilities: Some(vec!["filesystem::read_file".into(), "Grep".into()]),
         };
         assert!(tr.is_capability_allowed("filesystem::read_file"));
@@ -857,8 +857,8 @@ mod tests {
     }
 
     #[test]
-    fn tool_restrictions_is_capability_allowed_not_in_allowed() {
-        let tr = ToolRestrictions {
+    fn capability_restrictions_is_capability_allowed_not_in_allowed() {
+        let tr = CapabilityRestrictions {
             allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
         };
         assert!(!tr.is_capability_allowed("process::run"));
@@ -866,16 +866,16 @@ mod tests {
     }
 
     #[test]
-    fn tool_restrictions_is_capability_allowed_empty_allowed() {
-        let tr = ToolRestrictions {
+    fn capability_restrictions_is_capability_allowed_empty_allowed() {
+        let tr = CapabilityRestrictions {
             allowed_capabilities: Some(vec![]),
         };
         assert!(tr.is_capability_allowed("process::run"));
     }
 
     #[test]
-    fn tool_restrictions_to_denied_list_from_allowed() {
-        let tr = ToolRestrictions {
+    fn capability_restrictions_to_denied_list_from_allowed() {
+        let tr = CapabilityRestrictions {
             allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
         };
         let all = vec![
@@ -896,15 +896,15 @@ mod tests {
     }
 
     #[test]
-    fn tool_restrictions_to_denied_list_none() {
-        let tr = ToolRestrictions::default();
+    fn capability_restrictions_to_denied_list_none() {
+        let tr = CapabilityRestrictions::default();
         let all = vec!["process::run".into(), "filesystem::read_file".into()];
         assert!(tr.to_denied_list(&all).is_empty());
     }
 
     #[test]
-    fn tool_restrictions_to_denied_list_empty_allowed() {
-        let tr = ToolRestrictions {
+    fn capability_restrictions_to_denied_list_empty_allowed() {
+        let tr = CapabilityRestrictions {
             allowed_capabilities: Some(vec![]),
         };
         let all = vec!["process::run".into(), "filesystem::read_file".into()];
@@ -912,7 +912,7 @@ mod tests {
     }
 
     #[test]
-    fn cron_job_with_tool_restrictions_serde() {
+    fn cron_job_with_capability_restrictions_serde() {
         let now = Utc::now();
         let job = CronJob {
             id: "cron_tr".into(),
@@ -935,7 +935,7 @@ mod tests {
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
             tags: vec![],
-            tool_restrictions: Some(ToolRestrictions {
+            capability_restrictions: Some(CapabilityRestrictions {
                 allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
             }),
             workspace_id: None,
@@ -943,10 +943,10 @@ mod tests {
             updated_at: now,
         };
         let json = serde_json::to_string(&job).unwrap();
-        assert!(json.contains("toolRestrictions"));
+        assert!(json.contains("capabilityRestrictions"));
         let back: CronJob = serde_json::from_str(&json).unwrap();
-        assert!(back.tool_restrictions.is_some());
-        let tr = back.tool_restrictions.unwrap();
+        assert!(back.capability_restrictions.is_some());
+        let tr = back.capability_restrictions.unwrap();
         assert_eq!(
             tr.allowed_capabilities,
             Some(vec!["filesystem::read_file".to_string()])

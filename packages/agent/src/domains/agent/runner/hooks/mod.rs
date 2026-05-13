@@ -52,7 +52,7 @@
 //! # Valid `type` Values
 //!
 //! `session-start`, `session-end`, `stop`, `user-prompt-submit`,
-//! `pre-tool-use`, `post-tool-use`, `pre-compact`, `subagent-stop`,
+//! `pre-capability-invocation`, `post-capability-invocation`, `pre-compact`, `subagent-stop`,
 //! `notification`, `worktree-acquired`
 //!
 //! # Built-in Hooks

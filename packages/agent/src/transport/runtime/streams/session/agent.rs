@@ -180,7 +180,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             model,
             max_turns,
             spawn_depth,
-            tool_call_id,
+            invocation_id,
             blocking_timeout_ms,
             working_directory,
             spawn_type,
@@ -196,7 +196,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             if let Some(timeout) = blocking_timeout_ms {
                 data["blockingTimeoutMs"] = json!(timeout);
             }
-            set_opt(&mut data, "toolCallId", tool_call_id);
+            set_opt(&mut data, "invocationId", invocation_id);
             set_opt(&mut data, "workingDirectory", working_directory);
             set_opt(&mut data, "spawnType", spawn_type);
             Some(session_scoped(event, "agent.subagent_spawned", Some(data)))

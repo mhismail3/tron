@@ -5,7 +5,7 @@ import Foundation
 /// Handles: capability.invocation.started, capability.invocation.completed
 ///
 /// Note: These handlers are for standalone capability event transformation.
-/// The interleaved content processor handles provider tool_use content blocks
+/// The interleaved content processor handles provider capability_invocation content blocks
 /// within message.assistant events differently.
 enum CapabilityInvocationHandlers {
 

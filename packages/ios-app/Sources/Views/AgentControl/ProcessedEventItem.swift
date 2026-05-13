@@ -6,7 +6,7 @@ import Foundation
 struct ProcessedEventItem: Identifiable {
     enum Kind {
         case single(SessionEvent)
-        case mergedTool(call: SessionEvent, result: SessionEvent?)
+        case mergedCapability(call: SessionEvent, result: SessionEvent?)
     }
 
     let kind: Kind
@@ -14,7 +14,7 @@ struct ProcessedEventItem: Identifiable {
     var id: String {
         switch kind {
         case .single(let event): return event.id
-        case .mergedTool(let call, _): return "tool-\(call.id)"
+        case .mergedCapability(let call, _): return "capability-\(call.id)"
         }
     }
 }
@@ -38,8 +38,8 @@ func processEventsForTurn(_ turn: TurnGroup) -> (main: [ProcessedEventItem], pos
     let lastMainIndex: Int
     if let lai = lastAssistantIndex {
         let afterAssistant = events[lai...]
-        if let lastToolResult = afterAssistant.lastIndex(where: { $0.eventType == .capabilityInvocationCompleted }) {
-            lastMainIndex = lastToolResult
+        if let lastCapabilityResult = afterAssistant.lastIndex(where: { $0.eventType == .capabilityInvocationCompleted }) {
+            lastMainIndex = lastCapabilityResult
         } else {
             lastMainIndex = lai
         }
@@ -65,7 +65,7 @@ func processEventsForTurn(_ turn: TurnGroup) -> (main: [ProcessedEventItem], pos
         if event.eventType == .capabilityInvocationStarted {
             let callId = event.payload.string("invocationId") ?? event.id
             let result = resultByCallId[callId]
-            mainItems.append(ProcessedEventItem(kind: .mergedTool(call: event, result: result)))
+            mainItems.append(ProcessedEventItem(kind: .mergedCapability(call: event, result: result)))
         } else {
             mainItems.append(ProcessedEventItem(kind: .single(event)))
         }

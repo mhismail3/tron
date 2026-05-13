@@ -38,7 +38,7 @@ pub struct PushArgs<'a> {
     /// protected (typically `["main","master","develop"]`).
     pub protected_branches: &'a [String],
     /// If `true`, bypass the protected-branch check. Not exposed in v1 UI
-    /// — only the agent tool has access via an explicit parameter.
+    /// — only the agent capability has access via an explicit parameter.
     pub override_protected: bool,
 }
 

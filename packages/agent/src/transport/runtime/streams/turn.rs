@@ -58,8 +58,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             turn,
             stop_reason,
             token_usage,
-            has_tool_calls,
-            tool_call_count,
+            has_capability_invocations,
+            capability_invocation_count,
             token_record,
             model,
             ..
@@ -67,8 +67,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             let mut data = json!({
                 "turn": turn,
                 "stopReason": stop_reason,
-                "hasToolCalls": has_tool_calls,
-                "toolCallCount": tool_call_count,
+                "hasCapabilityInvocations": has_capability_invocations,
+                "capabilityInvocationCount": capability_invocation_count,
             });
             insert_token_usage(&mut data, token_usage.as_ref());
             if let Some(record) = token_record {
@@ -80,12 +80,12 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
         TronEvent::AgentInterrupted {
             turn,
             partial_content,
-            active_tool,
+            active_capability,
             ..
         } => {
             let mut data = json!({ "turn": turn });
             set_opt(&mut data, "partialContent", partial_content);
-            set_opt(&mut data, "activeTool", active_tool);
+            set_opt(&mut data, "activeCapability", active_capability);
             Some(session_scoped(event, "agent.interrupted", Some(data)))
         }
         TronEvent::ApiRetry {

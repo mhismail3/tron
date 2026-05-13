@@ -122,12 +122,12 @@ pub struct IconSettings {
     pub assistant: String,
     /// System message indicator.
     pub system: String,
-    /// Tool running indicator.
-    pub tool_running: String,
-    /// Tool success indicator.
-    pub tool_success: String,
+    /// Capability running indicator.
+    pub capability_running: String,
+    /// Capability success indicator.
+    pub capability_success: String,
     /// Capability error indicator.
-    pub tool_error: String,
+    pub capability_error: String,
     /// Ready state indicator.
     pub ready: String,
     /// Thinking state indicator.
@@ -153,9 +153,9 @@ impl Default for IconSettings {
             user: "\u{203a}".to_string(),
             assistant: "\u{25c6}".to_string(),
             system: "\u{25c7}".to_string(),
-            tool_running: "\u{25c7}".to_string(),
-            tool_success: "\u{25c6}".to_string(),
-            tool_error: "\u{25c8}".to_string(),
+            capability_running: "\u{25c7}".to_string(),
+            capability_success: "\u{25c6}".to_string(),
+            capability_error: "\u{25c8}".to_string(),
             ready: "\u{25c6}".to_string(),
             thinking: "\u{25c7}".to_string(),
             streaming: "\u{25c6}".to_string(),

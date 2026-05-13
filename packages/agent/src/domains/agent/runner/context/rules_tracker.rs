@@ -12,7 +12,7 @@
 //! ## Dynamic rules activation
 //!
 //! After discovery, a [`RulesIndex`] is set on the tracker. As the agent
-//! touches file paths (via `PostToolUse` hook), scoped rules activate when
+//! touches file paths (via `PostCapabilityInvocation` hook), scoped rules activate when
 //! touched paths fall under their `scope_dir`. Global rules are always
 //! injected; scoped rules only appear after activation.
 //!

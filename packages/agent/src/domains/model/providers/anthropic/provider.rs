@@ -16,7 +16,7 @@ use crate::domains::model::providers::provider::{
 use crate::shared::messages::Context;
 
 use super::cache_pruning::{
-    DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_tool_results_for_recache,
+    DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_capability_results_for_recache,
 };
 use super::message_converter::convert_messages;
 use super::message_sanitizer::sanitize_messages;
@@ -162,12 +162,12 @@ impl AnthropicProvider {
     /// Build tool definitions with cache breakpoints.
     #[allow(clippy::unused_self)]
     fn build_tools(&self, context: &Context) -> Option<Vec<AnthropicTool>> {
-        let tools = context.tools.as_ref()?;
-        if tools.is_empty() {
+        let capabilities = context.capabilities.as_ref()?;
+        if capabilities.is_empty() {
             return None;
         }
 
-        let mut anthropic_tools: Vec<AnthropicTool> = tools
+        let mut anthropic_capabilities: Vec<AnthropicTool> = capabilities
             .iter()
             .map(|t| AnthropicTool {
                 name: t.name.clone(),
@@ -178,14 +178,14 @@ impl AnthropicProvider {
             .collect();
 
         // Breakpoint 1: Last tool → 1h TTL
-        if let Some(last) = anthropic_tools.last_mut() {
+        if let Some(last) = anthropic_capabilities.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: Some("1h".into()),
             });
         }
 
-        Some(anthropic_tools)
+        Some(anthropic_capabilities)
     }
 
     /// Build thinking configuration.
@@ -268,7 +268,7 @@ impl AnthropicProvider {
             max_tokens: self.calculate_max_tokens(options),
             messages,
             system: self.build_system_param(context),
-            tools: self.build_tools(context),
+            capabilities: self.build_tools(context),
             stream: true,
             thinking: self.build_thinking_config(options),
             output_config: self.build_output_config(options),
@@ -290,7 +290,7 @@ impl AnthropicProvider {
         if self.last_api_call_ms > 0 {
             if is_cache_cold(self.last_api_call_ms, DEFAULT_TTL_MS) {
                 let msg_count = messages.len();
-                messages = prune_tool_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
+                messages = prune_capability_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
                 info!(
                     elapsed_ms = %now_ms().saturating_sub(self.last_api_call_ms),
                     message_count = msg_count,
@@ -319,7 +319,7 @@ impl AnthropicProvider {
             model = %request.model,
             max_tokens = request.max_tokens,
             message_count = request.messages.len(),
-            has_tools = request.tools.is_some(),
+            has_tools = request.capabilities.is_some(),
             has_thinking = request.thinking.is_some(),
             "Sending Anthropic request"
         );
@@ -404,7 +404,7 @@ impl Provider for AnthropicProvider {
         let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
         if self.last_api_call_ms > 0 && is_cache_cold(self.last_api_call_ms, DEFAULT_TTL_MS) {
-            messages = prune_tool_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
+            messages = prune_capability_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
         }
         Self::apply_cache_to_last_user_message(&mut messages);
         serde_json::to_value(self.build_request(context, options, messages))
@@ -702,10 +702,10 @@ mod tests {
     fn build_tools_api_key_has_cache() {
         let provider = AnthropicProvider::new(api_key_config());
         let ctx = Context {
-            tools: Some(vec![crate::shared::tools::Tool {
+            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
                 name: "execute".into(),
                 description: "Execute inspected capabilities".into(),
-                parameters: crate::shared::tools::ToolParameterSchema {
+                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                     schema_type: "object".into(),
                     properties: None,
                     required: None,
@@ -715,13 +715,18 @@ mod tests {
             }]),
             ..Context::default()
         };
-        let tools = provider.build_tools(&ctx).unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, "execute");
+        let capabilities = provider.build_tools(&ctx).unwrap();
+        assert_eq!(capabilities.len(), 1);
+        assert_eq!(capabilities[0].name, "execute");
         // API key now gets cache too
-        assert!(tools[0].cache_control.is_some());
+        assert!(capabilities[0].cache_control.is_some());
         assert_eq!(
-            tools[0].cache_control.as_ref().unwrap().ttl.as_deref(),
+            capabilities[0]
+                .cache_control
+                .as_ref()
+                .unwrap()
+                .ttl
+                .as_deref(),
             Some("1h")
         );
     }
@@ -730,11 +735,11 @@ mod tests {
     fn build_tools_oauth_last_has_cache() {
         let provider = AnthropicProvider::new(oauth_config());
         let ctx = Context {
-            tools: Some(vec![
-                crate::shared::tools::Tool {
+            capabilities: Some(vec![
+                crate::shared::model_capabilities::ModelCapability {
                     name: "search".into(),
                     description: "Search capability catalog".into(),
-                    parameters: crate::shared::tools::ToolParameterSchema {
+                    parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                         schema_type: "object".into(),
                         properties: None,
                         required: None,
@@ -742,10 +747,10 @@ mod tests {
                         extra: serde_json::Map::default(),
                     },
                 },
-                crate::shared::tools::Tool {
+                crate::shared::model_capabilities::ModelCapability {
                     name: "execute".into(),
                     description: "Execute inspected capabilities".into(),
-                    parameters: crate::shared::tools::ToolParameterSchema {
+                    parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                         schema_type: "object".into(),
                         properties: None,
                         required: None,
@@ -756,10 +761,15 @@ mod tests {
             ]),
             ..Context::default()
         };
-        let tools = provider.build_tools(&ctx).unwrap();
-        assert!(tools[0].cache_control.is_none()); // First tool: no cache
+        let capabilities = provider.build_tools(&ctx).unwrap();
+        assert!(capabilities[0].cache_control.is_none()); // First tool: no cache
         assert_eq!(
-            tools[1].cache_control.as_ref().unwrap().ttl.as_deref(),
+            capabilities[1]
+                .cache_control
+                .as_ref()
+                .unwrap()
+                .ttl
+                .as_deref(),
             Some("1h")
         );
     }

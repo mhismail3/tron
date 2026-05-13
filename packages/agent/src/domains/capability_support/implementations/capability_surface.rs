@@ -1,6 +1,6 @@
-//! Live engine-catalog projection for provider tool schemas.
+//! Live engine-catalog projection for provider capability schemas.
 //!
-//! The provider-facing tool list is resolved from the live engine catalog at
+//! The provider-facing capability list is resolved from the live engine catalog at
 //! each model-call boundary. The visible model harness is intentionally tiny:
 //! only the `capability` worker's `search`, `inspect`, and `execute`
 //! primitives are exposed. Every concrete filesystem, web, MCP, shell, UI, or
@@ -18,7 +18,7 @@ use crate::engine::{
     FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
 };
 use crate::shared::messages::Provider;
-use crate::shared::tools::{Tool, ToolParameterSchema};
+use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
 const CAPABILITY_SURFACE_GRANT: &str = "agent-capability-surface";
 pub(crate) const CAPABILITY_ALLOW_SCOPE_PREFIX: &str = "capability.allow:";
@@ -26,18 +26,18 @@ pub(crate) const CAPABILITY_DENY_SCOPE_PREFIX: &str = "capability.deny:";
 
 /// One live model-facing capability resolved from the engine catalog.
 #[derive(Clone, Debug)]
-pub struct EngineToolTarget {
+pub struct EngineCapabilityTarget {
     /// Model-facing capability id.
-    pub model_tool_name: String,
+    pub model_capability_id: String,
     /// Canonical engine function id.
     pub function_id: FunctionId,
     /// Captured function definition.
     pub function: FunctionDefinition,
-    /// Whether this tool stops the current agent turn.
+    /// Whether this capability stops the current agent turn.
     pub stops_turn: bool,
-    /// Whether this tool is interactive.
+    /// Whether this capability is interactive.
     pub is_interactive: bool,
-    /// How this tool is scheduled relative to other capability invocations in the same turn.
+    /// How this capability is scheduled relative to other capability invocations in the same turn.
     pub execution_mode: ExecutionMode,
 }
 
@@ -47,8 +47,8 @@ pub struct EngineToolTarget {
 pub struct CapabilitySurfacePolicy {
     pub allowed_capabilities: Option<BTreeSet<String>>,
     pub denied_capabilities: BTreeSet<String>,
-    pub expose_interactive_tools: bool,
-    pub remove_spawn_tools_at_max_depth: bool,
+    pub expose_interactive_capabilities: bool,
+    pub remove_spawn_capabilities_at_max_depth: bool,
     pub is_unattended: bool,
     pub subagent_max_depth: u32,
 }
@@ -70,10 +70,14 @@ impl CapabilitySurfacePolicy {
             allowed_capabilities: policy
                 .allowed_capabilities
                 .as_ref()
-                .map(|tools| tools.iter().cloned().collect()),
+                .map(|capabilities| capabilities.iter().cloned().collect()),
             denied_capabilities,
-            expose_interactive_tools: policy.expose_interactive_tools.unwrap_or(false),
-            remove_spawn_tools_at_max_depth: policy.remove_spawn_tools_at_max_depth.unwrap_or(true),
+            expose_interactive_capabilities: policy
+                .expose_interactive_capabilities
+                .unwrap_or(false),
+            remove_spawn_capabilities_at_max_depth: policy
+                .remove_spawn_capabilities_at_max_depth
+                .unwrap_or(true),
             is_unattended,
             subagent_max_depth,
         }
@@ -99,119 +103,125 @@ impl CapabilitySurfacePolicy {
         scopes
     }
 
-    fn allows(&self, target: &EngineToolTarget) -> bool {
+    fn allows(&self, target: &EngineCapabilityTarget) -> bool {
         if let Some(allowed) = &self.allowed_capabilities
-            && !allowed.contains(&target.model_tool_name)
+            && !allowed.contains(&target.model_capability_id)
         {
             return false;
         }
-        if self.denied_capabilities.contains(&target.model_tool_name) {
+        if self
+            .denied_capabilities
+            .contains(&target.model_capability_id)
+        {
             return false;
         }
-        if self.is_unattended && target.is_interactive && !self.expose_interactive_tools {
+        if self.is_unattended && target.is_interactive && !self.expose_interactive_capabilities {
             return false;
         }
         true
     }
 }
 
-/// Tool surface resolved once for a provider request.
+/// ModelCapability surface resolved once for a provider request.
 #[derive(Clone, Debug)]
-pub struct ResolvedToolSurface {
+pub struct ResolvedCapabilitySurface {
     pub catalog_revision: CatalogRevision,
-    pub tools: Vec<Tool>,
-    pub targets_by_name: BTreeMap<String, EngineToolTarget>,
-    pub all_tool_names: Vec<String>,
-    pub turn_stopping_tools: HashSet<String>,
+    pub capabilities: Vec<ModelCapability>,
+    pub targets_by_name: BTreeMap<String, EngineCapabilityTarget>,
+    pub all_model_capability_ids: Vec<String>,
+    pub turn_stopping_capabilities: HashSet<String>,
 }
 
-/// Resolve model-facing tool schemas from the live engine catalog.
-pub(crate) async fn resolve_provider_tools(
+/// Resolve model-facing capability schemas from the live engine catalog.
+pub(crate) async fn resolve_provider_capabilities(
     host: &EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
     provider: Provider,
     context_policy: &ContextPolicy,
     capability_policy: &CapabilitySurfacePolicy,
-) -> Result<ResolvedToolSurface, String> {
-    let targets = resolve_tool_targets(host, session_id, workspace_id).await?;
+) -> Result<ResolvedCapabilitySurface, String> {
+    let targets = resolve_capability_targets(host, session_id, workspace_id).await?;
     let local_filter = context_policy.capability_filter();
-    let mut tools = Vec::new();
+    let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
-    let mut all_tool_names = Vec::new();
-    let mut turn_stopping_tools = HashSet::new();
+    let mut all_model_capability_ids = Vec::new();
+    let mut turn_stopping_capabilities = HashSet::new();
     for target in targets {
         if !capability_policy.allows(&target) {
             continue;
         }
         if let Some(filter) = local_filter.as_ref()
-            && !filter.iter().any(|name| name == &target.model_tool_name)
+            && !filter
+                .iter()
+                .any(|name| name == &target.model_capability_id)
         {
             continue;
         }
-        let tool = if context_policy.is_local() {
-            local_tool_schema(&target.function).unwrap_or_else(|| model_tool_schema(&target))
+        let capability = if context_policy.is_local() {
+            local_capability_schema(&target.function)
+                .unwrap_or_else(|| model_capability_schema(&target))
         } else {
-            model_tool_schema(&target)
+            model_capability_schema(&target)
         };
-        all_tool_names.push(target.model_tool_name.clone());
+        all_model_capability_ids.push(target.model_capability_id.clone());
         if target.stops_turn {
-            let _ = turn_stopping_tools.insert(target.model_tool_name.clone());
+            let _ = turn_stopping_capabilities.insert(target.model_capability_id.clone());
         }
-        let _ = targets_by_name.insert(target.model_tool_name.clone(), target);
-        tools.push(tool);
+        let _ = targets_by_name.insert(target.model_capability_id.clone(), target);
+        capabilities.push(capability);
     }
     tracing::debug!(
         provider = provider.as_str(),
         local = context_policy.is_local(),
-        tool_count = tools.len(),
+        capability_count = capabilities.len(),
         "resolved provider capability primitive surface from engine catalog"
     );
     let catalog_revision = host.catalog_revision().await;
-    Ok(ResolvedToolSurface {
+    Ok(ResolvedCapabilitySurface {
         catalog_revision,
-        tools,
+        capabilities,
         targets_by_name,
-        all_tool_names,
-        turn_stopping_tools,
+        all_model_capability_ids,
+        turn_stopping_capabilities,
     })
 }
 
 /// Resolve the canonical engine function for a model capability invocation.
 /// List model-facing capability ids visible to an agent actor before profile
 /// policy filtering. Used for skill deny-list expansion.
-pub(crate) async fn list_model_tool_names(
+pub(crate) async fn list_model_capability_ids(
     host: &EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    Ok(resolve_tool_targets(host, session_id, workspace_id)
+    Ok(resolve_capability_targets(host, session_id, workspace_id)
         .await?
         .into_iter()
-        .map(|target| target.model_tool_name)
+        .map(|target| target.model_capability_id)
         .collect())
 }
 
-/// List model-facing tool schemas visible to an agent actor before profile
+/// List model-facing capability schemas visible to an agent actor before profile
 /// policy filtering. Context read models use this to mirror the current live
-/// catalog without owning a separate tool list.
-pub(crate) async fn list_model_tools(
+/// catalog without owning a separate capability list.
+pub(crate) async fn list_model_capabilities(
     host: &EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
-) -> Result<Vec<Tool>, String> {
-    Ok(resolve_tool_targets(host, session_id, workspace_id)
+) -> Result<Vec<ModelCapability>, String> {
+    Ok(resolve_capability_targets(host, session_id, workspace_id)
         .await?
         .into_iter()
-        .map(|target| model_tool_schema(&target))
+        .map(|target| model_capability_schema(&target))
         .collect())
 }
 
-async fn resolve_tool_targets(
+async fn resolve_capability_targets(
     host: &EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
-) -> Result<Vec<EngineToolTarget>, String> {
+) -> Result<Vec<EngineCapabilityTarget>, String> {
     let actor = capability_surface_actor(session_id, workspace_id)?;
     let mut functions = host
         .discover(&FunctionQuery {
@@ -224,7 +234,7 @@ async fn resolve_tool_targets(
         (
             function
                 .metadata
-                .get("toolOrder")
+                .get("capabilityOrder")
                 .and_then(Value::as_u64)
                 .unwrap_or(u64::MAX),
             function.id.as_str().to_owned(),
@@ -243,25 +253,25 @@ async fn resolve_tool_targets(
         if function.request_schema.is_none() {
             continue;
         }
-        let Some(model_tool_name) = model_tool_name(&function) else {
+        let Some(model_capability_id) = model_capability_id(&function) else {
             continue;
         };
         if !authority_is_available(&function) {
             continue;
         }
-        if !seen_names.insert(model_tool_name.clone()) {
+        if !seen_names.insert(model_capability_id.clone()) {
             tracing::warn!(
-                model_tool_name,
+                model_capability_id,
                 function_id = %function.id,
                 "duplicate model capability id hidden from provider surface"
             );
             continue;
         }
-        targets.push(EngineToolTarget {
+        targets.push(EngineCapabilityTarget {
             stops_turn: metadata_bool(&function, "stopsTurn").unwrap_or(false),
             is_interactive: metadata_bool(&function, "isInteractive").unwrap_or(false),
             execution_mode: execution_mode(&function),
-            model_tool_name,
+            model_capability_id,
             function_id: function.id.clone(),
             function,
         });
@@ -305,10 +315,10 @@ fn is_capability_primitive(function: &FunctionDefinition) -> bool {
         .unwrap_or(false)
 }
 
-fn model_tool_name(function: &FunctionDefinition) -> Option<String> {
+fn model_capability_id(function: &FunctionDefinition) -> Option<String> {
     function
         .metadata
-        .get("modelToolName")
+        .get("modelPrimitiveName")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
 }
@@ -320,7 +330,7 @@ fn metadata_bool(function: &FunctionDefinition, key: &str) -> Option<bool> {
 fn execution_mode(function: &FunctionDefinition) -> ExecutionMode {
     let Some(mode) = function
         .metadata
-        .get("toolExecutionMode")
+        .get("capabilityExecutionMode")
         .and_then(Value::as_object)
     else {
         return ExecutionMode::Parallel;
@@ -336,17 +346,17 @@ fn execution_mode(function: &FunctionDefinition) -> ExecutionMode {
     }
 }
 
-fn model_tool_schema(target: &EngineToolTarget) -> Tool {
-    if let Some(tool) = target
+fn model_capability_schema(target: &EngineCapabilityTarget) -> ModelCapability {
+    if let Some(capability) = target
         .function
         .metadata
-        .get("toolSchema")
-        .and_then(|value| serde_json::from_value::<Tool>(value.clone()).ok())
+        .get("capabilitySchema")
+        .and_then(|value| serde_json::from_value::<ModelCapability>(value.clone()).ok())
     {
-        return tool;
+        return capability;
     }
-    Tool {
-        name: target.model_tool_name.clone(),
+    ModelCapability {
+        name: target.model_capability_id.clone(),
         description: target.function.description.clone(),
         parameters: parameter_schema_from_value(
             target
@@ -358,15 +368,15 @@ fn model_tool_schema(target: &EngineToolTarget) -> Tool {
     }
 }
 
-fn local_tool_schema(function: &FunctionDefinition) -> Option<Tool> {
+fn local_capability_schema(function: &FunctionDefinition) -> Option<ModelCapability> {
     function
         .metadata
-        .get("localToolSchema")
-        .and_then(|value| serde_json::from_value::<Tool>(value.clone()).ok())
+        .get("localCapabilitySchema")
+        .and_then(|value| serde_json::from_value::<ModelCapability>(value.clone()).ok())
 }
 
-fn parameter_schema_from_value(value: Value) -> ToolParameterSchema {
-    serde_json::from_value(value).unwrap_or_else(|_| ToolParameterSchema {
+fn parameter_schema_from_value(value: Value) -> CapabilityParameterSchema {
+    serde_json::from_value(value).unwrap_or_else(|_| CapabilityParameterSchema {
         schema_type: "object".to_owned(),
         properties: None,
         required: None,
@@ -433,7 +443,7 @@ mod tests {
             EffectClass::PureRead,
         );
         old_builtin_like_function.metadata =
-            serde_json::json!({"modelToolName": "old_filesystem_read"});
+            serde_json::json!({"modelPrimitiveName": "old_filesystem_read"});
         host.register_function_for_setup(old_builtin_like_function, None, false)
             .expect("nonprimitive function");
 
@@ -443,7 +453,7 @@ mod tests {
             None,
             false,
         );
-        let surface = resolve_provider_tools(
+        let surface = resolve_provider_capabilities(
             &host,
             "session-a",
             None,
@@ -453,6 +463,9 @@ mod tests {
         )
         .await
         .expect("surface");
-        assert_eq!(surface.all_tool_names, ["search", "inspect", "execute"]);
+        assert_eq!(
+            surface.all_model_capability_ids,
+            ["search", "inspect", "execute"]
+        );
     }
 }

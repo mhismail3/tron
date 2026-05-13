@@ -6,7 +6,7 @@ protocol EngineApprovalContext: LoggingContext {
     /// EngineApproval state container
     var engineApprovalState: EngineApprovalState { get }
 
-    /// Messages array for updating tool status
+    /// Messages array for updating capability status
     var messages: [ChatMessage] { get set }
 
     /// engine client for server communication
@@ -28,7 +28,7 @@ final class EngineApprovalCoordinator {
     // MARK: - Sheet Management
 
     /// Open the engine approval sheet.
-    func openSheet(for data: EngineApprovalToolData, context: EngineApprovalContext) {
+    func openSheet(for data: EngineApprovalData, context: EngineApprovalContext) {
         // Allow opening for pending (to decide) or approved/denied (to view)
         guard data.status == .pending || data.status == .approved || data.status == .denied else {
             context.logInfo("Not opening EngineApproval sheet - status is \(data.status)")
@@ -155,12 +155,12 @@ final class EngineApprovalCoordinator {
         context: EngineApprovalContext
     ) {
         if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: invocationId, in: context.messages) {
-            if case .engineApproval(var toolData) = context.messages[index].content {
-                toolData.status = decision == .approved ? .approved : .denied
-                toolData.decision = decision
-                toolData.note = note
-                toolData.result = result
-                context.messages[index].content = .engineApproval(toolData)
+            if case .engineApproval(var capabilityData) = context.messages[index].content {
+                capabilityData.status = decision == .approved ? .approved : .denied
+                capabilityData.decision = decision
+                capabilityData.note = note
+                capabilityData.result = result
+                context.messages[index].content = .engineApproval(capabilityData)
             }
         }
     }

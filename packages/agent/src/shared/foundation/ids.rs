@@ -110,7 +110,7 @@ branded_id! {
 
 branded_id! {
     /// Unique identifier for a capability invocation within a turn.
-    ToolCallId
+    CapabilityInvocationDraftId
 }
 
 branded_id! {

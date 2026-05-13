@@ -5,7 +5,7 @@
 //! LLM-initiated `agent::spawn_subagent` capability executions).
 //!
 //! Each submodule owns a single, named subagent: its system prompt, the
-//! tool allowlist, and the wire-up helper that shapes a
+//! capability allowlist, and the wire-up helper that shapes a
 //! [`SubsessionConfig`](crate::domains::agent::runner::orchestrator::subagent_manager::SubsessionConfig)
 //! and hands it to the `SubagentManager`.
 //!

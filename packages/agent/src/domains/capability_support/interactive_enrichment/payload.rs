@@ -5,14 +5,17 @@ use serde_json::json;
 /// Derive the structured fields that should be back-filled into the
 /// `message.user` payload from the already-parsed capability.invocation.started fields.
 pub(super) fn build_user_message_metadata(
-    tool_name: &str,
-    tool_fields: &Map<String, Value>,
+    model_capability_id: &str,
+    capability_fields: &Map<String, Value>,
 ) -> Map<String, Value> {
     let mut out = Map::new();
-    match tool_name {
+    match model_capability_id {
         "agent::ask_user" => {
             let _ = out.insert("messageKind".into(), json!("answered_questions"));
-            if let Some(parsed) = tool_fields.get("parsedAnswers").and_then(Value::as_array) {
+            if let Some(parsed) = capability_fields
+                .get("parsedAnswers")
+                .and_then(Value::as_array)
+            {
                 let _ = out.insert("answerCount".into(), json!(parsed.len()));
             }
         }

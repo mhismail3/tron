@@ -2232,7 +2232,7 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing tools are `search`, `inspect`, and `execute`. Use capability ids below with `execute`; inspect mutating or medium/high-risk capabilities first.\n\n");
+    out.push_str("The model-facing capabilities are `search`, `inspect`, and `execute`. Use capability ids below with `execute`; inspect mutating or medium/high-risk capabilities first.\n\n");
     for entry in entries.drain(..) {
         let mut line = format!(
             "- `{}` via `{}`: {} effect={} risk={} trust={}",

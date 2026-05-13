@@ -1,20 +1,21 @@
-//! Tool definition and result types.
+//! Model-facing capability primitive definitions and result types.
 //!
-//! Defines the schema for tools that the agent can invoke, plus the result
-//! type returned by capability invocation.
+//! Providers still use their native "tool/function call" vocabulary at the
+//! provider-protocol boundary, but the shared runtime speaks model capabilities
+//! and canonical capability invocation results.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared::content::ToolResultContent;
+use crate::shared::content::CapabilityResultContent;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tool schema
+// ModelCapability schema
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// JSON Schema-compatible parameter definition for a tool.
+/// JSON Schema-compatible parameter definition for a model capability.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ToolParameterSchema {
+pub struct CapabilityParameterSchema {
     /// Top-level JSON Schema type.
     #[serde(rename = "type")]
     pub schema_type: String,
@@ -32,15 +33,15 @@ pub struct ToolParameterSchema {
     pub extra: serde_json::Map<String, Value>,
 }
 
-/// A tool definition that can be sent to the LLM.
+/// A model-facing capability definition that can be sent to the LLM.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Tool {
-    /// Tool name (unique identifier).
+pub struct ModelCapability {
+    /// Capability name (unique identifier).
     pub name: String,
     /// Human-readable description.
     pub description: String,
-    /// JSON Schema for the tool's parameters.
-    pub parameters: ToolParameterSchema,
+    /// JSON Schema for the capability's parameters.
+    pub parameters: CapabilityParameterSchema,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,34 +51,34 @@ pub struct Tool {
 /// Content in a capability result — either a plain string or structured content blocks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum ToolResultBody {
+pub enum CapabilityResultBody {
     /// Plain text result.
     Text(String),
     /// Structured content blocks (text + images).
-    Blocks(Vec<ToolResultContent>),
+    Blocks(Vec<CapabilityResultContent>),
 }
 
 /// Result of a capability invocation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityResult {
-    /// The tool output content.
-    pub content: ToolResultBody,
-    /// Optional structured details (tool-specific metadata).
+    /// Capability output content.
+    pub content: CapabilityResultBody,
+    /// Optional structured details (capability-specific metadata).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
     /// Whether the execution resulted in an error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
-    /// If true, stops the agent turn loop immediately after this tool executes.
+    /// If true, stops the agent turn loop immediately after this invocation completes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_turn: Option<bool>,
 }
 
-/// Tool category for grouping.
+/// ModelCapability category for grouping.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ToolCategory {
+pub enum CapabilityCategory {
     /// File system operations.
     Filesystem,
     /// Shell/command execution.
@@ -98,7 +99,7 @@ pub enum ToolCategory {
 #[must_use]
 pub fn text_result(text: impl Into<String>, is_error: bool) -> CapabilityResult {
     CapabilityResult {
-        content: ToolResultBody::Blocks(vec![ToolResultContent::text(text)]),
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(text)]),
         details: None,
         is_error: if is_error { Some(true) } else { None },
         stop_turn: None,
@@ -118,13 +119,13 @@ pub fn image_result(
     mime_type: impl Into<String>,
     caption: Option<&str>,
 ) -> CapabilityResult {
-    let mut blocks: Vec<ToolResultContent> = Vec::new();
+    let mut blocks: Vec<CapabilityResultContent> = Vec::new();
     if let Some(cap) = caption {
-        blocks.push(ToolResultContent::text(cap));
+        blocks.push(CapabilityResultContent::text(cap));
     }
-    blocks.push(ToolResultContent::image(data, mime_type));
+    blocks.push(CapabilityResultContent::image(data, mime_type));
     CapabilityResult {
-        content: ToolResultBody::Blocks(blocks),
+        content: CapabilityResultBody::Blocks(blocks),
         details: None,
         is_error: None,
         stop_turn: None,
@@ -141,11 +142,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn tool_serde_roundtrip() {
-        let tool = Tool {
+    fn capability_serde_roundtrip() {
+        let capability = ModelCapability {
             name: "execute".into(),
             description: "Execute a shell command".into(),
-            parameters: ToolParameterSchema {
+            parameters: CapabilityParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
                     let mut m = serde_json::Map::new();
@@ -160,9 +161,9 @@ mod tests {
                 extra: serde_json::Map::new(),
             },
         };
-        let json = serde_json::to_value(&tool).unwrap();
-        let back: Tool = serde_json::from_value(json).unwrap();
-        assert_eq!(tool, back);
+        let json = serde_json::to_value(&capability).unwrap();
+        let back: ModelCapability = serde_json::from_value(json).unwrap();
+        assert_eq!(capability, back);
     }
 
     #[test]
@@ -188,10 +189,10 @@ mod tests {
     fn image_result_without_caption() {
         let r = image_result("base64data", "image/png", None);
         match &r.content {
-            ToolResultBody::Blocks(blocks) => {
+            CapabilityResultBody::Blocks(blocks) => {
                 assert_eq!(blocks.len(), 1);
             }
-            ToolResultBody::Text(_) => panic!("expected blocks"),
+            CapabilityResultBody::Text(_) => panic!("expected blocks"),
         }
     }
 
@@ -199,17 +200,17 @@ mod tests {
     fn image_result_with_caption() {
         let r = image_result("base64data", "image/png", Some("Screenshot"));
         match &r.content {
-            ToolResultBody::Blocks(blocks) => {
+            CapabilityResultBody::Blocks(blocks) => {
                 assert_eq!(blocks.len(), 2);
             }
-            ToolResultBody::Text(_) => panic!("expected blocks"),
+            CapabilityResultBody::Text(_) => panic!("expected blocks"),
         }
     }
 
     #[test]
-    fn tool_result_serde_text_body() {
+    fn capability_result_serde_text_body() {
         let r = CapabilityResult {
-            content: ToolResultBody::Text("plain output".into()),
+            content: CapabilityResultBody::Text("plain output".into()),
             details: None,
             is_error: None,
             stop_turn: None,
@@ -221,9 +222,9 @@ mod tests {
     }
 
     #[test]
-    fn tool_result_serde_with_details() {
+    fn capability_result_serde_with_details() {
         let r = CapabilityResult {
-            content: ToolResultBody::Text("ok".into()),
+            content: CapabilityResultBody::Text("ok".into()),
             details: Some(json!({"bytes_written": 42})),
             is_error: None,
             stop_turn: Some(true),
@@ -234,13 +235,13 @@ mod tests {
     }
 
     #[test]
-    fn tool_category_serde() {
+    fn capability_category_serde() {
         assert_eq!(
-            serde_json::to_string(&ToolCategory::Filesystem).unwrap(),
+            serde_json::to_string(&CapabilityCategory::Filesystem).unwrap(),
             "\"filesystem\""
         );
         assert_eq!(
-            serde_json::to_string(&ToolCategory::Shell).unwrap(),
+            serde_json::to_string(&CapabilityCategory::Shell).unwrap(),
             "\"shell\""
         );
     }

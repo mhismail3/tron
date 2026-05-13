@@ -550,7 +550,7 @@ fn stream_turn_end_without_token_usage_no_counter_change() {
         .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
-    // stream.turn_end with no tokenUsage (e.g. tool-only turn)
+    // stream.turn_end with no tokenUsage (e.g. capability-only turn)
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -590,7 +590,7 @@ fn events_without_token_usage_dont_affect_counters() {
         .append(&AppendOptions {
             session_id: &cr.session.id,
             event_type: EventType::CapabilityInvocationCompleted,
-            payload: serde_json::json!({"toolCallId": "t1", "content": "ok"}),
+            payload: serde_json::json!({"invocationId": "t1", "content": "ok"}),
             parent_id: None,
             sequence: None,
         })
@@ -1258,7 +1258,7 @@ fn agentic_loop() {
         .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
-    // Turn 1: user → assistant(tool_use) → turn_end → capability.invocation.completed → assistant(end_turn) → turn_end
+    // Turn 1: user → assistant(capability_invocation) → turn_end → capability.invocation.completed → assistant(end_turn) → turn_end
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -1274,7 +1274,7 @@ fn agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "tool_use", "id": "tool_1", "name": "process::run", "arguments": {"command": "ls"}}],
+                "content": [{"type": "capability_invocation", "id": "capability_1", "name": "process::run", "arguments": {"command": "ls"}}],
                 "turn": 1,
                 "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
             }),
@@ -1300,7 +1300,7 @@ fn agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::CapabilityInvocationCompleted,
             payload: serde_json::json!({
-                "toolCallId": "tool_1",
+                "invocationId": "capability_1",
                 "content": "file1.txt\nfile2.txt",
                 "turn": 1
             }),
@@ -1890,7 +1890,7 @@ fn get_state_at_head_with_agentic_loop() {
         .append(&AppendOptions {
             session_id: &cr.session.id,
             event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "Use a tool"}),
+            payload: serde_json::json!({"content": "Use a capability"}),
             parent_id: None,
             sequence: None,
         })
@@ -1900,7 +1900,7 @@ fn get_state_at_head_with_agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "tool_use", "id": "c1", "name": "process::run", "arguments": {}}],
+                "content": [{"type": "capability_invocation", "id": "c1", "name": "process::run", "arguments": {}}],
                 "turn": 1,
             }),
             parent_id: None,
@@ -1911,7 +1911,7 @@ fn get_state_at_head_with_agentic_loop() {
         .append(&AppendOptions {
             session_id: &cr.session.id,
             event_type: EventType::CapabilityInvocationCompleted,
-            payload: serde_json::json!({"toolCallId": "c1", "content": "output", "isError": false}),
+            payload: serde_json::json!({"invocationId": "c1", "content": "output", "isError": false}),
             parent_id: None,
             sequence: None,
         })
@@ -1930,11 +1930,14 @@ fn get_state_at_head_with_agentic_loop() {
         .unwrap();
 
     let state = store.get_state_at_head(&cr.session.id).unwrap();
-    // user, assistant, toolResult, assistant
+    // user, assistant, capabilityResult, assistant
     assert_eq!(state.messages_with_event_ids.len(), 4);
     assert_eq!(state.messages_with_event_ids[0].message.role, "user");
     assert_eq!(state.messages_with_event_ids[1].message.role, "assistant");
-    assert_eq!(state.messages_with_event_ids[2].message.role, "toolResult");
+    assert_eq!(
+        state.messages_with_event_ids[2].message.role,
+        "capabilityResult"
+    );
     assert_eq!(state.messages_with_event_ids[3].message.role, "assistant");
 }
 
@@ -2006,8 +2009,8 @@ fn event_rows_to_session_events_converts_correctly() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        tool_name: None,
-        tool_call_id: None,
+        model_primitive_name: None,
+        invocation_id: None,
         turn: None,
         input_tokens: None,
         output_tokens: None,
@@ -2043,8 +2046,8 @@ fn event_rows_to_session_events_handles_invalid_json() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        tool_name: None,
-        tool_call_id: None,
+        model_primitive_name: None,
+        invocation_id: None,
         turn: None,
         input_tokens: None,
         output_tokens: None,
@@ -2081,8 +2084,8 @@ fn event_rows_to_session_events_skips_unknown_event_types() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        tool_name: None,
-        tool_call_id: None,
+        model_primitive_name: None,
+        invocation_id: None,
         turn: None,
         input_tokens: None,
         output_tokens: None,
@@ -2108,8 +2111,8 @@ fn event_rows_to_session_events_skips_unknown_event_types() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        tool_name: None,
-        tool_call_id: None,
+        model_primitive_name: None,
+        invocation_id: None,
         turn: None,
         input_tokens: None,
         output_tokens: None,
@@ -2574,7 +2577,7 @@ fn get_activity_summary_thinking_block() {
 }
 
 #[test]
-fn get_activity_summary_tool_use_with_result() {
+fn get_activity_summary_capability_invocation_with_result() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
@@ -2584,7 +2587,7 @@ fn get_activity_summary_tool_use_with_result() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "tool_use", "id": "call_1", "name": "filesystem::read_file", "input": {"path": "/foo.rs"}}
+                {"type": "capability_invocation", "id": "call_1", "name": "filesystem::read_file", "input": {"path": "/foo.rs"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -2594,7 +2597,7 @@ fn get_activity_summary_tool_use_with_result() {
         .append(&AppendOptions {
             session_id: &cr.session.id,
             event_type: EventType::CapabilityInvocationCompleted,
-            payload: serde_json::json!({"toolCallId": "call_1", "isError": false, "duration": 150}),
+            payload: serde_json::json!({"invocationId": "call_1", "isError": false, "duration": 150}),
             parent_id: None,
             sequence: None,
         })
@@ -2604,17 +2607,20 @@ fn get_activity_summary_tool_use_with_result() {
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].kind, "tool");
-    assert_eq!(lines[0].tool_name.as_deref(), Some("filesystem::read_file"));
+    assert_eq!(lines[0].kind, "capability");
+    assert_eq!(
+        lines[0].model_primitive_name.as_deref(),
+        Some("filesystem::read_file")
+    );
     assert_eq!(lines[0].duration_ms, Some(150));
     assert_eq!(lines[0].is_error, Some(false));
-    assert!(lines[0].tool_args.is_some());
-    let args = lines[0].tool_args.as_ref().unwrap();
+    assert!(lines[0].capability_args.is_some());
+    let args = lines[0].capability_args.as_ref().unwrap();
     assert_eq!(args["path"], "/foo.rs");
 }
 
 #[test]
-fn get_activity_summary_tool_use_no_result() {
+fn get_activity_summary_capability_invocation_no_result() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
@@ -2624,7 +2630,7 @@ fn get_activity_summary_tool_use_no_result() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "tool_use", "id": "call_99", "name": "process::run", "input": {"command": "ls"}}
+                {"type": "capability_invocation", "id": "call_99", "name": "process::run", "input": {"command": "ls"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -2635,8 +2641,11 @@ fn get_activity_summary_tool_use_no_result() {
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].kind, "tool");
-    assert_eq!(lines[0].tool_name.as_deref(), Some("process::run"));
+    assert_eq!(lines[0].kind, "capability");
+    assert_eq!(
+        lines[0].model_primitive_name.as_deref(),
+        Some("process::run")
+    );
     assert!(lines[0].duration_ms.is_none());
     assert!(lines[0].is_error.is_none());
 }
@@ -2652,8 +2661,8 @@ fn get_activity_summary_spawn_subagent_skipped() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "tool_use", "id": "call_1", "name": "agent::spawn_subagent", "input": {"task": "do stuff"}},
-                {"type": "tool_use", "id": "call_2", "name": "filesystem::read_file", "input": {"path": "/bar.rs"}}
+                {"type": "capability_invocation", "id": "call_1", "name": "agent::spawn_subagent", "input": {"task": "do stuff"}},
+                {"type": "capability_invocation", "id": "call_2", "name": "filesystem::read_file", "input": {"path": "/bar.rs"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -2664,7 +2673,10 @@ fn get_activity_summary_spawn_subagent_skipped() {
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].tool_name.as_deref(), Some("filesystem::read_file"));
+    assert_eq!(
+        lines[0].model_primitive_name.as_deref(),
+        Some("filesystem::read_file")
+    );
 }
 
 #[test]
@@ -2674,7 +2686,7 @@ fn get_activity_summary_subagent_lifecycle() {
         .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
-    // Spawn a user-visible subagent (has toolCallId in payload)
+    // Spawn a user-visible subagent (has invocationId in payload)
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -2682,7 +2694,7 @@ fn get_activity_summary_subagent_lifecycle() {
             payload: serde_json::json!({
                 "subagentSessionId": "sub1",
                 "task": "Review code",
-                "toolCallId": "tc_1",
+                "invocationId": "tc_1",
                 "spawnType": "blocking",
                 "model": "claude-opus-4-6",
                 "workingDirectory": "/tmp"
@@ -2727,7 +2739,7 @@ fn get_activity_summary_hook_subagent_filtered() {
         .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
-    // Hook subagent: toolCallId is null in payload → tool_call_id IS NULL on EventRow
+    // Hook subagent: invocationId is null in payload → invocation_id IS NULL on EventRow
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -2810,7 +2822,7 @@ fn get_activity_summary_interleaved_content() {
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
                 {"type": "text", "text": "Let me read the file"},
-                {"type": "tool_use", "id": "c1", "name": "filesystem::read_file", "input": {"path": "a.rs"}},
+                {"type": "capability_invocation", "id": "c1", "name": "filesystem::read_file", "input": {"path": "a.rs"}},
                 {"type": "text", "text": "Now I see the issue"}
             ]}),
             parent_id: None,
@@ -2824,8 +2836,11 @@ fn get_activity_summary_interleaved_content() {
     assert_eq!(lines.len(), 3);
     assert_eq!(lines[0].kind, "text");
     assert_eq!(lines[0].text.as_deref(), Some("Let me read the file"));
-    assert_eq!(lines[1].kind, "tool");
-    assert_eq!(lines[1].tool_name.as_deref(), Some("filesystem::read_file"));
+    assert_eq!(lines[1].kind, "capability");
+    assert_eq!(
+        lines[1].model_primitive_name.as_deref(),
+        Some("filesystem::read_file")
+    );
     assert_eq!(lines[2].kind, "text");
     assert_eq!(lines[2].text.as_deref(), Some("Now I see the issue"));
 }

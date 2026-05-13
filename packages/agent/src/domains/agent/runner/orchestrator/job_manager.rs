@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{
     JobInfo, JobKind, JobManagerOps, JobResult, JobState, ManagedProcessResult, ProcessManagerOps,
     SubagentOps, WaitMode,
@@ -101,7 +101,7 @@ impl JobManagerOps for JobManager {
         ids: &[String],
         mode: WaitMode,
         timeout_ms: u64,
-    ) -> Result<Vec<JobResult>, ToolError> {
+    ) -> Result<Vec<JobResult>, CapabilityExecutionError> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -132,7 +132,7 @@ impl JobManagerOps for JobManager {
         }
     }
 
-    fn cancel_job(&self, id: &str, user_initiated: bool) -> Result<(), ToolError> {
+    fn cancel_job(&self, id: &str, user_initiated: bool) -> Result<(), CapabilityExecutionError> {
         if Self::is_process_id(id) {
             self.process_manager.cancel_process(id, user_initiated)
         } else {
@@ -148,7 +148,7 @@ impl JobManager {
         agent_ids: &[&str],
         deadline: Instant,
         timeout_ms: u64,
-    ) -> Result<Vec<JobResult>, ToolError> {
+    ) -> Result<Vec<JobResult>, CapabilityExecutionError> {
         let mut results = Vec::new();
 
         // Wait for processes.
@@ -173,7 +173,7 @@ impl JobManager {
                 .await
             {
                 Ok(result) => results.push(Self::process_result_to_job(&result)),
-                Err(ToolError::Timeout { .. }) => {
+                Err(CapabilityExecutionError::Timeout { .. }) => {
                     results.push(JobResult {
                         id: pid.to_owned(),
                         kind: JobKind::Process,
@@ -184,7 +184,7 @@ impl JobManager {
                         details: None,
                     });
                 }
-                Err(ToolError::Validation { .. }) => {
+                Err(CapabilityExecutionError::Validation { .. }) => {
                     // Not found — include as error result rather than failing the whole wait.
                     results.push(JobResult {
                         id: pid.to_owned(),
@@ -230,7 +230,7 @@ impl JobManager {
                         });
                     }
                 }
-                Err(ToolError::Timeout { .. }) => {
+                Err(CapabilityExecutionError::Timeout { .. }) => {
                     // Add "still running" entries for agents that didn't complete.
                     for &aid in agent_ids {
                         let already_done = results.iter().any(|r| r.id == aid);
@@ -247,7 +247,7 @@ impl JobManager {
                         }
                     }
                 }
-                Err(ToolError::Validation { .. }) => {
+                Err(CapabilityExecutionError::Validation { .. }) => {
                     for &aid in agent_ids {
                         results.push(JobResult {
                             id: aid.to_owned(),
@@ -273,7 +273,7 @@ impl JobManager {
         agent_ids: &[&str],
         deadline: Instant,
         timeout_ms: u64,
-    ) -> Result<Vec<JobResult>, ToolError> {
+    ) -> Result<Vec<JobResult>, CapabilityExecutionError> {
         // Check if any processes are already completed.
         for &pid in proc_ids {
             if let Some(result) = self.process_manager.get_result(pid) {
@@ -283,7 +283,7 @@ impl JobManager {
 
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(ToolError::Timeout { timeout_ms });
+            return Err(CapabilityExecutionError::Timeout { timeout_ms });
         }
 
         // Race all process waits and agent waits.
@@ -337,10 +337,10 @@ impl JobManager {
 
         match tokio::time::timeout(remaining, result_rx.recv()).await {
             Ok(Some(result)) => Ok(vec![result]),
-            Ok(None) => Err(ToolError::Internal {
+            Ok(None) => Err(CapabilityExecutionError::Internal {
                 message: "All wait tasks completed without result".into(),
             }),
-            Err(_) => Err(ToolError::Timeout { timeout_ms }),
+            Err(_) => Err(CapabilityExecutionError::Timeout { timeout_ms }),
         }
     }
 }
@@ -387,16 +387,20 @@ mod tests {
         async fn spawn_managed(
             &self,
             _session_id: &str,
-            _tool_call_id: &str,
+            _invocation_id: &str,
             _config: ManagedProcessConfig,
             _task: Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
-        ) -> Result<ManagedProcessHandle, ToolError> {
+        ) -> Result<ManagedProcessHandle, CapabilityExecutionError> {
             unimplemented!()
         }
-        fn promote_to_background(&self, _process_id: &str) -> Result<(), ToolError> {
+        fn promote_to_background(&self, _process_id: &str) -> Result<(), CapabilityExecutionError> {
             unimplemented!()
         }
-        fn cancel_process(&self, process_id: &str, _user_initiated: bool) -> Result<(), ToolError> {
+        fn cancel_process(
+            &self,
+            process_id: &str,
+            _user_initiated: bool,
+        ) -> Result<(), CapabilityExecutionError> {
             if self.results.lock().unwrap().contains_key(process_id)
                 || self
                     .processes
@@ -407,7 +411,7 @@ mod tests {
             {
                 Ok(())
             } else {
-                Err(ToolError::Validation {
+                Err(CapabilityExecutionError::Validation {
                     message: format!("Process not found: {process_id}"),
                 })
             }
@@ -433,13 +437,13 @@ mod tests {
             &self,
             process_id: &str,
             _timeout_ms: u64,
-        ) -> Result<ManagedProcessResult, ToolError> {
+        ) -> Result<ManagedProcessResult, CapabilityExecutionError> {
             self.results
                 .lock()
                 .unwrap()
                 .get(process_id)
                 .cloned()
-                .ok_or_else(|| ToolError::Validation {
+                .ok_or_else(|| CapabilityExecutionError::Validation {
                     message: format!("Process not found: {process_id}"),
                 })
         }
@@ -473,7 +477,7 @@ mod tests {
                 .collect()
         }
 
-        fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError> {
+        fn cancel_subagent(&self, session_id: &str) -> Result<(), CapabilityExecutionError> {
             if self
                 .agents
                 .lock()
@@ -483,7 +487,7 @@ mod tests {
             {
                 Ok(())
             } else {
-                Err(ToolError::Validation {
+                Err(CapabilityExecutionError::Validation {
                     message: format!("Subagent not found: {session_id}"),
                 })
             }
@@ -494,14 +498,14 @@ mod tests {
             session_ids: &[String],
             _mode: WaitMode,
             _timeout_ms: u64,
-        ) -> Result<Vec<SubagentResult>, ToolError> {
+        ) -> Result<Vec<SubagentResult>, CapabilityExecutionError> {
             let results = self.results.lock().unwrap();
             let mut out = Vec::new();
             for sid in session_ids {
                 if let Some(r) = results.get(sid) {
                     out.push(r.clone());
                 } else {
-                    return Err(ToolError::Validation {
+                    return Err(CapabilityExecutionError::Validation {
                         message: format!("Unknown subagent session: {sid}"),
                     });
                 }
@@ -522,7 +526,7 @@ mod tests {
             state: state.into(),
             elapsed_ms: 1000,
             session_id: session.into(),
-            tool_call_id: "tc1".into(),
+            invocation_id: "tc1".into(),
         }
     }
 

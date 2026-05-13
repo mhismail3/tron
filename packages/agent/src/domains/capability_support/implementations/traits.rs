@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Execution mode
@@ -71,7 +71,7 @@ pub struct SubagentConfig {
     pub current_depth: u32,
     /// Model call ID that triggered the spawn (for iOS event correlation).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub invocation_id: Option<String>,
 }
 
 /// Subagent execution mode.
@@ -196,8 +196,8 @@ pub enum ProcessKind {
     Shell,
     /// Display screen capture stream.
     DisplayStream,
-    /// Generic long-running tool operation.
-    ToolOperation,
+    /// Generic long-running capability operation.
+    CapabilityOperation,
 }
 
 /// Lifecycle state of a managed process.
@@ -293,7 +293,7 @@ pub struct ProcessInfo {
     /// Session that owns this process.
     pub session_id: String,
     /// Capability invocation that spawned this process.
-    pub tool_call_id: String,
+    pub invocation_id: String,
 }
 
 /// Managed process execution for shell commands, streams, and long-running ops.
@@ -305,18 +305,22 @@ pub trait ProcessManagerOps: Send + Sync {
     async fn spawn_managed(
         &self,
         session_id: &str,
-        tool_call_id: &str,
+        invocation_id: &str,
         config: ManagedProcessConfig,
         task: std::pin::Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
-    ) -> Result<ManagedProcessHandle, ToolError>;
+    ) -> Result<ManagedProcessHandle, CapabilityExecutionError>;
 
     /// Promote a foreground process to background. Unblocks the awaiting capability invocation.
-    fn promote_to_background(&self, process_id: &str) -> Result<(), ToolError>;
+    fn promote_to_background(&self, process_id: &str) -> Result<(), CapabilityExecutionError>;
 
     /// Cancel a running process (any state).
     /// When `user_initiated` is true, the result's `user_cancelled` flag is set
-    /// so tools can produce appropriate messages (e.g., "Do not retry").
-    fn cancel_process(&self, process_id: &str, user_initiated: bool) -> Result<(), ToolError>;
+    /// so capabilities can produce appropriate messages (e.g., "Do not retry").
+    fn cancel_process(
+        &self,
+        process_id: &str,
+        user_initiated: bool,
+    ) -> Result<(), CapabilityExecutionError>;
 
     /// List processes for a session (active + recently completed).
     fn list_processes(&self, session_id: &str) -> Vec<ProcessInfo>;
@@ -336,12 +340,12 @@ pub trait ProcessManagerOps: Send + Sync {
     /// Wait for a specific process to complete, with timeout.
     ///
     /// Returns immediately if the process has already completed.
-    /// Returns `ToolError::Timeout` if the process doesn't complete within `timeout_ms`.
+    /// Returns `CapabilityExecutionError::Timeout` if the process doesn't complete within `timeout_ms`.
     async fn wait_for_process(
         &self,
         process_id: &str,
         timeout_ms: u64,
-    ) -> Result<ManagedProcessResult, ToolError>;
+    ) -> Result<ManagedProcessResult, CapabilityExecutionError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -416,7 +420,7 @@ pub trait ProcessRunner: Send + Sync {
         &self,
         command: &str,
         opts: &ProcessOptions,
-    ) -> Result<ProcessOutput, ToolError>;
+    ) -> Result<ProcessOutput, CapabilityExecutionError>;
 }
 
 /// Result from content summarization.
@@ -436,21 +440,24 @@ pub trait ContentSummarizer: Send + Sync {
         &self,
         task: &str,
         parent_session_id: &str,
-    ) -> Result<SummarizerResult, ToolError>;
+    ) -> Result<SummarizerResult, CapabilityExecutionError>;
 }
 
 /// Subagent spawning support.
 #[async_trait]
 pub trait SubagentSpawner: Send + Sync {
     /// Spawn a new subagent.
-    async fn spawn(&self, config: SubagentConfig) -> Result<SubagentHandle, ToolError>;
+    async fn spawn(
+        &self,
+        config: SubagentConfig,
+    ) -> Result<SubagentHandle, CapabilityExecutionError>;
     /// Wait for one or more subagents to complete.
     async fn wait_for_agents(
         &self,
         session_ids: &[String],
         mode: WaitMode,
         timeout_ms: u64,
-    ) -> Result<Vec<SubagentResult>, ToolError>;
+    ) -> Result<Vec<SubagentResult>, CapabilityExecutionError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -535,7 +542,7 @@ pub trait SubagentOps: Send + Sync {
     fn list_active_jobs(&self, parent_session_id: &str) -> Vec<JobInfo>;
 
     /// Cancel a specific subagent by session ID.
-    fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError>;
+    fn cancel_subagent(&self, session_id: &str) -> Result<(), CapabilityExecutionError>;
 
     /// Wait for one or more subagents to complete.
     async fn wait_for_agents(
@@ -543,7 +550,7 @@ pub trait SubagentOps: Send + Sync {
         session_ids: &[String],
         mode: WaitMode,
         timeout_ms: u64,
-    ) -> Result<Vec<SubagentResult>, ToolError>;
+    ) -> Result<Vec<SubagentResult>, CapabilityExecutionError>;
 
     /// Get result of a completed subagent (None if still running or not found).
     fn get_subagent_result(&self, session_id: &str) -> Option<SubagentResult>;
@@ -568,12 +575,12 @@ pub trait JobManagerOps: Send + Sync {
         ids: &[String],
         mode: WaitMode,
         timeout_ms: u64,
-    ) -> Result<Vec<JobResult>, ToolError>;
+    ) -> Result<Vec<JobResult>, CapabilityExecutionError>;
 
     /// Cancel a job by ID (auto-detects process vs agent).
     /// `user_initiated` marks the cancellation as coming from the iOS user,
-    /// which sets `user_cancelled` on the result so tools don't retry.
-    fn cancel_job(&self, id: &str, user_initiated: bool) -> Result<(), ToolError>;
+    /// which sets `user_cancelled` on the result so capabilities do not retry.
+    fn cancel_job(&self, id: &str, user_initiated: bool) -> Result<(), CapabilityExecutionError>;
 }
 
 /// iOS app notifications (`NotifyApp`).
@@ -583,7 +590,7 @@ pub trait NotifyDelegate: Send + Sync {
     async fn send_notification(
         &self,
         notification: &Notification,
-    ) -> Result<NotifyResult, ToolError>;
+    ) -> Result<NotifyResult, CapabilityExecutionError>;
 }
 
 /// Stores large content externally, returning a reference ID.
@@ -597,7 +604,10 @@ pub trait BlobStore: Send + Sync {
         &self,
         content: &[u8],
         mime_type: &str,
-    ) -> Result<String, crate::domains::capability_support::implementations::errors::ToolError>;
+    ) -> Result<
+        String,
+        crate::domains::capability_support::implementations::errors::CapabilityExecutionError,
+    >;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -634,7 +644,7 @@ pub struct HttpRequest<'a> {
 #[async_trait]
 pub trait HttpClient: Send + Sync {
     /// Perform a GET request and return the response.
-    async fn get(&self, url: &str) -> Result<HttpResponse, ToolError>;
+    async fn get(&self, url: &str) -> Result<HttpResponse, CapabilityExecutionError>;
 
     /// Perform a GET request with custom headers.
     ///
@@ -643,13 +653,16 @@ pub trait HttpClient: Send + Sync {
         &self,
         url: &str,
         headers: &[(&str, &str)],
-    ) -> Result<HttpResponse, ToolError> {
+    ) -> Result<HttpResponse, CapabilityExecutionError> {
         let _ = headers;
         self.get(url).await
     }
 
     /// Perform a full HTTP request with method, headers, body, and redirect control.
-    async fn request(&self, req: &HttpRequest<'_>) -> Result<HttpResponse, ToolError>;
+    async fn request(
+        &self,
+        req: &HttpRequest<'_>,
+    ) -> Result<HttpResponse, CapabilityExecutionError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -706,7 +719,7 @@ mod tests {
         for kind in [
             ProcessKind::Shell,
             ProcessKind::DisplayStream,
-            ProcessKind::ToolOperation,
+            ProcessKind::CapabilityOperation,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: ProcessKind = serde_json::from_str(&json).unwrap();
@@ -725,8 +738,8 @@ mod tests {
             "\"display_stream\""
         );
         assert_eq!(
-            serde_json::to_string(&ProcessKind::ToolOperation).unwrap(),
-            "\"tool_operation\""
+            serde_json::to_string(&ProcessKind::CapabilityOperation).unwrap(),
+            "\"capability_operation\""
         );
     }
 
@@ -791,7 +804,7 @@ mod tests {
             state: "background".into(),
             elapsed_ms: 3000,
             session_id: "sess-1".into(),
-            tool_call_id: "tc-1".into(),
+            invocation_id: "tc-1".into(),
         };
         let json = serde_json::to_string(&info).unwrap();
         let back: ProcessInfo = serde_json::from_str(&json).unwrap();

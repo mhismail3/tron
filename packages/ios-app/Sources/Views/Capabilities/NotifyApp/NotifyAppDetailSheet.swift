@@ -23,7 +23,7 @@ struct NotifyAppDetailSheet: View {
 
     var body: some View {
         CapabilityDetailSheetContainer(
-            modelToolName: "Notification",
+            modelPrimitiveName: "Notification",
             iconName: "bell.badge.fill",
             accent: .tronEmerald
         ) {

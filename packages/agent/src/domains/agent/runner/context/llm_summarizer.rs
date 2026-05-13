@@ -105,7 +105,7 @@ impl<S: SubsessionSpawner> Summarizer for LlmSummarizer<S> {
 mod tests {
     use super::*;
     use crate::shared::content::AssistantContent;
-    use crate::shared::messages::{ToolResultMessageContent, UserMessageContent};
+    use crate::shared::messages::{CapabilityResultMessageContent, UserMessageContent};
 
     use crate::domains::agent::runner::context::constants::{
         SUMMARIZER_ASSISTANT_TEXT_LIMIT, SUMMARIZER_MAX_SERIALIZED_CHARS,
@@ -170,12 +170,12 @@ mod tests {
     }
 
     #[test]
-    fn serialize_tool_call() {
+    fn serialize_capability_invocation() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("file_path".into(), serde_json::json!("/src/main.rs"));
         let _ = args.insert("command".into(), serde_json::json!("build"));
         let msgs = [Message::Assistant {
-            content: vec![AssistantContent::ToolUse {
+            content: vec![AssistantContent::CapabilityInvocation {
                 id: "tc-1".into(),
                 name: "execute".into(),
                 arguments: args,
@@ -192,10 +192,10 @@ mod tests {
     }
 
     #[test]
-    fn serialize_tool_result() {
-        let msgs = [Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text("File content here".into()),
+    fn serialize_capability_result() {
+        let msgs = [Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text("File content here".into()),
             is_error: None,
         }];
         let result = serialize_messages(&msgs);
@@ -203,10 +203,10 @@ mod tests {
     }
 
     #[test]
-    fn serialize_tool_error() {
-        let msgs = [Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text("Permission denied".into()),
+    fn serialize_capability_error() {
+        let msgs = [Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text("Permission denied".into()),
             is_error: Some(true),
         }];
         let result = serialize_messages(&msgs);
@@ -214,11 +214,11 @@ mod tests {
     }
 
     #[test]
-    fn serialize_tool_result_truncated() {
+    fn serialize_capability_result_truncated() {
         let long = "x".repeat(500);
-        let msgs = [Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text(long),
+        let msgs = [Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text(long),
             is_error: None,
         }];
         let result = serialize_messages(&msgs);

@@ -13,7 +13,7 @@ impl EventRepo {
                FROM events WHERE id = ?1
                UNION ALL
                SELECT e.id, e.session_id, e.parent_id, e.sequence, e.depth, e.type, e.timestamp, e.payload,
-                      e.content_blob_id, e.workspace_id, e.role, e.tool_name, e.tool_call_id, e.turn,
+                      e.content_blob_id, e.workspace_id, e.role, e.model_primitive_name, e.invocation_id, e.turn,
                       e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens, e.checksum,
                       e.model, e.latency_ms, e.stop_reason, e.has_thinking, e.provider_type, e.cost, a.lvl + 1
                FROM events e JOIN ancestors a ON e.id = a.parent_id
@@ -49,7 +49,7 @@ impl EventRepo {
                FROM events WHERE parent_id = ?1
                UNION ALL
                SELECT e.id, e.session_id, e.parent_id, e.sequence, e.depth, e.type, e.timestamp, e.payload,
-                      e.content_blob_id, e.workspace_id, e.role, e.tool_name, e.tool_call_id, e.turn,
+                      e.content_blob_id, e.workspace_id, e.role, e.model_primitive_name, e.invocation_id, e.turn,
                       e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens, e.checksum,
                       e.model, e.latency_ms, e.stop_reason, e.has_thinking, e.provider_type, e.cost, d.lvl + 1
                FROM events e JOIN desc d ON e.parent_id = d.id

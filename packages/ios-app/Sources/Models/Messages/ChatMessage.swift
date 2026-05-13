@@ -32,7 +32,7 @@ struct ChatMessage: Identifiable, Equatable {
     /// Whether extended thinking was used
     var hasThinking: Bool?
 
-    /// Why the turn ended (end_turn, tool_use, max_tokens)
+    /// Why the turn ended (end_turn, capability_invocation, max_tokens)
     var stopReason: String?
 
     /// Event ID from the server's event store (for deletion, forking, etc.)
@@ -100,7 +100,7 @@ struct ChatMessage: Identifiable, Equatable {
         // Must have an eventId (from server)
         guard eventId != nil else { return false }
 
-        // Must be a user or assistant message (not system, toolResult, etc.)
+        // Must be a user or assistant message (not system, capabilityResult, etc.)
         guard role == .user || role == .assistant else { return false }
 
         // Don't allow deleting streaming messages

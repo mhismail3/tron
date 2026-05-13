@@ -75,8 +75,8 @@ struct ChatSheetContent: View {
             MemoryRetainDetailSheet(title: data.title, summary: data.summary)
                 .adaptivePresentationDetents([.medium, .large])
 
-        case .askUserQuestion:
-            askUserQuestionSheet
+        case .userInteraction:
+            userInteractionSheet
 
         case .engineApproval:
             engineApprovalSheet
@@ -132,15 +132,15 @@ struct ChatSheetContent: View {
     }
 
     @ViewBuilder
-    private var askUserQuestionSheet: some View {
-        if let data = viewModel.askUserQuestionState.currentData {
-            AskUserQuestionSheet(
-                toolData: data,
+    private var userInteractionSheet: some View {
+        if let data = viewModel.userInteractionState.currentData {
+            UserInteractionSheet(
+                capabilityData: data,
                 onSubmit: { answers in
-                    viewModel.prepareAskUserQuestionSubmission(answers)
+                    viewModel.prepareUserInteractionSubmission(answers)
                 },
                 onDismiss: {
-                    viewModel.dismissAskUserQuestionSheet()
+                    viewModel.dismissUserInteractionSheet()
                 },
                 readOnly: data.status == .answered
             )
@@ -153,7 +153,7 @@ struct ChatSheetContent: View {
     private var engineApprovalSheet: some View {
         if let data = viewModel.engineApprovalState.currentData {
             EngineApprovalSheet(
-                toolData: data,
+                capabilityData: data,
                 onSubmit: { decision, note in
                     viewModel.prepareEngineApprovalSubmission(decision, note: note)
                 },

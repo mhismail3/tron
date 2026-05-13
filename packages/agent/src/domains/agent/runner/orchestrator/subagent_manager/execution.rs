@@ -46,7 +46,7 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
-pub(super) struct ToolAgentTaskLaunch {
+pub(super) struct CapabilityAgentTaskLaunch {
     pub(super) session_manager: Arc<SessionManager>,
     pub(super) event_store: Arc<EventStore>,
     pub(super) broadcast: Arc<EventEmitter>,
@@ -93,7 +93,7 @@ pub(super) fn spawn_subsession_task(params: SubsessionTaskLaunch) {
     drop(tokio::spawn(run_subsession_task(params).instrument(span)));
 }
 
-pub(super) fn spawn_tool_agent_task(params: ToolAgentTaskLaunch) {
+pub(super) fn spawn_capability_agent_task(params: CapabilityAgentTaskLaunch) {
     let session_id = params.child_session_id.clone();
     let parent_session_id = params.parent_session_id.clone();
     let depth = params.subagent_depth;
@@ -102,9 +102,11 @@ pub(super) fn spawn_tool_agent_task(params: ToolAgentTaskLaunch) {
         session_id = %session_id,
         parent_session_id = %parent_session_id,
         depth,
-        spawn_type = "tool_agent",
+        spawn_type = "capability_agent",
     );
-    drop(tokio::spawn(run_tool_agent_task(params).instrument(span)));
+    drop(tokio::spawn(
+        run_capability_agent_task(params).instrument(span),
+    ));
 }
 
 async fn run_subsession_task(params: SubsessionTaskLaunch) {
@@ -278,7 +280,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
     );
 }
 
-async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
+async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
     let working_directory = acquire_worktree_directory(
         params.worktree_coordinator.as_ref(),
         &params.child_session_id,
@@ -691,14 +693,15 @@ fn spawn_child_event_forwarder(
 fn activity_text(event: &TronEvent) -> Option<String> {
     match event {
         TronEvent::TurnStart { turn, .. } => Some(format!("Turn {turn} started")),
-        TronEvent::CapabilityInvocationStarted { tool_name, .. } => {
-            Some(format!("Executing {tool_name}"))
-        }
+        TronEvent::CapabilityInvocationStarted {
+            model_primitive_name,
+            ..
+        } => Some(format!("Executing {model_primitive_name}")),
         TronEvent::CapabilityInvocationCompleted {
-            tool_name,
+            model_primitive_name,
             duration,
             ..
-        } => Some(format!("{tool_name} completed ({duration}ms)")),
+        } => Some(format!("{model_primitive_name} completed ({duration}ms)")),
         _ => None,
     }
 }
@@ -711,49 +714,56 @@ fn forwarded_subagent_event(event: &TronEvent) -> Option<Value> {
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })),
         TronEvent::CapabilityInvocationStarted {
-            tool_call_id,
-            tool_name,
+            invocation_id,
+            model_primitive_name,
             arguments,
             ..
         } => Some(json!({
             "type": "capability.invocation.started",
             "data": {
-                "toolCallId": tool_call_id,
-                "toolName": tool_name,
+                "invocationId": invocation_id,
+                "modelPrimitiveName": model_primitive_name,
                 "arguments": arguments,
             },
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })),
         TronEvent::CapabilityInvocationCompleted {
-            tool_call_id,
-            tool_name,
+            invocation_id,
+            model_primitive_name,
             is_error,
             duration,
             result,
             ..
         } => {
-            let result_text = result
-                .as_ref()
-                .map(|tool_result| match &tool_result.content {
-                    crate::shared::tools::ToolResultBody::Text(text) => text.clone(),
-                    crate::shared::tools::ToolResultBody::Blocks(blocks) => blocks
-                        .iter()
-                        .filter_map(|block| {
-                            if let crate::shared::content::ToolResultContent::Text { text } = block
-                            {
-                                Some(text.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join(""),
-                });
+            let result_text =
+                result
+                    .as_ref()
+                    .map(|capability_result| match &capability_result.content {
+                        crate::shared::model_capabilities::CapabilityResultBody::Text(text) => {
+                            text.clone()
+                        }
+                        crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
+                            blocks
+                                .iter()
+                                .filter_map(|block| {
+                                    if let crate::shared::content::CapabilityResultContent::Text {
+                                        text,
+                                    } = block
+                                    {
+                                        Some(text.as_str())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("")
+                        }
+                    });
             Some(json!({
                 "type": "capability.invocation.completed",
                 "data": {
-                    "toolCallId": tool_call_id,
-                    "toolName": tool_name,
+                    "invocationId": invocation_id,
+                    "modelPrimitiveName": model_primitive_name,
                     "success": !is_error.unwrap_or(false),
                     "result": result_text,
                     "duration": duration,

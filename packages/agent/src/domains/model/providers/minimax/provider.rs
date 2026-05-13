@@ -92,12 +92,12 @@ impl MiniMaxProvider {
 
     /// Build tool definitions without cache control.
     fn build_tools(context: &Context) -> Option<Vec<AnthropicTool>> {
-        let tools = context.tools.as_ref()?;
-        if tools.is_empty() {
+        let capabilities = context.capabilities.as_ref()?;
+        if capabilities.is_empty() {
             return None;
         }
 
-        let anthropic_tools: Vec<AnthropicTool> = tools
+        let anthropic_capabilities: Vec<AnthropicTool> = capabilities
             .iter()
             .map(|t| AnthropicTool {
                 name: t.name.clone(),
@@ -107,7 +107,7 @@ impl MiniMaxProvider {
             })
             .collect();
 
-        Some(anthropic_tools)
+        Some(anthropic_capabilities)
     }
 
     /// Build thinking configuration — enabled only, never adaptive.
@@ -165,7 +165,7 @@ impl MiniMaxProvider {
             max_tokens: self.calculate_max_tokens(options),
             messages,
             system: Self::build_system_param(context),
-            tools: Self::build_tools(context),
+            capabilities: Self::build_tools(context),
             stream: true,
             thinking: Self::build_thinking_config(options),
             output_config: None,
@@ -198,7 +198,7 @@ impl MiniMaxProvider {
             model = %request.model,
             max_tokens = request.max_tokens,
             message_count = request.messages.len(),
-            has_tools = request.tools.is_some(),
+            has_tools = request.capabilities.is_some(),
             has_thinking = request.thinking.is_some(),
             "Sending MiniMax request"
         );
@@ -409,10 +409,10 @@ mod tests {
     #[test]
     fn build_tools_no_cache_control() {
         let ctx = Context {
-            tools: Some(vec![crate::shared::tools::Tool {
+            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
                 name: "execute".into(),
                 description: "Run commands".into(),
-                parameters: crate::shared::tools::ToolParameterSchema {
+                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                     schema_type: "object".into(),
                     properties: None,
                     required: None,
@@ -422,15 +422,15 @@ mod tests {
             }]),
             ..Context::default()
         };
-        let tools = MiniMaxProvider::build_tools(&ctx).unwrap();
-        assert_eq!(tools.len(), 1);
-        assert!(tools[0].cache_control.is_none());
+        let capabilities = MiniMaxProvider::build_tools(&ctx).unwrap();
+        assert_eq!(capabilities.len(), 1);
+        assert!(capabilities[0].cache_control.is_none());
     }
 
     #[test]
     fn build_tools_empty_returns_none() {
         let ctx = Context {
-            tools: Some(vec![]),
+            capabilities: Some(vec![]),
             ..Context::default()
         };
         assert!(MiniMaxProvider::build_tools(&ctx).is_none());

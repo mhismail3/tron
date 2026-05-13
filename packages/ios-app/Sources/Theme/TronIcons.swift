@@ -9,11 +9,11 @@ enum TronIcon: String, CaseIterable {
     case assistant = "sparkles"
     case system = "gearshape.fill"
 
-    // MARK: - Tool Status
-    case toolRunning = "arrow.triangle.2.circlepath"
-    case toolSuccess = "checkmark.circle.fill"
-    case toolError = "xmark.circle.fill"
-    case toolPending = "clock.fill"
+    // MARK: - Capability Status
+    case capabilityRunning = "arrow.triangle.2.circlepath"
+    case capabilitySuccess = "checkmark.circle.fill"
+    case capabilityError = "xmark.circle.fill"
+    case capabilityPending = "clock.fill"
 
     // MARK: - Agent State
     case thinking = "sparkle"
@@ -59,10 +59,10 @@ enum TronIcon: String, CaseIterable {
         case .user: return .tronMint
         case .assistant: return .tronEmerald
         case .system: return .tronTextSecondary
-        case .toolRunning: return .tronInfo
-        case .toolSuccess: return .tronSuccess
-        case .toolError: return .tronError
-        case .toolPending: return .tronTextMuted
+        case .capabilityRunning: return .tronInfo
+        case .capabilitySuccess: return .tronSuccess
+        case .capabilityError: return .tronError
+        case .capabilityPending: return .tronTextMuted
         case .thinking: return .tronEmerald
         case .streaming: return .tronEmerald
         case .ready: return .tronSuccess

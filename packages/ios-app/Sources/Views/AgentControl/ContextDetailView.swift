@@ -152,10 +152,10 @@ struct ContextDetailView: View {
                         )
                     }
 
-                    if snapshot.breakdown.tools > 0 {
+                    if snapshot.breakdown.capabilities > 0 {
                         CapabilitiesSection(
-                            toolsContent: snapshot.toolsContent,
-                            tokens: snapshot.breakdown.tools
+                            capabilitiesContent: snapshot.capabilitiesContent,
+                            tokens: snapshot.breakdown.capabilities
                         )
                     }
 

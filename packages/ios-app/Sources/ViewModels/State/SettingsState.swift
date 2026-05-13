@@ -69,7 +69,7 @@ final class SettingsState {
     // MARK: - plugin source
 
     /// Proactive schema-refresh TTL in milliseconds. `0` disables.
-    /// plugin-source-derived capability plugins refresh `tools/list` metadata when the
+    /// plugin-source-derived capability plugins refresh capability metadata when the
     /// per-server cache is older than this TTL.
     var mcpSchemaRefreshTtlMs: UInt64 = 30_000
 

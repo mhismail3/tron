@@ -59,13 +59,13 @@ struct CapabilityInvocationData: Equatable, Identifiable {
         if let progressMessage, !progressMessage.isEmpty {
             return progressMessage
         }
-        if let contractId = identity.contractId, identity.modelToolName == "execute" {
+        if let contractId = identity.contractId, identity.modelPrimitiveName == "execute" {
             return contractId
         }
         if let implementationId = identity.implementationId {
             return implementationId
         }
-        return identity.modelToolName ?? "Capability"
+        return identity.modelPrimitiveName ?? "Capability"
     }
 
     var formattedDuration: String? {
@@ -135,33 +135,33 @@ struct CapabilityErrorClassification: Equatable, Sendable {
 
 enum CapabilityPresentation {
     static func title(for identity: CapabilityIdentity) -> String {
-        if let contractId = identity.contractId, identity.modelToolName != contractId {
+        if let contractId = identity.contractId, identity.modelPrimitiveName != contractId {
             return humanizeCapabilityId(contractId)
         }
         if let functionId = identity.functionId {
             return humanizeCapabilityId(functionId)
         }
-        if let modelToolName = identity.modelToolName {
-            switch modelToolName {
+        if let modelPrimitiveName = identity.modelPrimitiveName {
+            switch modelPrimitiveName {
             case "search": return "Search capabilities"
             case "inspect": return "Inspect capability"
             case "execute": return "Resolve capability"
-            default: return humanizeCapabilityId(modelToolName)
+            default: return humanizeCapabilityId(modelPrimitiveName)
             }
         }
         return "Capability"
     }
 
     static func symbol(for identity: CapabilityIdentity) -> String {
-        let id = identity.contractId ?? identity.functionId ?? identity.modelToolName ?? ""
+        let id = identity.contractId ?? identity.functionId ?? identity.modelPrimitiveName ?? ""
         if id.hasPrefix("filesystem::") { return "doc.text.magnifyingglass" }
         if id.hasPrefix("process::") { return "terminal" }
         if id.hasPrefix("web::") { return "globe" }
         if id.hasPrefix("agent::") { return "person.crop.circle.badge.plus" }
         if id.hasPrefix("sandbox::") { return "shippingbox" }
-        if id.hasPrefix("capability::search") || identity.modelToolName == "search" { return "magnifyingglass" }
-        if id.hasPrefix("capability::inspect") || identity.modelToolName == "inspect" { return "info.circle" }
-        if id.hasPrefix("capability::execute") || identity.modelToolName == "execute" { return "play.circle" }
+        if id.hasPrefix("capability::search") || identity.modelPrimitiveName == "search" { return "magnifyingglass" }
+        if id.hasPrefix("capability::inspect") || identity.modelPrimitiveName == "inspect" { return "info.circle" }
+        if id.hasPrefix("capability::execute") || identity.modelPrimitiveName == "execute" { return "play.circle" }
         return "puzzlepiece.extension"
     }
 
@@ -192,7 +192,7 @@ enum CapabilityPresentation {
 extension CapabilityIdentity {
     init(payload: [String: Any]) {
         self.init(
-            modelToolName: payload["modelToolName"] as? String,
+            modelPrimitiveName: payload["modelPrimitiveName"] as? String,
             contractId: payload["contractId"] as? String,
             implementationId: payload["implementationId"] as? String,
             functionId: payload["functionId"] as? String,
@@ -209,16 +209,16 @@ extension CapabilityIdentity {
         )
     }
 
-    var isAskUserCapability: Bool {
+    var isUserInteractionCapability: Bool {
         contractId == "agent::ask_user" || functionId == "agent::ask_user"
     }
 
     var stableCapabilityId: String {
-        implementationId ?? contractId ?? functionId ?? modelToolName ?? "capability"
+        implementationId ?? contractId ?? functionId ?? modelPrimitiveName ?? "capability"
     }
 
     var isEmpty: Bool {
-        modelToolName == nil &&
+        modelPrimitiveName == nil &&
         contractId == nil &&
         implementationId == nil &&
         functionId == nil &&

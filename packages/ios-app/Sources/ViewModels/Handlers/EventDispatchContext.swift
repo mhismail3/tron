@@ -7,7 +7,7 @@ import Foundation
     func handleThinkingDelta(_ delta: String)
 }
 
-@MainActor protocol ToolEventHandler: AnyObject {
+@MainActor protocol CapabilityInvocationEventHandler: AnyObject {
     func handleCapabilityInvocationGenerating(_ result: CapabilityInvocationGeneratingPlugin.Result)
     func handleCapabilityInvocationStarted(_ result: CapabilityInvocationStartedPlugin.Result)
     func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result)
@@ -119,7 +119,7 @@ extension ApprovalEventHandler {
 /// Full dispatch target — ChatViewModel conforms to this.
 /// Composes all domain protocols into a single conformance point.
 @MainActor protocol EventDispatchTarget:
-    StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
+    StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, SubagentEventHandler, MemoryEventHandler,
     ServerEventHandler, WorktreeEventHandler, RepoEventHandler,
     DisplayStreamEventHandler, ProcessEventHandler, HookEventHandler,

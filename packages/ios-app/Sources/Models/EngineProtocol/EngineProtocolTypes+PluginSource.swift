@@ -13,7 +13,7 @@ enum PluginSourceHealth: String, Decodable, Sendable {
 struct PluginSourceStatus: Decodable, Identifiable, Sendable {
     let name: String
     let health: PluginSourceHealth
-    let toolCount: Int
+    let capabilityCount: Int
     let consecutiveFailures: Int
     let lastError: String?
     let connectedAt: String?
@@ -44,12 +44,12 @@ struct PluginSourceNameParams: Encodable {
 
 struct PluginSourceAddResult: Decodable {
     let success: Bool
-    let toolCount: Int
+    let capabilityCount: Int
 }
 
 struct PluginSourceRestartResult: Decodable {
     let success: Bool
-    let toolCount: Int
+    let capabilityCount: Int
 }
 
 struct PluginSourceReloadResult: Decodable {
@@ -61,20 +61,20 @@ struct PluginSourceSuccessResult: Decodable {
     let success: Bool
 }
 
-// MARK: - plugin source Tool Listing
+// MARK: - plugin source Capability Listing
 
-/// A tool discovered from an plugin source server (matches Rust ToolMatch).
+/// A capability discovered from a plugin source server.
 struct PluginCapabilityInfo: Decodable, Identifiable, Sendable {
     let server: String
-    let tool: String
+    let capability: String
     let description: String
     let params: [PluginCapabilityParam]
     let score: Int
 
-    var id: String { "\(server).\(tool)" }
+    var id: String { "\(server).\(capability)" }
 }
 
-/// Parameter summary for an plugin source tool (matches Rust ParamSummary).
+/// Parameter summary for an plugin source capability (matches Rust ParamSummary).
 struct PluginCapabilityParam: Decodable, Identifiable, Sendable {
     let name: String
     let paramType: String

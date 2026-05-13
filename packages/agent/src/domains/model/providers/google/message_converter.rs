@@ -4,11 +4,13 @@
 //! Sanitizes JSON schemas by removing unsupported properties (`additionalProperties`, `$schema`).
 
 use crate::domains::model::providers::id_remapping::{
-    IdFormat, build_tool_call_id_mapping, remap_tool_call_id,
+    IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
 use crate::shared::content::{AssistantContent, UserContent};
-use crate::shared::messages::{Context, Message, ToolResultMessageContent, UserMessageContent};
-use crate::shared::tools::Tool;
+use crate::shared::messages::{
+    CapabilityResultMessageContent, Context, Message, UserMessageContent,
+};
+use crate::shared::model_capabilities::ModelCapability;
 
 use super::types::{
     FunctionCallData, FunctionDeclaration, FunctionResponseData, GeminiContent, GeminiPart,
@@ -22,7 +24,7 @@ use super::types::{
 const SKIP_THOUGHT_SIGNATURE: &str = "skip_thought_signature_validator";
 
 /// Collect all capability invocation IDs from assistant messages for cross-provider remapping.
-fn collect_tool_call_ids(messages: &[Message]) -> Vec<String> {
+fn collect_invocation_ids(messages: &[Message]) -> Vec<String> {
     messages
         .iter()
         .filter_map(|m| match m {
@@ -30,7 +32,7 @@ fn collect_tool_call_ids(messages: &[Message]) -> Vec<String> {
                 let ids: Vec<String> = content
                     .iter()
                     .filter_map(|c| match c {
-                        AssistantContent::ToolUse { id, .. } => Some(id.clone()),
+                        AssistantContent::CapabilityInvocation { id, .. } => Some(id.clone()),
                         _ => None,
                     })
                     .collect();
@@ -52,9 +54,9 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
         return vec![];
     }
 
-    let all_tool_call_ids = collect_tool_call_ids(messages);
-    let id_refs: Vec<&str> = all_tool_call_ids.iter().map(String::as_str).collect();
-    let id_mapping = build_tool_call_id_mapping(&id_refs, IdFormat::OpenAi);
+    let all_invocation_ids = collect_invocation_ids(messages);
+    let id_refs: Vec<&str> = all_invocation_ids.iter().map(String::as_str).collect();
+    let id_mapping = build_invocation_id_mapping(&id_refs, IdFormat::OpenAi);
 
     let mut contents = Vec::new();
 
@@ -83,7 +85,7 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                                 });
                             }
                         }
-                        AssistantContent::ToolUse {
+                        AssistantContent::CapabilityInvocation {
                             name,
                             arguments,
                             thought_signature,
@@ -116,23 +118,23 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                     });
                 }
             }
-            Message::ToolResult {
-                tool_call_id,
+            Message::CapabilityResult {
+                invocation_id,
                 content,
                 ..
             } => {
-                let remapped_id = remap_tool_call_id(tool_call_id, &id_mapping);
-                let result_text = extract_tool_result_text(content);
-                let truncated = truncate_tool_result(&result_text);
+                let remapped_id = remap_invocation_id(invocation_id, &id_mapping);
+                let result_text = extract_capability_result_text(content);
+                let truncated = truncate_capability_result(&result_text);
 
                 contents.push(GeminiContent {
                     role: "user".into(),
                     parts: vec![GeminiPart::FunctionResponse {
                         function_response: FunctionResponseData {
-                            name: "tool_result".into(),
+                            name: "capability_result".into(),
                             response: serde_json::json!({
                                 "result": truncated,
-                                "tool_call_id": remapped_id,
+                                "invocation_id": remapped_id,
                             }),
                         },
                     }],
@@ -145,14 +147,16 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
 }
 
 /// Extract text from capability result message content.
-fn extract_tool_result_text(content: &ToolResultMessageContent) -> String {
+fn extract_capability_result_text(content: &CapabilityResultMessageContent) -> String {
     match content {
-        ToolResultMessageContent::Text(text) => text.clone(),
-        ToolResultMessageContent::Blocks(blocks) => blocks
+        CapabilityResultMessageContent::Text(text) => text.clone(),
+        CapabilityResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                crate::shared::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                crate::shared::content::ToolResultContent::Image { .. } => None,
+                crate::shared::content::CapabilityResultContent::Text { text } => {
+                    Some(text.as_str())
+                }
+                crate::shared::content::CapabilityResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -215,11 +219,11 @@ fn convert_user_content(content: &UserMessageContent) -> Vec<GeminiPart> {
     }
 }
 
-/// Convert tools to Gemini API format.
+/// Convert capabilities to Gemini API format.
 ///
 /// Returns a single-element array with all function declarations.
-pub fn convert_tools(tools: &[Tool]) -> Vec<GeminiTool> {
-    let declarations: Vec<FunctionDeclaration> = tools
+pub fn convert_tools(capabilities: &[ModelCapability]) -> Vec<GeminiTool> {
+    let declarations: Vec<FunctionDeclaration> = capabilities
         .iter()
         .map(|tool| {
             let schema = serde_json::to_value(&tool.parameters).unwrap_or_default();
@@ -267,7 +271,7 @@ pub fn sanitize_schema_for_gemini(schema: &serde_json::Value) -> serde_json::Val
 }
 
 /// Truncate capability result content if it exceeds the max length.
-fn truncate_tool_result(content: &str) -> String {
+fn truncate_capability_result(content: &str) -> String {
     if content.len() <= TOOL_RESULT_MAX_LENGTH {
         content.to_string()
     } else {
@@ -292,7 +296,7 @@ mod tests {
         Context {
             messages: messages.into(),
             system_prompt: None,
-            tools: None,
+            capabilities: None,
             working_directory: None,
             rules_content: None,
             memory_content: None,
@@ -347,11 +351,11 @@ mod tests {
     }
 
     #[test]
-    fn converts_assistant_tool_calls_with_thought_signature() {
+    fn converts_assistant_capability_invocations_with_thought_signature() {
         let mut args = Map::new();
         args.insert("command".into(), serde_json::json!("ls"));
         let context = ctx(vec![Message::Assistant {
-            content: vec![AssistantContent::ToolUse {
+            content: vec![AssistantContent::CapabilityInvocation {
                 id: "call_123".into(),
                 name: "execute".into(),
                 arguments: args,
@@ -377,9 +381,9 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_without_signature_uses_placeholder() {
+    fn capability_invocation_without_signature_uses_placeholder() {
         let context = ctx(vec![Message::Assistant {
-            content: vec![AssistantContent::ToolUse {
+            content: vec![AssistantContent::CapabilityInvocation {
                 id: "toolu_123".into(),
                 name: "inspect".into(),
                 arguments: Map::new(),
@@ -402,10 +406,10 @@ mod tests {
     }
 
     #[test]
-    fn converts_tool_result() {
-        let context = ctx(vec![Message::ToolResult {
-            tool_call_id: "call_abc".into(),
-            content: ToolResultMessageContent::Text("result text".into()),
+    fn converts_capability_result() {
+        let context = ctx(vec![Message::CapabilityResult {
+            invocation_id: "call_abc".into(),
+            content: CapabilityResultMessageContent::Text("result text".into()),
             is_error: None,
         }]);
         let contents = convert_messages(&context);
@@ -415,7 +419,7 @@ mod tests {
             GeminiPart::FunctionResponse {
                 function_response, ..
             } => {
-                assert_eq!(function_response.name, "tool_result");
+                assert_eq!(function_response.name, "capability_result");
             }
             _ => panic!("Expected function response"),
         }
@@ -466,10 +470,10 @@ mod tests {
     fn converts_tools_to_gemini_format() {
         let mut props = serde_json::Map::new();
         props.insert("command".into(), serde_json::json!({"type": "string"}));
-        let tools = vec![Tool {
+        let capabilities = vec![ModelCapability {
             name: "execute".into(),
             description: "Run a command".into(),
-            parameters: crate::shared::tools::ToolParameterSchema {
+            parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                 schema_type: "object".into(),
                 properties: Some(props),
                 required: Some(vec!["command".into()]),
@@ -477,7 +481,7 @@ mod tests {
                 extra: serde_json::Map::new(),
             },
         }];
-        let gemini_tools = convert_tools(&tools);
+        let gemini_tools = convert_tools(&capabilities);
         assert_eq!(gemini_tools.len(), 1);
         assert_eq!(gemini_tools[0].function_declarations.len(), 1);
         assert_eq!(gemini_tools[0].function_declarations[0].name, "execute");
@@ -485,8 +489,8 @@ mod tests {
 
     #[test]
     fn empty_tools_returns_empty() {
-        let tools: Vec<Tool> = vec![];
-        assert!(convert_tools(&tools).is_empty());
+        let capabilities: Vec<ModelCapability> = vec![];
+        assert!(convert_tools(&capabilities).is_empty());
     }
 
     // ── sanitize_schema ──────────────────────────────────────────────
@@ -532,18 +536,18 @@ mod tests {
         );
     }
 
-    // ── truncate_tool_result ─────────────────────────────────────────
+    // ── truncate_capability_result ─────────────────────────────────────────
 
     #[test]
     fn short_result_not_truncated() {
-        let result = truncate_tool_result("short");
+        let result = truncate_capability_result("short");
         assert_eq!(result, "short");
     }
 
     #[test]
     fn long_result_truncated() {
         let long_text = "x".repeat(TOOL_RESULT_MAX_LENGTH + 100);
-        let result = truncate_tool_result(&long_text);
+        let result = truncate_capability_result(&long_text);
         assert!(result.len() < long_text.len());
         assert!(result.contains("[Content truncated"));
     }

@@ -7,7 +7,7 @@ import Foundation
 // Covers the `Dictionary where Key == String, Value == AnyCodable` accessors
 // in AnyCodable.swift. The original implementation returned nil for numbers
 // that decoded as Double when Int was requested (and vice-versa), which
-// caused ~16 call sites across the tool-view layer to write out an explicit
+// caused ~16 call sites across the capability-view layer to write out an explicit
 // `as? Int / as? Double` ladder. These tests lock the widened numeric
 // behavior and the NaN/Inf/overflow guards that make widening safe.
 

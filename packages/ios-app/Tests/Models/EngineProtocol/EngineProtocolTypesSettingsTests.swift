@@ -224,7 +224,7 @@ struct ServerSettingsTests {
             queueDrainMode: .sequential
         )
         update.skills = .init(
-            compactionPolicy: .askUser,
+            compactionPolicy: .userInteraction,
             showIndex: .whenNoActiveSkills
         )
         update.git = .init(
@@ -241,7 +241,7 @@ struct ServerSettingsTests {
         #expect(session["queueDrainMode"] as? String == "sequential")
 
         let skills = json["skills"] as! [String: Any]
-        #expect(skills["compactionPolicy"] as? String == "askUser")
+        #expect(skills["compactionPolicy"] as? String == "userInteraction")
         #expect(skills["showIndex"] as? String == "whenNoActiveSkills")
 
         let git = json["git"] as! [String: Any]
@@ -262,7 +262,7 @@ struct ServerSettingsTests {
 
         #expect(SkillsCompactionPolicy.from("clearAll") == .clearAll)
         #expect(SkillsCompactionPolicy.from("autoRestore") == .autoRestore)
-        #expect(SkillsCompactionPolicy.from("askUser") == .askUser)
+        #expect(SkillsCompactionPolicy.from("userInteraction") == .userInteraction)
 
         #expect(SkillsShowIndex.from("always") == .always)
         #expect(SkillsShowIndex.from("never") == .never)

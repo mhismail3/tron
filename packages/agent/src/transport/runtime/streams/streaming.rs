@@ -22,7 +22,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
         )),
         TronEvent::DisplayFrame {
             stream_id,
-            tool_call_id,
+            invocation_id,
             data,
             frame_id,
             width,
@@ -33,7 +33,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             "display.frame",
             Some(json!({
                 "streamId": stream_id,
-                "toolCallId": tool_call_id,
+                "invocationId": invocation_id,
                 "data": data,
                 "frameId": frame_id,
                 "width": width,
@@ -45,7 +45,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             label,
             kind,
             background,
-            tool_call_id,
+            invocation_id,
             ..
         } => Some(session_scoped(
             event,
@@ -55,7 +55,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "label": label,
                 "kind": kind,
                 "background": background,
-                "toolCallId": tool_call_id,
+                "invocationId": invocation_id,
             })),
         )),
         TronEvent::ProcessStatusUpdate {
@@ -108,7 +108,7 @@ mod tests {
         let event = TronEvent::DisplayFrame {
             base: BaseEvent::now("sess-1"),
             stream_id: "stream-1".into(),
-            tool_call_id: "call-1".into(),
+            invocation_id: "call-1".into(),
             data: "b64data".into(),
             frame_id: 5,
             width: 1280,
@@ -123,7 +123,7 @@ mod tests {
         let event = TronEvent::DisplayFrame {
             base: BaseEvent::now("sess-1"),
             stream_id: "stream-1".into(),
-            tool_call_id: "call-1".into(),
+            invocation_id: "call-1".into(),
             data: "b64data".into(),
             frame_id: 5,
             width: 1280,
@@ -136,7 +136,7 @@ mod tests {
             .as_ref()
             .expect("should have data");
         assert_eq!(data["streamId"], "stream-1");
-        assert_eq!(data["toolCallId"], "call-1");
+        assert_eq!(data["invocationId"], "call-1");
         assert_eq!(data["data"], "b64data");
         assert_eq!(data["frameId"], 5);
         assert_eq!(data["width"], 1280);
@@ -148,7 +148,7 @@ mod tests {
         let event = TronEvent::DisplayFrame {
             base: BaseEvent::now("sess-42"),
             stream_id: "s".into(),
-            tool_call_id: "t".into(),
+            invocation_id: "t".into(),
             data: "d".into(),
             frame_id: 1,
             width: 640,
@@ -179,7 +179,7 @@ mod tests {
             label: "cargo build".into(),
             kind: "shell".into(),
             background: true,
-            tool_call_id: "tc-1".into(),
+            invocation_id: "tc-1".into(),
         };
         let projected = convert(&event).expect("should convert");
         assert_eq!(projected.server_event.event_type, "process.spawned");
@@ -193,7 +193,7 @@ mod tests {
             label: "npm test".into(),
             kind: "shell".into(),
             background: false,
-            tool_call_id: "tc-42".into(),
+            invocation_id: "tc-42".into(),
         };
         let projected = convert(&event).expect("should convert");
         let data = projected.server_event.data.as_ref().unwrap();
@@ -201,7 +201,7 @@ mod tests {
         assert_eq!(data["label"], "npm test");
         assert_eq!(data["kind"], "shell");
         assert_eq!(data["background"], false);
-        assert_eq!(data["toolCallId"], "tc-42");
+        assert_eq!(data["invocationId"], "tc-42");
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
             label: "l".into(),
             kind: "shell".into(),
             background: true,
-            tool_call_id: "t".into(),
+            invocation_id: "t".into(),
         };
         let projected = convert(&event).expect("should convert");
         assert_eq!(

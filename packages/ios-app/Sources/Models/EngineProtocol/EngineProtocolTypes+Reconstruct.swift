@@ -45,8 +45,8 @@ struct EngineApprovalItem: Decodable, Sendable {
 /// In-flight state for an active turn.
 struct InFlightState: Decodable {
     /// Capability invocations in the current turn (generating, running, completed, error).
-    let toolCalls: [CurrentTurnCapabilityInvocation]
-    /// Ordered content sequence (text, thinking, tool references).
+    let capabilityInvocations: [CurrentTurnCapabilityInvocation]
+    /// Ordered content sequence (text, thinking, capability references).
     let contentSequence: [ContentSequenceItem]
     /// Currently streaming content (text or thinking delta).
     let streaming: InFlightStreaming?

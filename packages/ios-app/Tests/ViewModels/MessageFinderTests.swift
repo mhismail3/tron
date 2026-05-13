@@ -20,18 +20,18 @@ final class MessageFinderTests: XCTestCase {
     }
 
     private func makeSubagentMessage(invocationId: String, subagentSessionId: String = "sub-sess") -> ChatMessage {
-        ChatMessage(role: .assistant, content: .subagent(SubagentToolData(
+        ChatMessage(role: .assistant, content: .subagent(SubagentInvocationData(
             invocationId: invocationId, subagentSessionId: subagentSessionId,
             task: "Do work", model: nil, status: .completed, currentTurn: 1
         )))
     }
 
-    private func makeAskUserQuestionMessage(invocationId: String) -> ChatMessage {
-        ChatMessage(role: .assistant, content: .askUserQuestion(AskUserQuestionToolData(
+    private func makeUserInteractionMessage(invocationId: String) -> ChatMessage {
+        ChatMessage(role: .assistant, content: .userInteraction(UserInteractionInvocationData(
             invocationId: invocationId,
-            params: AskUserQuestionParams(questions: [
-                AskUserQuestion(id: "q1", question: "Pick one", options: [
-                    AskUserQuestionOption(label: "A", value: nil, description: nil)
+            params: UserInteractionParams(questions: [
+                UserInteraction(id: "q1", question: "Pick one", options: [
+                    UserInteractionOption(label: "A", value: nil, description: nil)
                 ], mode: .single, allowOther: nil, otherPlaceholder: nil)
             ], context: nil),
             answers: [:],
@@ -40,7 +40,7 @@ final class MessageFinderTests: XCTestCase {
     }
 
     private func makeEngineApprovalMessage(invocationId: String) -> ChatMessage {
-        ChatMessage(role: .assistant, content: .engineApproval(EngineApprovalToolData(
+        ChatMessage(role: .assistant, content: .engineApproval(EngineApprovalData(
             invocationId: invocationId,
             params: EngineApprovalParams(action: "Delete file", reason: "Cleanup", riskLevel: .low),
             status: .pending
@@ -119,47 +119,47 @@ final class MessageFinderTests: XCTestCase {
 
     // MARK: - hasCapabilityInvocationMessage
 
-    func testHasToolMessageForToolUse() {
+    func testHasCapabilityMessageForCapabilityInvocation() {
         XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeCapabilityInvocationMessage(invocationId: "tc-1")]))
     }
 
-    func testHasToolMessageForToolResult() {
+    func testHasCapabilityMessageForCapabilityResult() {
         XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeCapabilityResultMessage(invocationId: "tc-1")]))
     }
 
-    func testHasToolMessageForSubagent() {
+    func testHasCapabilityMessageForSubagent() {
         XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeSubagentMessage(invocationId: "tc-1")]))
     }
 
-    func testHasToolMessageForAskUserQuestion() {
-        XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeAskUserQuestionMessage(invocationId: "tc-1")]))
+    func testHasCapabilityMessageForUserInteraction() {
+        XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeUserInteractionMessage(invocationId: "tc-1")]))
     }
 
-    func testHasToolMessageForEngineApproval() {
+    func testHasCapabilityMessageForEngineApproval() {
         XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeEngineApprovalMessage(invocationId: "tc-1")]))
     }
 
-    func testHasToolMessageReturnsFalseForText() {
+    func testHasCapabilityMessageReturnsFalseForText() {
         XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeTextMessage()]))
     }
 
-    func testHasToolMessageReturnsFalseForWrongId() {
+    func testHasCapabilityMessageReturnsFalseForWrongId() {
         XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-wrong", in: [makeCapabilityInvocationMessage(invocationId: "tc-1")]))
     }
 
-    func testHasToolMessageEmptyArray() {
+    func testHasCapabilityMessageEmptyArray() {
         XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: []))
     }
 
-    // MARK: - lastIndexOfAskUserQuestion
+    // MARK: - lastIndexOfUserInteraction
 
-    func testLastIndexOfAskUserQuestionFound() {
-        let messages = [makeAskUserQuestionMessage(invocationId: "tc-1")]
-        XCTAssertEqual(MessageFinder.lastIndexOfAskUserQuestion(invocationId: "tc-1", in: messages), 0)
+    func testLastIndexOfUserInteractionFound() {
+        let messages = [makeUserInteractionMessage(invocationId: "tc-1")]
+        XCTAssertEqual(MessageFinder.lastIndexOfUserInteraction(invocationId: "tc-1", in: messages), 0)
     }
 
-    func testLastIndexOfAskUserQuestionNotFound() {
-        XCTAssertNil(MessageFinder.lastIndexOfAskUserQuestion(invocationId: "tc-x", in: [makeTextMessage()]))
+    func testLastIndexOfUserInteractionNotFound() {
+        XCTAssertNil(MessageFinder.lastIndexOfUserInteraction(invocationId: "tc-x", in: [makeTextMessage()]))
     }
 
     // MARK: - lastIndexOfEngineApproval
@@ -184,20 +184,20 @@ final class MessageFinderTests: XCTestCase {
         XCTAssertNil(MessageFinder.indexBySubagentSessionId("sub-x", in: [makeTextMessage()]))
     }
 
-    // MARK: - indexOfSpawnSubagentTool
+    // MARK: - indexOfSpawnSubagentInvocation
 
-    func testIndexOfSpawnSubagentToolMatchesBothIdAndContract() {
+    func testIndexOfSpawnSubagentCapabilityMatchesBothIdAndContract() {
         let messages = [makeCapabilityInvocationMessage(invocationId: "tc-1", contractId: "agent::spawn_subagent")]
-        XCTAssertEqual(MessageFinder.indexOfSpawnSubagentTool(invocationId: "tc-1", in: messages), 0)
+        XCTAssertEqual(MessageFinder.indexOfSpawnSubagentInvocation(invocationId: "tc-1", in: messages), 0)
     }
 
-    func testIndexOfSpawnSubagentToolWrongContractReturnsNil() {
+    func testIndexOfSpawnSubagentCapabilityWrongContractReturnsNil() {
         let messages = [makeCapabilityInvocationMessage(invocationId: "tc-1", contractId: "filesystem::read_file")]
-        XCTAssertNil(MessageFinder.indexOfSpawnSubagentTool(invocationId: "tc-1", in: messages))
+        XCTAssertNil(MessageFinder.indexOfSpawnSubagentInvocation(invocationId: "tc-1", in: messages))
     }
 
-    func testIndexOfSpawnSubagentToolWrongIdReturnsNil() {
+    func testIndexOfSpawnSubagentCapabilityWrongIdReturnsNil() {
         let messages = [makeCapabilityInvocationMessage(invocationId: "tc-wrong", contractId: "agent::spawn_subagent")]
-        XCTAssertNil(MessageFinder.indexOfSpawnSubagentTool(invocationId: "tc-1", in: messages))
+        XCTAssertNil(MessageFinder.indexOfSpawnSubagentInvocation(invocationId: "tc-1", in: messages))
     }
 }

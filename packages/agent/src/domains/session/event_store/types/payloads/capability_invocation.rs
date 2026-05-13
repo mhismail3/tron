@@ -11,7 +11,7 @@ use crate::shared::events::CapabilityEventIdentity;
 pub struct CapabilityInvocationStartedPayload {
     /// Capability invocation ID.
     #[serde(rename = "invocationId")]
-    pub tool_call_id: String,
+    pub invocation_id: String,
     /// Model-facing primitive name.
     pub name: String,
     /// Primitive arguments.
@@ -29,7 +29,7 @@ pub struct CapabilityInvocationStartedPayload {
 /// Emitted by long-running capability calls (`process::run`, `web::fetch`,
 /// `agent::spawn_subagent`, …) to keep
 /// iOS chips from looking frozen and to let users cancel work that's taking
-/// too long. Every field except `tool_call_id` is optional — capabilities pick
+/// too long. Every field except `invocation_id` is optional — capabilities pick
 /// whichever fit their work: process::run streams a `message` with the latest stdout
 /// line; web::fetch sets both `percent` (bytes/total) and `message` ("32 KiB of
 /// 120 KiB"); subagent execution sets `message` with the child turn count.
@@ -38,11 +38,11 @@ pub struct CapabilityInvocationStartedPayload {
 pub struct CapabilityInvocationProgressPayload {
     /// The capability invocation this progress update belongs to.
     #[serde(rename = "invocationId")]
-    pub tool_call_id: String,
+    pub invocation_id: String,
     /// Free-form human-readable status ("downloaded 32 KiB", "turn 3 of 8").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    /// Fractional completion in `[0.0, 1.0]` when a total is known. Tools
+    /// Fractional completion in `[0.0, 1.0]` when a total is known. Capabilities
     /// without a bound (process::run heartbeat, indefinite subagent) leave this unset
     /// rather than guessing.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,7 +61,7 @@ pub struct CapabilityInvocationProgressPayload {
 pub struct CapabilityInvocationCompletedPayload {
     /// Capability invocation ID this result corresponds to.
     #[serde(rename = "invocationId")]
-    pub tool_call_id: String,
+    pub invocation_id: String,
     /// Result content.
     pub content: String,
     /// Whether the capability invocation errored.
@@ -93,7 +93,7 @@ mod tests {
 
     fn full_identity() -> CapabilityEventIdentity {
         CapabilityEventIdentity {
-            model_tool_name: Some("execute".into()),
+            model_primitive_name: Some("execute".into()),
             contract_id: Some("filesystem::read_file".into()),
             implementation_id: Some("first_party.filesystem.v1.read_file".into()),
             function_id: Some("filesystem::read_file".into()),
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn capability_started_payload_serializes_capability_identity() {
         let p = CapabilityInvocationStartedPayload {
-            tool_call_id: "call-1".into(),
+            invocation_id: "call-1".into(),
             name: "execute".into(),
             arguments: serde_json::json!({}),
             turn: 3,
@@ -121,7 +121,7 @@ mod tests {
         };
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["invocationId"], "call-1");
-        assert_eq!(v["modelToolName"], "execute");
+        assert_eq!(v["modelPrimitiveName"], "execute");
         assert_eq!(v["contractId"], "filesystem::read_file");
         assert_eq!(v["implementationId"], "first_party.filesystem.v1.read_file");
         assert_eq!(v["schemaDigest"], "sha256:test");
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn capability_completed_payload_serializes_capability_identity() {
         let p = CapabilityInvocationCompletedPayload {
-            tool_call_id: "call-1".into(),
+            invocation_id: "call-1".into(),
             content: "ok".into(),
             is_error: false,
             duration: 42,
@@ -144,7 +144,7 @@ mod tests {
         };
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["invocationId"], "call-1");
-        assert_eq!(v["modelToolName"], "execute");
+        assert_eq!(v["modelPrimitiveName"], "execute");
         assert_eq!(v["contractId"], "filesystem::read_file");
         assert_eq!(v["bindingDecisionId"], "binding-test");
     }
@@ -152,25 +152,25 @@ mod tests {
     #[test]
     fn capability_progress_serializes_camel_case_with_turn() {
         let p = CapabilityInvocationProgressPayload {
-            tool_call_id: "call-1".into(),
+            invocation_id: "call-1".into(),
             message: Some("32 KiB of 120 KiB".into()),
             percent: Some(0.267),
             turn: 3,
-            capability_identity: CapabilityEventIdentity::with_model_tool("execute"),
+            capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
         };
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["invocationId"], "call-1");
-        assert_eq!(v["modelToolName"], "execute");
+        assert_eq!(v["modelPrimitiveName"], "execute");
         assert_eq!(v["message"], "32 KiB of 120 KiB");
         assert_eq!(v["percent"], 0.267);
         assert_eq!(v["turn"], 3);
-        assert!(v.get("tool_call_id").is_none());
+        assert!(v.get("invocation_id").is_none());
     }
 
     #[test]
     fn capability_progress_omits_optional_fields_when_none() {
         let p = CapabilityInvocationProgressPayload {
-            tool_call_id: "call-1".into(),
+            invocation_id: "call-1".into(),
             message: None,
             percent: None,
             turn: 1,
@@ -186,11 +186,11 @@ mod tests {
     #[test]
     fn capability_progress_roundtrip_preserves_fields() {
         let p = CapabilityInvocationProgressPayload {
-            tool_call_id: "c".into(),
+            invocation_id: "c".into(),
             message: Some("m".into()),
             percent: Some(0.5),
             turn: 7,
-            capability_identity: CapabilityEventIdentity::with_model_tool("execute"),
+            capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: CapabilityInvocationProgressPayload = serde_json::from_str(&s).unwrap();

@@ -316,7 +316,7 @@ fn bootstrap_stub() -> &'static str {
      \n\
      You have no user-memory file yet at `~/.tron/memory/MEMORY.md`. \
      When you learn user-specific info (name, email, preferences, active projects, \
-     tools they use), create this file and record it. See the 'YOUR HUMAN' section \
+     capabilities they use), create this file and record it. See the 'YOUR HUMAN' section \
      of your system prompt for the discipline. Secrets (API keys, tokens, passwords) \
      go in the `vault` skill — NEVER in MEMORY.md or rules/.\n"
 }

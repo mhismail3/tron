@@ -61,7 +61,7 @@
 //!
 //! Depends on: `serde`, `serde_json`, `async_trait`, `thiserror`, `chrono`,
 //! `sha2`, `hex`, and `rusqlite` for the isolated durable ledger store.
-//! Does not depend on runtime, server, events, tools, or settings. Server-side
+//! Does not depend on runtime, server, events, capabilities, or settings. Server-side
 //! runtime services register those subsystems as in-process workers at startup without
 //! making the engine core depend on them.
 

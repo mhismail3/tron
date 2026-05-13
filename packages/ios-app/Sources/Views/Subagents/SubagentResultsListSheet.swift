@@ -5,15 +5,15 @@ import SwiftUI
 /// Each row opens the SubagentDetailSheet; "Send All" sends everything at once.
 @available(iOS 26.0, *)
 struct SubagentResultsListSheet: View {
-    let pendingSubagents: [SubagentToolData]
+    let pendingSubagents: [SubagentInvocationData]
     let subagentState: SubagentState
     let eventStoreManager: EventStoreManager
     let engineClient: EngineClient
     var onSendAll: (() -> Void)?
-    var onSendIndividual: ((SubagentToolData) -> Void)?
+    var onSendIndividual: ((SubagentInvocationData) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedSubagent: SubagentToolData?
+    @State private var selectedSubagent: SubagentInvocationData?
 
     var body: some View {
         NavigationStack {
@@ -66,7 +66,7 @@ struct SubagentResultsListSheet: View {
     }
 
     @ViewBuilder
-    private func resultRow(_ subagent: SubagentToolData) -> some View {
+    private func resultRow(_ subagent: SubagentInvocationData) -> some View {
         HStack(spacing: 12) {
             Image(systemName: subagent.status == .failed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -107,6 +107,6 @@ struct SubagentResultsListSheet: View {
 
 // MARK: - Identifiable conformance for sheet(item:)
 
-extension SubagentToolData: Identifiable {
+extension SubagentInvocationData: Identifiable {
     var id: String { hasSubagentSession ? subagentSessionId : invocationId }
 }

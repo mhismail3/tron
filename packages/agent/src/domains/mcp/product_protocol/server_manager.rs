@@ -40,7 +40,7 @@ struct ServerState {
 }
 
 impl ServerState {
-    fn tool_count(&self) -> usize {
+    fn capability_count(&self) -> usize {
         self.tool_defs.len()
     }
 }
@@ -52,7 +52,7 @@ pub struct SchemaRefreshResult {
     /// Diff against the previously-cached tool set (empty when unchanged).
     pub diff: SchemaDiff,
     /// Fresh tool list as returned by the MCP server.
-    pub tools: Vec<McpToolDef>,
+    pub capabilities: Vec<McpToolDef>,
 }
 
 /// Manages the lifecycle of MCP server connections.
@@ -72,7 +72,7 @@ impl McpServerManager {
         }
     }
 
-    /// Start all enabled MCP servers and discover their tools.
+    /// Start all enabled MCP servers and discover their capabilities.
     ///
     /// Returns `(server_name, tool_defs)` pairs for indexing.
     /// Disabled servers are skipped. Servers that fail to start are tracked as Failed.
@@ -87,10 +87,10 @@ impl McpServerManager {
             }
             match self.connect_server(config).await {
                 Ok((client, tool_defs)) => {
-                    let tool_count = tool_defs.len();
+                    let capability_count = tool_defs.len();
                     info!(
                         server = %config.name,
-                        tool_count,
+                        capability_count,
                         "MCP server connected"
                     );
                     let _ = self.servers.insert(
@@ -138,7 +138,7 @@ impl McpServerManager {
         discovered
     }
 
-    /// Connect to a single MCP server and discover its tools.
+    /// Connect to a single MCP server and discover its capabilities.
     async fn connect_server(
         &self,
         config: &McpServerConfig,
@@ -193,7 +193,7 @@ impl McpServerManager {
                 error!(
                     server = %server_name,
                     failures = state.consecutive_failures,
-                    "MCP server exceeded max failures — tools disabled"
+                    "MCP server exceeded max failures — capabilities disabled"
                 );
                 McpServerHealth::Failed
             } else {
@@ -279,8 +279,8 @@ impl McpServerManager {
 
         match self.connect_server(&config).await {
             Ok((client, tool_defs)) => {
-                let tool_count = tool_defs.len();
-                info!(server = %name, tool_count, "MCP server restarted successfully");
+                let capability_count = tool_defs.len();
+                info!(server = %name, capability_count, "MCP server restarted successfully");
                 let _ = self.servers.insert(
                     name.to_string(),
                     ServerState {
@@ -328,7 +328,7 @@ impl McpServerManager {
                     McpServerStatus {
                         name: config.name.clone(),
                         health: state.health.clone(),
-                        tool_count: state.tool_count(),
+                        capability_count: state.capability_count(),
                         consecutive_failures: state.consecutive_failures,
                         last_error: state.last_error.clone(),
                         connected_at: Some(state.connected_at.clone()),
@@ -337,7 +337,7 @@ impl McpServerManager {
                     McpServerStatus {
                         name: config.name.clone(),
                         health: McpServerHealth::Failed,
-                        tool_count: 0,
+                        capability_count: 0,
                         consecutive_failures: 0,
                         last_error: Some("never started".into()),
                         connected_at: None,
@@ -414,7 +414,7 @@ impl McpServerManager {
         }
     }
 
-    /// Refresh tool schemas for a server if the last refresh is older than `ttl`.
+    /// Refresh capability schemas for a server if the last refresh is older than `ttl`.
     ///
     /// Returns:
     /// - `Ok(None)` — refresh not needed (still within TTL), OR the refresh
@@ -443,18 +443,18 @@ impl McpServerManager {
         }
 
         let client = state.client.clone();
-        let old_tools = state.tool_defs.clone();
+        let old_capabilities = state.tool_defs.clone();
 
         match client.list_tools().await {
-            Ok(new_tools) => {
-                let diff = diff_schemas(&old_tools, &new_tools);
+            Ok(new_capabilities) => {
+                let diff = diff_schemas(&old_capabilities, &new_capabilities);
                 if let Some(state_mut) = self.servers.get_mut(name) {
-                    state_mut.tool_defs = new_tools.clone();
+                    state_mut.tool_defs = new_capabilities.clone();
                     state_mut.tools_refreshed_at = Instant::now();
                 }
                 Ok(Some(SchemaRefreshResult {
                     diff,
-                    tools: new_tools,
+                    capabilities: new_capabilities,
                 }))
             }
             Err(e) => {
@@ -485,7 +485,7 @@ mod tests {
     use super::*;
 
     /// Build a minimal `McpToolDef` for unit tests that need N placeholder
-    /// tools (where only the count / diff matters, not schema contents).
+    /// capabilities (where only the count / diff matters, not schema contents).
     fn dummy_tool_def(name: &str) -> McpToolDef {
         McpToolDef {
             name: name.to_string(),
@@ -609,8 +609,8 @@ mod tests {
     #[tokio::test]
     async fn start_all_with_no_servers() {
         let mut manager = McpServerManager::new(Vec::new());
-        let tools = manager.start_all().await;
-        assert!(tools.is_empty());
+        let capabilities = manager.start_all().await;
+        assert!(capabilities.is_empty());
     }
 
     #[tokio::test]
@@ -625,8 +625,8 @@ mod tests {
             enabled: true,
         }];
         let mut manager = McpServerManager::new(configs);
-        let tools = manager.start_all().await;
-        assert!(tools.is_empty());
+        let capabilities = manager.start_all().await;
+        assert!(capabilities.is_empty());
         assert!(!manager.is_connected("bad-server"));
         // Should be tracked as Failed
         assert_eq!(manager.health("bad-server"), Some(McpServerHealth::Failed));
@@ -935,7 +935,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_schemas_past_ttl_on_dead_client_bumps_timestamp_and_returns_none() {
-        // The placeholder client always errors on list_tools. Verify the
+        // The placeholder client always errors on list_capabilities. Verify the
         // refresh path swallows the error, bumps the timestamp to avoid
         // hammering, and returns Ok(None) so callers continue with cached.
         let mut manager = McpServerManager::new(Vec::new());

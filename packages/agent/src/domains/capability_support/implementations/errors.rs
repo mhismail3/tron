@@ -9,7 +9,7 @@ use thiserror::Error;
 
 /// Errors that can occur during capability invocation.
 #[derive(Debug, Error)]
-pub enum ToolError {
+pub enum CapabilityExecutionError {
     /// Parameter validation failed.
     #[error("validation error: {message}")]
     Validation {
@@ -91,9 +91,9 @@ pub enum ToolError {
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 
-    /// Tool not found in registry.
-    #[error("tool not found: {name}")]
-    ToolNotFound {
+    /// Capability primitive not found in registry.
+    #[error("capability not found: {name}")]
+    CapabilityNotFound {
         /// The capability id that was not found.
         name: String,
     },
@@ -106,7 +106,7 @@ pub enum ToolError {
     },
 }
 
-impl ToolError {
+impl CapabilityExecutionError {
     /// Create an `Internal` error from any `Display` type.
     pub fn internal(msg: impl std::fmt::Display) -> Self {
         Self::Internal {
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn validation_display() {
-        let err = ToolError::Validation {
+        let err = CapabilityExecutionError::Validation {
             message: "missing required parameter".into(),
         };
         assert_eq!(
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn file_not_found_display_includes_path() {
-        let err = ToolError::FileNotFound {
+        let err = CapabilityExecutionError::FileNotFound {
             path: "/tmp/missing.txt".into(),
         };
         assert_eq!(err.to_string(), "file not found: /tmp/missing.txt");
@@ -140,35 +140,39 @@ mod tests {
 
     #[test]
     fn timeout_display_includes_ms() {
-        let err = ToolError::Timeout { timeout_ms: 5000 };
+        let err = CapabilityExecutionError::Timeout { timeout_ms: 5000 };
         assert_eq!(err.to_string(), "timeout after 5000ms");
     }
 
     #[test]
     fn from_io_error() {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "gone");
-        let tool_err = ToolError::from(io_err);
-        assert!(matches!(tool_err, ToolError::Io(_)));
-        assert!(tool_err.to_string().contains("gone"));
+        let capability_err = CapabilityExecutionError::from(io_err);
+        assert!(matches!(capability_err, CapabilityExecutionError::Io(_)));
+        assert!(capability_err.to_string().contains("gone"));
     }
 
     #[test]
     fn internal_constructor() {
-        let err = ToolError::internal("something broke");
-        assert!(matches!(err, ToolError::Internal { message } if message == "something broke"));
+        let err = CapabilityExecutionError::internal("something broke");
+        assert!(
+            matches!(err, CapabilityExecutionError::Internal { message } if message == "something broke")
+        );
     }
 
     #[test]
     fn internal_from_display_type() {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "file missing");
-        let err = ToolError::internal(io_err);
-        assert!(matches!(err, ToolError::Internal { message } if message.contains("file missing")));
+        let err = CapabilityExecutionError::internal(io_err);
+        assert!(
+            matches!(err, CapabilityExecutionError::Internal { message } if message.contains("file missing"))
+        );
     }
 
     #[test]
     fn from_serde_json_error() {
         let json_err = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
-        let tool_err = ToolError::from(json_err);
-        assert!(matches!(tool_err, ToolError::Json(_)));
+        let capability_err = CapabilityExecutionError::from(json_err);
+        assert!(matches!(capability_err, CapabilityExecutionError::Json(_)));
     }
 }

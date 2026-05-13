@@ -1,23 +1,23 @@
 import SwiftUI
 
-/// Manages AskUserQuestion tool state for ChatViewModel
+/// Manages UserInteraction capability state for ChatViewModel
 /// Extracted from ChatViewModel to reduce property sprawl
 @Observable
 @MainActor
-final class AskUserQuestionState {
-    /// Whether to show the AskUserQuestion sheet
+final class UserInteractionState {
+    /// Whether to show the UserInteraction sheet
     var showSheet = false
 
-    /// Current AskUserQuestion tool data (when sheet is open)
-    var currentData: AskUserQuestionToolData?
+    /// Current UserInteraction capability data (when sheet is open)
+    var currentData: UserInteractionInvocationData?
 
     /// Pending answers keyed by question ID
-    var answers: [String: AskUserQuestionAnswer] = [:]
+    var answers: [String: UserInteractionAnswer] = [:]
 
-    /// Whether AskUserQuestion was called in the current turn (to suppress subsequent text)
+    /// Whether UserInteraction was called in the current turn (to suppress subsequent text)
     var calledInTurn = false
 
-    /// Number of questions in the last submitted answer (set by AskUserQuestionCoordinator)
+    /// Number of questions in the last submitted answer (set by UserInteractionCoordinator)
     var lastAnsweredQuestionCount: Int = 0
 
     /// Pending answer submission to send after sheet dismissal completes.
@@ -31,7 +31,7 @@ final class AskUserQuestionState {
         calledInTurn = false
     }
 
-    /// Clear all AskUserQuestion state
+    /// Clear all UserInteraction state
     func clearAll() {
         showSheet = false
         currentData = nil

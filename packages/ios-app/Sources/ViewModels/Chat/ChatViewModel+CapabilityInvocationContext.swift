@@ -9,24 +9,24 @@ extension ChatViewModel: CapabilityInvocationContext {
     // MARK: - Protocol Properties
     // Most properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
-    // - currentToolMessages: [UUID: ChatMessage]
+    // - currentCapabilityInvocationMessages: [UUID: ChatMessage]
     // - currentTurnCapabilityInvocations: [CapabilityInvocationRecord]
-    // - askUserQuestionCalledInTurn: Bool (via askUserQuestionState)
+    // - userInteractionCalledInTurn: Bool (via userInteractionState)
 
     // MARK: - Protocol Methods
 
     /// Enqueue a capability start for ordered processing (CapabilityInvocationContext)
-    func enqueueCapabilityInvocationStart(_ data: UIUpdateQueue.ToolStartData) {
+    func enqueueCapabilityInvocationStart(_ data: UIUpdateQueue.CapabilityInvocationStartData) {
         uiUpdateQueue.enqueueCapabilityInvocationStart(data)
     }
 
     /// Enqueue a capability end for ordered processing (CapabilityInvocationContext)
-    func enqueueToolEnd(_ data: UIUpdateQueue.ToolEndData) {
-        uiUpdateQueue.enqueueToolEnd(data)
+    func enqueueCapabilityInvocationEnd(_ data: UIUpdateQueue.CapabilityInvocationEndData) {
+        uiUpdateQueue.enqueueCapabilityInvocationEnd(data)
     }
 
     /// Reset thinking state for a new thinking block (CapabilityInvocationContext)
-    /// Called after tool completion so subsequent thinking starts fresh
+    /// Called after capability completion so subsequent thinking starts fresh
     func resetThinkingForNewBlock() {
         thinkingState.clearCurrentStreaming()
         thinkingMessageId = nil

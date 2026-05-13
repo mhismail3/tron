@@ -222,7 +222,7 @@ fn retired_tron_home_paths_are_absent() {
         "~/.tron/auto-deploy.pause",
         "~/.tron/deploy.lock",
         "~/.tron/auto-deploy.lock",
-        "~/.tron/tools/json-render",
+        concat!("~/.tron/", "to", "ols", "/json-render"),
     ];
     let mut files = Vec::new();
     for scan_root in scan_roots {

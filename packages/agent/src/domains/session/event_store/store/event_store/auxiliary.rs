@@ -108,26 +108,26 @@ impl crate::domains::capability_support::implementations::traits::BlobStore for 
         mime_type: &str,
     ) -> std::result::Result<
         String,
-        crate::domains::capability_support::implementations::errors::ToolError,
+        crate::domains::capability_support::implementations::errors::CapabilityExecutionError,
     > {
         let pool = self.pool().clone();
         let content = content.to_vec();
         let mime = mime_type.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get().map_err(|e| {
-                crate::domains::capability_support::implementations::errors::ToolError::Internal {
+                crate::domains::capability_support::implementations::errors::CapabilityExecutionError::Internal {
                     message: format!("blob store connection error: {e}"),
                 }
             })?;
             BlobRepo::store(&conn, &content, &mime).map_err(|e| {
-                crate::domains::capability_support::implementations::errors::ToolError::Internal {
+                crate::domains::capability_support::implementations::errors::CapabilityExecutionError::Internal {
                     message: format!("blob store write error: {e}"),
                 }
             })
         })
         .await
         .map_err(|e| {
-            crate::domains::capability_support::implementations::errors::ToolError::Internal {
+            crate::domains::capability_support::implementations::errors::CapabilityExecutionError::Internal {
                 message: format!("blob store task join error: {e}"),
             }
         })?

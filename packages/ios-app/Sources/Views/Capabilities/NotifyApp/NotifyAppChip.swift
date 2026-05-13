@@ -30,7 +30,7 @@ struct NotifyAppChip: View {
         }
         .buttonStyle(.plain)
         .chipStyle(data.status.color)
-        .chipAccessibility(tool: "Notify", status: data.status.label)
+        .chipAccessibility(capability: "Notify", status: data.status.label)
     }
 
     @ViewBuilder

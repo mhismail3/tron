@@ -164,7 +164,7 @@ struct CompactBoundaryPayload {
         // Summary is optional (may not be present in auto-compaction events)
         self.summary = payload.string("summary")
 
-        // Estimated total context tokens after compaction (system + tools + rules + messages)
+        // Estimated total context tokens after compaction (system + capabilities + rules + messages)
         self.estimatedContextTokens = payload.int("estimatedContextTokens")
 
         // Turn counts from turn-based compaction
@@ -220,20 +220,20 @@ struct ContextClearedPayload {
 ///
 /// - `.clearAll`: informational banner listing the cleared skill names. The
 ///   user can re-activate manually via `@skill-name` mention or the sidebar.
-/// - `.askUser`: interactive picker — each cleared skill becomes a tappable
+/// - `.userInteraction`: interactive picker — each cleared skill becomes a tappable
 ///   chip that re-adds it via the `skills::activate` engine protocol.
 ///
-/// Wire format is lowerCamelCase (`"clearAll"` / `"askUser"`).
+/// Wire format is lowerCamelCase (`"clearAll"` / `"userInteraction"`).
 enum SkillsClearedMode: String, Codable, Equatable, Hashable {
     case clearAll
-    case askUser
+    case userInteraction
 }
 
 /// Payload for `skills.cleared` event.
 ///
 /// Server: `SkillsClearedPayload` in `events/types/payloads/skill.rs`. Emitted
 /// on the first prompt after a `compact.boundary` under either ClearAll or
-/// AskUser compaction policy; AutoRestore never emits this event because it
+/// UserInteraction compaction policy; AutoRestore never emits this event because it
 /// preserves active skills through the boundary.
 ///
 /// All three fields (`clearedSkills`, `reason`, `mode`) are required on the
@@ -286,7 +286,7 @@ struct ContextSnapshotResult: Codable {
 
     struct ContextBreakdown: Codable {
         let systemPrompt: Int
-        let tools: Int
+        let capabilities: Int
         let rules: Int
         let memory: Int
         let skillIndex: Int
@@ -326,11 +326,11 @@ struct ContextCompactResult: Codable {
 /// Detailed message info for context auditing
 struct DetailedMessageInfo: Codable, Identifiable {
     let index: Int
-    let role: String  // "user" | "assistant" | "tool_result"
+    let role: String  // "user" | "assistant" | "capability_result"
     let tokens: Int
     let summary: String
     let content: String
-    let toolCalls: [CapabilityInvocationInfo]?
+    let capabilityInvocations: [CapabilityInvocationInfo]?
     let invocationId: String?
     let isError: Bool?
     /// Event ID for this message (for deletion support) - nil for synthetic messages
@@ -352,8 +352,8 @@ struct EnvironmentInfo: Codable {
     let serverOrigin: String?
 }
 
-/// Tool name and brief description for the context audit tools list.
-struct ToolSummaryInfo: Codable, Identifiable {
+/// Capability name and brief description for the context audit capabilities list.
+struct CapabilitySummaryInfo: Codable, Identifiable {
     let name: String
     let description: String
     var id: String { name }
@@ -371,9 +371,9 @@ struct DetailedContextSnapshotResult: Codable {
     let messages: [DetailedMessageInfo]
     /// Effective system-level context sent to the model
     let systemPromptContent: String
-    /// Raw tool clarification content if applicable (for debugging)
-    let toolClarificationContent: String?
-    let toolsContent: [ToolSummaryInfo]
+    /// Raw capability clarification content if applicable (for debugging)
+    let capabilityClarificationContent: String?
+    let capabilitiesContent: [CapabilitySummaryInfo]
     /// Skills explicitly added to this session's context
     let addedSkills: [AddedSkillInfo]
     /// Rules files loaded for this session (immutable, cannot be removed)
@@ -416,7 +416,7 @@ struct UserMemorySnapshot: Codable, Equatable {
     /// `bootstrapped == false`, this is the server-generated bootstrap stub.
     let content: String
     /// Listing of `rules/*.md` files (not contents). Agent reads individual
-    /// files on demand via the `Read` tool.
+    /// files on demand via the `Read` capability.
     let ruleFiles: [UserMemoryRuleFile]
     /// True iff `MEMORY.md` exists on disk at read time.
     let bootstrapped: Bool

@@ -327,8 +327,8 @@ struct MiniChatActivityView: View {
         case .text:
             MiniMessageRow(text: line.text, isUser: false)
 
-        case .capabilityStart, .capabilityEnd:
-            MiniToolChip(
+        case .capabilityInvocationStarted, .capabilityInvocationCompleted:
+            MiniCapabilityChip(
                 name: line.displayName ?? line.text,
                 icon: line.icon ?? "gearshape",
                 color: (line.iconColor ?? .tronTextMuted).color,
@@ -338,7 +338,7 @@ struct MiniChatActivityView: View {
             )
 
         case .subagentSpawn:
-            MiniToolChip(
+            MiniCapabilityChip(
                 name: "Subagent",
                 icon: "person.2",
                 color: .tronAmber,
@@ -347,7 +347,7 @@ struct MiniChatActivityView: View {
             )
 
         case .subagentDone:
-            MiniToolChip(
+            MiniCapabilityChip(
                 name: "Subagent",
                 icon: "checkmark.circle.fill",
                 color: .tronSuccess,
@@ -356,7 +356,7 @@ struct MiniChatActivityView: View {
             )
 
         case .subagentFailed:
-            MiniToolChip(
+            MiniCapabilityChip(
                 name: "Subagent",
                 icon: "xmark.circle.fill",
                 color: .tronError,
@@ -440,7 +440,7 @@ struct MiniThinkingRow: View {
 }
 
 @available(iOS 26.0, *)
-struct MiniToolChip: View {
+struct MiniCapabilityChip: View {
     let name: String
     let icon: String
     let color: Color

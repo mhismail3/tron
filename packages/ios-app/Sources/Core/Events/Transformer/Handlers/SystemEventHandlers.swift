@@ -90,7 +90,7 @@ enum SystemEventHandlers {
     ///
     /// - `.clearAll`: informational banner. The user can re-add skills
     ///   manually via `@skill-name`.
-    /// - `.askUser`: interactive picker — each cleared skill becomes a
+    /// - `.userInteraction`: interactive picker — each cleared skill becomes a
     ///   tappable chip that re-activates it via the `skills::activate` engine protocol.
     ///
     /// Returns `nil` (drops the message) when:

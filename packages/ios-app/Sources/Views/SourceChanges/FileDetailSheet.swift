@@ -53,7 +53,7 @@ struct FileDetailSheet: View {
 
     var body: some View {
         CapabilityDetailSheetContainer(
-            modelToolName: file.fileName,
+            modelPrimitiveName: file.fileName,
             iconName: fileIcon,
             accent: .tronTeal,
             iconColor: langColor

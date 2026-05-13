@@ -23,7 +23,7 @@ use super::stream_state::{StreamAction, StreamState, StreamTraceContext};
 
 /// Process an LLM stream, accumulating content and emitting events.
 ///
-/// When a tool in `turn_stopping_tools` completes (via `ToolCallEnd`), the
+/// When a capability in `turn_stopping_capabilities` completes (via `CapabilityInvocationDraftEnd`), the
 /// processor enters **drain mode**: it stops accumulating content (text,
 /// thinking, further capability invocations) but keeps reading the stream to capture
 /// accurate token usage from the `Done` event. The result is built from
@@ -34,7 +34,7 @@ pub async fn process_stream(
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
-    turn_stopping_tools: &HashSet<String>,
+    turn_stopping_capabilities: &HashSet<String>,
     sequence_counter: Option<&AtomicI64>,
     journal: Option<&mut StreamingJournal>,
 ) -> Result<StreamResult, RuntimeError> {
@@ -43,7 +43,7 @@ pub async fn process_stream(
         session_id,
         emitter,
         cancel,
-        turn_stopping_tools,
+        turn_stopping_capabilities,
         sequence_counter,
         journal,
         None,
@@ -60,7 +60,7 @@ pub async fn process_stream_with_trace(
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
-    turn_stopping_tools: &HashSet<String>,
+    turn_stopping_capabilities: &HashSet<String>,
     sequence_counter: Option<&AtomicI64>,
     mut journal: Option<&mut StreamingJournal>,
     trace_id: Option<&TraceId>,
@@ -110,7 +110,7 @@ pub async fn process_stream_with_trace(
                         session_id,
                         emitter,
                         sequence_counter,
-                        turn_stopping_tools,
+                        turn_stopping_capabilities,
                         &mut journal,
                         trace_context,
                     )

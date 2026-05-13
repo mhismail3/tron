@@ -155,8 +155,8 @@ struct AnalyticsSheet: View {
             // Stats row — 4-column grid to align with pills above
             let statColumns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 4)
             LazyVGrid(columns: statColumns, alignment: .leading, spacing: 0) {
-                if turnData.toolCount > 0 {
-                    statItem(value: "\(turnData.toolCount)", label: "Capabilities")
+                if turnData.capabilityCount > 0 {
+                    statItem(value: "\(turnData.capabilityCount)", label: "Capabilities")
                 }
                 if turnData.latency > 0 {
                     statItem(value: DurationFormatter.format(turnData.latency, style: .compact), label: "Latency")
@@ -169,11 +169,11 @@ struct AnalyticsSheet: View {
                 }
             }
 
-            // Tool names
-            if !turnData.tools.isEmpty {
+            // Capability names
+            if !turnData.capabilities.isEmpty {
                 FlowLayout(spacing: 4) {
-                    ForEach(turnData.tools, id: \.self) { tool in
-                        Text(tool)
+                    ForEach(turnData.capabilities, id: \.self) { capability in
+                        Text(capability)
                             .font(TronTypography.pill)
                             .foregroundStyle(.tronCyan)
                             .padding(.horizontal, 6)

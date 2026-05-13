@@ -45,7 +45,7 @@ pub struct RuleBase {
 /// evaluation logic. The `evaluate` method dispatches to the appropriate
 /// implementation.
 pub enum GuardrailRule {
-    /// Matches regex patterns against tool argument values.
+    /// Matches regex patterns against capability argument values.
     Pattern(pattern::PatternRule),
     /// Protects filesystem paths with glob patterns.
     Path(path::PathRule),

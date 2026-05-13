@@ -136,7 +136,7 @@ struct DiagnosticsBundleBuilder {
                     events: eventSnapshot.truncated,
                     metricKitPayloads: metricKitSnapshot.truncated
                 ),
-                privacy: "No raw chat text, prompts, tool arguments, tool output, tokens, file paths, workspace paths, full IDs, or raw event payloads are included."
+                privacy: "No raw chat text, prompts, capability arguments, capability output, tokens, file paths, workspace paths, full IDs, or raw event payloads are included."
             ),
             environment: DiagnosticsEnvironment(
                 generatedOnDevice: true,
@@ -505,7 +505,7 @@ enum DiagnosticsEventSanitizer {
         "source",
         "status",
         "stopReason",
-        "modelToolName",
+        "modelPrimitiveName",
         "totalCost",
         "turn",
         "useWorktree",

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 
 /// Tron scratch directory for sandbox workspaces.
 fn scratch_dir() -> PathBuf {
@@ -77,13 +77,13 @@ impl Drop for SandboxWorkspace {
 
 impl SandboxWorkspace {
     /// Create a new lightweight sandbox workspace.
-    pub async fn create(config: &SandboxConfig) -> Result<Self, ToolError> {
+    pub async fn create(config: &SandboxConfig) -> Result<Self, CapabilityExecutionError> {
         let id = Uuid::now_v7();
         let sandbox_path = scratch_dir().join(format!("sandbox-{id}"));
 
         tokio::fs::create_dir_all(&sandbox_path)
             .await
-            .map_err(|e| ToolError::Internal {
+            .map_err(|e| CapabilityExecutionError::Internal {
                 message: format!("Failed to create sandbox directory: {e}"),
             })?;
 
@@ -98,7 +98,7 @@ impl SandboxWorkspace {
                     copy_dir_recursive(src_path, &dest).await?;
                 } else {
                     let _ = tokio::fs::copy(src_path, &dest).await.map_err(|e| {
-                        ToolError::Internal {
+                        CapabilityExecutionError::Internal {
                             message: format!("Failed to copy {src} into sandbox: {e}"),
                         }
                     })?;
@@ -111,11 +111,11 @@ impl SandboxWorkspace {
             let mount_path = Path::new(mount);
             if mount_path.exists() {
                 let link = sandbox_path.join(mount_path.file_name().unwrap_or_default());
-                tokio::fs::symlink(mount_path, &link)
-                    .await
-                    .map_err(|e| ToolError::Internal {
+                tokio::fs::symlink(mount_path, &link).await.map_err(|e| {
+                    CapabilityExecutionError::Internal {
                         message: format!("Failed to mount {mount} into sandbox: {e}"),
-                    })?;
+                    }
+                })?;
             }
         }
 
@@ -135,17 +135,17 @@ impl SandboxWorkspace {
     }
 
     /// Explicitly clean up the sandbox directory.
-    pub async fn cleanup(self) -> Result<(), ToolError> {
+    pub async fn cleanup(self) -> Result<(), CapabilityExecutionError> {
         // Remove .active marker before cleanup
         let marker = self.path.join(".active");
         let _ = tokio::fs::remove_file(&marker).await;
 
         if self.path.exists() {
-            tokio::fs::remove_dir_all(&self.path)
-                .await
-                .map_err(|e| ToolError::Internal {
+            tokio::fs::remove_dir_all(&self.path).await.map_err(|e| {
+                CapabilityExecutionError::Internal {
                     message: format!("Failed to cleanup sandbox: {e}"),
-                })?;
+                }
+            })?;
             debug!(path = %self.path.display(), "cleaned up sandbox");
         }
         Ok(())
@@ -220,25 +220,27 @@ pub async fn check_docker_available() -> Result<(), String> {
 }
 
 /// Recursively copy a directory.
-async fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), ToolError> {
+async fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), CapabilityExecutionError> {
     tokio::fs::create_dir_all(dest)
         .await
-        .map_err(|e| ToolError::Internal {
+        .map_err(|e| CapabilityExecutionError::Internal {
             message: format!("Failed to create dir {}: {e}", dest.display()),
         })?;
 
-    let mut entries = tokio::fs::read_dir(src)
-        .await
-        .map_err(|e| ToolError::Internal {
-            message: format!("Failed to read dir {}: {e}", src.display()),
-        })?;
+    let mut entries =
+        tokio::fs::read_dir(src)
+            .await
+            .map_err(|e| CapabilityExecutionError::Internal {
+                message: format!("Failed to read dir {}: {e}", src.display()),
+            })?;
 
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|e| ToolError::Internal {
-            message: format!("Failed to read entry: {e}"),
-        })?
+    while let Some(entry) =
+        entries
+            .next_entry()
+            .await
+            .map_err(|e| CapabilityExecutionError::Internal {
+                message: format!("Failed to read entry: {e}"),
+            })?
     {
         let entry_path = entry.path();
         let dest_path = dest.join(entry.file_name());
@@ -248,7 +250,7 @@ async fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), ToolError> {
         } else {
             let _ = tokio::fs::copy(&entry_path, &dest_path)
                 .await
-                .map_err(|e| ToolError::Internal {
+                .map_err(|e| CapabilityExecutionError::Internal {
                     message: format!("Failed to copy file: {e}"),
                 })?;
         }

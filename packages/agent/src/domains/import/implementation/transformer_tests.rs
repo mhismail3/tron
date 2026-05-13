@@ -42,12 +42,7 @@ fn make_assistant_item(
     })
 }
 
-fn make_tool_result_item(
-    tool_use_id: &str,
-    content: &str,
-    is_error: bool,
-    turn: i64,
-) -> AssembledItem {
+fn make_provider_capability_result_item(turn: i64) -> AssembledItem {
     AssembledItem::UserMessage {
         record: serde_json::from_value(json!({
             "type": "user",
@@ -57,10 +52,10 @@ fn make_tool_result_item(
             "message": {
                 "role": "user",
                 "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": content,
-                    "is_error": is_error,
+                    "type": "capability_result",
+                    "capability_invocation_id": "provider_capability_1",
+                    "content": "provider result",
+                    "is_error": false,
                 }]
             }
         }))
@@ -169,32 +164,11 @@ fn user_message_with_images_sets_image_count() {
 }
 
 #[test]
-fn tool_result_user_emits_tool_result_event() {
-    let items = vec![make_tool_result_item("toolu_01", "file contents", false, 1)];
+fn provider_capability_result_is_not_translated() {
+    let items = vec![make_provider_capability_result_item(1)];
     let result = transform(items);
 
-    assert_eq!(result.events.len(), 1);
-    assert_eq!(
-        result.events[0].event_type,
-        EventType::CapabilityInvocationCompleted
-    );
-    assert_eq!(result.events[0].payload["toolCallId"], "toolu_01");
-    assert_eq!(result.events[0].payload["content"], "file contents");
-    assert_eq!(result.events[0].payload["isError"], false);
-    assert_eq!(result.events[0].payload["duration"], 0);
-}
-
-#[test]
-fn tool_result_with_error() {
-    let items = vec![make_tool_result_item(
-        "toolu_02",
-        "permission denied",
-        true,
-        1,
-    )];
-    let result = transform(items);
-
-    assert_eq!(result.events[0].payload["isError"], true);
+    assert!(result.events.is_empty());
 }
 
 #[test]
@@ -221,29 +195,31 @@ fn compact_summary_emits_boundary_and_summary() {
 }
 
 #[test]
-fn assistant_emits_message_tool_calls_and_turn_end() {
+fn assistant_drops_provider_capability_blocks_and_keeps_text() {
     let items = vec![make_assistant_item(
         vec![
             json!({"type": "text", "text": "Let me check"}),
-            json!({"type": "tool_use", "id": "toolu_01", "name": "process::run", "input": {"command": "ls"}}),
+            json!({"type": "capability_invocation", "id": "provider_capability_1", "name": "process::run", "input": {"command": "ls"}}),
         ],
         1,
         "claude-opus-4-6",
-        "tool_use",
+        "capability_invocation",
         100,
         50,
     )];
     let result = transform(items);
 
-    // stream.turn_start + message.assistant + capability.invocation.started + stream.turn_end
-    assert_eq!(result.events.len(), 4);
+    assert_eq!(result.events.len(), 3);
     assert_eq!(result.events[0].event_type, EventType::StreamTurnStart);
     assert_eq!(result.events[1].event_type, EventType::MessageAssistant);
     assert_eq!(
-        result.events[2].event_type,
-        EventType::CapabilityInvocationStarted
+        result.events[1].payload["content"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
-    assert_eq!(result.events[3].event_type, EventType::StreamTurnEnd);
+    assert_eq!(result.events[2].event_type, EventType::StreamTurnEnd);
 }
 
 #[test]
@@ -270,52 +246,55 @@ fn assistant_thinking_has_thinking_flag() {
 }
 
 #[test]
-fn assistant_tool_use_produces_tool_call_event() {
+fn provider_capability_only_assistant_produces_no_invocation_event() {
     let items = vec![make_assistant_item(
         vec![
-            json!({"type": "tool_use", "id": "toolu_x", "name": "filesystem::read_file", "input": {"path": "/a.rs"}}),
+            json!({"type": "capability_invocation", "id": "provider_capability_x", "name": "filesystem::read_file", "input": {"path": "/a.rs"}}),
         ],
         1,
         "claude-opus-4-6",
-        "tool_use",
+        "capability_invocation",
         10,
         5,
     )];
     let result = transform(items);
 
-    let tc = result
+    assert!(
+        result
+            .events
+            .iter()
+            .all(|event| event.event_type != EventType::CapabilityInvocationStarted)
+    );
+    let msg = result
         .events
         .iter()
-        .find(|e| e.event_type == EventType::CapabilityInvocationStarted)
+        .find(|e| e.event_type == EventType::MessageAssistant)
         .unwrap();
-    assert_eq!(tc.payload["toolCallId"], "toolu_x");
-    assert_eq!(tc.payload["name"], "filesystem::read_file");
-    assert_eq!(tc.payload["arguments"]["path"], "/a.rs");
-    assert_eq!(tc.payload["turn"], 1);
+    assert!(msg.payload["content"].as_array().unwrap().is_empty());
 }
 
 #[test]
-fn assistant_multiple_tool_uses() {
+fn assistant_multiple_provider_capability_blocks_are_dropped() {
     let items = vec![make_assistant_item(
         vec![
-            json!({"type": "tool_use", "id": "t1", "name": "process::run", "input": {}}),
-            json!({"type": "tool_use", "id": "t2", "name": "filesystem::read_file", "input": {}}),
-            json!({"type": "tool_use", "id": "t3", "name": "filesystem::write_file", "input": {}}),
+            json!({"type": "capability_invocation", "id": "provider_capability_1", "name": "process::run", "input": {}}),
+            json!({"type": "capability_invocation", "id": "provider_capability_2", "name": "filesystem::read_file", "input": {}}),
+            json!({"type": "capability_invocation", "id": "provider_capability_3", "name": "filesystem::write_file", "input": {}}),
         ],
         1,
         "claude-opus-4-6",
-        "tool_use",
+        "capability_invocation",
         10,
         5,
     )];
     let result = transform(items);
 
-    let tool_calls: Vec<_> = result
-        .events
-        .iter()
-        .filter(|e| e.event_type == EventType::CapabilityInvocationStarted)
-        .collect();
-    assert_eq!(tool_calls.len(), 3);
+    assert!(
+        result
+            .events
+            .iter()
+            .all(|event| event.event_type != EventType::CapabilityInvocationStarted)
+    );
 }
 
 #[test]
@@ -440,15 +419,15 @@ fn full_conversation_event_sequence() {
         make_assistant_item(
             vec![
                 json!({"type": "text", "text": "Here's an example:"}),
-                json!({"type": "tool_use", "id": "t1", "name": "filesystem::write_file", "input": {"path": "main.rs"}}),
+                json!({"type": "capability_invocation", "id": "provider_capability_1", "name": "filesystem::write_file", "input": {"path": "main.rs"}}),
             ],
             2,
             "claude-opus-4-6",
-            "tool_use",
+            "capability_invocation",
             200,
             100,
         ),
-        make_tool_result_item("t1", "File written", false, 2),
+        make_provider_capability_result_item(2),
         make_assistant_item(
             vec![json!({"type": "text", "text": "I created the file."})],
             2,
@@ -464,35 +443,32 @@ fn full_conversation_event_sequence() {
     assert_eq!(
         types,
         vec![
-            EventType::StreamTurnStart,               // turn 1
-            EventType::MessageUser,                   // "What is Rust?"
-            EventType::MessageAssistant,              // thinking + text
-            EventType::StreamTurnEnd,                 // turn 1 end
-            EventType::StreamTurnStart,               // turn 2
-            EventType::MessageUser,                   // "Show me an example"
-            EventType::MessageAssistant,              // text + tool_use
-            EventType::CapabilityInvocationStarted,   // Write tool
-            EventType::CapabilityInvocationCompleted, // "File written"
-            EventType::MessageAssistant,              // "I created the file."
-            EventType::StreamTurnEnd,                 // turn 2 end (one per turn)
+            EventType::StreamTurnStart,  // turn 1
+            EventType::MessageUser,      // "What is Rust?"
+            EventType::MessageAssistant, // thinking + text
+            EventType::StreamTurnEnd,    // turn 1 end
+            EventType::StreamTurnStart,  // turn 2
+            EventType::MessageUser,      // "Show me an example"
+            EventType::MessageAssistant,
+            EventType::MessageAssistant, // "I created the file."
+            EventType::StreamTurnEnd,    // turn 2 end (one per turn)
         ]
     );
 }
 
 #[test]
-fn assistant_tool_use_normalized_input_to_arguments() {
-    // Claude Code stores "input" + "caller" on tool_use blocks; Tron expects "arguments"
+fn provider_capability_block_is_removed_from_assistant_content() {
     let items = vec![make_assistant_item(
         vec![json!({
-            "type": "tool_use",
-            "id": "toolu_01",
+            "type": "capability_invocation",
+            "id": "provider_capability_1",
             "name": "process::run",
             "input": {"command": "ls"},
-            "caller": "tool_caller_xyz"
+            "caller": "capability_invocationer_xyz"
         })],
         1,
         "claude-opus-4-6",
-        "tool_use",
+        "capability_invocation",
         10,
         5,
     )];
@@ -503,14 +479,5 @@ fn assistant_tool_use_normalized_input_to_arguments() {
         .iter()
         .find(|e| e.event_type == EventType::MessageAssistant)
         .unwrap();
-    let block = &msg.payload["content"][0];
-    // "input" renamed to "arguments"
-    assert_eq!(block["arguments"]["command"], "ls");
-    assert!(block.get("input").is_none());
-    // "caller" stripped
-    assert!(block.get("caller").is_none());
-    // Other fields preserved
-    assert_eq!(block["type"], "tool_use");
-    assert_eq!(block["id"], "toolu_01");
-    assert_eq!(block["name"], "process::run");
+    assert!(msg.payload["content"].as_array().unwrap().is_empty());
 }

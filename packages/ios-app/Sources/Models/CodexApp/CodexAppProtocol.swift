@@ -314,13 +314,14 @@ enum CodexThreadItem: Decodable, Equatable, Sendable {
     case reasoning(id: String, summary: [String], content: [String])
     case commandExecution(id: String, command: String, cwd: String?, status: String, aggregatedOutput: String?, exitCode: Int?)
     case fileChange(id: String, status: String, changes: [String]?)
-    case mcpCapabilityInvocation(id: String, server: String?, tool: String?, status: String, error: String?)
+    case pluginCapabilityInvocation(id: String, source: String?, capability: String?, status: String, error: String?)
     case webSearch(id: String, query: String?, status: String)
     case other(id: String, type: String, text: String?)
 
     enum CodingKeys: String, CodingKey {
         case id, type, content, text, summary, command, cwd, status, aggregatedOutput, exitCode
-        case changes, server, tool, error, query, action, review
+        case changes, server, error, query, action, review
+        case capability = "tool"
     }
 
     init(from decoder: Decoder) throws {
@@ -359,10 +360,10 @@ enum CodexThreadItem: Decodable, Equatable, Sendable {
                 changes: Self.decodeFileChangeSummaries(container)
             )
         case "mcpCapabilityInvocation":
-            self = .mcpCapabilityInvocation(
+            self = .pluginCapabilityInvocation(
                 id: id,
-                server: try container.decodeIfPresent(String.self, forKey: .server),
-                tool: try container.decodeIfPresent(String.self, forKey: .tool),
+                source: try container.decodeIfPresent(String.self, forKey: .server),
+                capability: try container.decodeIfPresent(String.self, forKey: .capability),
                 status: try container.decodeIfPresent(String.self, forKey: .status) ?? "unknown",
                 error: try container.decodeIfPresent(String.self, forKey: .error)
             )

@@ -4,7 +4,7 @@
 //! Ports phases 1–4 from the TypeScript `sanitizeMessages()`.
 //!
 //! Invariants enforced:
-//! 1. Every `tool_use` block has a corresponding `ToolResult` message
+//! 1. Every `capability_invocation` block has a corresponding `ToolResult` message
 //! 2. No empty messages
 //! 3. No thinking-only assistant messages (display-only, no signature)
 //! 4. Signed thinking blocks converted to text (signatures are model-specific)
@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use tracing::debug;
 
 use crate::shared::content::AssistantContent;
-use crate::shared::messages::{Message, ToolResultMessageContent};
+use crate::shared::messages::{CapabilityResultMessageContent, Message};
 
 /// Content for synthetic capability results when execution was interrupted.
 const INTERRUPTED_CONTENT: &str = "[Interrupted]";
@@ -31,15 +31,15 @@ const CONTINUED_CONTENT: &str = "[Continued]";
 /// - Signed thinking blocks converted to text (cross-model signature normalization)
 /// - Empty messages filtered out
 /// - Thinking-only assistant messages (unsigned, display-only) filtered out
-/// - Duplicate `tool_use` IDs deduplicated
-/// - Synthetic capability results injected for unmatched `tool_use` blocks
+/// - Duplicate `capability_invocation` IDs deduplicated
+/// - Synthetic capability results injected for unmatched `capability_invocation` blocks
 /// - Placeholder user message prepended if first message isn't user
 pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
-    // PHASE 1: Filter invalid messages, deduplicate tool_use IDs
+    // PHASE 1: Filter invalid messages, deduplicate capability_invocation IDs
     let mut valid: Vec<Message> = Vec::with_capacity(messages.len());
-    let mut seen_tool_use_ids: HashSet<String> = HashSet::new();
-    // tool_use_id → index in `valid` where the assistant message lives
-    let mut tool_use_locations: HashMap<String, usize> = HashMap::new();
+    let mut seen_capability_invocation_ids: HashSet<String> = HashSet::new();
+    // capability_invocation_id → index in `valid` where the assistant message lives
+    let mut capability_invocation_locations: HashMap<String, usize> = HashMap::new();
 
     for msg in messages {
         match &msg {
@@ -51,19 +51,19 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                 valid.push(msg);
             }
             Message::Assistant { content, .. } => {
-                // Filter duplicate tool_use blocks + convert signed thinking to text.
+                // Filter duplicate capability_invocation blocks + convert signed thinking to text.
                 // Thinking signatures are model-specific cryptographic tokens — a signature
                 // from MiniMax or a different Anthropic model will be rejected by the target.
                 // Converting to text preserves reasoning content without the invalid wrapper.
                 let mut filtered: Vec<AssistantContent> = Vec::with_capacity(content.len());
                 for block in content {
                     match block {
-                        AssistantContent::ToolUse { id, .. } => {
-                            if seen_tool_use_ids.contains(id) {
-                                debug!(tool_use_id = %id, "Removed duplicate tool_use block");
+                        AssistantContent::CapabilityInvocation { id, .. } => {
+                            if seen_capability_invocation_ids.contains(id) {
+                                debug!(capability_invocation_id = %id, "Removed duplicate capability_invocation block");
                                 continue;
                             }
-                            let _ = seen_tool_use_ids.insert(id.clone());
+                            let _ = seen_capability_invocation_ids.insert(id.clone());
                             filtered.push(block.clone());
                         }
                         AssistantContent::Thinking {
@@ -89,10 +89,10 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
 
                 let idx = valid.len();
 
-                // Track tool_use locations for synthetic result injection
+                // Track capability_invocation locations for synthetic result injection
                 for block in &filtered {
-                    if let AssistantContent::ToolUse { id, .. } = block {
-                        let _ = tool_use_locations.insert(id.clone(), idx);
+                    if let AssistantContent::CapabilityInvocation { id, .. } = block {
+                        let _ = capability_invocation_locations.insert(id.clone(), idx);
                     }
                 }
 
@@ -104,17 +104,17 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                     thinking: None,
                 });
             }
-            Message::ToolResult {
-                tool_call_id,
+            Message::CapabilityResult {
+                invocation_id,
                 content,
                 ..
             } => {
-                if tool_call_id.is_empty() {
-                    debug!("Removed capability result with empty tool_call_id");
+                if invocation_id.is_empty() {
+                    debug!("Removed capability result with empty invocation_id");
                     continue;
                 }
-                if !is_valid_tool_result_content(content) {
-                    debug!(tool_call_id = %tool_call_id, "Removed empty capability result");
+                if !is_valid_capability_result_content(content) {
+                    debug!(invocation_id = %invocation_id, "Removed empty capability result");
                     continue;
                 }
                 valid.push(msg);
@@ -126,23 +126,23 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
     let existing_result_ids: HashSet<&str> = valid
         .iter()
         .filter_map(|msg| {
-            if let Message::ToolResult { tool_call_id, .. } = msg {
-                Some(tool_call_id.as_str())
+            if let Message::CapabilityResult { invocation_id, .. } = msg {
+                Some(invocation_id.as_str())
             } else {
                 None
             }
         })
         .collect();
 
-    // PHASE 3: Inject synthetic capability results for unmatched tool_use blocks
+    // PHASE 3: Inject synthetic capability results for unmatched capability_invocation blocks
     // Group missing IDs by assistant message index
     let mut missing_by_index: HashMap<usize, Vec<String>> = HashMap::new();
-    for (tool_use_id, assistant_idx) in &tool_use_locations {
-        if !existing_result_ids.contains(tool_use_id.as_str()) {
+    for (capability_invocation_id, assistant_idx) in &capability_invocation_locations {
+        if !existing_result_ids.contains(capability_invocation_id.as_str()) {
             missing_by_index
                 .entry(*assistant_idx)
                 .or_default()
-                .push(tool_use_id.clone());
+                .push(capability_invocation_id.clone());
         }
     }
 
@@ -152,14 +152,14 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
 
     for assistant_idx in sorted_indices {
         if let Some(missing_ids) = missing_by_index.get(&assistant_idx) {
-            // Insert in reverse to maintain original tool_use order
-            for tool_call_id in missing_ids.iter().rev() {
-                debug!(tool_call_id = %tool_call_id, "Injected synthetic capability result for interrupted execution");
+            // Insert in reverse to maintain original capability_invocation order
+            for invocation_id in missing_ids.iter().rev() {
+                debug!(invocation_id = %invocation_id, "Injected synthetic capability result for interrupted execution");
                 valid.insert(
                     assistant_idx + 1,
-                    Message::ToolResult {
-                        tool_call_id: tool_call_id.clone(),
-                        content: ToolResultMessageContent::Text(INTERRUPTED_CONTENT.into()),
+                    Message::CapabilityResult {
+                        invocation_id: invocation_id.clone(),
+                        content: CapabilityResultMessageContent::Text(INTERRUPTED_CONTENT.into()),
                         is_error: None,
                     },
                 );
@@ -203,10 +203,10 @@ fn is_valid_user_content(content: &crate::shared::messages::UserMessageContent) 
 }
 
 /// Check if capability result content is non-empty.
-fn is_valid_tool_result_content(content: &ToolResultMessageContent) -> bool {
+fn is_valid_capability_result_content(content: &CapabilityResultMessageContent) -> bool {
     match content {
-        ToolResultMessageContent::Text(_) => true,
-        ToolResultMessageContent::Blocks(blocks) => !blocks.is_empty(),
+        CapabilityResultMessageContent::Text(_) => true,
+        CapabilityResultMessageContent::Blocks(blocks) => !blocks.is_empty(),
     }
 }
 
@@ -218,11 +218,11 @@ fn is_valid_tool_result_content(content: &ToolResultMessageContent) -> bool {
 mod tests {
     use super::*;
     use crate::shared::content::AssistantContent;
-    use crate::shared::messages::{Message, ToolResultMessageContent};
+    use crate::shared::messages::{CapabilityResultMessageContent, Message};
     use serde_json::Map;
 
-    fn tool_use(id: &str, name: &str) -> AssistantContent {
-        AssistantContent::ToolUse {
+    fn capability_invocation(id: &str, name: &str) -> AssistantContent {
+        AssistantContent::CapabilityInvocation {
             id: id.into(),
             name: name.into(),
             arguments: Map::new(),
@@ -230,10 +230,10 @@ mod tests {
         }
     }
 
-    fn tool_result(tool_call_id: &str, text: &str) -> Message {
-        Message::ToolResult {
-            tool_call_id: tool_call_id.into(),
-            content: ToolResultMessageContent::Text(text.into()),
+    fn capability_result(invocation_id: &str, text: &str) -> Message {
+        Message::CapabilityResult {
+            invocation_id: invocation_id.into(),
+            content: CapabilityResultMessageContent::Text(text.into()),
             is_error: None,
         }
     }
@@ -308,22 +308,22 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_tool_use_ids_removed() {
+    fn duplicate_capability_invocation_ids_removed() {
         let messages = vec![
             Message::user("hello"),
             assistant_with_content(vec![
-                tool_use("tc-1", "execute"),
+                capability_invocation("tc-1", "execute"),
                 AssistantContent::text("some text"),
             ]),
-            tool_result("tc-1", "output"),
-            // Second assistant reuses the same tool_use ID
+            capability_result("tc-1", "output"),
+            // Second assistant reuses the same capability_invocation ID
             assistant_with_content(vec![
-                tool_use("tc-1", "execute"),
+                capability_invocation("tc-1", "execute"),
                 AssistantContent::text("more text"),
             ]),
         ];
         let result = sanitize_messages(messages);
-        // The second assistant message should have the duplicate tool_use removed
+        // The second assistant message should have the duplicate capability_invocation removed
         // but still keep the text block
         assert_eq!(result.len(), 4);
         if let Message::Assistant { content, .. } = &result[3] {
@@ -337,10 +337,10 @@ mod tests {
     // ── Phase 2-3: Synthetic capability results ────────────────────────────────
 
     #[test]
-    fn unmatched_tool_use_gets_synthetic_result() {
+    fn unmatched_capability_invocation_gets_synthetic_result() {
         let messages = vec![
             Message::user("hello"),
-            assistant_with_content(vec![tool_use("tc-1", "execute")]),
+            assistant_with_content(vec![capability_invocation("tc-1", "execute")]),
             // No capability result for tc-1
         ];
         let result = sanitize_messages(messages);
@@ -348,14 +348,14 @@ mod tests {
         assert!(result[0].is_user());
         assert!(result[1].is_assistant());
         // Synthetic result injected
-        if let Message::ToolResult {
-            tool_call_id,
+        if let Message::CapabilityResult {
+            invocation_id,
             content,
             ..
         } = &result[2]
         {
-            assert_eq!(tool_call_id, "tc-1");
-            if let ToolResultMessageContent::Text(text) = content {
+            assert_eq!(invocation_id, "tc-1");
+            if let CapabilityResultMessageContent::Text(text) = content {
                 assert_eq!(text, "[Interrupted]");
             }
         } else {
@@ -364,32 +364,32 @@ mod tests {
     }
 
     #[test]
-    fn matched_tool_use_no_synthetic_result() {
+    fn matched_capability_invocation_no_synthetic_result() {
         let messages = vec![
             Message::user("hello"),
-            assistant_with_content(vec![tool_use("tc-1", "execute")]),
-            tool_result("tc-1", "output"),
+            assistant_with_content(vec![capability_invocation("tc-1", "execute")]),
+            capability_result("tc-1", "output"),
         ];
         let result = sanitize_messages(messages);
         assert_eq!(result.len(), 3); // No synthetic result needed
     }
 
     #[test]
-    fn multiple_unmatched_tool_uses_all_get_synthetic_results() {
+    fn multiple_unmatched_capability_invocations_all_get_synthetic_results() {
         let messages = vec![
             Message::user("hello"),
             assistant_with_content(vec![
-                tool_use("tc-1", "execute"),
-                tool_use("tc-2", "inspect"),
-                tool_use("tc-3", "search"),
+                capability_invocation("tc-1", "execute"),
+                capability_invocation("tc-2", "inspect"),
+                capability_invocation("tc-3", "search"),
             ]),
         ];
         let result = sanitize_messages(messages);
         // user + assistant + 3 synthetic results
         assert_eq!(result.len(), 5);
-        assert!(result[2].is_tool_result());
-        assert!(result[3].is_tool_result());
-        assert!(result[4].is_tool_result());
+        assert!(result[2].is_capability_result());
+        assert!(result[3].is_capability_result());
+        assert!(result[4].is_capability_result());
     }
 
     // ── Phase 4: First message must be user ──────────────────────────────
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn idempotent_double_sanitize() {
         let messages = vec![
-            assistant_with_content(vec![tool_use("tc-1", "execute")]),
+            assistant_with_content(vec![capability_invocation("tc-1", "execute")]),
             Message::user("hello"),
         ];
         let first = sanitize_messages(messages);
@@ -446,17 +446,17 @@ mod tests {
     // ── Multiple consecutive ToolResults preserved ───────────────────────
 
     #[test]
-    fn multiple_consecutive_tool_results_preserved() {
+    fn multiple_consecutive_capability_results_preserved() {
         let messages = vec![
             Message::user("hello"),
             assistant_with_content(vec![
-                tool_use("tc-1", "execute"),
-                tool_use("tc-2", "inspect"),
-                tool_use("tc-3", "search"),
+                capability_invocation("tc-1", "execute"),
+                capability_invocation("tc-2", "inspect"),
+                capability_invocation("tc-3", "search"),
             ]),
-            tool_result("tc-1", "output1"),
-            tool_result("tc-2", "output2"),
-            tool_result("tc-3", "output3"),
+            capability_result("tc-1", "output1"),
+            capability_result("tc-2", "output2"),
+            capability_result("tc-3", "output3"),
         ];
         let result = sanitize_messages(messages);
         // All messages should be preserved as-is
@@ -480,9 +480,9 @@ mod tests {
                     thinking: "Let me search for that.".into(),
                     signature: Some("d7f2ef852b1a3c4e5f6a7b8c9d0e1f2a3b4c5d6e".into()),
                 },
-                tool_use("call_abc123", "execute"),
+                capability_invocation("call_abc123", "execute"),
             ]),
-            tool_result("call_abc123", "output"),
+            capability_result("call_abc123", "output"),
         ];
         let result = sanitize_messages(messages);
         assert_eq!(result.len(), 3);
@@ -490,7 +490,10 @@ mod tests {
             assert_eq!(content.len(), 2);
             assert!(content[0].is_text());
             assert_eq!(content[0].as_text().unwrap(), "Let me search for that.");
-            assert!(matches!(content[1], AssistantContent::ToolUse { .. }));
+            assert!(matches!(
+                content[1],
+                AssistantContent::CapabilityInvocation { .. }
+            ));
             assert!(!content.iter().any(AssistantContent::is_thinking));
         } else {
             panic!("Expected assistant message");
@@ -530,9 +533,9 @@ mod tests {
                     thinking: "second thought".into(),
                     signature: Some("sig2".into()),
                 },
-                tool_use("tc-1", "execute"),
+                capability_invocation("tc-1", "execute"),
             ]),
-            tool_result("tc-1", "output"),
+            capability_result("tc-1", "output"),
         ];
         let result = sanitize_messages(messages);
         if let Message::Assistant { content, .. } = &result[1] {
@@ -541,7 +544,10 @@ mod tests {
             assert_eq!(content[0].as_text().unwrap(), "first thought");
             assert!(content[1].is_text());
             assert_eq!(content[1].as_text().unwrap(), "second thought");
-            assert!(matches!(content[2], AssistantContent::ToolUse { .. }));
+            assert!(matches!(
+                content[2],
+                AssistantContent::CapabilityInvocation { .. }
+            ));
         } else {
             panic!("Expected assistant message");
         }

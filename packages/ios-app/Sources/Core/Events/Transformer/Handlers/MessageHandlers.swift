@@ -4,14 +4,14 @@ import Foundation
 ///
 /// Handles: message.user, message.assistant, message.system
 ///
-/// Note: The interleaved message.assistant transformation (preserving text/tool order)
+/// Note: The interleaved message.assistant transformation (preserving text/capability order)
 /// is handled separately in InterleavedContentProcessor.
 enum MessageHandlers {
 
     /// Transform message.user event into a ChatMessage.
     ///
     /// User messages contain the user's input to the agent.
-    /// Interactive-tool responses (answered questions and subagent results) are
+    /// Interactive-capability responses (answered questions and subagent results) are
     /// identified by the server-provided `messageKind` field and rendered
     /// as chips — iOS does not parse the message text content for these.
     static func transformUserMessage(
@@ -20,13 +20,13 @@ enum MessageHandlers {
     ) -> ChatMessage? {
         guard let parsed = UserMessagePayload(from: payload) else { return nil }
 
-        // Skip tool_result context messages - they're LLM conversation context,
+        // Skip capability_result context messages - they're LLM conversation context,
         // not displayable user messages. Capability results are displayed via capability.invocation.completed events.
-        if parsed.isToolResultContext {
+        if parsed.isCapabilityResultContext {
             return nil
         }
 
-        // Server-provided structured chip rendering (see the tools domain
+        // Server-provided structured chip rendering (see the capability domain
         // interactive enrichment modules). No text scanning needed — the
         // server tags these messages with `messageKind` on the live path
         // and back-fills historical events during reconstruction.
@@ -62,7 +62,7 @@ enum MessageHandlers {
     /// Transform message.assistant event into a ChatMessage.
     ///
     /// This handler extracts only TEXT content from assistant messages.
-    /// Tool blocks are handled separately by capability.invocation.started/capability.invocation.completed events
+    /// Capability blocks are handled separately by capability.invocation.started/capability.invocation.completed events
     /// or by the interleaved content processor.
     static func transformAssistantMessage(
         _ payload: [String: AnyCodable],
@@ -73,7 +73,7 @@ enum MessageHandlers {
         }
 
         // CRITICAL: Only extract TEXT from assistant messages
-        // Tool blocks are handled by capability.invocation.started/capability.invocation.completed events
+        // Capability blocks are handled by capability.invocation.started/capability.invocation.completed events
         guard let text = parsed.textContent, !text.isEmpty else { return nil }
 
         return ChatMessage(

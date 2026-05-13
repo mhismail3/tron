@@ -28,21 +28,21 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     // MARK: - Helper Functions
 
-    private func makeToolStartResult(
-        modelToolName: String,
+    private func makeCapabilityInvocationStartResult(
+        modelPrimitiveName: String,
         invocationId: String,
         arguments: [String: AnyCodable]? = nil,
         identity: CapabilityIdentity? = nil
     ) -> CapabilityInvocationStartedPlugin.Result {
         CapabilityInvocationStartedPlugin.Result(
-            modelToolName: modelToolName,
+            modelPrimitiveName: modelPrimitiveName,
             invocationId: invocationId,
             arguments: arguments,
             identity: identity
         )
     }
 
-    private func makeToolEndResult(
+    private func makeCapabilityInvocationEndResult(
         invocationId: String,
         success: Bool,
         result: String?,
@@ -50,7 +50,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     ) -> CapabilityInvocationCompletedPlugin.Result {
         CapabilityInvocationCompletedPlugin.Result(
             invocationId: invocationId,
-            modelToolName: nil,
+            modelPrimitiveName: nil,
             success: success,
             output: result,
             error: success ? nil : result,
@@ -141,9 +141,9 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.streamingManager.streamingText, initialText + "Hello, world!")
     }
 
-    func test_textDelta_skippedWhenAskUserQuestionCalled() {
-        // Given - mark AskUserQuestion as called
-        viewModel.askUserQuestionCalledInTurn = true
+    func test_textDelta_skippedWhenUserInteractionCalled() {
+        // Given - mark UserInteraction as called
+        viewModel.userInteractionCalledInTurn = true
 
         // When
         viewModel.handleTextDelta("Should be skipped")
@@ -213,13 +213,13 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertTrue(viewModel.thinkingState.currentText.contains("Deep thought"))
     }
 
-    // MARK: - Tool Start Routing Tests
+    // MARK: - Capability Start Routing Tests
 
-    func test_capabilityStart_createsToolMessage() {
+    func test_capabilityInvocationStarted_createsCapabilityMessage() {
         // Given
         let initialCount = viewModel.messages.count
-        let result = makeToolStartResult(
-            modelToolName: "Bash",
+        let result = makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: "toolu_test123",
             arguments: ["command": AnyCodable("ls -la")]
         )
@@ -227,15 +227,15 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         // When
         viewModel.handleCapabilityInvocationStarted(result)
 
-        // Then - tool message should be created
+        // Then - capability message should be created
         XCTAssertEqual(viewModel.messages.count, initialCount + 1)
     }
 
-    func test_capabilityStart_tracksCapabilityInvocation() {
+    func test_capabilityInvocationStarted_tracksCapabilityInvocation() {
         // Given
         XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        let result = makeToolStartResult(
-            modelToolName: "Read",
+        let result = makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: "toolu_read123",
             arguments: ["file_path": AnyCodable("/test.txt")]
         )
@@ -246,15 +246,15 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         // Then - capability invocation should be tracked
         XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.count, 1)
         XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.first?.invocationId, "toolu_read123")
-        XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.first?.modelToolName, "Read")
+        XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.first?.modelPrimitiveName, "execute")
     }
 
-    func test_capabilityStart_askUserQuestion_setsFlag() {
+    func test_capabilityInvocationStarted_userInteraction_setsFlag() {
         // Given
-        XCTAssertFalse(viewModel.askUserQuestionCalledInTurn)
+        XCTAssertFalse(viewModel.userInteractionCalledInTurn)
 
-        let result = makeToolStartResult(
-            modelToolName: "execute",
+        let result = makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: "toolu_ask123",
             arguments: [
                 "questions": AnyCodable([
@@ -269,22 +269,22 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
                     ]
                 ])
             ],
-            identity: testAskUserCapabilityIdentity()
+            identity: testUserInteractionCapabilityIdentity()
         )
 
         // When
         viewModel.handleCapabilityInvocationStarted(result)
 
         // Then - flag should be set
-        XCTAssertTrue(viewModel.askUserQuestionCalledInTurn)
+        XCTAssertTrue(viewModel.userInteractionCalledInTurn)
     }
 
-    // MARK: - Tool Progress Routing Tests
+    // MARK: - Capability Progress Routing Tests
 
     func test_capabilityProgress_updatesChipProgressFields() {
         let invocationId = "toolu_progress1"
-        let startResult = makeToolStartResult(
-            modelToolName: "Bash",
+        let startResult = makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: invocationId,
             arguments: ["command": AnyCodable("long-task")]
         )
@@ -321,10 +321,10 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.messages.count, initialCount)
     }
 
-    func test_capabilityEnd_clearsProgressFields() {
+    func test_capabilityInvocationCompleted_clearsProgressFields() {
         let invocationId = "toolu_progress_end"
-        viewModel.handleCapabilityInvocationStarted(makeToolStartResult(
-            modelToolName: "Bash",
+        viewModel.handleCapabilityInvocationStarted(makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: invocationId,
             arguments: nil
         ))
@@ -333,7 +333,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             message: "in-flight",
             percent: 0.4
         ))
-        viewModel.handleCapabilityInvocationCompleted(makeToolEndResult(
+        viewModel.handleCapabilityInvocationCompleted(makeCapabilityInvocationEndResult(
             invocationId: invocationId,
             success: true,
             result: "done",
@@ -354,18 +354,18 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     // MARK: - Capability Completion Routing Tests
 
-    func test_capabilityEnd_updatesTrackedCapabilityInvocation() {
-        // Given - start a tool first
+    func test_capabilityInvocationCompleted_updatesTrackedCapabilityInvocation() {
+        // Given - start a capability first
         let invocationId = "toolu_test456"
-        let startResult = makeToolStartResult(
-            modelToolName: "Bash",
+        let startResult = makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: invocationId,
             arguments: ["command": AnyCodable("echo hello")]
         )
         viewModel.handleCapabilityInvocationStarted(startResult)
 
-        // When - end the tool
-        let endResult = makeToolEndResult(
+        // When - end the capability
+        let endResult = makeCapabilityInvocationEndResult(
             invocationId: invocationId,
             success: true,
             result: "hello\n",
@@ -382,18 +382,18 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         }
     }
 
-    func test_capabilityEnd_error_marksCapabilityInvocationAsError() {
-        // Given - start a tool
+    func test_capabilityInvocationCompleted_error_marksCapabilityInvocationAsError() {
+        // Given - start a capability
         let invocationId = "toolu_error789"
-        let startResult = makeToolStartResult(
-            modelToolName: "Bash",
+        let startResult = makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: invocationId,
             arguments: ["command": AnyCodable("invalid_command")]
         )
         viewModel.handleCapabilityInvocationStarted(startResult)
 
         // When - end with error
-        let endResult = makeToolEndResult(
+        let endResult = makeCapabilityInvocationEndResult(
             invocationId: invocationId,
             success: false,
             result: "Command not found",
@@ -450,32 +450,32 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.agentPhase, .idle)
     }
 
-    func test_turnStart_resetsToolTracking() {
+    func test_turnStart_resetsCapabilityTracking() {
         // Given - have some capability invocations from previous turn
         viewModel.currentTurnCapabilityInvocations = [
-            CapabilityInvocationRecord(invocationId: "old1", modelToolName: "Bash", arguments: "{}")
+            CapabilityInvocationRecord(invocationId: "old1", modelPrimitiveName: "execute", arguments: "{}")
         ]
-        viewModel.currentToolMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
+        viewModel.currentCapabilityInvocationMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
 
         // When
         let result = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
-        // Then - tool tracking should be cleared
+        // Then - capability tracking should be cleared
         XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        XCTAssertTrue(viewModel.currentToolMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
     }
 
-    func test_turnStart_resetsAskUserQuestionFlag() {
+    func test_turnStart_resetsUserInteractionFlag() {
         // Given
-        viewModel.askUserQuestionCalledInTurn = true
+        viewModel.userInteractionCalledInTurn = true
 
         // When
         let result = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then
-        XCTAssertFalse(viewModel.askUserQuestionCalledInTurn)
+        XCTAssertFalse(viewModel.userInteractionCalledInTurn)
     }
 
     func test_turnStart_clearsThinkingMessageId() {
@@ -522,20 +522,20 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertFalse(viewModel.isProcessing)
     }
 
-    func test_complete_clearsToolTracking() {
+    func test_complete_clearsCapabilityTracking() {
         // Given: agent must be processing for handleComplete to transition
         viewModel.agentPhase = .processing
         viewModel.currentTurnCapabilityInvocations = [
-            CapabilityInvocationRecord(invocationId: "t1", modelToolName: "Bash", arguments: "{}")
+            CapabilityInvocationRecord(invocationId: "t1", modelPrimitiveName: "execute", arguments: "{}")
         ]
-        viewModel.currentToolMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
+        viewModel.currentCapabilityInvocationMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
 
         // When
         viewModel.handleComplete()
 
         // Then
         XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        XCTAssertTrue(viewModel.currentToolMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
     }
 
     // MARK: - Subagent Routing Tests
@@ -611,21 +611,21 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.handleTextDelta("Here's my response: ")
         viewModel.handleTextDelta("the answer is 42.")
 
-        // 4. Agent uses a tool
-        let capabilityStartResult = makeToolStartResult(
-            modelToolName: "Bash",
+        // 4. Agent uses a capability
+        let capabilityInvocationStartedResult = makeCapabilityInvocationStartResult(
+            modelPrimitiveName: "execute",
             invocationId: "toolu_flow1",
             arguments: ["command": AnyCodable("echo test")]
         )
-        viewModel.handleCapabilityInvocationStarted(capabilityStartResult)
+        viewModel.handleCapabilityInvocationStarted(capabilityInvocationStartedResult)
 
-        let capabilityEndResult = makeToolEndResult(
+        let capabilityInvocationCompletedResult = makeCapabilityInvocationEndResult(
             invocationId: "toolu_flow1",
             success: true,
             result: "test\n",
             durationMs: 100
         )
-        viewModel.handleCapabilityInvocationCompleted(capabilityEndResult)
+        viewModel.handleCapabilityInvocationCompleted(capabilityInvocationCompletedResult)
 
         // 5. Turn ends
         let tokenRecord = makeTokenRecord(
@@ -646,9 +646,9 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         // Then - verify final state
         XCTAssertFalse(viewModel.isProcessing)
         XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        XCTAssertTrue(viewModel.currentToolMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
 
-        // Should have: thinking message + tool message = at least 2 new messages
+        // Should have: thinking message + capability message = at least 2 new messages
         XCTAssertGreaterThanOrEqual(viewModel.messages.count, initialMessageCount + 2)
     }
 

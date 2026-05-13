@@ -322,12 +322,12 @@ mod tests {
                 "defaultTimeoutMs": 60000
             }
         });
-        let tools: CapabilitySettings = serde_json::from_value(json).unwrap();
-        assert_eq!(tools.process.default_timeout_ms, 60_000);
+        let capabilities: CapabilitySettings = serde_json::from_value(json).unwrap();
+        assert_eq!(capabilities.process.default_timeout_ms, 60_000);
         // Other process fields should be defaults.
-        assert_eq!(tools.process.max_timeout_ms, 600_000);
+        assert_eq!(capabilities.process.max_timeout_ms, 600_000);
         // Other capability sections should be defaults.
-        assert_eq!(tools.filesystem_read.default_limit_lines, 2000);
+        assert_eq!(capabilities.filesystem_read.default_limit_lines, 2000);
     }
 
     #[test]
@@ -388,10 +388,10 @@ mod tests {
                 "headed": true
             }
         });
-        let tools: CapabilitySettings = serde_json::from_value(json).unwrap();
-        assert!(tools.browser.headed);
+        let capabilities: CapabilitySettings = serde_json::from_value(json).unwrap();
+        assert!(capabilities.browser.headed);
         // Other capability sections should still be defaults.
-        assert_eq!(tools.process.default_timeout_ms, 120_000);
+        assert_eq!(capabilities.process.default_timeout_ms, 120_000);
     }
 
     #[test]
@@ -432,10 +432,10 @@ mod tests {
                 "screenshotThrottleMs": 250
             }
         });
-        let tools: CapabilitySettings = serde_json::from_value(json).unwrap();
-        assert!(!tools.computer_use.confirm_before_action);
-        assert_eq!(tools.computer_use.screenshot_throttle_ms, 250);
+        let capabilities: CapabilitySettings = serde_json::from_value(json).unwrap();
+        assert!(!capabilities.computer_use.confirm_before_action);
+        assert_eq!(capabilities.computer_use.screenshot_throttle_ms, 250);
         // Other capability sections should still be defaults.
-        assert_eq!(tools.process.default_timeout_ms, 120_000);
+        assert_eq!(capabilities.process.default_timeout_ms, 120_000);
     }
 }

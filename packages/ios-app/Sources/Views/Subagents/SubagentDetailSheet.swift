@@ -6,11 +6,11 @@ import UIKit
 /// Uses MessageBubble rendering (same as regular sessions) for all states.
 @available(iOS 26.0, *)
 struct SubagentDetailSheet: View {
-    let data: SubagentToolData
+    let data: SubagentInvocationData
     let subagentState: SubagentState
     let eventStoreManager: EventStoreManager
     let engineClient: EngineClient
-    var onSendResults: ((SubagentToolData) -> Void)?
+    var onSendResults: ((SubagentInvocationData) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     /// Chat history state

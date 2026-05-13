@@ -19,10 +19,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared::messages::{TokenUsage, ToolCall};
-use crate::shared::tools::CapabilityResult;
+use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::model_capabilities::CapabilityResult;
 
-/// Capability identity attached to provider protocol tool events.
+/// Capability identity attached to provider protocol capability events.
 ///
 /// `capability.invocation.started` / `capability.invocation.completed` are current capability event labels,
 /// but active UI identity must come from these fields. The model-facing name is
@@ -33,7 +33,7 @@ use crate::shared::tools::CapabilityResult;
 pub struct CapabilityEventIdentity {
     /// Provider-visible primitive name (`search`, `inspect`, or `execute`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_tool_name: Option<String>,
+    pub model_primitive_name: Option<String>,
     /// Stable abstract capability contract id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contract_id: Option<String>,
@@ -78,9 +78,9 @@ pub struct CapabilityEventIdentity {
 impl CapabilityEventIdentity {
     /// Build identity for a model-facing primitive before binding resolution.
     #[must_use]
-    pub fn with_model_tool(name: impl Into<String>) -> Self {
+    pub fn with_model_primitive(name: impl Into<String>) -> Self {
         Self {
-            model_tool_name: Some(name.into()),
+            model_primitive_name: Some(name.into()),
             ..Self::default()
         }
     }
@@ -150,32 +150,32 @@ pub enum StreamEvent {
     },
 
     /// Capability invocation started.
-    #[serde(rename = "toolcall_start")]
-    ToolCallStart {
+    #[serde(rename = "capability_invocation_start")]
+    CapabilityInvocationDraftStart {
         /// Capability invocation ID.
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
-        /// Tool name.
+        invocation_id: String,
+        /// Capability name.
         name: String,
     },
 
     /// Incremental capability invocation argument JSON.
-    #[serde(rename = "toolcall_delta")]
-    ToolCallDelta {
+    #[serde(rename = "capability_invocation_delta")]
+    CapabilityInvocationDraftDelta {
         /// Capability invocation ID.
-        #[serde(rename = "toolCallId")]
-        tool_call_id: String,
+        #[serde(rename = "invocationId")]
+        invocation_id: String,
         /// Partial JSON arguments.
         #[serde(rename = "argumentsDelta")]
         arguments_delta: String,
     },
 
     /// Capability invocation fully constructed.
-    #[serde(rename = "toolcall_end")]
-    ToolCallEnd {
+    #[serde(rename = "capability_invocation_end")]
+    CapabilityInvocationDraftEnd {
         /// Complete capability invocation.
-        #[serde(rename = "toolCall")]
-        tool_call: ToolCall,
+        #[serde(rename = "capabilityInvocation")]
+        capability_invocation: CapabilityInvocationDraft,
     },
 
     /// Stream completed successfully.
@@ -291,12 +291,12 @@ impl BaseEvent {
 
 /// Capability invocation summary in a batch event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ToolCallSummary {
+pub struct CapabilityInvocationSummary {
     /// Capability invocation ID.
     pub id: String,
-    /// Tool name.
+    /// Model-facing primitive name.
     pub name: String,
-    /// Tool arguments.
+    /// Primitive arguments.
     pub arguments: serde_json::Map<String, Value>,
 }
 
@@ -448,8 +448,8 @@ tron_events! {
         turn: u32,
         #[serde(rename = "partialContent", skip_serializing_if = "Option::is_none")]
         partial_content: Option<String>,
-        #[serde(rename = "activeTool", skip_serializing_if = "Option::is_none")]
-        active_tool: Option<String>,
+        #[serde(rename = "activeCapability", skip_serializing_if = "Option::is_none")]
+        active_capability: Option<String>,
     } => "agent_interrupted",
 
     // -- Turn lifecycle --
@@ -497,10 +497,10 @@ tron_events! {
         stop_reason: String,
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<TokenUsage>,
-        #[serde(rename = "hasToolCalls")]
-        has_tool_calls: bool,
-        #[serde(rename = "toolCallCount")]
-        tool_call_count: u32,
+        #[serde(rename = "hasCapabilityInvocations")]
+        has_capability_invocations: bool,
+        #[serde(rename = "capabilityInvocationCount")]
+        capability_invocation_count: u32,
         #[serde(rename = "tokenRecord", skip_serializing_if = "Option::is_none")]
         token_record: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -518,16 +518,16 @@ tron_events! {
 
     /// All capability invocations from the model's response (before execution).
     CapabilityInvocationBatch {
-        #[serde(rename = "toolCalls")]
-        tool_calls: Vec<ToolCallSummary>,
+        #[serde(rename = "capabilityInvocations")]
+        capability_invocations: Vec<CapabilityInvocationSummary>,
     } => "capability.invocation.batch",
 
     /// Capability invocation started.
     CapabilityInvocationStarted {
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
-        #[serde(rename = "modelToolName")]
-        tool_name: String,
+        invocation_id: String,
+        #[serde(rename = "modelPrimitiveName")]
+        model_primitive_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         arguments: Option<serde_json::Map<String, Value>>,
         #[serde(flatten)]
@@ -537,7 +537,7 @@ tron_events! {
     /// Capability invocation progress update.
     CapabilityInvocationOutput {
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
+        invocation_id: String,
         update: String,
     } => "capability.invocation.output",
 
@@ -547,7 +547,7 @@ tron_events! {
     /// subtitle) and an optional 0.0–1.0 completion fraction.
     CapabilityInvocationProgress {
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
+        invocation_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -559,9 +559,9 @@ tron_events! {
     /// Capability binding resolution update for an `execute` primitive call.
     CapabilityResolution {
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
-        #[serde(rename = "modelToolName")]
-        model_tool_name: String,
+        invocation_id: String,
+        #[serde(rename = "modelPrimitiveName")]
+        model_primitive_name: String,
         #[serde(rename = "requestedContractId", skip_serializing_if = "Option::is_none")]
         requested_contract_id: Option<String>,
         #[serde(rename = "requestedImplementationId", skip_serializing_if = "Option::is_none")]
@@ -575,9 +575,9 @@ tron_events! {
     /// Capability invocation completed.
     CapabilityInvocationCompleted {
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
-        #[serde(rename = "modelToolName")]
-        tool_name: String,
+        invocation_id: String,
+        #[serde(rename = "modelPrimitiveName")]
+        model_primitive_name: String,
         duration: u64,
         #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
@@ -590,9 +590,9 @@ tron_events! {
     /// Capability invocation argument delta (during streaming).
     CapabilityInvocationArgumentDelta {
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
-        #[serde(rename = "modelToolName", skip_serializing_if = "Option::is_none")]
-        tool_name: Option<String>,
+        invocation_id: String,
+        #[serde(rename = "modelPrimitiveName", skip_serializing_if = "Option::is_none")]
+        model_primitive_name: Option<String>,
         #[serde(rename = "argumentsDelta")]
         arguments_delta: String,
     } => "capability.invocation.arguments_delta",
@@ -600,9 +600,9 @@ tron_events! {
     /// Capability invocation generating (before arguments streamed).
     CapabilityInvocationGenerating {
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
-        #[serde(rename = "modelToolName")]
-        tool_name: String,
+        invocation_id: String,
+        #[serde(rename = "modelPrimitiveName")]
+        model_primitive_name: String,
         #[serde(flatten)]
         capability_identity: CapabilityEventIdentity,
     } => "capability.invocation.generating",
@@ -615,10 +615,10 @@ tron_events! {
         hook_names: Vec<String>,
         #[serde(rename = "hookEvent")]
         hook_event: String,
-        #[serde(rename = "modelToolName", skip_serializing_if = "Option::is_none")]
-        tool_name: Option<String>,
+        #[serde(rename = "modelPrimitiveName", skip_serializing_if = "Option::is_none")]
+        model_primitive_name: Option<String>,
         #[serde(rename = "invocationId", skip_serializing_if = "Option::is_none")]
-        tool_call_id: Option<String>,
+        invocation_id: Option<String>,
     } => "hook_triggered",
 
     /// Hook execution completed.
@@ -632,10 +632,10 @@ tron_events! {
         duration: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        #[serde(rename = "modelToolName", skip_serializing_if = "Option::is_none")]
-        tool_name: Option<String>,
+        #[serde(rename = "modelPrimitiveName", skip_serializing_if = "Option::is_none")]
+        model_primitive_name: Option<String>,
         #[serde(rename = "invocationId", skip_serializing_if = "Option::is_none")]
-        tool_call_id: Option<String>,
+        invocation_id: Option<String>,
     } => "hook_completed",
 
     /// Background hook execution started.
@@ -983,7 +983,7 @@ tron_events! {
         #[serde(rename = "spawnDepth")]
         spawn_depth: u32,
         #[serde(rename = "invocationId", skip_serializing_if = "Option::is_none")]
-        tool_call_id: Option<String>,
+        invocation_id: Option<String>,
         #[serde(rename = "blockingTimeoutMs", skip_serializing_if = "Option::is_none")]
         blocking_timeout_ms: Option<u64>,
         #[serde(rename = "workingDirectory", skip_serializing_if = "Option::is_none")]
@@ -1304,7 +1304,7 @@ tron_events! {
         stream_id: String,
         /// Capability invocation that initiated the stream.
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
+        invocation_id: String,
         /// Base64-encoded JPEG frame data.
         data: String,
         /// Monotonically increasing frame counter.
@@ -1325,13 +1325,13 @@ tron_events! {
         process_id: String,
         /// Human-readable label.
         label: String,
-        /// Process kind ("shell", "display_stream", "tool_operation").
+        /// Process kind ("shell", "display_stream", "capability_operation").
         kind: String,
         /// Whether the process was started in the background.
         background: bool,
         /// Capability invocation that spawned this process.
         #[serde(rename = "invocationId")]
-        tool_call_id: String,
+        invocation_id: String,
     } => "process_spawned",
 
     /// A managed process changed status (promoted, cancelled).
@@ -1383,8 +1383,8 @@ tron_events! {
         /// Human-readable label.
         label: String,
         /// Capability invocation that spawned this job.
-        #[serde(rename = "toolCallId")]
-        tool_call_id: String,
+        #[serde(rename = "invocationId")]
+        invocation_id: String,
     } => "job_backgrounded",
 }
 
@@ -1487,9 +1487,9 @@ const STREAM_EVENT_TYPES: &[&str] = &[
     "thinking_start",
     "thinking_delta",
     "thinking_end",
-    "toolcall_start",
-    "toolcall_delta",
-    "toolcall_end",
+    "capability_invocation_start",
+    "capability_invocation_delta",
+    "capability_invocation_end",
     "done",
     "error",
     "retry",
@@ -1583,21 +1583,21 @@ mod tests {
     }
 
     #[test]
-    fn stream_event_toolcall_start() {
-        let e = StreamEvent::ToolCallStart {
-            tool_call_id: "tc-1".into(),
+    fn stream_event_capability_invocation_start() {
+        let e = StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "tc-1".into(),
             name: "execute".into(),
         };
         let json = serde_json::to_value(&e).unwrap();
-        assert_eq!(json["type"], "toolcall_start");
+        assert_eq!(json["type"], "capability_invocation_start");
         assert_eq!(json["invocationId"], "tc-1");
         assert_eq!(json["name"], "execute");
     }
 
     #[test]
-    fn stream_event_toolcall_delta() {
-        let e = StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-1".into(),
+    fn stream_event_capability_invocation_delta() {
+        let e = StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-1".into(),
             arguments_delta: r#"{"comm"#.into(),
         };
         let json = serde_json::to_value(&e).unwrap();
@@ -1672,16 +1672,16 @@ mod tests {
                 thinking: "t".into(),
                 signature: None,
             },
-            StreamEvent::ToolCallStart {
-                tool_call_id: "id".into(),
+            StreamEvent::CapabilityInvocationDraftStart {
+                invocation_id: "id".into(),
                 name: "n".into(),
             },
-            StreamEvent::ToolCallDelta {
-                tool_call_id: "id".into(),
+            StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id: "id".into(),
                 arguments_delta: "d".into(),
             },
-            StreamEvent::ToolCallEnd {
-                tool_call: ToolCall::default(),
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation: CapabilityInvocationDraft::default(),
             },
             StreamEvent::Done {
                 message: AssistantMessage {
@@ -1796,11 +1796,11 @@ mod tests {
     fn tron_event_capability_invocation_started() {
         let e = TronEvent::CapabilityInvocationStarted {
             base: BaseEvent::now("s1"),
-            tool_call_id: "tc-1".into(),
-            tool_name: "execute".into(),
+            invocation_id: "tc-1".into(),
+            model_primitive_name: "execute".into(),
             arguments: None,
             capability_identity: CapabilityEventIdentity {
-                model_tool_name: Some("execute".into()),
+                model_primitive_name: Some("execute".into()),
                 contract_id: Some("filesystem::read_file".into()),
                 implementation_id: Some("first_party.filesystem.v1.read_file".into()),
                 function_id: Some("filesystem::read_file".into()),
@@ -1818,7 +1818,7 @@ mod tests {
         };
         assert!(e.is_capability_invocation());
         let json = serde_json::to_value(&e).unwrap();
-        assert_eq!(json["modelToolName"], "execute");
+        assert_eq!(json["modelPrimitiveName"], "execute");
         assert_eq!(json["contractId"], "filesystem::read_file");
         assert_eq!(
             json["implementationId"],
@@ -1833,12 +1833,12 @@ mod tests {
     fn tron_event_binding_resolution_is_capability_invocation_event() {
         let e = TronEvent::CapabilityResolution {
             base: BaseEvent::now("s1"),
-            tool_call_id: "tc-1".into(),
-            model_tool_name: "execute".into(),
+            invocation_id: "tc-1".into(),
+            model_primitive_name: "execute".into(),
             requested_contract_id: Some("filesystem::read_file".into()),
             requested_implementation_id: None,
             requested_function_id: None,
-            capability_identity: CapabilityEventIdentity::with_model_tool("execute"),
+            capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
         };
         assert!(e.is_capability_invocation());
         assert_eq!(e.event_type(), "capability.resolution");
@@ -1873,13 +1873,13 @@ mod tests {
     fn tron_event_hook_completed() {
         let e = TronEvent::HookCompleted {
             base: BaseEvent::now("s1"),
-            hook_names: vec!["pre-tool-use".into()],
-            hook_event: "PreToolUse".into(),
+            hook_names: vec!["pre-capability-invocation".into()],
+            hook_event: "PreCapabilityInvocation".into(),
             result: HookResult::Block,
             duration: Some(150),
             reason: Some("Dangerous command detected".into()),
-            tool_name: Some("execute".into()),
-            tool_call_id: Some("tc-1".into()),
+            model_primitive_name: Some("execute".into()),
+            invocation_id: Some("tc-1".into()),
         };
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["result"], "block");
@@ -1942,7 +1942,7 @@ mod tests {
                 base: base.clone(),
                 turn: 1,
                 partial_content: None,
-                active_tool: None,
+                active_capability: None,
             },
             TronEvent::TurnStart {
                 base: base.clone(),
@@ -1973,8 +1973,8 @@ mod tests {
                 turn: 1,
                 stop_reason: "end_turn".into(),
                 token_usage: None,
-                has_tool_calls: false,
-                tool_call_count: 0,
+                has_capability_invocations: false,
+                capability_invocation_count: 0,
                 token_record: None,
                 model: None,
             },
@@ -1984,40 +1984,40 @@ mod tests {
             },
             TronEvent::CapabilityInvocationBatch {
                 base: base.clone(),
-                tool_calls: vec![],
+                capability_invocations: vec![],
             },
             TronEvent::CapabilityInvocationStarted {
                 base: base.clone(),
-                tool_call_id: "id".into(),
-                tool_name: "n".into(),
+                invocation_id: "id".into(),
+                model_primitive_name: "n".into(),
                 arguments: None,
                 capability_identity: CapabilityEventIdentity::default(),
             },
             TronEvent::CapabilityInvocationOutput {
                 base: base.clone(),
-                tool_call_id: "id".into(),
+                invocation_id: "id".into(),
                 update: "u".into(),
             },
             TronEvent::CapabilityInvocationProgress {
                 base: base.clone(),
-                tool_call_id: "id".into(),
+                invocation_id: "id".into(),
                 message: Some("msg".into()),
                 percent: Some(0.5),
                 capability_identity: CapabilityEventIdentity::default(),
             },
             TronEvent::CapabilityResolution {
                 base: base.clone(),
-                tool_call_id: "id".into(),
-                model_tool_name: "execute".into(),
+                invocation_id: "id".into(),
+                model_primitive_name: "execute".into(),
                 requested_contract_id: Some("filesystem::read_file".into()),
                 requested_implementation_id: None,
                 requested_function_id: None,
-                capability_identity: CapabilityEventIdentity::with_model_tool("execute"),
+                capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
             },
             TronEvent::CapabilityInvocationCompleted {
                 base: base.clone(),
-                tool_call_id: "id".into(),
-                tool_name: "n".into(),
+                invocation_id: "id".into(),
+                model_primitive_name: "n".into(),
                 duration: 0,
                 is_error: None,
                 result: None,
@@ -2025,22 +2025,22 @@ mod tests {
             },
             TronEvent::CapabilityInvocationArgumentDelta {
                 base: base.clone(),
-                tool_call_id: "id".into(),
-                tool_name: None,
+                invocation_id: "id".into(),
+                model_primitive_name: None,
                 arguments_delta: "d".into(),
             },
             TronEvent::CapabilityInvocationGenerating {
                 base: base.clone(),
-                tool_call_id: "id".into(),
-                tool_name: "n".into(),
+                invocation_id: "id".into(),
+                model_primitive_name: "n".into(),
                 capability_identity: CapabilityEventIdentity::default(),
             },
             TronEvent::HookTriggered {
                 base: base.clone(),
                 hook_names: vec![],
                 hook_event: "e".into(),
-                tool_name: None,
-                tool_call_id: None,
+                model_primitive_name: None,
+                invocation_id: None,
             },
             TronEvent::HookCompleted {
                 base: base.clone(),
@@ -2049,8 +2049,8 @@ mod tests {
                 result: HookResult::Continue,
                 duration: None,
                 reason: None,
-                tool_name: None,
-                tool_call_id: None,
+                model_primitive_name: None,
+                invocation_id: None,
             },
             TronEvent::HookBackgroundStarted {
                 base: base.clone(),
@@ -2249,7 +2249,7 @@ mod tests {
                 model: "m".into(),
                 max_turns: 50,
                 spawn_depth: 0,
-                tool_call_id: None,
+                invocation_id: None,
                 blocking_timeout_ms: Some(300_000),
                 working_directory: None,
                 spawn_type: None,
@@ -2336,7 +2336,7 @@ mod tests {
             TronEvent::DisplayFrame {
                 base: base.clone(),
                 stream_id: "stream-1".into(),
-                tool_call_id: "call-1".into(),
+                invocation_id: "call-1".into(),
                 data: "base64data".into(),
                 frame_id: 1,
                 width: 1280,
@@ -2348,7 +2348,7 @@ mod tests {
                 label: "test".into(),
                 kind: "shell".into(),
                 background: false,
-                tool_call_id: "tc-1".into(),
+                invocation_id: "tc-1".into(),
             },
             TronEvent::ProcessStatusUpdate {
                 base: base.clone(),
@@ -2372,7 +2372,7 @@ mod tests {
                 job_id: "proc-1".into(),
                 reason: "auto_timeout".into(),
                 label: "test".into(),
-                tool_call_id: "tc-1".into(),
+                invocation_id: "tc-1".into(),
             },
             TronEvent::WorktreeMainSynced {
                 base: base.clone(),
@@ -2582,7 +2582,7 @@ mod tests {
         let e = TronEvent::DisplayFrame {
             base: BaseEvent::now("sess-1"),
             stream_id: "stream-1".into(),
-            tool_call_id: "call-1".into(),
+            invocation_id: "call-1".into(),
             data: "base64jpeg".into(),
             frame_id: 42,
             width: 1280,
@@ -2605,7 +2605,7 @@ mod tests {
         let original = TronEvent::DisplayFrame {
             base: BaseEvent::now("s1"),
             stream_id: "s".into(),
-            tool_call_id: "t".into(),
+            invocation_id: "t".into(),
             data: "d".into(),
             frame_id: 1,
             width: 640,
@@ -2626,7 +2626,7 @@ mod tests {
             label: "cargo build".into(),
             kind: "shell".into(),
             background: true,
-            tool_call_id: "tc-1".into(),
+            invocation_id: "tc-1".into(),
         };
         assert_eq!(e.event_type(), "process_spawned");
         assert_eq!(e.session_id(), "sess-1");
@@ -2646,7 +2646,7 @@ mod tests {
             label: "test".into(),
             kind: "shell".into(),
             background: false,
-            tool_call_id: "tc-1".into(),
+            invocation_id: "tc-1".into(),
         };
         let json = serde_json::to_string(&original).unwrap();
         let back: TronEvent = serde_json::from_str(&json).unwrap();

@@ -55,7 +55,7 @@ fn test_context_manager(model: &str) -> ContextManager {
                 &spec,
             ),
         working_directory: Some("/tmp".into()),
-        tools: vec![],
+        capabilities: vec![],
         rules_content: None,
         compaction: crate::domains::agent::runner::context::types::CompactionConfig::default(),
     })
@@ -64,7 +64,7 @@ fn test_context_manager(model: &str) -> ContextManager {
 fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
     AgentDeps {
         provider: Arc::new(provider),
-        tool_surface_policy:
+        capability_surface_policy:
             crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy::default(),
         guardrails: None,
         hooks: None,
@@ -80,13 +80,13 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
 }
 
 #[test]
-fn agent_uses_empty_initial_tool_snapshot() {
+fn agent_uses_empty_initial_capability_snapshot() {
     let agent = TronAgent::new(AgentConfig::default(), make_deps(MockProvider), "s1".into());
-    assert!(agent.context_manager().tool_names().is_empty());
+    assert!(agent.context_manager().model_capability_names().is_empty());
 }
 
 #[tokio::test]
-async fn text_only_run_succeeds_without_frozen_tools() {
+async fn text_only_run_succeeds_without_frozen_capabilities() {
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 1,

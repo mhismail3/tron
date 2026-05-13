@@ -60,10 +60,10 @@ struct ChatSheetTests {
     }
 
     @Test("Ask user question sheet has consistent id")
-    func testAskUserQuestionId() {
-        let sheet = ChatSheet.askUserQuestion
+    func testUserInteractionId() {
+        let sheet = ChatSheet.userInteraction
 
-        #expect(sheet.id == "askUserQuestion")
+        #expect(sheet.id == "userInteraction")
     }
 
     @Test("Subagent detail sheet has consistent id")
@@ -76,14 +76,14 @@ struct ChatSheetTests {
     @Test("Notify app sheets with different data have different ids")
     func testNotifyAppDifferentDataHaveDifferentIds() {
         let data1 = NotifyAppChipData(
-            invocationId: "tool1",
+            invocationId: "invocation1",
             title: "Title 1",
             body: "Body",
             sheetContent: nil,
             status: .sending
         )
         let data2 = NotifyAppChipData(
-            invocationId: "tool2",
+            invocationId: "invocation2",
             title: "Title 2",
             body: "Body",
             sheetContent: nil,
@@ -116,7 +116,7 @@ struct ChatSheetTests {
         )
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
         let notifyData = NotifyAppChipData(
-            invocationId: "tool",
+            invocationId: "capability",
             title: "Title",
             body: "Body",
             sheetContent: nil,
@@ -139,7 +139,7 @@ struct ChatSheetTests {
             .agentControl,
             .skillDetail(skill),
             .compactionDetail(compactionData),
-            .askUserQuestion,
+            .userInteraction,
             .subagentDetail,
             .notifyApp(notifyData),
             .thinkingDetail("content"),
@@ -370,13 +370,13 @@ struct SheetCoordinatorTests {
         }
     }
 
-    @Test("showAskUserQuestion creates ask user question sheet")
-    func testShowAskUserQuestionCreatesSheet() {
+    @Test("showUserInteraction creates ask user question sheet")
+    func testShowUserInteractionCreatesSheet() {
         let coordinator = SheetCoordinator()
 
-        coordinator.showAskUserQuestion()
+        coordinator.showUserInteraction()
 
-        #expect(coordinator.activeSheet == .askUserQuestion)
+        #expect(coordinator.activeSheet == .userInteraction)
     }
 
     @Test("showSubagentDetail creates subagent detail sheet")
@@ -392,7 +392,7 @@ struct SheetCoordinatorTests {
     func testShowNotifyAppCreatesCorrectSheet() {
         let coordinator = SheetCoordinator()
         let data = NotifyAppChipData(
-            invocationId: "tool123",
+            invocationId: "invocation123",
             title: "Notification",
             body: "Body text",
             sheetContent: nil,
@@ -402,7 +402,7 @@ struct SheetCoordinatorTests {
         coordinator.showNotifyApp(data)
 
         if case .notifyApp(let sheetData) = coordinator.activeSheet {
-            #expect(sheetData.invocationId == "tool123")
+            #expect(sheetData.invocationId == "invocation123")
             #expect(sheetData.title == "Notification")
         } else {
             Issue.record("Expected notifyApp sheet")

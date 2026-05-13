@@ -147,7 +147,7 @@ impl crate::domains::capability_support::implementations::traits::ContentSummari
         parent_session_id: &str,
     ) -> Result<
         crate::domains::capability_support::implementations::traits::SummarizerResult,
-        crate::domains::capability_support::implementations::errors::ToolError,
+        crate::domains::capability_support::implementations::errors::CapabilityExecutionError,
     > {
         let process_plan = self.manager.plan_process("webSummarizer")?;
         let process = &process_plan.process;
@@ -188,7 +188,7 @@ impl crate::domains::capability_support::implementations::traits::ContentSummari
             })
             .await
             .map_err(|e| {
-                crate::domains::capability_support::implementations::errors::ToolError::Internal {
+                crate::domains::capability_support::implementations::errors::CapabilityExecutionError::Internal {
                     message: format!("Summarizer subsession failed: {e}"),
                 }
             })?;
@@ -345,7 +345,7 @@ impl CompactionHandler {
         let trigger_input = CompactionTriggerInput {
             current_token_ratio: token_ratio,
             recent_event_types: pending_events,
-            recent_tool_calls: pending_commands,
+            recent_capability_invocations: pending_commands,
         };
 
         let trigger_result = self.trigger.lock().unwrap().should_compact(&trigger_input);
@@ -507,8 +507,8 @@ impl CompactionHandler {
                     base: BaseEvent::now(session_id),
                     hook_names: vec![],
                     hook_event: "PreCompact".into(),
-                    tool_name: None,
-                    tool_call_id: None,
+                    model_primitive_name: None,
+                    invocation_id: None,
                 },
                 counter,
             );
@@ -517,8 +517,8 @@ impl CompactionHandler {
                 base: BaseEvent::now(session_id),
                 hook_names: vec![],
                 hook_event: "PreCompact".into(),
-                tool_name: None,
-                tool_call_id: None,
+                model_primitive_name: None,
+                invocation_id: None,
             });
         }
         let result = hook_engine.execute(&hook_ctx).await;
@@ -538,8 +538,8 @@ impl CompactionHandler {
                     result: event_result,
                     duration: None,
                     reason: result.reason.clone(),
-                    tool_name: None,
-                    tool_call_id: None,
+                    model_primitive_name: None,
+                    invocation_id: None,
                 },
                 counter,
             );
@@ -551,8 +551,8 @@ impl CompactionHandler {
                 result: event_result,
                 duration: None,
                 reason: result.reason.clone(),
-                tool_name: None,
-                tool_call_id: None,
+                model_primitive_name: None,
+                invocation_id: None,
             });
         }
         result.action != HookAction::Block

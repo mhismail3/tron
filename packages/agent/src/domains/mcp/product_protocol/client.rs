@@ -193,7 +193,7 @@ impl McpClient {
             let _ = cmd.arg(arg);
         }
 
-        // Inject the user's login-shell PATH so that tools installed via nvm,
+        // Inject the user's login-shell PATH so that capabilities installed via nvm,
         // Homebrew, cargo, etc. are discoverable. Without this, launchd gives
         // only a minimal system PATH and binaries like `npx` aren't found.
         if !config.env.contains_key("PATH") {
@@ -347,7 +347,7 @@ impl McpClient {
     pub async fn list_tools(&self) -> Result<Vec<McpToolDef>, McpError> {
         let result = self.send_request("tools/list", None).await?;
 
-        let tools: Vec<McpToolDef> = result
+        let capabilities: Vec<McpToolDef> = result
             .get("tools")
             .and_then(Value::as_array)
             .map(|arr| {
@@ -370,8 +370,8 @@ impl McpClient {
             })
             .unwrap_or_default();
 
-        debug!(server = %self.name, count = tools.len(), "discovered MCP tools");
-        Ok(tools)
+        debug!(server = %self.name, count = capabilities.len(), "discovered MCP tools");
+        Ok(capabilities)
     }
 
     /// Call a tool on the server.

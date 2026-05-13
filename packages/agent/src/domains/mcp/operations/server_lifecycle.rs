@@ -1,6 +1,6 @@
 //! MCP workflow operations.
 use super::McpServerConfig;
-use super::{publish_mcp_status_changed, refresh_mcp_tool_catalog, require_router};
+use super::{publish_mcp_status_changed, refresh_mcp_capability_catalog, require_router};
 use crate::domains::mcp::Deps;
 use crate::engine::Invocation;
 use crate::shared::server::errors::CapabilityError;
@@ -53,20 +53,21 @@ pub(crate) async fn mcp_add_server_value(
     };
 
     let mut guard = router.write().await;
-    let tool_count = guard
-        .add_server(config)
-        .await
-        .map_err(|e| CapabilityError::Internal {
-            message: e.to_string(),
-        })?;
+    let capability_count =
+        guard
+            .add_server(config)
+            .await
+            .map_err(|e| CapabilityError::Internal {
+                message: e.to_string(),
+            })?;
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
-    refresh_mcp_tool_catalog(deps).await;
+    refresh_mcp_capability_catalog(deps).await;
 
     Ok(json!({
         "success": true,
-        "toolCount": tool_count,
+        "capabilityCount": capability_count,
     }))
 }
 
@@ -86,7 +87,7 @@ pub(crate) async fn mcp_remove_server_value(
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
-    refresh_mcp_tool_catalog(deps).await;
+    refresh_mcp_capability_catalog(deps).await;
 
     Ok(json!({ "success": true }))
 }
@@ -109,7 +110,7 @@ pub(crate) async fn mcp_enable_server_value(
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
-    refresh_mcp_tool_catalog(deps).await;
+    refresh_mcp_capability_catalog(deps).await;
 
     Ok(json!({ "success": true }))
 }
@@ -132,7 +133,7 @@ pub(crate) async fn mcp_disable_server_value(
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
-    refresh_mcp_tool_catalog(deps).await;
+    refresh_mcp_capability_catalog(deps).await;
 
     Ok(json!({ "success": true }))
 }
@@ -146,20 +147,21 @@ pub(crate) async fn mcp_restart_server_value(
     let name = require_string_param(params, "name")?;
 
     let mut guard = router.write().await;
-    let tool_count = guard
-        .restart_server(&name)
-        .await
-        .map_err(|e| CapabilityError::Internal {
-            message: e.to_string(),
-        })?;
+    let capability_count =
+        guard
+            .restart_server(&name)
+            .await
+            .map_err(|e| CapabilityError::Internal {
+                message: e.to_string(),
+            })?;
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
-    refresh_mcp_tool_catalog(deps).await;
+    refresh_mcp_capability_catalog(deps).await;
 
     Ok(json!({
         "success": true,
-        "toolCount": tool_count,
+        "capabilityCount": capability_count,
     }))
 }
 
@@ -177,7 +179,7 @@ pub(crate) async fn mcp_reload_value(
     drop(guard);
 
     publish_mcp_status_changed(invocation, deps).await;
-    refresh_mcp_tool_catalog(deps).await;
+    refresh_mcp_capability_catalog(deps).await;
 
     Ok(json!({
         "success": true,

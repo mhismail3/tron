@@ -19,24 +19,24 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         mockContext = nil
     }
 
-    // MARK: - Tool Generating Tests
+    // MARK: - Capability Generating Tests
 
-    func testToolGeneratingCreatesRunningChip() async throws {
-        // Given: A tool generating event
+    func testCapabilityInvocationGeneratingCreatesRunningChip() async throws {
+        // Given: A capability generating event
         let result = CapabilityInvocationGeneratingPlugin.Result(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             invocationId: "gen_123",
-            identity: CapabilityIdentity(modelToolName: "execute", contractId: "filesystem::write_file")
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "filesystem::write_file")
         )
 
-        // When: Handling tool generating
+        // When: Handling capability generating
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
         // Then: A capability invocation should be created with .generating status
         XCTAssertEqual(mockContext.messages.count, 1)
         XCTAssertEqual(mockContext.messages[0].role, .assistant)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
-            XCTAssertEqual(invocation.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation.identity.modelPrimitiveName, "execute")
             XCTAssertEqual(invocation.identity.contractId, "filesystem::write_file")
             XCTAssertEqual(invocation.id, "gen_123")
             XCTAssertEqual(invocation.status, .generating)
@@ -46,16 +46,16 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         }
     }
 
-    func testToolGeneratingFinalizesThinkingMessage() async throws {
-        let result = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Write", invocationId: "gen_think")
+    func testCapabilityInvocationGeneratingFinalizesThinkingMessage() async throws {
+        let result = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_think")
 
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
         XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
     }
 
-    func testToolGeneratingFlushesStreamingText() async throws {
-        let result = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Write", invocationId: "gen_flush")
+    func testCapabilityInvocationGeneratingFlushesStreamingText() async throws {
+        let result = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_flush")
 
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
@@ -63,95 +63,95 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.finalizeStreamingMessageCalled)
     }
 
-    func testToolGeneratingMakesToolVisible() async throws {
-        let result = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Write", invocationId: "gen_vis")
+    func testCapabilityInvocationGeneratingMakesCapabilityVisible() async throws {
+        let result = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_vis")
 
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
         XCTAssertTrue(mockContext.visibleInvocationIds.contains("gen_vis"))
     }
 
-    func testToolGeneratingEnqueuesToolStart() async throws {
-        let result = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Write", invocationId: "gen_enq")
+    func testCapabilityInvocationGeneratingEnqueuesCapabilityInvocationStart() async throws {
+        let result = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_enq")
 
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
-        XCTAssertEqual(mockContext.enqueuedToolStarts.count, 1)
-        XCTAssertEqual(mockContext.enqueuedToolStarts[0].invocationId, "gen_enq")
-        XCTAssertEqual(mockContext.enqueuedToolStarts[0].modelToolName, "Write")
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts.count, 1)
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts[0].invocationId, "gen_enq")
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts[0].modelPrimitiveName, "execute")
     }
 
-    func testToolGeneratingTracksCapabilityInvocation() async throws {
-        let result = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Bash", invocationId: "gen_track")
+    func testCapabilityInvocationGeneratingTracksCapabilityInvocation() async throws {
+        let result = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_track")
 
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations.count, 1)
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].invocationId, "gen_track")
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].modelToolName, "Bash")
+        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].modelPrimitiveName, "execute")
     }
 
-    func testToolGeneratingSkipsDuplicateChip() async throws {
-        // Given: A tool message already exists
+    func testCapabilityInvocationGeneratingSkipsDuplicateChip() async throws {
+        // Given: A capability message already exists
         let existing = ChatMessage(
             role: .assistant,
             content: .capabilityInvocation(testCapabilityInvocation(
                 id: "dup_123",
                 status: .running,
-                identity: testCapabilityIdentity(modelToolName: "Write")
+                identity: testCapabilityIdentity(modelPrimitiveName: "execute")
             ))
         )
         mockContext.messages.append(existing)
 
         // When: capability.invocation.generating arrives for same invocationId
-        let result = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Write", invocationId: "dup_123")
+        let result = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "dup_123")
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
         // Then: No duplicate message created
         XCTAssertEqual(mockContext.messages.count, 1)
     }
 
-    func testToolGeneratingCreatesGeneratingChipForAskUserQuestion() async throws {
+    func testCapabilityInvocationGeneratingCreatesGeneratingChipForUserInteraction() async throws {
         let result = CapabilityInvocationGeneratingPlugin.Result(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             invocationId: "gen_ask",
-            identity: testAskUserCapabilityIdentity()
+            identity: testUserInteractionCapabilityIdentity()
         )
 
         coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
 
         // Should create a message with .generating status
         XCTAssertEqual(mockContext.messages.count, 1)
-        if case .askUserQuestion(let data) = mockContext.messages[0].content {
+        if case .userInteraction(let data) = mockContext.messages[0].content {
             XCTAssertEqual(data.invocationId, "gen_ask")
             XCTAssertEqual(data.status, .generating)
             XCTAssertTrue(data.params.questions.isEmpty)
         } else {
-            XCTFail("Expected askUserQuestion content")
+            XCTFail("Expected userInteraction content")
         }
         XCTAssertTrue(mockContext.visibleInvocationIds.contains("gen_ask"))
     }
 
-    func testToolStartUpdatesGeneratingAskUserQuestionChip() async throws {
+    func testCapabilityInvocationStartUpdatesGeneratingUserInteractionChip() async throws {
         // Given: capability.invocation.generating already created a .generating chip
-        let askUserIdentity = testAskUserCapabilityIdentity()
+        let userInteractionIdentity = testUserInteractionCapabilityIdentity()
         let genResult = CapabilityInvocationGeneratingPlugin.Result(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             invocationId: "gen_ask_update",
-            identity: askUserIdentity
+            identity: userInteractionIdentity
         )
         coordinator.handleCapabilityInvocationGenerating(genResult, context: mockContext)
         XCTAssertEqual(mockContext.messages.count, 1)
 
         // When: capability.invocation.started arrives with real params encoded in formattedArguments
-        let params = AskUserQuestionParams(
+        let params = UserInteractionParams(
             questions: [
-                AskUserQuestion(
+                UserInteraction(
                     id: "q1",
                     question: "Pick one?",
                     options: [
-                        AskUserQuestionOption(label: "A", value: nil, description: nil),
-                        AskUserQuestionOption(label: "B", value: nil, description: nil)
+                        UserInteractionOption(label: "A", value: nil, description: nil),
+                        UserInteractionOption(label: "B", value: nil, description: nil)
                     ],
                     mode: .single,
                     allowOther: false,
@@ -162,37 +162,37 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         )
         let paramsJson = String(data: try! JSONEncoder().encode(params), encoding: .utf8)!
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             invocationId: "gen_ask_update",
             arguments: nil,
             formattedArguments: paramsJson,
-            identity: askUserIdentity
+            identity: userInteractionIdentity
         )
         coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
 
         // Then: No duplicate message (still just 1)
         XCTAssertEqual(mockContext.messages.count, 1)
         // Then: Status updated from .generating to .pending with real params
-        if case .askUserQuestion(let data) = mockContext.messages[0].content {
+        if case .userInteraction(let data) = mockContext.messages[0].content {
             XCTAssertEqual(data.status, .pending)
             XCTAssertEqual(data.params.questions.count, 1)
             XCTAssertEqual(data.params.questions[0].question, "Pick one?")
         } else {
-            XCTFail("Expected askUserQuestion content")
+            XCTFail("Expected userInteraction content")
         }
         // Then: calledInTurn is set
-        XCTAssertTrue(mockContext.askUserQuestionCalledInTurn)
+        XCTAssertTrue(mockContext.userInteractionCalledInTurn)
     }
 
-    func testToolStartUpdatesDuplicateFromGenerating() async throws {
+    func testCapabilityInvocationStartUpdatesDuplicateFromGenerating() async throws {
         // Given: capability.invocation.generating already created a chip with empty arguments
-        let genResult = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Write", invocationId: "gen_first")
+        let genResult = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_first")
         coordinator.handleCapabilityInvocationGenerating(genResult, context: mockContext)
         XCTAssertEqual(mockContext.messages.count, 1)
 
         // When: capability.invocation.started arrives for same invocationId with full arguments
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "Write",
+            modelPrimitiveName: "execute",
             invocationId: "gen_first",
             arguments: ["file_path": AnyCodable("/test.txt")],
             formattedArguments: "{\"file_path\":\"/test.txt\"}"
@@ -201,7 +201,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
 
         // Then: No duplicate message (still just 1)
         XCTAssertEqual(mockContext.messages.count, 1)
-        // Then: Tool is still visible
+        // Then: Capability is still visible
         XCTAssertTrue(mockContext.visibleInvocationIds.contains("gen_first"))
         // Then: Arguments are updated from empty to full
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
@@ -210,15 +210,15 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         } else {
             XCTFail("Expected capability invocation content")
         }
-        // Then: currentToolMessages is updated
-        XCTAssertEqual(mockContext.currentToolMessages.count, 1)
+        // Then: currentCapabilityInvocationMessages is updated
+        XCTAssertEqual(mockContext.currentCapabilityInvocationMessages.count, 1)
         // Then: currentTurnCapabilityInvocations arguments are updated
         XCTAssertTrue(mockContext.currentTurnCapabilityInvocations[0].arguments.contains("file_path"))
     }
 
-    func testToolEndUpdatesGeneratingChip() async throws {
+    func testCapabilityInvocationEndUpdatesGeneratingChip() async throws {
         // Given: capability.invocation.generating created a chip
-        let genResult = CapabilityInvocationGeneratingPlugin.Result(modelToolName: "Write", invocationId: "gen_end")
+        let genResult = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_end")
         coordinator.handleCapabilityInvocationGenerating(genResult, context: mockContext)
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations.count, 1)
 
@@ -235,24 +235,24 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         // Then: Capability invocation record is updated
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].result, "File written")
         // Then: Capability end is enqueued
-        XCTAssertEqual(mockContext.enqueuedToolEnds.count, 1)
+        XCTAssertEqual(mockContext.enqueuedCapabilityEnds.count, 1)
     }
 
-    func testMultipleToolGeneratingEvents() async throws {
+    func testMultipleCapabilityGeneratingEvents() async throws {
         // When: Two capability.invocation.generating events arrive
         coordinator.handleCapabilityInvocationGenerating(
             CapabilityInvocationGeneratingPlugin.Result(
-                modelToolName: "execute",
+                modelPrimitiveName: "execute",
                 invocationId: "tc1",
-                identity: CapabilityIdentity(modelToolName: "execute", contractId: "filesystem::write_file")
+                identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "filesystem::write_file")
             ),
             context: mockContext
         )
         coordinator.handleCapabilityInvocationGenerating(
             CapabilityInvocationGeneratingPlugin.Result(
-                modelToolName: "execute",
+                modelPrimitiveName: "execute",
                 invocationId: "tc2",
-                identity: CapabilityIdentity(modelToolName: "execute", contractId: "process::run")
+                identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "process::run")
             ),
             context: mockContext
         )
@@ -262,53 +262,53 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         // Then: Both have .generating status
         if case .capabilityInvocation(let invocation1) = mockContext.messages[0].content {
             XCTAssertEqual(invocation1.status, .generating)
-            XCTAssertEqual(invocation1.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation1.identity.modelPrimitiveName, "execute")
             XCTAssertEqual(invocation1.identity.contractId, "filesystem::write_file")
         } else { XCTFail("Expected capability invocation content") }
         if case .capabilityInvocation(let invocation2) = mockContext.messages[1].content {
             XCTAssertEqual(invocation2.status, .generating)
-            XCTAssertEqual(invocation2.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation2.identity.modelPrimitiveName, "execute")
             XCTAssertEqual(invocation2.identity.contractId, "process::run")
         } else { XCTFail("Expected capability invocation content") }
         // Then: Two enqueued capability starts
-        XCTAssertEqual(mockContext.enqueuedToolStarts.count, 2)
-        XCTAssertEqual(mockContext.enqueuedToolStarts[0].invocationId, "tc1")
-        XCTAssertEqual(mockContext.enqueuedToolStarts[1].invocationId, "tc2")
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts.count, 2)
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts[0].invocationId, "tc1")
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts[1].invocationId, "tc2")
     }
 
-    // MARK: - Tool Start Tests
+    // MARK: - Capability Start Tests
 
-    func testToolStartCreatesToolMessage() async throws {
+    func testCapabilityInvocationStartCreatesCapabilityMessage() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "execute",
-            invocationId: "tool_123",
+            modelPrimitiveName: "execute",
+            invocationId: "inv_123",
             arguments: nil,
             formattedArguments: "{\"command\": \"ls -la\"}",
-            identity: CapabilityIdentity(modelToolName: "execute", contractId: "process::run")
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "process::run")
         )
 
         // When: Handling capability start
         coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
 
-        // Then: A tool message should be created
+        // Then: A capability message should be created
         XCTAssertEqual(mockContext.messages.count, 1)
         XCTAssertEqual(mockContext.messages[0].role, .assistant)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
-            XCTAssertEqual(invocation.identity.modelToolName, "execute")
+            XCTAssertEqual(invocation.identity.modelPrimitiveName, "execute")
             XCTAssertEqual(invocation.identity.contractId, "process::run")
-            XCTAssertEqual(invocation.id, "tool_123")
+            XCTAssertEqual(invocation.id, "inv_123")
             XCTAssertEqual(invocation.status, .running)
         } else {
             XCTFail("Expected capability invocation content")
         }
     }
 
-    func testToolStartFlushesStreamingTextFirst() async throws {
+    func testCapabilityInvocationStartFlushesStreamingTextFirst() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "Read",
-            invocationId: "tool_456",
+            modelPrimitiveName: "execute",
+            invocationId: "inv_456",
             arguments: nil,
             formattedArguments: "{}"
         )
@@ -321,11 +321,11 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.finalizeStreamingMessageCalled)
     }
 
-    func testToolStartFinalizesThinkingMessage() async throws {
+    func testCapabilityInvocationStartFinalizesThinkingMessage() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "Read",
-            invocationId: "tool_thinking_start",
+            modelPrimitiveName: "execute",
+            invocationId: "inv_thinking_start",
             arguments: nil,
             formattedArguments: "{}"
         )
@@ -337,13 +337,14 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
     }
 
-    func testToolStartTracksCapabilityInvocation() async throws {
+    func testCapabilityInvocationStartTracksCapabilityInvocation() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "Grep",
-            invocationId: "tool_789",
+            modelPrimitiveName: "execute",
+            invocationId: "inv_789",
             arguments: nil,
-            formattedArguments: "{\"pattern\": \"TODO\"}"
+            formattedArguments: "{\"contractId\":\"filesystem::search_text\",\"payload\":{\"pattern\":\"TODO\"}}",
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "filesystem::search_text")
         )
 
         // When: Handling capability start
@@ -351,15 +352,16 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
 
         // Then: Capability invocation should be tracked
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations.count, 1)
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].invocationId, "tool_789")
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].modelToolName, "Grep")
+        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].invocationId, "inv_789")
+        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].modelPrimitiveName, "execute")
+        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].identity.contractId, "filesystem::search_text")
     }
 
-    func testToolStartMakesToolVisible() async throws {
+    func testCapabilityInvocationStartMakesCapabilityVisible() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "Edit",
-            invocationId: "tool_visible",
+            modelPrimitiveName: "execute",
+            invocationId: "inv_visible",
             arguments: nil,
             formattedArguments: "{}"
         )
@@ -367,15 +369,15 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         // When: Handling capability start
         coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
 
-        // Then: Tool should be made visible for animation
-        XCTAssertTrue(mockContext.visibleInvocationIds.contains("tool_visible"))
+        // Then: Capability should be made visible for animation
+        XCTAssertTrue(mockContext.visibleInvocationIds.contains("inv_visible"))
     }
 
-    func testToolStartEnqueuesForUIUpdateQueue() async throws {
+    func testCapabilityInvocationStartEnqueuesForUIUpdateQueue() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "Write",
-            invocationId: "tool_queue",
+            modelPrimitiveName: "execute",
+            invocationId: "inv_queue",
             arguments: nil,
             formattedArguments: "{}"
         )
@@ -384,22 +386,22 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
 
         // Then: Should be enqueued for ordered processing
-        XCTAssertEqual(mockContext.enqueuedToolStarts.count, 1)
-        XCTAssertEqual(mockContext.enqueuedToolStarts[0].invocationId, "tool_queue")
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts.count, 1)
+        XCTAssertEqual(mockContext.enqueuedCapabilityStarts[0].invocationId, "inv_queue")
     }
 
-    // MARK: - AskUserQuestion Tool Tests
+    // MARK: - UserInteraction Capability Tests
 
-    func testAskUserQuestionToolStart() async throws {
-        // Given: An AskUserQuestion capability start with params encoded in formattedArguments
-        let params = AskUserQuestionParams(
+    func testUserInteractionCapabilityInvocationStart() async throws {
+        // Given: An UserInteraction capability start with params encoded in formattedArguments
+        let params = UserInteractionParams(
             questions: [
-                AskUserQuestion(
+                UserInteraction(
                     id: "q1",
                     question: "Pick one?",
                     options: [
-                        AskUserQuestionOption(label: "A", value: nil, description: "Option A"),
-                        AskUserQuestionOption(label: "B", value: nil, description: "Option B")
+                        UserInteractionOption(label: "A", value: nil, description: "Option A"),
+                        UserInteractionOption(label: "B", value: nil, description: "Option B")
                     ],
                     mode: .single,
                     allowOther: false,
@@ -410,38 +412,38 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         )
         let paramsJson = String(data: try! JSONEncoder().encode(params), encoding: .utf8)!
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             invocationId: "ask_123",
             arguments: nil,
             formattedArguments: paramsJson,
-            identity: testAskUserCapabilityIdentity()
+            identity: testUserInteractionCapabilityIdentity()
         )
 
         // When: Handling capability start
         coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
 
-        // Then: Should create AskUserQuestion message
+        // Then: Should create UserInteraction message
         XCTAssertEqual(mockContext.messages.count, 1)
-        if case .askUserQuestion(let data) = mockContext.messages[0].content {
+        if case .userInteraction(let data) = mockContext.messages[0].content {
             XCTAssertEqual(data.invocationId, "ask_123")
             XCTAssertEqual(data.status, .pending)
             XCTAssertEqual(data.params.questions.count, 1)
         } else {
-            XCTFail("Expected askUserQuestion content")
+            XCTFail("Expected userInteraction content")
         }
 
         // Then: Should mark calledInTurn
-        XCTAssertTrue(mockContext.askUserQuestionCalledInTurn)
+        XCTAssertTrue(mockContext.userInteractionCalledInTurn)
     }
 
-    func testAskUserQuestionToolStartFallsBackOnParseFailure() async throws {
-        // Given: An AskUserQuestion capability start with invalid JSON (parse will fail)
+    func testUserInteractionCapabilityInvocationStartFallsBackOnParseFailure() async throws {
+        // Given: An UserInteraction capability start with invalid JSON (parse will fail)
         let event = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             invocationId: "ask_fail",
             arguments: nil,
             formattedArguments: "invalid json",
-            identity: testAskUserCapabilityIdentity()
+            identity: testUserInteractionCapabilityIdentity()
         )
 
         // When: Handling capability start
@@ -458,9 +460,9 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         }
     }
 
-    // MARK: - Tool End Tests
+    // MARK: - Capability End Tests
 
-    func testToolEndEnqueuesForProcessing() async throws {
+    func testCapabilityInvocationEndEnqueuesForProcessing() async throws {
         // Given: A capability end event
         let event = CapabilityInvocationCompletedPlugin.Result(
             invocationId: "capability.invocation.completed_123",
@@ -474,22 +476,22 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
 
         // Then: Should enqueue for ordered processing
-        XCTAssertEqual(mockContext.enqueuedToolEnds.count, 1)
-        XCTAssertEqual(mockContext.enqueuedToolEnds[0].invocationId, "capability.invocation.completed_123")
-        XCTAssertTrue(mockContext.enqueuedToolEnds[0].success)
+        XCTAssertEqual(mockContext.enqueuedCapabilityEnds.count, 1)
+        XCTAssertEqual(mockContext.enqueuedCapabilityEnds[0].invocationId, "capability.invocation.completed_123")
+        XCTAssertTrue(mockContext.enqueuedCapabilityEnds[0].success)
     }
 
-    func testToolEndUpdatesCapabilityInvocationRecord() async throws {
+    func testCapabilityInvocationEndUpdatesCapabilityInvocationRecord() async throws {
         // Given: A tracked capability invocation
         mockContext.currentTurnCapabilityInvocations.append(CapabilityInvocationRecord(
-            invocationId: "tool_track_123",
-            modelToolName: "Bash",
+            invocationId: "inv_track_123",
+            modelPrimitiveName: "execute",
             arguments: "{}"
         ))
 
         // Given: A capability end event
         let event = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "tool_track_123",
+            invocationId: "inv_track_123",
             success: false,
             displayResult: "Command failed",
             durationMs: 50,
@@ -504,17 +506,17 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.currentTurnCapabilityInvocations[0].isError)
     }
 
-    func testAskUserQuestionToolEndOpensSheet() async throws {
-        // Given: An AskUserQuestion message exists
-        let askData = AskUserQuestionToolData(
+    func testUserInteractionCapabilityInvocationEndOpensSheet() async throws {
+        // Given: An UserInteraction message exists
+        let askData = UserInteractionInvocationData(
             invocationId: "ask_sheet_123",
-            params: AskUserQuestionParams(
+            params: UserInteractionParams(
                 questions: [
-                    AskUserQuestion(
+                    UserInteraction(
                         id: "q1",
                         question: "Pick?",
                         options: [
-                            AskUserQuestionOption(label: "A", value: nil, description: nil)
+                            UserInteractionOption(label: "A", value: nil, description: nil)
                         ],
                         mode: .single,
                         allowOther: false,
@@ -529,7 +531,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         )
         mockContext.messages.append(ChatMessage(
             role: .assistant,
-            content: .askUserQuestion(askData)
+            content: .userInteraction(askData)
         ))
 
         // Given: Capability end arrives
@@ -545,15 +547,15 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
 
         // Then: Sheet should be opened
-        XCTAssertTrue(mockContext.askUserQuestionSheetOpened)
+        XCTAssertTrue(mockContext.userInteractionSheetOpened)
     }
 
     // MARK: - Thinking Block Boundary Tests
 
-    func testToolEndResetsThinkingStateForNewBlock() async throws {
+    func testCapabilityInvocationEndResetsThinkingStateForNewBlock() async throws {
         // Given: A capability end event
         let event = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "tool_thinking_reset",
+            invocationId: "inv_thinking_reset",
             success: true,
             displayResult: "Done",
             durationMs: 100,
@@ -567,10 +569,10 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
     }
 
-    func testToolEndFinalizesThinkingBeforeReset() async throws {
+    func testCapabilityInvocationEndFinalizesThinkingBeforeReset() async throws {
         // Given: A capability end event
         let event = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "tool_thinking_finalize",
+            invocationId: "inv_thinking_finalize",
             success: true,
             displayResult: "Done",
             durationMs: 100,
@@ -585,17 +587,17 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
     }
 
-    func testAskUserQuestionToolEndAlsoResetsThinkingState() async throws {
-        // Given: An AskUserQuestion message exists
-        let askData = AskUserQuestionToolData(
+    func testUserInteractionCapabilityInvocationEndAlsoResetsThinkingState() async throws {
+        // Given: An UserInteraction message exists
+        let askData = UserInteractionInvocationData(
             invocationId: "ask_thinking_reset",
-            params: AskUserQuestionParams(
+            params: UserInteractionParams(
                 questions: [
-                    AskUserQuestion(
+                    UserInteraction(
                         id: "q1",
                         question: "Pick?",
                         options: [
-                            AskUserQuestionOption(label: "A", value: nil, description: nil)
+                            UserInteractionOption(label: "A", value: nil, description: nil)
                         ],
                         mode: .single,
                         allowOther: false,
@@ -610,7 +612,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         )
         mockContext.messages.append(ChatMessage(
             role: .assistant,
-            content: .askUserQuestion(askData)
+            content: .userInteraction(askData)
         ))
 
         // Given: Capability end arrives
@@ -622,24 +624,24 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             details: nil
         )
 
-        // When: Handling capability end (AskUserQuestion returns early, but should still reset)
+        // When: Handling capability end (UserInteraction returns early, but should still reset)
         coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
 
         // Then: Thinking state should still be reset (called at start of handleCapabilityInvocationCompleted)
         XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
     }
 
-    func testToolEndDoesNotEnqueueForAskUserQuestion() async throws {
-        // Given: An AskUserQuestion message exists
-        let askData = AskUserQuestionToolData(
+    func testCapabilityInvocationEndDoesNotEnqueueForUserInteraction() async throws {
+        // Given: An UserInteraction message exists
+        let askData = UserInteractionInvocationData(
             invocationId: "ask_no_enqueue",
-            params: AskUserQuestionParams(
+            params: UserInteractionParams(
                 questions: [
-                    AskUserQuestion(
+                    UserInteraction(
                         id: "q1",
                         question: "Pick?",
                         options: [
-                            AskUserQuestionOption(label: "A", value: nil, description: nil)
+                            UserInteractionOption(label: "A", value: nil, description: nil)
                         ],
                         mode: .single,
                         allowOther: false,
@@ -654,7 +656,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         )
         mockContext.messages.append(ChatMessage(
             role: .assistant,
-            content: .askUserQuestion(askData)
+            content: .userInteraction(askData)
         ))
 
         // Given: Capability end arrives
@@ -669,8 +671,8 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         // When: Handling capability end
         coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
 
-        // Then: Should NOT enqueue (AskUserQuestion returns early)
-        XCTAssertEqual(mockContext.enqueuedToolEnds.count, 0)
+        // Then: Should NOT enqueue (UserInteraction returns early)
+        XCTAssertEqual(mockContext.enqueuedCapabilityEnds.count, 0)
     }
 }
 
@@ -682,21 +684,21 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
     // MARK: - State
     var messages: [ChatMessage] = []
     let messageIndex = MessageIndex()
-    var runningToolCount: Int = 0
-    var currentToolMessages: [UUID: ChatMessage] = [:]
+    var runningCapabilityInvocationCount: Int = 0
+    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
     var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
 
     // MARK: - State Objects
-    var askUserQuestionCalledInTurn: Bool = false
+    var userInteractionCalledInTurn: Bool = false
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false
     var finalizeStreamingMessageCalled = false
     var visibleInvocationIds: Set<String> = []
-    var enqueuedToolStarts: [UIUpdateQueue.ToolStartData] = []
-    var enqueuedToolEnds: [UIUpdateQueue.ToolEndData] = []
-    var askUserQuestionSheetOpened = false
-    var openedAskUserQuestionData: AskUserQuestionToolData?
+    var enqueuedCapabilityStarts: [UIUpdateQueue.CapabilityInvocationStartData] = []
+    var enqueuedCapabilityEnds: [UIUpdateQueue.CapabilityInvocationEndData] = []
+    var userInteractionSheetOpened = false
+    var openedUserInteractionData: UserInteractionInvocationData?
     var resetThinkingForNewBlockCalled = false
     var finalizeThinkingMessageIfNeededCalled = false
 
@@ -714,17 +716,17 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
         visibleInvocationIds.insert(invocationId)
     }
 
-    func enqueueCapabilityInvocationStart(_ data: UIUpdateQueue.ToolStartData) {
-        enqueuedToolStarts.append(data)
+    func enqueueCapabilityInvocationStart(_ data: UIUpdateQueue.CapabilityInvocationStartData) {
+        enqueuedCapabilityStarts.append(data)
     }
 
-    func enqueueToolEnd(_ data: UIUpdateQueue.ToolEndData) {
-        enqueuedToolEnds.append(data)
+    func enqueueCapabilityInvocationEnd(_ data: UIUpdateQueue.CapabilityInvocationEndData) {
+        enqueuedCapabilityEnds.append(data)
     }
 
-    func openAskUserQuestionSheet(for data: AskUserQuestionToolData) {
-        askUserQuestionSheetOpened = true
-        openedAskUserQuestionData = data
+    func openUserInteractionSheet(for data: UserInteractionInvocationData) {
+        userInteractionSheetOpened = true
+        openedUserInteractionData = data
     }
 
     func resetThinkingForNewBlock() {
@@ -746,10 +748,10 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
 
 // MARK: - Test Helper Extensions
 
-/// Test-only initializer matching the historical ToolStartEvent constructor.
+/// Test-only initializer matching the historical CapabilityInvocationStartEvent constructor.
 extension CapabilityInvocationStartedPlugin.Result {
     init(
-        modelToolName: String,
+        modelPrimitiveName: String,
         invocationId: String,
         arguments: [String: AnyCodable]?,
         formattedArguments: String,
@@ -763,16 +765,16 @@ extension CapabilityInvocationStartedPlugin.Result {
                 args = parsed
             }
         }
-        self.init(modelToolName: modelToolName, invocationId: invocationId, arguments: args, identity: identity)
+        self.init(modelPrimitiveName: modelPrimitiveName, invocationId: invocationId, arguments: args, identity: identity)
     }
 }
 
-/// Test-only initializer matching the historical ToolEndEvent constructor.
+/// Test-only initializer matching the historical CapabilityInvocationEndEvent constructor.
 extension CapabilityInvocationCompletedPlugin.Result {
-    init(invocationId: String, success: Bool, displayResult: String, durationMs: Int?, details: CapabilityInvocationCompletedPlugin.EventData.ToolDetails?) {
+    init(invocationId: String, success: Bool, displayResult: String, durationMs: Int?, details: CapabilityInvocationCompletedPlugin.EventData.CapabilityResultDetails?) {
         self.init(
             invocationId: invocationId,
-            modelToolName: nil,
+            modelPrimitiveName: nil,
             success: success,
             output: success ? displayResult : nil,
             error: success ? nil : displayResult,

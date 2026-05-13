@@ -1,23 +1,23 @@
 import SwiftUI
 
-// MARK: - Tool Detail Sheet Container
+// MARK: - Capability Detail Sheet Container
 
 /// Reusable container that provides the shared NavigationStack + toolbar + presentation
-/// boilerplate used by all tool detail sheets.
+/// boilerplate used by all capability detail sheets.
 ///
 /// Usage:
 /// ```swift
 /// CapabilityDetailSheetContainer(
-///     modelToolName: "Bash",
+///     modelPrimitiveName: "execute",
 ///     iconName: "terminal",
 ///     accent: .tronEmerald
 /// ) {
-///     // tool-specific content sections
+///     // capability-specific content sections
 /// }
 /// ```
 @available(iOS 26.0, *)
 struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
-    let modelToolName: String
+    let modelPrimitiveName: String
     let iconName: String
     let accent: Color
     let iconColor: Color?
@@ -26,14 +26,14 @@ struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View
     @Environment(\.dismiss) private var dismiss
 
     init(
-        modelToolName: String,
+        modelPrimitiveName: String,
         iconName: String,
         accent: Color,
         iconColor: Color? = nil,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder leadingToolbar: @escaping () -> LeadingToolbar
     ) {
-        self.modelToolName = modelToolName
+        self.modelPrimitiveName = modelPrimitiveName
         self.iconName = iconName
         self.accent = accent
         self.iconColor = iconColor
@@ -57,7 +57,7 @@ struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View
                         Image(systemName: iconName)
                             .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(iconColor ?? accent)
-                        SheetTitle(title: modelToolName, color: accent)
+                        SheetTitle(title: modelPrimitiveName, color: accent)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -76,13 +76,13 @@ struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View
 @available(iOS 26.0, *)
 extension CapabilityDetailSheetContainer where LeadingToolbar == EmptyView {
     init(
-        modelToolName: String,
+        modelPrimitiveName: String,
         iconName: String,
         accent: Color,
         iconColor: Color? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
-        self.modelToolName = modelToolName
+        self.modelPrimitiveName = modelPrimitiveName
         self.iconName = iconName
         self.accent = accent
         self.iconColor = iconColor
@@ -94,7 +94,7 @@ extension CapabilityDetailSheetContainer where LeadingToolbar == EmptyView {
 // MARK: - Sheet Section Padding
 
 /// Single point of control for the horizontal padding applied to each section
-/// inside a tool detail sheet. Every section should use `.sheetSection()` instead
+/// inside a capability detail sheet. Every section should use `.sheetSection()` instead
 /// of raw `.padding(.horizontal)` so the value can be changed in one place.
 extension View {
     func sheetSection() -> some View {

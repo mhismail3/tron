@@ -9,7 +9,7 @@ use serde_json::json;
 /// Spawns the `conflict-resolver` subagent to drive merge resolution.
 ///
 /// Delegates to [`crate::domains::agent::runner::subagents::conflict_resolver::spawn`],
-/// which owns the system prompt, restricted tool allowlist, and
+/// which owns the system prompt, restricted capability allowlist, and
 /// auto-abort-on-failure watcher. Returns machine-readable status so
 /// iOS can degrade gracefully (e.g. fall back to manual resolution if
 /// `spawned == false`).

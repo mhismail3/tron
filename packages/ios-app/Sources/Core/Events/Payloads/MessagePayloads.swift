@@ -15,14 +15,14 @@ struct UserMessagePayload {
     /// user messages with only `content`; imported sessions may include it.
     let turn: Int?
     let imageCount: Int?
-    /// True if this message contains ONLY tool_result blocks (no text)
+    /// True if this message contains ONLY capability_result blocks (no text)
     /// These are LLM conversation context, not displayable user messages
-    let isToolResultContext: Bool
+    let isCapabilityResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
     /// Skills referenced in this message (rendered as cyan chips above the message)
     let skills: [Skill]?
-    /// Server-provided structured message kind for interactive-tool responses.
+    /// Server-provided structured message kind for interactive-capability responses.
     /// Values: `"answered_questions"`, `"subagent_results_delivered"`. When present,
     /// iOS renders a chip instead of the plain text content.
     let messageKind: String?
@@ -37,17 +37,17 @@ struct UserMessagePayload {
         // Content can be a string or array of content blocks
         if let content = payload.string("content") {
             self.content = content
-            self.isToolResultContext = false
+            self.isCapabilityResultContext = false
         } else if let contentBlocks = payload["content"]?.value as? [[String: Any]] {
-            // Check if this is a tool_result context message (no text, only tool_results)
+            // Check if this is a capability_result context message (no text, only capability_results)
             let textBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.text.rawValue }
-            let toolResultBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.toolResult.rawValue }
+            let capabilityResultBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.capabilityResult.rawValue }
 
-            if textBlocks.isEmpty && !toolResultBlocks.isEmpty {
-                // This is a tool_result context message - not for display
+            if textBlocks.isEmpty && !capabilityResultBlocks.isEmpty {
+                // This is a capability_result context message - not for display
                 // Capability results are displayed via capability.invocation.completed events
                 self.content = ""
-                self.isToolResultContext = true
+                self.isCapabilityResultContext = true
             } else {
                 // Extract text from content blocks
                 let texts = contentBlocks.compactMap { block -> String? in
@@ -55,7 +55,7 @@ struct UserMessagePayload {
                     return block["text"] as? String
                 }
                 self.content = texts.joined(separator: "\n")
-                self.isToolResultContext = false
+                self.isCapabilityResultContext = false
             }
 
             // Extract attachments from content blocks (images, documents, PDFs)
@@ -130,7 +130,7 @@ struct UserMessagePayload {
             self.skills = nil
         }
 
-        // Structured interactive-tool response metadata (server-provided).
+        // Structured interactive-capability response metadata (server-provided).
         self.messageKind = payload.string("messageKind")
         self.answerCount = payload.int("answerCount")
         self.subagentCount = payload.int("subagentCount")
@@ -140,8 +140,8 @@ struct UserMessagePayload {
 /// Payload for message.assistant event
 /// Server: `events/types/payloads/message.rs::AssistantMessagePayload`
 ///
-/// IMPORTANT: This payload contains ContentBlocks which may include tool_use blocks.
-/// However, tool_use blocks should be IGNORED here — they are rendered via capability.invocation.started events.
+/// IMPORTANT: This payload contains ContentBlocks which may include capability_invocation blocks.
+/// However, capability_invocation blocks should be IGNORED here — they are rendered via capability.invocation.started events.
 ///
 /// `content`, `turn`, `model`, and `stopReason` are all non-optional on the
 /// Rust payload. Missing any of them fails decoding (`init?` returns nil)
@@ -158,7 +158,7 @@ struct AssistantMessagePayload {
     let hasThinking: Bool?
     let interrupted: Bool?
 
-    /// Extracts ONLY the text content, ignoring tool_use blocks.
+    /// Extracts ONLY the text content, ignoring capability_invocation blocks.
     /// Capability invocations are rendered via separate capability.invocation.started events.
     ///
     /// INVARIANT: the trimming here (`.whitespacesAndNewlines`) MUST

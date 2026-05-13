@@ -13,19 +13,19 @@ use super::types::HookContext;
 /// Implementations are scoped to a session — the `session_id` is set once
 /// and used for all created contexts. Timestamps are generated automatically.
 pub trait HookContextFactory: Send + Sync {
-    /// Create a [`HookContext::PreToolUse`] context.
-    fn create_pre_tool_context(
+    /// Create a [`HookContext::PreCapabilityInvocation`] context.
+    fn create_pre_capability_invocation_context(
         &self,
-        tool_name: &str,
+        model_primitive_name: &str,
         arguments: serde_json::Value,
-        tool_call_id: &str,
+        invocation_id: &str,
     ) -> HookContext;
 
-    /// Create a [`HookContext::PostToolUse`] context.
-    fn create_post_tool_context(
+    /// Create a [`HookContext::PostCapabilityInvocation`] context.
+    fn create_post_capability_invocation_context(
         &self,
-        tool_name: &str,
-        tool_call_id: &str,
+        model_primitive_name: &str,
+        invocation_id: &str,
         result: serde_json::Value,
         duration_ms: u64,
     ) -> HookContext;
@@ -43,7 +43,11 @@ pub trait HookContextFactory: Send + Sync {
     fn create_session_start_context(&self, working_directory: &str) -> HookContext;
 
     /// Create a [`HookContext::SessionEnd`] context.
-    fn create_session_end_context(&self, message_count: u64, tool_call_count: u64) -> HookContext;
+    fn create_session_end_context(
+        &self,
+        message_count: u64,
+        capability_invocation_count: u64,
+    ) -> HookContext;
 
     /// Create a [`HookContext::UserPromptSubmit`] context.
     fn create_user_prompt_submit_context(&self, prompt: &str) -> HookContext;
@@ -91,33 +95,33 @@ impl DefaultContextFactory {
 }
 
 impl HookContextFactory for DefaultContextFactory {
-    fn create_pre_tool_context(
+    fn create_pre_capability_invocation_context(
         &self,
-        tool_name: &str,
+        model_primitive_name: &str,
         arguments: serde_json::Value,
-        tool_call_id: &str,
+        invocation_id: &str,
     ) -> HookContext {
-        HookContext::PreToolUse {
+        HookContext::PreCapabilityInvocation {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
-            tool_name: tool_name.to_string(),
-            tool_arguments: arguments,
-            tool_call_id: tool_call_id.to_string(),
+            model_primitive_name: model_primitive_name.to_string(),
+            capability_arguments: arguments,
+            invocation_id: invocation_id.to_string(),
         }
     }
 
-    fn create_post_tool_context(
+    fn create_post_capability_invocation_context(
         &self,
-        tool_name: &str,
-        tool_call_id: &str,
+        model_primitive_name: &str,
+        invocation_id: &str,
         result: serde_json::Value,
         duration_ms: u64,
     ) -> HookContext {
-        HookContext::PostToolUse {
+        HookContext::PostCapabilityInvocation {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
-            tool_name: tool_name.to_string(),
-            tool_call_id: tool_call_id.to_string(),
+            model_primitive_name: model_primitive_name.to_string(),
+            invocation_id: invocation_id.to_string(),
             result,
             duration_ms,
         }
@@ -148,12 +152,16 @@ impl HookContextFactory for DefaultContextFactory {
         }
     }
 
-    fn create_session_end_context(&self, message_count: u64, tool_call_count: u64) -> HookContext {
+    fn create_session_end_context(
+        &self,
+        message_count: u64,
+        capability_invocation_count: u64,
+    ) -> HookContext {
         HookContext::SessionEnd {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
             message_count,
-            tool_call_count,
+            capability_invocation_count,
         }
     }
 
@@ -215,28 +223,28 @@ mod tests {
     }
 
     #[test]
-    fn test_pre_tool_context() {
+    fn test_pre_capability_invocation_context() {
         let factory = make_factory();
-        let ctx = factory.create_pre_tool_context(
+        let ctx = factory.create_pre_capability_invocation_context(
             "process::run",
             serde_json::json!({"command": "ls"}),
             "tc-1",
         );
-        assert_eq!(ctx.hook_type(), HookType::PreToolUse);
+        assert_eq!(ctx.hook_type(), HookType::PreCapabilityInvocation);
         assert_eq!(ctx.session_id(), "session-123");
         assert!(!ctx.timestamp().is_empty());
     }
 
     #[test]
-    fn test_post_tool_context() {
+    fn test_post_capability_invocation_context() {
         let factory = make_factory();
-        let ctx = factory.create_post_tool_context(
+        let ctx = factory.create_post_capability_invocation_context(
             "process::run",
             "tc-1",
             serde_json::json!({"output": "foo"}),
             150,
         );
-        assert_eq!(ctx.hook_type(), HookType::PostToolUse);
+        assert_eq!(ctx.hook_type(), HookType::PostCapabilityInvocation);
         assert_eq!(ctx.session_id(), "session-123");
     }
 
@@ -294,12 +302,12 @@ mod tests {
         assert_eq!(ctx.hook_type(), HookType::SessionEnd);
         if let HookContext::SessionEnd {
             message_count,
-            tool_call_count,
+            capability_invocation_count,
             ..
         } = &ctx
         {
             assert_eq!(*message_count, 10);
-            assert_eq!(*tool_call_count, 5);
+            assert_eq!(*capability_invocation_count, 5);
         } else {
             panic!("Expected SessionEnd context");
         }

@@ -60,11 +60,11 @@ final class RetryTurnTests: XCTestCase {
     }
 
     func testSkipsUserMessageWithoutTextContent() {
-        // User message with tool result (not text) should be skipped so that
+        // User message with capability result (not text) should be skipped so that
         // retry doesn't silently grab something the user never typed.
         viewModel.messages = [
             ChatMessage(role: .user, content: .text("older prompt")),
-            ChatMessage(role: .user, content: .capabilityResult(testCapabilityResult(id: "toolu_abc", content: "tool output"))),
+            ChatMessage(role: .user, content: .capabilityResult(testCapabilityResult(id: "toolu_abc", content: "capability output"))),
         ]
 
         let found = viewModel.findLastUserTextMessage()
@@ -96,7 +96,7 @@ final class RetryTurnTests: XCTestCase {
     }
 
     func testReturnsNilWhenUserMessagesAreAllNonText() {
-        // User has only ever submitted attachments / tool responses — no
+        // User has only ever submitted attachments / capability responses — no
         // text to re-issue. Retry must refuse.
         viewModel.messages = [
             ChatMessage(role: .user, content: .capabilityResult(testCapabilityResult(id: "t1", content: "ok"))),

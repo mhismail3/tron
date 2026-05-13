@@ -42,13 +42,13 @@ struct ForkButtonStateTests {
     }
 
     @Test("Capability invocation events are not forkable")
-    func toolCallNotForkable() {
+    func invocationStartNotForkable() {
         let event = makeEvent(type: "capability.invocation.started")
         #expect(event.isForkable == false)
     }
 
     @Test("Capability result events are not forkable")
-    func toolResultNotForkable() {
+    func capabilityResultNotForkable() {
         let event = makeEvent(type: "capability.invocation.completed")
         #expect(event.isForkable == false)
     }

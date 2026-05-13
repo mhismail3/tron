@@ -57,35 +57,26 @@ fn write_sample_session(dir: &Path) -> std::path::PathBuf {
         }
     })).unwrap();
 
-    writeln!(f, "{}", json!({
-        "type": "assistant",
-        "uuid": "a2",
-        "parentUuid": "a1",
-        "timestamp": "2026-01-01T00:00:02Z",
-        "message": {
-            "id": "msg_01",
-            "role": "assistant",
-            "content": [
-                { "type": "text", "text": "Here's how to use Rust:" },
-                { "type": "tool_use", "id": "toolu_01", "name": "filesystem::write_file", "input": { "path": "main.rs", "content": "fn main() {}" } }
-            ],
-            "stop_reason": "tool_use",
-            "usage": { "input_tokens": 500, "output_tokens": 200 }
-        }
-    })).unwrap();
-
-    // Capability result
-    writeln!(f, "{}", json!({
-        "type": "user",
-        "uuid": "tr1",
-        "parentUuid": "a2",
-        "timestamp": "2026-01-01T00:00:03Z",
-        "promptId": "p1",
-        "message": {
-            "role": "user",
-            "content": [{ "type": "tool_result", "tool_use_id": "toolu_01", "content": "File written successfully" }]
-        }
-    })).unwrap();
+    writeln!(
+        f,
+        "{}",
+        json!({
+            "type": "assistant",
+            "uuid": "a2",
+            "parentUuid": "a1",
+            "timestamp": "2026-01-01T00:00:02Z",
+            "message": {
+                "id": "msg_01",
+                "role": "assistant",
+                "content": [
+                    { "type": "text", "text": "Here's how to use Rust:" }
+                ],
+                "stop_reason": "end_turn",
+                "usage": { "input_tokens": 500, "output_tokens": 200 }
+            }
+        })
+    )
+    .unwrap();
 
     // Final assistant response
     writeln!(
@@ -94,7 +85,7 @@ fn write_sample_session(dir: &Path) -> std::path::PathBuf {
         json!({
             "type": "assistant",
             "uuid": "a3",
-            "parentUuid": "tr1",
+            "parentUuid": "a2",
             "timestamp": "2026-01-01T00:00:04Z",
             "message": {
                 "id": "msg_02",
@@ -338,7 +329,7 @@ fn import_reconstruction_produces_valid_messages() {
 }
 
 #[test]
-fn import_reconstruction_has_tool_args() {
+fn import_reconstruction_has_no_provider_capability_blocks() {
     use crate::domains::session::event_store::event_rows_to_session_events;
     use crate::domains::session::event_store::reconstruct::reconstruct_from_events;
 
@@ -351,16 +342,19 @@ fn import_reconstruction_has_tool_args() {
     let session_events = event_rows_to_session_events(&events);
     let recon = reconstruct_from_events(&session_events);
 
-    // Find assistant messages with tool_use content blocks
-    let has_tool_use = recon.messages_with_event_ids.iter().any(|m| {
+    let has_provider_capability_blocks = recon.messages_with_event_ids.iter().any(|m| {
         if let Some(arr) = m.message.content.as_array() {
-            arr.iter()
-                .any(|b| b.get("type").and_then(serde_json::Value::as_str) == Some("tool_use"))
+            arr.iter().any(|b| {
+                matches!(
+                    b.get("type").and_then(serde_json::Value::as_str),
+                    Some("capability_invocation" | "capability_result")
+                )
+            })
         } else {
             false
         }
     });
-    assert!(has_tool_use);
+    assert!(!has_provider_capability_blocks);
 }
 
 #[test]
@@ -530,12 +524,10 @@ fn import_produces_exactly_the_advertised_event_count() {
 }
 
 #[test]
-fn import_session_passes_warnings_through_result() {
-    // M28: the writer routes through the validator, so any warnings the
-    // dry-run surfaces must end up on ImportResult.warnings verbatim.
+fn import_session_refuses_provider_capability_history() {
     let store = setup();
     let dir = tempdir().unwrap();
-    let file = dir.path().join("with-orphan.jsonl");
+    let file = dir.path().join("provider-capability-history.jsonl");
     let mut f = std::fs::File::create(&file).unwrap();
 
     writeln!(
@@ -560,19 +552,22 @@ fn import_session_passes_warnings_through_result() {
             "id": "msg_01",
             "role": "assistant",
             "content": [
-                { "type": "tool_use", "id": "toolu_orphan", "name": "filesystem::read_file", "input": { "path": "x.txt" } }
+                { "type": "capability_invocation", "id": "provider_cap_1", "name": "filesystem::read_file", "input": { "path": "x.txt" } }
             ],
-            "stop_reason": "tool_use",
+            "stop_reason": "capability_invocation",
             "usage": { "input_tokens": 10, "output_tokens": 5 },
             "model": "claude-opus-4-6"
         }
     })).unwrap();
 
-    let result = import_session(&store, &file, "/tmp/project", &[], None).unwrap();
-    assert!(result.warnings.iter().any(|w| matches!(
-        &w.kind,
-        crate::domains::import::ImportWarningKind::OrphanToolUse { tool_call_id } if tool_call_id == "toolu_orphan"
-    )));
+    assert!(matches!(
+        import_session(&store, &file, "/tmp/project", &[], None),
+        Err(
+            crate::domains::import::ImportError::UnsupportedProviderCapabilityHistory {
+                block_count: 1
+            }
+        )
+    ));
 }
 
 #[test]

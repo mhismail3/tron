@@ -3,23 +3,22 @@ import XCTest
 
 final class CapabilityArgumentExtractorTests: XCTestCase {
 
-    // MARK: - Primary path: toolCall.arguments
+    // MARK: - Primary path: invocationStart.arguments
 
     private func makeCapabilityInvocation(arguments: String) -> CapabilityInvocationStartedPayload? {
         CapabilityInvocationStartedPayload(from: [
             "invocationId": AnyCodable("tc1"),
-            "name": AnyCodable("Read"),
-            "modelToolName": AnyCodable("execute"),
+            "modelPrimitiveName": AnyCodable("execute"),
             "arguments": AnyCodable(arguments),
             "turn": AnyCodable(1)
         ])
     }
 
     func testExtractsFromCapabilityInvocationArguments() {
-        let toolCall = makeCapabilityInvocation(arguments: "{\"path\":\"/test.txt\"}")
+        let invocationStart = makeCapabilityInvocation(arguments: "{\"path\":\"/test.txt\"}")
 
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: toolCall,
+            invocationStart: invocationStart,
             contentBlock: [:]
         )
 
@@ -34,7 +33,7 @@ final class CapabilityArgumentExtractorTests: XCTestCase {
         ]
 
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: nil,
+            invocationStart: nil,
             contentBlock: block
         )
 
@@ -50,7 +49,7 @@ final class CapabilityArgumentExtractorTests: XCTestCase {
         ]
 
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: nil,
+            invocationStart: nil,
             contentBlock: block
         )
 
@@ -65,7 +64,7 @@ final class CapabilityArgumentExtractorTests: XCTestCase {
         ]
 
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: nil,
+            invocationStart: nil,
             contentBlock: block
         )
 
@@ -78,7 +77,7 @@ final class CapabilityArgumentExtractorTests: XCTestCase {
 
     func testReturnsNilWhenNoArguments() {
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: nil,
+            invocationStart: nil,
             contentBlock: [:]
         )
 
@@ -91,7 +90,7 @@ final class CapabilityArgumentExtractorTests: XCTestCase {
         ]
 
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: nil,
+            invocationStart: nil,
             contentBlock: block
         )
 
@@ -106,7 +105,7 @@ final class CapabilityArgumentExtractorTests: XCTestCase {
         ]
 
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: nil,
+            invocationStart: nil,
             contentBlock: block
         )
 
@@ -114,16 +113,16 @@ final class CapabilityArgumentExtractorTests: XCTestCase {
     }
 
     func testCapabilityInvocationArgumentsTakePriorityOverContentBlock() {
-        let toolCall = makeCapabilityInvocation(arguments: "{\"from_tool_call\":true}")
+        let invocationStart = makeCapabilityInvocation(arguments: "{\"from_capability_invocation\":true}")
         let block: [String: Any] = [
             "arguments": ["from_block": true]
         ]
 
         let result = CapabilityArgumentExtractor.extractArguments(
-            toolCall: toolCall,
+            invocationStart: invocationStart,
             contentBlock: block
         )
 
-        XCTAssertEqual(result, "{\"from_tool_call\":true}")
+        XCTAssertEqual(result, "{\"from_capability_invocation\":true}")
     }
 }

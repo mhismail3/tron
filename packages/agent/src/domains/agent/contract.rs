@@ -33,8 +33,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics": STREAM_TOPICS,"version":1}))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
-        CapabilityContract::new("agent::abort_tool", "agent", EffectClass::ReversibleSideEffect, RiskLevel::Medium, Some("agent.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"toolCallId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","toolCallId"],"type":"object"}))
+        CapabilityContract::new("agent::abort_invocation", "agent", EffectClass::ReversibleSideEffect, RiskLevel::Medium, Some("agent.write"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"invocationId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","invocationId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
@@ -105,12 +105,12 @@ fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(
                 CompensationKind::ExternalIrreversible,
-                "hidden run-turn starts live provider/tool work; event-store history remains authoritative and replay is ledger/idempotency controlled",
+                "hidden run-turn starts live provider capability work; event-store history remains authoritative and replay is ledger/idempotency controlled",
             ))
             .high_risk_contract(json!({
                 "internal": true,
                 "hiddenPromptRuntimeFunction": true,
-                "rollbackOrCompensation": "hidden run-turn starts live provider/tool work; event-store history remains authoritative and replay is ledger/idempotency controlled",
+                "rollbackOrCompensation": "hidden run-turn starts live provider capability work; event-store history remains authoritative and replay is ledger/idempotency controlled",
                 "streamTopics": STREAM_TOPICS,
                 "version": 1
             }))

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Shared argument parsing for tool JSON arguments.
+/// Shared argument parsing for capability JSON arguments.
 /// Uses JSONSerialization instead of regex for correct handling of
 /// escapes, nested values, and edge cases.
 enum CapabilityArgumentParser {

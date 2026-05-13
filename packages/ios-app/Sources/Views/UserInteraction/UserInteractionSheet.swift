@@ -1,23 +1,23 @@
 import SwiftUI
 
-// MARK: - AskUserQuestion Sheet
+// MARK: - UserInteraction Sheet
 
-/// Sheet for answering AskUserQuestion capability invocations
+/// Sheet for answering UserInteraction capability invocations
 /// Displays ONLY questions/answers - no surrounding context or agent messages
 /// Uses iOS 26 liquid glass styling
 @available(iOS 26.0, *)
-struct AskUserQuestionSheet: View {
-    let toolData: AskUserQuestionToolData
-    let onSubmit: ([AskUserQuestionAnswer]) -> Void
+struct UserInteractionSheet: View {
+    let capabilityData: UserInteractionInvocationData
+    let onSubmit: ([UserInteractionAnswer]) -> Void
     let onDismiss: () -> Void
     var readOnly: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentQuestionIndex = 0
-    @State private var answers: [String: AskUserQuestionAnswer] = [:]
+    @State private var answers: [String: UserInteractionAnswer] = [:]
 
-    private var questions: [AskUserQuestion] {
-        toolData.params.questions
+    private var questions: [UserInteraction] {
+        capabilityData.params.questions
     }
 
     private var hasAnyAnswer: Bool {
@@ -85,7 +85,7 @@ struct AskUserQuestionSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(.tronAmber)
         .onAppear {
-            answers = toolData.answers
+            answers = capabilityData.answers
         }
     }
 
@@ -98,7 +98,7 @@ struct AskUserQuestionSheet: View {
                 answer: binding(for: questions[0]),
                 questionNumber: 1,
                 totalQuestions: 1,
-                status: toolData.status,
+                status: capabilityData.status,
                 readOnly: readOnly
             )
             .padding(.horizontal, 20)
@@ -119,7 +119,7 @@ struct AskUserQuestionSheet: View {
                         answer: binding(for: question),
                         questionNumber: index + 1,
                         totalQuestions: questions.count,
-                        status: toolData.status,
+                        status: capabilityData.status,
                         readOnly: readOnly
                     )
                     .padding(.horizontal, 20)
@@ -166,7 +166,7 @@ struct AskUserQuestionSheet: View {
     }
 
     private var statusAccentColor: Color {
-        switch toolData.status {
+        switch capabilityData.status {
         case .generating, .pending:
             return .tronAmber
         case .answered:
@@ -178,10 +178,10 @@ struct AskUserQuestionSheet: View {
 
     // MARK: - Helpers
 
-    private func binding(for question: AskUserQuestion) -> Binding<AskUserQuestionAnswer> {
+    private func binding(for question: UserInteraction) -> Binding<UserInteractionAnswer> {
         Binding(
             get: {
-                answers[question.id] ?? AskUserQuestionAnswer(
+                answers[question.id] ?? UserInteractionAnswer(
                     questionId: question.id,
                     selectedValues: [],
                     otherValue: nil
@@ -210,11 +210,11 @@ struct AskUserQuestionSheet: View {
 
 @available(iOS 26.0, *)
 struct QuestionCardView: View {
-    let question: AskUserQuestion
-    @Binding var answer: AskUserQuestionAnswer
+    let question: UserInteraction
+    @Binding var answer: UserInteractionAnswer
     let questionNumber: Int
     let totalQuestions: Int
-    var status: AskUserQuestionStatus = .pending
+    var status: UserInteractionStatus = .pending
     var readOnly: Bool = false
 
     @State private var otherText = ""
@@ -309,12 +309,12 @@ struct QuestionCardView: View {
         }
     }
 
-    private func isSelected(_ option: AskUserQuestionOption) -> Bool {
+    private func isSelected(_ option: UserInteractionOption) -> Bool {
         let value = option.value ?? option.label
         return answer.selectedValues.contains(value)
     }
 
-    private func toggleOption(_ option: AskUserQuestionOption) {
+    private func toggleOption(_ option: UserInteractionOption) {
         guard !readOnly else { return }
         let value = option.value ?? option.label
 
@@ -334,9 +334,9 @@ struct QuestionCardView: View {
 
 @available(iOS 26.0, *)
 struct CompactOptionRowView: View {
-    let option: AskUserQuestionOption
+    let option: UserInteractionOption
     let isSelected: Bool
-    let mode: AskUserQuestion.SelectionMode
+    let mode: UserInteraction.SelectionMode
     var accentColor: Color = .tronAmber
     var readOnly: Bool = false
     let action: () -> Void
@@ -411,20 +411,20 @@ struct CompactOptionRowView: View {
 #if DEBUG
 @available(iOS 26.0, *)
 #Preview("Single Question") {
-    AskUserQuestionSheet(
-        toolData: AskUserQuestionToolData(
+    UserInteractionSheet(
+        capabilityData: UserInteractionInvocationData(
             invocationId: "call_123",
-            params: AskUserQuestionParams(
+            params: UserInteractionParams(
                 questions: [
-                    AskUserQuestion(
+                    UserInteraction(
                         id: "q1",
                         question: "What is your favorite color?",
                         options: [
-                            AskUserQuestionOption(label: "Red", value: nil, description: nil),
-                            AskUserQuestionOption(label: "Blue", value: nil, description: nil),
-                            AskUserQuestionOption(label: "Green", value: nil, description: nil),
-                            AskUserQuestionOption(label: "Yellow", value: nil, description: nil),
-                            AskUserQuestionOption(label: "Purple", value: nil, description: nil)
+                            UserInteractionOption(label: "Red", value: nil, description: nil),
+                            UserInteractionOption(label: "Blue", value: nil, description: nil),
+                            UserInteractionOption(label: "Green", value: nil, description: nil),
+                            UserInteractionOption(label: "Yellow", value: nil, description: nil),
+                            UserInteractionOption(label: "Purple", value: nil, description: nil)
                         ],
                         mode: .single,
                         allowOther: true,
@@ -444,29 +444,29 @@ struct CompactOptionRowView: View {
 
 @available(iOS 26.0, *)
 #Preview("Multiple Questions") {
-    AskUserQuestionSheet(
-        toolData: AskUserQuestionToolData(
+    UserInteractionSheet(
+        capabilityData: UserInteractionInvocationData(
             invocationId: "call_123",
-            params: AskUserQuestionParams(
+            params: UserInteractionParams(
                 questions: [
-                    AskUserQuestion(
+                    UserInteraction(
                         id: "q1",
                         question: "What approach would you prefer?",
                         options: [
-                            AskUserQuestionOption(label: "Approach A", value: nil, description: "Use existing patterns"),
-                            AskUserQuestionOption(label: "Approach B", value: nil, description: "Create new abstraction")
+                            UserInteractionOption(label: "Approach A", value: nil, description: "Use existing patterns"),
+                            UserInteractionOption(label: "Approach B", value: nil, description: "Create new abstraction")
                         ],
                         mode: .single,
                         allowOther: nil,
                         otherPlaceholder: nil
                     ),
-                    AskUserQuestion(
+                    UserInteraction(
                         id: "q2",
                         question: "Which files should I modify?",
                         options: [
-                            AskUserQuestionOption(label: "Message.swift", value: nil, description: nil),
-                            AskUserQuestionOption(label: "ChatViewModel.swift", value: nil, description: nil),
-                            AskUserQuestionOption(label: "MessageBubble.swift", value: nil, description: nil)
+                            UserInteractionOption(label: "Message.swift", value: nil, description: nil),
+                            UserInteractionOption(label: "ChatViewModel.swift", value: nil, description: nil),
+                            UserInteractionOption(label: "MessageBubble.swift", value: nil, description: nil)
                         ],
                         mode: .multi,
                         allowOther: nil,

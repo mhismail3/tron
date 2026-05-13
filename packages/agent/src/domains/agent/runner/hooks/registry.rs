@@ -183,38 +183,48 @@ mod tests {
     #[test]
     fn test_register_single() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("hook1", HookType::PreToolUse, 0));
+        registry.register(make_handler("hook1", HookType::PreCapabilityInvocation, 0));
         assert_eq!(registry.count(), 1);
     }
 
     #[test]
     fn test_register_multiple_same_type() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("a", HookType::PreToolUse, 10));
-        registry.register(make_handler("b", HookType::PreToolUse, 20));
+        registry.register(make_handler("a", HookType::PreCapabilityInvocation, 10));
+        registry.register(make_handler("b", HookType::PreCapabilityInvocation, 20));
         assert_eq!(registry.count(), 2);
-        let handlers = registry.get_handlers(HookType::PreToolUse);
+        let handlers = registry.get_handlers(HookType::PreCapabilityInvocation);
         assert_eq!(handlers.len(), 2);
     }
 
     #[test]
     fn test_register_different_types() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("a", HookType::PreToolUse, 0));
-        registry.register(make_handler("b", HookType::PostToolUse, 0));
+        registry.register(make_handler("a", HookType::PreCapabilityInvocation, 0));
+        registry.register(make_handler("b", HookType::PostCapabilityInvocation, 0));
         assert_eq!(registry.count(), 2);
-        assert_eq!(registry.get_handlers(HookType::PreToolUse).len(), 1);
-        assert_eq!(registry.get_handlers(HookType::PostToolUse).len(), 1);
+        assert_eq!(
+            registry
+                .get_handlers(HookType::PreCapabilityInvocation)
+                .len(),
+            1
+        );
+        assert_eq!(
+            registry
+                .get_handlers(HookType::PostCapabilityInvocation)
+                .len(),
+            1
+        );
     }
 
     #[test]
     fn test_get_handlers_sorted_by_priority_descending() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("low", HookType::PreToolUse, 10));
-        registry.register(make_handler("high", HookType::PreToolUse, 100));
-        registry.register(make_handler("mid", HookType::PreToolUse, 50));
+        registry.register(make_handler("low", HookType::PreCapabilityInvocation, 10));
+        registry.register(make_handler("high", HookType::PreCapabilityInvocation, 100));
+        registry.register(make_handler("mid", HookType::PreCapabilityInvocation, 50));
 
-        let handlers = registry.get_handlers(HookType::PreToolUse);
+        let handlers = registry.get_handlers(HookType::PreCapabilityInvocation);
         assert_eq!(handlers[0].name(), "high");
         assert_eq!(handlers[1].name(), "mid");
         assert_eq!(handlers[2].name(), "low");
@@ -229,17 +239,17 @@ mod tests {
     #[test]
     fn test_register_replaces_duplicate_name() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("hook1", HookType::PreToolUse, 10));
-        registry.register(make_handler("hook1", HookType::PreToolUse, 50));
+        registry.register(make_handler("hook1", HookType::PreCapabilityInvocation, 10));
+        registry.register(make_handler("hook1", HookType::PreCapabilityInvocation, 50));
         assert_eq!(registry.count(), 1);
-        let handlers = registry.get_handlers(HookType::PreToolUse);
+        let handlers = registry.get_handlers(HookType::PreCapabilityInvocation);
         assert_eq!(handlers[0].priority(), 50);
     }
 
     #[test]
     fn test_unregister_existing() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("hook1", HookType::PreToolUse, 0));
+        registry.register(make_handler("hook1", HookType::PreCapabilityInvocation, 0));
         assert!(registry.unregister("hook1"));
         assert_eq!(registry.count(), 0);
     }
@@ -253,8 +263,8 @@ mod tests {
     #[test]
     fn test_unregister_only_removes_named() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("a", HookType::PreToolUse, 0));
-        registry.register(make_handler("b", HookType::PreToolUse, 0));
+        registry.register(make_handler("a", HookType::PreCapabilityInvocation, 0));
+        registry.register(make_handler("b", HookType::PreCapabilityInvocation, 0));
         let _ = registry.unregister("a");
         assert_eq!(registry.count(), 1);
         assert!(registry.get_by_name("b").is_some());
@@ -264,7 +274,11 @@ mod tests {
     fn test_list_all() {
         let mut registry = HookRegistry::new();
         registry.register(make_handler("z-hook", HookType::Stop, 0));
-        registry.register(make_handler("a-hook", HookType::PreToolUse, 100));
+        registry.register(make_handler(
+            "a-hook",
+            HookType::PreCapabilityInvocation,
+            100,
+        ));
         let list = registry.list_all();
         assert_eq!(list.len(), 2);
         // Sorted by name
@@ -275,7 +289,7 @@ mod tests {
     #[test]
     fn test_get_by_name_found() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("hook1", HookType::PreToolUse, 0));
+        registry.register(make_handler("hook1", HookType::PreCapabilityInvocation, 0));
         let handler = registry.get_by_name("hook1");
         assert!(handler.is_some());
         assert_eq!(handler.unwrap().name(), "hook1");
@@ -290,8 +304,8 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut registry = HookRegistry::new();
-        registry.register(make_handler("a", HookType::PreToolUse, 0));
-        registry.register(make_handler("b", HookType::PostToolUse, 0));
+        registry.register(make_handler("a", HookType::PreCapabilityInvocation, 0));
+        registry.register(make_handler("b", HookType::PostCapabilityInvocation, 0));
         registry.clear();
         assert_eq!(registry.count(), 0);
     }

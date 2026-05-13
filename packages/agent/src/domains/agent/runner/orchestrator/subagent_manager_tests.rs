@@ -163,7 +163,7 @@ fn make_config(task: &str) -> SubagentConfig {
         skills: None,
         max_depth: 0,
         current_depth: 0,
-        tool_call_id: None,
+        invocation_id: None,
     }
 }
 
@@ -346,15 +346,15 @@ async fn truncate_helper() {
 
 #[test]
 fn spawn_type_enum_variants() {
-    assert_ne!(SpawnType::ToolAgent, SpawnType::Subsession);
-    assert_eq!(SpawnType::ToolAgent, SpawnType::ToolAgent);
+    assert_ne!(SpawnType::CapabilityAgent, SpawnType::Subsession);
+    assert_eq!(SpawnType::CapabilityAgent, SpawnType::CapabilityAgent);
     assert_eq!(SpawnType::Subsession, SpawnType::Subsession);
 }
 
 #[test]
 fn spawn_type_debug() {
-    let s = format!("{:?}", SpawnType::ToolAgent);
-    assert!(s.contains("ToolAgent"));
+    let s = format!("{:?}", SpawnType::CapabilityAgent);
+    assert!(s.contains("CapabilityAgent"));
 }
 
 // ── SubsessionConfig defaults ──
@@ -378,14 +378,14 @@ fn subsession_config_defaults() {
 // ── Query helpers ──
 
 #[tokio::test]
-async fn active_count_by_type_tool_agent() {
+async fn active_count_by_type_capability_agent() {
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    // Spawn a blocking tool agent (completes immediately)
+    // Spawn a blocking capability agent (completes immediately)
     let config = make_config("test task");
     let _handle = manager.spawn(config).await.unwrap();
 
-    // After blocking spawn completes, should be 0 active ToolAgents
-    assert_eq!(manager.active_count_by_type(&SpawnType::ToolAgent), 0);
+    // After blocking spawn completes, should be 0 active CapabilityAgents
+    assert_eq!(manager.active_count_by_type(&SpawnType::CapabilityAgent), 0);
     assert_eq!(manager.active_count_by_type(&SpawnType::Subsession), 0);
 }
 
@@ -437,7 +437,7 @@ async fn spawn_subsession_nonblocking_returns_session_id() {
 }
 
 #[tokio::test]
-async fn spawn_subsession_no_tools_by_default() {
+async fn spawn_subsession_no_capabilities_by_default() {
     // Default inherit_capabilities = false, so subsession should have empty live capability catalog
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
     let config = make_subsession_config("summarize", "parent-001");
@@ -990,14 +990,14 @@ async fn notify_defaults_true_when_probe_weak_expired() {
 
 #[test]
 fn spawn_type_hook_variant_exists() {
-    assert_ne!(SpawnType::Hook, SpawnType::ToolAgent);
+    assert_ne!(SpawnType::Hook, SpawnType::CapabilityAgent);
     assert_ne!(SpawnType::Hook, SpawnType::Subsession);
     assert_eq!(SpawnType::Hook, SpawnType::Hook);
 }
 
 #[test]
 fn spawn_type_as_str_values() {
-    assert_eq!(SpawnType::ToolAgent.as_str(), "toolAgent");
+    assert_eq!(SpawnType::CapabilityAgent.as_str(), "capabilityAgent");
     assert_eq!(SpawnType::Subsession.as_str(), "subsession");
     assert_eq!(SpawnType::Hook.as_str(), "hook");
 }
@@ -1072,7 +1072,7 @@ async fn spawn_subsession_with_hook_type_emits_hook_in_event() {
 }
 
 #[tokio::test]
-async fn spawn_tool_agent_emits_tool_agent_type_in_event() {
+async fn spawn_capability_agent_emits_capability_agent_type_in_event() {
     let (mgr, store, broadcast) = make_manager_and_store();
     let manager = SubagentManager::new(
         mgr.clone(),
@@ -1085,7 +1085,7 @@ async fn spawn_tool_agent_emits_tool_agent_type_in_event() {
     );
 
     let mut rx = broadcast.subscribe();
-    let config = make_config("tool agent task");
+    let config = make_config("capability agent task");
     let _handle = manager.spawn(config).await.unwrap();
 
     let mut found_spawn_type = None;
@@ -1097,8 +1097,8 @@ async fn spawn_tool_agent_emits_tool_agent_type_in_event() {
     }
     assert_eq!(
         found_spawn_type.as_deref(),
-        Some("toolAgent"),
-        "SubagentSpawned event should contain spawnType: toolAgent"
+        Some("capabilityAgent"),
+        "SubagentSpawned event should contain spawnType: capabilityAgent"
     );
 }
 
@@ -1165,7 +1165,7 @@ async fn subagent_failed_includes_spawn_type() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Skill frontmatter → subagent denied tools wiring
+// Skill frontmatter → subagent denied capabilities wiring
 //
 // REGRESSION: `skill_frontmatter_to_denials` was implemented + unit-tested
 // but never called from production code. Subagents spawned with
@@ -1282,14 +1282,15 @@ fn compute_denied_capabilities_skill_allowed_capabilities_inverted_to_denials() 
     ));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    let all_tools = vec![
+    let all_capabilities = vec![
         "filesystem::read_file".to_string(),
         "filesystem::write_file".to_string(),
         "process::run".to_string(),
         "Grep".to_string(),
         "filesystem::edit_file".to_string(),
     ];
-    let merged = manager.compute_denied_capabilities(&[], Some(&["readonly".into()]), &all_tools);
+    let merged =
+        manager.compute_denied_capabilities(&[], Some(&["readonly".into()]), &all_capabilities);
     let set: std::collections::HashSet<_> = merged.into_iter().collect();
     assert!(set.contains("filesystem::write_file"));
     assert!(set.contains("process::run"));

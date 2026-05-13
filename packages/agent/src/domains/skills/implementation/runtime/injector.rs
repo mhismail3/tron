@@ -151,8 +151,8 @@ pub fn build_skill_context(skills: &[&SkillMetadata]) -> String {
         let escaped_name = escape_xml(&skill.name);
         let _ = writeln!(xml, "<skill name=\"{escaped_name}\">");
 
-        // Add tool preferences if present
-        let prefs = build_tool_preferences(skill);
+        // Add capability preferences if present
+        let prefs = build_capability_preferences(skill);
         if !prefs.is_empty() {
             xml.push_str(&prefs);
             xml.push('\n');
@@ -236,25 +236,25 @@ pub fn build_activation_directive(skill_names: &[String]) -> Option<String> {
     ))
 }
 
-/// Build tool preference/restriction XML blocks for a skill.
-fn build_tool_preferences(skill: &SkillMetadata) -> String {
+/// Build capability preference/restriction XML blocks for a skill.
+fn build_capability_preferences(skill: &SkillMetadata) -> String {
     let fm = &skill.frontmatter;
 
     if let Some(allowed) = &fm.allowed_capabilities
         && !allowed.is_empty()
     {
-        let tools = allowed.join(", ");
+        let capabilities = allowed.join(", ");
         return format!(
-            "<skill-tool-preferences>This skill works best with: {tools}. Prefer these tools.</skill-tool-preferences>"
+            "<skill-capability-preferences>This skill works best with: {capabilities}. Prefer these capabilities.</skill-capability-preferences>"
         );
     }
 
     if let Some(denied) = &fm.denied_capabilities
         && !denied.is_empty()
     {
-        let tools = denied.join(", ");
+        let capabilities = denied.join(", ");
         return format!(
-            "<skill-tool-restrictions>This skill must NOT use: {tools}. These capabilities are restricted.</skill-tool-restrictions>"
+            "<skill-capability-restrictions>This skill must NOT use: {capabilities}. These capabilities are restricted.</skill-capability-restrictions>"
         );
     }
 
@@ -299,7 +299,7 @@ mod tests {
         }
     }
 
-    fn make_skill_with_tools(
+    fn make_skill_with_capabilities(
         name: &str,
         content: &str,
         allowed: Option<Vec<String>>,
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_extract_simple_reference() {
-        let refs = extract_skill_references("Use @browser tool");
+        let refs = extract_skill_references("Use @browser capability");
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].name, "browser");
         assert_eq!(refs[0].original, "@browser");
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_extract_multiple_references() {
-        let refs = extract_skill_references("Use @browser and @git tools");
+        let refs = extract_skill_references("Use @browser and @git capabilities");
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0].name, "browser");
         assert_eq!(refs[1].name, "git");
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_build_context_with_allowed_capabilities() {
-        let skill = make_skill_with_tools(
+        let skill = make_skill_with_capabilities(
             "reader",
             "filesystem::read_file things.",
             Some(vec![
@@ -464,20 +464,20 @@ mod tests {
             None,
         );
         let context = build_skill_context(&[&skill]);
-        assert!(context.contains("<skill-tool-preferences>"));
+        assert!(context.contains("<skill-capability-preferences>"));
         assert!(context.contains("filesystem::read_file, filesystem::search_text"));
     }
 
     #[test]
     fn test_build_context_with_denied_capabilities() {
-        let skill = make_skill_with_tools(
+        let skill = make_skill_with_capabilities(
             "safe",
             "Safe skill.",
             None,
             Some(vec!["process::run".to_string()]),
         );
         let context = build_skill_context(&[&skill]);
-        assert!(context.contains("<skill-tool-restrictions>"));
+        assert!(context.contains("<skill-capability-restrictions>"));
         assert!(context.contains("process::run"));
     }
 

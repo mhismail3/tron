@@ -53,7 +53,7 @@ use tron::domains::session::event_store::{ConnectionConfig, EventStore};
 use tron::domains::settings::db_path_policy::resolve_production_db_path;
 use tron::domains::skills::registry::SkillRegistry;
 use tron::shared::server::context::{
-    AgentDeps, ServerRuntimeContext, ToolRuntimeConfig, register_blocking_supervisor_shutdown,
+    AgentDeps, CapabilitySupportConfig, ServerRuntimeContext, register_blocking_supervisor_shutdown,
 };
 use tron::transport::runtime::streams::EngineStreamEventPump;
 
@@ -80,9 +80,9 @@ type PushServiceOption = Option<PushService>;
 #[cfg(not(feature = "apns"))]
 type PushServiceOption = Option<()>;
 
-/// Tron agent — server and CLI tools.
+/// Tron agent — server and CLI capabilities.
 #[derive(Parser, Debug)]
-#[command(name = "tron", about = "Tron agent server and tools")]
+#[command(name = "tron", about = "Tron agent server and capability runtime")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -428,10 +428,10 @@ async fn init_mcp(
         .map(|s| s.name.as_str())
         .collect();
     if !connected.is_empty() {
-        let tool_count: usize = statuses.iter().map(|s| s.tool_count).sum();
+        let capability_count: usize = statuses.iter().map(|s| s.capability_count).sum();
         tracing::info!(
             servers = ?connected,
-            tool_count,
+            capability_count,
             "MCP servers available through capability primitives"
         );
     }
@@ -456,7 +456,7 @@ struct ServiceState {
     shared_subagent_manager: Option<Arc<SubagentManager>>,
     hook_abort_tracker: Arc<tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker>,
     push_service: PushServiceOption,
-    tool_runtime: ToolRuntimeConfig,
+    capability_support_config: CapabilitySupportConfig,
     process_manager:
         Arc<dyn tron::domains::capability_support::implementations::traits::ProcessManagerOps>,
     job_manager: Arc<dyn tron::domains::capability_support::implementations::traits::JobManagerOps>,
@@ -466,7 +466,7 @@ struct ServiceState {
     codex_app_server: Arc<tron::platform::codex_app::CodexAppServerManager>,
 }
 
-/// Build core services: orchestrator, session manager, providers, tools, subagent manager.
+/// Build core services: orchestrator, session manager, providers, capabilities, subagent manager.
 async fn init_services(
     event_store: Arc<EventStore>,
     settings: &tron::domains::settings::TronSettings,
@@ -537,10 +537,10 @@ async fn init_services(
             )
         }
     };
-    let tool_runtime = ToolRuntimeConfig {
+    let capability_support_config = CapabilitySupportConfig {
         http_client: shared_http_client,
-        sandbox_settings: settings.tools.process.sandbox.clone(),
-        computer_use_settings: settings.tools.computer_use.clone(),
+        sandbox_settings: settings.capabilities.process.sandbox.clone(),
+        computer_use_settings: settings.capabilities.computer_use.clone(),
         notify_delegate,
     };
 
@@ -607,7 +607,7 @@ async fn init_services(
         shared_subagent_manager,
         hook_abort_tracker,
         push_service,
-        tool_runtime,
+        capability_support_config,
         process_manager,
         job_manager,
         output_buffer_registry,
@@ -724,7 +724,7 @@ fn init_cron(
                 services.event_store.clone(),
             )) as _,
         ),
-        http_client: services.tool_runtime.http_client.clone(),
+        http_client: services.capability_support_config.http_client.clone(),
         pool: services.event_store.pool().clone(),
     };
     let scheduler = Arc::new(tron::domains::cron::CronScheduler::new(
@@ -800,7 +800,7 @@ fn build_server_runtime_context(
         settings_path,
         profile_runtime,
         agent_deps: services.agent_deps,
-        tool_runtime: services.tool_runtime,
+        capability_support_config: services.capability_support_config,
         server_start_time: std::time::Instant::now(),
         transcription_engine: services.transcription_engine,
         subagent_manager: services.shared_subagent_manager,
@@ -985,7 +985,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Phase 3: Core services (orchestrator, providers, tools, subagents)
+    // Phase 3: Core services (orchestrator, providers, capabilities, subagents)
     let push_service = init_push();
     let mcp = init_mcp(&settings, &settings_path).await;
     let mcp_router = mcp.router.clone();
@@ -1037,7 +1037,7 @@ async fn main() -> Result<()> {
             );
         }
         server.shutdown().register_phase_hook(
-            tron::app::shutdown::ShutdownPhase::Tools,
+            tron::app::shutdown::ShutdownPhase::Capabilities,
             "codex-app-server",
             move || async move {
                 codex_app_server.stop().await;

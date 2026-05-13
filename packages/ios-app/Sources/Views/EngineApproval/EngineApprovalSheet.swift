@@ -6,7 +6,7 @@ import SwiftUI
 /// Shows action, reason, risk level badge, approve/deny buttons, and optional note input.
 @available(iOS 26.0, *)
 struct EngineApprovalSheet: View {
-    let toolData: EngineApprovalToolData
+    let capabilityData: EngineApprovalData
     let onSubmit: (EngineApprovalUserDecision, String?) -> Void
     let onDismiss: () -> Void
     var readOnly: Bool = false
@@ -15,7 +15,7 @@ struct EngineApprovalSheet: View {
     @State private var noteText = ""
 
     private var isDecided: Bool {
-        toolData.status == .approved || toolData.status == .denied || toolData.status == .failed
+        capabilityData.status == .approved || capabilityData.status == .denied || capabilityData.status == .failed
     }
 
     var body: some View {
@@ -26,14 +26,14 @@ struct EngineApprovalSheet: View {
                     riskHeader
 
                     // Action section
-                    detailSection(title: "Action", content: toolData.params.action)
+                    detailSection(title: "Action", content: capabilityData.params.action)
 
                     // Reason section
-                    detailSection(title: "Reason", content: toolData.params.reason)
+                    detailSection(title: "Reason", content: capabilityData.params.reason)
 
                     // Note section (read-only for decided, editable for pending)
                     if readOnly {
-                        if let note = toolData.note, !note.isEmpty {
+                        if let note = capabilityData.note, !note.isEmpty {
                             detailSection(title: "Note", content: note)
                         }
                     } else {
@@ -76,7 +76,7 @@ struct EngineApprovalSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(accentColor)
         .onAppear {
-            noteText = toolData.note ?? ""
+            noteText = capabilityData.note ?? ""
         }
     }
 
@@ -113,12 +113,12 @@ struct EngineApprovalSheet: View {
     @ViewBuilder
     private var decisionBadge: some View {
         HStack(spacing: 4) {
-            Image(systemName: toolData.decision == .approved ? "checkmark.circle.fill" : "xmark.circle.fill")
+            Image(systemName: capabilityData.decision == .approved ? "checkmark.circle.fill" : "xmark.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            Text(toolData.decision?.rawValue ?? "")
+            Text(capabilityData.decision?.rawValue ?? "")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
         }
-        .foregroundStyle(toolData.decision == .approved ? Color.tronSuccess : Color.tronError)
+        .foregroundStyle(capabilityData.decision == .approved ? Color.tronSuccess : Color.tronError)
     }
 
     // MARK: - Detail Section
@@ -224,7 +224,7 @@ struct EngineApprovalSheet: View {
     // MARK: - Computed Properties
 
     private var accentColor: Color {
-        switch toolData.status {
+        switch capabilityData.status {
         case .pending: return .tronAmber
         case .approved: return .tronSuccess
         case .denied, .failed: return .tronError
@@ -232,15 +232,15 @@ struct EngineApprovalSheet: View {
     }
 
     private var decisionTitle: String {
-        switch toolData.decision {
+        switch capabilityData.decision {
         case .approved: return "Approved"
         case .denied: return "Denied"
-        case nil: return toolData.status == .failed ? "Failed" : "Approval"
+        case nil: return capabilityData.status == .failed ? "Failed" : "Approval"
         }
     }
 
     private var riskIcon: String {
-        switch toolData.params.riskLevel {
+        switch capabilityData.params.riskLevel {
         case .low: return "shield"
         case .medium: return "shield.lefthalf.filled"
         case .high: return "exclamationmark.shield.fill"
@@ -248,7 +248,7 @@ struct EngineApprovalSheet: View {
     }
 
     private var riskLabel: String {
-        switch toolData.params.riskLevel {
+        switch capabilityData.params.riskLevel {
         case .low: return "Low Risk"
         case .medium: return "Medium Risk"
         case .high: return "High Risk"
@@ -256,7 +256,7 @@ struct EngineApprovalSheet: View {
     }
 
     private var riskColor: Color {
-        switch toolData.params.riskLevel {
+        switch capabilityData.params.riskLevel {
         case .low: return .tronEmerald
         case .medium: return .tronAmber
         case .high: return .tronError
@@ -270,7 +270,7 @@ struct EngineApprovalSheet: View {
 @available(iOS 26.0, *)
 #Preview("Pending - Low Risk") {
     EngineApprovalSheet(
-        toolData: EngineApprovalToolData(
+        capabilityData: EngineApprovalData(
             invocationId: "call_1",
             params: EngineApprovalParams(
                 action: "Install ffmpeg via brew",
@@ -287,7 +287,7 @@ struct EngineApprovalSheet: View {
 @available(iOS 26.0, *)
 #Preview("Pending - High Risk") {
     EngineApprovalSheet(
-        toolData: EngineApprovalToolData(
+        capabilityData: EngineApprovalData(
             invocationId: "call_2",
             params: EngineApprovalParams(
                 action: "Deploy v2.0 to production",
@@ -304,7 +304,7 @@ struct EngineApprovalSheet: View {
 @available(iOS 26.0, *)
 #Preview("Approved - Read Only") {
     EngineApprovalSheet(
-        toolData: EngineApprovalToolData(
+        capabilityData: EngineApprovalData(
             invocationId: "call_3",
             params: EngineApprovalParams(
                 action: "Install ffmpeg via brew",

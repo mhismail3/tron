@@ -50,8 +50,8 @@ enum ChatSheet: Identifiable, Equatable {
     case compactionDetail(CompactionDetailData)
     case memoryRetainDetail(MemoryRetainDetailData)
 
-    // Tool sheets
-    case askUserQuestion
+    // Capability sheets
+    case userInteraction
     case engineApproval
     case subagentDetail
 
@@ -77,8 +77,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "compaction"
         case .memoryRetainDetail:
             return "memoryRetain"
-        case .askUserQuestion:
-            return "askUserQuestion"
+        case .userInteraction:
+            return "userInteraction"
         case .engineApproval:
             return "engineApproval"
         case .subagentDetail:
@@ -110,7 +110,7 @@ enum ChatSheet: Identifiable, Equatable {
             return data1 == data2
         case (.memoryRetainDetail(let data1), .memoryRetainDetail(let data2)):
             return data1 == data2
-        case (.askUserQuestion, .askUserQuestion):
+        case (.userInteraction, .userInteraction):
             return true
         case (.engineApproval, .engineApproval):
             return true

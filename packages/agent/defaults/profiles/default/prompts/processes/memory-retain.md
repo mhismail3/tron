@@ -52,4 +52,4 @@ evidence:
 - Arguments must articulate a thesis, not just summarize.
 - If no knowledge topics were discussed, omit the argument section entirely.
 - If no identity-relevant facts were revealed, omit the core memory section entirely.
-- Do NOT include JSON, code fences, or tool call traces.
+- Do NOT include JSON, code fences, or capability invocation traces.

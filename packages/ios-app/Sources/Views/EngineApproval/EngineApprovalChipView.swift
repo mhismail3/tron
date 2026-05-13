@@ -3,10 +3,10 @@ import SwiftUI
 // MARK: - Engine Approval Chip
 
 /// In-chat viewer for engine-owned approval records.
-/// Compact chip style matching AskUserQuestionToolViewer.
+/// Compact chip style matching UserInteractionCapabilityViewer.
 @available(iOS 26.0, *)
 struct EngineApprovalChipView: View {
-    let data: EngineApprovalToolData
+    let data: EngineApprovalData
     let onTap: () -> Void
 
     var body: some View {
@@ -118,7 +118,7 @@ struct EngineApprovalChipView: View {
 #Preview("All States") {
     VStack(spacing: 16) {
         EngineApprovalChipView(
-            data: EngineApprovalToolData(
+            data: EngineApprovalData(
                 invocationId: "call_1",
                 params: EngineApprovalParams(
                     action: "Install ffmpeg via brew",
@@ -131,7 +131,7 @@ struct EngineApprovalChipView: View {
         )
 
         EngineApprovalChipView(
-            data: EngineApprovalToolData(
+            data: EngineApprovalData(
                 invocationId: "call_2",
                 params: EngineApprovalParams(
                     action: "Deploy to production",
@@ -144,7 +144,7 @@ struct EngineApprovalChipView: View {
         )
 
         EngineApprovalChipView(
-            data: EngineApprovalToolData(
+            data: EngineApprovalData(
                 invocationId: "call_3",
                 params: EngineApprovalParams(
                     action: "Install ffmpeg",
@@ -157,7 +157,7 @@ struct EngineApprovalChipView: View {
         )
 
         EngineApprovalChipView(
-            data: EngineApprovalToolData(
+            data: EngineApprovalData(
                 invocationId: "call_4",
                 params: EngineApprovalParams(
                     action: "Delete ~/project/",
@@ -170,7 +170,7 @@ struct EngineApprovalChipView: View {
         )
 
         EngineApprovalChipView(
-            data: EngineApprovalToolData(
+            data: EngineApprovalData(
                 invocationId: "call_5",
                 params: EngineApprovalParams(
                     action: "Modify config",

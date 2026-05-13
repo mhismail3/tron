@@ -53,8 +53,8 @@ pub struct OllamaModelInfo {
     pub max_output: u32,
     /// Supports extended thinking.
     pub supports_thinking: bool,
-    /// Supports tool use.
-    pub supports_tools: bool,
+    /// Supports capability invocation.
+    pub supports_capabilities: bool,
     /// Supports image inputs.
     pub supports_images: bool,
     /// Model description for the client UI.
@@ -77,7 +77,7 @@ static OLLAMA_MODELS: LazyLock<HashMap<&'static str, OllamaModelInfo>> = LazyLoc
             context_window: 65_536,
             max_output: 8_192,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             description: "Gemma 4 E4B — 4.5B effective dense model for edge/validation.",
             sort_order: 0,
@@ -94,7 +94,7 @@ static OLLAMA_MODELS: LazyLock<HashMap<&'static str, OllamaModelInfo>> = LazyLoc
             context_window: 65_536,
             max_output: 8_192,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             description: "Gemma 4 26B MoE — 3.8B active params, flagship local model.",
             sort_order: 1,
@@ -247,7 +247,7 @@ mod tests {
         assert_eq!(m.name, "Gemma 4 E4B");
         assert_eq!(m.context_window, 65_536);
         assert!(m.supports_thinking);
-        assert!(m.supports_tools);
+        assert!(m.supports_capabilities);
         assert!(m.supports_images);
         assert!(!m.recommended);
     }
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(m.name, "Gemma 4 26B");
         assert_eq!(m.context_window, 65_536);
         assert!(m.supports_thinking);
-        assert!(m.supports_tools);
+        assert!(m.supports_capabilities);
         assert!(m.supports_images);
         assert!(m.recommended);
     }

@@ -60,7 +60,7 @@ struct ReconstructedState {
     /// Populated from notification.subagent_result events during reconstruction
     var subagentResults: [SubagentResultInfo]
 
-    /// Subagent spawn events (for tool→subagent chip conversion during reconstruction)
+    /// Subagent spawn events (for capability→subagent chip conversion during reconstruction)
     var subagentSpawns: [SubagentSpawnInfo]
 
     /// Subagent completion events keyed by subagent session ID

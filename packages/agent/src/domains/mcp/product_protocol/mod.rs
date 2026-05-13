@@ -9,33 +9,33 @@
 //! ```text
 //! capability primitives ←→ live `mcp::*` functions ←→ McpRouter ←→ MCP Servers
 //!                                      ↑
-//!                                  ToolIndex
+//!                                  McpCapabilityIndex
 //! ```
 //!
 //! ## Modules
 //!
-//! - [`types`] — MCP protocol types (JSON-RPC, tool schemas, server config)
+//! - [`types`] — MCP protocol types (JSON-RPC, capability schemas, server config)
 //! - [`client`] — Transport and protocol implementation
-//! - [`tool_projection`] — MCP result conversion helper
+//! - [`capability_projection`] — MCP result conversion helper
 //! - [`server_manager`] — Lifecycle management for MCP servers
-//! - [`tool_index`] — Searchable in-memory tool index
+//! - [`capability_index`] — Searchable in-memory tool index
 //! - [`schemas`] — Pure drift-detection between two tool-definition sets
-//! - [`router`] — Central coordinator (`McpServerManager` + `ToolIndex`)
+//! - [`router`] — Central coordinator (`McpServerManager` + `McpCapabilityIndex`)
 //!
 //! # INVARIANT: unknown MCP capabilities are not autonomous writes
 //!
-//! MCP tools discovered from external servers are classified conservatively
+//! MCP capabilities discovered from external servers are classified conservatively
 //! when registered into the engine catalog. Obvious read-only names become
-//! low-risk `PureRead` capabilities; mutation-like or unknown tools become
+//! low-risk `PureRead` capabilities; mutation-like or unknown capabilities become
 //! approval-required external side effects until a stronger server/capability
 //! policy says otherwise.
 
+pub mod capability_index;
+pub mod capability_projection;
 pub mod client;
 pub mod router;
 pub mod schemas;
 pub mod server_manager;
-pub mod tool_index;
-pub mod tool_projection;
 pub mod types;
 
 #[cfg(test)]

@@ -47,20 +47,20 @@ impl AgentCommandService {
 
     /// Abort a single in-flight capability invocation without aborting the surrounding turn.
     ///
-    /// Returns `{ "aborted": true }` if the tool was in flight (its child
+    /// Returns `{ "aborted": true }` if the capability invocation was in flight (its child
     /// `CancellationToken` was cancelled) or `{ "aborted": false }` when
-    /// there is no matching tool — the call already finished, the id is
-    /// wrong, or the session has no matching per-tool abort entry. Callers treat both
+    /// there is no matching invocation — the call already finished, the id is
+    /// wrong, or the session has no matching per-invocation abort entry. Callers treat both
     /// as "nothing to do" rather than errors.
-    pub(crate) fn abort_tool(
+    pub(crate) fn abort_invocation(
         deps: &Deps,
         session_id: &str,
-        tool_call_id: &str,
+        invocation_id: &str,
     ) -> Result<Value, CapabilityError> {
         let aborted = deps
             .orchestrator
-            .tool_abort_registry()
-            .abort(session_id, tool_call_id);
+            .invocation_abort_registry()
+            .abort(session_id, invocation_id);
         Ok(json!({ "aborted": aborted }))
     }
 }

@@ -62,18 +62,18 @@ final class PluginSourceClient: EngineDomainClient {
         )
     }
 
-    // MARK: - Tool Listing
+    // MARK: - Capability Listing
 
-    func listTools(server: String? = nil) async throws -> [PluginCapabilityInfo] {
+    func listCapabilities(server: String? = nil) async throws -> [PluginCapabilityInfo] {
         _ = try requireTransport().requireConnection()
 
-        struct ListToolsParams: Encodable {
+        struct ListCapabilitiesParams: Encodable {
             let server: String?
         }
 
         let result: [PluginCapabilityInfo] = try await invokeRead(
-            "mcp::list_tools",
-            ListToolsParams(server: server)
+            "mcp::list_capabilities",
+            ListCapabilitiesParams(server: server)
         )
         return result
     }

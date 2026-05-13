@@ -15,9 +15,9 @@ struct PluginSourcesPage: View {
     @State private var showAddSheet = false
     @State private var actionInProgress: String?
     @State private var expandedServer: String?
-    @State private var toolsByServer: [String: [PluginCapabilityInfo]] = [:]
-    @State private var toolsLoading: String?
-    @State private var expandedTool: String?
+    @State private var capabilitiesBySource: [String: [PluginCapabilityInfo]] = [:]
+    @State private var capabilitiesLoading: String?
+    @State private var expandedCapability: String?
 
     private var engineClient: EngineClient { dependencies.engineClient }
 
@@ -83,9 +83,9 @@ struct PluginSourcesPage: View {
                         server: server,
                         isExpanded: expandedServer == server.name,
                         actionInProgress: actionInProgress,
-                        tools: toolsByServer[server.name],
-                        toolsLoading: toolsLoading == server.name,
-                        expandedTool: $expandedTool,
+                        capabilities: capabilitiesBySource[server.name],
+                        capabilitiesLoading: capabilitiesLoading == server.name,
+                        expandedCapability: $expandedCapability,
                         onTap: { toggleExpansion(server) },
                         onToggle: { toggleServer(server) },
                         onRestart: { restartServer(server.name) },
@@ -117,7 +117,7 @@ struct PluginSourcesPage: View {
     // MARK: - Schema Refresh
 
     /// Server-authoritative `pluginSources.schemaRefreshTtlMs`. Controls proactive
-    /// refresh of each plugin source source's `tools/list` metadata so generated
+    /// refresh of each plugin source's capability metadata so generated
     /// capability implementations stay aligned with upstream schemas.
     private var schemaRefreshCard: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -143,7 +143,7 @@ struct PluginSourcesPage: View {
                 }
             }
 
-            SettingsCaption(text: "How often to re-fetch tool schemas from each server. 0 disables automatic refresh.")
+            SettingsCaption(text: "How often to re-fetch capability schemas from each source. 0 disables automatic refresh.")
         }
     }
 
@@ -160,28 +160,28 @@ struct PluginSourcesPage: View {
 
     private func toggleExpansion(_ server: PluginSourceStatus) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            expandedTool = nil
+            expandedCapability = nil
             if expandedServer == server.name {
                 expandedServer = nil
             } else {
                 expandedServer = server.name
-                if toolsByServer[server.name] == nil && server.isConnected {
-                    loadTools(for: server.name)
+                if capabilitiesBySource[server.name] == nil && server.isConnected {
+                    loadCapabilities(for: server.name)
                 }
             }
         }
     }
 
-    private func loadTools(for serverName: String) {
-        toolsLoading = serverName
+    private func loadCapabilities(for serverName: String) {
+        capabilitiesLoading = serverName
         Task {
             do {
-                let tools = try await engineClient.pluginSources.listTools(server: serverName)
-                toolsByServer[serverName] = tools
+                let capabilities = try await engineClient.pluginSources.listCapabilities(server: serverName)
+                capabilitiesBySource[serverName] = capabilities
             } catch {
-                toolsByServer[serverName] = []
+                capabilitiesBySource[serverName] = []
             }
-            toolsLoading = nil
+            capabilitiesLoading = nil
         }
     }
 
@@ -207,7 +207,7 @@ struct PluginSourcesPage: View {
                     name: name,
                     idempotencyKey: .userAction("pluginSources.removeServer")
                 )
-                toolsByServer.removeValue(forKey: name)
+                capabilitiesBySource.removeValue(forKey: name)
                 if expandedServer == name { expandedServer = nil }
                 await loadStatus()
             } catch {
@@ -226,7 +226,7 @@ struct PluginSourcesPage: View {
                         name: server.name,
                         idempotencyKey: .userAction("pluginSources.disableServer")
                     )
-                    toolsByServer.removeValue(forKey: server.name)
+                    capabilitiesBySource.removeValue(forKey: server.name)
                 } else {
                     try await engineClient.pluginSources.enableServer(
                         name: server.name,
@@ -249,10 +249,10 @@ struct PluginSourcesPage: View {
                     name: name,
                     idempotencyKey: .userAction("pluginSources.restartServer")
                 )
-                toolsByServer.removeValue(forKey: name)
+                capabilitiesBySource.removeValue(forKey: name)
                 await loadStatus()
                 if expandedServer == name {
-                    loadTools(for: name)
+                    loadCapabilities(for: name)
                 }
             } catch {
                 loadError = error.localizedDescription
@@ -268,9 +268,9 @@ private struct PluginSourceCard: View {
     let server: PluginSourceStatus
     let isExpanded: Bool
     let actionInProgress: String?
-    let tools: [PluginCapabilityInfo]?
-    let toolsLoading: Bool
-    @Binding var expandedTool: String?
+    let capabilities: [PluginCapabilityInfo]?
+    let capabilitiesLoading: Bool
+    @Binding var expandedCapability: String?
     let onTap: () -> Void
     let onToggle: () -> Void
     let onRestart: () -> Void
@@ -302,8 +302,8 @@ private struct PluginSourceCard: View {
                         Text(server.health.rawValue)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(healthColor)
-                        if server.toolCount > 0 {
-                            Text("\(server.toolCount)")
+                        if server.capabilityCount > 0 {
+                            Text("\(server.capabilityCount)")
                                 .font(TronTypography.pillValue)
                                 .countBadge(.tronEmerald)
                         }
@@ -362,7 +362,7 @@ private struct PluginSourceCard: View {
             // Expanded: generated capabilities
             if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    if toolsLoading {
+                    if capabilitiesLoading {
                         HStack(spacing: 6) {
                             ProgressView()
                                 .tint(.tronEmerald)
@@ -373,19 +373,19 @@ private struct PluginSourceCard: View {
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                    } else if let tools, !tools.isEmpty {
-                        ForEach(tools) { tool in
+                    } else if let capabilities, !capabilities.isEmpty {
+                        ForEach(capabilities) { capability in
                             PluginCapabilityRow(
-                                tool: tool,
-                                isExpanded: expandedTool == tool.id,
+                                capability: capability,
+                                isExpanded: expandedCapability == capability.id,
                                 onTap: {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                        expandedTool = expandedTool == tool.id ? nil : tool.id
+                                        expandedCapability = expandedCapability == capability.id ? nil : capability.id
                                     }
                                 }
                             )
                         }
-                    } else if tools != nil {
+                    } else if capabilities != nil {
                         Text("No capabilities discovered")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
@@ -403,10 +403,10 @@ private struct PluginSourceCard: View {
     }
 }
 
-// MARK: - Tool Row
+// MARK: - Capability Row
 
 private struct PluginCapabilityRow: View {
-    let tool: PluginCapabilityInfo
+    let capability: PluginCapabilityInfo
     let isExpanded: Bool
     let onTap: () -> Void
 
@@ -418,14 +418,14 @@ private struct PluginCapabilityRow: View {
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 14)
 
-                Text(tool.tool)
+                Text(capability.capability)
                     .font(TronTypography.code(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
 
-                if !tool.params.isEmpty {
-                    Text("\(tool.params.count)")
+                if !capability.params.isEmpty {
+                    Text("\(capability.params.count)")
                         .font(TronTypography.pillValue)
                         .countBadge(.tronSlate)
                 }
@@ -442,14 +442,14 @@ private struct PluginCapabilityRow: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    if !tool.description.isEmpty {
-                        Text(tool.description)
+                    if !capability.description.isEmpty {
+                        Text(capability.description)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .padding(.horizontal, 8)
                     }
 
-                    let sorted = tool.params.sorted { $0.required && !$1.required }
+                    let sorted = capability.params.sorted { $0.required && !$1.required }
                     ForEach(sorted) { param in
                         PluginCapabilityParamRow(param: param)
                     }

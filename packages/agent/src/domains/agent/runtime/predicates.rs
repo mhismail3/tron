@@ -16,7 +16,7 @@ pub(super) fn retain_eligible(
     use crate::domains::agent::runner::errors::StopReason;
     matches!(
         stop_reason,
-        StopReason::EndTurn | StopReason::NoToolCalls | StopReason::MaxTurns
+        StopReason::EndTurn | StopReason::NoCapabilityInvocationDrafts | StopReason::MaxTurns
     )
 }
 
@@ -31,8 +31,8 @@ mod retain_eligible_tests {
     }
 
     #[test]
-    fn no_tool_calls_is_eligible() {
-        assert!(retain_eligible(&StopReason::NoToolCalls));
+    fn no_capability_invocations_is_eligible() {
+        assert!(retain_eligible(&StopReason::NoCapabilityInvocationDrafts));
     }
 
     #[test]
@@ -41,8 +41,8 @@ mod retain_eligible_tests {
     }
 
     #[test]
-    fn tool_stop_is_not_eligible() {
-        assert!(!retain_eligible(&StopReason::ToolStop));
+    fn capability_stop_is_not_eligible() {
+        assert!(!retain_eligible(&StopReason::CapabilityStop));
     }
 
     #[test]

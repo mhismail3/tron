@@ -129,10 +129,10 @@ fn recover_single_turn(
             "thinking": recovered.accumulated_thinking,
         }));
     }
-    for tc in &recovered.tool_calls {
+    for tc in &recovered.capability_invocations {
         content.push(json!({
-            "type": "tool_use",
-            "tool_call": tc,
+            "type": "capability_invocation",
+            "capability_invocation": tc,
         }));
     }
 
@@ -193,7 +193,7 @@ fn recover_single_turn(
         turn,
         text_len = recovered.accumulated_text.len(),
         thinking_len = recovered.accumulated_thinking.len(),
-        tool_calls = recovered.tool_calls.len(),
+        capability_invocations = recovered.capability_invocations.len(),
         "recovered partial assistant message from crash"
     );
 
@@ -261,7 +261,7 @@ mod tests {
         // Verify the content block construction logic
         let text = "Hello world";
         let thinking = "Let me think";
-        let tool_call = json!({"name": "execute", "id": "tc_1"});
+        let capability_invocation = json!({"name": "execute", "id": "tc_1"});
 
         let mut content = Vec::new();
         if !text.is_empty() {
@@ -270,12 +270,12 @@ mod tests {
         if !thinking.is_empty() {
             content.push(json!({ "type": "thinking", "thinking": thinking }));
         }
-        content.push(json!({ "type": "tool_use", "tool_call": tool_call }));
+        content.push(json!({ "type": "capability_invocation", "capability_invocation": capability_invocation }));
 
         assert_eq!(content.len(), 3);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "Hello world");
         assert_eq!(content[1]["type"], "thinking");
-        assert_eq!(content[2]["type"], "tool_use");
+        assert_eq!(content[2]["type"], "capability_invocation");
     }
 }

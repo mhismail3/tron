@@ -16,7 +16,7 @@ extension ChatViewModel {
         let state = UnifiedEventTransformer.reconstructSessionState(from: result.events)
         applyReconstructedConfig(state)
 
-        // 2. Replace displayed messages, then convert subagent tools using lifecycle events.
+        // 2. Replace displayed messages, then convert subagent capabilities using lifecycle events.
         //    Order matters: restoreSubagentState modifies allReconstructedMessages in-place,
         //    so it must run AFTER the array is set.
         allReconstructedMessages = state.messages
@@ -129,7 +129,7 @@ extension ChatViewModel {
         guard !items.isEmpty else { return }
         var restored = 0
         for item in items {
-            let data = engineApprovalToolData(from: item.approval)
+            let data = engineApprovalCapabilityData(from: item.approval)
             if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: data.invocationId, in: messages) {
                 messages[index].content = .engineApproval(data)
             } else {
@@ -146,15 +146,15 @@ extension ChatViewModel {
     ///
     /// `session::reconstruct` is the source of truth for history. When it says
     /// the session is not running, no local phase, stale post-processing
-    /// timeout, or reconstructed half-open thinking/tool marker may keep the
+    /// timeout, or reconstructed half-open thinking/capability marker may keep the
     /// chat in a processing UI state.
     func reconcileCompletedReconstructionState() {
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
         agentPhase = .idle
-        runningToolCount = 0
+        runningCapabilityInvocationCount = 0
         pullUpPanelState.awaitingSuggestions = false
-        currentToolMessages.removeAll()
+        currentCapabilityInvocationMessages.removeAll()
         currentTurnCapabilityInvocations.removeAll()
         streamingManager.reset()
         thinkingState.markStreamingComplete()
@@ -167,16 +167,16 @@ extension ChatViewModel {
 
     /// Process in-flight state from a running agent turn.
     ///
-    /// Builds streaming messages, tool chips, and thinking blocks from the
+    /// Builds streaming messages, capability chips, and thinking blocks from the
     /// server's content sequence and capability invocation state.
     private func processInFlightState(_ inFlight: InFlightState) async {
-        logger.info("[RECONSTRUCT] Processing in-flight: \(inFlight.contentSequence.count) sequence items, \(inFlight.toolCalls.count) tools, streaming=\(inFlight.streaming?.type ?? "none")", category: .session)
+        logger.info("[RECONSTRUCT] Processing in-flight: \(inFlight.contentSequence.count) sequence items, \(inFlight.capabilityInvocations.count) capabilities, streaming=\(inFlight.streaming?.type ?? "none")", category: .session)
 
         // Initialize turn tracking for in-flight content
         turnStartMessageIndex = messages.count
         firstTextMessageIdForTurn = nil
 
-        let toolCallMap = Dictionary(uniqueKeysWithValues: inFlight.toolCalls.map { ($0.invocationId, $0) })
+        let capabilityInvocationMap = Dictionary(uniqueKeysWithValues: inFlight.capabilityInvocations.map { ($0.invocationId, $0) })
         var accumulatedThinking = ""
         let messageCountBefore = messages.count
 
@@ -266,9 +266,9 @@ extension ChatViewModel {
                     thinkingMessageId = msg.id
                 }
 
-            case .toolRef(let invocationId):
-                if let toolCall = toolCallMap[invocationId] {
-                    await processInFlightCapabilityInvocation(toolCall)
+            case .capabilityRef(let invocationId):
+                if let capabilityInvocation = capabilityInvocationMap[invocationId] {
+                    await processInFlightCapabilityInvocation(capabilityInvocation)
                 }
             }
         }
@@ -280,99 +280,99 @@ extension ChatViewModel {
     }
 
     /// Process a single in-flight capability invocation into a UI message.
-    private func processInFlightCapabilityInvocation(_ toolCall: CurrentTurnCapabilityInvocation) async {
-        guard let modelToolName = toolCall.modelToolName else {
-            logger.warning("[RECONSTRUCT] Dropping in-flight capability invocation \(toolCall.invocationId) without modelToolName", category: .session)
+    private func processInFlightCapabilityInvocation(_ capabilityInvocation: CurrentTurnCapabilityInvocation) async {
+        guard let modelPrimitiveName = capabilityInvocation.modelPrimitiveName else {
+            logger.warning("[RECONSTRUCT] Dropping in-flight capability invocation \(capabilityInvocation.invocationId) without modelPrimitiveName", category: .session)
             return
         }
 
-        logger.info("Reconstruction: capability \(modelToolName) status=\(toolCall.status)", category: .session)
+        logger.info("Reconstruction: capability \(modelPrimitiveName) status=\(capabilityInvocation.status)", category: .session)
 
         // Format arguments as string for display
         var argsString = "{}"
-        if let args = toolCall.arguments {
+        if let args = capabilityInvocation.arguments {
             do {
                 let argsData = try JSONEncoder().encode(args)
                 if let argsJson = String(data: argsData, encoding: .utf8) {
                     argsString = argsJson
                 }
             } catch {
-                logger.warning("Failed to encode capability arguments for \(modelToolName): \(error.localizedDescription)", category: .events)
+                logger.warning("Failed to encode capability arguments for \(modelPrimitiveName): \(error.localizedDescription)", category: .events)
             }
         }
 
         // Add to current turn capability invocations for tracking
         var record = CapabilityInvocationRecord(
-            invocationId: toolCall.invocationId,
-            modelToolName: modelToolName,
+            invocationId: capabilityInvocation.invocationId,
+            modelPrimitiveName: modelPrimitiveName,
             arguments: argsString
         )
-        record.result = toolCall.result
-        record.isError = toolCall.isError ?? false
+        record.result = capabilityInvocation.result
+        record.isError = capabilityInvocation.isError ?? false
         currentTurnCapabilityInvocations.append(record)
 
         let identity = CapabilityIdentity(
-            modelToolName: modelToolName,
-            contractId: toolCall.contractId,
-            implementationId: toolCall.implementationId,
-            functionId: toolCall.functionId,
-            pluginId: toolCall.pluginId,
-            workerId: toolCall.workerId,
-            schemaDigest: toolCall.schemaDigest,
-            catalogRevision: toolCall.catalogRevision,
-            trustTier: toolCall.trustTier,
-            riskLevel: toolCall.riskLevel,
-            effectClass: toolCall.effectClass,
-            traceId: toolCall.traceId,
-            rootInvocationId: toolCall.rootInvocationId,
-            bindingDecisionId: toolCall.bindingDecisionId
+            modelPrimitiveName: modelPrimitiveName,
+            contractId: capabilityInvocation.contractId,
+            implementationId: capabilityInvocation.implementationId,
+            functionId: capabilityInvocation.functionId,
+            pluginId: capabilityInvocation.pluginId,
+            workerId: capabilityInvocation.workerId,
+            schemaDigest: capabilityInvocation.schemaDigest,
+            catalogRevision: capabilityInvocation.catalogRevision,
+            trustTier: capabilityInvocation.trustTier,
+            riskLevel: capabilityInvocation.riskLevel,
+            effectClass: capabilityInvocation.effectClass,
+            traceId: capabilityInvocation.traceId,
+            rootInvocationId: capabilityInvocation.rootInvocationId,
+            bindingDecisionId: capabilityInvocation.bindingDecisionId
         )
 
-        // AskUserQuestion: create interactive form instead of generic tool chip
-        if identity.isAskUserCapability {
-            // Dedup: if an AskUserQuestion message with this invocationId already exists
+        // UserInteraction: create interactive form instead of generic capability chip
+        if identity.isUserInteractionCapability {
+            // Dedup: if an UserInteraction message with this invocationId already exists
             // from persisted events, skip creating a duplicate
             if messages.contains(where: { msg in
-                if case .askUserQuestion(let data) = msg.content {
-                    return data.invocationId == toolCall.invocationId
+                if case .userInteraction(let data) = msg.content {
+                    return data.invocationId == capabilityInvocation.invocationId
                 }
                 return false
             }) {
-                logger.info("[RECONSTRUCT] Skipping duplicate AskUserQuestion id=\(toolCall.invocationId)", category: .session)
+                logger.info("[RECONSTRUCT] Skipping duplicate UserInteraction id=\(capabilityInvocation.invocationId)", category: .session)
                 return
             }
 
-            let isActive = toolCall.status == CapabilityInvocationStatusDTO.running.rawValue
-                || toolCall.status == CapabilityInvocationStatusDTO.generating.rawValue
+            let isActive = capabilityInvocation.status == CapabilityInvocationStatusDTO.running.rawValue
+                || capabilityInvocation.status == CapabilityInvocationStatusDTO.generating.rawValue
 
-            var params = AskUserQuestionParams(questions: [], context: nil)
+            var params = UserInteractionParams(questions: [], context: nil)
             if let argsData = argsString.data(using: .utf8),
-               let decoded = try? JSONDecoder().decode(AskUserQuestionParams.self, from: argsData) {
+               let decoded = try? JSONDecoder().decode(UserInteractionParams.self, from: argsData) {
                 params = decoded
             }
 
-            let toolData = AskUserQuestionToolData(
-                invocationId: toolCall.invocationId,
+            let capabilityData = UserInteractionInvocationData(
+                invocationId: capabilityInvocation.invocationId,
                 params: params,
                 answers: [:],
                 status: isActive ? .pending : .superseded,
                 result: nil
             )
-            let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
+            let message = ChatMessage(role: .assistant, content: .userInteraction(capabilityData))
             messages.append(message)
-            currentToolMessages[message.id] = message
-            animationCoordinator.makeCapabilityInvocationVisible(toolCall.invocationId)
+            currentCapabilityInvocationMessages[message.id] = message
+            animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
 
             if isActive {
-                askUserQuestionState.currentData = toolData
+                userInteractionState.currentData = capabilityData
             }
             return
         }
 
         // Create UI message for the capability invocation
-        let messageId = UUID(uuidString: toolCall.invocationId) ?? UUID()
+        let messageId = UUID(uuidString: capabilityInvocation.invocationId) ?? UUID()
 
-        let status: CapabilityInvocationStatus = switch toolCall.status {
+        let status: CapabilityInvocationStatus = switch capabilityInvocation.status {
             case CapabilityInvocationStatusDTO.generating.rawValue, CapabilityInvocationStatusDTO.running.rawValue:
                 .running
             case CapabilityInvocationStatusDTO.error.rawValue:
@@ -381,11 +381,11 @@ extension ChatViewModel {
                 .success
         }
 
-        // Compute duration for completed tools
+        // Compute duration for completed capabilities
         var durationMs: Int? = nil
-        if toolCall.status == CapabilityInvocationStatusDTO.completed.rawValue || toolCall.status == CapabilityInvocationStatusDTO.error.rawValue {
-            if let completedAt = toolCall.completedAt,
-               let startedAt = toolCall.startedAt,
+        if capabilityInvocation.status == CapabilityInvocationStatusDTO.completed.rawValue || capabilityInvocation.status == CapabilityInvocationStatusDTO.error.rawValue {
+            if let completedAt = capabilityInvocation.completedAt,
+               let startedAt = capabilityInvocation.startedAt,
                let startDate = DateParser.parse(startedAt),
                let endDate = DateParser.parse(completedAt) {
                 durationMs = Int(endDate.timeIntervalSince(startDate) * 1000)
@@ -393,22 +393,22 @@ extension ChatViewModel {
         }
 
         let invocationData = CapabilityInvocationData(
-            id: toolCall.invocationId,
+            id: capabilityInvocation.invocationId,
             status: status,
             arguments: argsString,
-            result: toolCall.result,
+            result: capabilityInvocation.result,
             durationMs: durationMs,
             identity: identity,
-            logs: (status == .running && toolCall.streamingOutput != nil) ? [toolCall.streamingOutput!] : []
+            logs: (status == .running && capabilityInvocation.streamingOutput != nil) ? [capabilityInvocation.streamingOutput!] : []
         )
 
-        // Dedup: if a tool message with this invocationId already exists (from persisted
+        // Dedup: if a capability message with this invocationId already exists (from persisted
         // message.assistant), update it with in-flight details rather than creating a duplicate.
         if let existingIdx = messages.firstIndex(where: { msg in
             switch msg.content {
-            case .capabilityInvocation(let data): return data.id == toolCall.invocationId
-            case .engineApproval(let data): return data.invocationId == toolCall.invocationId
-            case .subagent(let data): return data.invocationId == toolCall.invocationId
+            case .capabilityInvocation(let data): return data.id == capabilityInvocation.invocationId
+            case .engineApproval(let data): return data.invocationId == capabilityInvocation.invocationId
+            case .subagent(let data): return data.invocationId == capabilityInvocation.invocationId
             default: return false
             }
         }) {
@@ -418,23 +418,23 @@ extension ChatViewModel {
             if case .capabilityInvocation = messages[existingIdx].content {
                 messages[existingIdx].content = .capabilityInvocation(invocationData)
             }
-            currentToolMessages[messages[existingIdx].id] = messages[existingIdx]
-            animationCoordinator.makeCapabilityInvocationVisible(toolCall.invocationId)
-            logger.info("[RECONSTRUCT] Deduplicated capability message for \(modelToolName) id=\(toolCall.invocationId)", category: .session)
+            currentCapabilityInvocationMessages[messages[existingIdx].id] = messages[existingIdx]
+            animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
+            logger.info("[RECONSTRUCT] Deduplicated capability message for \(modelPrimitiveName) id=\(capabilityInvocation.invocationId)", category: .session)
             return
         }
 
-        let toolMessage = ChatMessage(
+        let capabilityMessage = ChatMessage(
             id: messageId,
             role: .assistant,
             content: .capabilityInvocation(invocationData),
             timestamp: Date()
         )
 
-        // Track in currentToolMessages AFTER content is finalized
-        currentToolMessages[messageId] = toolMessage
-        messages.append(toolMessage)
-        animationCoordinator.makeCapabilityInvocationVisible(toolCall.invocationId)
+        // Track in currentCapabilityInvocationMessages AFTER content is finalized
+        currentCapabilityInvocationMessages[messageId] = capabilityMessage
+        messages.append(capabilityMessage)
+        animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
     }
 
     /// Load more older messages using `session::reconstruct` with pagination.

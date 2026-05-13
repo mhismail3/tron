@@ -11,7 +11,7 @@
 //! | `summarizer` | Summarizer trait and recovery implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
 //! | `loader` | Loads project rules and global `~/.tron/memory/rules/{CLAUDE,AGENTS}.md` overlays |
-//! | `local_policy` | Profile-backed local-model policy view: provider ids, tool allow-list, rules truncation |
+//! | `local_policy` | Profile-backed local-model policy view: provider ids, capability allow-list, rules truncation |
 //! | `rules_discovery` | Finds path-scoped `CLAUDE.md` / `AGENTS.md` files in project agent dirs |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |

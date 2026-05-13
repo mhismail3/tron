@@ -1,9 +1,9 @@
 import SwiftUI
 
-// MARK: - Tool Detail Section
+// MARK: - Capability Detail Section
 
 /// Glass container with section header outside, matching SkillDetailSheet pattern.
-/// Reusable across all tool detail sheets.
+/// Reusable across all capability detail sheets.
 @available(iOS 26.0, *)
 struct CapabilityDetailSection<Trailing: View, Content: View>: View {
     let title: String

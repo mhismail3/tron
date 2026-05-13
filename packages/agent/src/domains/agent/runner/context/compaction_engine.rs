@@ -9,7 +9,7 @@
 //!
 //! 1. Walk toward the start counting real user turns (skip compaction summaries).
 //! 2. Stop when `preserve_recent_turns` reached or token budget exceeded.
-//! 3. Apply orphaned-ToolResult fixup at the split boundary.
+//! 3. Apply orphaned-CapabilityResult fixup at the split boundary.
 //! 4. Summarize older messages, replace with summary user + assistant ack.
 //! 5. Report token counts and turn statistics.
 //!
@@ -49,8 +49,8 @@ pub trait CompactionDeps: Send + Sync {
     fn get_context_limit(&self) -> u64;
     /// Estimate system prompt tokens.
     fn estimate_system_prompt_tokens(&self) -> u64;
-    /// Estimate tools definition tokens.
-    fn estimate_tools_tokens(&self) -> u64;
+    /// Estimate capabilities definition tokens.
+    fn estimate_capabilities_tokens(&self) -> u64;
     /// Get estimated token count for a specific message.
     fn get_message_tokens(&self, msg: &Message) -> u64;
 }
@@ -93,7 +93,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     /// Algorithm:
     /// 1. Walk toward the start from the end counting real user turns (skip compaction summaries)
     /// 2. Stop when `preserve_recent_turns` reached OR token budget exceeded
-    /// 3. Apply orphaned-`ToolResult` fixup (walk toward the start past `ToolResult`s at boundary)
+    /// 3. Apply orphaned-`CapabilityResult` fixup (walk toward the start past `CapabilityResult`s at boundary)
     /// 4. Guarantee: if `preserve_recent_turns > 0` and there are messages,
     ///    preserve at least 1 complete turn
     fn compute_split_point(&self, messages: &[Message]) -> usize {
@@ -137,7 +137,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
                 // Reset for next turn
                 current_turn_tokens = 0;
             } else {
-                // Assistant, ToolResult, or compaction summary — accumulate into current turn
+                // Assistant, CapabilityResult, or compaction summary — accumulate into current turn
                 current_turn_tokens += msg_tokens;
             }
         }
@@ -157,10 +157,10 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             }
         }
 
-        // Orphaned ToolResult fixup: if split is within bounds and lands on a ToolResult,
+        // Orphaned CapabilityResult fixup: if split is within bounds and lands on a CapabilityResult,
         // scan toward the start to include its preceding Assistant.
         if candidate_split < messages.len() {
-            while candidate_split > 0 && messages[candidate_split].is_tool_result() {
+            while candidate_split > 0 && messages[candidate_split].is_capability_result() {
                 candidate_split -= 1;
             }
         }
@@ -360,11 +360,11 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 
     // ─── Private helpers ─────────────────────────────────────────────────
 
-    /// Calculate message-only tokens (total - system overhead - tools overhead).
+    /// Calculate message-only tokens (total - system overhead - capabilities overhead).
     fn message_only_tokens(&self) -> u64 {
         let total = self.deps.get_current_tokens();
         let overhead =
-            self.deps.estimate_system_prompt_tokens() + self.deps.estimate_tools_tokens();
+            self.deps.estimate_system_prompt_tokens() + self.deps.estimate_capabilities_tokens();
         total.saturating_sub(overhead)
     }
 

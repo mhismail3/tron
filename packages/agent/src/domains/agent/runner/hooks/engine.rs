@@ -572,7 +572,7 @@ mod tests {
         }
 
         fn hook_type(&self) -> HookType {
-            HookType::PreToolUse
+            HookType::PreCapabilityInvocation
         }
 
         fn priority(&self) -> i32 {
@@ -587,18 +587,18 @@ mod tests {
 
     fn make_ctx(hook_type: HookType) -> HookContext {
         match hook_type {
-            HookType::PreToolUse => HookContext::PreToolUse {
+            HookType::PreCapabilityInvocation => HookContext::PreCapabilityInvocation {
                 session_id: "s1".to_string(),
                 timestamp: "t".to_string(),
-                tool_name: "process::run".to_string(),
-                tool_arguments: serde_json::json!({}),
-                tool_call_id: "tc1".to_string(),
+                model_primitive_name: "process::run".to_string(),
+                capability_arguments: serde_json::json!({}),
+                invocation_id: "tc1".to_string(),
             },
-            HookType::PostToolUse => HookContext::PostToolUse {
+            HookType::PostCapabilityInvocation => HookContext::PostCapabilityInvocation {
                 session_id: "s1".to_string(),
                 timestamp: "t".to_string(),
-                tool_name: "process::run".to_string(),
-                tool_call_id: "tc1".to_string(),
+                model_primitive_name: "process::run".to_string(),
+                invocation_id: "tc1".to_string(),
                 result: serde_json::json!({}),
                 duration_ms: 100,
             },
@@ -639,7 +639,9 @@ mod tests {
     #[tokio::test]
     async fn test_execute_no_handlers() {
         let engine = HookEngine::new(HookRegistry::new());
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
         assert_eq!(result.action, HookAction::Continue);
     }
 
@@ -648,19 +650,21 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(make_simple(
             "a",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             0,
             HookResult::continue_(),
         ));
         registry.register(make_simple(
             "b",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             0,
             HookResult::continue_(),
         ));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
         assert_eq!(result.action, HookAction::Continue);
     }
 
@@ -682,7 +686,9 @@ mod tests {
         }));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
         assert!(result.is_blocked());
         assert_eq!(result.reason.as_deref(), Some("blocked"));
@@ -695,19 +701,21 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(make_simple(
             "mod1",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             10,
             HookResult::modify(serde_json::json!({"key1": "val1"})),
         ));
         registry.register(make_simple(
             "mod2",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             5,
             HookResult::modify(serde_json::json!({"key2": "val2"})),
         ));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
         assert_eq!(result.action, HookAction::Modify);
         let mods = result.modifications.unwrap();
@@ -720,19 +728,21 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(make_simple(
             "first",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             100,
             HookResult::modify(serde_json::json!({"key": "first"})),
         ));
         registry.register(make_simple(
             "second",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             50,
             HookResult::modify(serde_json::json!({"key": "second"})),
         ));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
         let mods = result.modifications.unwrap();
         assert_eq!(mods["key"], "second"); // Later hook's value wins
@@ -743,19 +753,21 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(make_simple(
             "a",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             10,
             HookResult::modify_with_message(serde_json::json!({}), "Message A"),
         ));
         registry.register(make_simple(
             "b",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             5,
             HookResult::modify_with_message(serde_json::json!({}), "Message B"),
         ));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
         assert!(result.message.unwrap().contains("Message A"));
     }
@@ -765,11 +777,13 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(ErrorHandler {
             name: "err".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
         }));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
         // Fail-open: error becomes Continue
         assert_eq!(result.action, HookAction::Continue);
@@ -780,12 +794,14 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(SlowHandler {
             name: "slow".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
             delay_ms: 5000,
         }));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
         // Timeout → fail-open → Continue
         assert_eq!(result.action, HookAction::Continue);
@@ -798,12 +814,14 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(ErrorHandler {
             name: "guard".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
         }));
         let mut engine = HookEngine::new(registry);
         engine.set_error_policy(HookErrorPolicy::Block);
 
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
         assert!(
             result.is_blocked(),
             "errorPolicy=Block must synthesize a Block"
@@ -820,13 +838,15 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(SlowHandler {
             name: "slow".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
             delay_ms: 5000,
         }));
         let mut engine = HookEngine::new(registry);
         engine.set_error_policy(HookErrorPolicy::Block);
 
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
         assert!(result.is_blocked());
         let reason = result.reason.unwrap_or_default();
         assert!(
@@ -848,14 +868,16 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(make_simple(
             "ok",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             0,
             HookResult::continue_(),
         ));
         let mut engine = HookEngine::new(registry);
         engine.set_error_policy(HookErrorPolicy::Block);
 
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
         assert_eq!(result.action, HookAction::Continue);
     }
 
@@ -864,7 +886,7 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(SimpleHandler {
             name: "filtered".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
             priority: 100,
             mode: HookExecutionMode::Blocking,
             result: HookResult::block("should not happen"),
@@ -872,7 +894,9 @@ mod tests {
         }));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
         assert_eq!(result.action, HookAction::Continue);
     }
 
@@ -882,13 +906,15 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(TrackingHandler {
             name: "bg".to_string(),
-            hook_type: HookType::PostToolUse,
+            hook_type: HookType::PostCapabilityInvocation,
             mode: HookExecutionMode::Background,
             called: Arc::clone(&called),
         }));
 
         let engine = HookEngine::new(registry);
-        let _ = engine.execute(&make_ctx(HookType::PostToolUse)).await;
+        let _ = engine
+            .execute(&make_ctx(HookType::PostCapabilityInvocation))
+            .await;
 
         // Wait for background to complete
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -902,7 +928,7 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(SimpleHandler {
             name: "forced-bg".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
             priority: 0,
             mode: HookExecutionMode::Background, // Wants to be background
             result: HookResult::block("blocked by forced-blocking"),
@@ -910,9 +936,11 @@ mod tests {
         }));
 
         let engine = HookEngine::new(registry);
-        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let result = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
-        // Should be blocked because PreToolUse forces blocking mode
+        // Should be blocked because PreCapabilityInvocation forces blocking mode
         assert!(result.is_blocked());
     }
 
@@ -1102,7 +1130,7 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(make_simple(
             "a",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             0,
             HookResult::continue_(),
         ));
@@ -1117,7 +1145,7 @@ mod tests {
         let mut engine = HookEngine::new(registry);
         engine.registry_mut().register(make_simple(
             "a",
-            HookType::PreToolUse,
+            HookType::PreCapabilityInvocation,
             0,
             HookResult::continue_(),
         ));
@@ -1130,15 +1158,17 @@ mod tests {
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(TrackingHandler {
             name: "post".to_string(),
-            hook_type: HookType::PostToolUse,
+            hook_type: HookType::PostCapabilityInvocation,
             mode: HookExecutionMode::Blocking,
             called: Arc::clone(&called),
         }));
 
         let engine = HookEngine::new(registry);
-        let _ = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        let _ = engine
+            .execute(&make_ctx(HookType::PreCapabilityInvocation))
+            .await;
 
-        // PostToolUse handler should NOT have been called for PreToolUse context
+        // PostCapabilityInvocation handler should NOT have been called for PreCapabilityInvocation context
         assert!(!called.load(Ordering::SeqCst));
     }
 
@@ -1171,7 +1201,11 @@ mod tests {
     async fn test_load_discovered_hooks_registers_script_handlers() {
         let hooks = vec![
             make_script_hook("project:session-start", HookType::SessionStart, 0),
-            make_script_hook("project:post-tool-use", HookType::PostToolUse, 100),
+            make_script_hook(
+                "project:post-capability-invocation",
+                HookType::PostCapabilityInvocation,
+                100,
+            ),
         ];
 
         let mut engine = HookEngine::new(HookRegistry::new());
@@ -1187,7 +1221,7 @@ mod tests {
         assert!(
             engine
                 .registry()
-                .get_by_name("project:post-tool-use")
+                .get_by_name("project:post-capability-invocation")
                 .is_some()
         );
     }

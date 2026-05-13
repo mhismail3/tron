@@ -25,7 +25,7 @@ pub struct ParamSummary {
 }
 
 /// A tool stored in the index with pre-tokenized fields for fast search.
-struct IndexedTool {
+struct IndexedCapability {
     server_name: String,
     tool_name: String,
     description: String,
@@ -37,12 +37,12 @@ struct IndexedTool {
 /// A search result with relevance score.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolMatch {
+pub struct McpCapabilityMatch {
     /// MCP server name.
     pub server: String,
-    /// Tool name.
+    /// Capability name.
     pub tool: String,
-    /// Tool description.
+    /// ModelCapability description.
     pub description: String,
     /// Parameter summaries for this tool.
     pub params: Vec<ParamSummary>,
@@ -50,21 +50,23 @@ pub struct ToolMatch {
     pub score: u32,
 }
 
-/// In-memory index of all MCP tools across all servers.
-pub struct ToolIndex {
-    tools: Vec<IndexedTool>,
+/// In-memory index of all MCP capabilities across all servers.
+pub struct McpCapabilityIndex {
+    capabilities: Vec<IndexedCapability>,
 }
 
-impl Default for ToolIndex {
+impl Default for McpCapabilityIndex {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ToolIndex {
+impl McpCapabilityIndex {
     /// Create an empty tool index.
     pub fn new() -> Self {
-        Self { tools: Vec::new() }
+        Self {
+            capabilities: Vec::new(),
+        }
     }
 
     /// Add capabilities from a server. Parses schemas and tokenizes for search.
@@ -73,7 +75,7 @@ impl ToolIndex {
             let params = extract_params(&def.input_schema);
             let name_tokens = tokenize(&def.name);
             let desc_tokens = tokenize(&def.description);
-            self.tools.push(IndexedTool {
+            self.capabilities.push(IndexedCapability {
                 server_name: server.to_string(),
                 tool_name: def.name.clone(),
                 description: def.description.clone(),
@@ -84,22 +86,22 @@ impl ToolIndex {
         }
     }
 
-    /// Remove all tools belonging to a server.
+    /// Remove all capabilities belonging to a server.
     pub fn remove_server(&mut self, server: &str) {
-        self.tools.retain(|t| t.server_name != server);
+        self.capabilities.retain(|t| t.server_name != server);
     }
 
-    /// Search for tools matching the query keywords, optionally filtered by server.
+    /// Search for capabilities matching the query keywords, optionally filtered by server.
     /// Returns up to 40 results sorted by descending score.
-    pub fn search(&self, query: &str, server_filter: Option<&str>) -> Vec<ToolMatch> {
+    pub fn search(&self, query: &str, server_filter: Option<&str>) -> Vec<McpCapabilityMatch> {
         let keywords: Vec<String> = tokenize(query.trim());
         let server_filter = server_filter.and_then(|server| {
             let trimmed = server.trim();
             (!trimmed.is_empty()).then_some(trimmed)
         });
 
-        let mut results: Vec<ToolMatch> = self
-            .tools
+        let mut results: Vec<McpCapabilityMatch> = self
+            .capabilities
             .iter()
             .filter(|t| server_filter.is_none_or(|s| t.server_name == s))
             .filter_map(|t| {
@@ -107,7 +109,7 @@ impl ToolIndex {
                 if !keywords.is_empty() && score == 0 {
                     return None;
                 }
-                Some(ToolMatch {
+                Some(McpCapabilityMatch {
                     server: t.server_name.clone(),
                     tool: t.tool_name.clone(),
                     description: t.description.clone(),
@@ -125,23 +127,24 @@ impl ToolIndex {
         results
     }
 
-    /// Total number of indexed tools.
-    pub fn tool_count(&self) -> usize {
-        self.tools.len()
+    /// Total number of indexed capabilities.
+    pub fn capability_count(&self) -> usize {
+        self.capabilities.len()
     }
 
     /// Number of capabilities from a specific server.
-    pub fn server_tool_count(&self, server: &str) -> usize {
-        self.tools
+    pub fn server_capability_count(&self, server: &str) -> usize {
+        self.capabilities
             .iter()
             .filter(|t| t.server_name == server)
             .count()
     }
 
     /// Format search results as compact text for LLM consumption.
-    pub fn format_results(matches: &[ToolMatch]) -> String {
+    pub fn format_results(matches: &[McpCapabilityMatch]) -> String {
         if matches.is_empty() {
-            return "No tools found. Try different keywords or omit the server filter.".to_string();
+            return "No capabilities found. Try different keywords or omit the server filter."
+                .to_string();
         }
 
         let mut out = format!("Found {} tool(s):\n", matches.len());
@@ -178,9 +181,9 @@ fn tokenize(s: &str) -> Vec<String> {
 }
 
 /// Score a tool against query keywords.
-fn score_tool(tool: &IndexedTool, keywords: &[String]) -> u32 {
+fn score_tool(tool: &IndexedCapability, keywords: &[String]) -> u32 {
     if keywords.is_empty() {
-        return 1; // return all tools with minimal score when no query
+        return 1; // return all capabilities with minimal score when no query
     }
 
     let mut total = 0u32;
@@ -195,7 +198,7 @@ fn score_tool(tool: &IndexedTool, keywords: &[String]) -> u32 {
         else if server_lower == *kw {
             total += 50;
         }
-        // Tool name starts with keyword
+        // Capability name starts with keyword
         else if tool.name_tokens.iter().any(|t| t.starts_with(kw.as_str())) {
             total += 30;
         }
@@ -282,38 +285,38 @@ mod tests {
 
     #[test]
     fn empty_index_returns_no_results() {
-        let index = ToolIndex::new();
+        let index = McpCapabilityIndex::new();
         let results = index.search("anything", None);
         assert!(results.is_empty());
     }
 
     #[test]
     fn add_server_populates_index() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools("sqlite", &sample_tools());
-        assert_eq!(index.tool_count(), 2);
-        assert_eq!(index.server_tool_count("sqlite"), 2);
+        assert_eq!(index.capability_count(), 2);
+        assert_eq!(index.server_capability_count("sqlite"), 2);
     }
 
     #[test]
     fn remove_server_clears_only_that_server() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools("sqlite", &sample_tools());
         index.add_server_tools(
             "postgres",
             &[make_tool("execute", "Run SQL", json!({"type": "object"}))],
         );
-        assert_eq!(index.tool_count(), 3);
+        assert_eq!(index.capability_count(), 3);
 
         index.remove_server("sqlite");
-        assert_eq!(index.tool_count(), 1);
-        assert_eq!(index.server_tool_count("sqlite"), 0);
-        assert_eq!(index.server_tool_count("postgres"), 1);
+        assert_eq!(index.capability_count(), 1);
+        assert_eq!(index.server_capability_count("sqlite"), 0);
+        assert_eq!(index.server_capability_count("postgres"), 1);
     }
 
     #[test]
     fn exact_name_match_scores_highest() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools(
             "s",
             &[
@@ -329,7 +332,7 @@ mod tests {
 
     #[test]
     fn prefix_match_scores_higher_than_description() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools(
             "s",
             &[
@@ -344,7 +347,7 @@ mod tests {
 
     #[test]
     fn server_filter_restricts_results() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools("sqlite", &sample_tools());
         index.add_server_tools(
             "postgres",
@@ -359,11 +362,11 @@ mod tests {
 
     #[test]
     fn results_capped_at_40() {
-        let mut index = ToolIndex::new();
-        let tools: Vec<McpToolDef> = (0..50)
+        let mut index = McpCapabilityIndex::new();
+        let capabilities: Vec<McpToolDef> = (0..50)
             .map(|i| make_tool(&format!("tool_{i}"), "a tool", json!({"type": "object"})))
             .collect();
-        index.add_server_tools("big", &tools);
+        index.add_server_tools("big", &capabilities);
 
         let results = index.search("tool", None);
         assert_eq!(results.len(), 40);
@@ -371,7 +374,7 @@ mod tests {
 
     #[test]
     fn case_insensitive_matching() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools(
             "s",
             &[make_tool(
@@ -389,7 +392,7 @@ mod tests {
 
     #[test]
     fn multi_keyword_query_combines_scores() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools(
             "s",
             &[
@@ -405,7 +408,7 @@ mod tests {
 
     #[test]
     fn empty_description_still_matches_by_name() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools("s", &[make_tool("ping", "", json!({"type": "object"}))]);
         let results = index.search("ping", None);
         assert_eq!(results.len(), 1);
@@ -453,7 +456,7 @@ mod tests {
 
     #[test]
     fn format_results_readable() {
-        let matches = vec![ToolMatch {
+        let matches = vec![McpCapabilityMatch {
             server: "sqlite".into(),
             tool: "query".into(),
             description: "Run SQL queries".into(),
@@ -473,7 +476,7 @@ mod tests {
             ],
             score: 100,
         }];
-        let output = ToolIndex::format_results(&matches);
+        let output = McpCapabilityIndex::format_results(&matches);
         assert!(output.contains("[sqlite] query"));
         assert!(output.contains("sql (string, required)"));
         assert!(output.contains("limit (number)"));
@@ -481,13 +484,13 @@ mod tests {
 
     #[test]
     fn format_results_empty_shows_helpful_message() {
-        let output = ToolIndex::format_results(&[]);
-        assert!(output.contains("No tools found"));
+        let output = McpCapabilityIndex::format_results(&[]);
+        assert!(output.contains("No capabilities found"));
     }
 
     #[test]
     fn blank_server_filter_lists_all_servers() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools("sqlite", &sample_tools());
         index.add_server_tools(
             "browser",
@@ -503,7 +506,7 @@ mod tests {
 
     #[test]
     fn search_with_no_query_returns_all() {
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         index.add_server_tools("s", &sample_tools());
         let results = index.search("", None);
         assert_eq!(results.len(), 2);
@@ -511,11 +514,11 @@ mod tests {
 
     #[test]
     fn browse_mode_not_capped_at_40() {
-        let mut index = ToolIndex::new();
-        let tools: Vec<McpToolDef> = (0..50)
+        let mut index = McpCapabilityIndex::new();
+        let capabilities: Vec<McpToolDef> = (0..50)
             .map(|i| make_tool(&format!("tool_{i}"), "a tool", json!({"type": "object"})))
             .collect();
-        index.add_server_tools("big", &tools);
+        index.add_server_tools("big", &capabilities);
 
         let results = index.search("", None);
         assert_eq!(results.len(), 50);

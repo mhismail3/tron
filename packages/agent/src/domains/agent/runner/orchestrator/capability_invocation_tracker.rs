@@ -1,4 +1,4 @@
-//! Tool-call tracker — manages pending capability results via oneshot channels.
+//! ModelCapability-call tracker — manages pending capability results via oneshot channels.
 
 use std::collections::HashMap;
 
@@ -6,11 +6,11 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 /// Tracks pending capability invocations and routes results back to the agent loop.
-pub struct ToolCallTracker {
+pub struct CapabilityInvocationTracker {
     pending: HashMap<String, oneshot::Sender<Value>>,
 }
 
-impl ToolCallTracker {
+impl CapabilityInvocationTracker {
     /// Create an empty tracker.
     pub fn new() -> Self {
         Self {
@@ -19,16 +19,16 @@ impl ToolCallTracker {
     }
 
     /// Register a capability invocation, returning a receiver that will deliver the result.
-    pub fn register(&mut self, tool_call_id: &str) -> oneshot::Receiver<Value> {
+    pub fn register(&mut self, invocation_id: &str) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.pending.insert(tool_call_id.to_string(), tx);
+        let _ = self.pending.insert(invocation_id.to_string(), tx);
         rx
     }
 
     /// Resolve a pending capability invocation with a result value.
     /// Returns `true` if the capability invocation was found and resolved, `false` otherwise.
-    pub fn resolve(&mut self, tool_call_id: &str, value: Value) -> bool {
-        if let Some(tx) = self.pending.remove(tool_call_id) {
+    pub fn resolve(&mut self, invocation_id: &str, value: Value) -> bool {
+        if let Some(tx) = self.pending.remove(invocation_id) {
             tx.send(value).is_ok()
         } else {
             false
@@ -36,8 +36,8 @@ impl ToolCallTracker {
     }
 
     /// Check if a capability invocation is pending.
-    pub fn has_pending(&self, tool_call_id: &str) -> bool {
-        self.pending.contains_key(tool_call_id)
+    pub fn has_pending(&self, invocation_id: &str) -> bool {
+        self.pending.contains_key(invocation_id)
     }
 
     /// Number of pending capability invocations.
@@ -51,7 +51,7 @@ impl ToolCallTracker {
     }
 }
 
-impl Default for ToolCallTracker {
+impl Default for CapabilityInvocationTracker {
     fn default() -> Self {
         Self::new()
     }
@@ -64,13 +64,13 @@ mod tests {
 
     #[test]
     fn new_is_empty() {
-        let tracker = ToolCallTracker::new();
+        let tracker = CapabilityInvocationTracker::new();
         assert_eq!(tracker.pending_count(), 0);
     }
 
     #[tokio::test]
     async fn register_returns_receiver() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         let _rx = tracker.register("tc_1");
         assert!(tracker.has_pending("tc_1"));
         assert_eq!(tracker.pending_count(), 1);
@@ -78,7 +78,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_sends_value() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         let rx = tracker.register("tc_1");
 
         let resolved = tracker.resolve("tc_1", json!({"output": "done"}));
@@ -90,13 +90,13 @@ mod tests {
 
     #[test]
     fn resolve_nonexistent_returns_false() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         assert!(!tracker.resolve("unknown", json!(null)));
     }
 
     #[tokio::test]
     async fn has_pending_false_after_resolve() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         let _rx = tracker.register("tc_1");
         assert!(tracker.has_pending("tc_1"));
 
@@ -106,13 +106,13 @@ mod tests {
 
     #[test]
     fn has_pending_false_unknown() {
-        let tracker = ToolCallTracker::new();
+        let tracker = CapabilityInvocationTracker::new();
         assert!(!tracker.has_pending("nope"));
     }
 
     #[tokio::test]
     async fn cancel_all_drops_senders() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         let rx1 = tracker.register("tc_1");
         let rx2 = tracker.register("tc_2");
 
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_pending() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         let rx1 = tracker.register("tc_1");
         let rx2 = tracker.register("tc_2");
         let rx3 = tracker.register("tc_3");
@@ -146,7 +146,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_only_once() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         let rx = tracker.register("tc_1");
 
         assert!(tracker.resolve("tc_1", json!("first")));
@@ -157,7 +157,7 @@ mod tests {
 
     #[tokio::test]
     async fn register_same_id_replaces() {
-        let mut tracker = ToolCallTracker::new();
+        let mut tracker = CapabilityInvocationTracker::new();
         let rx1 = tracker.register("tc_1");
         let rx2 = tracker.register("tc_1"); // replaces
 

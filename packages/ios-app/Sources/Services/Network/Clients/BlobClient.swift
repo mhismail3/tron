@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for fetching blob content from the server.
-/// Used by the Display tool to load images stored in blob storage.
+/// Used by the Display capability to load images stored in blob storage.
 final class BlobClient: EngineDomainClient {
 
     /// Fetch blob content by ID. Returns base64-encoded data and MIME type.

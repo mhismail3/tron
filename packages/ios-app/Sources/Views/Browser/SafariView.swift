@@ -3,7 +3,7 @@ import UIKit
 import SafariServices
 
 /// A SwiftUI wrapper for SFSafariViewController.
-/// Used by the OpenBrowser tool to display web content in native Safari.
+/// Used by the OpenBrowser capability to display web content in native Safari.
 struct SafariView: UIViewControllerRepresentable {
     let url: URL
     var entersReaderIfAvailable: Bool = false

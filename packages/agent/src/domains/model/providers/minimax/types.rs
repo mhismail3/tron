@@ -60,8 +60,8 @@ pub struct MiniMaxModelInfo {
     pub max_output: u32,
     /// Supports extended thinking.
     pub supports_thinking: bool,
-    /// Supports tool use.
-    pub supports_tools: bool,
+    /// Supports capability invocation.
+    pub supports_capabilities: bool,
     /// Supports image inputs.
     pub supports_images: bool,
     /// Input cost per million tokens (USD).
@@ -90,7 +90,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -110,7 +110,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -130,7 +130,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -150,7 +150,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -170,7 +170,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -190,7 +190,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -210,7 +210,7 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
             context_window: 204_800,
             max_output: 128_000,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.3,
             output_cost_per_million: 1.2,
@@ -365,7 +365,7 @@ mod tests {
     fn minimax_tool_support() {
         for id in all_minimax_model_ids() {
             let m = get_minimax_model(id).unwrap();
-            assert!(m.supports_tools, "{id} should support tools");
+            assert!(m.supports_capabilities, "{id} should support tools");
         }
     }
 

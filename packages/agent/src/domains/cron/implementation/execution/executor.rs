@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domains::cron::errors::CronError;
 use crate::domains::cron::types::{
-    CronJob, CronRun, ExecutionOutput, Payload, RunStatus, ToolRestrictions,
+    CapabilityRestrictions, CronJob, CronRun, ExecutionOutput, Payload, RunStatus,
 };
 
 /// Execute an isolated agent turn. Implemented in `main.rs`.
@@ -30,7 +30,7 @@ pub trait AgentTurnExecutor: Send + Sync {
         model: Option<&str>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
-        tool_restrictions: Option<&ToolRestrictions>,
+        capability_restrictions: Option<&CapabilityRestrictions>,
         cancel: CancellationToken,
     ) -> Result<AgentTurnResult, CronError>;
 }
@@ -104,14 +104,14 @@ pub async fn execute_payload(
     cancel: CancellationToken,
 ) -> Result<ExecutionOutput, CronError> {
     // Check capability restrictions for non-AgentTurn payloads.
-    // AgentTurn restrictions are applied inside the agent (tool-level filtering).
+    // AgentTurn restrictions are applied inside the agent (capability-level filtering).
     if !matches!(&job.payload, Payload::AgentTurn { .. })
-        && let Some(ref tr) = job.tool_restrictions
+        && let Some(ref tr) = job.capability_restrictions
     {
         let cap = payload_capability_name(&job.payload);
         if !tr.is_capability_allowed(cap) {
             return Err(CronError::Execution(format!(
-                "{cap} blocked by job tool restrictions"
+                "{cap} blocked by job capability restrictions"
             )));
         }
     }
@@ -156,7 +156,7 @@ pub async fn execute_payload(
                     model.as_deref(),
                     workspace_id.as_deref(),
                     system_prompt.as_deref(),
-                    job.tool_restrictions.as_ref(),
+                    job.capability_restrictions.as_ref(),
                     cancel,
                 )
                 .await?;
@@ -547,7 +547,7 @@ mod tests {
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
             tags: vec![],
-            tool_restrictions: None,
+            capability_restrictions: None,
             workspace_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -712,7 +712,7 @@ mod tests {
             _model: Option<&str>,
             _workspace_id: Option<&str>,
             _system_prompt: Option<&str>,
-            _tool_restrictions: Option<&ToolRestrictions>,
+            _capability_restrictions: Option<&CapabilityRestrictions>,
             _cancel: CancellationToken,
         ) -> Result<AgentTurnResult, CronError> {
             let mut guard = self.response.lock();
@@ -920,13 +920,13 @@ mod tests {
         assert!(enabled);
     }
 
-    // ── Tool restriction enforcement ─────────────────────────────────
+    // ── ModelCapability restriction enforcement ─────────────────────────────────
 
     #[tokio::test]
     async fn shell_command_blocked_by_allowed_capabilities_missing() {
         let deps = make_test_deps();
         let mut job = make_shell_job("echo hi");
-        job.tool_restrictions = Some(ToolRestrictions {
+        job.capability_restrictions = Some(CapabilityRestrictions {
             allowed_capabilities: Some(vec!["Webhook".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
@@ -951,7 +951,7 @@ mod tests {
     async fn shell_command_allowed_when_in_allowed_list() {
         let deps = make_test_deps();
         let mut job = make_shell_job("echo allowed");
-        job.tool_restrictions = Some(ToolRestrictions {
+        job.capability_restrictions = Some(CapabilityRestrictions {
             allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
@@ -971,7 +971,7 @@ mod tests {
             },
             ..make_shell_job("echo")
         };
-        job.tool_restrictions = Some(ToolRestrictions {
+        job.capability_restrictions = Some(CapabilityRestrictions {
             allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
@@ -989,7 +989,7 @@ mod tests {
             },
             ..make_shell_job("echo")
         };
-        job.tool_restrictions = Some(ToolRestrictions {
+        job.capability_restrictions = Some(CapabilityRestrictions {
             allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
@@ -1016,7 +1016,7 @@ mod tests {
             ..make_shell_job("echo")
         };
         // Even with restrictions that don't include AgentTurn, it should dispatch
-        job.tool_restrictions = Some(ToolRestrictions {
+        job.capability_restrictions = Some(CapabilityRestrictions {
             allowed_capabilities: Some(vec!["ShellCommand".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
@@ -1175,7 +1175,7 @@ mod tests {
     #[tokio::test]
     async fn disable_during_attempt_completes_attempt_then_aborts() {
         // If the job is flipped to disabled WHILE attempt 0 is running,
-        // the current attempt is NOT interrupted (intentional: tools
+        // the current attempt is NOT interrupted (intentional: capability invocations
         // and subagent turns often have side effects; we don't kill
         // them mid-run). Instead, the retry-loop pre-check on the NEXT
         // iteration short-circuits to Cancelled. If the attempt

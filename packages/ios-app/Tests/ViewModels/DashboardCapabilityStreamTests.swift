@@ -6,7 +6,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
     func testSessionStreamBufferAddsCapabilityStartFromIdentity() {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             contractId: "filesystem::read_file",
             implementationId: "first_party.filesystem.v1.read_file",
             functionId: "filesystem::read_file"
@@ -19,7 +19,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         )
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].modelToolName, "filesystem::read_file")
+        XCTAssertEqual(buffer.lines[0].modelPrimitiveName, "filesystem::read_file")
         XCTAssertEqual(buffer.lines[0].displayName, "Read File")
         XCTAssertEqual(buffer.lines[0].icon, "doc.text.magnifyingglass")
         XCTAssertEqual(buffer.lines[0].capabilityIdentity, identity)
@@ -28,7 +28,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
     func testSessionStreamBufferAddsCapabilityEndWithRiskAwarePresentation() {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
-            modelToolName: "execute",
+            modelPrimitiveName: "execute",
             contractId: "process::run",
             implementationId: "first_party.process.v1.run",
             functionId: "process::run"

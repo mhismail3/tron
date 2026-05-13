@@ -5,11 +5,11 @@ import Foundation
 struct ServerActivityLine: Decodable, Hashable, Sendable {
     let kind: String
     let text: String?
-    let toolArgs: AnyCodable?
+    let capabilityArgs: AnyCodable?
     let durationMs: Int?
     let isError: Bool?
     let turns: Int?
-    let modelToolName: String?
+    let modelPrimitiveName: String?
     let contractId: String?
     let implementationId: String?
     let functionId: String?
@@ -32,17 +32,17 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
             return ActivityLine(kind: .text, text: text ?? "")
         case "thinking":
             return ActivityLine(kind: .thinking, text: "Thinking")
-        case "tool":
+        case "capability":
             let identity = capabilityIdentity
             let name = identity.stableCapabilityId
-            let argsJSON = serializeArgs(toolArgs)
+            let argsJSON = serializeArgs(capabilityArgs)
             let durationStr = durationMs.map { SessionStreamBuffer.formatDuration($0) }
             return ActivityLine(
-                kind: .capabilityStart,
+                kind: .capabilityInvocationStarted,
                 text: name,
                 icon: CapabilityPresentation.symbol(for: identity),
                 iconColor: CapabilityColor.fromCapability(identity),
-                modelToolName: name,
+                modelPrimitiveName: name,
                 displayName: CapabilityPresentation.title(for: identity),
                 summary: argsJSON == "{}" ? nil : argsJSON,
                 duration: durationStr,
@@ -61,7 +61,7 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
 
     private var capabilityIdentity: CapabilityIdentity {
         CapabilityIdentity(
-            modelToolName: modelToolName,
+            modelPrimitiveName: modelPrimitiveName,
             contractId: contractId,
             implementationId: implementationId,
             functionId: functionId,

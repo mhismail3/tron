@@ -23,12 +23,12 @@ const CAPABILITY_PATH_ARGS: &[(&str, &str)] = &[
 /// to produce project-relative paths. Returns empty if the capability doesn't touch
 /// files or the path is outside the project.
 pub fn extract_touched_paths(
-    tool_name: &str,
+    model_primitive_name: &str,
     arguments: &serde_json::Map<String, serde_json::Value>,
     working_dir: &Path,
     project_root: &Path,
 ) -> Vec<String> {
-    let (capability_id, payload) = normalize_capability_payload(tool_name, arguments);
+    let (capability_id, payload) = normalize_capability_payload(model_primitive_name, arguments);
     let arg_key = match CAPABILITY_PATH_ARGS
         .iter()
         .find(|(name, _)| *name == capability_id)
@@ -66,11 +66,11 @@ pub fn extract_touched_paths(
 }
 
 fn normalize_capability_payload<'a>(
-    tool_name: &'a str,
+    model_primitive_name: &'a str,
     arguments: &'a serde_json::Map<String, serde_json::Value>,
 ) -> (&'a str, &'a serde_json::Map<String, serde_json::Value>) {
-    if tool_name != "execute" {
-        return (tool_name, arguments);
+    if model_primitive_name != "execute" {
+        return (model_primitive_name, arguments);
     }
     let capability_id = [
         "contractId",
@@ -80,7 +80,7 @@ fn normalize_capability_payload<'a>(
     ]
     .iter()
     .find_map(|key| arguments.get(*key).and_then(serde_json::Value::as_str))
-    .unwrap_or(tool_name);
+    .unwrap_or(model_primitive_name);
     let payload = arguments
         .get("payload")
         .and_then(serde_json::Value::as_object)
@@ -189,9 +189,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_tool_returns_empty() {
+    fn unknown_capability_returns_empty() {
         let result = extract_touched_paths(
-            "UnknownTool",
+            "UnknownCapability",
             &args(&[("path", "/project/src/foo.rs")]),
             Path::new(WD),
             Path::new(PROJECT),

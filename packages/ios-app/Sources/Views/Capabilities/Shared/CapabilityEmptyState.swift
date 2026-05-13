@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Empty State
 
 /// Reusable empty/no-results state view (icon + message + optional subtitle).
-/// Replaces the duplicated empty state pattern across 7 tool detail sheets.
+/// Replaces the duplicated empty state pattern across 7 capability detail sheets.
 @available(iOS 26.0, *)
 struct CapabilityEmptyState: View {
     let title: String

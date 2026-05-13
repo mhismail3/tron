@@ -211,7 +211,7 @@ mod tests {
             AgentConfig::default(),
             AgentDeps {
                 provider,
-                tool_surface_policy:
+                capability_surface_policy:
                     crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy::default(),
                 guardrails: None,
                 hooks: None,
@@ -224,7 +224,7 @@ mod tests {
                             &spec,
                         ),
                     working_directory: None,
-                    tools: vec![],
+                    capabilities: vec![],
                     rules_content: None,
                     compaction: crate::domains::agent::runner::context::types::CompactionConfig::default(),
                 }),

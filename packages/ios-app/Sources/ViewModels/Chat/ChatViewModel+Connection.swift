@@ -29,7 +29,7 @@ extension ChatViewModel: ConnectionContext {
     }
 
     /// Clear state that refers to an in-flight turn (streaming text,
-    /// thinking, running tools) so reconstruction can rebuild it from
+    /// thinking, running capabilities) so reconstruction can rebuild it from
     /// the event log without double-rendering.
     ///
     /// ## Scope
@@ -82,13 +82,13 @@ extension ChatViewModel: ConnectionContext {
         if let thinkingId = thinkingMessageId {
             removeFromMessages { $0.id == thinkingId }
         }
-        // Remove running tool messages (will be re-created from reconstruction)
-        let runningToolIds = currentToolMessages.keys
-        removeFromMessages { runningToolIds.contains($0.id) }
+        // Remove running capability messages (will be re-created from reconstruction)
+        let runningCapabilityIds = currentCapabilityInvocationMessages.keys
+        removeFromMessages { runningCapabilityIds.contains($0.id) }
         // Clear turn tracking state
         thinkingMessageId = nil
         currentTurnCapabilityInvocations.removeAll()
-        currentToolMessages.removeAll()
+        currentCapabilityInvocationMessages.removeAll()
         // Reset thinking accumulators so stale content doesn't bleed through
         thinkingState.seedCatchUpThinking("", isStreaming: false)
     }

@@ -5,7 +5,7 @@
 //! and `handle_drain_event`—classify each `StreamEvent` into a `StreamAction`
 //! that the caller (`process_stream`) uses to drive the select loop.
 //!
-//! Also contains pure helpers: `finalize_tool_call` (JSON argument parsing)
+//! Also contains pure helpers: `finalize_capability_invocation` (JSON argument parsing)
 //! and `build_message` (assembles `AssistantMessage` from accumulators).
 
 use std::collections::HashSet;
@@ -17,7 +17,7 @@ use serde_json::Map;
 use crate::engine::{InvocationId, TraceId};
 use crate::shared::content::AssistantContent;
 use crate::shared::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
-use crate::shared::messages::{TokenUsage, ToolCall};
+use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
 
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::errors::RuntimeError;
@@ -54,10 +54,10 @@ impl StreamTraceContext<'_> {
 pub(super) struct StreamState {
     pub(super) text_acc: String,
     pub(super) thinking_acc: String,
-    pub(super) tool_calls: Vec<ToolCall>,
-    pub(super) current_tool_id: Option<String>,
-    pub(super) current_tool_name: Option<String>,
-    pub(super) current_tool_args: String,
+    pub(super) capability_invocations: Vec<CapabilityInvocationDraft>,
+    pub(super) current_invocation_id: Option<String>,
+    pub(super) current_model_primitive_name: Option<String>,
+    pub(super) current_capability_args: String,
     pub(super) token_usage: Option<TokenUsage>,
     pub(super) thinking_signature: Option<String>,
     pub(super) stream_start: Instant,
@@ -72,10 +72,10 @@ impl StreamState {
         Self {
             text_acc: String::with_capacity(4096),
             thinking_acc: String::with_capacity(2048),
-            tool_calls: Vec::with_capacity(4),
-            current_tool_id: None,
-            current_tool_name: None,
-            current_tool_args: String::with_capacity(512),
+            capability_invocations: Vec::with_capacity(4),
+            current_invocation_id: None,
+            current_model_primitive_name: None,
+            current_capability_args: String::with_capacity(512),
             token_usage: None,
             thinking_signature: None,
             stream_start: Instant::now(),
@@ -170,64 +170,64 @@ impl StreamState {
         }
     }
 
-    fn handle_tool_call_start(
+    fn handle_capability_invocation_start(
         &mut self,
-        tool_call_id: String,
+        invocation_id: String,
         name: String,
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
         trace_context: StreamTraceContext<'_>,
     ) {
-        finalize_tool_call(
-            &mut self.tool_calls,
-            &mut self.current_tool_id,
-            &mut self.current_tool_name,
-            &mut self.current_tool_args,
+        finalize_capability_invocation(
+            &mut self.capability_invocations,
+            &mut self.current_invocation_id,
+            &mut self.current_model_primitive_name,
+            &mut self.current_capability_args,
         );
 
-        self.current_tool_id = Some(tool_call_id.clone());
-        self.current_tool_name = Some(name.clone());
-        self.current_tool_args.clear();
+        self.current_invocation_id = Some(invocation_id.clone());
+        self.current_model_primitive_name = Some(name.clone());
+        self.current_capability_args.clear();
 
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::CapabilityInvocationGenerating {
                     base: trace_context.base_event(session_id),
-                    tool_call_id,
-                    tool_name: name.clone(),
+                    invocation_id,
+                    model_primitive_name: name.clone(),
                     capability_identity:
-                        crate::shared::events::CapabilityEventIdentity::with_model_tool(name),
+                        crate::shared::events::CapabilityEventIdentity::with_model_primitive(name),
                 },
                 counter,
             );
         } else {
             let _ = emitter.emit(TronEvent::CapabilityInvocationGenerating {
                 base: trace_context.base_event(session_id),
-                tool_call_id,
-                tool_name: name.clone(),
+                invocation_id,
+                model_primitive_name: name.clone(),
                 capability_identity:
-                    crate::shared::events::CapabilityEventIdentity::with_model_tool(name),
+                    crate::shared::events::CapabilityEventIdentity::with_model_primitive(name),
             });
         }
     }
 
-    fn handle_tool_call_delta(
+    fn handle_capability_invocation_delta(
         &mut self,
-        tool_call_id: String,
+        invocation_id: String,
         arguments_delta: String,
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
         trace_context: StreamTraceContext<'_>,
     ) {
-        self.current_tool_args.push_str(&arguments_delta);
+        self.current_capability_args.push_str(&arguments_delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::CapabilityInvocationArgumentDelta {
                     base: trace_context.base_event(session_id),
-                    tool_call_id,
-                    tool_name: self.current_tool_name.clone(),
+                    invocation_id,
+                    model_primitive_name: self.current_model_primitive_name.clone(),
                     arguments_delta,
                 },
                 counter,
@@ -235,21 +235,28 @@ impl StreamState {
         } else {
             let _ = emitter.emit(TronEvent::CapabilityInvocationArgumentDelta {
                 base: trace_context.base_event(session_id),
-                tool_call_id,
-                tool_name: self.current_tool_name.clone(),
+                invocation_id,
+                model_primitive_name: self.current_model_primitive_name.clone(),
                 arguments_delta,
             });
         }
     }
 
-    fn handle_tool_call_end(&mut self, tool_call: ToolCall) {
-        self.current_tool_id = None;
-        self.current_tool_name = None;
-        self.current_tool_args.clear();
-        if let Some(pos) = self.tool_calls.iter().position(|tc| tc.id == tool_call.id) {
-            self.tool_calls[pos] = tool_call;
+    fn handle_capability_invocation_end(
+        &mut self,
+        capability_invocation: CapabilityInvocationDraft,
+    ) {
+        self.current_invocation_id = None;
+        self.current_model_primitive_name = None;
+        self.current_capability_args.clear();
+        if let Some(pos) = self
+            .capability_invocations
+            .iter()
+            .position(|tc| tc.id == capability_invocation.id)
+        {
+            self.capability_invocations[pos] = capability_invocation;
         } else {
-            self.tool_calls.push(tool_call);
+            self.capability_invocations.push(capability_invocation);
         }
     }
 
@@ -266,9 +273,9 @@ impl StreamState {
                 &self.text_acc,
                 &self.thinking_acc,
                 self.thinking_signature.as_deref(),
-                &self.tool_calls,
+                &self.capability_invocations,
             ),
-            tool_calls: self.tool_calls,
+            capability_invocations: self.capability_invocations,
             stop_reason: "interrupted".into(),
             token_usage: self.token_usage,
             interrupted: true,
@@ -282,11 +289,11 @@ impl StreamState {
         final_message: Option<AssistantMessage>,
         stop_reason: String,
     ) -> crate::domains::agent::runner::types::StreamResult {
-        finalize_tool_call(
-            &mut self.tool_calls,
-            &mut self.current_tool_id,
-            &mut self.current_tool_name,
-            &mut self.current_tool_args,
+        finalize_capability_invocation(
+            &mut self.capability_invocations,
+            &mut self.current_invocation_id,
+            &mut self.current_model_primitive_name,
+            &mut self.current_capability_args,
         );
 
         let message = final_message.unwrap_or_else(|| {
@@ -294,13 +301,13 @@ impl StreamState {
                 &self.text_acc,
                 &self.thinking_acc,
                 self.thinking_signature.as_deref(),
-                &self.tool_calls,
+                &self.capability_invocations,
             )
         });
 
         crate::domains::agent::runner::types::StreamResult {
             message,
-            tool_calls: self.tool_calls,
+            capability_invocations: self.capability_invocations,
             stop_reason,
             token_usage: self.token_usage,
             interrupted: false,
@@ -309,7 +316,7 @@ impl StreamState {
         }
     }
 
-    /// Handle a stream event while in drain mode (after a stopping tool completed).
+    /// Handle a stream event while in drain mode (after a stopping capability completed).
     ///
     /// Only Done, Error, SafetyBlock, and Retry are processed; all content events
     /// are skipped. Token usage is captured from Done but the message is discarded
@@ -326,7 +333,7 @@ impl StreamState {
             StreamEvent::Done { message, .. } => {
                 self.token_usage.clone_from(&message.token_usage);
                 StreamAction::Done {
-                    stop_reason: "tool_use".into(),
+                    stop_reason: "capability_invocation".into(),
                     final_message: None,
                 }
             }
@@ -374,8 +381,8 @@ impl StreamState {
 
     /// Handle a stream event during normal (non-drain) processing.
     ///
-    /// Accumulates text, thinking, and capability invocation content. When a tool in
-    /// `turn_stopping_tools` completes, sets `self.draining = true` so the
+    /// Accumulates text, thinking, and capability invocation content. When a capability in
+    /// `turn_stopping_capabilities` completes, sets `self.draining = true` so the
     /// caller switches to `handle_drain_event` on subsequent events.
     pub(super) fn handle_normal_event(
         &mut self,
@@ -383,7 +390,7 @@ impl StreamState {
         session_id: &str,
         emitter: &EventEmitter,
         sequence_counter: Option<&AtomicI64>,
-        turn_stopping_tools: &HashSet<String>,
+        turn_stopping_capabilities: &HashSet<String>,
         journal: &mut Option<&mut StreamingJournal>,
         trace_context: StreamTraceContext<'_>,
     ) -> StreamAction {
@@ -449,9 +456,12 @@ impl StreamState {
                 );
             }
 
-            StreamEvent::ToolCallStart { tool_call_id, name } => {
-                self.handle_tool_call_start(
-                    tool_call_id,
+            StreamEvent::CapabilityInvocationDraftStart {
+                invocation_id,
+                name,
+            } => {
+                self.handle_capability_invocation_start(
+                    invocation_id,
                     name,
                     session_id,
                     emitter,
@@ -460,12 +470,12 @@ impl StreamState {
                 );
             }
 
-            StreamEvent::ToolCallDelta {
-                tool_call_id,
+            StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id,
                 arguments_delta,
             } => {
-                self.handle_tool_call_delta(
-                    tool_call_id,
+                self.handle_capability_invocation_delta(
+                    invocation_id,
                     arguments_delta,
                     session_id,
                     emitter,
@@ -474,17 +484,19 @@ impl StreamState {
                 );
             }
 
-            StreamEvent::ToolCallEnd { tool_call } => {
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
                 if let Some(j) = journal {
-                    if let Ok(serialized) = serde_json::to_string(&tool_call) {
-                        if let Err(e) = j.append_delta("tool_use", &serialized) {
+                    if let Ok(serialized) = serde_json::to_string(&capability_invocation) {
+                        if let Err(e) = j.append_delta("capability_invocation", &serialized) {
                             tracing::warn!(session_id, error = %e, "journal write failed for capability invocation");
                         }
                     }
                 }
-                let name = tool_call.name.clone();
-                self.handle_tool_call_end(tool_call);
-                if turn_stopping_tools.contains(&name) {
+                let name = capability_invocation.name.clone();
+                self.handle_capability_invocation_end(capability_invocation);
+                if turn_stopping_capabilities.contains(&name) {
                     self.draining = true;
                 }
             }
@@ -549,8 +561,8 @@ impl StreamState {
 }
 
 /// Finalize an in-progress capability invocation from accumulated deltas.
-pub(super) fn finalize_tool_call(
-    tool_calls: &mut Vec<ToolCall>,
+pub(super) fn finalize_capability_invocation(
+    capability_invocations: &mut Vec<CapabilityInvocationDraft>,
     current_id: &mut Option<String>,
     current_name: &mut Option<String>,
     current_args: &mut String,
@@ -565,8 +577,8 @@ pub(super) fn finalize_tool_call(
             Err(e) => {
                 let preview: String = current_args.chars().take(200).collect();
                 tracing::warn!(
-                    tool_name = %name,
-                    tool_call_id = %id,
+                    model_primitive_name = %name,
+                    invocation_id = %id,
                     error = %e,
                     args_preview = %preview,
                     "malformed capability invocation arguments, using empty map"
@@ -574,10 +586,10 @@ pub(super) fn finalize_tool_call(
                 Map::new()
             }
         };
-        if let Some(pos) = tool_calls.iter().position(|tc| tc.id == id) {
-            tool_calls[pos] = ToolCall::new(id, name, arguments);
+        if let Some(pos) = capability_invocations.iter().position(|tc| tc.id == id) {
+            capability_invocations[pos] = CapabilityInvocationDraft::new(id, name, arguments);
         } else {
-            tool_calls.push(ToolCall::new(id, name, arguments));
+            capability_invocations.push(CapabilityInvocationDraft::new(id, name, arguments));
         }
         current_args.clear();
     }
@@ -588,7 +600,7 @@ pub(super) fn build_message(
     text: &str,
     thinking: &str,
     thinking_signature: Option<&str>,
-    tool_calls: &[ToolCall],
+    capability_invocations: &[CapabilityInvocationDraft],
 ) -> AssistantMessage {
     let mut content: Vec<AssistantContent> = Vec::with_capacity(3);
 
@@ -606,8 +618,8 @@ pub(super) fn build_message(
         }
     }
 
-    for tc in tool_calls {
-        content.push(AssistantContent::ToolUse {
+    for tc in capability_invocations {
+        content.push(AssistantContent::CapabilityInvocation {
             id: tc.id.clone(),
             name: tc.name.clone(),
             arguments: tc.arguments.clone(),

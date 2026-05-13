@@ -187,12 +187,12 @@ pub(crate) async fn cron_create_value(
                     .collect()
             })
             .unwrap_or_default(),
-        tool_restrictions: job_param
-            .get("toolRestrictions")
+        capability_restrictions: job_param
+            .get("capabilityRestrictions")
             .map(|value| serde_json::from_value(value.clone()))
             .transpose()
             .map_err(|error| CapabilityError::InvalidParams {
-                message: format!("Invalid toolRestrictions: {error}"),
+                message: format!("Invalid capabilityRestrictions: {error}"),
             })?,
         workspace_id: job_param
             .get("workspaceId")
@@ -332,13 +332,13 @@ pub(crate) async fn cron_update_value(
     if let Some(workspace) = payload.get("workspaceId") {
         job.workspace_id = workspace.as_str().map(String::from);
     }
-    if let Some(value) = payload.get("toolRestrictions") {
-        job.tool_restrictions = if value.is_null() {
+    if let Some(value) = payload.get("capabilityRestrictions") {
+        job.capability_restrictions = if value.is_null() {
             None
         } else {
             Some(serde_json::from_value(value.clone()).map_err(|error| {
                 CapabilityError::InvalidParams {
-                    message: format!("Invalid toolRestrictions: {error}"),
+                    message: format!("Invalid capabilityRestrictions: {error}"),
                 }
             })?)
         };

@@ -6,82 +6,82 @@ import Foundation
 @MainActor
 struct UIUpdateQueueTests {
 
-    // MARK: - Tool End Processing
+    // MARK: - Capability End Processing
 
     @Test("Capability end is processed immediately via flush")
-    func testToolEndProcessedImmediately() {
+    func testCapabilityInvocationEndProcessedImmediately() {
         let queue = UIUpdateQueue()
         var processedUpdates: [UIUpdateQueue.UpdateType] = []
         queue.onProcessUpdates = { processedUpdates = $0 }
 
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "A", modelToolName: "Read", arguments: "{}", timestamp: Date()
+            invocationId: "A", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "B", modelToolName: "Write", arguments: "{}", timestamp: Date()
+            invocationId: "B", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
         // End B before A — should still be processed immediately
-        queue.enqueueToolEnd(.init(
+        queue.enqueueCapabilityInvocationEnd(.init(
             invocationId: "B", success: true, result: "ok", durationMs: 10, details: nil
         ))
         queue.flush()
 
-        let capabilityEndCount = processedUpdates.filter {
-            if case .capabilityEnd = $0 { return true }
+        let capabilityInvocationCompletedCount = processedUpdates.filter {
+            if case .capabilityInvocationCompleted = $0 { return true }
             return false
         }.count
-        #expect(capabilityEndCount == 1)
+        #expect(capabilityInvocationCompletedCount == 1)
     }
 
     @Test("Capability ends processed in arrival order")
-    func testToolEndsProcessedInArrivalOrder() {
+    func testCapabilityInvocationEndsProcessedInArrivalOrder() {
         let queue = UIUpdateQueue()
         var processedUpdates: [UIUpdateQueue.UpdateType] = []
         queue.onProcessUpdates = { processedUpdates = $0 }
 
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "A", modelToolName: "Read", arguments: "{}", timestamp: Date()
+            invocationId: "A", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "B", modelToolName: "Write", arguments: "{}", timestamp: Date()
+            invocationId: "B", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "C", modelToolName: "Bash", arguments: "{}", timestamp: Date()
+            invocationId: "C", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
 
         // End in reverse order
-        queue.enqueueToolEnd(.init(invocationId: "C", success: true, result: "c", durationMs: nil, details: nil))
-        queue.enqueueToolEnd(.init(invocationId: "B", success: true, result: "b", durationMs: nil, details: nil))
-        queue.enqueueToolEnd(.init(invocationId: "A", success: true, result: "a", durationMs: nil, details: nil))
+        queue.enqueueCapabilityInvocationEnd(.init(invocationId: "C", success: true, result: "c", durationMs: nil, details: nil))
+        queue.enqueueCapabilityInvocationEnd(.init(invocationId: "B", success: true, result: "b", durationMs: nil, details: nil))
+        queue.enqueueCapabilityInvocationEnd(.init(invocationId: "A", success: true, result: "a", durationMs: nil, details: nil))
         queue.flush()
 
         // All capability ends should be present — they share the same priority so
         // stable sort preserves arrival order among them
-        let capabilityEnds = processedUpdates.compactMap { update -> String? in
-            if case .capabilityEnd(let data) = update { return data.invocationId }
+        let capabilityInvocationCompletions = processedUpdates.compactMap { update -> String? in
+            if case .capabilityInvocationCompleted(let data) = update { return data.invocationId }
             return nil
         }
-        #expect(capabilityEnds.count == 3)
-        #expect(capabilityEnds == ["C", "B", "A"])
+        #expect(capabilityInvocationCompletions.count == 3)
+        #expect(capabilityInvocationCompletions == ["C", "B", "A"])
     }
 
-    @Test("Capability end for unknown tool is processed")
-    func testToolEndForUnknownToolProcessed() {
+    @Test("Capability end for unknown capability is processed")
+    func testCapabilityInvocationEndForUnknownCapabilityProcessed() {
         let queue = UIUpdateQueue()
         var processedUpdates: [UIUpdateQueue.UpdateType] = []
         queue.onProcessUpdates = { processedUpdates = $0 }
 
         // No capability start — just end
-        queue.enqueueToolEnd(.init(
+        queue.enqueueCapabilityInvocationEnd(.init(
             invocationId: "unknown", success: true, result: "ok", durationMs: nil, details: nil
         ))
         queue.flush()
 
-        let capabilityEndCount = processedUpdates.filter {
-            if case .capabilityEnd = $0 { return true }
+        let capabilityInvocationCompletedCount = processedUpdates.filter {
+            if case .capabilityInvocationCompleted = $0 { return true }
             return false
         }.count
-        #expect(capabilityEndCount == 1)
+        #expect(capabilityInvocationCompletedCount == 1)
     }
 
     @Test("Turn boundary with isStart resets, capability end still works after")
@@ -92,18 +92,18 @@ struct UIUpdateQueueTests {
 
         queue.enqueueTurnBoundary(.init(turnNumber: 1, isStart: true))
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "X", modelToolName: "Read", arguments: "{}", timestamp: Date()
+            invocationId: "X", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
-        queue.enqueueToolEnd(.init(
+        queue.enqueueCapabilityInvocationEnd(.init(
             invocationId: "X", success: true, result: "ok", durationMs: 5, details: nil
         ))
         queue.flush()
 
-        let capabilityEndCount = processedUpdates.filter {
-            if case .capabilityEnd = $0 { return true }
+        let capabilityInvocationCompletedCount = processedUpdates.filter {
+            if case .capabilityInvocationCompleted = $0 { return true }
             return false
         }.count
-        #expect(capabilityEndCount == 1)
+        #expect(capabilityInvocationCompletedCount == 1)
     }
 
     // MARK: - Text Delta Coalescing
@@ -136,7 +136,7 @@ struct UIUpdateQueueTests {
         queue.onProcessUpdates = { processedUpdates = $0 }
 
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "A", modelToolName: "Read", arguments: "{}", timestamp: Date()
+            invocationId: "A", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
         queue.enqueueMessageAppend(.init(
             messageId: UUID(), role: "assistant", content: "Hello"
@@ -154,7 +154,7 @@ struct UIUpdateQueueTests {
         queue.onProcessUpdates = { _ in callCount += 1 }
 
         queue.enqueueCapabilityInvocationStart(.init(
-            invocationId: "A", modelToolName: "Read", arguments: "{}", timestamp: Date()
+            invocationId: "A", modelPrimitiveName: "execute", arguments: "{}", timestamp: Date()
         ))
         queue.enqueueTextDelta(.init(delta: "hi", totalLength: 2))
 

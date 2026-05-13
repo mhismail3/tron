@@ -36,10 +36,10 @@ pub(crate) async fn status_value(
     } else {
         "idle"
     };
-    let current_tool = deps
+    let current_capability = deps
         .orchestrator
         .turn_accumulators()
-        .current_running_tool(&session_id);
+        .current_running_capability(&session_id);
     let event_store = deps.event_store.clone();
     let sid_for_latest = session_id.clone();
     let latest_timestamp = run_blocking_task("agent.status.latest_event", move || {
@@ -64,10 +64,10 @@ pub(crate) async fn status_value(
             delta.num_milliseconds().try_into().ok()
         })
         .map(|ms: i64| ms.max(0));
-    let current_tool_value = current_tool.map(|snap| {
+    let current_capability_value = current_capability.map(|snap| {
         json!({
-            "name": snap.tool_name,
-            "toolCallId": snap.tool_call_id,
+            "name": snap.model_primitive_name,
+            "invocationId": snap.invocation_id,
             "startedAt": snap.started_at,
         })
     });
@@ -76,7 +76,7 @@ pub(crate) async fn status_value(
         "sessionId": session_id,
         "phase": phase,
         "runId": run_id,
-        "currentTool": current_tool_value,
+        "currentCapability": current_capability_value,
         "lastEventTimestamp": latest_timestamp,
         "timeSinceLastEventMs": time_since_last_event_ms,
     }))
@@ -90,13 +90,13 @@ pub(crate) async fn abort_value(
     AgentCommandService::abort(deps, &session_id)
 }
 
-pub(crate) async fn abort_tool_value(
+pub(crate) async fn abort_invocation_value(
     params: Option<&Value>,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
-    let tool_call_id = require_string_param(params, "toolCallId")?;
-    AgentCommandService::abort_tool(deps, &session_id, &tool_call_id)
+    let invocation_id = require_string_param(params, "invocationId")?;
+    AgentCommandService::abort_invocation(deps, &session_id, &invocation_id)
 }
 
 pub(crate) async fn queue_prompt_value(

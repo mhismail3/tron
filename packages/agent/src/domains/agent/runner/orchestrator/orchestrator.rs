@@ -20,9 +20,9 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::domains::agent::runner::agent::compaction_handler::CompactionHandler;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::errors::RuntimeError;
+use crate::domains::agent::runner::orchestrator::capability_invocation_tracker::CapabilityInvocationTracker;
+use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::runner::orchestrator::session_manager::{SessionFilter, SessionManager};
-use crate::domains::agent::runner::orchestrator::tool_abort_registry::ToolAbortRegistry;
-use crate::domains::agent::runner::orchestrator::tool_call_tracker::ToolCallTracker;
 use crate::domains::agent::runner::orchestrator::turn_accumulator::TurnAccumulatorMap;
 
 /// Read-only probe for querying active run state.
@@ -134,7 +134,7 @@ pub struct Orchestrator {
     broadcast: Arc<EventEmitter>,
     run_registry: Arc<RunRegistry>,
     /// Capability invocation tracker shared with capability-result capabilities.
-    tool_tracker: Mutex<ToolCallTracker>,
+    capability_invocation_tracker: Mutex<CapabilityInvocationTracker>,
     /// Accumulates in-progress turn content for session resume catch-up.
     turn_accumulators: Arc<TurnAccumulatorMap>,
     /// Per-session monotonic sequence counters.
@@ -150,9 +150,9 @@ pub struct Orchestrator {
     /// and producing duplicate `memory.retained` events. Held as `Arc<DashMap>`
     /// so background tasks can hold a reference independent of the orchestrator.
     retain_in_flight: Arc<DashMap<String, ()>>,
-    /// Per-tool cancellation tokens for `agent.abortTool`. Populated by the
-    /// tool executor on each call, consumed (cancelled) by the engine transport.
-    tool_abort_registry: Arc<ToolAbortRegistry>,
+    /// Per-invocation cancellation tokens for `agent.abortCapabilityInvocation`. Populated by the
+    /// capability executor on each call, consumed (cancelled) by the engine transport.
+    invocation_abort_registry: Arc<InvocationAbortRegistry>,
 }
 
 impl Orchestrator {
@@ -162,18 +162,18 @@ impl Orchestrator {
             session_manager,
             broadcast: Arc::new(EventEmitter::new()),
             run_registry: Arc::new(RunRegistry::new()),
-            tool_tracker: Mutex::new(ToolCallTracker::new()),
+            capability_invocation_tracker: Mutex::new(CapabilityInvocationTracker::new()),
             turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
             sequence_counters: Arc::new(DashMap::new()),
             compaction_handlers: Arc::new(DashMap::new()),
             retain_in_flight: Arc::new(DashMap::new()),
-            tool_abort_registry: Arc::new(ToolAbortRegistry::new()),
+            invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
         }
     }
 
-    /// Get a shared reference to the per-tool abort registry.
-    pub fn tool_abort_registry(&self) -> &Arc<ToolAbortRegistry> {
-        &self.tool_abort_registry
+    /// Get a shared reference to the per-invocation abort registry.
+    pub fn invocation_abort_registry(&self) -> &Arc<InvocationAbortRegistry> {
+        &self.invocation_abort_registry
     }
 
     /// Get the session manager.
@@ -453,21 +453,31 @@ impl Orchestrator {
     }
 
     /// Register a capability invocation, returning a receiver for the result.
-    pub fn register_tool_call(
+    pub fn register_capability_invocation(
         &self,
-        tool_call_id: &str,
+        invocation_id: &str,
     ) -> tokio::sync::oneshot::Receiver<serde_json::Value> {
-        self.tool_tracker.lock().register(tool_call_id)
+        self.capability_invocation_tracker
+            .lock()
+            .register(invocation_id)
     }
 
     /// Resolve a pending capability invocation with a result. Returns true if found.
-    pub fn resolve_tool_call(&self, tool_call_id: &str, value: serde_json::Value) -> bool {
-        self.tool_tracker.lock().resolve(tool_call_id, value)
+    pub fn resolve_capability_invocation(
+        &self,
+        invocation_id: &str,
+        value: serde_json::Value,
+    ) -> bool {
+        self.capability_invocation_tracker
+            .lock()
+            .resolve(invocation_id, value)
     }
 
     /// Check if a capability invocation is pending.
-    pub fn has_pending_tool_call(&self, tool_call_id: &str) -> bool {
-        self.tool_tracker.lock().has_pending(tool_call_id)
+    pub fn has_pending_capability_invocation(&self, invocation_id: &str) -> bool {
+        self.capability_invocation_tracker
+            .lock()
+            .has_pending(invocation_id)
     }
 
     /// Graceful shutdown — end all active sessions.
@@ -492,7 +502,7 @@ impl Orchestrator {
         }
 
         // Cancel all pending capability invocations
-        self.tool_tracker.lock().cancel_all();
+        self.capability_invocation_tracker.lock().cancel_all();
 
         // Clear all sequence counters and compaction handlers
         self.sequence_counters.clear();
@@ -688,22 +698,22 @@ mod tests {
     // --- Capability invocation tracker tests ---
 
     #[tokio::test]
-    async fn tool_call_register_and_resolve() {
+    async fn invocation_register_and_resolve() {
         let orch = make_orchestrator();
-        let rx = orch.register_tool_call("tc_1");
+        let rx = orch.register_capability_invocation("tc_1");
 
-        assert!(orch.has_pending_tool_call("tc_1"));
-        assert!(orch.resolve_tool_call("tc_1", json!({"result": "ok"})));
-        assert!(!orch.has_pending_tool_call("tc_1"));
+        assert!(orch.has_pending_capability_invocation("tc_1"));
+        assert!(orch.resolve_capability_invocation("tc_1", json!({"result": "ok"})));
+        assert!(!orch.has_pending_capability_invocation("tc_1"));
 
         let val = rx.await.unwrap();
         assert_eq!(val["result"], "ok");
     }
 
     #[test]
-    fn tool_call_resolve_unknown_returns_false() {
+    fn invocation_resolve_unknown_returns_false() {
         let orch = make_orchestrator();
-        assert!(!orch.resolve_tool_call("unknown", json!(null)));
+        assert!(!orch.resolve_capability_invocation("unknown", json!(null)));
     }
 
     // --- Concurrency limit tests ---
@@ -784,9 +794,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_clears_tool_calls() {
+    async fn shutdown_clears_invocations() {
         let orch = make_orchestrator();
-        let rx = orch.register_tool_call("tc_1");
+        let rx = orch.register_capability_invocation("tc_1");
 
         orch.shutdown().await.unwrap();
         assert!(rx.await.is_err()); // sender was dropped

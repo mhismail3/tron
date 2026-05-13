@@ -1,6 +1,6 @@
 version = "1"
 
 [policy]
-toolDescriptionsAreContextBlocks = true
+capabilityDescriptionsAreContextBlocks = true
 secretValuesAreNeverRendered = true
 providerSpecificFormatting = "providerPayload"

@@ -1,6 +1,6 @@
 //! Blob repository — content-addressable storage with SHA-256 dedup.
 //!
-//! Blobs store large content (tool outputs, file contents) separately from events.
+//! Blobs store large content (capability outputs, file contents) separately from events.
 //! Content is hashed with SHA-256 for deduplication — storing the same content twice
 //! increments the reference count instead of creating a duplicate row.
 

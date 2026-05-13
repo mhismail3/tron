@@ -2,7 +2,7 @@
 //!
 //! Transport setup delegates to `domains::registration` so the client
 //! protocol layer does not know individual domain workers, hidden apply
-//! functions, or tool worker internals.
+//! functions, or capability worker internals.
 
 use crate::engine::Result as EngineResult;
 use crate::shared::server::context::ServerRuntimeContext;

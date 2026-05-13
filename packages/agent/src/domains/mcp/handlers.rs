@@ -29,8 +29,8 @@ operation_bindings! {
         "reload" => |invocation, deps| {
             mcp_reload_value(invocation, deps).await
         },
-        "list_tools" => |invocation, deps| {
-            mcp_list_tools_value(Some(&invocation.payload), deps).await
+        "list_capabilities" => |invocation, deps| {
+            mcp_list_capabilities_value(Some(&invocation.payload), deps).await
         },
     ];
 }

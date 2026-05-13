@@ -59,14 +59,14 @@ struct ProcessedEventItemTests {
         if case .single(let e) = main[0].kind {
             #expect(e.id == event.id)
         } else {
-            Issue.record("Expected .single, got .mergedTool")
+            Issue.record("Expected .single, got .mergedCapability")
         }
     }
 
-    // MARK: - Tool Call Merging
+    // MARK: - Capability Call Merging
 
     @Test("Capability invocation with matching result merges into single item")
-    func toolCallWithResult() {
+    func invocationStartWithResult() {
         let callId = "call-123"
         let callEvent = makeEvent(
             id: "evt-call",
@@ -89,24 +89,24 @@ struct ProcessedEventItemTests {
         let (main, postTurn) = processEventsForTurn(turn)
         #expect(postTurn.isEmpty)
 
-        let toolItems = main.filter {
-            if case .mergedTool = $0.kind { return true }
+        let capabilityItems = main.filter {
+            if case .mergedCapability = $0.kind { return true }
             return false
         }
-        #expect(toolItems.count == 1)
+        #expect(capabilityItems.count == 1)
 
-        if case .mergedTool(let call, let result) = toolItems[0].kind {
+        if case .mergedCapability(let call, let result) = capabilityItems[0].kind {
             #expect(call.id == "evt-call")
             #expect(result?.id == "evt-result")
         } else {
-            Issue.record("Expected .mergedTool")
+            Issue.record("Expected .mergedCapability")
         }
     }
 
-    @Test("In-progress capability invocation after completed tool goes to post-turn boundary")
-    func toolCallInProgressAfterCompletedTool() {
+    @Test("In-progress capability invocation after completed capability goes to post-turn boundary")
+    func invocationStartInProgressAfterCompletedCapability() {
         // When a completed capability invocation+result exists, a subsequent in-progress call
-        // falls past the lastMainIndex (= last toolResult index) into post-turn
+        // falls past the lastMainIndex (= last capabilityResult index) into post-turn
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
             makeEvent(id: "call-done", type: "capability.invocation.started", sequence: 2, payload: ["invocationId": AnyCodable("done")]),
@@ -117,14 +117,14 @@ struct ProcessedEventItemTests {
         let (main, _) = processEventsForTurn(turn)
 
         // assistant + merged(done) + merged(pending with nil result) = items in main or post-turn
-        // lastMainIndex = index of last toolResult (2), so call-pending at index 3 is post-turn
+        // lastMainIndex = index of last capabilityResult (2), so call-pending at index 3 is post-turn
         // Only assistant + merged(done) in main
-        let toolItems = main.filter {
-            if case .mergedTool = $0.kind { return true }
+        let capabilityItems = main.filter {
+            if case .mergedCapability = $0.kind { return true }
             return false
         }
-        #expect(toolItems.count == 1)
-        if case .mergedTool(let call, let result) = toolItems[0].kind {
+        #expect(capabilityItems.count == 1)
+        if case .mergedCapability(let call, let result) = capabilityItems[0].kind {
             #expect(call.id == "call-done")
             #expect(result?.id == "result-done")
         }
@@ -147,7 +147,7 @@ struct ProcessedEventItemTests {
     }
 
     @Test("Capability results without matching calls are dropped from main items")
-    func orphanedToolResultDropped() {
+    func orphanedCapabilityResultDropped() {
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
             makeEvent(
@@ -160,7 +160,7 @@ struct ProcessedEventItemTests {
         let turn = makeTurn(events: events)
         let (main, _) = processEventsForTurn(turn)
 
-        // The tool result is skipped (not added as .single, and no matching call to merge with)
+        // The capability result is skipped (not added as .single, and no matching call to merge with)
         #expect(main.count == 1)
         if case .single(let e) = main[0].kind {
             #expect(e.eventType == .messageAssistant)
@@ -213,13 +213,13 @@ struct ProcessedEventItemTests {
         let turn = makeTurn(events: events)
         let (main, postTurn) = processEventsForTurn(turn)
 
-        // Main: user + assistant + merged tool = 3 items
+        // Main: user + assistant + merged capability = 3 items
         #expect(main.count == 3)
         // Post-turn: config.model_switch
         #expect(postTurn.count == 1)
     }
 
-    // MARK: - Multiple Tool Calls
+    // MARK: - Multiple Capability Calls
 
     @Test("Multiple sequential capability invocations each correctly paired")
     func multipleCapabilityInvocations() {
@@ -234,25 +234,25 @@ struct ProcessedEventItemTests {
         let (main, postTurn) = processEventsForTurn(turn)
         #expect(postTurn.isEmpty)
 
-        // assistant + 2 merged tools = 3 items
+        // assistant + 2 merged capabilities = 3 items
         #expect(main.count == 3)
 
-        let toolItems = main.compactMap { item -> (String, String?)? in
-            if case .mergedTool(let call, let result) = item.kind {
+        let capabilityItems = main.compactMap { item -> (String, String?)? in
+            if case .mergedCapability(let call, let result) = item.kind {
                 return (call.id, result?.id)
             }
             return nil
         }
-        #expect(toolItems.count == 2)
-        #expect(toolItems[0].0 == "call-a")
-        #expect(toolItems[0].1 == "result-a")
-        #expect(toolItems[1].0 == "call-b")
-        #expect(toolItems[1].1 == "result-b")
+        #expect(capabilityItems.count == 2)
+        #expect(capabilityItems[0].0 == "call-a")
+        #expect(capabilityItems[0].1 == "result-a")
+        #expect(capabilityItems[1].0 == "call-b")
+        #expect(capabilityItems[1].1 == "result-b")
     }
 
-    @Test("In-progress capability invocation after completed tools goes to post-turn boundary")
+    @Test("In-progress capability invocation after completed capabilities goes to post-turn boundary")
     func inProgressCapabilityInvocationPostBoundary() {
-        // call-c at index 5 is past the lastMainIndex (last toolResult at index 4)
+        // call-c at index 5 is past the lastMainIndex (last capabilityResult at index 4)
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
             makeEvent(id: "call-a", type: "capability.invocation.started", sequence: 2, payload: ["invocationId": AnyCodable("id-a")]),
@@ -265,7 +265,7 @@ struct ProcessedEventItemTests {
         let (main, postTurn) = processEventsForTurn(turn)
 
         // call-c goes past boundary, capability.invocation.started not in postTurnTypes → filtered out
-        #expect(main.count == 3) // assistant + 2 merged completed tools
+        #expect(main.count == 3) // assistant + 2 merged completed capabilities
         #expect(postTurn.isEmpty) // capability.invocation.started is not a lifecycle event type
     }
 
@@ -277,9 +277,9 @@ struct ProcessedEventItemTests {
         let callEvent = makeEvent(id: "evt-2", type: "capability.invocation.started", payload: ["invocationId": AnyCodable("tc-1")])
 
         let single = ProcessedEventItem(kind: .single(singleEvent))
-        let merged = ProcessedEventItem(kind: .mergedTool(call: callEvent, result: nil))
+        let merged = ProcessedEventItem(kind: .mergedCapability(call: callEvent, result: nil))
 
         #expect(single.id == "evt-1")
-        #expect(merged.id == "tool-evt-2")
+        #expect(merged.id == "capability-evt-2")
     }
 }

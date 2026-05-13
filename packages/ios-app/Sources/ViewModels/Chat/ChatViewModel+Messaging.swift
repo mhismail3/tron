@@ -159,14 +159,14 @@ extension ChatViewModel {
     }
 
     /// Cooperatively abort a single in-flight capability invocation without stopping the turn.
-    /// The server cancels the per-tool CancellationToken so the tool can observe
+    /// The server cancels the per-invocation CancellationToken so the capability can observe
     /// cancellation and return an error result; the agent loop continues.
-    func abortTool(invocationId: String, idempotencyKey: EngineIdempotencyKey) {
+    func abortCapabilityInvocation(invocationId: String, idempotencyKey: EngineIdempotencyKey) {
         Task {
             do {
-                _ = try await engineClient.agent.abortTool(invocationId: invocationId, idempotencyKey: idempotencyKey)
+                _ = try await engineClient.agent.abortCapabilityInvocation(invocationId: invocationId, idempotencyKey: idempotencyKey)
             } catch {
-                logError("Failed to abort tool \(invocationId): \(error.localizedDescription)")
+                logError("Failed to abort capability \(invocationId): \(error.localizedDescription)")
             }
         }
     }

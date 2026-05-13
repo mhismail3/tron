@@ -287,7 +287,7 @@ impl SessionQueryService {
                     let role = match event.event_type.as_str() {
                         "message.user" => "user",
                         "message.assistant" => "assistant",
-                        "capability.invocation.completed" => "tool",
+                        "capability.invocation.completed" => "capability",
                         _ => "unknown",
                     };
                     let content =
@@ -306,12 +306,12 @@ impl SessionQueryService {
                         "content": content,
                         "timestamp": event.timestamp,
                     });
-                    if let Some(ref tool_name) = event.tool_name {
-                        message["toolUse"] = json!({ "name": tool_name });
+                    if let Some(ref model_primitive_name) = event.model_primitive_name {
+                        message["capabilityInvocation"] = json!({ "name": model_primitive_name });
                     }
                     if event.event_type == "capability.invocation.completed" {
-                        if let Some(tool_call_id) = content.get("toolCallId") {
-                            message["toolCallId"] = tool_call_id.clone();
+                        if let Some(invocation_id) = content.get("invocationId") {
+                            message["invocationId"] = invocation_id.clone();
                         }
                         if let Some(is_error) = content.get("isError") {
                             message["isError"] = is_error.clone();
@@ -382,7 +382,7 @@ mod tests {
     }
 
     /// Events in the export are ordered by sequence ASC. A downstream
-    /// import or replay tool relies on this; shuffling by insertion order
+    /// import or replay capability relies on this; shuffling by insertion order
     /// or ID would be a silent correctness bug.
     #[tokio::test]
     async fn export_events_are_ordered_by_sequence_asc() {
@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(result["eventCount"].as_u64().unwrap(), 4);
     }
 
-    /// `exportedAt` is an RFC3339 timestamp. Downstream tools parse it
+    /// `exportedAt` is an RFC3339 timestamp. Downstream capabilities parse it
     /// as-is — if this regresses to a raw `SystemTime` or a broken format,
     /// import tooling silently breaks.
     #[tokio::test]

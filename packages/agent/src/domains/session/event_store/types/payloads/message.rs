@@ -28,7 +28,7 @@ pub struct UserMessagePayload {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssistantMessagePayload {
-    /// Content blocks (text, `tool_use`, thinking).
+    /// Content blocks (text, `capability_invocation`, thinking).
     pub content: Value,
     /// Turn number.
     pub turn: i64,

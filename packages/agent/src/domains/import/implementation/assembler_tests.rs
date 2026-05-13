@@ -165,8 +165,8 @@ fn three_chunk_assistant() {
             Some("a2"),
             "2026-01-01T00:00:02Z",
             "msg1",
-            json!([{ "type": "tool_use", "id": "t1", "name": "process::run", "input": {} }]),
-            Some("tool_use"),
+            json!([{ "type": "capability_invocation", "id": "t1", "name": "process::run", "input": {} }]),
+            Some("capability_invocation"),
             Some(json!({ "input_tokens": 200, "output_tokens": 100 })),
             None,
             1,
@@ -181,8 +181,8 @@ fn three_chunk_assistant() {
     assert_eq!(am.content_blocks.len(), 3);
     assert_eq!(am.content_blocks[0]["type"], "thinking");
     assert_eq!(am.content_blocks[1]["type"], "text");
-    assert_eq!(am.content_blocks[2]["type"], "tool_use");
-    assert_eq!(am.stop_reason, "tool_use");
+    assert_eq!(am.content_blocks[2]["type"], "capability_invocation");
+    assert_eq!(am.stop_reason, "capability_invocation");
 }
 
 #[test]
@@ -204,8 +204,8 @@ fn stop_reason_from_last_chunk() {
             Some("a1"),
             "2026-01-01T00:00:01Z",
             "msg1",
-            json!([{ "type": "tool_use", "id": "t1", "name": "X", "input": {} }]),
-            Some("tool_use"),
+            json!([{ "type": "capability_invocation", "id": "t1", "name": "X", "input": {} }]),
+            Some("capability_invocation"),
             None,
             None,
             1,
@@ -216,7 +216,7 @@ fn stop_reason_from_last_chunk() {
     let AssembledItem::AssistantMessage(am) = &items[0] else {
         panic!()
     };
-    assert_eq!(am.stop_reason, "tool_use");
+    assert_eq!(am.stop_reason, "capability_invocation");
 }
 
 #[test]

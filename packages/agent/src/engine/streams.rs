@@ -1,7 +1,7 @@
 //! Engine stream primitive.
 //!
 //! Streams are resumable cursor views over engine-visible change records. They
-//! are not a transport: engine clients, agent tools, and external workers can
+//! are not a transport: engine clients, agent capabilities, and external workers can
 //! all poll the same stream cursor model.
 //!
 //! INVARIANT: live subscriptions that omit an explicit cursor start at the

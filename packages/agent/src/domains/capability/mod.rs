@@ -23,10 +23,10 @@
 //!
 //! Provider integrations should only expose the three capability primitives. All
 //! other behavior must remain discoverable/executable as worker-owned catalog
-//! entries rather than prompt-expanded hardcoded tools. Admin functions such as
+//! entries rather than prompt-expanded hardcoded capabilities. Admin functions such as
 //! `capability::status`, `capability::plugin_list`, and
 //! `capability::policy_validate` are normal catalog functions for operator
-//! clients and are never marked with model-facing tool metadata.
+//! clients and are never marked with model-facing capability metadata.
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!

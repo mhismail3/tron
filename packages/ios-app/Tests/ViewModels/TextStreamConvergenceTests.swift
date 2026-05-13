@@ -105,36 +105,36 @@ final class TextStreamConvergenceTests: XCTestCase {
 
     // MARK: - Server payload shape
 
-    func testServerExtractsOnlyTextBlocksSkippingToolUse() {
+    func testServerExtractsOnlyTextBlocksSkippingCapabilityInvocation() {
         // When the server emits message.assistant with interleaved
-        // text + tool_use blocks, textContent returns only the text.
+        // text + capability_invocation blocks, textContent returns only the text.
         // Tool_use blocks render via capability.invocation.started events (handled live by
         // a different plugin); they MUST NOT contribute to the text
         // message otherwise the live path (which does NOT include
-        // tool_use in receivedText) would diverge.
+        // capability_invocation in receivedText) would diverge.
         let payload: [String: AnyCodable] = [
             "content": AnyCodable([
-                ["type": "text", "text": "Before tool."],
-                ["type": "tool_use", "id": "t1", "name": "Bash", "input": ["cmd": "ls"]],
-                ["type": "text", "text": "After tool."],
+                ["type": "text", "text": "Before capability."],
+                ["type": "capability_invocation", "id": "t1", "name": "execute", "input": ["cmd": "ls"]],
+                ["type": "text", "text": "After capability."],
             ]),
             "turn": AnyCodable(1),
             "model": AnyCodable("claude-sonnet-4"),
-            "stopReason": AnyCodable("tool_use")
+            "stopReason": AnyCodable("capability_invocation")
         ]
         let server = AssistantMessagePayload(from: payload)?.textContent
         // Text blocks join with newline separator, then trim.
-        XCTAssertEqual(server, "Before tool.\nAfter tool.")
+        XCTAssertEqual(server, "Before capability.\nAfter capability.")
     }
 
     func testServerReturnsNilWhenContentHasNoTextBlocks() {
         let payload: [String: AnyCodable] = [
             "content": AnyCodable([
-                ["type": "tool_use", "id": "t1", "name": "Bash", "input": [:] as [String: String]]
+                ["type": "capability_invocation", "id": "t1", "name": "execute", "input": [:] as [String: String]]
             ]),
             "turn": AnyCodable(1),
             "model": AnyCodable("claude-sonnet-4"),
-            "stopReason": AnyCodable("tool_use")
+            "stopReason": AnyCodable("capability_invocation")
         ]
         XCTAssertNil(AssistantMessagePayload(from: payload)?.textContent)
     }

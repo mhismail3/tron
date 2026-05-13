@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{NotifyDelegate, NotifyResult};
 use crate::domains::session::event_store::{ConnectionPool, EventStore};
 
@@ -45,7 +45,7 @@ impl NotifyDelegate for RelayNotifyDelegate {
     async fn send_notification(
         &self,
         notification: &crate::domains::capability_support::implementations::traits::Notification,
-    ) -> Result<NotifyResult, ToolError> {
+    ) -> Result<NotifyResult, CapabilityExecutionError> {
         let device_tokens = push_helpers::active_tokens(&self.pool)?;
 
         if device_tokens.is_empty() {

@@ -320,8 +320,8 @@ struct ModelInfoStrictDecodeTests {
         payload["reasoningLevels"] = ["minimal", "low", "medium", "high", "xhigh"]
         payload["defaultReasoningLevel"] = "medium"
         payload["supportsStreaming"] = true
-        payload["supportsTools"] = true
-        payload["supportsToolSearch"] = false
+        payload["supportsCapabilityPrimitives"] = true
+        payload["supportsCapabilitySearch"] = false
         payload["supportsComputerUse"] = false
         payload["supportsVerbosity"] = true
         payload["defaultVerbosity"] = "low"
@@ -337,8 +337,8 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.maxContextWindow == 272_000)
         #expect(m.reasoningLevels == ["minimal", "low", "medium", "high", "xhigh"])
         #expect(m.supportsStreaming == true)
-        #expect(m.supportsTools == true)
-        #expect(m.supportsToolSearch == false)
+        #expect(m.supportsCapabilityPrimitives == true)
+        #expect(m.supportsCapabilitySearch == false)
         #expect(m.supportsComputerUse == false)
         #expect(m.supportsVerbosity == true)
         #expect(m.defaultVerbosity == "low")

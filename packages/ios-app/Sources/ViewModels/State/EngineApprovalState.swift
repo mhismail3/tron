@@ -16,7 +16,7 @@ final class EngineApprovalState {
     var showSheet = false
 
     /// Current engine approval chip data when the sheet is open.
-    var currentData: EngineApprovalToolData?
+    var currentData: EngineApprovalData?
 
     /// Pending approval submission to send after sheet dismissal completes.
     /// Set during prepareSubmission(), consumed by executePendingSubmission().

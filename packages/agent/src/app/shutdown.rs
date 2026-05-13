@@ -12,7 +12,7 @@
 //!    MCP servers can send `shutdown` messages before the WebSocket
 //!    server is torn down.
 //!
-//! The order is intentional: agent loops finish turns → tools drain →
+//! The order is intentional: agent loops finish turns → capabilities drain →
 //! MCP disconnects cleanly → cron stops scheduling → transcription
 //! workers drop → DB pool closes. See [`ShutdownPhase`].
 
@@ -42,21 +42,21 @@ const PER_HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 ///
 /// The order matters:
 /// - [`Agent`](ShutdownPhase::Agent) drains in-flight turns first so
-///   tools they own finish naturally.
-/// - [`Tools`](ShutdownPhase::Tools) then cancels anything still running
+///   capabilities they own finish naturally.
+/// - [`Capabilities`](ShutdownPhase::Capabilities) then cancels anything still running
 ///   (e.g. long process capabilities that ignored turn cancel).
 /// - [`Mcp`](ShutdownPhase::Mcp) disconnects external MCP servers BEFORE
 ///   we stop accepting capability calls that would call them.
 /// - [`Cron`](ShutdownPhase::Cron) stops scheduling new runs.
 /// - [`Transcription`](ShutdownPhase::Transcription) reaps sidecar
-///   processes last, after any tool that might produce audio has drained.
+///   processes last, after any capability that might produce audio has drained.
 /// - [`Database`](ShutdownPhase::Database) flushes pending writes last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShutdownPhase {
-    /// Agent turn loops — drain in-flight turns before any tool dies.
+    /// Agent turn loops — drain in-flight turns before capability workers stop.
     Agent = 0,
     /// Capability executors that outlive their turn.
-    Tools = 1,
+    Capabilities = 1,
     /// MCP stdio/SSE clients — disconnect cleanly before the transport stops.
     Mcp = 2,
     /// Cron scheduler — stop enqueuing new runs; in-flight runs drain via tasks.
@@ -71,7 +71,7 @@ impl ShutdownPhase {
     fn as_str(self) -> &'static str {
         match self {
             Self::Agent => "agent",
-            Self::Tools => "tools",
+            Self::Capabilities => "capabilities",
             Self::Mcp => "mcp",
             Self::Cron => "cron",
             Self::Transcription => "transcription",
@@ -591,7 +591,7 @@ mod tests {
             (ShutdownPhase::Mcp, "mcp"),
             (ShutdownPhase::Cron, "cron"),
             (ShutdownPhase::Transcription, "transcription"),
-            (ShutdownPhase::Tools, "tools"),
+            (ShutdownPhase::Capabilities, "capabilities"),
         ] {
             let order = Arc::clone(&order);
             coord.register_phase_hook(phase, name, move || async move {
@@ -606,7 +606,14 @@ mod tests {
         let observed = order.lock().clone();
         assert_eq!(
             observed,
-            vec!["agent", "tools", "mcp", "cron", "transcription", "database"]
+            vec![
+                "agent",
+                "capabilities",
+                "mcp",
+                "cron",
+                "transcription",
+                "database",
+            ]
         );
     }
 
@@ -619,7 +626,7 @@ mod tests {
         coord.register_phase_hook(ShutdownPhase::Agent, "bad", move || async move {
             panic!("intentional test panic");
         });
-        coord.register_phase_hook(ShutdownPhase::Tools, "good", move || async move {
+        coord.register_phase_hook(ShutdownPhase::Capabilities, "good", move || async move {
             ran_after_clone.store(true, Ordering::SeqCst);
         });
 
@@ -643,7 +650,7 @@ mod tests {
         coord.register_phase_hook(ShutdownPhase::Agent, "slow", move || async move {
             tokio::time::sleep(Duration::from_secs(60)).await;
         });
-        coord.register_phase_hook(ShutdownPhase::Tools, "fast", move || async move {
+        coord.register_phase_hook(ShutdownPhase::Capabilities, "fast", move || async move {
             ran_after_clone.store(true, Ordering::SeqCst);
         });
 
@@ -695,7 +702,7 @@ mod tests {
 
         for phase in [
             ShutdownPhase::Agent,
-            ShutdownPhase::Tools,
+            ShutdownPhase::Capabilities,
             ShutdownPhase::Mcp,
             ShutdownPhase::Cron,
             ShutdownPhase::Transcription,
@@ -718,8 +725,8 @@ mod tests {
     fn phase_ordering_is_total() {
         // Lock in the declared phase order; any reordering requires an
         // explicit change to this test + the module docs.
-        assert!(ShutdownPhase::Agent < ShutdownPhase::Tools);
-        assert!(ShutdownPhase::Tools < ShutdownPhase::Mcp);
+        assert!(ShutdownPhase::Agent < ShutdownPhase::Capabilities);
+        assert!(ShutdownPhase::Capabilities < ShutdownPhase::Mcp);
         assert!(ShutdownPhase::Mcp < ShutdownPhase::Cron);
         assert!(ShutdownPhase::Cron < ShutdownPhase::Transcription);
         assert!(ShutdownPhase::Transcription < ShutdownPhase::Database);

@@ -52,7 +52,7 @@ final class CompactionCoordinator {
         context.finalizeStreamingMessage()
 
         // Update context tracking — prefer estimatedContextTokens (total context including
-        // system prompt, tools, rules) over tokensAfter (messages-only)
+        // system prompt, capabilities, rules) over tokensAfter (messages-only)
         let postCompactionTokens = pluginResult.estimatedContextTokens ?? pluginResult.tokensAfter
         context.contextState.lastTurnInputTokens = postCompactionTokens
 

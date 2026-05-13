@@ -28,7 +28,7 @@
 //! - [`injector`] — `@reference` extraction and `<skills>` XML context building
 //! - [`tracker`] — Per-session skill tracking with event-sourced reconstruction.
 //!   Tracks active skills and deactivation notices.
-//! - [`denials`] — Convert frontmatter tool restrictions to denial config
+//! - [`denials`] — Convert frontmatter capability restrictions to denial config
 //!
 //! ## State Model
 //!

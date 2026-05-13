@@ -20,7 +20,7 @@ use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::agent::turn_runner;
 use crate::domains::agent::runner::errors::StopReason;
 use crate::domains::agent::runner::orchestrator::event_persister::EventPersister;
-use crate::domains::agent::runner::orchestrator::tool_abort_registry::ToolAbortRegistry;
+use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::runner::types::{AgentConfig, RunContext, RunResult};
 
 /// RAII guard that resets `is_running` to `false` on drop (even on panic).
@@ -46,8 +46,8 @@ impl Drop for RunGuard<'_> {
 pub struct AgentDeps {
     /// LLM provider for generating completions.
     pub provider: Arc<dyn Provider>,
-    /// Live catalog policy for model-facing tools.
-    pub tool_surface_policy: CapabilitySurfacePolicy,
+    /// Live catalog policy for model-facing capabilities.
+    pub capability_surface_policy: CapabilitySurfacePolicy,
     /// Optional guardrail engine for content safety.
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for lifecycle hooks.
@@ -79,7 +79,7 @@ pub struct AgentDeps {
 pub struct TronAgent {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
-    tool_surface_policy: CapabilitySurfacePolicy,
+    capability_surface_policy: CapabilitySurfacePolicy,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
     context_manager: ContextManager,
@@ -106,10 +106,10 @@ pub struct TronAgent {
     output_buffer_registry: Option<
         Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     >,
-    /// Optional per-call cancellation registry. Enables `agent.abortTool` to
+    /// Optional per-call cancellation registry. Enables `agent.abortCapabilityInvocation` to
     /// cancel a single in-flight capability without aborting the whole turn.
     /// When `None` (subagents, older code paths) calls share the turn-level token.
-    tool_abort_registry: Option<Arc<ToolAbortRegistry>>,
+    invocation_abort_registry: Option<Arc<InvocationAbortRegistry>>,
     /// Optional engine host used by the executor to invoke capability primitives.
     engine_host: Option<crate::engine::EngineHostHandle>,
 }
@@ -127,7 +127,7 @@ impl TronAgent {
         Self {
             config,
             provider: deps.provider,
-            tool_surface_policy: deps.tool_surface_policy,
+            capability_surface_policy: deps.capability_surface_policy,
             guardrails: deps.guardrails,
             hooks: deps.hooks,
             context_manager: deps.context_manager,
@@ -144,7 +144,7 @@ impl TronAgent {
             external_abort_token: false,
             persister: None,
             sequence_counter: None,
-            tool_abort_registry: None,
+            invocation_abort_registry: None,
         }
     }
 
@@ -228,7 +228,7 @@ impl TronAgent {
                 turn,
                 context_manager: &mut self.context_manager,
                 provider: &self.provider,
-                tool_surface_policy: &self.tool_surface_policy,
+                capability_surface_policy: &self.capability_surface_policy,
                 guardrails: &self.guardrails,
                 hooks: &self.hooks,
                 compaction: &*self.compaction,
@@ -249,7 +249,7 @@ impl TronAgent {
                 job_manager: self.job_manager.as_ref(),
                 output_buffer_registry: self.output_buffer_registry.as_ref(),
                 sequence_counter: self.sequence_counter.as_ref().map(|c| c.as_ref()),
-                tool_abort_registry: self.tool_abort_registry.as_ref(),
+                invocation_abort_registry: self.invocation_abort_registry.as_ref(),
                 engine_host: self.engine_host.as_ref(),
             })
             .await;
@@ -288,12 +288,14 @@ impl TronAgent {
             }
 
             if result.stop_turn_requested {
-                final_stop_reason = StopReason::ToolStop;
+                final_stop_reason = StopReason::CapabilityStop;
                 exited_via_break = true;
                 break;
             }
 
-            if let Some(StopReason::EndTurn | StopReason::NoToolCalls) = result.stop_reason {
+            if let Some(StopReason::EndTurn | StopReason::NoCapabilityInvocationDrafts) =
+                result.stop_reason
+            {
                 final_stop_reason = result.stop_reason.unwrap_or(StopReason::EndTurn);
                 exited_via_break = true;
                 break;
@@ -415,11 +417,11 @@ impl TronAgent {
         self.sequence_counter = Some(counter);
     }
 
-    /// Inject the per-tool cancellation registry (owned by the orchestrator).
-    /// Each in-flight capability invocation gets a child of `abort_token`; `agent.abortTool`
+    /// Inject the per-invocation cancellation registry (owned by the orchestrator).
+    /// Each in-flight capability invocation gets a child of `abort_token`; `agent.abortCapabilityInvocation`
     /// cancels that child without touching siblings or the turn itself.
-    pub fn set_tool_abort_registry(&mut self, registry: Arc<ToolAbortRegistry>) {
-        self.tool_abort_registry = Some(registry);
+    pub fn set_invocation_abort_registry(&mut self, registry: Arc<InvocationAbortRegistry>) {
+        self.invocation_abort_registry = Some(registry);
     }
 
     /// Abort the current run.

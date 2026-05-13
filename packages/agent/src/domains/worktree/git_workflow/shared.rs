@@ -8,7 +8,7 @@
 //! Operation implementations intentionally keep business logic minimal:
 //! param extraction → coordinator call → JSON response. Event emission
 //! (`WorktreeMainSynced`, `RepoMainAdvanced`, lock acquire/release, …) is
-//! owned by the coordinator layer so it fires for every caller (tool,
+//! owned by the coordinator layer so it fires for every caller (capability,
 //! engine transport, subagent).
 //!
 //! Error mapping: every coordinator error is routed through

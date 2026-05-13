@@ -26,8 +26,8 @@ operation_bindings! {
         "abort" => |invocation, deps| {
             abort_value(Some(&invocation.payload), deps).await
         },
-        "abort_tool" => |invocation, deps| {
-            abort_tool_value(Some(&invocation.payload), deps).await
+        "abort_invocation" => |invocation, deps| {
+            abort_invocation_value(Some(&invocation.payload), deps).await
         },
         "queue_prompt" => |invocation, deps| {
             queue_prompt_value(Some(&invocation.payload), invocation, deps).await

@@ -36,15 +36,15 @@ pub fn is_cache_cold(last_api_call_ms: u64, ttl_ms: u64) -> bool {
     now_ms.saturating_sub(last_api_call_ms) > ttl_ms
 }
 
-/// Prune large `tool_result` content blocks from old turns.
+/// Prune large `capability_result` content blocks from old turns.
 ///
 /// When the cache goes cold, re-caching the entire conversation is expensive.
-/// This function replaces large `tool_result` content (>2KB) in old turns with
+/// This function replaces large `capability_result` content (>2KB) in old turns with
 /// a placeholder, keeping recent turns intact.
 ///
 /// Returns a new Vec — never mutates the input.
 #[must_use]
-pub fn prune_tool_results_for_recache(
+pub fn prune_capability_results_for_recache(
     messages: &[AnthropicMessageParam],
     recent_turns: usize,
 ) -> Vec<AnthropicMessageParam> {
@@ -71,7 +71,7 @@ pub fn prune_tool_results_for_recache(
         }
     }
 
-    // Clone messages, pruning large tool_results before the cutoff
+    // Clone messages, pruning large capability_results before the cutoff
     messages
         .iter()
         .enumerate()
@@ -79,18 +79,18 @@ pub fn prune_tool_results_for_recache(
             if i >= cutoff_index || msg.role != "user" {
                 return msg.clone();
             }
-            prune_user_message_tool_results(msg)
+            prune_user_message_capability_results(msg)
         })
         .collect()
 }
 
-/// Prune large `tool_result` content blocks in a user message.
-fn prune_user_message_tool_results(msg: &AnthropicMessageParam) -> AnthropicMessageParam {
+/// Prune large `capability_result` content blocks in a user message.
+fn prune_user_message_capability_results(msg: &AnthropicMessageParam) -> AnthropicMessageParam {
     let pruned_content: Vec<Value> = msg
         .content
         .iter()
         .map(|block| {
-            if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+            if block.get("type").and_then(Value::as_str) != Some("capability_result") {
                 return block.clone();
             }
             let content = &block["content"];
@@ -137,19 +137,19 @@ mod tests {
         }
     }
 
-    fn tool_result_block(id: &str, content: &str) -> Value {
+    fn capability_result_block(id: &str, content: &str) -> Value {
         json!({
-            "type": "tool_result",
-            "tool_use_id": id,
+            "type": "capability_result",
+            "capability_invocation_id": id,
             "content": content,
         })
     }
 
-    fn large_tool_result_block(id: &str) -> Value {
+    fn large_capability_result_block(id: &str) -> Value {
         let large_content = "x".repeat(3000);
         json!({
-            "type": "tool_result",
-            "tool_use_id": id,
+            "type": "capability_result",
+            "capability_invocation_id": id,
             "content": large_content,
         })
     }
@@ -193,7 +193,7 @@ mod tests {
         let _ = result;
     }
 
-    // ── prune_tool_results_for_recache ──────────────────────────────────
+    // ── prune_capability_results_for_recache ──────────────────────────────────
 
     #[test]
     fn prune_not_enough_turns() {
@@ -201,7 +201,7 @@ mod tests {
             user_msg(vec![json!("hello")]),
             assistant_msg(vec![json!({"type": "text", "text": "hi"})]),
         ];
-        let result = prune_tool_results_for_recache(&messages, 3);
+        let result = prune_capability_results_for_recache(&messages, 3);
         assert_eq!(result.len(), 2);
     }
 
@@ -209,22 +209,22 @@ mod tests {
     fn prune_preserves_recent_turns() {
         let messages = vec![
             // Turn 1 (old)
-            user_msg(vec![large_tool_result_block("t1")]),
+            user_msg(vec![large_capability_result_block("t1")]),
             assistant_msg(vec![json!({"type": "text", "text": "r1"})]),
             // Turn 2 (old)
-            user_msg(vec![large_tool_result_block("t2")]),
+            user_msg(vec![large_capability_result_block("t2")]),
             assistant_msg(vec![json!({"type": "text", "text": "r2"})]),
             // Turn 3 (recent)
-            user_msg(vec![large_tool_result_block("t3")]),
+            user_msg(vec![large_capability_result_block("t3")]),
             assistant_msg(vec![json!({"type": "text", "text": "r3"})]),
             // Turn 4 (recent)
-            user_msg(vec![large_tool_result_block("t4")]),
+            user_msg(vec![large_capability_result_block("t4")]),
             assistant_msg(vec![json!({"type": "text", "text": "r4"})]),
             // Turn 5 (recent)
-            user_msg(vec![large_tool_result_block("t5")]),
+            user_msg(vec![large_capability_result_block("t5")]),
             assistant_msg(vec![json!({"type": "text", "text": "r5"})]),
         ];
-        let result = prune_tool_results_for_recache(&messages, 3);
+        let result = prune_capability_results_for_recache(&messages, 3);
         assert_eq!(result.len(), 10);
 
         // Turn 1 user message (index 0) should be pruned
@@ -246,10 +246,10 @@ mod tests {
     }
 
     #[test]
-    fn prune_small_tool_results_not_pruned() {
+    fn prune_small_capability_results_not_pruned() {
         let messages = vec![
             // Turn 1 (old, but small capability result)
-            user_msg(vec![tool_result_block("t1", "small output")]),
+            user_msg(vec![capability_result_block("t1", "small output")]),
             assistant_msg(vec![json!({"type": "text", "text": "r1"})]),
             // Turn 2
             user_msg(vec![json!("user2")]),
@@ -261,7 +261,7 @@ mod tests {
             user_msg(vec![json!("user4")]),
             assistant_msg(vec![json!({"type": "text", "text": "r4"})]),
         ];
-        let result = prune_tool_results_for_recache(&messages, 3);
+        let result = prune_capability_results_for_recache(&messages, 3);
 
         // Turn 1 capability result is small — NOT pruned
         let content = result[0].content[0]["content"].as_str().unwrap();
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_non_tool_result_blocks_untouched() {
+    fn prune_non_capability_result_blocks_untouched() {
         let messages = vec![
             user_msg(vec![json!({"type": "text", "text": "x".repeat(5000)})]),
             assistant_msg(vec![json!({"type": "text", "text": "r1"})]),
@@ -280,15 +280,15 @@ mod tests {
             user_msg(vec![json!("u4")]),
             assistant_msg(vec![json!({"type": "text", "text": "r4"})]),
         ];
-        let result = prune_tool_results_for_recache(&messages, 3);
+        let result = prune_capability_results_for_recache(&messages, 3);
 
-        // First user message has large text block, not tool_result — NOT pruned
+        // First user message has large text block, not capability_result — NOT pruned
         assert_eq!(result[0].content[0]["type"], "text");
     }
 
     #[test]
     fn prune_empty_messages() {
-        let result = prune_tool_results_for_recache(&[], 3);
+        let result = prune_capability_results_for_recache(&[], 3);
         assert!(result.is_empty());
     }
 
@@ -296,14 +296,14 @@ mod tests {
     fn prune_exactly_at_boundary() {
         // 3 turns, preserve 3 → nothing pruned
         let messages = vec![
-            user_msg(vec![large_tool_result_block("t1")]),
+            user_msg(vec![large_capability_result_block("t1")]),
             assistant_msg(vec![json!({"type": "text", "text": "r1"})]),
-            user_msg(vec![large_tool_result_block("t2")]),
+            user_msg(vec![large_capability_result_block("t2")]),
             assistant_msg(vec![json!({"type": "text", "text": "r2"})]),
-            user_msg(vec![large_tool_result_block("t3")]),
+            user_msg(vec![large_capability_result_block("t3")]),
             assistant_msg(vec![json!({"type": "text", "text": "r3"})]),
         ];
-        let result = prune_tool_results_for_recache(&messages, 3);
+        let result = prune_capability_results_for_recache(&messages, 3);
 
         // All capability results preserved (exactly 3 turns, preserve 3)
         let content = result[0].content[0]["content"].to_string();

@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared::messages::{Message, ToolCall};
+use crate::shared::messages::{CapabilityInvocationDraft, Message};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Session memory
@@ -34,7 +34,7 @@ pub struct SessionMemory {
     /// Conversation messages.
     pub messages: Vec<Message>,
     /// Capability invocations made during the session.
-    pub tool_calls: Vec<ToolCall>,
+    pub capability_invocations: Vec<CapabilityInvocationDraft>,
     /// Working directory path.
     pub working_directory: String,
     /// Files the agent is currently working with.
@@ -56,7 +56,7 @@ impl SessionMemory {
             started_at: chrono::Utc::now().to_rfc3339(),
             ended_at: None,
             messages: Vec::new(),
-            tool_calls: Vec::new(),
+            capability_invocations: Vec::new(),
             working_directory: working_directory.into(),
             active_files: Vec::new(),
             context: serde_json::Map::new(),
@@ -79,7 +79,7 @@ mod tests {
         assert_eq!(mem.session_id, "sess-1");
         assert_eq!(mem.working_directory, "/tmp/project");
         assert!(mem.messages.is_empty());
-        assert!(mem.tool_calls.is_empty());
+        assert!(mem.capability_invocations.is_empty());
         assert!(mem.ended_at.is_none());
         assert!(!mem.started_at.is_empty());
     }

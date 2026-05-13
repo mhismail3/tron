@@ -38,7 +38,7 @@ struct TurnGroupingTests {
 
     // MARK: - Boundary-Based Grouping
 
-    @Test("User message + assistant + tools grouped into same turn")
+    @Test("User message + assistant + capabilities grouped into same turn")
     func userAndAssistantGroupedTogether() {
         let events = [
             makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("Hello")]),
@@ -297,12 +297,12 @@ struct TurnGroupingTests {
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 2)
 
-        // Turn 1: user + assistant + 2 capability invocations + 2 tool results + hook + worktree.commit
+        // Turn 1: user + assistant + 2 capability invocations + 2 capability results + hook + worktree.commit
         #expect(groups[1].turnNumber == 1)
         #expect(groups[1].events.count == 8)
         #expect(groups[1].userMessagePreview == "Create test files")
 
-        // Turn 2: user + assistant + capability invocation + tool result
+        // Turn 2: user + assistant + capability invocation + capability result
         #expect(groups[2].turnNumber == 2)
         #expect(groups[2].events.count == 4)
         #expect(groups[2].userMessagePreview == "Now edit them")
@@ -643,7 +643,7 @@ struct TurnGroupingTests {
 
     // MARK: - Realistic Multi-Prompt Session
 
-    @Test("Realistic session matching actual database patterns with tools and inter-prompt events")
+    @Test("Realistic session matching actual database patterns with capabilities and inter-prompt events")
     func realisticMultiPromptSession() {
         let events = [
             // Session setup
@@ -679,8 +679,8 @@ struct TurnGroupingTests {
         let groups = TurnGrouping.group(events: events, analytics: emptyAnalytics, currentSessionId: "current")
 
         // Turn 0: setup (3 events)
-        // Turn 1-3: prompt 1 (user + hook + 3 assistants + 2 tools + 2 results + 2 inter-prompt)
-        // Turn 4-5: prompt 2 (user + 2 assistants + tool + notification + result + hook)
+        // Turn 1-3: prompt 1 (user + hook + 3 assistants + 2 capabilities + 2 results + 2 inter-prompt)
+        // Turn 4-5: prompt 2 (user + 2 assistants + capability + notification + result + hook)
         // Turn 6: prompt 3 (user + assistant)
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 3) // session.start + skills::activated + worktree.acquired

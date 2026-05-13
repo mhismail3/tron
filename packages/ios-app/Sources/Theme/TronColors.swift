@@ -504,11 +504,11 @@ enum TronAnimationTiming {
     /// Maximum messages to cascade (cap at 1 second)
     static let cascadeMaxMessages = 50
 
-    // MARK: - Tool Call Stagger
-    /// Interval between tool appearances (80ms)
-    static let toolStaggerNanos: UInt64 = 80_000_000
-    /// Maximum tool stagger delay (200ms)
-    static let toolStaggerCapNanos: UInt64 = 200_000_000
+    // MARK: - Capability Call Stagger
+    /// Interval between capability appearances (80ms)
+    static let capabilityStaggerNanos: UInt64 = 80_000_000
+    /// Maximum capability stagger delay (200ms)
+    static let capabilityStaggerCapNanos: UInt64 = 200_000_000
 
     // MARK: - Text Streaming
     /// Batch interval for text updates (100ms)

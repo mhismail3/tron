@@ -8,6 +8,7 @@
 //! deserialization.
 
 mod api;
+mod capabilities;
 mod context;
 mod git;
 mod guardrails;
@@ -15,11 +16,11 @@ mod memory;
 mod prompt_library;
 mod server;
 mod skills;
-mod tools;
 mod ui;
 mod update;
 
 pub use api::*;
+pub use capabilities::*;
 pub use context::*;
 pub use git::*;
 pub use guardrails::*;
@@ -27,7 +28,6 @@ pub use memory::*;
 pub use prompt_library::*;
 pub use server::*;
 pub use skills::*;
-pub use tools::*;
 pub use ui::*;
 pub use update::*;
 
@@ -63,7 +63,7 @@ pub struct TronSettings {
     /// Retry configuration for API calls.
     pub retry: RetrySettings,
     /// Capability-specific settings.
-    pub tools: CapabilitySettings,
+    pub capabilities: CapabilitySettings,
     /// Context management settings (compaction, memory, rules, tasks).
     pub context: ContextSettings,
     /// Agent runtime settings (max turns, timeouts).
@@ -107,7 +107,7 @@ impl Default for TronSettings {
             name: "tron".to_string(),
             api: ApiSettings::default(),
             retry: RetrySettings::default(),
-            tools: CapabilitySettings::default(),
+            capabilities: CapabilitySettings::default(),
             context: ContextSettings::default(),
             agent: AgentRuntimeSettings::default(),
             logging: LoggingSettings::default(),
@@ -160,7 +160,7 @@ impl TronSettings {
 
         clamp_ratio(&mut self.retry.jitter_factor, "jitter_factor");
 
-        let process = &mut self.tools.process;
+        let process = &mut self.capabilities.process;
         if process.max_timeout_ms < process.default_timeout_ms {
             tracing::warn!(
                 "process max_timeout_ms ({}) < default_timeout_ms ({}), correcting",
@@ -442,10 +442,10 @@ mod tests {
     #[test]
     fn validate_corrects_process_timeout_inversion() {
         let mut s = TronSettings::default();
-        s.tools.process.default_timeout_ms = 300_000;
-        s.tools.process.max_timeout_ms = 100_000;
+        s.capabilities.process.default_timeout_ms = 300_000;
+        s.capabilities.process.max_timeout_ms = 100_000;
         s.validate();
-        assert_eq!(s.tools.process.max_timeout_ms, 300_000);
+        assert_eq!(s.capabilities.process.max_timeout_ms, 300_000);
     }
 
     #[test]
@@ -453,11 +453,11 @@ mod tests {
         let mut s = TronSettings::default();
         let before_threshold = s.context.compactor.compaction_threshold;
         let before_jitter = s.retry.jitter_factor;
-        let before_max = s.tools.process.max_timeout_ms;
+        let before_max = s.capabilities.process.max_timeout_ms;
         s.validate();
         assert!((s.context.compactor.compaction_threshold - before_threshold).abs() < f64::EPSILON);
         assert!((s.retry.jitter_factor - before_jitter).abs() < f64::EPSILON);
-        assert_eq!(s.tools.process.max_timeout_ms, before_max);
+        assert_eq!(s.capabilities.process.max_timeout_ms, before_max);
     }
 
     #[test]

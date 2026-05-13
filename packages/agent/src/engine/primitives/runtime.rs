@@ -320,7 +320,7 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
             "contextPrimerLevel": "catalog",
             "runtimeRequirements": {"workerKind": "sandbox", "deliveryModes": ["Sync"]},
             "examples": [{"payload": {"hello": "world"}}],
-            "modelToolName": "demo_echo",
+            "modelPrimitiveName": "demo_echo",
             "streamTopics": []
         }
     });
@@ -658,7 +658,7 @@ def function_definition():
             "contextPrimerLevel": "catalog",
             "runtimeRequirements": {"workerKind": "sandbox", "deliveryModes": ["Sync"]},
             "examples": [{"payload": {"hello": "world"}}],
-            "modelToolName": "demo_echo",
+            "modelPrimitiveName": "demo_echo",
             "streamTopics": []
         },
     }

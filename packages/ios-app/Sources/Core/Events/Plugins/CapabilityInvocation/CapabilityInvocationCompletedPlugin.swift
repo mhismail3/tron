@@ -17,18 +17,18 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
 
         struct DataPayload: Decodable, Sendable {
             let invocationId: String
-            let modelToolName: String?
+            let modelPrimitiveName: String?
             let success: Bool
             let output: String?
             let error: String?
             let duration: Int?
-            let details: ToolDetails?
-            /// Raw details dictionary for tool-specific structured results
+            let details: CapabilityResultDetails?
+            /// Raw details dictionary for capability-specific structured results
             let rawDetails: [String: AnyCodable]?
             let identity: CapabilityIdentity
 
             enum CodingKeys: String, CodingKey {
-                case invocationId, modelToolName, success, output, error, duration, details
+                case invocationId, modelPrimitiveName, success, output, error, duration, details
                 case contractId, implementationId, functionId, pluginId, workerId
                 case schemaDigest, catalogRevision, trustTier, riskLevel, effectClass, traceId
                 case rootInvocationId, bindingDecisionId
@@ -37,14 +37,14 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
             init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 invocationId = try container.decode(String.self, forKey: .invocationId)
-                modelToolName = try container.decodeIfPresent(String.self, forKey: .modelToolName)
+                modelPrimitiveName = try container.decodeIfPresent(String.self, forKey: .modelPrimitiveName)
                 success = try container.decode(Bool.self, forKey: .success)
                 error = try container.decodeIfPresent(String.self, forKey: .error)
                 duration = try container.decodeIfPresent(Int.self, forKey: .duration)
-                details = try container.decodeIfPresent(ToolDetails.self, forKey: .details)
+                details = try container.decodeIfPresent(CapabilityResultDetails.self, forKey: .details)
                 rawDetails = try container.decodeIfPresent([String: AnyCodable].self, forKey: .details)
                 identity = CapabilityIdentity(
-                    modelToolName: try container.decodeIfPresent(String.self, forKey: .modelToolName),
+                    modelPrimitiveName: try container.decodeIfPresent(String.self, forKey: .modelPrimitiveName),
                     contractId: try container.decodeIfPresent(String.self, forKey: .contractId),
                     implementationId: try container.decodeIfPresent(String.self, forKey: .implementationId),
                     functionId: try container.decodeIfPresent(String.self, forKey: .functionId),
@@ -63,7 +63,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                 // Handle output as either String or [ContentBlock] array
                 if let outputString = try? container.decodeIfPresent(String.self, forKey: .output) {
                     output = outputString
-                } else if let outputBlocks = try? container.decodeIfPresent([ToolOutputBlock].self, forKey: .output) {
+                } else if let outputBlocks = try? container.decodeIfPresent([CapabilityOutputBlock].self, forKey: .output) {
                     output = outputBlocks.compactMap { $0.text }.joined()
                 } else {
                     output = nil
@@ -72,14 +72,14 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         }
 
         /// Details structure for capability results (e.g., screenshot data).
-        struct ToolDetails: Decodable, Sendable {
+        struct CapabilityResultDetails: Decodable, Sendable {
             let screenshot: String?
             let format: String?
         }
     }
 
     /// Helper struct for decoding capability output content blocks.
-    private struct ToolOutputBlock: Decodable {
+    private struct CapabilityOutputBlock: Decodable {
         let type: String
         let text: String?
     }
@@ -88,29 +88,29 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
 
     struct Result: EventResult {
         let invocationId: String
-        let modelToolName: String?
+        let modelPrimitiveName: String?
         let success: Bool
         let output: String?
         let error: String?
         let duration: Int?
-        let details: EventData.ToolDetails?
-        /// Raw details dictionary for tool-specific structured results
+        let details: EventData.CapabilityResultDetails?
+        /// Raw details dictionary for capability-specific structured results
         let rawDetails: [String: AnyCodable]?
         let identity: CapabilityIdentity
 
         init(
             invocationId: String,
-            modelToolName: String?,
+            modelPrimitiveName: String?,
             success: Bool,
             output: String?,
             error: String?,
             duration: Int?,
-            details: EventData.ToolDetails?,
+            details: EventData.CapabilityResultDetails?,
             rawDetails: [String: AnyCodable]?,
             identity: CapabilityIdentity? = nil
         ) {
             self.invocationId = invocationId
-            self.modelToolName = modelToolName
+            self.modelPrimitiveName = modelPrimitiveName
             self.success = success
             self.output = output
             self.error = error
@@ -135,7 +135,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
             invocationId: event.data.invocationId,
-            modelToolName: event.data.modelToolName,
+            modelPrimitiveName: event.data.modelPrimitiveName,
             success: event.data.success,
             output: event.data.output,
             error: event.data.error,

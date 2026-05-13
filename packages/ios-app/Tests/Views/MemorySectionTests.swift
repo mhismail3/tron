@@ -103,7 +103,7 @@ struct UserMemorySnapshotTests {
             "thresholdLevel": "safe",
             "breakdown": {
                 "systemPrompt": 500,
-                "tools": 200,
+                "capabilities": 200,
                 "rules": 0,
                 "memory": 50,
                 "skillIndex": 0,
@@ -116,7 +116,7 @@ struct UserMemorySnapshotTests {
             },
             "messages": [],
             "systemPromptContent": "You are Tron.",
-            "toolsContent": [],
+            "capabilitiesContent": [],
             "addedSkills": [],
             "memory": {
                 "content": "# Me",
@@ -144,13 +144,13 @@ struct UserMemorySnapshotTests {
             "usagePercent": 0,
             "thresholdLevel": "safe",
             "breakdown": {
-                "systemPrompt": 0, "tools": 0, "rules": 0, "memory": 0,
+                "systemPrompt": 0, "capabilities": 0, "rules": 0, "memory": 0,
                 "skillIndex": 0, "skillContext": 0, "skillRemoval": 0,
                 "jobResults": 0, "environment": 0, "messages": 0
             },
             "messages": [],
             "systemPromptContent": "",
-            "toolsContent": [],
+            "capabilitiesContent": [],
             "addedSkills": [],
             "memory": null
         }

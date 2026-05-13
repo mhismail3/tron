@@ -135,7 +135,7 @@ fn assign_turns(chain: Vec<ClaudeRecord>) -> Vec<LinearRecord> {
         // Advance turn on new promptId from non-meta user records.
         if kind == RecordKind::User
             && record.is_meta != Some(true)
-            && !record.is_tool_result()
+            && !record.is_capability_result()
             && let Some(pid) = &record.prompt_id
             && last_prompt_id.as_ref() != Some(pid)
         {

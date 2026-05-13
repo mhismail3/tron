@@ -16,7 +16,7 @@
 //! Context parts (rules, memory, skills, tasks) are injected as a `developer`
 //! message prepended to the input. On the first turn (no assistant messages yet),
 //! a tool clarification message is also prepended when the active profile
-//! supports function tools.
+//! supports function capabilities.
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -31,7 +31,7 @@ use crate::domains::model::providers::provider::{
 use crate::shared::messages::{Context, Message};
 
 use super::message_converter::{
-    convert_to_responses_input, convert_tools_v2, generate_tool_clarification_message,
+    convert_to_responses_input, convert_tools_v2, generate_capability_clarification_message,
 };
 use super::stream_handler::{create_stream_state, process_stream_event};
 use super::types::{
@@ -407,17 +407,20 @@ impl OpenAIProvider {
     ///
     /// Converts messages, prepends a tool clarification on the first turn,
     /// and injects context parts (rules, memory, skills, tasks) as a developer message.
-    fn build_input(context: &Context, include_tool_clarification: bool) -> Vec<ResponsesInputItem> {
+    fn build_input(
+        context: &Context,
+        include_capability_clarification: bool,
+    ) -> Vec<ResponsesInputItem> {
         let mut input = convert_to_responses_input(&context.messages);
 
         // Prepend tool clarification on first turn (before any assistant messages)
-        if let Some(ref ctx_tools) = context.tools
-            && include_tool_clarification
-            && !ctx_tools.is_empty()
+        if let Some(ref ctx_capabilities) = context.capabilities
+            && include_capability_clarification
+            && !ctx_capabilities.is_empty()
             && Self::is_first_turn(&context.messages)
         {
-            let clarification = generate_tool_clarification_message(
-                ctx_tools,
+            let clarification = generate_capability_clarification_message(
+                ctx_capabilities,
                 context.working_directory.as_deref(),
             );
             input.insert(
@@ -454,7 +457,7 @@ impl OpenAIProvider {
     /// Whether hosted tool search is available for this provider instance.
     ///
     /// Requires both: the model declares support AND we're on the Platform endpoint.
-    /// Tool search is not available on the Codex backend.
+    /// ModelCapability search is not available on the Codex backend.
     fn model_supports_tool_search(&self) -> bool {
         self.api_endpoint == ApiEndpoint::Platform
             && self
@@ -492,13 +495,14 @@ impl OpenAIProvider {
     ) -> ResponsesRequest {
         let reasoning_effort = self.resolve_reasoning_effort(options);
         let active_profile = self.active_profile();
-        let supports_tools = active_profile.is_none_or(|profile| profile.supports_tools);
-        let input = Self::build_input(context, supports_tools);
+        let supports_capabilities =
+            active_profile.is_none_or(|profile| profile.supports_capabilities);
+        let input = Self::build_input(context, supports_capabilities);
         let enable_tool_search = self.model_supports_tool_search();
-        let tools = context
-            .tools
+        let capabilities = context
+            .capabilities
             .as_ref()
-            .filter(|_| supports_tools)
+            .filter(|_| supports_capabilities)
             .map(|t| convert_tools_v2(t, enable_tool_search));
         let reasoning = self
             .active_profile()
@@ -515,7 +519,7 @@ impl OpenAIProvider {
             stream: true,
             store: false,
             temperature: options.temperature,
-            tools,
+            capabilities,
             max_output_tokens: self.resolve_max_output_tokens(options),
             reasoning,
             text: self.resolve_text_config(),
@@ -543,7 +547,7 @@ impl OpenAIProvider {
         debug!(
             model = %self.config.model,
             message_count = context.messages.len(),
-            tool_count = context.tools.as_ref().map_or(0, Vec::len),
+            tool_count = context.capabilities.as_ref().map_or(0, Vec::len),
             "Starting OpenAI stream"
         );
 

@@ -28,13 +28,13 @@ use crate::engine::{
     EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionQuery, FunctionRevision,
     Invocation, RiskLevel,
 };
-use crate::shared::content::ToolResultContent;
+use crate::shared::content::CapabilityResultContent;
+use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::paths::files;
 use crate::shared::profile::CapabilityPolicySpec;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
-use crate::shared::tools::{CapabilityResult, ToolResultBody};
 
 const DEFAULT_LIMIT: usize = 12;
 const MAX_LIMIT: usize = 50;
@@ -142,8 +142,8 @@ pub(crate) async fn search_value(
         message: error.to_string(),
     })?;
     let summary = render_search_summary(&query, &results);
-    tool_result_value(CapabilityResult {
-        content: ToolResultBody::Blocks(vec![ToolResultContent::text(summary)]),
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(summary)]),
         details: Some(json!({
             "query": query,
             "catalogRevision": catalog_revision.0,
@@ -212,8 +212,8 @@ pub(crate) async fn inspect_value(
         message: error.to_string(),
     })?;
     let summary = render_inspection_summary(&details);
-    tool_result_value(CapabilityResult {
-        content: ToolResultBody::Blocks(vec![ToolResultContent::text(summary)]),
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(summary)]),
         details: Some(details),
         is_error: None,
         stop_turn: None,
@@ -961,8 +961,8 @@ async fn execute_invoke_value(
             })
             .await
             .map_err(engine_error_to_capability_error)?;
-        return tool_result_value(CapabilityResult {
-            content: ToolResultBody::Blocks(vec![ToolResultContent::text(format!(
+        return capability_result_value(CapabilityResult {
+            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
                 "Approval required before executing {}.",
                 function.id.as_str()
             ))]),
@@ -1035,12 +1035,12 @@ async fn execute_invoke_value(
 
     if let Ok(mut nested) = serde_json::from_value::<CapabilityResult>(output.clone()) {
         nested.details = Some(merge_optional_details(nested.details, details));
-        return tool_result_value(nested);
+        return capability_result_value(nested);
     }
 
     let text = serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string());
-    tool_result_value(CapabilityResult {
-        content: ToolResultBody::Blocks(vec![ToolResultContent::text(text)]),
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(text)]),
         details: Some(details),
         is_error: None,
         stop_turn: None,
@@ -1920,7 +1920,7 @@ fn render_inspection_summary(details: &Value) -> String {
     )
 }
 
-fn tool_result_value(result: CapabilityResult) -> Result<Value, CapabilityError> {
+fn capability_result_value(result: CapabilityResult) -> Result<Value, CapabilityError> {
     serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
     })
@@ -2026,12 +2026,12 @@ mod tests {
     }
 
     #[test]
-    fn child_idempotency_derives_from_parent_tool_call_key() {
+    fn child_idempotency_derives_from_parent_capability_invocation_key() {
         let function = test_function("filesystem::read_file");
         let causal = CausalContext::new(
             crate::engine::ActorId::new("agent:s1").expect("actor id"),
             ActorKind::Agent,
-            AuthorityGrantId::new("agent-tool-runtime").expect("grant id"),
+            AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
             crate::engine::TraceId::new("trace").expect("trace id"),
         )
         .with_idempotency_key("parent-key");
@@ -2062,7 +2062,7 @@ mod tests {
         let causal = CausalContext::new(
             crate::engine::ActorId::new("agent:s1").expect("actor id"),
             ActorKind::Agent,
-            AuthorityGrantId::new("agent-tool-runtime").expect("grant id"),
+            AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
             crate::engine::TraceId::new("trace").expect("trace id"),
         );
         let invocation = Invocation::new_sync(
@@ -2087,7 +2087,7 @@ mod tests {
         let causal = CausalContext::new(
             crate::engine::ActorId::new("agent:s1").expect("actor id"),
             ActorKind::Agent,
-            AuthorityGrantId::new("agent-tool-runtime").expect("grant id"),
+            AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
             crate::engine::TraceId::new("trace").expect("trace id"),
         )
         .with_runtime_metadata(
@@ -2146,8 +2146,8 @@ mod tests {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let src = manifest.join("src");
         let forbidden = [
-            concat!("Tron", "Tool"),
-            concat!("Tool", "Context"),
+            concat!("Tron", "ModelCapability"),
+            concat!("ModelCapability", "Context"),
             concat!("capability", "_runtime"),
             concat!("builtin", "_function", "_registrations"),
             concat!("Mcp", "Search"),
@@ -2156,11 +2156,11 @@ mod tests {
             concat!("Engine", "Inspect"),
             concat!("Engine", "Invoke"),
             concat!("Engine", "Watch"),
-            concat!("allowed", "Tools"),
-            concat!("denied", "Tools"),
-            concat!("inherit", "Tools"),
-            concat!("tool", "Policy"),
-            concat!("tool", "Policies"),
+            concat!("allowed", "Too", "ls"),
+            concat!("denied", "Too", "ls"),
+            concat!("inherit", "Too", "ls"),
+            concat!("to", "ol", "Policy"),
+            concat!("to", "ol", "Policies"),
             concat!("allowed", "_tools"),
             concat!("denied", "_tools"),
             concat!("inherit", "_tools"),

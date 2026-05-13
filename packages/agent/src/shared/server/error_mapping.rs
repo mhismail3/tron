@@ -308,6 +308,15 @@ pub(crate) fn map_import_error(e: ImportError) -> CapabilityError {
             message: "Empty session: no importable records after parsing".into(),
             details: None,
         },
+        I::UnsupportedProviderCapabilityHistory { block_count } => CapabilityError::Custom {
+            code: codes::IMPORT_UNSUPPORTED_PROVIDER_CAPABILITY_HISTORY.into(),
+            message: format!(
+                "Import refused: source contains {block_count} provider-native capability history block(s). Clean capability-only sessions start from current Tron events only."
+            ),
+            details: Some(serde_json::json!({
+                "blockCount": block_count,
+            })),
+        },
         I::NoClaudeDirectory { path } => CapabilityError::NotFound {
             code: codes::IMPORT_NO_CLAUDE_DIRECTORY.into(),
             message: format!("No Claude Code directory found at {}", path.display()),
@@ -766,6 +775,16 @@ mod tests {
     fn import_empty_session_is_typed() {
         let mapped = map_import_error(I::EmptySession);
         assert_eq!(mapped.code(), "IMPORT_EMPTY_SESSION");
+    }
+
+    #[test]
+    fn import_provider_capability_history_is_refused() {
+        let mapped = map_import_error(I::UnsupportedProviderCapabilityHistory { block_count: 2 });
+        assert_eq!(
+            mapped.code(),
+            "IMPORT_UNSUPPORTED_PROVIDER_CAPABILITY_HISTORY"
+        );
+        assert_eq!(mapped.details().unwrap()["blockCount"], 2);
     }
 
     #[test]

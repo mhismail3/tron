@@ -327,7 +327,7 @@ fn path_traversal() -> GuardrailRule {
             name: "Path Traversal".into(),
             description: "Blocks path traversal sequences (..) in file paths".into(),
             severity: Severity::Block,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Standard,
             capabilities: vec![
                 "filesystem::write_file".into(),
@@ -353,7 +353,7 @@ fn path_hidden_mkdir() -> GuardrailRule {
             name: "Hidden Directory Creation".into(),
             description: "Blocks creation of hidden directories via mkdir".into(),
             severity: Severity::Block,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Standard,
             capabilities: vec!["process::run".into()],
             priority: 700,
@@ -375,7 +375,7 @@ fn process_timeout() -> GuardrailRule {
             name: "process::run Timeout Limit".into(),
             description: "Enforces maximum timeout for process commands (60 minutes)".into(),
             severity: Severity::Block,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Standard,
             capabilities: vec!["process::run".into()],
             priority: 500,
@@ -396,7 +396,7 @@ fn process_long_timeout_warning() -> GuardrailRule {
             name: "process::run Long Timeout Warning".into(),
             description: "Warns when process timeout exceeds 10 minutes".into(),
             severity: Severity::Warn,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Standard,
             capabilities: vec!["process::run".into()],
             priority: 400,
@@ -422,7 +422,7 @@ fn command_substitution_warning() -> GuardrailRule {
             description: "Warns when command substitution may construct destructive commands"
                 .into(),
             severity: Severity::Warn,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Standard,
             capabilities: vec!["process::run".into()],
             priority: 300,
@@ -510,12 +510,12 @@ mod tests {
 
     use super::super::types::EvaluationContext;
 
-    fn make_ctx(tool: &str, args: serde_json::Value) -> EvaluationContext {
+    fn make_ctx(capability_id: &str, args: serde_json::Value) -> EvaluationContext {
         EvaluationContext {
-            tool_name: tool.to_string(),
-            tool_arguments: args,
+            model_primitive_name: capability_id.to_string(),
+            capability_arguments: args,
             session_id: None,
-            tool_call_id: None,
+            invocation_id: None,
         }
     }
 
@@ -600,14 +600,14 @@ mod tests {
     }
 
     #[test]
-    fn dotfiles_does_not_apply_to_read_tool() {
+    fn dotfiles_does_not_apply_to_read_capability() {
         let rule = find_rule("core.dotfiles-protection");
         assert!(
             !rule
                 .base()
                 .capabilities
                 .contains(&"filesystem::read_file".to_string()),
-            "Dotfiles rule should not apply to filesystem::read_file tool"
+            "Dotfiles rule should not apply to filesystem::read_file capability"
         );
     }
 

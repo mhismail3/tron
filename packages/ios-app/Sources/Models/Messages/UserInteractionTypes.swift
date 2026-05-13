@@ -1,9 +1,9 @@
 import Foundation
 
-// MARK: - AskUserQuestion Types
+// MARK: - UserInteraction Types
 
 /// A single option in a question
-struct AskUserQuestionOption: Codable, Identifiable, Equatable {
+struct UserInteractionOption: Codable, Identifiable, Equatable {
     /// Display label for the option
     let label: String
     /// Optional value (defaults to label if not provided)
@@ -16,13 +16,13 @@ struct AskUserQuestionOption: Codable, Identifiable, Equatable {
 }
 
 /// A single question with options
-struct AskUserQuestion: Codable, Identifiable, Equatable {
+struct UserInteraction: Codable, Identifiable, Equatable {
     /// Unique identifier for this question
     let id: String
     /// The question text
     let question: String
     /// Available options to choose from
-    let options: [AskUserQuestionOption]
+    let options: [UserInteractionOption]
     /// Selection mode: single choice or multiple choice
     let mode: SelectionMode
     /// Whether to allow a free-form "Other" option
@@ -37,16 +37,16 @@ struct AskUserQuestion: Codable, Identifiable, Equatable {
     }
 }
 
-/// Parameters for the AskUserQuestion capability invocation
-struct AskUserQuestionParams: Codable, Equatable {
+/// Parameters for the UserInteraction capability invocation
+struct UserInteractionParams: Codable, Equatable {
     /// Array of questions (1-5)
-    let questions: [AskUserQuestion]
+    let questions: [UserInteraction]
     /// Optional context to provide alongside the questions
     let context: String?
 }
 
 /// A user's answer to a single question
-struct AskUserQuestionAnswer: Codable, Equatable {
+struct UserInteractionAnswer: Codable, Equatable {
     /// ID of the question being answered
     let questionId: String
     /// Selected option values (labels or explicit values)
@@ -61,20 +61,20 @@ struct AskUserQuestionAnswer: Codable, Equatable {
     }
 }
 
-/// The complete result from the AskUserQuestion tool
-struct AskUserQuestionResult: Codable, Equatable {
+/// The complete result from the UserInteraction capability
+struct UserInteractionResult: Codable, Equatable {
     /// All answers provided by the user
-    let answers: [AskUserQuestionAnswer]
+    let answers: [UserInteractionAnswer]
     /// Whether all questions were answered
     let complete: Bool
     /// ISO 8601 timestamp of when the result was submitted
     let submittedAt: String
 }
 
-/// Status for AskUserQuestion in async mode
-/// In async mode, the tool returns immediately and user answers as a new prompt
-enum AskUserQuestionStatus: Equatable {
-    /// Tool arguments still streaming — chip shows spinner
+/// Status for UserInteraction in async mode
+/// In async mode, the capability returns immediately and user answers as a new prompt
+enum UserInteractionStatus: Equatable {
+    /// Capability arguments still streaming — chip shows spinner
     case generating
     /// Awaiting user response - the question chip is answerable
     case pending
@@ -84,18 +84,18 @@ enum AskUserQuestionStatus: Equatable {
     case superseded
 }
 
-/// Tool data for AskUserQuestion tracking (in-chat state)
-struct AskUserQuestionToolData: Equatable {
+/// Capability data for UserInteraction tracking (in-chat state)
+struct UserInteractionInvocationData: Equatable {
     /// The capability invocation ID from the agent
     let invocationId: String
     /// The question parameters (mutable: set to placeholder during .generating, updated on capability.invocation.started)
-    var params: AskUserQuestionParams
+    var params: UserInteractionParams
     /// Current answers keyed by question ID
-    var answers: [String: AskUserQuestionAnswer]
+    var answers: [String: UserInteractionAnswer]
     /// Status in async mode (pending/answered/superseded)
-    var status: AskUserQuestionStatus
+    var status: UserInteractionStatus
     /// Final result (set when submitted)
-    var result: AskUserQuestionResult?
+    var result: UserInteractionResult?
 
     /// Check if all questions have been answered
     var isComplete: Bool {

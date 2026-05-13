@@ -239,7 +239,7 @@ mod tests {
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
             tags: vec![],
-            tool_restrictions: None,
+            capability_restrictions: None,
             workspace_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -466,28 +466,28 @@ mod tests {
         assert!(validate_job(&job).is_err());
     }
 
-    // ── Tool restrictions validation ─────────────────────────────────
+    // ── ModelCapability restrictions validation ─────────────────────────────────
 
     #[test]
-    fn validate_job_tool_restrictions_allowed_only() {
+    fn validate_job_capability_restrictions_allowed_only() {
         let mut job = make_valid_job();
-        job.tool_restrictions = Some(ToolRestrictions {
+        job.capability_restrictions = Some(CapabilityRestrictions {
             allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
         });
         validate_job(&job).unwrap();
     }
 
     #[test]
-    fn validate_job_tool_restrictions_none() {
+    fn validate_job_capability_restrictions_none() {
         let mut job = make_valid_job();
-        job.tool_restrictions = None;
+        job.capability_restrictions = None;
         validate_job(&job).unwrap();
     }
 
     #[test]
-    fn validate_job_tool_restrictions_empty_list() {
+    fn validate_job_capability_restrictions_empty_list() {
         let mut job = make_valid_job();
-        job.tool_restrictions = Some(ToolRestrictions {
+        job.capability_restrictions = Some(CapabilityRestrictions {
             allowed_capabilities: Some(vec![]),
         });
         validate_job(&job).unwrap();

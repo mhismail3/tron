@@ -61,7 +61,7 @@ use arc_swap::ArcSwapOption;
 /// Writers (reload / init) swap the new `Arc` atomically; readers with an
 /// older `Arc` keep a consistent snapshot until they drop it. Exactly the
 /// pattern `arc-swap` was designed for — a rarely-updated singleton read by
-/// many hot paths (every engine invocation, every turn, every tool).
+/// many hot paths (every engine invocation, every turn, every capability).
 ///
 /// `OnceLock` defers allocation until first access; inside that slot we keep
 /// the `ArcSwapOption` that carries the current value (or `None` until the
@@ -215,7 +215,7 @@ authProfile = "default"
         assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(settings.retry.max_retries, 3);
         assert_eq!(settings.agent.max_turns, 250);
-        assert_eq!(settings.tools.process.default_timeout_ms, 120_000);
+        assert_eq!(settings.capabilities.process.default_timeout_ms, 120_000);
         assert_eq!(settings.context.compactor.max_tokens, 25_000);
         assert!(settings.guardrails.is_none());
     }

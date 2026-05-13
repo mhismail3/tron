@@ -31,7 +31,7 @@ enum SystemEvent: Equatable, Hashable {
     /// `mode` controls rendering:
     /// - `.clearAll`: informational banner listing the cleared skill names.
     ///   The user can re-add via `@skill-name` or the sidebar picker.
-    /// - `.askUser`: interactive picker — each skill becomes a tappable chip
+    /// - `.userInteraction`: interactive picker — each skill becomes a tappable chip
     ///   that re-activates it via the `skills::activate` engine protocol.
     case skillsCleared(clearedSkills: [String], mode: SkillsClearedMode)
     /// Rules were loaded on session start
@@ -125,7 +125,7 @@ enum SystemEvent: Equatable, Hashable {
             switch mode {
             case .clearAll:
                 return "Cleared \(clearedSkills.count) \(noun) on compaction"
-            case .askUser:
+            case .userInteraction:
                 return "Re-activate \(clearedSkills.count) \(noun)?"
             }
         case .rulesLoaded(let count):

@@ -2,10 +2,10 @@ import XCTest
 @testable import TronMobile
 
 @MainActor
-final class AskUserQuestionStateTests: XCTestCase {
+final class UserInteractionStateTests: XCTestCase {
 
-    func testShowAskUserQuestionSheet() {
-        let state = AskUserQuestionState()
+    func testShowUserInteractionSheet() {
+        let state = UserInteractionState()
         XCTAssertFalse(state.showSheet)
 
         state.showSheet = true
@@ -13,12 +13,12 @@ final class AskUserQuestionStateTests: XCTestCase {
     }
 
     func testCurrentQuestionData() {
-        let state = AskUserQuestionState()
+        let state = UserInteractionState()
         XCTAssertNil(state.currentData)
 
         let question = createTestQuestion(id: "q1", question: "Test question?")
-        let params = AskUserQuestionParams(questions: [question], context: nil)
-        let data = AskUserQuestionToolData(
+        let params = UserInteractionParams(questions: [question], context: nil)
+        let data = UserInteractionInvocationData(
             invocationId: "tc-123",
             params: params,
             answers: [:],
@@ -31,10 +31,10 @@ final class AskUserQuestionStateTests: XCTestCase {
     }
 
     func testAnswersTracking() {
-        let state = AskUserQuestionState()
+        let state = UserInteractionState()
         XCTAssertTrue(state.answers.isEmpty)
 
-        let answer = AskUserQuestionAnswer(
+        let answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["Option A"],
             otherValue: nil
@@ -46,7 +46,7 @@ final class AskUserQuestionStateTests: XCTestCase {
     }
 
     func testCalledInTurn() {
-        let state = AskUserQuestionState()
+        let state = UserInteractionState()
         XCTAssertFalse(state.calledInTurn)
 
         state.calledInTurn = true
@@ -54,7 +54,7 @@ final class AskUserQuestionStateTests: XCTestCase {
     }
 
     func testResetForNewTurn() {
-        let state = AskUserQuestionState()
+        let state = UserInteractionState()
         state.calledInTurn = true
 
         state.resetForNewTurn()
@@ -63,15 +63,15 @@ final class AskUserQuestionStateTests: XCTestCase {
     }
 
     func testClearAll() {
-        let state = AskUserQuestionState()
+        let state = UserInteractionState()
         state.showSheet = true
-        state.currentData = AskUserQuestionToolData(
+        state.currentData = UserInteractionInvocationData(
             invocationId: "tc-123",
-            params: AskUserQuestionParams(questions: [], context: nil),
+            params: UserInteractionParams(questions: [], context: nil),
             answers: [:],
             status: .pending
         )
-        state.answers["q1"] = AskUserQuestionAnswer(
+        state.answers["q1"] = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["A"],
             otherValue: nil
@@ -88,8 +88,8 @@ final class AskUserQuestionStateTests: XCTestCase {
 
     // MARK: - Helper Methods
 
-    private func createTestQuestion(id: String, question: String) -> AskUserQuestion {
-        return AskUserQuestion(
+    private func createTestQuestion(id: String, question: String) -> UserInteraction {
+        return UserInteraction(
             id: id,
             question: question,
             options: [],

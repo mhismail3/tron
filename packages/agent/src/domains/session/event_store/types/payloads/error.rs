@@ -20,8 +20,8 @@ pub struct ErrorAgentPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ErrorCapabilityPayload {
     /// Model-facing primitive name.
-    #[serde(rename = "modelToolName")]
-    pub model_tool_name: String,
+    #[serde(rename = "modelPrimitiveName")]
+    pub model_primitive_name: String,
     /// Capability invocation ID.
     #[serde(rename = "invocationId")]
     pub invocation_id: String,

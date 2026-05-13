@@ -30,14 +30,14 @@ enum ErrorHandlers {
     /// Transform error.capability event into a ChatMessage.
     ///
     /// Capability errors represent failures during capability execution.
-    /// Includes model tool name, error message, and optional error code.
+    /// Includes model capability name, error message, and optional error code.
     static func transformCapabilityError(
         _ payload: [String: AnyCodable],
         timestamp: Date
     ) -> ChatMessage? {
         guard let parsed = CapabilityErrorPayload(from: payload) else { return nil }
 
-        var errorText = "Capability '\(parsed.modelToolName)' failed: \(parsed.error)"
+        var errorText = "Capability '\(parsed.modelPrimitiveName)' failed: \(parsed.error)"
         if let code = parsed.code {
             errorText = "[\(code)] \(errorText)"
         }

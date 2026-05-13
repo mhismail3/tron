@@ -19,7 +19,7 @@ pub(crate) async fn job_subscribe_value(
             .ok_or_else(|| CapabilityError::Internal {
                 message: "Output buffer registry not available".into(),
             })?;
-    let (buffer, tool_call_id) =
+    let (buffer, invocation_id) =
         registry
             .get(&job_id)
             .ok_or_else(|| CapabilityError::InvalidParams {
@@ -34,7 +34,7 @@ pub(crate) async fn job_subscribe_value(
     let emitter = deps.orchestrator.broadcast().clone();
     let sub_job_id = job_id.clone();
     drop(tokio::spawn(async move {
-        run_subscriber(buffer, &tool_call_id, &session_id, &emitter, cancel).await;
+        run_subscriber(buffer, &invocation_id, &session_id, &emitter, cancel).await;
         let _ = ACTIVE_SUBSCRIPTIONS.remove(&sub_job_id);
     }));
 
@@ -60,7 +60,7 @@ pub(crate) fn job_unsubscribe_value(params: Option<&Value>) -> Result<Value, Cap
 
 pub(crate) async fn run_subscriber(
     buffer: Arc<crate::domains::agent::runner::orchestrator::output_buffer::SharedOutputBuffer>,
-    tool_call_id: &str,
+    invocation_id: &str,
     session_id: &str,
     emitter: &Arc<crate::domains::agent::runner::agent::event_emitter::EventEmitter>,
     cancel: CancellationToken,
@@ -74,7 +74,7 @@ pub(crate) async fn run_subscriber(
             let _ = emitter.emit(
                 crate::shared::events::TronEvent::CapabilityInvocationOutput {
                     base: crate::shared::events::BaseEvent::now(session_id),
-                    tool_call_id: tool_call_id.to_owned(),
+                    invocation_id: invocation_id.to_owned(),
                     update: chunk,
                 },
             );
@@ -85,7 +85,7 @@ pub(crate) async fn run_subscriber(
                 let _ = emitter.emit(
                     crate::shared::events::TronEvent::CapabilityInvocationOutput {
                         base: crate::shared::events::BaseEvent::now(session_id),
-                        tool_call_id: tool_call_id.to_owned(),
+                        invocation_id: invocation_id.to_owned(),
                         update: chunk,
                     },
                 );

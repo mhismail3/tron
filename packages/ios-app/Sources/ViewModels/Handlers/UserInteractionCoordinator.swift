@@ -1,12 +1,12 @@
 import Foundation
 
-/// Protocol defining the context required by AskUserQuestionCoordinator.
+/// Protocol defining the context required by UserInteractionCoordinator.
 @MainActor
-protocol AskUserQuestionContext: LoggingContext {
-    /// AskUserQuestion state container
-    var askUserQuestionState: AskUserQuestionState { get }
+protocol UserInteractionContext: LoggingContext {
+    /// UserInteraction state container
+    var userInteractionState: UserInteractionState { get }
 
-    /// Messages array for updating tool status
+    /// Messages array for updating capability status
     var messages: [ChatMessage] { get set }
 
     /// engine client for server communication
@@ -19,7 +19,7 @@ protocol AskUserQuestionContext: LoggingContext {
     var currentTurn: Int { get set }
 }
 
-/// Coordinates AskUserQuestion event handling and user interaction for ChatViewModel.
+/// Coordinates UserInteraction event handling and user interaction for ChatViewModel.
 ///
 /// Responsibilities:
 /// - Sheet management (open/dismiss for pending and answered questions)
@@ -27,29 +27,29 @@ protocol AskUserQuestionContext: LoggingContext {
 /// - Submitting answers to the server via engine protocol (server constructs the agent prompt)
 /// - Marking pending questions as superseded when user bypasses
 @MainActor
-final class AskUserQuestionCoordinator {
+final class UserInteractionCoordinator {
 
     init() {}
 
     // MARK: - Sheet Management
 
-    func openSheet(for data: AskUserQuestionToolData, context: AskUserQuestionContext) {
+    func openSheet(for data: UserInteractionInvocationData, context: UserInteractionContext) {
         guard data.status == .pending || data.status == .answered else {
-            context.logInfo("Not opening AskUserQuestion sheet - status is \(data.status)")
+            context.logInfo("Not opening UserInteraction sheet - status is \(data.status)")
             return
         }
 
-        context.askUserQuestionState.currentData = data
-        context.askUserQuestionState.answers = data.answers
-        context.askUserQuestionState.showSheet = true
+        context.userInteractionState.currentData = data
+        context.userInteractionState.answers = data.answers
+        context.userInteractionState.showSheet = true
 
         let mode = data.status == .answered ? "read-only" : "interactive"
-        context.logInfo("Opened AskUserQuestion sheet (\(mode)) for \(data.params.questions.count) questions")
+        context.logInfo("Opened UserInteraction sheet (\(mode)) for \(data.params.questions.count) questions")
     }
 
-    func dismissSheet(context: AskUserQuestionContext) {
-        context.askUserQuestionState.showSheet = false
-        context.logInfo("AskUserQuestion sheet dismissed without submitting")
+    func dismissSheet(context: UserInteractionContext) {
+        context.userInteractionState.showSheet = false
+        context.logInfo("UserInteraction sheet dismissed without submitting")
     }
 
     // MARK: - Two-Phase Answer Submission
@@ -62,8 +62,8 @@ final class AskUserQuestionCoordinator {
 
     /// Phase 1: Prepare submission — updates chip, stores structured data as pending.
     /// Called BEFORE sheet dismiss. Does NOT send to server.
-    func prepareSubmission(_ answers: [AskUserQuestionAnswer], context: AskUserQuestionContext) {
-        guard let data = context.askUserQuestionState.currentData else {
+    func prepareSubmission(_ answers: [UserInteractionAnswer], context: UserInteractionContext) {
+        guard let data = context.userInteractionState.currentData else {
             context.logError("Cannot submit answers - no current question data")
             return
         }
@@ -71,19 +71,19 @@ final class AskUserQuestionCoordinator {
         guard data.status == .pending else {
             context.logWarning("Cannot submit answers - question status is \(data.status)")
             context.showError("This question is no longer active")
-            context.askUserQuestionState.showSheet = false
-            context.askUserQuestionState.currentData = nil
-            context.askUserQuestionState.answers = [:]
+            context.userInteractionState.showSheet = false
+            context.userInteractionState.currentData = nil
+            context.userInteractionState.answers = [:]
             return
         }
 
-        let result = AskUserQuestionResult(
+        let result = UserInteractionResult(
             answers: answers,
             complete: true,
             submittedAt: DateParser.now
         )
 
-        context.logInfo("Preparing AskUserQuestion submission for invocationId=\(data.invocationId)")
+        context.logInfo("Preparing UserInteraction submission for invocationId=\(data.invocationId)")
 
         // Update the chip status to .answered immediately
         updateMessageToAnswered(
@@ -104,26 +104,26 @@ final class AskUserQuestionCoordinator {
                 otherValue: answer.otherValue
             ))
         }
-        context.askUserQuestionState.pendingSubmission = submissions
+        context.userInteractionState.pendingSubmission = submissions
 
         // Store question count for chip display
-        context.askUserQuestionState.lastAnsweredQuestionCount = data.params.questions.count
+        context.userInteractionState.lastAnsweredQuestionCount = data.params.questions.count
 
-        context.askUserQuestionState.showSheet = false
-        context.askUserQuestionState.answers = [:]
+        context.userInteractionState.showSheet = false
+        context.userInteractionState.answers = [:]
 
-        context.logInfo("AskUserQuestion submission prepared, awaiting sheet dismiss")
+        context.logInfo("UserInteraction submission prepared, awaiting sheet dismiss")
     }
 
     /// Phase 2: Execute pending submission — sends via server engine protocol.
     /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
-    func executePendingSubmission(context: AskUserQuestionContext) {
-        guard let submissions = context.askUserQuestionState.pendingSubmission else { return }
-        context.askUserQuestionState.pendingSubmission = nil
-        context.askUserQuestionState.currentData = nil
+    func executePendingSubmission(context: UserInteractionContext) {
+        guard let submissions = context.userInteractionState.pendingSubmission else { return }
+        context.userInteractionState.pendingSubmission = nil
+        context.userInteractionState.currentData = nil
 
         // Add answered questions chip to chat
-        let questionCount = max(1, context.askUserQuestionState.lastAnsweredQuestionCount)
+        let questionCount = max(1, context.userInteractionState.lastAnsweredQuestionCount)
         let answerChip = ChatMessage(
             role: .user,
             content: .answeredQuestions(questionCount: questionCount)
@@ -135,7 +135,7 @@ final class AskUserQuestionCoordinator {
         Task {
             do {
                 _ = try await context.engineClient.agent.submitAnswers(questions: submissions, idempotencyKey: .userAction("agent.submitAnswers"))
-                context.logInfo("AskUserQuestion answers submitted via engine protocol")
+                context.logInfo("UserInteraction answers submitted via engine protocol")
             } catch {
                 context.logError("Failed to submit answers: \(error.localizedDescription)")
                 context.showError("Failed to submit answers: \(error.localizedDescription)")
@@ -145,13 +145,13 @@ final class AskUserQuestionCoordinator {
 
     // MARK: - State Management
 
-    func markPendingQuestionsAsSuperseded(context: AskUserQuestionContext) {
+    func markPendingQuestionsAsSuperseded(context: UserInteractionContext) {
         for i in context.messages.indices {
-            if case .askUserQuestion(var data) = context.messages[i].content,
+            if case .userInteraction(var data) = context.messages[i].content,
                data.status == .pending {
                 data.status = .superseded
-                context.messages[i].content = .askUserQuestion(data)
-                context.logInfo("Marked AskUserQuestion \(data.invocationId) as superseded")
+                context.messages[i].content = .userInteraction(data)
+                context.logInfo("Marked UserInteraction \(data.invocationId) as superseded")
             }
         }
     }
@@ -160,20 +160,20 @@ final class AskUserQuestionCoordinator {
 
     private func updateMessageToAnswered(
         invocationId: String,
-        result: AskUserQuestionResult,
-        answers: [AskUserQuestionAnswer],
-        context: AskUserQuestionContext
+        result: UserInteractionResult,
+        answers: [UserInteractionAnswer],
+        context: UserInteractionContext
     ) {
-        if let index = MessageFinder.lastIndexOfAskUserQuestion(invocationId: invocationId, in: context.messages) {
-            if case .askUserQuestion(var toolData) = context.messages[index].content {
-                toolData.status = .answered
-                toolData.result = result
-                var answersDict: [String: AskUserQuestionAnswer] = [:]
+        if let index = MessageFinder.lastIndexOfUserInteraction(invocationId: invocationId, in: context.messages) {
+            if case .userInteraction(var capabilityData) = context.messages[index].content {
+                capabilityData.status = .answered
+                capabilityData.result = result
+                var answersDict: [String: UserInteractionAnswer] = [:]
                 for answer in answers {
                     answersDict[answer.questionId] = answer
                 }
-                toolData.answers = answersDict
-                context.messages[index].content = .askUserQuestion(toolData)
+                capabilityData.answers = answersDict
+                context.messages[index].content = .userInteraction(capabilityData)
             }
         }
     }

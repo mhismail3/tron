@@ -37,7 +37,7 @@ final class DisplayStreamStateTests: XCTestCase {
         let state = DisplayStreamState()
         state.activeStreamId = "stream-1"
         state.streamFrameImage = UIImage()
-        state.streamInvocationId = "tool-1"
+        state.streamInvocationId = "capability-1"
         state.showStreamSheet = true
         state.hasAutoOpenedStream = true
         state.stoppedStreamId = "stream-0"
@@ -58,14 +58,14 @@ final class DisplayStreamStateTests: XCTestCase {
         let state = DisplayStreamState()
         state.activeStreamId = "stream-1"
         state.streamFrameImage = UIImage()
-        state.streamInvocationId = "tool-1"
+        state.streamInvocationId = "capability-1"
         state.hasAutoOpenedStream = true
 
         state.endStream()
 
         XCTAssertNil(state.activeStreamId)
         XCTAssertNotNil(state.streamFrameImage)
-        XCTAssertEqual(state.streamInvocationId, "tool-1")
+        XCTAssertEqual(state.streamInvocationId, "capability-1")
         XCTAssertTrue(state.hasAutoOpenedStream)
     }
 

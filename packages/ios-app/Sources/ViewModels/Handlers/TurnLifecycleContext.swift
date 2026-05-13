@@ -7,13 +7,13 @@ import Foundation
 /// - LoggingContext: Logging and error display
 /// - ProcessingTrackable: Processing state and setSessionProcessing
 /// - StreamingManaging: Streaming state management
-/// - ToolStateTracking: Capability invocation state (currentToolMessages, currentTurnCapabilityInvocations, etc.)
+/// - CapabilityInvocationStateTracking: Capability invocation state (currentCapabilityInvocationMessages, currentTurnCapabilityInvocations, etc.)
 ///
 /// Note: SessionIdentifiable was removed as sessionId is not used by TurnLifecycleCoordinator.
 /// Note: streamingText removed - passed as parameter to handleComplete instead.
 /// Note: updateTotalTokenUsage removed - not called by coordinator.
 @MainActor
-protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, ToolStateTracking, MessageMutating {
+protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, CapabilityInvocationStateTracking, MessageMutating {
 
     // MARK: - Turn Tracking State
 
@@ -50,8 +50,8 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
     /// Enqueue a turn boundary event for UI update queue
     func enqueueTurnBoundary(_ data: UIUpdateQueue.TurnBoundaryData)
 
-    /// Reset animation coordinator tool state
-    func resetAnimationCoordinatorToolState()
+    /// Reset animation coordinator capability state
+    func resetAnimationCoordinatorCapabilityState()
 
     /// Flush the UI update queue
     func flushUIUpdateQueue()

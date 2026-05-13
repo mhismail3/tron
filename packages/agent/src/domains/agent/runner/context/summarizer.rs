@@ -6,12 +6,12 @@
 //!
 //! The concrete LLM summarizer (which spawns a Haiku subagent) lives in
 //! `llm_summarizer`, not here -- it depends on subsession infrastructure.
-//! This module provides the trait and the tools it needs.
+//! This module provides the trait and the capabilities it needs.
 
 use serde_json::Value;
 
 use crate::shared::content::AssistantContent;
-use crate::shared::messages::{Message, ToolResultMessageContent, UserMessageContent};
+use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
 
 use super::constants::{
     SUMMARIZER_ASSISTANT_TEXT_LIMIT, SUMMARIZER_MAX_SERIALIZED_CHARS,
@@ -96,7 +96,7 @@ impl Summarizer for KeywordSummarizer {
         let mut user_messages = Vec::new();
         let mut files_modified = Vec::new();
         let mut topics = Vec::new();
-        let mut tool_names = Vec::new();
+        let mut model_capability_names = Vec::new();
 
         for msg in messages {
             match msg {
@@ -109,11 +109,11 @@ impl Summarizer for KeywordSummarizer {
                 Message::Assistant { content, .. } => {
                     for block in content {
                         match block {
-                            AssistantContent::ToolUse {
+                            AssistantContent::CapabilityInvocation {
                                 name, arguments, ..
                             } => {
-                                if !tool_names.contains(name) {
-                                    tool_names.push(name.clone());
+                                if !model_capability_names.contains(name) {
+                                    model_capability_names.push(name.clone());
                                 }
                                 if let Some(path) = arguments
                                     .get("file_path")
@@ -138,7 +138,7 @@ impl Summarizer for KeywordSummarizer {
                         }
                     }
                 }
-                Message::ToolResult { .. } => {}
+                Message::CapabilityResult { .. } => {}
             }
         }
 
@@ -148,8 +148,11 @@ impl Summarizer for KeywordSummarizer {
             let mut parts = Vec::new();
             parts.push(format!("The user made {} requests.", user_messages.len()));
             parts.push(format!("Key requests: {}", user_messages.join("; ")));
-            if !tool_names.is_empty() {
-                parts.push(format!("Tools used: {}", tool_names.join(", ")));
+            if !model_capability_names.is_empty() {
+                parts.push(format!(
+                    "Capabilities used: {}",
+                    model_capability_names.join(", ")
+                ));
             }
             if !files_modified.is_empty() {
                 parts.push(format!("Files touched: {}", files_modified.join(", ")));
@@ -217,7 +220,7 @@ pub fn serialize_messages(messages: &[Message]) -> String {
                                 lines.push(format!("[THINKING] {t}"));
                             }
                         }
-                        AssistantContent::ToolUse {
+                        AssistantContent::CapabilityInvocation {
                             name, arguments, ..
                         } => {
                             let args = extract_key_args(arguments);
@@ -230,10 +233,10 @@ pub fn serialize_messages(messages: &[Message]) -> String {
                     }
                 }
             }
-            Message::ToolResult {
+            Message::CapabilityResult {
                 content, is_error, ..
             } => {
-                let text = tool_result_content_text(content);
+                let text = capability_result_content_text(content);
                 let t = truncate(&text, SUMMARIZER_TOOL_RESULT_TEXT_LIMIT);
                 if *is_error == Some(true) {
                     lines.push(format!("[TOOL_ERROR] {t}"));
@@ -248,7 +251,7 @@ pub fn serialize_messages(messages: &[Message]) -> String {
     cap_transcript(&full, SUMMARIZER_MAX_SERIALIZED_CHARS)
 }
 
-/// Extract key arguments from a `tool_use` arguments map.
+/// Extract key arguments from a `capability_invocation` arguments map.
 ///
 /// Looks for priority keys: `file_path`, `path`, `command`, `pattern`, `url`, `query`.
 /// Each value is truncated to 100 chars.
@@ -311,15 +314,17 @@ fn user_content_text(content: &UserMessageContent) -> String {
     }
 }
 
-/// Extract text from a `ToolResultMessageContent`.
-fn tool_result_content_text(content: &ToolResultMessageContent) -> String {
+/// Extract text from a `CapabilityResultMessageContent`.
+fn capability_result_content_text(content: &CapabilityResultMessageContent) -> String {
     match content {
-        ToolResultMessageContent::Text(t) => t.clone(),
-        ToolResultMessageContent::Blocks(blocks) => blocks
+        CapabilityResultMessageContent::Text(t) => t.clone(),
+        CapabilityResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                crate::shared::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                crate::shared::content::ToolResultContent::Image { .. } => None,
+                crate::shared::content::CapabilityResultContent::Text { text } => {
+                    Some(text.as_str())
+                }
+                crate::shared::content::CapabilityResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -556,11 +561,11 @@ mod tests {
     }
 
     #[test]
-    fn serialize_tool_use() {
+    fn serialize_capability_invocation() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("file_path".into(), json!("/src/main.rs"));
         let messages = vec![Message::Assistant {
-            content: vec![AssistantContent::ToolUse {
+            content: vec![AssistantContent::CapabilityInvocation {
                 id: "tc-1".into(),
                 name: "inspect".into(),
                 arguments: args,
@@ -576,10 +581,10 @@ mod tests {
     }
 
     #[test]
-    fn serialize_tool_result() {
-        let messages = vec![Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text("file contents here".into()),
+    fn serialize_capability_result() {
+        let messages = vec![Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text("file contents here".into()),
             is_error: None,
         }];
         let result = serialize_messages(&messages);
@@ -587,10 +592,10 @@ mod tests {
     }
 
     #[test]
-    fn serialize_tool_error() {
-        let messages = vec![Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text("permission denied".into()),
+    fn serialize_capability_error() {
+        let messages = vec![Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text("permission denied".into()),
             is_error: Some(true),
         }];
         let result = serialize_messages(&messages);
@@ -758,7 +763,7 @@ mod tests {
         let messages = vec![
             Message::user("Fix the login"),
             Message::Assistant {
-                content: vec![AssistantContent::ToolUse {
+                content: vec![AssistantContent::CapabilityInvocation {
                     id: "tc-1".into(),
                     name: "inspect".into(),
                     arguments: args,
@@ -821,20 +826,20 @@ mod tests {
         assert_eq!(user_content_text(&content), "one\ntwo");
     }
 
-    // -- tool_result_content_text --
+    // -- capability_result_content_text --
 
     #[test]
-    fn tool_result_content_text_from_string() {
-        let content = ToolResultMessageContent::Text("output".into());
-        assert_eq!(tool_result_content_text(&content), "output");
+    fn capability_result_content_text_from_string() {
+        let content = CapabilityResultMessageContent::Text("output".into());
+        assert_eq!(capability_result_content_text(&content), "output");
     }
 
     #[test]
-    fn tool_result_content_text_from_blocks() {
-        let content = ToolResultMessageContent::Blocks(vec![
-            crate::shared::content::ToolResultContent::text("line1"),
-            crate::shared::content::ToolResultContent::text("line2"),
+    fn capability_result_content_text_from_blocks() {
+        let content = CapabilityResultMessageContent::Blocks(vec![
+            crate::shared::content::CapabilityResultContent::text("line1"),
+            crate::shared::content::CapabilityResultContent::text("line2"),
         ]);
-        assert_eq!(tool_result_content_text(&content), "line1\nline2");
+        assert_eq!(capability_result_content_text(&content), "line1\nline2");
     }
 }

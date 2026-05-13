@@ -60,12 +60,12 @@ pub struct ClaudeRecord {
     /// Git branch at time of record.
     pub git_branch: Option<String>,
 
-    /// Tool-use ID being responded to (on capability-result `user` records).
-    pub source_tool_use_id: Option<String>,
+    /// Capability invocation ID being responded to (on capability-result `user` records).
+    pub source_capability_invocation_id: Option<String>,
 
     /// UUID of the assistant record that issued the capability invocation.
-    #[serde(rename = "sourceToolAssistantUUID")]
-    pub source_tool_assistant_uuid: Option<String>,
+    #[serde(rename = "sourceCapabilityAssistantUUID")]
+    pub source_capability_assistant_uuid: Option<String>,
 
     /// Reference message ID (on `file-history-snapshot` records).
     pub message_id: Option<String>,
@@ -95,7 +95,7 @@ pub struct ClaudeMessage {
     /// Model ID (e.g., "claude-opus-4-6").
     pub model: Option<String>,
 
-    /// Stop reason: `end_turn`, `tool_use`, or null (for partial chunks).
+    /// Stop reason: `end_turn`, `capability_invocation`, or null (for partial chunks).
     pub stop_reason: Option<String>,
 
     /// Token usage for this API call.
@@ -158,7 +158,7 @@ impl ClaudeRecord {
     }
 
     /// Whether this is a user record containing a capability result.
-    pub fn is_tool_result(&self) -> bool {
+    pub fn is_capability_result(&self) -> bool {
         if self.kind() != RecordKind::User {
             return false;
         }
@@ -168,13 +168,13 @@ impl ClaudeRecord {
         let Some(content) = &msg.content else {
             return false;
         };
-        // Content is an array with a tool_result block as first element
+        // Content is an array with a capability_result block as first element
         content
             .as_array()
             .and_then(|arr| arr.first())
             .and_then(|block| block.get("type"))
             .and_then(Value::as_str)
-            == Some("tool_result")
+            == Some("capability_result")
     }
 }
 

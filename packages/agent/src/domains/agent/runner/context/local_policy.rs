@@ -25,7 +25,7 @@ use crate::shared::messages::Provider;
 ///
 /// A thin, self-documenting replacement for scattered `if is_local` branches.
 /// Prefer passing [`ContextPolicy`] into helpers over a raw `bool` so the
-/// semantic decision ("strip memory? include all tools?") is visible at the
+/// semantic decision ("strip memory? include all capability primitives?") is visible at the
 /// call site.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContextPolicy {
@@ -166,7 +166,7 @@ impl ContextPolicy {
         self.spec.skip_pending_jobs_bootstrap
     }
 
-    /// The allow-list of capability ids, or `None` if all registered tools apply.
+    /// The allow-list of capability ids, or `None` if all registered capabilities apply.
     #[must_use]
     pub fn capability_filter(&self) -> Option<Vec<String>> {
         self.capability_policy
@@ -262,37 +262,49 @@ mod tests {
     #[test]
     fn unknown_provider_is_not_local() {
         // Defensive: unrecognized providers default to cloud policy so they
-        // get full tool access and unrestricted context. Forcing them into
+        // get full capability access and unrestricted context. Forcing them into
         // the local allow-list would silently break any new provider added.
         assert!(!provider_is_local_for_spec(Provider::Unknown, &spec()));
     }
 
-    // ── local tool filter ────────────────────────────────────────────────
+    // ── local capability filter ──────────────────────────────────────────
 
     #[test]
-    fn local_tools_allow_capability_primitives() {
+    fn local_profile_allows_capability_primitives() {
         let allowed = local_policy().capability_filter().unwrap();
         for name in ["search", "inspect", "execute"] {
             assert!(
-                allowed.iter().any(|tool| tool == name),
+                allowed.iter().any(|capability| capability == name),
                 "{name} should be local-allowed"
             );
         }
     }
 
     #[test]
-    fn cloud_only_tool_rejected() {
+    fn cloud_only_capability_rejected() {
         let allowed = local_policy().capability_filter().unwrap();
-        assert!(!allowed.iter().any(|tool| tool == "agent::spawn_subagent"));
-        assert!(!allowed.iter().any(|tool| tool == "filesystem::read_file"));
-        assert!(!allowed.iter().any(|tool| tool == "UnknownTool"));
+        assert!(
+            !allowed
+                .iter()
+                .any(|capability| capability == "agent::spawn_subagent")
+        );
+        assert!(
+            !allowed
+                .iter()
+                .any(|capability| capability == "filesystem::read_file")
+        );
+        assert!(
+            !allowed
+                .iter()
+                .any(|capability| capability == "UnknownCapability")
+        );
     }
 
     #[test]
-    fn local_tool_check_is_case_sensitive() {
+    fn local_capability_check_is_case_sensitive() {
         let allowed = local_policy().capability_filter().unwrap();
-        assert!(!allowed.iter().any(|tool| tool == "Search"));
-        assert!(!allowed.iter().any(|tool| tool == "EXECUTE"));
+        assert!(!allowed.iter().any(|capability| capability == "Search"));
+        assert!(!allowed.iter().any(|capability| capability == "EXECUTE"));
     }
 
     // ── truncate_rules ──────────────────────────────────────────────────

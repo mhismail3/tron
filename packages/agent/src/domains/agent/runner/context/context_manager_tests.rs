@@ -24,7 +24,7 @@ fn test_config() -> ContextManagerConfig {
         system_prompt: Some("You are helpful.".into()),
         context_policy: cloud_context_policy(),
         working_directory: Some("/tmp".into()),
-        tools: Vec::new(),
+        capabilities: Vec::new(),
         rules_content: None,
         compaction: CompactionConfig {
             threshold: 0.70,
@@ -73,13 +73,13 @@ fn default_system_prompt() {
 fn ollama_model_gets_local_prompt() {
     let config = ContextManagerConfig {
         model: "gemma4:e4b".into(),
-        system_prompt: Some("Tool routing".into()),
+        system_prompt: Some("ModelCapability routing".into()),
         context_policy: local_context_policy(),
         ..test_config()
     };
     let cm = ContextManager::new(config);
     let prompt = cm.get_system_prompt();
-    assert!(prompt.contains("Tool routing"));
+    assert!(prompt.contains("ModelCapability routing"));
     assert!(!prompt.contains("YOUR IDENTITY"));
 }
 
@@ -644,30 +644,30 @@ fn trigger_compaction_callback() {
 // -- capability result processing --
 
 #[test]
-fn process_small_tool_result() {
+fn process_small_capability_result() {
     let cm = ContextManager::new(test_config());
-    let result = cm.process_tool_result("tc-1", "small output");
+    let result = cm.process_capability_result("tc-1", "small output");
     assert!(!result.truncated);
     assert_eq!(result.content, "small output");
     assert!(result.original_size.is_none());
 }
 
 #[test]
-fn process_large_tool_result() {
+fn process_large_capability_result() {
     let cm = ContextManager::new(test_config());
     let large = "x".repeat(TOOL_RESULT_MAX_CHARS + 1000);
-    let result = cm.process_tool_result("tc-1", &large);
+    let result = cm.process_capability_result("tc-1", &large);
     assert!(result.truncated);
     assert!(result.original_size.is_some());
     assert!(result.content.len() < large.len());
 }
 
 #[test]
-fn tool_result_budget_reserves_for_response() {
+fn capability_result_budget_reserves_for_response() {
     let mut cm = ContextManager::new(test_config());
     // 50k tokens used of 100k limit → 50k remaining
     cm.set_api_context_tokens(50_000);
-    let max_size = cm.get_max_tool_result_size();
+    let max_size = cm.get_max_capability_result_size();
 
     // remaining=50k, reserve=8k, margin=5k → available=37k tokens → 148k chars
     // But capped at TOOL_RESULT_MAX_CHARS (100k)
@@ -675,11 +675,11 @@ fn tool_result_budget_reserves_for_response() {
 }
 
 #[test]
-fn tool_result_budget_near_limit() {
+fn capability_result_budget_near_limit() {
     let mut cm = ContextManager::new(test_config());
     // 95k tokens used of 100k limit → 5k remaining
     cm.set_api_context_tokens(95_000);
-    let max_size = cm.get_max_tool_result_size();
+    let max_size = cm.get_max_capability_result_size();
 
     // remaining=5k, reserve=8k → saturating_sub yields 0 before margin
     // Falls back to TOOL_RESULT_MIN_TOKENS (2500) * 4 = 10000 chars
@@ -882,7 +882,7 @@ fn compaction_deps_no_poison_after_panic() {
         current_tokens: 100,
         context_limit: 100_000,
         system_prompt_tokens: 10,
-        tools_tokens: 5,
+        capabilities_tokens: 5,
     };
 
     // Panic while holding the lock — parking_lot::Mutex doesn't poison
@@ -980,10 +980,10 @@ fn build_base_context_messages_empty() {
 }
 
 #[test]
-fn build_base_context_tools_none() {
+fn build_base_context_capabilities_none() {
     let cm = ContextManager::new(test_config());
     let ctx = cm.build_base_context();
-    assert!(ctx.tools.is_none());
+    assert!(ctx.capabilities.is_none());
 }
 
 // -- touch_file_path returns only new activations --
@@ -1043,7 +1043,7 @@ fn local_window_config() -> ContextManagerConfig {
         system_prompt: Some("You are helpful.".into()),
         context_policy: local_context_policy(),
         working_directory: Some("/tmp".into()),
-        tools: Vec::new(),
+        capabilities: Vec::new(),
         rules_content: None,
         compaction: CompactionConfig {
             threshold: 0.70,
@@ -1054,7 +1054,7 @@ fn local_window_config() -> ContextManagerConfig {
 }
 
 #[test]
-fn local_window_tool_result_sizer_at_50k_used() {
+fn local_window_capability_result_sizer_at_50k_used() {
     // context_limit=65_536, api_tokens=50_000 → remaining=15_536
     //   safety = 15_536 / 10 = 1_553
     //   response_reserve = 8_000
@@ -1062,7 +1062,7 @@ fn local_window_tool_result_sizer_at_50k_used() {
     //   budget = 5_983 * 4 = 23_932 chars
     let mut cm = ContextManager::new(local_window_config());
     cm.set_api_context_tokens(50_000);
-    let budget = cm.get_max_tool_result_size();
+    let budget = cm.get_max_capability_result_size();
     assert!(
         (23_000..=24_000).contains(&budget),
         "expected ~23_932 chars, got {budget}"
@@ -1070,12 +1070,12 @@ fn local_window_tool_result_sizer_at_50k_used() {
 }
 
 #[test]
-fn local_window_tool_result_sizer_floor_when_tight() {
+fn local_window_capability_result_sizer_floor_when_tight() {
     // When remaining < response_reserve, sizer falls back to
     // TOOL_RESULT_MIN_TOKENS * CHARS_PER_TOKEN = 2_500 * 4 = 10_000 chars.
     let mut cm = ContextManager::new(local_window_config());
     cm.set_api_context_tokens(64_000);
-    let budget = cm.get_max_tool_result_size();
+    let budget = cm.get_max_capability_result_size();
     assert_eq!(budget, 10_000, "expected MIN floor, got {budget}");
 }
 

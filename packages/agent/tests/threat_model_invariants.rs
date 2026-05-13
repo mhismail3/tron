@@ -314,7 +314,7 @@ fn tron_server_transport_has_no_removed_rpc_surface() {
 }
 
 #[test]
-fn tool_registry_authority_stays_deleted() {
+fn capability_registry_authority_stays_deleted() {
     let crate_root = crate_root();
     let repo_root = repo_root();
 
@@ -324,13 +324,13 @@ fn tool_registry_authority_stays_deleted() {
     ] {
         assert!(
             !crate_root.join(&removed).exists(),
-            "{removed} must stay deleted; provider tools are capability primitives over domain-owned workers"
+            "{removed} must stay deleted; provider capabilities are capability primitives over domain-owned workers"
         );
     }
 
     let forbidden = [
-        ["Tool", "Registry"].concat(),
-        ["Tool", "Registry", "Config"].concat(),
+        ["ModelCapability", "Registry"].concat(),
+        ["ModelCapability", "Registry", "Config"].concat(),
         ["create_tool", "_registry"].concat(),
         ["tool", "_factory"].concat(),
         "registry.names()".to_string(),
@@ -350,7 +350,7 @@ fn tool_registry_authority_stays_deleted() {
             for needle in &forbidden {
                 assert!(
                     !content.contains(needle),
-                    "{} must not reintroduce deleted tool registry authority `{needle}`",
+                    "{} must not reintroduce deleted capability registry authority `{needle}`",
                     path.strip_prefix(&repo_root).unwrap_or(&path).display()
                 );
             }
@@ -363,14 +363,15 @@ fn tool_registry_authority_stays_deleted() {
             .exists(),
         "legacy capability invocation handler must stay deleted"
     );
-    let tool_executor_source =
-        std::fs::read_to_string(crate_root.join("src/domains/agent/runner/agent/tool_executor.rs"))
-            .expect("failed to read agent tool executor");
+    let capability_executor_source = std::fs::read_to_string(
+        crate_root.join("src/domains/agent/runner/agent/capability_invocation_executor.rs"),
+    )
+    .expect("failed to read agent capability executor");
     assert!(
-        tool_executor_source.contains("\"search\"")
-            && tool_executor_source.contains("\"inspect\"")
-            && tool_executor_source.contains("\"execute\""),
-        "agent tool executor must route only the three capability primitives"
+        capability_executor_source.contains("\"search\"")
+            && capability_executor_source.contains("\"inspect\"")
+            && capability_executor_source.contains("\"execute\""),
+        "agent capability executor must route only the three capability primitives"
     );
     for retired_runtime_term in [
         concat!("Tool", "Context"),
@@ -378,14 +379,14 @@ fn tool_registry_authority_stays_deleted() {
         concat!("Tron", "Tool"),
     ] {
         assert!(
-            !tool_executor_source.contains(retired_runtime_term),
-            "agent tool executor must not reintroduce the retired runtime bridge"
+            !capability_executor_source.contains(retired_runtime_term),
+            "agent capability executor must not reintroduce the retired runtime bridge"
         );
     }
 }
 
 #[test]
-fn retired_tool_event_surface_stays_deleted() {
+fn retired_capability_event_surface_stays_deleted() {
     let repo_root = repo_root();
     let crate_root = crate_root();
 
@@ -398,6 +399,16 @@ fn retired_tool_event_surface_stays_deleted() {
         concat!("tool", "_", "end"),
         concat!("tool", ".", "start"),
         concat!("tool", ".", "end"),
+        concat!("tool", "Agent"),
+        concat!("Tool", "Agent"),
+        concat!("tool", "Count"),
+        concat!("tool", "Status"),
+        concat!("tool", "Order"),
+        concat!("tool", "Execution", "Mode"),
+        concat!("tool", "Schema"),
+        concat!("local", "Tool", "Schema"),
+        concat!("Tool", "Operation"),
+        concat!("tool", "_", "operation"),
         concat!("agent", ".", "tool", "_"),
         concat!("tool", "::", "result"),
         concat!("Mcp", "Search"),
@@ -421,8 +432,61 @@ fn retired_tool_event_surface_stays_deleted() {
             for needle in &forbidden_exact {
                 assert!(
                     !content.contains(needle),
-                    "{} must not reintroduce retired tool event/execution marker `{needle}`",
+                    "{} must not reintroduce retired capability event/execution marker `{needle}`",
                     path.strip_prefix(&repo_root).unwrap_or(&path).display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn provider_tool_terms_stay_inside_protocol_boundaries() {
+    let repo_root = repo_root();
+    let allowed_prefixes = [
+        "packages/agent/src/domains/model/providers/",
+        "packages/agent/src/domains/mcp/product_protocol/",
+        "packages/agent/tests/threat_model_invariants.rs",
+    ];
+    let forbidden = [
+        concat!("model", "Tool", "Name"),
+        concat!("model", "_", "tool", "_", "name"),
+        concat!("tool", "Call", "Id"),
+        concat!("tool", "_", "call", "_", "id"),
+        concat!("tool", "_", "name"),
+        concat!("tool", "Name"),
+        concat!("tool", "_", "calls"),
+        concat!("Tool", "Call"),
+        concat!("Tool", "Result"),
+        concat!("Tool", "Use"),
+        concat!("tool", "_", "use"),
+        concat!("tool", "_", "result"),
+    ];
+
+    for root in [
+        repo_root.join("README.md"),
+        repo_root.join("packages/agent/src"),
+        repo_root.join("packages/agent/tests"),
+        repo_root.join("packages/agent/defaults"),
+    ] {
+        for path in files_to_scan(&root) {
+            let rel = path
+                .strip_prefix(&repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if allowed_prefixes
+                .iter()
+                .any(|prefix| rel.starts_with(prefix))
+            {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            for needle in forbidden {
+                assert!(
+                    !content.contains(needle),
+                    "{rel} contains provider/tool protocol term `{needle}` outside the protocol boundary"
                 );
             }
         }
@@ -435,7 +499,7 @@ fn retired_stale_shapes_stay_deleted() {
 
     let retired_shapes = [
         (
-            "src/shared/protocol/tools.rs".to_string(),
+            "src/shared/protocol/capabilities.rs".to_string(),
             "pub enum ToolExecutionContract".to_string(),
         ),
         (
@@ -466,8 +530,9 @@ fn retired_stale_shapes_stay_deleted() {
 
     for (relative, needle) in retired_shapes {
         let path = crate_root.join(&relative);
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         assert!(
             !content.contains(&needle),
             "{relative} must not reintroduce retired stale shape `{needle}`"
@@ -1048,16 +1113,17 @@ fn agent_runtime_stays_engine_native() {
         );
     }
 
-    let tool_executor =
-        std::fs::read_to_string(crate_root.join("src/domains/agent/runner/agent/tool_executor.rs"))
-            .expect("failed to read tool_executor.rs");
+    let capability_executor = std::fs::read_to_string(
+        crate_root.join("src/domains/agent/runner/agent/capability_invocation_executor.rs"),
+    )
+    .expect("failed to read capability_invocation_executor.rs");
     assert!(
-        !tool_executor.contains("TraceId::new(format!(\"tool:"),
-        "model tool child invocations must inherit the agent run trace instead of minting detached tool traces"
+        !capability_executor.contains("TraceId::new(format!(\"tool:"),
+        "model capability child invocations must inherit the agent run trace instead of minting detached tool traces"
     );
     assert!(
-        tool_executor.contains("with_parent_invocation"),
-        "model tool child invocations must carry the agent run-turn invocation as parent"
+        capability_executor.contains("with_parent_invocation"),
+        "model capability child invocations must carry the agent run-turn invocation as parent"
     );
 }
 

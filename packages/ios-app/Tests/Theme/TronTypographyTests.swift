@@ -103,7 +103,7 @@ struct TronTypographyCodePresetTests {
         #expect(TronTypography.sizeBody2 == 11)    // codeContent, codeCaption, filePath
         #expect(TronTypography.sizeCaption == 10)   // codeContentSM, codeSM
 
-        // Common sizes referenced by tool detail sheets
+        // Common sizes referenced by capability detail sheets
         #expect(TronTypography.sizeBodySM == 12)
         #expect(TronTypography.sizeBody == 14)
         #expect(TronTypography.sizeBody3 == 13)

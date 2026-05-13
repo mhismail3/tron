@@ -685,7 +685,7 @@ struct MemoryRetainedNotificationView: View {
 ///   via `@skill-name` or the sidebar. Flat styling to mirror the other
 ///   informational pills (compaction, rules).
 ///
-/// - `.askUser`: interactive picker — a header line ("Re-activate N skills?")
+/// - `.userInteraction`: interactive picker — a header line ("Re-activate N skills?")
 ///   above a wrapped row of tappable chips. Tapping a chip fires
 ///   `onReactivate(skillName)` which percolates up as
 ///   `MessageBubbleTapAction.reactivateSkill` and ultimately invokes the
@@ -698,7 +698,7 @@ struct MemoryRetainedNotificationView: View {
 struct SkillsClearedNotificationView: View {
     let clearedSkills: [String]
     let mode: SkillsClearedMode
-    /// Invoked when the user taps a skill chip (AskUser mode only). Nil in
+    /// Invoked when the user taps a skill chip (UserInteraction mode only). Nil in
     /// ClearAll mode; the informational banner has no interaction.
     var onReactivate: ((String) -> Void)? = nil
 
@@ -712,8 +712,8 @@ struct SkillsClearedNotificationView: View {
         switch mode {
         case .clearAll:
             clearAllBanner
-        case .askUser:
-            askUserPicker
+        case .userInteraction:
+            userInteractionPicker
         }
     }
 
@@ -744,15 +744,15 @@ struct SkillsClearedNotificationView: View {
         return "Cleared \(clearedSkills.count) \(noun) on compaction:"
     }
 
-    // MARK: AskUser — interactive picker
+    // MARK: UserInteraction — interactive picker
 
-    private var askUserPicker: some View {
+    private var userInteractionPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronCyan)
-                Text(askUserHeader)
+                Text(userInteractionHeader)
                     .font(TronTypography.filePath)
                     .foregroundStyle(Color.tronCyan.opacity(0.9))
             }
@@ -780,7 +780,7 @@ struct SkillsClearedNotificationView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var askUserHeader: String {
+    private var userInteractionHeader: String {
         let noun = clearedSkills.count == 1 ? "skill" : "skills"
         return "Re-activate \(clearedSkills.count) \(noun)?"
     }

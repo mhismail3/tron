@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 /// Some types are forced-blocking — they can affect agent flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HookType {
-    /// Before a tool is executed. Forced-blocking.
-    PreToolUse,
-    /// After a tool has executed.
-    PostToolUse,
+    /// Before a capability is invoked. Forced-blocking.
+    PreCapabilityInvocation,
+    /// After a capability has completed.
+    PostCapabilityInvocation,
     /// When the agent stops.
     Stop,
     /// When a subagent stops.
@@ -50,7 +50,7 @@ impl HookType {
     pub fn is_forced_blocking(self) -> bool {
         matches!(
             self,
-            Self::PreToolUse | Self::UserPromptSubmit | Self::PreCompact,
+            Self::PreCapabilityInvocation | Self::UserPromptSubmit | Self::PreCompact,
         )
     }
 
@@ -58,8 +58,8 @@ impl HookType {
     #[must_use]
     pub fn all() -> &'static [HookType] {
         &[
-            Self::PreToolUse,
-            Self::PostToolUse,
+            Self::PreCapabilityInvocation,
+            Self::PostCapabilityInvocation,
             Self::Stop,
             Self::SubagentStop,
             Self::SessionStart,
@@ -75,8 +75,8 @@ impl HookType {
 impl std::fmt::Display for HookType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PreToolUse => write!(f, "PreToolUse"),
-            Self::PostToolUse => write!(f, "PostToolUse"),
+            Self::PreCapabilityInvocation => write!(f, "PreCapabilityInvocation"),
+            Self::PostCapabilityInvocation => write!(f, "PostCapabilityInvocation"),
             Self::Stop => write!(f, "Stop"),
             Self::SubagentStop => write!(f, "SubagentStop"),
             Self::SessionStart => write!(f, "SessionStart"),
@@ -97,8 +97,8 @@ pub enum HookAction {
     Continue,
     /// Block the current operation.
     Block,
-    /// Modify the operation with provided modifications (e.g., tool
-    /// argument rewriting in PreToolUse).
+    /// Modify the operation with provided modifications (e.g., capability
+    /// argument rewriting in PreCapabilityInvocation).
     Modify,
     /// Append `added_context` to the prompt/turn this hook is firing
     /// on, without otherwise modifying it. Used by hooks that want to
@@ -246,31 +246,31 @@ impl HookResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "hookType", rename_all = "camelCase")]
 pub enum HookContext {
-    /// Context for [`HookType::PreToolUse`].
+    /// Context for [`HookType::PreCapabilityInvocation`].
     #[serde(rename_all = "camelCase")]
-    PreToolUse {
+    PreCapabilityInvocation {
         /// Session this hook fires in.
         session_id: String,
         /// ISO 8601 timestamp.
         timestamp: String,
-        /// Tool being invoked.
-        tool_name: String,
-        /// Arguments passed to the tool.
-        tool_arguments: serde_json::Value,
+        /// ModelCapability being invoked.
+        model_primitive_name: String,
+        /// Arguments passed to the capability.
+        capability_arguments: serde_json::Value,
         /// Unique ID for this capability invocation.
-        tool_call_id: String,
+        invocation_id: String,
     },
-    /// Context for [`HookType::PostToolUse`].
+    /// Context for [`HookType::PostCapabilityInvocation`].
     #[serde(rename_all = "camelCase")]
-    PostToolUse {
+    PostCapabilityInvocation {
         /// Session this hook fires in.
         session_id: String,
         /// ISO 8601 timestamp.
         timestamp: String,
-        /// Tool that was invoked.
-        tool_name: String,
+        /// ModelCapability that was invoked.
+        model_primitive_name: String,
         /// Unique ID for this capability invocation.
-        tool_call_id: String,
+        invocation_id: String,
         /// Serialized capability result.
         result: serde_json::Value,
         /// How long the capability invocation took.
@@ -328,7 +328,7 @@ pub enum HookContext {
         /// Number of messages in the session.
         message_count: u64,
         /// Number of capability invocations in the session.
-        tool_call_count: u64,
+        capability_invocation_count: u64,
     },
     /// Context for [`HookType::UserPromptSubmit`].
     #[serde(rename_all = "camelCase")]
@@ -389,8 +389,8 @@ impl HookContext {
     #[must_use]
     pub fn hook_type(&self) -> HookType {
         match self {
-            Self::PreToolUse { .. } => HookType::PreToolUse,
-            Self::PostToolUse { .. } => HookType::PostToolUse,
+            Self::PreCapabilityInvocation { .. } => HookType::PreCapabilityInvocation,
+            Self::PostCapabilityInvocation { .. } => HookType::PostCapabilityInvocation,
             Self::Stop { .. } => HookType::Stop,
             Self::SubagentStop { .. } => HookType::SubagentStop,
             Self::SessionStart { .. } => HookType::SessionStart,
@@ -406,8 +406,8 @@ impl HookContext {
     #[must_use]
     pub fn session_id(&self) -> &str {
         match self {
-            Self::PreToolUse { session_id, .. }
-            | Self::PostToolUse { session_id, .. }
+            Self::PreCapabilityInvocation { session_id, .. }
+            | Self::PostCapabilityInvocation { session_id, .. }
             | Self::Stop { session_id, .. }
             | Self::SubagentStop { session_id, .. }
             | Self::SessionStart { session_id, .. }
@@ -423,8 +423,8 @@ impl HookContext {
     #[must_use]
     pub fn timestamp(&self) -> &str {
         match self {
-            Self::PreToolUse { timestamp, .. }
-            | Self::PostToolUse { timestamp, .. }
+            Self::PreCapabilityInvocation { timestamp, .. }
+            | Self::PostCapabilityInvocation { timestamp, .. }
             | Self::Stop { timestamp, .. }
             | Self::SubagentStop { timestamp, .. }
             | Self::SessionStart { timestamp, .. }
@@ -523,7 +523,7 @@ impl DiscoveredHook {
 /// Script files use comment-prefixed frontmatter (`# `, `// `):
 /// ```text
 /// # ---
-/// # type: pre-tool-use
+/// # type: pre-capability-invocation
 /// # label: Safety check
 /// # ---
 /// #!/bin/bash
@@ -566,14 +566,14 @@ mod tests {
 
     #[test]
     fn test_hook_type_forced_blocking() {
-        assert!(HookType::PreToolUse.is_forced_blocking());
+        assert!(HookType::PreCapabilityInvocation.is_forced_blocking());
         assert!(HookType::UserPromptSubmit.is_forced_blocking());
         assert!(HookType::PreCompact.is_forced_blocking());
     }
 
     #[test]
     fn test_hook_type_not_forced_blocking() {
-        assert!(!HookType::PostToolUse.is_forced_blocking());
+        assert!(!HookType::PostCapabilityInvocation.is_forced_blocking());
         assert!(!HookType::Stop.is_forced_blocking());
         assert!(!HookType::SubagentStop.is_forced_blocking());
         assert!(!HookType::SessionStart.is_forced_blocking());
@@ -589,8 +589,14 @@ mod tests {
 
     #[test]
     fn test_hook_type_display() {
-        assert_eq!(HookType::PreToolUse.to_string(), "PreToolUse");
-        assert_eq!(HookType::PostToolUse.to_string(), "PostToolUse");
+        assert_eq!(
+            HookType::PreCapabilityInvocation.to_string(),
+            "PreCapabilityInvocation"
+        );
+        assert_eq!(
+            HookType::PostCapabilityInvocation.to_string(),
+            "PostCapabilityInvocation"
+        );
         assert_eq!(HookType::Stop.to_string(), "Stop");
         assert_eq!(HookType::Notification.to_string(), "Notification");
     }
@@ -736,30 +742,30 @@ mod tests {
     // --- HookContext ---
 
     #[test]
-    fn test_hook_context_pre_tool_use_type() {
-        let ctx = HookContext::PreToolUse {
+    fn test_hook_context_pre_capability_invocation_type() {
+        let ctx = HookContext::PreCapabilityInvocation {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "process::run".to_string(),
-            tool_arguments: serde_json::json!({"command": "ls"}),
-            tool_call_id: "tc1".to_string(),
+            model_primitive_name: "process::run".to_string(),
+            capability_arguments: serde_json::json!({"command": "ls"}),
+            invocation_id: "tc1".to_string(),
         };
-        assert_eq!(ctx.hook_type(), HookType::PreToolUse);
+        assert_eq!(ctx.hook_type(), HookType::PreCapabilityInvocation);
         assert_eq!(ctx.session_id(), "s1");
         assert_eq!(ctx.timestamp(), "2026-01-01T00:00:00Z");
     }
 
     #[test]
-    fn test_hook_context_post_tool_use_type() {
-        let ctx = HookContext::PostToolUse {
+    fn test_hook_context_post_capability_invocation_type() {
+        let ctx = HookContext::PostCapabilityInvocation {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "process::run".to_string(),
-            tool_call_id: "tc1".to_string(),
+            model_primitive_name: "process::run".to_string(),
+            invocation_id: "tc1".to_string(),
             result: serde_json::json!({"ok": true}),
             duration_ms: 150,
         };
-        assert_eq!(ctx.hook_type(), HookType::PostToolUse);
+        assert_eq!(ctx.hook_type(), HookType::PostCapabilityInvocation);
     }
 
     #[test]
@@ -791,7 +797,7 @@ mod tests {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             message_count: 5,
-            tool_call_count: 3,
+            capability_invocation_count: 3,
         };
         assert_eq!(ctx.hook_type(), HookType::SessionEnd);
     }
@@ -842,17 +848,17 @@ mod tests {
     }
 
     #[test]
-    fn test_hook_context_serde_roundtrip_pre_tool_use() {
-        let ctx = HookContext::PreToolUse {
+    fn test_hook_context_serde_roundtrip_pre_capability_invocation() {
+        let ctx = HookContext::PreCapabilityInvocation {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "process::run".to_string(),
-            tool_arguments: serde_json::json!({"command": "ls"}),
-            tool_call_id: "tc1".to_string(),
+            model_primitive_name: "process::run".to_string(),
+            capability_arguments: serde_json::json!({"command": "ls"}),
+            invocation_id: "tc1".to_string(),
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let deserialized: HookContext = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.hook_type(), HookType::PreToolUse);
+        assert_eq!(deserialized.hook_type(), HookType::PreCapabilityInvocation);
         assert_eq!(deserialized.session_id(), "s1");
     }
 
@@ -913,7 +919,7 @@ mod tests {
     fn test_hook_info_serde_roundtrip() {
         let info = HookInfo {
             name: "test-hook".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
             priority: 100,
             execution_mode: HookExecutionMode::Blocking,
             description: Some("A test hook".to_string()),

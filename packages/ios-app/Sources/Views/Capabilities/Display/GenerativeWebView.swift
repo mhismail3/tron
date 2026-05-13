@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-/// WKWebView wrapper for displaying generated web UIs in the Display tool detail sheet.
+/// WKWebView wrapper for displaying generated web UIs in the Display capability detail sheet.
 ///
 /// Handles loading state, error reporting, scheme-restricted navigation,
 /// and popup prevention. Safari Web Inspector is enabled for debugging.

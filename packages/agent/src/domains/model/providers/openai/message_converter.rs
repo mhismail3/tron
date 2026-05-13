@@ -10,10 +10,12 @@
 //! - Capability results → `function_call_output` items (truncated at 16k)
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
-use crate::domains::model::providers::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
-use crate::shared::content::{AssistantContent, ToolResultContent, UserContent};
-use crate::shared::messages::{Message, ToolResultMessageContent, UserMessageContent};
-use crate::shared::tools::Tool;
+use crate::domains::model::providers::{
+    IdFormat, build_invocation_id_mapping, remap_invocation_id,
+};
+use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
+use crate::shared::model_capabilities::ModelCapability;
 
 use super::types::{
     MessageContent, ResponsesInputItem, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH,
@@ -28,9 +30,9 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
     let mut input = Vec::new();
 
     // Build capability invocation ID mapping for cross-provider switching
-    let all_tool_call_ids = collect_tool_call_ids(messages);
-    let id_refs: Vec<&str> = all_tool_call_ids.iter().map(String::as_str).collect();
-    let id_mapping = build_tool_call_id_mapping(&id_refs, IdFormat::OpenAi);
+    let all_invocation_ids = collect_invocation_ids(messages);
+    let id_refs: Vec<&str> = all_invocation_ids.iter().map(String::as_str).collect();
+    let id_mapping = build_invocation_id_mapping(&id_refs, IdFormat::OpenAi);
 
     for msg in messages {
         match msg {
@@ -40,12 +42,12 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
             Message::Assistant { content, .. } => {
                 convert_assistant_message(content, &id_mapping, &mut input);
             }
-            Message::ToolResult {
-                tool_call_id,
+            Message::CapabilityResult {
+                invocation_id,
                 content,
                 ..
             } => {
-                convert_tool_result(tool_call_id, content, &id_mapping, &mut input);
+                convert_capability_result(invocation_id, content, &id_mapping, &mut input);
             }
         }
     }
@@ -53,16 +55,19 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
     input
 }
 
-/// Convert Tron tools to Responses API tool entries.
+/// Convert Tron capabilities to Responses API tool entries.
 ///
 /// When `enable_tool_search` is `true`, marks all functions with `defer_loading: true`
 /// and appends a `ToolSearch` sentinel. This enables the model to dynamically discover
-/// which tools to use, reducing prompt tokens for large tool sets.
+/// which capabilities to use, reducing prompt tokens for large tool sets.
 ///
 /// When `false`, produces standard function entries with no `defer_loading` field.
 #[must_use]
-pub fn convert_tools_v2(tools: &[Tool], enable_tool_search: bool) -> Vec<ResponsesToolEntry> {
-    let mut entries: Vec<ResponsesToolEntry> = tools
+pub fn convert_tools_v2(
+    capabilities: &[ModelCapability],
+    enable_tool_search: bool,
+) -> Vec<ResponsesToolEntry> {
+    let mut entries: Vec<ResponsesToolEntry> = capabilities
         .iter()
         .map(|t| {
             let schema = serde_json::to_value(&t.parameters).unwrap_or_default();
@@ -112,14 +117,14 @@ pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Va
 /// Generate a tool clarification message for the first turn.
 ///
 /// Since `OpenAI` Codex has its own built-in system instructions that reference
-/// tools we don't use (shell, `apply_patch`, etc.), we prepend this message to
-/// clarify the actual available tools.
+/// capabilities we don't use (shell, `apply_patch`, etc.), we prepend this message to
+/// clarify the actual available capabilities.
 #[must_use]
-pub fn generate_tool_clarification_message(
-    tools: &[Tool],
+pub fn generate_capability_clarification_message(
+    capabilities: &[ModelCapability],
     working_directory: Option<&str>,
 ) -> String {
-    let tool_descriptions: Vec<String> = tools
+    let tool_descriptions: Vec<String> = capabilities
         .iter()
         .map(|t| {
             let required = serde_json::to_value(&t.parameters)
@@ -150,8 +155,8 @@ pub fn generate_tool_clarification_message(
         You are Tron, an AI coding assistant that acts through Tron's live capability system.\n\
         {cwd_line}\n\
         \n\
-        ## Available Tools\n\
-        The tools mentioned in the system instructions (shell, apply_patch, etc.) are NOT available. \
+        ## Available Capabilities\n\
+        The capabilities mentioned in the system instructions (shell, apply_patch, etc.) are NOT available. \
         Use ONLY these tools:\n\
         \n\
         {tool_list}\n\
@@ -163,7 +168,7 @@ pub fn generate_tool_clarification_message(
         command execution, and web capabilities for network retrieval when they are visible to the session.\n\
         \n\
         ## Important Rules\n\
-        1. You MUST provide ALL required parameters when calling tools - never call with empty arguments\n\
+        1. You MUST provide ALL required parameters when calling capabilities - never call with empty arguments\n\
         2. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
         3. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
         4. Be helpful, accurate, and efficient when working with code\n\
@@ -178,12 +183,12 @@ pub fn generate_tool_clarification_message(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Collect all capability invocation IDs from assistant messages.
-fn collect_tool_call_ids(messages: &[Message]) -> Vec<String> {
+fn collect_invocation_ids(messages: &[Message]) -> Vec<String> {
     let mut ids = Vec::new();
     for msg in messages {
         if let Message::Assistant { content, .. } = msg {
             for block in content {
-                if let AssistantContent::ToolUse { id, .. } = block {
+                if let AssistantContent::CapabilityInvocation { id, .. } = block {
                     ids.push(id.clone());
                 }
             }
@@ -269,14 +274,14 @@ fn convert_assistant_message(
 
     // Convert capability invocations to function_call items
     for block in content {
-        if let AssistantContent::ToolUse {
+        if let AssistantContent::CapabilityInvocation {
             id,
             name,
             arguments,
             ..
         } = block
         {
-            let remapped_id = remap_tool_call_id(id, id_mapping).to_string();
+            let remapped_id = remap_invocation_id(id, id_mapping).to_string();
             input.push(ResponsesInputItem::FunctionCall {
                 id: None,
                 call_id: remapped_id,
@@ -288,18 +293,18 @@ fn convert_assistant_message(
 }
 
 /// Convert a capability result to a Responses API `function_call_output` item.
-fn convert_tool_result(
-    tool_call_id: &str,
-    content: &ToolResultMessageContent,
+fn convert_capability_result(
+    invocation_id: &str,
+    content: &CapabilityResultMessageContent,
     id_mapping: &std::collections::HashMap<String, String>,
     input: &mut Vec<ResponsesInputItem>,
 ) {
     let output_text = match content {
-        ToolResultMessageContent::Text(text) => text.clone(),
-        ToolResultMessageContent::Blocks(blocks) => blocks
+        CapabilityResultMessageContent::Text(text) => text.clone(),
+        CapabilityResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| {
-                if let ToolResultContent::Text { text } = block {
+                if let CapabilityResultContent::Text { text } = block {
                     Some(text.as_str())
                 } else {
                     None
@@ -318,7 +323,7 @@ fn convert_tool_result(
         output_text
     };
 
-    let remapped_id = remap_tool_call_id(tool_call_id, id_mapping).to_string();
+    let remapped_id = remap_invocation_id(invocation_id, id_mapping).to_string();
     input.push(ResponsesInputItem::FunctionCallOutput {
         call_id: remapped_id,
         output: truncated,
@@ -334,15 +339,15 @@ fn convert_tool_result(
 mod tests {
     use super::*;
     use crate::shared::content::AssistantContent;
-    use crate::shared::messages::{Message, ToolResultMessageContent, UserMessageContent};
-    use crate::shared::tools::{Tool, ToolParameterSchema};
+    use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
+    use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
     use serde_json::{Map, Value, json};
 
-    fn make_tool(name: &str, desc: &str) -> Tool {
-        Tool {
+    fn make_tool(name: &str, desc: &str) -> ModelCapability {
+        ModelCapability {
             name: name.into(),
             description: desc.into(),
-            parameters: ToolParameterSchema {
+            parameters: CapabilityParameterSchema {
                 schema_type: "object".into(),
                 properties: Some(Map::new()),
                 required: Some(vec![]),
@@ -352,17 +357,17 @@ mod tests {
         }
     }
 
-    fn make_tool_with_required(name: &str, desc: &str, required: Vec<&str>) -> Tool {
+    fn make_tool_with_required(name: &str, desc: &str, required: Vec<&str>) -> ModelCapability {
         let mut props = Map::new();
         for r in &required {
             let mut prop = Map::new();
             prop.insert("type".into(), json!("string"));
             props.insert((*r).to_string(), Value::Object(prop));
         }
-        Tool {
+        ModelCapability {
             name: name.into(),
             description: desc.into(),
-            parameters: ToolParameterSchema {
+            parameters: CapabilityParameterSchema {
                 schema_type: "object".into(),
                 properties: Some(props),
                 required: Some(required.into_iter().map(String::from).collect()),
@@ -480,11 +485,11 @@ mod tests {
     }
 
     #[test]
-    fn converts_assistant_tool_calls() {
+    fn converts_assistant_capability_invocations() {
         let mut args = Map::new();
         args.insert("path".into(), json!("/test.txt"));
         let messages = vec![Message::Assistant {
-            content: vec![AssistantContent::ToolUse {
+            content: vec![AssistantContent::CapabilityInvocation {
                 id: "call_abc".into(),
                 name: "read_file".into(),
                 arguments: args,
@@ -511,10 +516,10 @@ mod tests {
     }
 
     #[test]
-    fn converts_tool_results() {
-        let messages = vec![Message::ToolResult {
-            tool_call_id: "call_abc".into(),
-            content: ToolResultMessageContent::Text("File contents here".into()),
+    fn converts_capability_results() {
+        let messages = vec![Message::CapabilityResult {
+            invocation_id: "call_abc".into(),
+            content: CapabilityResultMessageContent::Text("File contents here".into()),
             is_error: None,
         }];
 
@@ -528,12 +533,12 @@ mod tests {
     }
 
     #[test]
-    fn converts_tool_result_content_blocks() {
-        let messages = vec![Message::ToolResult {
-            tool_call_id: "call_abc".into(),
-            content: ToolResultMessageContent::Blocks(vec![
-                ToolResultContent::text("Line 1"),
-                ToolResultContent::text("Line 2"),
+    fn converts_capability_result_content_blocks() {
+        let messages = vec![Message::CapabilityResult {
+            invocation_id: "call_abc".into(),
+            content: CapabilityResultMessageContent::Blocks(vec![
+                CapabilityResultContent::text("Line 1"),
+                CapabilityResultContent::text("Line 2"),
             ]),
             is_error: None,
         }];
@@ -545,11 +550,11 @@ mod tests {
     }
 
     #[test]
-    fn truncates_long_tool_results() {
+    fn truncates_long_capability_results() {
         let long_output = "x".repeat(20000);
-        let messages = vec![Message::ToolResult {
-            tool_call_id: "call_abc".into(),
-            content: ToolResultMessageContent::Text(long_output),
+        let messages = vec![Message::CapabilityResult {
+            invocation_id: "call_abc".into(),
+            content: CapabilityResultMessageContent::Text(long_output),
             is_error: None,
         }];
 
@@ -561,9 +566,9 @@ mod tests {
     }
 
     #[test]
-    fn handles_empty_tool_call_arguments() {
+    fn handles_empty_capability_invocation_arguments() {
         let messages = vec![Message::Assistant {
-            content: vec![AssistantContent::ToolUse {
+            content: vec![AssistantContent::CapabilityInvocation {
                 id: "call_1".into(),
                 name: "get_status".into(),
                 arguments: Map::new(),
@@ -585,12 +590,12 @@ mod tests {
     }
 
     #[test]
-    fn remaps_anthropic_tool_call_ids() {
+    fn remaps_anthropic_invocation_ids() {
         let mut args = Map::new();
         args.insert("path".into(), json!("/test"));
         let messages = vec![
             Message::Assistant {
-                content: vec![AssistantContent::ToolUse {
+                content: vec![AssistantContent::CapabilityInvocation {
                     id: "toolu_01abc".into(),
                     name: "read_file".into(),
                     arguments: args,
@@ -601,9 +606,9 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::ToolResult {
-                tool_call_id: "toolu_01abc".into(),
-                content: ToolResultMessageContent::Text("result".into()),
+            Message::CapabilityResult {
+                invocation_id: "toolu_01abc".into(),
+                content: CapabilityResultMessageContent::Text("result".into()),
                 is_error: None,
             },
         ];
@@ -632,10 +637,10 @@ mod tests {
     }
 
     #[test]
-    fn preserves_openai_tool_call_ids() {
+    fn preserves_openai_invocation_ids() {
         let messages = vec![
             Message::Assistant {
-                content: vec![AssistantContent::ToolUse {
+                content: vec![AssistantContent::CapabilityInvocation {
                     id: "call_existing".into(),
                     name: "execute".into(),
                     arguments: Map::new(),
@@ -646,9 +651,9 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::ToolResult {
-                tool_call_id: "call_existing".into(),
-                content: ToolResultMessageContent::Text("ok".into()),
+            Message::CapabilityResult {
+                invocation_id: "call_existing".into(),
+                content: CapabilityResultMessageContent::Text("ok".into()),
                 is_error: None,
             },
         ];
@@ -671,7 +676,7 @@ mod tests {
             Message::Assistant {
                 content: vec![
                     AssistantContent::text("Reading..."),
-                    AssistantContent::ToolUse {
+                    AssistantContent::CapabilityInvocation {
                         id: "call_1".into(),
                         name: "inspect".into(),
                         arguments: args,
@@ -683,9 +688,9 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::ToolResult {
-                tool_call_id: "call_1".into(),
-                content: ToolResultMessageContent::Text("file data".into()),
+            Message::CapabilityResult {
+                invocation_id: "call_1".into(),
+                content: CapabilityResultMessageContent::Text("file data".into()),
                 is_error: None,
             },
         ];
@@ -706,11 +711,11 @@ mod tests {
     #[test]
     fn convert_tools_v2_without_tool_search() {
         use crate::domains::model::providers::openai::types::ResponsesToolEntry;
-        let tools = vec![
+        let capabilities = vec![
             make_tool("execute", "Run commands"),
             make_tool("inspect", "Read file"),
         ];
-        let result = convert_tools_v2(&tools, false);
+        let result = convert_tools_v2(&capabilities, false);
 
         assert_eq!(result.len(), 2);
         for entry in &result {
@@ -726,11 +731,11 @@ mod tests {
     #[test]
     fn convert_tools_v2_with_tool_search() {
         use crate::domains::model::providers::openai::types::ResponsesToolEntry;
-        let tools = vec![
+        let capabilities = vec![
             make_tool("execute", "Run commands"),
             make_tool("inspect", "Read file"),
         ];
-        let result = convert_tools_v2(&tools, true);
+        let result = convert_tools_v2(&capabilities, true);
 
         // 2 functions + 1 tool_search sentinel
         assert_eq!(result.len(), 3);
@@ -751,8 +756,8 @@ mod tests {
 
     #[test]
     fn convert_tools_v2_tool_search_json_shape() {
-        let tools = vec![make_tool("execute", "Run commands")];
-        let result = convert_tools_v2(&tools, true);
+        let capabilities = vec![make_tool("execute", "Run commands")];
+        let result = convert_tools_v2(&capabilities, true);
         let json = serde_json::to_value(&result).unwrap();
         let arr = json.as_array().unwrap();
 
@@ -761,7 +766,7 @@ mod tests {
         assert_eq!(arr[0]["defer_loading"], true);
         assert_eq!(arr[0]["name"], "execute");
 
-        // Tool search sentinel
+        // ModelCapability search sentinel
         assert_eq!(arr[1]["type"], "tool_search");
     }
 
@@ -773,16 +778,16 @@ mod tests {
         assert!(matches!(&result[0], ResponsesToolEntry::ToolSearch {}));
     }
 
-    // ── generate_tool_clarification_message ─────────────────────────
+    // ── generate_capability_clarification_message ─────────────────────────
 
     #[test]
-    fn clarification_includes_tool_names() {
-        let tools = vec![make_tool_with_required(
+    fn clarification_includes_model_primitive_names() {
+        let capabilities = vec![make_tool_with_required(
             "execute",
             "Execute inspected capabilities",
             vec!["mode"],
         )];
-        let result = generate_tool_clarification_message(&tools, None);
+        let result = generate_capability_clarification_message(&capabilities, None);
 
         assert!(result.contains("execute"));
         assert!(result.contains("Execute inspected capabilities"));
@@ -791,21 +796,22 @@ mod tests {
 
     #[test]
     fn clarification_includes_working_directory() {
-        let tools = vec![];
-        let result = generate_tool_clarification_message(&tools, Some("/home/user/project"));
+        let capabilities = vec![];
+        let result =
+            generate_capability_clarification_message(&capabilities, Some("/home/user/project"));
         assert!(result.contains("/home/user/project"));
     }
 
     #[test]
     fn clarification_includes_tron_identity() {
-        let result = generate_tool_clarification_message(&[], None);
+        let result = generate_capability_clarification_message(&[], None);
         assert!(result.contains("TRON"));
         assert!(result.contains("AI coding assistant"));
     }
 
     #[test]
     fn clarification_includes_capability_execution_guidance() {
-        let result = generate_tool_clarification_message(&[], None);
+        let result = generate_capability_clarification_message(&[], None);
         assert!(result.contains("Capability Execution"));
         assert!(result.contains("process::run"));
         assert!(result.contains("search"));

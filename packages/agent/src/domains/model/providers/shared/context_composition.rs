@@ -206,7 +206,7 @@ pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
 /// Compile the complete provider-independent audit view of an LLM request.
 ///
 /// Unlike [`compose_context_parts`], this includes non-instruction provider
-/// surfaces such as tool schemas and conversation messages. It is used only for
+/// surfaces such as capability schemas and conversation messages. It is used only for
 /// Constitution audit/replay and must not feed back into prompt text assembly.
 pub fn compose_context_audit_blocks(context: &Context) -> Vec<ContextBlock> {
     let mut blocks = compose_context_blocks(context);
@@ -226,20 +226,20 @@ pub fn compose_context_audit_blocks(context: &Context) -> Vec<ContextBlock> {
         blocks.push(block);
     }
 
-    if let Some(ref tools) = context.tools
-        && !tools.is_empty()
+    if let Some(ref capabilities) = context.capabilities
+        && !capabilities.is_empty()
     {
-        if let Ok(text) = serde_json::to_string(tools) {
+        if let Ok(text) = serde_json::to_string(capabilities) {
             let mut block = context_block_for_text(
-                "tools.schemas",
-                "Tool Schemas",
+                "capabilities.schemas",
+                "ModelCapability Schemas",
                 TronHome::Profiles,
                 text,
                 ContextCacheClass::Session,
                 120,
             );
-            block.provider_surface = ProviderSurface::Tool;
-            block.inclusion_reason = "available tools attached to provider request".into();
+            block.provider_surface = ProviderSurface::ModelCapability;
+            block.inclusion_reason = "available capabilities attached to provider request".into();
             blocks.push(block);
         }
     }
@@ -312,7 +312,7 @@ mod tests {
         Context {
             system_prompt: Some("You are a helpful assistant.".into()),
             messages: vec![].into(),
-            tools: None,
+            capabilities: None,
             working_directory: Some("/Users/test/project".into()),
             rules_content: Some("Always use Rust.".into()),
             memory_content: Some("User prefers concise responses.".into()),
@@ -370,7 +370,7 @@ mod tests {
         let ctx = Context {
             system_prompt: None,
             messages: vec![].into(),
-            tools: None,
+            capabilities: None,
             working_directory: None,
             rules_content: None,
             memory_content: None,
@@ -393,7 +393,7 @@ mod tests {
         let ctx = Context {
             system_prompt: Some(String::new()),
             messages: vec![].into(),
-            tools: None,
+            capabilities: None,
             working_directory: None,
             rules_content: Some(String::new()),
             memory_content: Some("memory".into()),
@@ -417,7 +417,7 @@ mod tests {
         let ctx = Context {
             system_prompt: Some("Hello".into()),
             messages: vec![].into(),
-            tools: None,
+            capabilities: None,
             working_directory: None,
             rules_content: None,
             memory_content: None,
@@ -440,10 +440,10 @@ mod tests {
     fn audit_blocks_include_tools_and_messages_without_flattening() {
         let ctx = Context {
             messages: vec![crate::shared::messages::Message::user("hello")].into(),
-            tools: Some(vec![crate::shared::tools::Tool {
+            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
                 name: "inspect".into(),
                 description: "Read a file".into(),
-                parameters: crate::shared::tools::ToolParameterSchema {
+                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                     schema_type: "object".into(),
                     properties: None,
                     required: None,
@@ -459,10 +459,8 @@ mod tests {
         assert_eq!(flat, vec!["System"]);
 
         let blocks = compose_context_audit_blocks(&ctx);
-        assert!(
-            blocks.iter().any(|block| block.id == "tools.schemas"
-                && block.provider_surface == ProviderSurface::Tool)
-        );
+        assert!(blocks.iter().any(|block| block.id == "capabilities.schemas"
+            && block.provider_surface == ProviderSurface::ModelCapability));
         assert!(
             blocks
                 .iter()
@@ -501,7 +499,7 @@ mod tests {
         let ctx = Context {
             system_prompt: None,
             messages: vec![].into(),
-            tools: None,
+            capabilities: None,
             working_directory: None,
             rules_content: None,
             memory_content: None,
@@ -525,7 +523,7 @@ mod tests {
         let ctx = Context {
             system_prompt: Some("System".into()),
             messages: vec![].into(),
-            tools: None,
+            capabilities: None,
             working_directory: None,
             rules_content: Some("Rules".into()),
             memory_content: None,
@@ -615,7 +613,7 @@ mod tests {
         let ctx = Context {
             system_prompt: None,
             messages: vec![].into(),
-            tools: None,
+            capabilities: None,
             working_directory: None,
             rules_content: None,
             memory_content: None,

@@ -63,10 +63,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let defaultVerbosity: String?
     /// Whether the active OpenAI profile supports streaming Responses.
     let supportsStreaming: Bool?
-    /// Whether the active OpenAI profile supports function tools.
-    let supportsTools: Bool?
-    /// Whether the active OpenAI profile supports hosted tool search.
-    let supportsToolSearch: Bool?
+    /// Whether the active profile supports provider-native capability invocation.
+    let supportsCapabilityPrimitives: Bool?
+    /// Whether the active OpenAI profile supports hosted capability search.
+    let supportsCapabilitySearch: Bool?
     /// Whether the active OpenAI profile supports computer use.
     let supportsComputerUse: Bool?
     /// For Gemini models: default thinking level
@@ -113,7 +113,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case retirementDate = "deprecationDate"
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case supportsVerbosity, defaultVerbosity
-        case supportsStreaming, supportsTools, supportsToolSearch, supportsComputerUse
+        case supportsStreaming, supportsCapabilityPrimitives, supportsCapabilitySearch, supportsComputerUse
         case thinkingLevel, supportedThinkingLevels
         case family, maxOutput, recommended, releaseDate, sortOrder
         case providerDisplayName, providerSortOrder
@@ -154,8 +154,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         supportsVerbosity: Bool? = nil,
         defaultVerbosity: String? = nil,
         supportsStreaming: Bool? = nil,
-        supportsTools: Bool? = nil,
-        supportsToolSearch: Bool? = nil,
+        supportsCapabilityPrimitives: Bool? = nil,
+        supportsCapabilitySearch: Bool? = nil,
         supportsComputerUse: Bool? = nil,
         thinkingLevel: String? = nil,
         supportedThinkingLevels: [String]? = nil,
@@ -197,8 +197,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.supportsVerbosity = supportsVerbosity
         self.defaultVerbosity = defaultVerbosity
         self.supportsStreaming = supportsStreaming
-        self.supportsTools = supportsTools
-        self.supportsToolSearch = supportsToolSearch
+        self.supportsCapabilityPrimitives = supportsCapabilityPrimitives
+        self.supportsCapabilitySearch = supportsCapabilitySearch
         self.supportsComputerUse = supportsComputerUse
         self.thinkingLevel = thinkingLevel
         self.supportedThinkingLevels = supportedThinkingLevels

@@ -205,7 +205,7 @@ pub struct ProcessSpec {
     pub inherit_capabilities: Option<bool>,
     /// Strict allowlist applied after inherited capabilities are loaded.
     pub allowed_capabilities: Option<Vec<String>>,
-    /// Tools denied from the inherited registry.
+    /// Capabilities denied from the inherited registry.
     pub denied_capabilities: Vec<String>,
     /// Reasoning level string (`none`, `low`, `medium`, `high`, `xhigh`, `max`).
     pub reasoning: Option<String>,
@@ -270,9 +270,9 @@ pub struct CapabilityPolicySpec {
     /// Capability ids denied by this policy.
     pub denied_capabilities: Vec<String>,
     /// Whether interactive capabilities may be exposed.
-    pub expose_interactive_tools: Option<bool>,
+    pub expose_interactive_capabilities: Option<bool>,
     /// Whether spawn/wait capabilities are removed at max depth.
-    pub remove_spawn_tools_at_max_depth: Option<bool>,
+    pub remove_spawn_capabilities_at_max_depth: Option<bool>,
 }
 
 /// Capability search policy.
@@ -356,8 +356,8 @@ pub struct ProviderPolicySpec {
     pub prompt: Option<String>,
     /// Where system prompt content is rendered.
     pub system_prompt_surface: Option<String>,
-    /// Whether a tool-clarification message is required.
-    pub tool_clarification: Option<bool>,
+    /// Whether a capability-clarification message is required.
+    pub capability_clarification: Option<bool>,
     /// Whether duplicate system-prompt inclusion is permitted.
     pub allow_duplicate_system_prompt: Option<bool>,
     /// Cache policy id.
@@ -1102,7 +1102,7 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
             &process.audit_policy,
             &spec.audit_policy,
         )?;
-        validate_tool_overlap(
+        validate_capability_overlap(
             name,
             process_id,
             process.allowed_capabilities.as_deref(),
@@ -1157,7 +1157,7 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
                 &spec.capability_context_primer_policies,
             )?;
         }
-        validate_tool_overlap(
+        validate_capability_overlap(
             name,
             policy_id,
             policy.allowed_capabilities.as_deref(),
@@ -1267,7 +1267,7 @@ fn validate_allowed_value(
     ))
 }
 
-fn validate_tool_overlap(
+fn validate_capability_overlap(
     profile_name: &str,
     owner: &str,
     allowed: Option<&[String]>,
@@ -1276,11 +1276,14 @@ fn validate_tool_overlap(
     let Some(allowed) = allowed else {
         return Ok(());
     };
-    if let Some(conflict) = allowed.iter().find(|tool| denied.contains(*tool)) {
+    if let Some(conflict) = allowed
+        .iter()
+        .find(|capability| denied.contains(*capability))
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "profile `{profile_name}` policy `{owner}` both allows and denies tool `{conflict}`"
+                "profile `{profile_name}` policy `{owner}` both allows and denies capability `{conflict}`"
             ),
         ));
     }
@@ -1443,7 +1446,7 @@ const KNOWN_CONTEXT_BLOCKS: &[&str] = &[
     "hooks.addContext",
     "environment.server",
     "environment.workingDirectory",
-    "tools.schemas",
+    "capabilities.schemas",
     "conversation.messages",
 ];
 
@@ -1500,7 +1503,7 @@ fn validate_context_block_manifest(path: &Path) -> io::Result<()> {
                 &block.id,
                 "providerSurface",
                 provider_surface,
-                &["instructions", "message", "tool", "excluded"],
+                &["instructions", "message", "capability", "excluded"],
             )?;
         }
         if !seen.insert(block.id.clone()) {

@@ -508,7 +508,7 @@ mod tests {
         create_skill(
             tmp.path(),
             "browser",
-            "---\nname: Browser Tool\ndescription: Browse websites\ntags: [web, browser]\n---\n# Browser\n\nUse this to browse.",
+            "---\nname: Browser ModelCapability\ndescription: Browse websites\ntags: [web, browser]\n---\n# Browser\n\nUse this to browse.",
         );
 
         let result = scan_directory(tmp.path(), SkillSource::Project, "tron", "");
@@ -516,7 +516,7 @@ mod tests {
 
         let skill = &result.skills[0];
         assert_eq!(skill.name, "browser");
-        assert_eq!(skill.display_name, "Browser Tool");
+        assert_eq!(skill.display_name, "Browser ModelCapability");
         assert_eq!(skill.description, "Browse websites");
         assert_eq!(skill.source, SkillSource::Project);
         assert!(skill.content.contains("Use this to browse."));
@@ -526,10 +526,14 @@ mod tests {
     #[test]
     fn test_display_name_defaults_to_folder_name() {
         let tmp = TempDir::new().unwrap();
-        create_skill(tmp.path(), "my-tool", "---\ndescription: A tool\n---\nBody");
+        create_skill(
+            tmp.path(),
+            "project-skill",
+            "---\ndescription: A capability helper\n---\nBody",
+        );
 
         let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
-        assert_eq!(result.skills[0].display_name, "my-tool");
+        assert_eq!(result.skills[0].display_name, "project-skill");
     }
 
     // --- discover_project_skills_dirs ---

@@ -149,8 +149,8 @@ pub struct ClaudeModelInfo {
     pub supports_adaptive_thinking: bool,
     /// Supports effort levels (Opus 4.6+).
     pub supports_effort: bool,
-    /// Supports tool use.
-    pub supports_tools: bool,
+    /// Supports capability invocation.
+    pub supports_capabilities: bool,
     /// Supports image inputs.
     pub supports_images: bool,
     /// Input cost per million tokens (USD).
@@ -271,7 +271,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: true,
             supports_effort: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 5.0,
             output_cost_per_million: 25.0,
@@ -303,7 +303,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: true,
             supports_effort: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 5.0,
             output_cost_per_million: 25.0,
@@ -335,7 +335,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: true,
             supports_effort: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
@@ -367,7 +367,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 5.0,
             output_cost_per_million: 25.0,
@@ -398,7 +398,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
@@ -429,7 +429,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 1.0,
             output_cost_per_million: 5.0,
@@ -461,7 +461,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 15.0,
             output_cost_per_million: 75.0,
@@ -493,7 +493,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 15.0,
             output_cost_per_million: 75.0,
@@ -524,7 +524,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
@@ -556,7 +556,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: true,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
@@ -588,7 +588,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             supports_thinking_beta_headers: false,
             supports_adaptive_thinking: false,
             supports_effort: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 0.25,
             output_cost_per_million: 1.25,
@@ -737,12 +737,12 @@ pub enum SseContentBlock {
         #[serde(default)]
         thinking: String,
     },
-    /// Tool use block.
-    #[serde(rename = "tool_use")]
-    ToolUse {
+    /// ModelCapability use block.
+    #[serde(rename = "capability_invocation")]
+    CapabilityInvocation {
         /// Capability invocation ID.
         id: String,
-        /// Tool name.
+        /// Capability name.
         name: String,
     },
 }
@@ -806,12 +806,12 @@ pub struct SseError {
 // Anthropic API request types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Tool definition for Anthropic API.
+/// ModelCapability definition for Anthropic API.
 #[derive(Clone, Debug, Serialize)]
 pub struct AnthropicTool {
-    /// Tool name.
+    /// Capability name.
     pub name: String,
-    /// Tool description.
+    /// ModelCapability description.
     pub description: String,
     /// JSON Schema for input parameters.
     pub input_schema: Value,
@@ -832,9 +832,9 @@ pub struct AnthropicRequest {
     /// System prompt (string or array of blocks).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<Value>,
-    /// Available tools.
+    /// Available capabilities.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<AnthropicTool>>,
+    pub capabilities: Option<Vec<AnthropicTool>>,
     /// Stream mode.
     pub stream: bool,
     /// Thinking configuration.
@@ -906,23 +906,27 @@ pub fn thinking_block(thinking: &str, signature: &str) -> Value {
     })
 }
 
-/// Build a `tool_use` content block.
+/// Build a `capability_invocation` content block.
 #[must_use]
-pub fn tool_use_block(id: &str, name: &str, input: &Map<String, Value>) -> Value {
+pub fn capability_invocation_block(id: &str, name: &str, input: &Map<String, Value>) -> Value {
     serde_json::json!({
-        "type": "tool_use",
+        "type": "capability_invocation",
         "id": id,
         "name": name,
         "input": input,
     })
 }
 
-/// Build a `tool_result` content block.
+/// Build a `capability_result` content block.
 #[must_use]
-pub fn tool_result_block(tool_use_id: &str, content: &[Value], is_error: bool) -> Value {
+pub fn capability_result_block(
+    capability_invocation_id: &str,
+    content: &[Value],
+    is_error: bool,
+) -> Value {
     let mut block = serde_json::json!({
-        "type": "tool_result",
-        "tool_use_id": tool_use_id,
+        "type": "capability_result",
+        "capability_invocation_id": capability_invocation_id,
         "content": content,
     });
     if is_error {
@@ -958,7 +962,7 @@ mod tests {
         assert!(!info.supports_thinking_beta_headers);
         assert!(info.supports_adaptive_thinking);
         assert!(info.supports_effort);
-        assert!(info.supports_tools);
+        assert!(info.supports_capabilities);
         // 4.6 is no longer the recommended Opus (4.7 took the spot).
         assert!(!info.recommended);
         assert!(!info.retired_generation);
@@ -974,7 +978,7 @@ mod tests {
         assert!(!info.supports_thinking_beta_headers);
         assert!(info.supports_adaptive_thinking);
         assert!(info.supports_effort);
-        assert!(info.supports_tools);
+        assert!(info.supports_capabilities);
         assert_float_eq(info.input_cost_per_million, 3.0);
         assert_float_eq(info.output_cost_per_million, 15.0);
         assert_float_eq(info.cache_read_cost_per_million, 0.3);
@@ -1160,20 +1164,20 @@ mod tests {
     }
 
     #[test]
-    fn sse_content_block_start_tool_use() {
+    fn sse_content_block_start_capability_invocation() {
         let json = r#"{
             "type": "content_block_start",
             "index": 1,
-            "content_block": {"type": "tool_use", "id": "toolu_01abc", "name": "execute"}
+            "content_block": {"type": "capability_invocation", "id": "toolu_01abc", "name": "execute"}
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
             AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
-                SseContentBlock::ToolUse { id, name } => {
+                SseContentBlock::CapabilityInvocation { id, name } => {
                     assert_eq!(id, "toolu_01abc");
                     assert_eq!(name, "execute");
                 }
-                _ => panic!("expected ToolUse"),
+                _ => panic!("expected CapabilityInvocation"),
             },
             _ => panic!("expected ContentBlockStart"),
         }
@@ -1334,29 +1338,29 @@ mod tests {
     }
 
     #[test]
-    fn tool_use_block_builds_correct_json() {
+    fn capability_invocation_block_builds_correct_json() {
         let mut input = Map::new();
         let _ = input.insert("cmd".into(), serde_json::json!("ls"));
-        let block = tool_use_block("toolu_01abc", "execute", &input);
-        assert_eq!(block["type"], "tool_use");
+        let block = capability_invocation_block("toolu_01abc", "execute", &input);
+        assert_eq!(block["type"], "capability_invocation");
         assert_eq!(block["id"], "toolu_01abc");
         assert_eq!(block["name"], "execute");
         assert_eq!(block["input"]["cmd"], "ls");
     }
 
     #[test]
-    fn tool_result_block_success() {
+    fn capability_result_block_success() {
         let content = vec![text_block("output")];
-        let block = tool_result_block("toolu_01abc", &content, false);
-        assert_eq!(block["type"], "tool_result");
-        assert_eq!(block["tool_use_id"], "toolu_01abc");
+        let block = capability_result_block("toolu_01abc", &content, false);
+        assert_eq!(block["type"], "capability_result");
+        assert_eq!(block["capability_invocation_id"], "toolu_01abc");
         assert!(block.get("is_error").is_none());
     }
 
     #[test]
-    fn tool_result_block_error() {
+    fn capability_result_block_error() {
         let content = vec![text_block("error msg")];
-        let block = tool_result_block("toolu_01abc", &content, true);
+        let block = capability_result_block("toolu_01abc", &content, true);
         assert_eq!(block["is_error"], true);
     }
 

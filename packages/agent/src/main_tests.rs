@@ -467,7 +467,8 @@ async fn server_boots_and_responds() {
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
-        tool_runtime: tron::shared::server::context::ToolRuntimeConfig::default(),
+        capability_support_config: tron::shared::server::context::CapabilitySupportConfig::default(
+        ),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
@@ -683,7 +684,8 @@ async fn server_graceful_shutdown() {
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
-        tool_runtime: tron::shared::server::context::ToolRuntimeConfig::default(),
+        capability_support_config: tron::shared::server::context::CapabilitySupportConfig::default(
+        ),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,

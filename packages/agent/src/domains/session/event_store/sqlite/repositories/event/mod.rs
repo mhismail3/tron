@@ -32,7 +32,7 @@ mod type_queries;
 /// is defined in exactly one place.
 const EVENT_COLUMNS: &str = "\
     id, session_id, parent_id, sequence, depth, type, timestamp, payload, \
-    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn, \
+    content_blob_id, workspace_id, role, model_primitive_name, invocation_id, turn, \
     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, \
     model, latency_ms, stop_reason, has_thinking, provider_type, cost";
 
@@ -82,8 +82,8 @@ impl EventRepo {
             content_blob_id: row.get("content_blob_id")?,
             workspace_id: row.get("workspace_id")?,
             role: row.get("role")?,
-            tool_name: row.get("tool_name")?,
-            tool_call_id: row.get("tool_call_id")?,
+            model_primitive_name: row.get("model_primitive_name")?,
+            invocation_id: row.get("invocation_id")?,
             turn: row.get("turn")?,
             input_tokens: row.get("input_tokens")?,
             output_tokens: row.get("output_tokens")?,

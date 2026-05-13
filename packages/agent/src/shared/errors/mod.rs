@@ -6,7 +6,7 @@
 //! - [`SessionError`]: Session lifecycle failures (create, resume, fork, run)
 //! - [`PersistenceError`]: Database/storage errors with table and operation context
 //! - [`ProviderError`]: LLM provider errors with status code and retry info
-//! - [`ToolError`]: Capability invocation failures with capability id and call ID
+//! - [`CapabilityExecutionError`]: Capability invocation failures with capability id and call ID
 //! - [`ErrorCollector`]: Accumulates errors from fire-and-forget operations
 //!
 //! The error parsing utilities in [`parse`] classify raw error strings into
@@ -47,7 +47,7 @@ pub enum TronError {
 
     /// Capability invocation error.
     #[error("{0}")]
-    Tool(#[from] ToolError),
+    CapabilityInvocation(#[from] CapabilityExecutionError),
 
     /// canonical capability function error.
     #[error("{0}")]
@@ -113,7 +113,9 @@ impl TronError {
             Self::Session(e) => e.category,
             Self::Provider(e) => e.category,
             Self::Internal { category, .. } => *category,
-            Self::Persistence(_) | Self::Tool(_) | Self::Capability(_) => ErrorCategory::Unknown,
+            Self::Persistence(_) | Self::CapabilityInvocation(_) | Self::Capability(_) => {
+                ErrorCategory::Unknown
+            }
         }
     }
 
@@ -130,7 +132,7 @@ impl TronError {
                     ErrorSeverity::Error
                 }
             }
-            Self::Tool(e) => e.severity,
+            Self::CapabilityInvocation(e) => e.severity,
             Self::Capability(_) => ErrorSeverity::Error,
             Self::Internal { severity, .. } => *severity,
         }
@@ -152,7 +154,7 @@ impl TronError {
             Self::Session(e) => &e.code,
             Self::Persistence(e) => &e.code,
             Self::Provider(e) => &e.code,
-            Self::Tool(e) => &e.code,
+            Self::CapabilityInvocation(e) => &e.code,
             Self::Capability(e) => &e.code,
             Self::Internal { code, .. } => code,
         }
@@ -461,17 +463,17 @@ impl ProviderError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ToolError
+// CapabilityExecutionError
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Capability invocation error.
 #[derive(Debug, Error)]
-#[error("Tool {tool_name} (call {tool_call_id}) failed: {message}")]
-pub struct ToolError {
-    /// Tool name.
-    pub tool_name: String,
+#[error("Capability {capability_id} (invocation {invocation_id}) failed: {message}")]
+pub struct CapabilityExecutionError {
+    /// Capability name.
+    pub capability_id: String,
     /// Capability invocation ID.
-    pub tool_call_id: String,
+    pub invocation_id: String,
     /// Human-readable message.
     pub message: String,
     /// Machine-readable error code.
@@ -483,19 +485,19 @@ pub struct ToolError {
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
-impl ToolError {
+impl CapabilityExecutionError {
     /// Create a new capability error.
     #[must_use]
     pub fn new(
-        tool_name: impl Into<String>,
-        tool_call_id: impl Into<String>,
+        capability_id: impl Into<String>,
+        invocation_id: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
-        let name: String = tool_name.into();
-        let code = format!("TOOL_{}_ERROR", name.to_uppercase());
+        let name: String = capability_id.into();
+        let code = format!("CAPABILITY_{}_ERROR", name.to_uppercase());
         Self {
-            tool_name: name,
-            tool_call_id: tool_call_id.into(),
+            capability_id: name,
+            invocation_id: invocation_id.into(),
             message: message.into(),
             code,
             severity: ErrorSeverity::Error,

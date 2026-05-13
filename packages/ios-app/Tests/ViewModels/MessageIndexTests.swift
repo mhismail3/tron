@@ -83,12 +83,12 @@ struct MessageIndexTests {
 
     // MARK: - invocationId index
 
-    @Test("invocationId index tracks tool use messages")
-    func invocationIdIndex_tracksToolUse() {
+    @Test("invocationId index tracks capability invocation messages")
+    func invocationIdIndex_tracksCapabilityInvocation() {
         let index = MessageIndex()
-        let tool = makeCapabilityMessage(invocationId: "toolu_abc")
+        let capability = makeCapabilityMessage(invocationId: "toolu_abc")
 
-        index.didAppend(tool, at: 0)
+        index.didAppend(capability, at: 0)
 
         #expect(index.index(forCapabilityInvocationId: "toolu_abc") == 0)
     }
@@ -96,10 +96,10 @@ struct MessageIndexTests {
     @Test("invocationId index removed when message removed")
     func invocationIdIndex_removedOnRemove() {
         let index = MessageIndex()
-        let tool = makeCapabilityMessage(invocationId: "toolu_abc")
+        let capability = makeCapabilityMessage(invocationId: "toolu_abc")
 
-        index.didAppend(tool, at: 0)
-        index.didRemove(tool, at: 0, newTotalCount: 0)
+        index.didAppend(capability, at: 0)
+        index.didRemove(capability, at: 0, newTotalCount: 0)
 
         #expect(index.index(forCapabilityInvocationId: "toolu_abc") == nil)
     }
@@ -132,10 +132,10 @@ struct MessageIndexTests {
     func clearMessages_clearsIndex() {
         let index = MessageIndex()
         let m1 = makeMessage()
-        let tool = makeCapabilityMessage(invocationId: "toolu_xyz")
+        let capability = makeCapabilityMessage(invocationId: "toolu_xyz")
 
         index.didAppend(m1, at: 0)
-        index.didAppend(tool, at: 1)
+        index.didAppend(capability, at: 1)
 
         index.clear()
 
@@ -149,7 +149,7 @@ struct MessageIndexTests {
         var messages: [ChatMessage] = []
         for i in 0..<100 {
             if i % 10 == 0 {
-                messages.append(makeCapabilityMessage(invocationId: "tool_\(i)"))
+                messages.append(makeCapabilityMessage(invocationId: "inv_\(i)"))
             } else {
                 messages.append(makeMessage())
             }
@@ -161,9 +161,9 @@ struct MessageIndexTests {
             #expect(index.index(for: msg.id) == i)
         }
 
-        #expect(index.index(forCapabilityInvocationId: "tool_0") == 0)
-        #expect(index.index(forCapabilityInvocationId: "tool_50") == 50)
-        #expect(index.index(forCapabilityInvocationId: "tool_90") == 90)
+        #expect(index.index(forCapabilityInvocationId: "inv_0") == 0)
+        #expect(index.index(forCapabilityInvocationId: "inv_50") == 50)
+        #expect(index.index(forCapabilityInvocationId: "inv_90") == 90)
     }
 
     @Test("didInsertAtFront shifts all existing indices")

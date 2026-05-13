@@ -101,19 +101,19 @@ protocol StreamingManaging: AnyObject {
     func resetStreamingManager()
 }
 
-// MARK: - Tool State Tracking
+// MARK: - Capability State Tracking
 
 /// Protocol for contexts that track capability invocation state during a turn.
 @MainActor
-protocol ToolStateTracking: AnyObject {
-    /// Map of current tool messages by message ID.
-    var currentToolMessages: [UUID: ChatMessage] { get set }
+protocol CapabilityInvocationStateTracking: AnyObject {
+    /// Map of current capability messages by message ID.
+    var currentCapabilityInvocationMessages: [UUID: ChatMessage] { get set }
 
     /// Capability invocations tracked for the current turn.
     var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] { get set }
 
-    /// Whether AskUserQuestion was called in the current turn.
-    var askUserQuestionCalledInTurn: Bool { get set }
+    /// Whether UserInteraction was called in the current turn.
+    var userInteractionCalledInTurn: Bool { get set }
 }
 
 // MARK: - Dashboard Updates

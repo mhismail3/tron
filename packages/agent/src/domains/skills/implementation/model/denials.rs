@@ -1,8 +1,8 @@
-//! Convert skill frontmatter to tool denial configuration.
+//! Convert skill frontmatter to capability denial configuration.
 //!
 //! Supports two mutually exclusive modes:
-//! - **Deny-list** (`deniedCapabilities`): directly specifies denied tools
-//! - **Allow-list** (`allowedCapabilities`): inverts to denied (all tools not in allow list)
+//! - **Deny-list** (`deniedCapabilities`): directly specifies denied capabilities
+//! - **Allow-list** (`allowedCapabilities`): inverts to denied (all capabilities not in allow list)
 //!
 //! If both are specified, `deniedCapabilities` takes precedence with a warning.
 //!
@@ -19,15 +19,15 @@ use std::collections::HashSet;
 
 use tracing::debug;
 
-use crate::domains::skills::types::{SkillFrontmatter, SkillSubagentMode, ToolDenialConfig};
+use crate::domains::skills::types::{CapabilityDenialConfig, SkillFrontmatter, SkillSubagentMode};
 
-/// Convert skill frontmatter tool restrictions to a [`ToolDenialConfig`].
+/// Convert skill frontmatter capability restrictions to a [`CapabilityDenialConfig`].
 ///
-/// Returns `None` if no tool restrictions are specified.
+/// Returns `None` if no capability restrictions are specified.
 pub fn skill_frontmatter_to_denials(
     frontmatter: &SkillFrontmatter,
-    all_available_tools: &[String],
-) -> Option<ToolDenialConfig> {
+    all_available_capabilities: &[String],
+) -> Option<CapabilityDenialConfig> {
     let has_denied = frontmatter
         .denied_capabilities
         .as_ref()
@@ -45,7 +45,7 @@ pub fn skill_frontmatter_to_denials(
 
     if has_denied {
         let denied_capabilities = frontmatter.denied_capabilities.clone().unwrap_or_default();
-        return Some(ToolDenialConfig {
+        return Some(CapabilityDenialConfig {
             denied_capabilities,
         });
     }
@@ -56,12 +56,12 @@ pub fn skill_frontmatter_to_denials(
         .filter(|a| !a.is_empty())
     {
         let allowed: HashSet<&str> = allowed_list.iter().map(String::as_str).collect();
-        let denied_capabilities: Vec<String> = all_available_tools
+        let denied_capabilities: Vec<String> = all_available_capabilities
             .iter()
-            .filter(|tool| !allowed.contains(tool.as_str()))
+            .filter(|capability| !allowed.contains(capability.as_str()))
             .cloned()
             .collect();
-        return Some(ToolDenialConfig {
+        return Some(CapabilityDenialConfig {
             denied_capabilities,
         });
     }
@@ -80,7 +80,7 @@ pub fn get_skill_subagent_mode(frontmatter: &SkillFrontmatter) -> SkillSubagentM
 mod tests {
     use super::*;
 
-    fn all_tools() -> Vec<String> {
+    fn all_capabilities() -> Vec<String> {
         vec![
             "filesystem::read_file".to_string(),
             "filesystem::write_file".to_string(),
@@ -100,7 +100,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let config = skill_frontmatter_to_denials(&fm, &all_tools()).unwrap();
+        let config = skill_frontmatter_to_denials(&fm, &all_capabilities()).unwrap();
         assert_eq!(
             config.denied_capabilities,
             vec!["process::run", "filesystem::write_file"]
@@ -116,7 +116,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let config = skill_frontmatter_to_denials(&fm, &all_tools()).unwrap();
+        let config = skill_frontmatter_to_denials(&fm, &all_capabilities()).unwrap();
         assert!(
             config
                 .denied_capabilities
@@ -148,14 +148,14 @@ mod tests {
             allowed_capabilities: Some(vec!["filesystem::read_file".to_string()]),
             ..Default::default()
         };
-        let config = skill_frontmatter_to_denials(&fm, &all_tools()).unwrap();
+        let config = skill_frontmatter_to_denials(&fm, &all_capabilities()).unwrap();
         assert_eq!(config.denied_capabilities, vec!["process::run"]);
     }
 
     #[test]
     fn test_neither_specified_returns_none() {
         let fm = SkillFrontmatter::default();
-        assert!(skill_frontmatter_to_denials(&fm, &all_tools()).is_none());
+        assert!(skill_frontmatter_to_denials(&fm, &all_capabilities()).is_none());
     }
 
     #[test]
@@ -164,7 +164,7 @@ mod tests {
             denied_capabilities: Some(Vec::new()),
             ..Default::default()
         };
-        assert!(skill_frontmatter_to_denials(&fm, &all_tools()).is_none());
+        assert!(skill_frontmatter_to_denials(&fm, &all_capabilities()).is_none());
     }
 
     #[test]

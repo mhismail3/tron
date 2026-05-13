@@ -14,7 +14,7 @@ import SwiftUI
 //   a small "bootstrapped" vs "empty" indicator).
 // - Expanded: MEMORY.md content rendered as markdown + a list of rules/ files
 //   with their frontmatter descriptions (names only — contents are not
-//   pre-loaded; agent reads on demand via the `Read` tool).
+//   pre-loaded; agent reads on demand via the `Read` capability).
 
 @available(iOS 26.0, *)
 struct MemorySection: View {

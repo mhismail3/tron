@@ -4,7 +4,7 @@
 //! configuration, snapshots, compaction, capability results, and summarization.
 
 use crate::shared::messages::Message;
-use crate::shared::tools::Tool;
+use crate::shared::model_capabilities::ModelCapability;
 use serde::{Deserialize, Serialize};
 
 use super::constants::Thresholds;
@@ -62,8 +62,8 @@ pub struct ContextManagerConfig {
     pub context_policy: super::local_policy::ContextPolicy,
     /// Working directory for file operations.
     pub working_directory: Option<String>,
-    /// Available tools.
-    pub tools: Vec<Tool>,
+    /// Available capabilities.
+    pub capabilities: Vec<ModelCapability>,
     /// Rules content from AGENTS.md / CLAUDE.md hierarchy.
     pub rules_content: Option<String>,
     /// Compaction settings.
@@ -101,8 +101,8 @@ impl Default for CompactionConfig {
 pub struct TokenBreakdown {
     /// System prompt tokens.
     pub system_prompt: u64,
-    /// Tool definition tokens.
-    pub tools: u64,
+    /// ModelCapability definition tokens.
+    pub capabilities: u64,
     /// Rules content tokens (static + dynamic combined).
     pub rules: u64,
     /// Workspace memory tokens.
@@ -123,7 +123,7 @@ pub struct TokenBreakdown {
     ///
     /// This reconciles the chars/4 component estimates with the exact provider
     /// context count after a turn. Anthropic cache-write accounting and exact
-    /// tokenization of system text, tool schemas, cache markers, and messages
+    /// tokenization of system text, capability schemas, cache markers, and messages
     /// can make the reported total higher than the local estimate without
     /// implying hidden conversation history.
     pub provider_adjustment: u64,
@@ -134,7 +134,7 @@ impl TokenBreakdown {
     #[must_use]
     pub fn total(&self) -> u64 {
         self.system_prompt
-            + self.tools
+            + self.capabilities
             + self.rules
             + self.memory
             + self.skill_index
@@ -229,10 +229,10 @@ pub struct DetailedMessageInfo {
     pub event_id: Option<String>,
     /// Capability invocations within assistant messages.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCallInfo>>,
+    pub capability_invocations: Option<Vec<CapabilityInvocationDraftInfo>>,
     /// Capability invocation ID (for capability result messages).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub invocation_id: Option<String>,
     /// Error flag (for capability result messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
@@ -240,10 +240,10 @@ pub struct DetailedMessageInfo {
 
 /// Capability invocation information for detailed snapshot.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ToolCallInfo {
+pub struct CapabilityInvocationDraftInfo {
     /// Capability invocation ID.
     pub id: String,
-    /// Tool name.
+    /// Capability name.
     pub name: String,
     /// Estimated token count.
     pub tokens: u64,
@@ -262,19 +262,19 @@ pub struct DetailedContextSnapshot {
     pub messages: Vec<DetailedMessageInfo>,
     /// Effective system-level context.
     pub system_prompt_content: String,
-    /// Tool clarification content (for Codex providers).
+    /// ModelCapability clarification content (for Codex providers).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_clarification_content: Option<String>,
-    /// Tool summaries (name + first-sentence description).
-    pub tools_content: Vec<ToolSummary>,
+    pub capability_clarification_content: Option<String>,
+    /// ModelCapability summaries (name + first-sentence description).
+    pub capabilities_content: Vec<CapabilitySummary>,
 }
 
-/// Tool name and brief description for the detailed snapshot.
+/// Capability name and brief description for the detailed snapshot.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ToolSummary {
-    /// Tool name (unique identifier).
+pub struct CapabilitySummary {
+    /// Capability name (unique identifier).
     pub name: String,
-    /// Brief description (first sentence of the tool's full description).
+    /// Brief description (first sentence of the capability's full description).
     pub description: String,
 }
 
@@ -351,14 +351,14 @@ pub struct CompactionResult {
 }
 
 // =============================================================================
-// Tool Result Processing
+// ModelCapability Result Processing
 // =============================================================================
 
 /// Processed capability result (potentially truncated).
 #[derive(Clone, Debug)]
-pub struct ProcessedToolResult {
+pub struct ProcessedCapabilityResult {
     /// Capability invocation ID.
-    pub tool_call_id: String,
+    pub invocation_id: String,
     /// Content (possibly truncated).
     pub content: String,
     /// Whether the content was truncated.
@@ -393,8 +393,8 @@ pub struct ExportedState {
     pub model: String,
     /// System prompt.
     pub system_prompt: String,
-    /// Tool definitions.
-    pub tools: Vec<Tool>,
+    /// ModelCapability definitions.
+    pub capabilities: Vec<ModelCapability>,
     /// Conversation messages.
     pub messages: Vec<Message>,
 }
@@ -495,7 +495,7 @@ pub struct CompactionTriggerInput {
     /// Recent event types from the current cycle.
     pub recent_event_types: Vec<String>,
     /// Recent process::run capability invocation commands.
-    pub recent_tool_calls: Vec<String>,
+    pub recent_capability_invocations: Vec<String>,
 }
 
 /// Provider re-export for context module convenience.
@@ -592,7 +592,7 @@ mod tests {
             threshold_level: ThresholdLevel::Normal,
             breakdown: TokenBreakdown {
                 system_prompt: 1000,
-                tools: 2000,
+                capabilities: 2000,
                 rules: 500,
                 memory: 100,
                 skill_index: 0,
@@ -633,7 +633,7 @@ mod tests {
     fn token_breakdown_total_sums_all() {
         let b = TokenBreakdown {
             system_prompt: 100,
-            tools: 200,
+            capabilities: 200,
             rules: 300,
             memory: 50,
             skill_index: 25,
@@ -697,22 +697,22 @@ mod tests {
     }
 
     #[test]
-    fn tool_summary_serde_roundtrip() {
-        let summary = ToolSummary {
+    fn capability_summary_serde_roundtrip() {
+        let summary = CapabilitySummary {
             name: "process".into(),
             description: "Execute a shell command.".into(),
         };
         let json = serde_json::to_value(&summary).unwrap();
         assert_eq!(json["name"], "process");
         assert_eq!(json["description"], "Execute a shell command.");
-        let back: ToolSummary = serde_json::from_value(json).unwrap();
+        let back: CapabilitySummary = serde_json::from_value(json).unwrap();
         assert_eq!(back.name, "process");
         assert_eq!(back.description, "Execute a shell command.");
     }
 
     #[test]
-    fn tool_summary_empty_description() {
-        let summary = ToolSummary {
+    fn capability_summary_empty_description() {
+        let summary = CapabilitySummary {
             name: "stub".into(),
             description: String::new(),
         };

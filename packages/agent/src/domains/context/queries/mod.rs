@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use crate::domains::context::Deps;
 use crate::domains::context::service::{
     PreparedSessionContext, build_active_skill_context, build_context_manager_for_session,
-    build_summarizer, retry_context_read, tool_definitions,
+    build_summarizer, model_capability_definitions, retry_context_read,
 };
 use crate::domains::session::context::{RuleFileLevel, collect_dynamic_rule_paths};
 use crate::shared::server::context::run_blocking_task;
@@ -44,7 +44,7 @@ impl ContextQueryService {
         let profile_runtime = deps.profile_runtime.clone();
         let skill_registry = deps.skill_registry.clone();
         let memory_registry = deps.memory_registry.clone();
-        let tool_definitions = tool_definitions(deps, &session_id).await;
+        let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.get_snapshot", move || {
             retry_context_read("context.get_snapshot", || {
@@ -54,7 +54,7 @@ impl ContextQueryService {
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
-                    tool_definitions.clone(),
+                    capabilities_for_model.clone(),
                 )?;
                 // Skill index + memory content: skip for local models (stripped at turn time)
                 if !prepared.context_manager.is_local_model() {
@@ -107,7 +107,7 @@ impl ContextQueryService {
         let profile_runtime = deps.profile_runtime.clone();
         let skill_registry = deps.skill_registry.clone();
         let memory_registry = deps.memory_registry.clone();
-        let tool_definitions = tool_definitions(deps, &session_id).await;
+        let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.get_detailed_snapshot", move || {
             retry_context_read("context.get_detailed_snapshot", || {
@@ -117,7 +117,7 @@ impl ContextQueryService {
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
-                    tool_definitions.clone(),
+                    capabilities_for_model.clone(),
                 )?;
                 build_detailed_snapshot_response(
                     event_store.as_ref(),
@@ -166,7 +166,7 @@ impl ContextQueryService {
         let event_store = deps.event_store.clone();
         let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
-        let tool_definitions = tool_definitions(deps, &session_id).await;
+        let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.should_compact", move || {
             retry_context_read("context.should_compact", || {
@@ -176,7 +176,7 @@ impl ContextQueryService {
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
-                    tool_definitions.clone(),
+                    capabilities_for_model.clone(),
                 )?;
                 Ok(json!({
                     "shouldCompact": prepared.context_manager.should_compact(),
@@ -221,7 +221,7 @@ impl ContextQueryService {
         let event_store = deps.event_store.clone();
         let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
-        let tool_definitions = tool_definitions(deps, &session_id).await;
+        let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.can_accept_turn", move || {
             retry_context_read("context.can_accept_turn", || {
@@ -231,7 +231,7 @@ impl ContextQueryService {
                     event_store.as_ref(),
                     context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
-                    tool_definitions.clone(),
+                    capabilities_for_model.clone(),
                 )?;
                 Ok(json!({
                     "canAcceptTurn": prepared.context_manager.can_accept_turn().can_proceed,

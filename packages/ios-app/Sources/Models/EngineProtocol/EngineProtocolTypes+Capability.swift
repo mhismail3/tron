@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Capability Identity
 
 struct CapabilityIdentity: Codable, Equatable, Hashable, Sendable {
-    var modelToolName: String?
+    var modelPrimitiveName: String?
     var contractId: String?
     var implementationId: String?
     var functionId: String?
@@ -19,7 +19,7 @@ struct CapabilityIdentity: Codable, Equatable, Hashable, Sendable {
     var bindingDecisionId: String?
 
     init(
-        modelToolName: String? = nil,
+        modelPrimitiveName: String? = nil,
         contractId: String? = nil,
         implementationId: String? = nil,
         functionId: String? = nil,
@@ -34,7 +34,7 @@ struct CapabilityIdentity: Codable, Equatable, Hashable, Sendable {
         rootInvocationId: String? = nil,
         bindingDecisionId: String? = nil
     ) {
-        self.modelToolName = modelToolName
+        self.modelPrimitiveName = modelPrimitiveName
         self.contractId = contractId
         self.implementationId = implementationId
         self.functionId = functionId
@@ -324,8 +324,8 @@ struct CapabilityPolicyDTO: Codable, Equatable, Sendable {
     var contextPrimerPolicy: String?
     var allowedCapabilities: [String]?
     var deniedCapabilities: [String]?
-    var exposeInteractiveTools: Bool?
-    var removeSpawnToolsAtMaxDepth: Bool?
+    var exposeInteractiveCapabilities: Bool?
+    var removeSpawnCapabilitiesAtMaxDepth: Bool?
 }
 
 struct CapabilityPolicyGetDTO: Codable, Equatable, Sendable {

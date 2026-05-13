@@ -8,14 +8,14 @@ use serde::{Deserialize, Serialize};
 pub struct HookTriggeredPayload {
     /// Hook names.
     pub hook_names: Vec<String>,
-    /// Hook event type (e.g., `PreToolUse`).
+    /// Hook event type (e.g., `PreCapabilityInvocation`).
     pub hook_event: String,
-    /// Tool name (for tool-related hooks).
+    /// Capability name (for capability invocation hooks).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
+    pub model_primitive_name: Option<String>,
     /// Capability invocation ID.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub invocation_id: Option<String>,
     /// Timestamp.
     pub timestamp: String,
 }
@@ -36,12 +36,12 @@ pub struct HookCompletedPayload {
     /// Reason for block/modify.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// Tool name.
+    /// Capability name.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
+    pub model_primitive_name: Option<String>,
     /// Capability invocation ID.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub invocation_id: Option<String>,
     /// Timestamp.
     pub timestamp: String,
 }

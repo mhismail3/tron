@@ -1,6 +1,6 @@
-use crate::shared::content::ToolResultContent;
+use crate::shared::content::CapabilityResultContent;
 use crate::shared::events::{CapabilityEventIdentity, TronEvent};
-use crate::shared::tools::ToolResultBody;
+use crate::shared::model_capabilities::CapabilityResultBody;
 use serde_json::json;
 
 use super::routed::{ProjectedEvent, session_scoped, set_opt};
@@ -20,15 +20,15 @@ fn set_identity(data: &mut serde_json::Value, identity: &CapabilityEventIdentity
 pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
         TronEvent::CapabilityInvocationStarted {
-            tool_name,
-            tool_call_id,
+            model_primitive_name,
+            invocation_id,
             arguments,
             capability_identity,
             ..
         } => {
             let mut data = json!({
-                "modelToolName": tool_name,
-                "invocationId": tool_call_id,
+                "modelPrimitiveName": model_primitive_name,
+                "invocationId": invocation_id,
             });
             set_opt(&mut data, "arguments", arguments);
             set_identity(&mut data, capability_identity);
@@ -39,8 +39,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             ))
         }
         TronEvent::CapabilityInvocationCompleted {
-            tool_name,
-            tool_call_id,
+            model_primitive_name,
+            invocation_id,
             duration,
             is_error,
             result,
@@ -49,19 +49,19 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
         } => {
             let success = !is_error.unwrap_or(false);
             let mut data = json!({
-                "modelToolName": tool_name,
-                "invocationId": tool_call_id,
+                "modelPrimitiveName": model_primitive_name,
+                "invocationId": invocation_id,
                 "duration": duration,
                 "success": success,
             });
-            if let Some(tool_result) = result {
-                let result_text = match &tool_result.content {
-                    ToolResultBody::Text(text) => text.clone(),
-                    ToolResultBody::Blocks(blocks) => blocks
+            if let Some(capability_result) = result {
+                let result_text = match &capability_result.content {
+                    CapabilityResultBody::Text(text) => text.clone(),
+                    CapabilityResultBody::Blocks(blocks) => blocks
                         .iter()
                         .filter_map(|block| match block {
-                            ToolResultContent::Text { text } => Some(text.as_str()),
-                            ToolResultContent::Image { .. } => None,
+                            CapabilityResultContent::Text { text } => Some(text.as_str()),
+                            CapabilityResultContent::Image { .. } => None,
                         })
                         .collect::<Vec<_>>()
                         .join("\n"),
@@ -71,7 +71,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 } else {
                     data["error"] = json!(result_text);
                 }
-                if let Some(details) = &tool_result.details {
+                if let Some(details) = &capability_result.details {
                     data["details"] = details.clone();
                 }
             }
@@ -83,25 +83,25 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             ))
         }
         TronEvent::CapabilityInvocationOutput {
-            tool_call_id,
+            invocation_id,
             update,
             ..
         } => Some(session_scoped(
             event,
             "capability.invocation.output",
             Some(json!({
-                "invocationId": tool_call_id,
+                "invocationId": invocation_id,
                 "output": update,
             })),
         )),
         TronEvent::CapabilityInvocationProgress {
-            tool_call_id,
+            invocation_id,
             message,
             percent,
             capability_identity,
             ..
         } => {
-            let mut data = json!({ "invocationId": tool_call_id });
+            let mut data = json!({ "invocationId": invocation_id });
             set_opt(&mut data, "message", message);
             set_opt(&mut data, "percent", percent);
             set_identity(&mut data, capability_identity);
@@ -112,8 +112,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             ))
         }
         TronEvent::CapabilityResolution {
-            tool_call_id,
-            model_tool_name,
+            invocation_id,
+            model_primitive_name,
             requested_contract_id,
             requested_implementation_id,
             requested_function_id,
@@ -121,8 +121,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             ..
         } => {
             let mut data = json!({
-                "invocationId": tool_call_id,
-                "modelToolName": model_tool_name,
+                "invocationId": invocation_id,
+                "modelPrimitiveName": model_primitive_name,
             });
             set_opt(&mut data, "requestedContractId", requested_contract_id);
             set_opt(
@@ -134,22 +134,25 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             set_identity(&mut data, capability_identity);
             Some(session_scoped(event, "capability.resolution", Some(data)))
         }
-        TronEvent::CapabilityInvocationBatch { tool_calls, .. } => Some(session_scoped(
+        TronEvent::CapabilityInvocationBatch {
+            capability_invocations,
+            ..
+        } => Some(session_scoped(
             event,
             "capability.invocation.batch",
-            Some(json!({ "toolCalls": tool_calls })),
+            Some(json!({ "capabilityInvocations": capability_invocations })),
         )),
         TronEvent::CapabilityInvocationArgumentDelta {
-            tool_call_id,
-            tool_name,
+            invocation_id,
+            model_primitive_name,
             arguments_delta,
             ..
         } => {
             let mut data = json!({
-                "invocationId": tool_call_id,
+                "invocationId": invocation_id,
                 "argumentsDelta": arguments_delta,
             });
-            set_opt(&mut data, "modelToolName", tool_name);
+            set_opt(&mut data, "modelPrimitiveName", model_primitive_name);
             Some(session_scoped(
                 event,
                 "capability.invocation.arguments_delta",
@@ -157,14 +160,14 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             ))
         }
         TronEvent::CapabilityInvocationGenerating {
-            tool_call_id,
-            tool_name,
+            invocation_id,
+            model_primitive_name,
             capability_identity,
             ..
         } => {
             let mut data = json!({
-                "invocationId": tool_call_id,
-                "modelToolName": tool_name,
+                "invocationId": invocation_id,
+                "modelPrimitiveName": model_primitive_name,
             });
             set_identity(&mut data, capability_identity);
             Some(session_scoped(
@@ -177,7 +180,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             job_id,
             reason,
             label,
-            tool_call_id,
+            invocation_id,
             ..
         } => Some(session_scoped(
             event,
@@ -186,7 +189,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "jobId": job_id,
                 "reason": reason,
                 "label": label,
-                "invocationId": tool_call_id,
+                "invocationId": invocation_id,
             })),
         )),
         _ => None,

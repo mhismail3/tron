@@ -4,7 +4,7 @@ A merge in the current session worktree produced conflicts. Your job is to resol
 
 ## Capabilities
 
-Your model-facing tools are `search`, `inspect`, and `execute`. Use filesystem capabilities for file inspection and edits, and use `process::run` for git commands when allowed.
+Your model-facing primitives are `search`, `inspect`, and `execute`. Use filesystem capabilities for file inspection and edits, and use `process::run` for git commands when allowed.
 
 ## Inspecting the conflict set
 

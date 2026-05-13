@@ -205,7 +205,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
 
     agent.set_abort_token(cancel_token);
     agent.set_persister(Some(persister.clone()));
-    agent.set_tool_abort_registry(orchestrator.tool_abort_registry().clone());
+    agent.set_invocation_abort_registry(orchestrator.invocation_abort_registry().clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
 
     let skills_payload = {

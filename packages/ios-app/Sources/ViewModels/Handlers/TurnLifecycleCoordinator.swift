@@ -33,8 +33,8 @@ final class TurnLifecycleCoordinator {
     ) {
         context.logInfo("Turn \(pluginResult.turnNumber) started")
 
-        // Reset interactive tool tracking for the new turn
-        context.askUserQuestionCalledInTurn = false
+        // Reset interactive capability tracking for the new turn
+        context.userInteractionCalledInTurn = false
 
         // Finalize any streaming text from the previous turn
         if context.hasActiveStreaming {
@@ -48,24 +48,24 @@ final class TurnLifecycleCoordinator {
         // Notify ThinkingState of new turn (clears previous turn's thinking for sheet)
         context.startThinkingTurn(pluginResult.turnNumber, model: context.currentModel)
 
-        // Clear tool tracking for the new turn
+        // Clear capability tracking for the new turn
         if !context.currentTurnCapabilityInvocations.isEmpty {
-            context.logDebug("Starting Turn \(pluginResult.turnNumber), clearing \(context.currentTurnCapabilityInvocations.count) completed tool records from previous turn")
+            context.logDebug("Starting Turn \(pluginResult.turnNumber), clearing \(context.currentTurnCapabilityInvocations.count) completed capability records from previous turn")
             context.currentTurnCapabilityInvocations.removeAll()
         }
-        if !context.currentToolMessages.isEmpty {
-            context.logDebug("Clearing \(context.currentToolMessages.count) tool message references from previous turn")
-            context.currentToolMessages.removeAll()
+        if !context.currentCapabilityInvocationMessages.isEmpty {
+            context.logDebug("Clearing \(context.currentCapabilityInvocationMessages.count) capability message references from previous turn")
+            context.currentCapabilityInvocationMessages.removeAll()
         }
 
-        // Notify UIUpdateQueue of turn boundary (resets tool ordering)
+        // Notify UIUpdateQueue of turn boundary (resets capability ordering)
         context.enqueueTurnBoundary(UIUpdateQueue.TurnBoundaryData(
             turnNumber: pluginResult.turnNumber,
             isStart: true
         ))
 
-        // Reset AnimationCoordinator tool state for new turn
-        context.resetAnimationCoordinatorToolState()
+        // Reset AnimationCoordinator capability state for new turn
+        context.resetAnimationCoordinatorCapabilityState()
 
         // Track turn boundary for multi-turn metadata assignment
         context.turnStartMessageIndex = context.messages.count
@@ -112,11 +112,11 @@ final class TurnLifecycleCoordinator {
 
         // Find the message to update with metadata.
         // The stats line renders BELOW the target message, so we must pick the
-        // LAST message in the turn to ensure stats appear after all tool chips.
+        // LAST message in the turn to ensure stats appear after all capability chips.
         //
         // Strategy:
         //   1. Active streaming message (text-only turns ending mid-stream)
-        //   2. Last assistant message in turn range (text+tools, tool-only, or text-only)
+        //   2. Last assistant message in turn range (text+capabilities, capability-only, or text-only)
         //   3. Tracked first text ID fallback (rare: turnStartMessageIndex lost)
         var targetIndex: Int?
 
@@ -127,12 +127,12 @@ final class TurnLifecycleCoordinator {
         } else if let startIndex = context.turnStartMessageIndex,
                   startIndex < context.messages.count {
             // Find the LAST assistant message in this turn.
-            // This ensures the stats line appears after all parallel tool chips,
+            // This ensures the stats line appears after all parallel capability chips,
             // not between the first and second capability invocation.
             for i in startIndex..<context.messages.count {
                 if context.messages[i].role == .assistant {
                     switch context.messages[i].content {
-                    case .text, .capabilityInvocation, .askUserQuestion, .engineApproval:
+                    case .text, .capabilityInvocation, .userInteraction, .engineApproval:
                         targetIndex = i
                     default:
                         break
@@ -236,9 +236,9 @@ final class TurnLifecycleCoordinator {
         streamingText: String,
         context: TurnLifecycleContext
     ) {
-        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolCalls: \(context.currentTurnCapabilityInvocations.count))")
+        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, capabilityInvocations: \(context.currentTurnCapabilityInvocations.count))")
 
-        // Flush any pending UI updates to ensure all tool results are displayed
+        // Flush any pending UI updates to ensure all capability results are displayed
         context.flushUIUpdateQueue()
         context.flushPendingTextUpdates()
 
@@ -251,12 +251,12 @@ final class TurnLifecycleCoordinator {
             lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200))
         )
 
-        context.currentToolMessages.removeAll()
+        context.currentCapabilityInvocationMessages.removeAll()
         context.currentTurnCapabilityInvocations.removeAll()
 
         // Reset all manager states
         context.resetUIUpdateQueue()
-        context.resetAnimationCoordinatorToolState()
+        context.resetAnimationCoordinatorCapabilityState()
         context.resetStreamingManager()
 
         // Refresh context from server to ensure accuracy after all operations

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Unified duration formatting from milliseconds.
-/// Replaces duplicate formatting logic in ToolDetailComponents, ToolResultViews,
+/// Replaces duplicate formatting logic in CapabilityDetailComponents, CapabilityResultViews,
 /// AutomationDetailSheet, and AutomationRunDetailSheet.
 enum DurationFormatter {
 

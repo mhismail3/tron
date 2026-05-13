@@ -2704,7 +2704,7 @@ async fn e2e_detailed_snapshot_has_system_prompt() {
 
     // iOS required fields
     assert!(result["messages"].is_array());
-    assert!(result["toolsContent"].is_array());
+    assert!(result["capabilitiesContent"].is_array());
     assert!(result["addedSkills"].is_array());
 
     server.shutdown().shutdown();

@@ -7,7 +7,7 @@ extension ChatViewModel: EngineApprovalContext {}
 // MARK: - EngineApproval Methods
 
 extension ChatViewModel {
-    func engineApprovalToolData(from approval: EngineApprovalRecordDTO) -> EngineApprovalToolData {
+    func engineApprovalCapabilityData(from approval: EngineApprovalRecordDTO) -> EngineApprovalData {
         let action = ApprovalEventText.action(functionId: approval.functionId, payload: approval.payload)
         let reason = ApprovalEventText.reason(approvalId: approval.approvalId, functionId: approval.functionId)
         let status: EngineApprovalChipStatus
@@ -33,7 +33,7 @@ extension ChatViewModel {
                 submittedAt: approval.decidedAt ?? approval.updatedAt ?? DateParser.now
             )
         }
-        return EngineApprovalToolData(
+        return EngineApprovalData(
             invocationId: "engine-approval:\(approval.approvalId)",
             params: EngineApprovalParams(
                 action: action,
@@ -52,12 +52,12 @@ extension ChatViewModel {
     // MARK: - Sheet Management
 
     /// Open the engine approval sheet for a server-owned approval record.
-    func openEngineApprovalSheet(for data: EngineApprovalToolData) {
+    func openEngineApprovalSheet(for data: EngineApprovalData) {
         engineApprovalCoordinator.openSheet(for: data, context: self)
     }
 
     func handleApprovalPending(_ result: ApprovalPendingPlugin.Result) {
-        let data = engineApprovalToolData(from: result.approval)
+        let data = engineApprovalCapabilityData(from: result.approval)
 
         if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: data.invocationId, in: messages) {
             messages[index].content = .engineApproval(data)
@@ -71,7 +71,7 @@ extension ChatViewModel {
     }
 
     func handleApprovalResolved(_ result: ApprovalResolvedPlugin.Result) {
-        let data = engineApprovalToolData(from: result.approval)
+        let data = engineApprovalCapabilityData(from: result.approval)
         if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: result.invocationId, in: messages) {
             messages[index].content = .engineApproval(data)
         } else {

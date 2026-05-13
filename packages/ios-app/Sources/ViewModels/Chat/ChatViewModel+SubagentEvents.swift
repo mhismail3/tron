@@ -13,12 +13,12 @@ extension ChatViewModel {
         } else {
             // Wire contract: `spawnType` is always emitted by the server.
             // Missing / unknown value signals a schema drift — log loudly and
-            // use the safe default (toolAgent) so the chip still renders.
+            // use the safe default (capabilityAgent) so the chip still renders.
             logger.error(
-                "Subagent live event missing/unknown spawnType=\(result.spawnType ?? "<nil>") for session \(result.subagentSessionId); defaulting to toolAgent",
+                "Subagent live event missing/unknown spawnType=\(result.spawnType ?? "<nil>") for session \(result.subagentSessionId); defaulting to capabilityAgent",
                 category: .chat
             )
-            resolvedSpawnType = .toolAgent
+            resolvedSpawnType = .capabilityAgent
         }
 
         subagentState.trackSpawn(
@@ -30,7 +30,7 @@ extension ChatViewModel {
             spawnType: resolvedSpawnType
         )
 
-        updateToolMessageToSubagentChip(
+        updateCapabilityMessageToSubagentChip(
             invocationId: result.invocationId ?? result.subagentSessionId,
             subagentSessionId: result.subagentSessionId
         )
@@ -138,15 +138,15 @@ extension ChatViewModel {
 
     // MARK: - Subagent Helpers
 
-    private func updateToolMessageToSubagentChip(invocationId: String, subagentSessionId: String) {
+    private func updateCapabilityMessageToSubagentChip(invocationId: String, subagentSessionId: String) {
         guard let data = subagentState.getSubagent(sessionId: subagentSessionId) else {
             logger.warning("No subagent data found for session \(subagentSessionId)", category: .chat)
             return
         }
 
-        if let index = MessageFinder.indexOfSpawnSubagentTool(invocationId: invocationId, in: messages) {
+        if let index = MessageFinder.indexOfSpawnSubagentInvocation(invocationId: invocationId, in: messages) {
             messages[index].content = .subagent(data)
-            logger.debug("Converted tool message to subagent chip for \(subagentSessionId)", category: .chat)
+            logger.debug("Converted capability message to subagent chip for \(subagentSessionId)", category: .chat)
         }
     }
 
@@ -181,7 +181,7 @@ extension ChatViewModel {
             return false
         }
 
-        // Add chip to chat immediately (matches AskUserQuestionCoordinator pattern).
+        // Add chip to chat immediately (matches UserInteractionCoordinator pattern).
         // On reconstruction the server-tagged message.user event produces the same chip.
         let chip = ChatMessage(
             role: .user,

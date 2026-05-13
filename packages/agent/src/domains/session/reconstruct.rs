@@ -8,8 +8,8 @@
 //! ## In-flight reconciliation
 //!
 //! When capabilities are executing, `message.assistant` has already been persisted (containing
-//! thinking, text, and tool_use blocks), but the turn accumulator still holds the same
-//! content. [`reconcile_in_flight`] strips text/thinking from in-flight state when tools
+//! thinking, text, and capability_invocation blocks), but the turn accumulator still holds the same
+//! content. [`reconcile_in_flight`] strips text/thinking from in-flight state when capabilities
 //! are past "generating" status, preventing duplicate content on iOS reconstruction.
 //!
 //! ## Response shape
@@ -138,8 +138,8 @@ impl SessionReconstructService {
             if let Some(ref s) = state {
                 debug!(
                     session_id,
-                    tool_count = s
-                        .get("toolCalls")
+                    capability_count = s
+                        .get("capabilityInvocations")
                         .and_then(|v| v.as_array())
                         .map(|a| a.len())
                         .unwrap_or(0),
@@ -190,7 +190,7 @@ impl SessionReconstructService {
 
         // 5a. Enrich agent::ask_user capability.invocation.started events with server-parsed
         // status so iOS can render them without scanning event history.
-        crate::domains::capability_support::interactive_enrichment::enrich_interactive_tool_statuses(
+        crate::domains::capability_support::interactive_enrichment::enrich_interactive_capability_statuses(
             &mut wire_events,
         );
 
@@ -225,29 +225,33 @@ impl SessionReconstructService {
         orchestrator: &crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator,
         session_id: &str,
     ) -> Option<Value> {
-        let (text, tool_calls, content_sequence) =
+        let (text, capability_invocations, content_sequence) =
             orchestrator.turn_accumulators().get_state(session_id)?;
 
         Some(Self::reconcile_in_flight(
             text,
-            tool_calls,
+            capability_invocations,
             content_sequence,
         ))
     }
 
     /// Reconcile in-flight accumulator state against persisted events.
     ///
-    /// When any tool has progressed past "generating" status, capability invocation has
-    /// started, which means `message.assistant` was persisted (tools only execute
+    /// When any capability has progressed past "generating" status, capability invocation has
+    /// started, which means `message.assistant` was persisted (capabilities only execute
     /// after persist). In that case, text and thinking in the accumulator duplicate
     /// the persisted event — strip them from the response to prevent iOS duplication.
     ///
-    /// Capability invocations and tool_ref items are always preserved since they carry live
+    /// Capability invocations and capability_ref items are always preserved since they carry live
     /// status (running/completed, streamingOutput, startedAt) not in persisted events.
-    fn reconcile_in_flight(text: String, tool_calls: Value, content_sequence: Value) -> Value {
+    fn reconcile_in_flight(
+        text: String,
+        capability_invocations: Value,
+        content_sequence: Value,
+    ) -> Value {
         // Detect if message.assistant has been persisted for this turn.
-        // Any tool past "generating" means capability invocation started → message.assistant persisted.
-        let tools_executing = tool_calls
+        // Any capability past "generating" means capability invocation started → message.assistant persisted.
+        let capabilities_executing = capability_invocations
             .as_array()
             .map(|calls| {
                 calls.iter().any(|tc| {
@@ -258,19 +262,19 @@ impl SessionReconstructService {
             })
             .unwrap_or(false);
 
-        if tools_executing {
+        if capabilities_executing {
             // Strip text/thinking from content sequence — already in persisted message.assistant.
-            // Keep only tool_ref items (they carry live status not in persisted events).
+            // Keep only capability_ref items (they carry live status not in persisted events).
             let filtered: Vec<Value> = content_sequence
                 .as_array()
                 .unwrap_or(&vec![])
                 .iter()
-                .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("tool_ref"))
+                .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("capability_ref"))
                 .cloned()
                 .collect();
 
             json!({
-                "toolCalls": tool_calls,
+                "capabilityInvocations": capability_invocations,
                 "contentSequence": filtered,
                 "streaming": null,
             })
@@ -283,7 +287,7 @@ impl SessionReconstructService {
             };
 
             json!({
-                "toolCalls": tool_calls,
+                "capabilityInvocations": capability_invocations,
                 "contentSequence": content_sequence,
                 "streaming": streaming,
             })
@@ -298,12 +302,12 @@ mod tests {
     // ── reconcile_in_flight tests ──
 
     #[test]
-    fn strips_text_thinking_when_tools_executing() {
+    fn strips_text_thinking_when_capabilities_executing() {
         let result = SessionReconstructService::reconcile_in_flight(
             "I'll run sleep 10.".into(),
             json!([{
-                "toolCallId": "tc_1",
-                "toolName": "execute",
+                "invocationId": "tc_1",
+                "modelPrimitiveName": "execute",
                 "status": "running",
                 "startedAt": "2026-04-07T12:00:00Z",
                 "streamingOutput": "running...",
@@ -311,25 +315,25 @@ mod tests {
             json!([
                 { "type": "thinking", "thinking": "The user wants sleep 10." },
                 { "type": "text", "text": "I'll run sleep 10." },
-                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "capability_ref", "invocationId": "tc_1" },
             ]),
         );
 
         // Text/thinking stripped — already in persisted message.assistant
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 1);
-        assert_eq!(seq[0]["type"], "tool_ref");
-        assert_eq!(seq[0]["toolCallId"], "tc_1");
+        assert_eq!(seq[0]["type"], "capability_ref");
+        assert_eq!(seq[0]["invocationId"], "tc_1");
 
         // Streaming cleared
         assert!(result["streaming"].is_null());
 
         // Capability invocations preserved with full detail
-        let tools = result["toolCalls"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["status"], "running");
-        assert_eq!(tools[0]["startedAt"], "2026-04-07T12:00:00Z");
-        assert_eq!(tools[0]["streamingOutput"], "running...");
+        let capabilities = result["capabilityInvocations"].as_array().unwrap();
+        assert_eq!(capabilities.len(), 1);
+        assert_eq!(capabilities[0]["status"], "running");
+        assert_eq!(capabilities[0]["startedAt"], "2026-04-07T12:00:00Z");
+        assert_eq!(capabilities[0]["streamingOutput"], "running...");
     }
 
     #[test]
@@ -337,14 +341,14 @@ mod tests {
         let result = SessionReconstructService::reconcile_in_flight(
             "Let me think...".into(),
             json!([{
-                "toolCallId": "tc_1",
-                "toolName": "execute",
+                "invocationId": "tc_1",
+                "modelPrimitiveName": "execute",
                 "status": "generating",
             }]),
             json!([
                 { "type": "thinking", "thinking": "Planning..." },
                 { "type": "text", "text": "Let me think..." },
-                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "capability_ref", "invocationId": "tc_1" },
             ]),
         );
 
@@ -353,7 +357,7 @@ mod tests {
         assert_eq!(seq.len(), 3);
         assert_eq!(seq[0]["type"], "thinking");
         assert_eq!(seq[1]["type"], "text");
-        assert_eq!(seq[2]["type"], "tool_ref");
+        assert_eq!(seq[2]["type"], "capability_ref");
 
         // Streaming active
         assert_eq!(result["streaming"]["type"], "text");
@@ -361,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_everything_when_no_tools() {
+    fn keeps_everything_when_no_capabilities() {
         let result = SessionReconstructService::reconcile_in_flight(
             "Here is my response...".into(),
             json!([]),
@@ -382,75 +386,75 @@ mod tests {
     }
 
     #[test]
-    fn strips_when_mixed_tool_statuses() {
-        // One tool running, one still generating — strip because at least one is executing
+    fn strips_when_mixed_capability_statuses() {
+        // One capability running, one still generating — strip because at least one is executing
         let result = SessionReconstructService::reconcile_in_flight(
-            "Running tools...".into(),
+            "Running capabilities...".into(),
             json!([
-                { "toolCallId": "tc_1", "toolName": "execute", "status": "running" },
-                { "toolCallId": "tc_2", "toolName": "inspect", "status": "generating" },
+                { "invocationId": "tc_1", "modelPrimitiveName": "execute", "status": "running" },
+                { "invocationId": "tc_2", "modelPrimitiveName": "inspect", "status": "generating" },
             ]),
             json!([
                 { "type": "thinking", "thinking": "Let me run both." },
-                { "type": "text", "text": "Running tools..." },
-                { "type": "tool_ref", "toolCallId": "tc_1" },
-                { "type": "tool_ref", "toolCallId": "tc_2" },
+                { "type": "text", "text": "Running capabilities..." },
+                { "type": "capability_ref", "invocationId": "tc_1" },
+                { "type": "capability_ref", "invocationId": "tc_2" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
-        assert_eq!(seq.len(), 2); // Only tool_refs
-        assert_eq!(seq[0]["toolCallId"], "tc_1");
-        assert_eq!(seq[1]["toolCallId"], "tc_2");
+        assert_eq!(seq.len(), 2); // Only capability_refs
+        assert_eq!(seq[0]["invocationId"], "tc_1");
+        assert_eq!(seq[1]["invocationId"], "tc_2");
         assert!(result["streaming"].is_null());
 
         // Both capability invocations preserved
-        assert_eq!(result["toolCalls"].as_array().unwrap().len(), 2);
+        assert_eq!(result["capabilityInvocations"].as_array().unwrap().len(), 2);
     }
 
     #[test]
-    fn strips_when_tool_completed() {
+    fn strips_when_capability_completed() {
         let result = SessionReconstructService::reconcile_in_flight(
             "Done.".into(),
             json!([{
-                "toolCallId": "tc_1",
-                "toolName": "inspect",
+                "invocationId": "tc_1",
+                "modelPrimitiveName": "inspect",
                 "status": "completed",
                 "result": "file contents...",
                 "completedAt": "2026-04-07T12:00:01Z",
             }]),
             json!([
                 { "type": "text", "text": "Done." },
-                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "capability_ref", "invocationId": "tc_1" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 1);
-        assert_eq!(seq[0]["type"], "tool_ref");
+        assert_eq!(seq[0]["type"], "capability_ref");
         assert!(result["streaming"].is_null());
     }
 
     #[test]
-    fn strips_when_tool_errored() {
+    fn strips_when_capability_errored() {
         let result = SessionReconstructService::reconcile_in_flight(
             "Trying...".into(),
             json!([{
-                "toolCallId": "tc_1",
-                "toolName": "execute",
+                "invocationId": "tc_1",
+                "modelPrimitiveName": "execute",
                 "status": "error",
                 "isError": true,
                 "result": "command not found",
             }]),
             json!([
                 { "type": "text", "text": "Trying..." },
-                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "capability_ref", "invocationId": "tc_1" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 1);
-        assert_eq!(seq[0]["type"], "tool_ref");
+        assert_eq!(seq[0]["type"], "capability_ref");
     }
 
     #[test]
@@ -458,8 +462,8 @@ mod tests {
         let result = SessionReconstructService::reconcile_in_flight(
             "text".into(),
             json!([{
-                "toolCallId": "tc_1",
-                "toolName": "execute",
+                "invocationId": "tc_1",
+                "modelPrimitiveName": "execute",
                 "status": "running",
                 "arguments": { "command": "sleep 10" },
                 "startedAt": "2026-04-07T12:00:00Z",
@@ -467,19 +471,22 @@ mod tests {
                 "isError": false,
             }]),
             json!([
-                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "capability_ref", "invocationId": "tc_1" },
             ]),
         );
 
-        let tool = &result["toolCalls"][0];
-        assert_eq!(tool["startedAt"], "2026-04-07T12:00:00Z");
-        assert_eq!(tool["streamingOutput"], "partial output line 1\nline 2\n");
-        assert_eq!(tool["arguments"]["command"], "sleep 10");
-        assert_eq!(tool["isError"], false);
+        let capability = &result["capabilityInvocations"][0];
+        assert_eq!(capability["startedAt"], "2026-04-07T12:00:00Z");
+        assert_eq!(
+            capability["streamingOutput"],
+            "partial output line 1\nline 2\n"
+        );
+        assert_eq!(capability["arguments"]["command"], "sleep 10");
+        assert_eq!(capability["isError"], false);
     }
 
     #[test]
-    fn no_streaming_when_text_empty_and_no_tools() {
+    fn no_streaming_when_text_empty_and_no_capabilities() {
         let result = SessionReconstructService::reconcile_in_flight(
             String::new(),
             json!([]),
@@ -494,25 +501,25 @@ mod tests {
 
     #[test]
     fn strips_multiple_text_and_thinking_blocks() {
-        // Interleaved: thinking, text, tool, text, tool
+        // Interleaved: thinking, text, capability, text, capability
         let result = SessionReconstructService::reconcile_in_flight(
             "second text".into(),
             json!([
-                { "toolCallId": "tc_1", "toolName": "execute", "status": "running" },
-                { "toolCallId": "tc_2", "toolName": "inspect", "status": "running" },
+                { "invocationId": "tc_1", "modelPrimitiveName": "execute", "status": "running" },
+                { "invocationId": "tc_2", "modelPrimitiveName": "inspect", "status": "running" },
             ]),
             json!([
                 { "type": "thinking", "thinking": "plan A" },
                 { "type": "text", "text": "first text" },
-                { "type": "tool_ref", "toolCallId": "tc_1" },
+                { "type": "capability_ref", "invocationId": "tc_1" },
                 { "type": "thinking", "thinking": "plan B" },
                 { "type": "text", "text": "second text" },
-                { "type": "tool_ref", "toolCallId": "tc_2" },
+                { "type": "capability_ref", "invocationId": "tc_2" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 2);
-        assert!(seq.iter().all(|item| item["type"] == "tool_ref"));
+        assert!(seq.iter().all(|item| item["type"] == "capability_ref"));
     }
 }

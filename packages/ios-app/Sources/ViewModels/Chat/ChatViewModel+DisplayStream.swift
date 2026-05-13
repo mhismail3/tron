@@ -14,7 +14,7 @@ extension ChatViewModel: DisplayStreamEventHandler {
     // MARK: - Stream Lifecycle
 
     /// Called when the stream ends (agent complete, frames stop arriving).
-    /// Keeps `streamFrameImage` and `streamInvocationId` so the tool chip
+    /// Keeps `streamFrameImage` and `streamInvocationId` so the capability chip
     /// can still show the last frame after the stream is over.
     func endDisplayStream() {
         displayStreamState.endStream()

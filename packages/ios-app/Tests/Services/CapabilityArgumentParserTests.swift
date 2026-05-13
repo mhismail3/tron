@@ -252,22 +252,22 @@ struct CapabilityArgumentParserTests {
         #expect(!result.isEmpty)
     }
 
-    // MARK: - Real-world tool argument samples
+    // MARK: - Real-world capability argument samples
 
-    @Test("Parses real Read tool arguments")
+    @Test("Parses real Read capability arguments")
     func testRealReadArgs() {
         let args = "{\"file_path\": \"/Users/test/Workspace/tron/packages/agent/src/index.ts\"}"
         #expect(CapabilityArgumentParser.filePath(from: args) == "/Users/test/Workspace/tron/packages/agent/src/index.ts")
         #expect(CapabilityArgumentParser.shortenPath(CapabilityArgumentParser.filePath(from: args)) == "index.ts")
     }
 
-    @Test("Parses real Bash tool arguments")
+    @Test("Parses real Bash capability arguments")
     func testRealBashArgs() {
         let args = "{\"command\": \"git status --short\"}"
         #expect(CapabilityArgumentParser.command(from: args) == "git status --short")
     }
 
-    @Test("Parses real Search tool arguments")
+    @Test("Parses real Search capability arguments")
     func testRealSearchArgs() {
         let args = "{\"pattern\": \"TODO\", \"path\": \"./src\"}"
         #expect(CapabilityArgumentParser.pattern(from: args) == "TODO")
@@ -287,14 +287,14 @@ struct CapabilityArgumentParserTests {
         #expect(CapabilityArgumentParser.query(from: args) == "Swift async await tutorial")
     }
 
-    @Test("Parses real Write tool arguments with content")
+    @Test("Parses real Write capability arguments with content")
     func testRealWriteArgs() {
         let args = "{\"file_path\": \"/path/to/config.json\", \"content\": \"{\\n  \\\"name\\\": \\\"MyApp\\\"\\n}\"}"
         #expect(CapabilityArgumentParser.filePath(from: args) == "/path/to/config.json")
         #expect(CapabilityArgumentParser.content(from: args) == "{\n  \"name\": \"MyApp\"\n}")
     }
 
-    @Test("Parses real Edit tool arguments")
+    @Test("Parses real Edit capability arguments")
     func testRealEditArgs() {
         let args = "{\"file_path\": \"/Users/test/server.py\"}"
         #expect(CapabilityArgumentParser.filePath(from: args) == "/Users/test/server.py")

@@ -7,8 +7,8 @@ import SwiftUI
 enum ActivityLineKind: String, Codable, Equatable, CaseIterable, Sendable {
     case text
     case userPrompt
-    case capabilityStart
-    case capabilityEnd
+    case capabilityInvocationStarted
+    case capabilityInvocationCompleted
     case subagentSpawn
     case subagentDone
     case subagentFailed
@@ -18,17 +18,17 @@ enum ActivityLineKind: String, Codable, Equatable, CaseIterable, Sendable {
 
 // MARK: - Activity Line Status
 
-/// Status of a tool or subagent activity line.
+/// Status of a capability or subagent activity line.
 enum ActivityLineStatus: String, Codable, Equatable, CaseIterable, Sendable {
     case running
     case success
     case error
 }
 
-// MARK: - Capability Color
+// MARK: - Capability Risk Color
 
-/// Type-safe capability color that bridges between ToolDescriptor string names and SwiftUI colors.
-/// Replaces the stringly-typed `iconColorName` → `String.resolvedCapabilityColor` pattern.
+/// Type-safe capability color that bridges between capability presentation hint names and SwiftUI colors.
+/// Replaces the stringly-typed `presentationColorName` → `String.resolvedCapabilityColor` pattern.
 enum CapabilityColor: String, Codable, Equatable, CaseIterable, Sendable {
     case tronSlate
     case tronPink
@@ -64,7 +64,7 @@ enum CapabilityColor: String, Codable, Equatable, CaseIterable, Sendable {
         }
     }
 
-    /// Parse from a ToolDescriptor `iconColorName` string. Falls back to `.tronTextMuted`.
+    /// Parse from a capability presentation hint color string. Falls back to `.tronTextMuted`.
     init(fromDescriptorName name: String) {
         self = CapabilityColor(rawValue: name) ?? .tronTextMuted
     }
@@ -107,7 +107,7 @@ struct ActivityLine: Identifiable, Codable, Sendable {
     var text: String
     var icon: String?
     var iconColor: CapabilityColor?
-    var modelToolName: String?
+    var modelPrimitiveName: String?
     var displayName: String?
     var summary: String?
     var duration: String?
@@ -125,7 +125,7 @@ struct ActivityLine: Identifiable, Codable, Sendable {
         text: String,
         icon: String? = nil,
         iconColor: CapabilityColor? = nil,
-        modelToolName: String? = nil,
+        modelPrimitiveName: String? = nil,
         displayName: String? = nil,
         summary: String? = nil,
         duration: String? = nil,
@@ -138,7 +138,7 @@ struct ActivityLine: Identifiable, Codable, Sendable {
         self.text = text
         self.icon = icon
         self.iconColor = iconColor
-        self.modelToolName = modelToolName
+        self.modelPrimitiveName = modelPrimitiveName
         self.displayName = displayName
         self.summary = summary
         self.duration = duration
@@ -150,7 +150,7 @@ struct ActivityLine: Identifiable, Codable, Sendable {
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case kind, text, icon, iconColor, modelToolName, displayName, summary, duration, status, capabilityIdentity
+        case kind, text, icon, iconColor, modelPrimitiveName, displayName, summary, duration, status, capabilityIdentity
     }
 
     init(from decoder: Decoder) throws {
@@ -160,7 +160,7 @@ struct ActivityLine: Identifiable, Codable, Sendable {
         self.text = try c.decode(String.self, forKey: .text)
         self.icon = try c.decodeIfPresent(String.self, forKey: .icon)
         self.iconColor = try c.decodeIfPresent(CapabilityColor.self, forKey: .iconColor)
-        self.modelToolName = try c.decodeIfPresent(String.self, forKey: .modelToolName)
+        self.modelPrimitiveName = try c.decodeIfPresent(String.self, forKey: .modelPrimitiveName)
         self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
         self.summary = try c.decodeIfPresent(String.self, forKey: .summary)
         self.duration = try c.decodeIfPresent(String.self, forKey: .duration)
@@ -178,7 +178,7 @@ extension ActivityLine: Equatable {
         lhs.text == rhs.text &&
         lhs.icon == rhs.icon &&
         lhs.iconColor == rhs.iconColor &&
-        lhs.modelToolName == rhs.modelToolName &&
+        lhs.modelPrimitiveName == rhs.modelPrimitiveName &&
         lhs.displayName == rhs.displayName &&
         lhs.summary == rhs.summary &&
         lhs.duration == rhs.duration &&

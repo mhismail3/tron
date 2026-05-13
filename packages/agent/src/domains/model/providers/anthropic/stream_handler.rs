@@ -4,7 +4,7 @@
 //! into unified [`StreamEvent`]s consumed by the agent runtime.
 //!
 //! The handler maintains a [`StreamState`] that accumulates text, thinking, signature,
-//! and tool arguments across delta events, then emits complete blocks on `content_block_stop`.
+//! and capability arguments across delta events, then emits complete blocks on `content_block_stop`.
 //!
 //! Delegates mechanical delta accumulation to [`StreamAccumulator`] from the shared
 //! `stream_common` module, keeping only Anthropic-specific protocol mapping here.
@@ -27,8 +27,8 @@ pub struct StreamState {
     pub acc: StreamAccumulator,
     /// Current content block type being accumulated.
     pub current_block_type: Option<BlockType>,
-    /// Capability invocation ID for the current `tool_use` block.
-    pub current_tool_call_id: Option<String>,
+    /// Capability invocation ID for the current `capability_invocation` block.
+    pub current_invocation_id: Option<String>,
     /// Cache creation tokens.
     pub cache_creation_tokens: u64,
     /// Cache read tokens.
@@ -49,7 +49,7 @@ impl Default for StreamState {
             provider_type: crate::shared::messages::Provider::default(),
             acc: StreamAccumulator::new(),
             current_block_type: None,
-            current_tool_call_id: None,
+            current_invocation_id: None,
             cache_creation_tokens: 0,
             cache_read_tokens: 0,
             cache_creation_5m_tokens: 0,
@@ -67,8 +67,8 @@ pub enum BlockType {
     Text,
     /// Extended thinking.
     Thinking,
-    /// Tool use (function call).
-    ToolUse,
+    /// ModelCapability use (function call).
+    CapabilityInvocation,
 }
 
 /// Create a new stream state for a specific provider.
@@ -127,10 +127,12 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
                 state.acc.thinking_started = true;
                 vec![StreamEvent::ThinkingStart]
             }
-            SseContentBlock::ToolUse { id, name } => {
-                state.current_block_type = Some(BlockType::ToolUse);
-                state.current_tool_call_id = Some(id.clone());
-                state.acc.start_tool_call(id.clone(), name.clone())
+            SseContentBlock::CapabilityInvocation { id, name } => {
+                state.current_block_type = Some(BlockType::CapabilityInvocation);
+                state.current_invocation_id = Some(id.clone());
+                state
+                    .acc
+                    .start_capability_invocation(id.clone(), name.clone())
             }
         },
 
@@ -152,7 +154,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
                 vec![]
             }
             SseDelta::InputJsonDelta { partial_json } => {
-                if let Some(ref id) = state.current_tool_call_id {
+                if let Some(ref id) = state.current_invocation_id {
                     state.acc.append_tool_args(id, partial_json)
                 } else {
                     vec![]
@@ -215,17 +217,22 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
                 signature,
             }]
         }
-        Some(BlockType::ToolUse) => {
-            let id = state.current_tool_call_id.take().unwrap_or_default();
-            let events = state.acc.finish_tool_call(&id);
-            // Extract the ToolCall from the event to build the content block.
-            if let Some(StreamEvent::ToolCallEnd { tool_call }) = events.first() {
-                state.content_blocks.push(AssistantContent::ToolUse {
-                    id: tool_call.id.clone(),
-                    name: tool_call.name.clone(),
-                    arguments: tool_call.arguments.clone(),
-                    thought_signature: None,
-                });
+        Some(BlockType::CapabilityInvocation) => {
+            let id = state.current_invocation_id.take().unwrap_or_default();
+            let events = state.acc.finish_capability_invocation(&id);
+            // Extract the CapabilityInvocationDraft from the event to build the content block.
+            if let Some(StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            }) = events.first()
+            {
+                state
+                    .content_blocks
+                    .push(AssistantContent::CapabilityInvocation {
+                        id: capability_invocation.id.clone(),
+                        name: capability_invocation.name.clone(),
+                        arguments: capability_invocation.arguments.clone(),
+                        thought_signature: None,
+                    });
             }
             events
         }
@@ -420,11 +427,11 @@ mod tests {
     }
 
     #[test]
-    fn content_block_start_tool_use() {
+    fn content_block_start_capability_invocation() {
         let mut state = create_stream_state();
         let event = AnthropicSseEvent::ContentBlockStart {
             index: 1,
-            content_block: SseContentBlock::ToolUse {
+            content_block: SseContentBlock::CapabilityInvocation {
                 id: "toolu_01abc".into(),
                 name: "execute".into(),
             },
@@ -432,14 +439,17 @@ mod tests {
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ToolCallStart { tool_call_id, name } => {
-                assert_eq!(tool_call_id, "toolu_01abc");
+            StreamEvent::CapabilityInvocationDraftStart {
+                invocation_id,
+                name,
+            } => {
+                assert_eq!(invocation_id, "toolu_01abc");
                 assert_eq!(name, "execute");
             }
-            _ => panic!("expected ToolCallStart"),
+            _ => panic!("expected CapabilityInvocationDraftStart"),
         }
-        assert_eq!(state.current_tool_call_id, Some("toolu_01abc".into()));
-        assert_eq!(state.acc.tool_calls()[0].name, "execute");
+        assert_eq!(state.current_invocation_id, Some("toolu_01abc".into()));
+        assert_eq!(state.acc.capability_invocations()[0].name, "execute");
     }
 
     // ── content_block_delta ─────────────────────────────────────────────
@@ -519,11 +529,11 @@ mod tests {
     #[test]
     fn content_block_delta_input_json() {
         let mut state = create_stream_state();
-        state.current_block_type = Some(BlockType::ToolUse);
-        state.current_tool_call_id = Some("toolu_01abc".into());
+        state.current_block_type = Some(BlockType::CapabilityInvocation);
+        state.current_invocation_id = Some("toolu_01abc".into());
         let _ = state
             .acc
-            .start_tool_call("toolu_01abc".into(), "execute".into());
+            .start_capability_invocation("toolu_01abc".into(), "execute".into());
         let event = AnthropicSseEvent::ContentBlockDelta {
             index: 1,
             delta: SseDelta::InputJsonDelta {
@@ -533,14 +543,14 @@ mod tests {
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ToolCallDelta {
-                tool_call_id,
+            StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id,
                 arguments_delta,
             } => {
-                assert_eq!(tool_call_id, "toolu_01abc");
+                assert_eq!(invocation_id, "toolu_01abc");
                 assert_eq!(arguments_delta, r#"{"cmd":"#);
             }
-            _ => panic!("expected ToolCallDelta"),
+            _ => panic!("expected CapabilityInvocationDraftDelta"),
         }
     }
 
@@ -604,45 +614,49 @@ mod tests {
     }
 
     #[test]
-    fn content_block_stop_tool_use() {
+    fn content_block_stop_capability_invocation() {
         let mut state = create_stream_state();
-        state.current_block_type = Some(BlockType::ToolUse);
-        state.current_tool_call_id = Some("toolu_01abc".into());
+        state.current_block_type = Some(BlockType::CapabilityInvocation);
+        state.current_invocation_id = Some("toolu_01abc".into());
         let _ = state
             .acc
-            .start_tool_call("toolu_01abc".into(), "execute".into());
+            .start_capability_invocation("toolu_01abc".into(), "execute".into());
         let _ = state.acc.append_tool_args("toolu_01abc", r#"{"cmd":"ls"}"#);
         let event = AnthropicSseEvent::ContentBlockStop { index: 1 };
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ToolCallEnd { tool_call } => {
-                assert_eq!(tool_call.id, "toolu_01abc");
-                assert_eq!(tool_call.name, "execute");
-                assert_eq!(tool_call.arguments["cmd"], "ls");
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
+                assert_eq!(capability_invocation.id, "toolu_01abc");
+                assert_eq!(capability_invocation.name, "execute");
+                assert_eq!(capability_invocation.arguments["cmd"], "ls");
             }
-            _ => panic!("expected ToolCallEnd"),
+            _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
-        assert!(state.current_tool_call_id.is_none());
-        assert!(state.acc.tool_calls().is_empty());
+        assert!(state.current_invocation_id.is_none());
+        assert!(state.acc.capability_invocations().is_empty());
     }
 
     #[test]
-    fn content_block_stop_tool_use_empty_args() {
+    fn content_block_stop_capability_invocation_empty_args() {
         let mut state = create_stream_state();
-        state.current_block_type = Some(BlockType::ToolUse);
-        state.current_tool_call_id = Some("toolu_01abc".into());
+        state.current_block_type = Some(BlockType::CapabilityInvocation);
+        state.current_invocation_id = Some("toolu_01abc".into());
         let _ = state
             .acc
-            .start_tool_call("toolu_01abc".into(), "execute".into());
+            .start_capability_invocation("toolu_01abc".into(), "execute".into());
         // Empty args
         let event = AnthropicSseEvent::ContentBlockStop { index: 0 };
         let events = process_sse_event(&event, &mut state);
         match &events[0] {
-            StreamEvent::ToolCallEnd { tool_call } => {
-                assert!(tool_call.arguments.is_empty());
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
+                assert!(capability_invocation.arguments.is_empty());
             }
-            _ => panic!("expected ToolCallEnd"),
+            _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
     }
 
@@ -664,17 +678,17 @@ mod tests {
     }
 
     #[test]
-    fn message_delta_tool_use_stop() {
+    fn message_delta_capability_invocation_stop() {
         let mut state = create_stream_state();
         let event = AnthropicSseEvent::MessageDelta {
             delta: SseMessageDelta {
-                stop_reason: Some("tool_use".into()),
+                stop_reason: Some("capability_invocation".into()),
             },
             usage: None,
         };
         let events = process_sse_event(&event, &mut state);
         assert!(events.is_empty());
-        assert_eq!(state.stop_reason, Some("tool_use".into()));
+        assert_eq!(state.stop_reason, Some("capability_invocation".into()));
     }
 
     // ── message_stop ────────────────────────────────────────────────────
@@ -989,7 +1003,7 @@ mod tests {
     }
 
     #[test]
-    fn full_tool_use_stream() {
+    fn full_capability_invocation_stream() {
         let mut state = create_stream_state();
 
         let _ = process_sse_event(
@@ -1004,11 +1018,11 @@ mod tests {
             &mut state,
         );
 
-        // Tool use block
+        // ModelCapability use block
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockStart {
                 index: 0,
-                content_block: SseContentBlock::ToolUse {
+                content_block: SseContentBlock::CapabilityInvocation {
                     id: "toolu_01abc".into(),
                     name: "execute".into(),
                 },
@@ -1038,19 +1052,21 @@ mod tests {
             &mut state,
         );
         match &events[0] {
-            StreamEvent::ToolCallEnd { tool_call } => {
-                assert_eq!(tool_call.id, "toolu_01abc");
-                assert_eq!(tool_call.name, "execute");
-                assert_eq!(tool_call.arguments["cmd"], "ls");
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
+                assert_eq!(capability_invocation.id, "toolu_01abc");
+                assert_eq!(capability_invocation.name, "execute");
+                assert_eq!(capability_invocation.arguments["cmd"], "ls");
             }
-            _ => panic!("expected ToolCallEnd"),
+            _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
 
-        // message_delta with tool_use stop reason
+        // message_delta with capability_invocation stop reason
         let _ = process_sse_event(
             &AnthropicSseEvent::MessageDelta {
                 delta: SseMessageDelta {
-                    stop_reason: Some("tool_use".into()),
+                    stop_reason: Some("capability_invocation".into()),
                 },
                 usage: Some(SseUsageDelta { output_tokens: 30 }),
             },
@@ -1060,7 +1076,7 @@ mod tests {
         let events = process_sse_event(&AnthropicSseEvent::MessageStop, &mut state);
         match &events[0] {
             StreamEvent::Done { stop_reason, .. } => {
-                assert_eq!(stop_reason, "tool_use");
+                assert_eq!(stop_reason, "capability_invocation");
             }
             _ => panic!("expected Done"),
         }

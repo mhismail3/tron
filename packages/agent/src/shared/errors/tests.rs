@@ -66,11 +66,11 @@ fn tron_error_from_provider() {
 }
 
 #[test]
-fn tron_error_from_tool() {
-    let tool_err = ToolError::new("execute", "call-1", "timeout");
-    let err = TronError::from(tool_err);
+fn tron_error_from_capability_execution() {
+    let capability_err = CapabilityExecutionError::new("execute", "call-1", "timeout");
+    let err = TronError::from(capability_err);
     assert!(err.to_string().contains("execute"));
-    assert_eq!(err.code(), "TOOL_EXECUTE_ERROR");
+    assert_eq!(err.code(), "CAPABILITY_EXECUTE_ERROR");
 }
 
 #[test]
@@ -235,29 +235,30 @@ fn provider_name_display() {
     assert_eq!(Provider::Unknown.to_string(), "unknown");
 }
 
-// -- ToolError --
+// -- CapabilityExecutionError --
 
 #[test]
-fn tool_error_basic() {
-    let err = ToolError::new("execute", "call-1", "command timed out");
-    assert_eq!(err.tool_name, "execute");
-    assert_eq!(err.tool_call_id, "call-1");
-    assert_eq!(err.code, "TOOL_EXECUTE_ERROR");
+fn capability_execution_error_basic() {
+    let err = CapabilityExecutionError::new("execute", "call-1", "command timed out");
+    assert_eq!(err.capability_id, "execute");
+    assert_eq!(err.invocation_id, "call-1");
+    assert_eq!(err.code, "CAPABILITY_EXECUTE_ERROR");
     assert!(err.to_string().contains("execute"));
     assert!(err.to_string().contains("call-1"));
 }
 
 #[test]
-fn tool_error_with_severity() {
-    let err =
-        ToolError::new("inspect", "call-2", "file not found").with_severity(ErrorSeverity::Warning);
+fn capability_execution_error_with_severity() {
+    let err = CapabilityExecutionError::new("inspect", "call-2", "file not found")
+        .with_severity(ErrorSeverity::Warning);
     assert_eq!(err.severity, ErrorSeverity::Warning);
 }
 
 #[test]
-fn tool_error_with_source() {
+fn capability_execution_error_with_source() {
     let cause = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
-    let err = ToolError::new("inspect", "call-2", "file not found").with_source(cause);
+    let err =
+        CapabilityExecutionError::new("inspect", "call-2", "file not found").with_source(cause);
     assert!(err.source.is_some());
 }
 
@@ -379,9 +380,10 @@ fn tron_error_severity_from_provider_retryable() {
 }
 
 #[test]
-fn tron_error_severity_from_tool() {
-    let tool_err = ToolError::new("execute", "c1", "timeout").with_severity(ErrorSeverity::Fatal);
-    let err = TronError::from(tool_err);
+fn tron_error_severity_from_capability_execution() {
+    let capability_err = CapabilityExecutionError::new("execute", "c1", "timeout")
+        .with_severity(ErrorSeverity::Fatal);
+    let err = TronError::from(capability_err);
     assert_eq!(err.severity(), ErrorSeverity::Fatal);
 }
 

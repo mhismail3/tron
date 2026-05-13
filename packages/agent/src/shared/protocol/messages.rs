@@ -9,38 +9,38 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::shared::content::{AssistantContent, ToolResultContent, UserContent};
-use crate::shared::tools::Tool;
+use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::model_capabilities::ModelCapability;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Capability invocation
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn default_tool_use() -> String {
-    "tool_use".into()
+fn default_capability_invocation() -> String {
+    "capability_invocation".into()
 }
 
 /// A capability invocation emitted by the assistant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ToolCall {
-    /// Discriminator — always `"tool_use"`.
-    #[serde(rename = "type", default = "default_tool_use")]
+pub struct CapabilityInvocationDraft {
+    /// Discriminator — always `"capability_invocation"`.
+    #[serde(rename = "type", default = "default_capability_invocation")]
     content_type: String,
     /// Unique capability invocation ID.
     pub id: String,
-    /// Tool name.
+    /// Capability name.
     pub name: String,
-    /// Tool arguments (JSON object).
+    /// Capability arguments (JSON object).
     pub arguments: Map<String, Value>,
     /// Thought signature for Gemini models.
     #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
     pub thought_signature: Option<String>,
 }
 
-impl Default for ToolCall {
+impl Default for CapabilityInvocationDraft {
     fn default() -> Self {
         Self {
-            content_type: "tool_use".into(),
+            content_type: "capability_invocation".into(),
             id: String::new(),
             name: String::new(),
             arguments: Map::new(),
@@ -49,7 +49,7 @@ impl Default for ToolCall {
     }
 }
 
-impl ToolCall {
+impl CapabilityInvocationDraft {
     /// Create a new capability invocation.
     #[must_use]
     pub fn new(
@@ -58,7 +58,7 @@ impl ToolCall {
         arguments: Map<String, Value>,
     ) -> Self {
         Self {
-            content_type: "tool_use".into(),
+            content_type: "capability_invocation".into(),
             id: id.into(),
             name: name.into(),
             arguments,
@@ -74,21 +74,21 @@ impl ToolCall {
     }
 }
 
-/// Normalize tool arguments from canonical `arguments`.
+/// Normalize capability arguments from canonical `arguments`.
 #[must_use]
-pub fn normalize_tool_arguments(block: &Value) -> Map<String, Value> {
+pub fn normalize_capability_arguments(block: &Value) -> Map<String, Value> {
     if let Some(args) = block.get("arguments").and_then(Value::as_object) {
         return args.clone();
     }
     Map::new()
 }
 
-/// Normalize capability result ID — handles both `tool_use_id` and `toolCallId`.
+/// Normalize capability result ID — handles both `capability_invocation_id` and `invocationId`.
 #[must_use]
-pub fn normalize_tool_result_id(block: &Value) -> String {
+pub fn normalize_capability_result_id(block: &Value) -> String {
     block
-        .get("tool_use_id")
-        .or_else(|| block.get("toolCallId"))
+        .get("capability_invocation_id")
+        .or_else(|| block.get("invocationId"))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned()
@@ -221,8 +221,8 @@ pub struct Cost {
 pub enum StopReason {
     /// Natural end of response.
     EndTurn,
-    /// Model wants to use a tool.
-    ToolUse,
+    /// Model wants to invoke a capability.
+    CapabilityInvocation,
     /// Hit the max output token limit.
     MaxTokens,
     /// Hit a stop sequence.
@@ -251,11 +251,11 @@ pub enum UserMessageContent {
 /// Content of a capability result message — either a plain string or structured blocks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum ToolResultMessageContent {
+pub enum CapabilityResultMessageContent {
     /// Simple text.
     Text(String),
     /// Structured content blocks.
-    Blocks(Vec<ToolResultContent>),
+    Blocks(Vec<CapabilityResultContent>),
 }
 
 /// A conversation message (discriminated by `role`).
@@ -290,13 +290,13 @@ pub enum Message {
         thinking: Option<String>,
     },
     /// Capability result message.
-    #[serde(rename = "toolResult")]
-    ToolResult {
+    #[serde(rename = "capabilityResult")]
+    CapabilityResult {
         /// Capability invocation ID.
-        #[serde(rename = "toolCallId")]
-        tool_call_id: String,
+        #[serde(rename = "invocationId")]
+        invocation_id: String,
         /// Result content.
-        content: ToolResultMessageContent,
+        content: CapabilityResultMessageContent,
         /// Error flag.
         #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
@@ -322,8 +322,8 @@ impl Message {
 
     /// Returns `true` if this is a capability result message.
     #[must_use]
-    pub fn is_tool_result(&self) -> bool {
-        matches!(self, Self::ToolResult { .. })
+    pub fn is_capability_result(&self) -> bool {
+        matches!(self, Self::CapabilityResult { .. })
     }
 
     /// Create a user message from a plain string.
@@ -361,9 +361,12 @@ impl Message {
     }
 }
 
-/// Extract tool use blocks from assistant content.
-pub fn extract_tool_calls(content: &[AssistantContent]) -> Vec<&AssistantContent> {
-    content.iter().filter(|c| c.is_tool_use()).collect()
+/// Extract capability invocation blocks from assistant content.
+pub fn extract_capability_invocations(content: &[AssistantContent]) -> Vec<&AssistantContent> {
+    content
+        .iter()
+        .filter(|c| c.is_capability_invocation())
+        .collect()
 }
 
 /// Extract text from assistant content blocks.
@@ -389,9 +392,9 @@ pub struct Context {
     pub system_prompt: Option<String>,
     /// Conversation messages (shared via `Arc` to avoid deep cloning per turn).
     pub messages: Arc<[Message]>,
-    /// Available tools.
+    /// Available capabilities.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<Tool>>,
+    pub capabilities: Option<Vec<ModelCapability>>,
     /// Working directory for file operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
@@ -436,30 +439,33 @@ pub struct Context {
 // Type guard helpers for untyped values
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Check if a JSON value is an API-format `tool_result` block.
+/// Check if a JSON value is an API-format `capability_result` block.
 #[must_use]
-pub fn is_api_tool_result_block(block: &Value) -> bool {
-    block.get("type").and_then(Value::as_str) == Some("tool_result")
-        && block.get("tool_use_id").and_then(Value::as_str).is_some()
+pub fn is_provider_capability_result_block(block: &Value) -> bool {
+    block.get("type").and_then(Value::as_str) == Some("capability_result")
+        && block
+            .get("capability_invocation_id")
+            .and_then(Value::as_str)
+            .is_some()
 }
 
-/// Check if a JSON value is an internal-format `tool_result` block.
+/// Check if a JSON value is an internal-format `capability_result` block.
 #[must_use]
-pub fn is_internal_tool_result_block(block: &Value) -> bool {
-    block.get("type").and_then(Value::as_str) == Some("tool_result")
-        && block.get("toolCallId").and_then(Value::as_str).is_some()
+pub fn is_internal_capability_result_block(block: &Value) -> bool {
+    block.get("type").and_then(Value::as_str) == Some("capability_result")
+        && block.get("invocationId").and_then(Value::as_str).is_some()
 }
 
-/// Check if a JSON value is any `tool_result` block (API or internal format).
+/// Check if a JSON value is any `capability_result` block (API or internal format).
 #[must_use]
-pub fn is_any_tool_result_block(block: &Value) -> bool {
-    is_api_tool_result_block(block) || is_internal_tool_result_block(block)
+pub fn is_any_capability_result_block(block: &Value) -> bool {
+    is_provider_capability_result_block(block) || is_internal_capability_result_block(block)
 }
 
-/// Check if a JSON value is an API-format `tool_use` block.
+/// Check if a JSON value is an API-format `capability_invocation` block.
 #[must_use]
-pub fn is_api_tool_use_block(block: &Value) -> bool {
-    block.get("type").and_then(Value::as_str) == Some("tool_use")
+pub fn is_provider_capability_invocation_block(block: &Value) -> bool {
+    block.get("type").and_then(Value::as_str) == Some("capability_invocation")
         && block.get("id").and_then(Value::as_str).is_some()
         && block.get("arguments").is_some()
 }
@@ -474,86 +480,86 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    // -- ToolCall --
+    // -- CapabilityInvocationDraft --
 
     #[test]
-    fn tool_call_default() {
-        let tc = ToolCall::default();
+    fn capability_invocation_default() {
+        let tc = CapabilityInvocationDraft::default();
         assert!(tc.id.is_empty());
     }
 
     #[test]
-    fn tool_call_serializes_type_field() {
-        let tc = ToolCall {
+    fn capability_invocation_serializes_type_field() {
+        let tc = CapabilityInvocationDraft {
             id: "tc_1".into(),
             name: "test".into(),
-            ..ToolCall::default()
+            ..CapabilityInvocationDraft::default()
         };
         let json = serde_json::to_value(&tc).unwrap();
-        assert_eq!(json["type"], "tool_use");
+        assert_eq!(json["type"], "capability_invocation");
     }
 
     #[test]
-    fn tool_call_deserializes_type_field() {
-        let json = r#"{"type":"tool_use","id":"tc_1","name":"test","arguments":{}}"#;
-        let tc: ToolCall = serde_json::from_str(json).unwrap();
+    fn capability_invocation_deserializes_type_field() {
+        let json = r#"{"type":"capability_invocation","id":"tc_1","name":"test","arguments":{}}"#;
+        let tc: CapabilityInvocationDraft = serde_json::from_str(json).unwrap();
         assert_eq!(tc.id, "tc_1");
     }
 
     #[test]
-    fn tool_call_serde_roundtrip() {
+    fn capability_invocation_serde_roundtrip() {
         let mut args = Map::new();
         let _ = args.insert("cmd".into(), json!("ls"));
-        let tc = ToolCall {
+        let tc = CapabilityInvocationDraft {
             id: "call-1".into(),
             name: "execute".into(),
             arguments: args,
-            ..ToolCall::default()
+            ..CapabilityInvocationDraft::default()
         };
         let json = serde_json::to_value(&tc).unwrap();
-        let back: ToolCall = serde_json::from_value(json).unwrap();
+        let back: CapabilityInvocationDraft = serde_json::from_value(json).unwrap();
         assert_eq!(tc, back);
     }
 
     // -- normalize helpers --
 
     #[test]
-    fn normalize_tool_arguments_requires_arguments() {
+    fn normalize_capability_arguments_requires_arguments() {
         let v = json!({"input": {"a": 1}});
-        let args = normalize_tool_arguments(&v);
+        let args = normalize_capability_arguments(&v);
         assert!(args.is_empty());
     }
 
     #[test]
-    fn normalize_tool_arguments_from_arguments() {
+    fn normalize_capability_arguments_from_arguments() {
         let v = json!({"arguments": {"b": 2}});
-        let args = normalize_tool_arguments(&v);
+        let args = normalize_capability_arguments(&v);
         assert_eq!(args["b"], 2);
     }
 
     #[test]
-    fn normalize_tool_arguments_empty() {
+    fn normalize_capability_arguments_empty() {
         let v = json!({});
-        let args = normalize_tool_arguments(&v);
+        let args = normalize_capability_arguments(&v);
         assert!(args.is_empty());
     }
 
     #[test]
-    fn normalize_tool_result_id_api_format() {
-        let v = json!({"tool_use_id": "tc-1"});
-        assert_eq!(normalize_tool_result_id(&v), "tc-1");
+    fn normalize_capability_result_id_api_format() {
+        let v = json!({"capability_invocation_id": "tc-1"});
+        assert_eq!(normalize_capability_result_id(&v), "tc-1");
     }
 
     #[test]
-    fn normalize_tool_result_id_internal_format() {
-        let v = json!({"toolCallId": "tc-2"});
-        assert_eq!(normalize_tool_result_id(&v), "tc-2");
+    fn normalize_capability_result_id_internal_format() {
+        let v = json!({"invocationId": "tc-2"});
+        assert_eq!(normalize_capability_result_id(&v), "tc-2");
     }
 
     #[test]
-    fn normalize_tool_result_id_missing() {
+    fn normalize_capability_result_id_missing() {
         let v = json!({});
-        assert_eq!(normalize_tool_result_id(&v), "");
+        assert_eq!(normalize_capability_result_id(&v), "");
     }
 
     #[test]
@@ -640,8 +646,8 @@ mod tests {
             "\"end_turn\""
         );
         assert_eq!(
-            serde_json::to_string(&StopReason::ToolUse).unwrap(),
-            "\"tool_use\""
+            serde_json::to_string(&StopReason::CapabilityInvocation).unwrap(),
+            "\"capability_invocation\""
         );
         assert_eq!(
             serde_json::to_string(&StopReason::ModelContextWindowExceeded).unwrap(),
@@ -656,7 +662,7 @@ mod tests {
         let msg = Message::user("hello");
         assert!(msg.is_user());
         assert!(!msg.is_assistant());
-        assert!(!msg.is_tool_result());
+        assert!(!msg.is_capability_result());
 
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["role"], "user");
@@ -685,16 +691,16 @@ mod tests {
     }
 
     #[test]
-    fn message_tool_result() {
-        let msg = Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text("done".into()),
+    fn message_capability_result() {
+        let msg = Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text("done".into()),
             is_error: None,
         };
-        assert!(msg.is_tool_result());
+        assert!(msg.is_capability_result());
         let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["role"], "toolResult");
-        assert_eq!(json["toolCallId"], "tc-1");
+        assert_eq!(json["role"], "capabilityResult");
+        assert_eq!(json["invocationId"], "tc-1");
     }
 
     #[test]
@@ -708,10 +714,10 @@ mod tests {
     // -- extract helpers --
 
     #[test]
-    fn extract_tool_calls_from_content() {
+    fn extract_capability_invocations_from_content() {
         let content = vec![
             AssistantContent::text("text"),
-            AssistantContent::ToolUse {
+            AssistantContent::CapabilityInvocation {
                 id: "tc-1".into(),
                 name: "execute".into(),
                 arguments: Map::new(),
@@ -721,14 +727,14 @@ mod tests {
                 thinking: "hmm".into(),
                 signature: None,
             },
-            AssistantContent::ToolUse {
+            AssistantContent::CapabilityInvocation {
                 id: "tc-2".into(),
                 name: "inspect".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             },
         ];
-        let tcs = extract_tool_calls(&content);
+        let tcs = extract_capability_invocations(&content);
         assert_eq!(tcs.len(), 2);
     }
 
@@ -736,7 +742,7 @@ mod tests {
     fn extract_assistant_text_from_content() {
         let content = vec![
             AssistantContent::text("first"),
-            AssistantContent::ToolUse {
+            AssistantContent::CapabilityInvocation {
                 id: "tc-1".into(),
                 name: "execute".into(),
                 arguments: Map::new(),
@@ -750,41 +756,42 @@ mod tests {
     // -- Type guard functions --
 
     #[test]
-    fn is_api_tool_result_block_positive() {
-        let v = json!({"type": "tool_result", "tool_use_id": "tc-1", "content": "ok"});
-        assert!(is_api_tool_result_block(&v));
+    fn is_provider_capability_result_block_positive() {
+        let v = json!({"type": "capability_result", "capability_invocation_id": "tc-1", "content": "ok"});
+        assert!(is_provider_capability_result_block(&v));
     }
 
     #[test]
-    fn is_api_tool_result_block_negative() {
-        let v = json!({"type": "tool_result", "toolCallId": "tc-1", "content": "ok"});
-        assert!(!is_api_tool_result_block(&v));
+    fn is_provider_capability_result_block_negative() {
+        let v = json!({"type": "capability_result", "invocationId": "tc-1", "content": "ok"});
+        assert!(!is_provider_capability_result_block(&v));
     }
 
     #[test]
-    fn is_internal_tool_result_block_positive() {
-        let v = json!({"type": "tool_result", "toolCallId": "tc-1", "content": "ok"});
-        assert!(is_internal_tool_result_block(&v));
+    fn is_internal_capability_result_block_positive() {
+        let v = json!({"type": "capability_result", "invocationId": "tc-1", "content": "ok"});
+        assert!(is_internal_capability_result_block(&v));
     }
 
     #[test]
-    fn is_any_tool_result_block_both_formats() {
-        let api = json!({"type": "tool_result", "tool_use_id": "tc-1", "content": "ok"});
-        let internal = json!({"type": "tool_result", "toolCallId": "tc-1", "content": "ok"});
-        assert!(is_any_tool_result_block(&api));
-        assert!(is_any_tool_result_block(&internal));
+    fn is_any_capability_result_block_both_formats() {
+        let api = json!({"type": "capability_result", "capability_invocation_id": "tc-1", "content": "ok"});
+        let internal =
+            json!({"type": "capability_result", "invocationId": "tc-1", "content": "ok"});
+        assert!(is_any_capability_result_block(&api));
+        assert!(is_any_capability_result_block(&internal));
     }
 
     #[test]
-    fn is_api_tool_use_block_positive() {
-        let v = json!({"type": "tool_use", "id": "tc-1", "name": "execute", "arguments": {}});
-        assert!(is_api_tool_use_block(&v));
+    fn is_provider_capability_invocation_block_positive() {
+        let v = json!({"type": "capability_invocation", "id": "tc-1", "name": "execute", "arguments": {}});
+        assert!(is_provider_capability_invocation_block(&v));
     }
 
     #[test]
-    fn is_api_tool_use_block_negative_missing_arguments() {
-        let v = json!({"type": "tool_use", "id": "tc-1", "name": "execute"});
-        assert!(!is_api_tool_use_block(&v));
+    fn is_provider_capability_invocation_block_negative_missing_arguments() {
+        let v = json!({"type": "capability_invocation", "id": "tc-1", "name": "execute"});
+        assert!(!is_provider_capability_invocation_block(&v));
     }
 
     // -- Context --
@@ -794,7 +801,7 @@ mod tests {
         let ctx = Context::default();
         assert!(ctx.system_prompt.is_none());
         assert!(ctx.messages.is_empty());
-        assert!(ctx.tools.is_none());
+        assert!(ctx.capabilities.is_none());
     }
 
     #[test]
@@ -802,7 +809,7 @@ mod tests {
         let ctx = Context {
             system_prompt: Some("You are a helpful assistant.".into()),
             messages: vec![Message::user("hi")].into(),
-            tools: None,
+            capabilities: None,
             working_directory: Some("/tmp".into()),
             rules_content: None,
             memory_content: None,
@@ -941,10 +948,10 @@ mod tests {
     }
 
     #[test]
-    fn is_compaction_summary_false_tool_result() {
-        let msg = Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text(
+    fn is_compaction_summary_false_capability_result() {
+        let msg = Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text(
                 "[Context from earlier in this conversation]".into(),
             ),
             is_error: None,

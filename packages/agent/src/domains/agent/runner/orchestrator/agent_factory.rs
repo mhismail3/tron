@@ -85,7 +85,7 @@ impl AgentFactory {
         config.subagent_depth = opts.subagent_depth;
         config.subagent_max_depth = opts.subagent_max_depth;
 
-        let tool_surface_policy = CapabilitySurfacePolicy::from_profile(
+        let capability_surface_policy = CapabilitySurfacePolicy::from_profile(
             &opts.capability_policy,
             &opts.denied_capabilities,
             opts.is_unattended,
@@ -101,7 +101,7 @@ impl AgentFactory {
             system_prompt: config.system_prompt.clone(),
             context_policy: opts.context_policy,
             working_directory: config.working_directory.clone(),
-            tools: Vec::new(),
+            capabilities: Vec::new(),
             rules_content: opts.rules_content,
             compaction,
         };
@@ -131,7 +131,7 @@ impl AgentFactory {
             config,
             AgentDeps {
                 provider: opts.provider,
-                tool_surface_policy,
+                capability_surface_policy,
                 guardrails: opts.guardrails,
                 hooks: opts.hooks,
                 context_manager,
@@ -240,16 +240,16 @@ mod tests {
         let mut opts = default_opts(Arc::new(MockProvider));
         opts.denied_capabilities = vec!["process::run".into()];
         let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
-        assert!(agent.context_manager().tool_names().is_empty());
+        assert!(agent.context_manager().model_capability_names().is_empty());
     }
 
     #[test]
-    fn create_agent_initial_context_has_no_frozen_tool_snapshot() {
+    fn create_agent_initial_context_has_no_frozen_capability_snapshot() {
         let agent = AgentFactory::create_agent(
             default_config(),
             "s1".into(),
             default_opts(Arc::new(MockProvider)),
         );
-        assert!(agent.context_manager().tool_names().is_empty());
+        assert!(agent.context_manager().model_capability_names().is_empty());
     }
 }

@@ -226,7 +226,7 @@ pub struct RunContext {
     /// Engine trace inherited from the hidden `agent::run_turn` invocation.
     #[serde(skip)]
     pub engine_trace_id: Option<crate::engine::TraceId>,
-    /// Parent engine invocation id for child tool/function invocations.
+    /// Parent engine invocation id for child capability/function invocations.
     #[serde(skip)]
     pub parent_invocation_id: Option<crate::engine::InvocationId>,
     /// Catalog revision captured by the hidden `agent::run_turn` invocation.
@@ -250,7 +250,7 @@ pub struct RunContext {
     /// Session execution profile name used for this turn.
     #[serde(skip)]
     pub profile_name: Option<String>,
-    /// Resolved profile used for this turn's prompt/context/tool policies.
+    /// Resolved profile used for this turn's prompt/context/capability policies.
     #[serde(skip)]
     pub resolved_profile: Option<Arc<crate::shared::profile::ResolvedProfile>>,
     /// Reasoning level override.
@@ -289,7 +289,7 @@ pub struct TurnResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Number of capability invocations executed.
-    pub tool_calls_executed: usize,
+    pub capability_invocations_executed: usize,
     /// Token usage for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
@@ -301,7 +301,7 @@ pub struct TurnResult {
     /// Content captured before interruption.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial_content: Option<String>,
-    /// Whether a tool requested turn stop.
+    /// Whether a capability requested turn stop.
     pub stop_turn_requested: bool,
     /// LLM model ID used for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -310,7 +310,7 @@ pub struct TurnResult {
     pub latency_ms: u64,
     /// Whether the response contained thinking blocks.
     pub has_thinking: bool,
-    /// Raw LLM stop reason string (e.g. `end_turn`, `tool_use`).
+    /// Raw LLM stop reason string (e.g. `end_turn`, `capability_invocation`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_stop_reason: Option<String>,
     /// Context window tokens this turn (for cross-turn baseline tracking).
@@ -323,7 +323,7 @@ impl Default for TurnResult {
         Self {
             success: true,
             error: None,
-            tool_calls_executed: 0,
+            capability_invocations_executed: 0,
             token_usage: None,
             stop_reason: None,
             interrupted: false,
@@ -374,20 +374,20 @@ impl Default for RunResult {
 /// Result of capability invocation pipeline.
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
-pub struct ToolExecutionResult {
+pub struct CapabilityInvocationExecutionResult {
     /// Capability invocation ID.
-    pub tool_call_id: String,
+    pub invocation_id: String,
     /// Capability result.
-    pub result: crate::shared::tools::CapabilityResult,
+    pub result: crate::shared::model_capabilities::CapabilityResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
     /// Whether a hook blocked execution.
     pub blocked_by_hook: bool,
     /// Whether a guardrail blocked execution.
     pub blocked_by_guardrail: bool,
-    /// Whether this tool requested a turn stop.
+    /// Whether this capability requested a turn stop.
     pub stops_turn: bool,
-    /// Whether this tool is interactive.
+    /// Whether this capability is interactive.
     pub is_interactive: bool,
 }
 
@@ -397,7 +397,7 @@ pub struct StreamResult {
     /// Full assistant message.
     pub message: crate::shared::events::AssistantMessage,
     /// Extracted capability invocations.
-    pub tool_calls: Vec<crate::shared::messages::ToolCall>,
+    pub capability_invocations: Vec<crate::shared::messages::CapabilityInvocationDraft>,
     /// Stop reason string from LLM.
     pub stop_reason: String,
     /// Token usage.
@@ -488,7 +488,7 @@ mod tests {
         let tr = TurnResult::default();
         assert!(tr.success);
         assert!(tr.error.is_none());
-        assert_eq!(tr.tool_calls_executed, 0);
+        assert_eq!(tr.capability_invocations_executed, 0);
         assert!(!tr.interrupted);
         assert!(!tr.stop_turn_requested);
         assert!(tr.model.is_none());
@@ -518,7 +518,7 @@ mod tests {
         let tr = TurnResult {
             success: false,
             error: Some("provider timeout".into()),
-            tool_calls_executed: 3,
+            capability_invocations_executed: 3,
             token_usage: Some(TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
@@ -534,7 +534,7 @@ mod tests {
         let json = serde_json::to_string(&tr).unwrap();
         let back: TurnResult = serde_json::from_str(&json).unwrap();
         assert!(!back.success);
-        assert_eq!(back.tool_calls_executed, 3);
+        assert_eq!(back.capability_invocations_executed, 3);
         assert_eq!(back.stop_reason, Some(StopReason::Error));
         assert_eq!(back.model.as_deref(), Some("claude-opus-4-6"));
         assert_eq!(back.latency_ms, 2000);

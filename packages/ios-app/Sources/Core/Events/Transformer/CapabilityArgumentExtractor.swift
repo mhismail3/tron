@@ -1,24 +1,24 @@
 import Foundation
 
-/// Extracts tool arguments from either a `CapabilityInvocationStartedPayload` or a content block dictionary.
+/// Extracts capability arguments from either a `CapabilityInvocationStartedPayload` or a content block dictionary.
 ///
-/// Used by `InterleavedContentProcessor`, `AskUserQuestionTransformer`, and
-/// `AskUserQuestionTransformer` to resolve tool arguments consistently.
+/// Used by `InterleavedContentProcessor`, `UserInteractionTransformer`, and
+/// `UserInteractionTransformer` to resolve capability arguments consistently.
 enum CapabilityArgumentExtractor {
 
     /// Extract arguments JSON string from a capability invocation payload or content block.
     ///
     /// Priority:
-    /// 1. `toolCall.arguments` — the pre-parsed string from the `capability.invocation.started` event
+    /// 1. `invocationStart.arguments` — the pre-parsed string from the `capability.invocation.started` event
     /// 2. `contentBlock["arguments"]` or `contentBlock["input"]` — serialized from the dict
     ///
     /// - Returns: JSON string, or nil if no arguments could be extracted
     static func extractArguments(
-        toolCall: CapabilityInvocationStartedPayload?,
+        invocationStart: CapabilityInvocationStartedPayload?,
         contentBlock: [String: Any]
     ) -> String? {
-        if let toolCallArgs = toolCall?.arguments {
-            return toolCallArgs
+        if let invocationStartArgs = invocationStart?.arguments {
+            return invocationStartArgs
         }
 
         if let inputDict = (contentBlock["arguments"] ?? contentBlock["input"]) as? [String: Any],

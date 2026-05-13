@@ -22,9 +22,9 @@ use super::rules_tracker::RulesTracker;
 use super::summarizer::Summarizer;
 use super::token_estimator;
 use super::types::{
-    CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
-    DetailedContextSnapshot, ExportedState, ExtractedData, PreTurnValidation, ProcessedToolResult,
-    SessionMemoryEntry, ToolSummary,
+    CapabilitySummary, CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
+    DetailedContextSnapshot, ExportedState, ExtractedData, PreTurnValidation,
+    ProcessedCapabilityResult, SessionMemoryEntry,
 };
 
 // =============================================================================
@@ -94,15 +94,15 @@ impl ContextManager {
         });
         let context_policy = config.context_policy.clone();
 
-        // Filter provider tool definitions for token estimation accuracy.
+        // Filter provider capability definitions for token estimation accuracy.
         // Local models only receive the profile-selected local capability
         // policy at turn time, so the estimator should count only those.
         if context_policy.is_local()
-            && let Some(local_tools) = context_policy.capability_filter()
+            && let Some(local_capabilities) = context_policy.capability_filter()
         {
             config
-                .tools
-                .retain(|t| local_tools.iter().any(|name| name == &t.name));
+                .capabilities
+                .retain(|t| local_capabilities.iter().any(|name| name == &t.name));
         }
 
         let rules_content = config.rules_content.clone();
@@ -372,7 +372,7 @@ impl ContextManager {
             self.volatile_job_results_tokens
         };
         self.estimate_system_prompt_tokens()
-            + self.estimate_tools_tokens()
+            + self.estimate_capabilities_tokens()
             + self.estimate_rules_tokens()
             + self.estimate_memory_tokens()
             + self.estimate_skill_index_tokens()
@@ -420,7 +420,7 @@ impl ContextManager {
     }
 
     #[must_use]
-    /// Get the working directory (for file operations and tool context).
+    /// Get the working directory (for file operations and capability context).
     pub fn get_working_directory(&self) -> &str {
         self.config.working_directory.as_deref().unwrap_or("/tmp")
     }
@@ -437,15 +437,21 @@ impl ContextManager {
     }
 
     #[must_use]
-    /// Estimate tool definitions token count.
-    pub fn estimate_tools_tokens(&self) -> u64 {
-        u64::from(token_estimator::estimate_tools_tokens(&self.config.tools))
+    /// Estimate capability definitions token count.
+    pub fn estimate_capabilities_tokens(&self) -> u64 {
+        u64::from(token_estimator::estimate_capabilities_tokens(
+            &self.config.capabilities,
+        ))
     }
 
     #[must_use]
-    /// Return the names of all registered tools.
-    pub fn tool_names(&self) -> Vec<String> {
-        self.config.tools.iter().map(|t| t.name.clone()).collect()
+    /// Return the names of all registered capabilities.
+    pub fn model_capability_names(&self) -> Vec<String> {
+        self.config
+            .capabilities
+            .iter()
+            .map(|t| t.name.clone())
+            .collect()
     }
 
     /// Set skill index content for token estimation.
@@ -722,12 +728,16 @@ impl ContextManager {
 
     /// Process a capability result, truncating if necessary.
     #[must_use]
-    pub fn process_tool_result(&self, tool_call_id: &str, content: &str) -> ProcessedToolResult {
-        let max_size = self.get_max_tool_result_size();
+    pub fn process_capability_result(
+        &self,
+        invocation_id: &str,
+        content: &str,
+    ) -> ProcessedCapabilityResult {
+        let max_size = self.get_max_capability_result_size();
 
         if content.len() <= max_size {
-            ProcessedToolResult {
-                tool_call_id: tool_call_id.to_owned(),
+            ProcessedCapabilityResult {
+                invocation_id: invocation_id.to_owned(),
                 content: content.to_owned(),
                 truncated: false,
                 original_size: None,
@@ -740,8 +750,8 @@ impl ContextManager {
                 content.len(),
                 prefix.len(),
             );
-            ProcessedToolResult {
-                tool_call_id: tool_call_id.to_owned(),
+            ProcessedCapabilityResult {
+                invocation_id: invocation_id.to_owned(),
                 content: truncated_content,
                 truncated: true,
                 original_size: Some(content.len()),
@@ -754,7 +764,7 @@ impl ContextManager {
     /// Reserves 8000 tokens for the model response and 10% safety margin,
     /// then converts the available tokens to chars (4 chars per token).
     #[must_use]
-    pub fn get_max_tool_result_size(&self) -> usize {
+    pub fn get_max_capability_result_size(&self) -> usize {
         let limit = self.get_context_limit();
         let current = self.get_current_tokens();
         let remaining = limit.saturating_sub(current);
@@ -792,14 +802,14 @@ impl ContextManager {
     ///
     /// Includes: `system_prompt`, `working_directory`, `rules_content`,
     /// `memory_content`, `dynamic_rules_context`. Callers fill in external
-    /// fields (`messages`, `tools`, `skill_context`,
+    /// fields (`messages`, `capabilities`, `skill_context`,
     /// `job_results_context`, `hook_context`, `server_origin`).
     #[must_use]
     pub fn build_base_context(&self) -> crate::shared::messages::Context {
         crate::shared::messages::Context {
             system_prompt: Some(self.get_system_prompt().to_owned()),
             messages: Arc::default(),
-            tools: None,
+            capabilities: None,
             working_directory: Some(self.get_working_directory().to_owned()),
             rules_content: self.get_rules_content().map(String::from),
             memory_content: self.get_full_memory_content(),
@@ -836,7 +846,7 @@ impl ContextManager {
         ExportedState {
             model: self.config.model.clone(),
             system_prompt: self.system_prompt.clone(),
-            tools: self.config.tools.clone(),
+            capabilities: self.config.capabilities.clone(),
             messages: self.get_messages(),
         }
     }
@@ -864,8 +874,8 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
     fn estimate_system_prompt_tokens(&self) -> u64 {
         self.manager.estimate_system_prompt_tokens()
     }
-    fn estimate_tools_tokens(&self) -> u64 {
-        self.manager.estimate_tools_tokens()
+    fn estimate_capabilities_tokens(&self) -> u64 {
+        self.manager.estimate_capabilities_tokens()
     }
     fn estimate_rules_tokens(&self) -> u64 {
         self.manager.estimate_rules_tokens()
@@ -901,15 +911,15 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
     fn get_system_prompt(&self) -> String {
         self.manager.get_system_prompt().to_owned()
     }
-    fn get_tool_clarification(&self) -> Option<String> {
+    fn get_capability_clarification(&self) -> Option<String> {
         None
     }
-    fn get_tool_summaries(&self) -> Vec<ToolSummary> {
+    fn get_capability_summaries(&self) -> Vec<CapabilitySummary> {
         self.manager
             .config
-            .tools
+            .capabilities
             .iter()
-            .map(|t| ToolSummary {
+            .map(|t| CapabilitySummary {
                 name: t.name.clone(),
                 description: crate::shared::text::first_sentence(&t.description).to_owned(),
             })
@@ -934,7 +944,7 @@ struct ManagerCompactionDeps {
     current_tokens: u64,
     context_limit: u64,
     system_prompt_tokens: u64,
-    tools_tokens: u64,
+    capabilities_tokens: u64,
 }
 
 impl ManagerCompactionDeps {
@@ -944,7 +954,7 @@ impl ManagerCompactionDeps {
             current_tokens: manager.get_current_tokens(),
             context_limit: manager.get_context_limit(),
             system_prompt_tokens: manager.estimate_system_prompt_tokens(),
-            tools_tokens: manager.estimate_tools_tokens(),
+            capabilities_tokens: manager.estimate_capabilities_tokens(),
         }
     }
 }
@@ -965,8 +975,8 @@ impl CompactionDeps for ManagerCompactionDeps {
     fn estimate_system_prompt_tokens(&self) -> u64 {
         self.system_prompt_tokens
     }
-    fn estimate_tools_tokens(&self) -> u64 {
-        self.tools_tokens
+    fn estimate_capabilities_tokens(&self) -> u64 {
+        self.capabilities_tokens
     }
     fn get_message_tokens(&self, msg: &Message) -> u64 {
         u64::from(token_estimator::estimate_message_tokens(msg))

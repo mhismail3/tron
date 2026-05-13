@@ -5,7 +5,7 @@ import SwiftUI
 /// Per-session ring buffer of recent activity lines for dashboard display.
 /// Capped at `maxStreamBufferLines` to bound memory. Text deltas coalesce into a single
 /// `.text` line until a non-text event arrives. Each capability invocation gets its own
-/// `.capabilityStart` line with summary, duration, and status.
+/// `.capabilityInvocationStarted` line with summary, duration, and status.
 struct SessionStreamBuffer {
     private(set) var lines: [ActivityLine] = []
     private(set) var isActive: Bool = true
@@ -54,14 +54,14 @@ struct SessionStreamBuffer {
         currentTextLineIndex = nil
 
         let argsJSON = Self.serializeArguments(arguments)
-        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelToolName ?? "capability"
+        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelPrimitiveName ?? "capability"
 
         let line = ActivityLine(
-            kind: .capabilityStart,
+            kind: .capabilityInvocationStarted,
             text: name,
             icon: CapabilityPresentation.symbol(for: identity),
             iconColor: CapabilityColor.fromCapability(identity),
-            modelToolName: name,
+            modelPrimitiveName: name,
             displayName: CapabilityPresentation.title(for: identity),
             summary: argsJSON == "{}" ? nil : argsJSON,
             status: .running,
@@ -78,25 +78,25 @@ struct SessionStreamBuffer {
         let formattedDuration = durationMs.map { Self.formatDuration($0) }
 
         if let invocationId,
-           let idx = lines.lastIndex(where: { $0.kind == .capabilityStart && $0.invocationId == invocationId }) {
+           let idx = lines.lastIndex(where: { $0.kind == .capabilityInvocationStarted && $0.invocationId == invocationId }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
             return
         }
 
-        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelToolName ?? "capability"
-        if let idx = lines.lastIndex(where: { $0.kind == .capabilityStart && $0.modelToolName == name && $0.status == .running }) {
+        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelPrimitiveName ?? "capability"
+        if let idx = lines.lastIndex(where: { $0.kind == .capabilityInvocationStarted && $0.modelPrimitiveName == name && $0.status == .running }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
             return
         }
 
         let line = ActivityLine(
-            kind: .capabilityEnd,
+            kind: .capabilityInvocationCompleted,
             text: name,
             icon: CapabilityPresentation.symbol(for: identity),
             iconColor: CapabilityColor.fromCapability(identity),
-            modelToolName: name,
+            modelPrimitiveName: name,
             displayName: CapabilityPresentation.title(for: identity),
             duration: formattedDuration,
             status: success ? .success : .error,
@@ -126,7 +126,7 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        // Replace the most recent pending spawn line (like capabilityEnd replaces capabilityStart)
+        // Replace the most recent pending spawn line (like capabilityInvocationCompleted replaces capabilityInvocationStarted)
         if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
             lines[idx] = ActivityLine(
                 kind: .subagentDone,
@@ -246,9 +246,9 @@ final class DashboardStreamManager {
     /// Sessions that have completed — prevents post-completion events from creating new buffers
     private var completedSessionIds: Set<String> = []
 
-    /// Subagent session IDs from non-tool-agent spawn types — suppressed from display.
+    /// Subagent session IDs from non-capability-agent spawn types — suppressed from display.
     /// Used to filter completion/failure events whose spawn type is not carried on the event itself.
-    private var nonToolSubagentIds: Set<String> = []
+    private var nonCapabilitySubagentIds: Set<String> = []
 
     /// Sessions with pending text deltas that need flushing
     private var dirtySessionIds: Set<String> = []
@@ -293,9 +293,9 @@ final class DashboardStreamManager {
             handleTextDelta(sessionId: sessionId, delta: delta)
         case .thinkingDelta:
             handleThinkingDelta(sessionId: sessionId)
-        case .capabilityStart(let identity, let id, let args):
+        case .capabilityInvocationStarted(let identity, let id, let args):
             handleCapabilityStart(sessionId: sessionId, identity: identity, invocationId: id, arguments: args)
-        case .capabilityEnd(let identity, let id, let success, let ms):
+        case .capabilityInvocationCompleted(let identity, let id, let success, let ms):
             handleCapabilityEnd(sessionId: sessionId, identity: identity, invocationId: id, success: success, durationMs: ms)
         case .subagentSpawned(let task, let invocationId, let subId, let spawnType):
             handleSubagentSpawned(sessionId: sessionId, task: task, invocationId: invocationId, subagentSessionId: subId, spawnType: spawnType)
@@ -342,19 +342,19 @@ final class DashboardStreamManager {
     func handleSubagentSpawned(sessionId: String, task: String, invocationId: String?, subagentSessionId: String, spawnType: String?) {
         // Wire contract: server emits a known spawnType for every subagent
         // event. An unknown/missing value indicates a schema drift — log and
-        // treat conservatively as `.toolAgent` so the activity still renders.
+        // treat conservatively as `.capabilityAgent` so the activity still renders.
         let resolvedType: SubagentSpawnType
         if let decoded = SubagentSpawnType(from: spawnType) {
             resolvedType = decoded
         } else {
             logger.error(
-                "Dashboard stream received unknown spawnType=\(spawnType ?? "<nil>") for session \(subagentSessionId); defaulting to toolAgent",
+                "Dashboard stream received unknown spawnType=\(spawnType ?? "<nil>") for session \(subagentSessionId); defaulting to capabilityAgent",
                 category: .session
             )
-            resolvedType = .toolAgent
+            resolvedType = .capabilityAgent
         }
-        if resolvedType != .toolAgent {
-            nonToolSubagentIds.insert(subagentSessionId)
+        if resolvedType != .capabilityAgent {
+            nonCapabilitySubagentIds.insert(subagentSessionId)
             return
         }
         guard ensurePendingBuffer(for: sessionId) else { return }
@@ -363,14 +363,14 @@ final class DashboardStreamManager {
     }
 
     func handleSubagentCompleted(sessionId: String, turns: Int, durationMs: Int?, subagentSessionId: String, spawnType: String?) {
-        if nonToolSubagentIds.remove(subagentSessionId) != nil { return }
+        if nonCapabilitySubagentIds.remove(subagentSessionId) != nil { return }
         guard ensurePendingBuffer(for: sessionId) else { return }
         pendingBuffers[sessionId]?.addSubagentComplete(turns: turns, durationMs: durationMs)
         flushSession(sessionId)
     }
 
     func handleSubagentFailed(sessionId: String, error: String, subagentSessionId: String, spawnType: String?) {
-        if nonToolSubagentIds.remove(subagentSessionId) != nil { return }
+        if nonCapabilitySubagentIds.remove(subagentSessionId) != nil { return }
         guard ensurePendingBuffer(for: sessionId) else { return }
         pendingBuffers[sessionId]?.addSubagentFailed(error: error)
         flushSession(sessionId)
@@ -378,7 +378,7 @@ final class DashboardStreamManager {
 
     /// Handle a turn start event. Returns `true` if a fresh buffer was created
     /// (new session or resuming after completion), `false` if the existing buffer
-    /// was preserved (tool-use continuation turn within the same processing cycle).
+    /// was preserved (capability-invocation continuation turn within the same processing cycle).
     @discardableResult
     func handleTurnStart(sessionId: String) -> Bool {
         let wasCompleted = completedSessionIds.remove(sessionId) != nil
@@ -428,7 +428,7 @@ final class DashboardStreamManager {
         pendingBuffers.removeAll()
         dirtySessionIds.removeAll()
         completedSessionIds.removeAll()
-        nonToolSubagentIds.removeAll()
+        nonCapabilitySubagentIds.removeAll()
         renderTimer?.cancel()
         renderTimer = nil
     }

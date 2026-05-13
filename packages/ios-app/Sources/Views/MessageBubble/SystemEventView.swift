@@ -81,13 +81,13 @@ struct SystemEventView: View {
             SkillDeactivatedNotificationView(skillName: skillName)
 
         case .skillsCleared(let clearedSkills, let mode):
-            // M6: `.clearAll` renders an informational banner; `.askUser`
+            // M6: `.clearAll` renders an informational banner; `.userInteraction`
             // renders tappable chips that call `skills::activate` via the
             // `.reactivateSkill` tap action.
             SkillsClearedNotificationView(
                 clearedSkills: clearedSkills,
                 mode: mode,
-                onReactivate: mode == .askUser ? { skillName in
+                onReactivate: mode == .userInteraction ? { skillName in
                     onTap?(.reactivateSkill(skillName: skillName))
                 } : nil
             )

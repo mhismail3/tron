@@ -545,15 +545,14 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertTrue(assistantEvent.summary.contains("Response text"))
 
         // Test capability-backed capability.invocation.started transport summary
-        let toolEvent = SessionEvent(id: "e3", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "capability.invocation.started", timestamp: "2024-01-01T00:00:00Z", sequence: 3, payload: [
-            "name": AnyCodable("execute"),
-            "modelToolName": AnyCodable("execute"),
+        let capabilityEvent = SessionEvent(id: "e3", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "capability.invocation.started", timestamp: "2024-01-01T00:00:00Z", sequence: 3, payload: [
+            "modelPrimitiveName": AnyCodable("execute"),
             "contractId": AnyCodable("filesystem::read_file"),
             "functionId": AnyCodable("filesystem::read_file"),
             "arguments": AnyCodable(["file_path": "/src/main.ts"])
         ])
-        XCTAssertTrue(toolEvent.summary.contains("Read File"))
-        XCTAssertTrue(toolEvent.summary.contains("main.ts"))
+        XCTAssertTrue(capabilityEvent.summary.contains("Read File"))
+        XCTAssertTrue(capabilityEvent.summary.contains("main.ts"))
 
         // Test session.start summary (shortModelName returns "Opus 4" for "claude-opus-4")
         let startEvent = SessionEvent(id: "e4", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 4, payload: [
@@ -587,7 +586,7 @@ final class EventDatabaseTests: XCTestCase {
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 50, outputTokens: 100, turn: 1))
             ]),
             SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "capability.invocation.started", timestamp: "2024-01-01T00:03:00Z", sequence: 4, payload: [
-                "name": AnyCodable("Read"),
+                "modelPrimitiveName": AnyCodable("execute"),
                 "turn": AnyCodable(1),
                 "invocationId": AnyCodable("tc1")
             ]),
@@ -613,9 +612,9 @@ final class EventDatabaseTests: XCTestCase {
         // Verify capability invocations total
         XCTAssertEqual(analytics.totalCapabilityInvocations, 1)
 
-        // Verify tools are tracked per-turn
-        XCTAssertEqual(analytics.turns.first?.tools.count, 1)
-        XCTAssertEqual(analytics.turns.first?.tools.first, "Read")
+        // Verify capabilities are tracked per-turn
+        XCTAssertEqual(analytics.turns.first?.capabilities.count, 1)
+        XCTAssertEqual(analytics.turns.first?.capabilities.first, "execute")
 
         // Verify average latency (500 + 300) / 2 = 400
         XCTAssertEqual(analytics.avgLatency, 400)
@@ -798,24 +797,24 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(analytics.avgLatency, 442)
     }
 
-    func testConsolidatedAnalyticsTurnResetWithTools() {
-        // 2 conversations with overlapping turn numbers and different tools
+    func testConsolidatedAnalyticsTurnResetWithCapabilities() {
+        // 2 conversations with overlapping turn numbers and different capabilities
         let events: [SessionEvent] = [
-            // Conversation 1, turn 1 with Read tool
+            // Conversation 1, turn 1 with execute capability
             SessionEvent(id: "a1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1), "model": AnyCodable("claude-sonnet-4"),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 1))
             ]),
             SessionEvent(id: "a2", parentId: "a1", sessionId: "s1", workspaceId: "/test", type: "capability.invocation.started", timestamp: "2024-01-01T00:01:01Z", sequence: 2, payload: [
-                "name": AnyCodable("Read"), "turn": AnyCodable(1), "invocationId": AnyCodable("tc1")
+                "modelPrimitiveName": AnyCodable("execute"), "turn": AnyCodable(1), "invocationId": AnyCodable("tc1")
             ]),
-            // Conversation 2, turn 1 (reset) with Write tool
+            // Conversation 2, turn 1 (reset) with execute capability
             SessionEvent(id: "b1", parentId: "a2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
                 "turn": AnyCodable(1), "model": AnyCodable("gpt-4o"),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 200, outputTokens: 100, turn: 1))
             ]),
             SessionEvent(id: "b2", parentId: "b1", sessionId: "s1", workspaceId: "/test", type: "capability.invocation.started", timestamp: "2024-01-01T00:02:01Z", sequence: 4, payload: [
-                "name": AnyCodable("Write"), "turn": AnyCodable(1), "invocationId": AnyCodable("tc2")
+                "modelPrimitiveName": AnyCodable("execute"), "turn": AnyCodable(1), "invocationId": AnyCodable("tc2")
             ])
         ]
 
@@ -824,9 +823,9 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(analytics.totalTurns, 2)
         XCTAssertEqual(analytics.totalCapabilityInvocations, 2)
 
-        // First turn should have Read, second should have Write
-        XCTAssertEqual(analytics.turns[0].tools, ["Read"])
-        XCTAssertEqual(analytics.turns[1].tools, ["Write"])
+        // First turn should have execute, second should have execute
+        XCTAssertEqual(analytics.turns[0].capabilities, ["execute"])
+        XCTAssertEqual(analytics.turns[1].capabilities, ["execute"])
     }
 
     func testConsolidatedAnalyticsTurnResetWithErrors() {

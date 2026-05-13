@@ -305,7 +305,7 @@ fn extract_session_meta(path: &Path, session_uuid: &str) -> Result<ClaudeSession
                 }
             }
             RecordKind::User => {
-                if record.is_meta != Some(true) && !record.is_tool_result() {
+                if record.is_meta != Some(true) && !record.is_capability_result() {
                     message_count += 1;
                 }
             }

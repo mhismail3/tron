@@ -208,8 +208,8 @@ pub struct OpenAIModelProfile {
     pub max_output: u64,
     /// Whether this profile supports streaming Responses requests.
     pub supports_streaming: bool,
-    /// Whether the model supports tool use.
-    pub supports_tools: bool,
+    /// Whether the model supports capability invocation.
+    pub supports_capabilities: bool,
     /// Whether the model supports image inputs.
     pub supports_images: bool,
     /// Whether the model supports reasoning.
@@ -294,7 +294,7 @@ fn profile(
     max_context_window: Option<u64>,
     max_output: u64,
     supports_streaming: bool,
-    supports_tools: bool,
+    supports_capabilities: bool,
     supports_images: bool,
     supports_tool_search: bool,
     supports_computer_use: bool,
@@ -314,7 +314,7 @@ fn profile(
         max_context_window,
         max_output,
         supports_streaming,
-        supports_tools,
+        supports_capabilities,
         supports_images,
         supports_reasoning: !reasoning_levels.is_empty(),
         supports_tool_search,
@@ -377,7 +377,7 @@ fn platform_profile(
     max_context_window: Option<u64>,
     max_output: u64,
     supports_streaming: bool,
-    supports_tools: bool,
+    supports_capabilities: bool,
     supports_images: bool,
     supports_tool_search: bool,
     supports_computer_use: bool,
@@ -395,7 +395,7 @@ fn platform_profile(
         max_context_window,
         max_output,
         supports_streaming,
-        supports_tools,
+        supports_capabilities,
         supports_images,
         supports_tool_search,
         supports_computer_use,
@@ -414,7 +414,7 @@ fn platform_profile(
 fn platform_reasoning_profile(
     context_window: u64,
     max_output: u64,
-    supports_tools: bool,
+    supports_capabilities: bool,
     supports_images: bool,
     supports_tool_search: bool,
     supports_computer_use: bool,
@@ -429,7 +429,7 @@ fn platform_reasoning_profile(
         Some(context_window),
         max_output,
         true,
-        supports_tools,
+        supports_capabilities,
         supports_images,
         supports_tool_search,
         supports_computer_use,
@@ -447,7 +447,7 @@ fn platform_reasoning_profile(
 fn platform_text_profile(
     context_window: u64,
     max_output: u64,
-    supports_tools: bool,
+    supports_capabilities: bool,
     supports_images: bool,
     input_cost_per_million: f64,
     output_cost_per_million: f64,
@@ -458,7 +458,7 @@ fn platform_text_profile(
         Some(context_window),
         max_output,
         true,
-        supports_tools,
+        supports_capabilities,
         supports_images,
         false,
         false,
@@ -476,7 +476,7 @@ fn platform_text_profile(
 fn platform_non_streaming_profile(
     context_window: u64,
     max_output: u64,
-    supports_tools: bool,
+    supports_capabilities: bool,
     supports_images: bool,
     reasoning_levels: &'static [&'static str],
     default_reasoning_level: &'static str,
@@ -488,7 +488,7 @@ fn platform_non_streaming_profile(
         Some(context_window),
         max_output,
         false,
-        supports_tools,
+        supports_capabilities,
         supports_images,
         false,
         false,
@@ -2284,8 +2284,8 @@ impl OpenAIModelInfo {
             "apiEndpoint": profile.api_endpoint,
             "authPaths": [profile.auth_path.as_str()],
             "supportsStreaming": profile.supports_streaming,
-            "supportsTools": profile.supports_tools,
-            "supportsToolSearch": profile.supports_tool_search,
+            "supportsCapabilityPrimitives": profile.supports_capabilities,
+            "supportsCapabilitySearch": profile.supports_tool_search,
             "supportsComputerUse": profile.supports_computer_use,
             "supportsVerbosity": profile.supports_verbosity,
         });
@@ -2431,7 +2431,7 @@ pub enum ResponsesInputItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
     },
-    /// Function call (tool use by assistant).
+    /// Function call (capability invocation by assistant).
     #[serde(rename = "function_call")]
     FunctionCall {
         /// Optional item ID (returned by API, omitted in requests).
@@ -2475,7 +2475,7 @@ pub enum ResponsesToolEntry {
         #[serde(skip_serializing_if = "Option::is_none")]
         defer_loading: Option<bool>,
     },
-    /// Tool search sentinel — enables the model to dynamically discover tools.
+    /// ModelCapability search sentinel — enables the model to dynamically discover capabilities.
     #[serde(rename = "tool_search")]
     ToolSearch {},
     /// Computer use tool (stub — full implementation deferred).
@@ -2507,9 +2507,9 @@ pub struct ResponsesRequest {
     /// Temperature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
-    /// Tool definitions (functions, tool search, computer use).
+    /// ModelCapability definitions (functions, tool search, computer use).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<ResponsesToolEntry>>,
+    pub capabilities: Option<Vec<ResponsesToolEntry>>,
     /// Max output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
@@ -2655,10 +2655,10 @@ pub enum SseEventType {
     /// Streaming function call arguments.
     #[serde(rename = "response.function_call_arguments.delta")]
     FunctionCallArgsDelta,
-    /// Tool search call started (hosted tool search).
+    /// ModelCapability search call started (hosted tool search).
     #[serde(rename = "response.tool_search_call.searching")]
     ToolSearchCallSearching,
-    /// Tool search call completed (hosted tool search).
+    /// ModelCapability search call completed (hosted tool search).
     #[serde(rename = "response.tool_search_call.completed")]
     ToolSearchCallCompleted,
     /// Computer call output (stub).
@@ -2677,15 +2677,15 @@ pub enum SseEventType {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputItemType {
-    /// Function call (tool use by assistant).
+    /// Function call (capability invocation by assistant).
     FunctionCall,
     /// Message content.
     Message,
     /// Reasoning/thinking.
     Reasoning,
-    /// Tool search call (hosted tool discovery).
+    /// ModelCapability search call (hosted tool discovery).
     ToolSearchCall,
-    /// Tool search output (hosted tool discovery result).
+    /// ModelCapability search output (hosted tool discovery result).
     ToolSearchOutput,
     /// Computer call (screenshot + action loop).
     ComputerCall,
@@ -3402,7 +3402,7 @@ mod tests {
             stream: true,
             store: false,
             temperature: None,
-            tools: None,
+            capabilities: None,
             max_output_tokens: Some(16384),
             reasoning: Some(ReasoningConfig {
                 effort: "medium".into(),

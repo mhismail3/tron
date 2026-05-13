@@ -296,7 +296,7 @@ mod tests {
         let evt3 = chain
             .append(
                 EventType::CapabilityInvocationStarted,
-                serde_json::json!({"toolName": "process::run"}),
+                serde_json::json!({"modelPrimitiveName": "process::run"}),
             )
             .unwrap();
         assert_eq!(evt3.parent_id.as_deref(), Some(evt2.id.as_str()));

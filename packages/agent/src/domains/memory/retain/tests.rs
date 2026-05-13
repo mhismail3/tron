@@ -610,33 +610,37 @@ async fn manual_retain_never_emits_auto_retain_failed() {
     );
 }
 
-// ── serialize_for_memory + collect_interactive_tool_use_ids ──────────
+// ── serialize_for_memory + collect_interactive_capability_invocation_ids ──────────
 
-/// Build an assistant message that emits a `tool_use` block for `tool_name`
+/// Build an assistant message that emits a `capability_invocation` block for `model_capability_name`
 /// with the given id and (optional) input payload.
-fn assistant_tool_use_with_input(tool_name: &str, tool_id: &str, input: Value) -> Message {
+fn assistant_capability_invocation_with_input(
+    model_capability_name: &str,
+    capability_id: &str,
+    input: Value,
+) -> Message {
     Message {
         role: "assistant".to_string(),
         content: json!([{
-            "type": "tool_use",
-            "id": tool_id,
-            "name": tool_name,
+            "type": "capability_invocation",
+            "id": capability_id,
+            "name": model_capability_name,
             "input": input
         }]),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }
 }
 
-/// Minimal `tool_use` assistant message — input is an empty object.
+/// Minimal `capability_invocation` assistant message — input is an empty object.
 /// Use this when the id/name are all that matters for the test.
-fn assistant_tool_use(tool_name: &str, tool_id: &str) -> Message {
-    assistant_tool_use_with_input(tool_name, tool_id, json!({}))
+fn assistant_capability_invocation(model_capability_name: &str, capability_id: &str) -> Message {
+    assistant_capability_invocation_with_input(model_capability_name, capability_id, json!({}))
 }
 
 /// Assistant message for an `agent::ask_user` capability invocation with real question
 /// text (what the agent would actually send at runtime).
-fn assistant_ask_user_question(tool_id: &str, questions: &[&str]) -> Message {
+fn assistant_user_interaction(capability_id: &str, questions: &[&str]) -> Message {
     let qs: Vec<Value> = questions
         .iter()
         .map(|q| {
@@ -647,14 +651,18 @@ fn assistant_ask_user_question(tool_id: &str, questions: &[&str]) -> Message {
             })
         })
         .collect();
-    assistant_tool_use_with_input("agent::ask_user", tool_id, json!({"questions": qs}))
+    assistant_capability_invocation_with_input(
+        "agent::ask_user",
+        capability_id,
+        json!({"questions": qs}),
+    )
 }
 
 fn assistant_text(text: &str) -> Message {
     Message {
         role: "assistant".to_string(),
         content: json!([{"type": "text", "text": text}]),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }
 }
@@ -663,55 +671,55 @@ fn user_text(text: &str) -> Message {
     Message {
         role: "user".to_string(),
         content: json!(text),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }
 }
 
-fn tool_result(tool_call_id: &str, text: &str) -> Message {
+fn capability_result(invocation_id: &str, text: &str) -> Message {
     Message {
-        role: "tool_result".to_string(),
+        role: "capability_result".to_string(),
         content: json!([{"type": "text", "text": text}]),
-        tool_call_id: Some(tool_call_id.to_string()),
+        invocation_id: Some(invocation_id.to_string()),
         is_error: None,
     }
 }
 
-// ── collect_interactive_tool_use_ids ──
+// ── collect_interactive_capability_invocation_ids ──
 
 #[test]
-fn collect_interactive_ids_finds_ask_user_question() {
-    let msgs = vec![assistant_tool_use("agent::ask_user", "aq_1")];
-    let ids = collect_interactive_tool_use_ids(&msgs);
+fn collect_interactive_ids_finds_user_interaction() {
+    let msgs = vec![assistant_capability_invocation("agent::ask_user", "aq_1")];
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
     assert!(ids.contains("aq_1"));
     assert_eq!(ids.len(), 1);
 }
 
 #[test]
-fn collect_interactive_ids_ignores_non_interactive_tools() {
+fn collect_interactive_ids_ignores_non_interactive_capabilities() {
     let msgs = vec![
-        assistant_tool_use("filesystem::read_file", "r_1"),
-        assistant_tool_use("process::run", "b_1"),
+        assistant_capability_invocation("filesystem::read_file", "r_1"),
+        assistant_capability_invocation("process::run", "b_1"),
     ];
-    let ids = collect_interactive_tool_use_ids(&msgs);
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
     assert!(
         ids.is_empty(),
-        "should not collect non-interactive tool ids"
+        "should not collect non-interactive capability ids"
     );
 }
 
 #[test]
-fn collect_interactive_ids_mixed_tool_use() {
+fn collect_interactive_ids_mixed_capability_invocation() {
     let msgs = vec![Message {
         role: "assistant".to_string(),
         content: json!([
-            {"type": "tool_use", "id": "aq_1", "name": "agent::ask_user", "input": {}},
-            {"type": "tool_use", "id": "r_1", "name": "filesystem::read_file", "input": {}}
+            {"type": "capability_invocation", "id": "aq_1", "name": "agent::ask_user", "input": {}},
+            {"type": "capability_invocation", "id": "r_1", "name": "filesystem::read_file", "input": {}}
         ]),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }];
-    let ids = collect_interactive_tool_use_ids(&msgs);
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
     assert!(ids.contains("aq_1"));
     assert!(!ids.contains("r_1"));
     assert_eq!(ids.len(), 1);
@@ -722,10 +730,10 @@ fn collect_interactive_ids_string_content_skipped_safely() {
     let msgs = vec![Message {
         role: "user".to_string(),
         content: json!("plain string content"),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }];
-    let ids = collect_interactive_tool_use_ids(&msgs);
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
     assert!(ids.is_empty());
 }
 
@@ -734,33 +742,36 @@ fn collect_interactive_ids_block_without_type_field() {
     let msgs = vec![Message {
         role: "assistant".to_string(),
         content: json!([{"name": "agent::ask_user", "id": "aq_1"}]),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }];
-    let ids = collect_interactive_tool_use_ids(&msgs);
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
     assert!(ids.is_empty(), "blocks without type field must be ignored");
 }
 
 #[test]
-fn collect_interactive_ids_tool_use_without_id() {
+fn collect_interactive_ids_capability_invocation_without_id() {
     let msgs = vec![Message {
         role: "assistant".to_string(),
-        content: json!([{"type": "tool_use", "name": "agent::ask_user"}]),
-        tool_call_id: None,
+        content: json!([{"type": "capability_invocation", "name": "agent::ask_user"}]),
+        invocation_id: None,
         is_error: None,
     }];
-    let ids = collect_interactive_tool_use_ids(&msgs);
-    assert!(ids.is_empty(), "tool_use without id produces no entry");
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
+    assert!(
+        ids.is_empty(),
+        "capability_invocation without id produces no entry"
+    );
 }
 
 #[test]
 fn collect_interactive_ids_multiple_ask_user_calls() {
     let msgs = vec![
-        assistant_tool_use("agent::ask_user", "aq_1"),
-        assistant_tool_use("agent::ask_user", "aq_2"),
-        assistant_tool_use("agent::ask_user", "aq_3"),
+        assistant_capability_invocation("agent::ask_user", "aq_1"),
+        assistant_capability_invocation("agent::ask_user", "aq_2"),
+        assistant_capability_invocation("agent::ask_user", "aq_3"),
     ];
-    let ids = collect_interactive_tool_use_ids(&msgs);
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
     assert_eq!(ids.len(), 3);
     assert!(ids.contains("aq_1"));
     assert!(ids.contains("aq_2"));
@@ -783,20 +794,20 @@ fn serialize_handles_string_content_message() {
 }
 
 #[test]
-fn serialize_filters_ask_user_question_result_but_keeps_question_text() {
+fn serialize_filters_user_interaction_result_but_keeps_question_text() {
     let msgs = vec![
-        assistant_ask_user_question("aq_1", &["What's your favorite color?"]),
-        tool_result(
+        assistant_user_interaction("aq_1", &["What's your favorite color?"]),
+        capability_result(
             "aq_1",
             "Q1: What's your favorite color? [single] (Red, Blue)",
         ),
         user_text("Red"),
     ];
     let out = serialize_for_memory(&msgs);
-    // Verbose tool_result recap is filtered.
+    // Verbose capability_result recap is filtered.
     assert!(
-        !out.contains("[TOOL_RESULT]"),
-        "interactive tool_result should be filtered: {out}"
+        !out.contains("[CAPABILITY_RESULT]"),
+        "interactive capability_result should be filtered: {out}"
     );
     // Option list noise stays out.
     assert!(
@@ -813,14 +824,14 @@ fn serialize_filters_ask_user_question_result_but_keeps_question_text() {
 }
 
 #[test]
-fn serialize_retains_non_interactive_tool_result() {
+fn serialize_retains_non_interactive_capability_result() {
     let msgs = vec![
-        assistant_tool_use("filesystem::read_file", "r_1"),
-        tool_result("r_1", "file contents here"),
+        assistant_capability_invocation("filesystem::read_file", "r_1"),
+        capability_result("r_1", "file contents here"),
     ];
     let out = serialize_for_memory(&msgs);
     assert!(
-        out.contains("[TOOL_RESULT] file contents here"),
+        out.contains("[CAPABILITY_RESULT] file contents here"),
         "non-interactive capability result should appear: {out}"
     );
 }
@@ -828,19 +839,19 @@ fn serialize_retains_non_interactive_tool_result() {
 #[test]
 fn serialize_filters_multiple_interactive_in_slice() {
     let msgs = vec![
-        assistant_tool_use("agent::ask_user", "aq_1"),
-        tool_result("aq_1", "Q1: first"),
+        assistant_capability_invocation("agent::ask_user", "aq_1"),
+        capability_result("aq_1", "Q1: first"),
         user_text("a1"),
-        assistant_tool_use("agent::ask_user", "aq_2"),
-        tool_result("aq_2", "Q2: second"),
+        assistant_capability_invocation("agent::ask_user", "aq_2"),
+        capability_result("aq_2", "Q2: second"),
         user_text("a2"),
-        assistant_tool_use("agent::ask_user", "aq_3"),
-        tool_result("aq_3", "Q3: third"),
+        assistant_capability_invocation("agent::ask_user", "aq_3"),
+        capability_result("aq_3", "Q3: third"),
         user_text("a3"),
     ];
     let out = serialize_for_memory(&msgs);
     assert!(
-        !out.contains("[TOOL_RESULT]"),
+        !out.contains("[CAPABILITY_RESULT]"),
         "all three should be filtered: {out}"
     );
     assert!(!out.contains("Q1:"), "no question echo: {out}");
@@ -852,32 +863,32 @@ fn serialize_filters_multiple_interactive_in_slice() {
 }
 
 #[test]
-fn serialize_keeps_orphan_tool_result() {
-    // Capability result whose tool_call_id has no matching tool_use in the slice.
+fn serialize_keeps_orphan_capability_result() {
+    // Capability result whose invocation_id has no matching capability_invocation in the slice.
     // Default: preserve it — we only filter when we can confidently identify
     // the source as interactive.
-    let msgs = vec![tool_result("orphan_id", "some tool output")];
+    let msgs = vec![capability_result("orphan_id", "some capability output")];
     let out = serialize_for_memory(&msgs);
     assert!(
-        out.contains("[TOOL_RESULT] some tool output"),
-        "orphan tool_result should be preserved: {out}"
+        out.contains("[CAPABILITY_RESULT] some capability output"),
+        "orphan capability_result should be preserved: {out}"
     );
 }
 
 #[test]
 fn serialize_preserves_mixed_interactive_and_regular() {
     let msgs = vec![
-        assistant_tool_use("agent::ask_user", "aq_1"),
-        tool_result("aq_1", "Q1: pick one"),
+        assistant_capability_invocation("agent::ask_user", "aq_1"),
+        capability_result("aq_1", "Q1: pick one"),
         user_text("done"),
-        assistant_tool_use("filesystem::read_file", "r_1"),
-        tool_result("r_1", "file body"),
+        assistant_capability_invocation("filesystem::read_file", "r_1"),
+        capability_result("r_1", "file body"),
         assistant_text("final thoughts"),
     ];
     let out = serialize_for_memory(&msgs);
     assert!(!out.contains("pick one"), "interactive filtered: {out}");
     assert!(
-        out.contains("[TOOL_RESULT] file body"),
+        out.contains("[CAPABILITY_RESULT] file body"),
         "filesystem read kept: {out}"
     );
     assert!(out.contains("[ASSISTANT] final thoughts"));
@@ -885,56 +896,56 @@ fn serialize_preserves_mixed_interactive_and_regular() {
 }
 
 #[test]
-fn serialize_flags_errored_non_interactive_tool_result() {
+fn serialize_flags_errored_non_interactive_capability_result() {
     let msgs = vec![
-        assistant_tool_use("process::run", "b_1"),
+        assistant_capability_invocation("process::run", "b_1"),
         Message {
-            role: "tool_result".to_string(),
+            role: "capability_result".to_string(),
             content: json!([{"type": "text", "text": "command failed"}]),
-            tool_call_id: Some("b_1".to_string()),
+            invocation_id: Some("b_1".to_string()),
             is_error: Some(true),
         },
     ];
     let out = serialize_for_memory(&msgs);
     assert!(
-        out.contains("[TOOL_ERROR] command failed"),
+        out.contains("[CAPABILITY_ERROR] command failed"),
         "error label preserved: {out}"
     );
 }
 
-// ── extract_interactive_tool_summary ──
+// ── extract_interactive_capability_summary ──
 
 #[test]
 fn extract_summary_returns_none_for_text_block() {
     let block = json!({"type": "text", "text": "hello"});
-    assert_eq!(extract_interactive_tool_summary(&block), None);
+    assert_eq!(extract_interactive_capability_summary(&block), None);
 }
 
 #[test]
-fn extract_summary_returns_none_for_non_interactive_tool_use() {
+fn extract_summary_returns_none_for_non_interactive_capability_invocation() {
     let block = json!({
-        "type": "tool_use",
+        "type": "capability_invocation",
         "id": "r_1",
         "name": "filesystem::read_file",
         "input": {"path": "/tmp/x"}
     });
-    assert_eq!(extract_interactive_tool_summary(&block), None);
+    assert_eq!(extract_interactive_capability_summary(&block), None);
 }
 
 #[test]
 fn extract_summary_returns_none_when_input_missing() {
     let block = json!({
-        "type": "tool_use",
+        "type": "capability_invocation",
         "id": "aq_1",
         "name": "agent::ask_user"
     });
-    assert_eq!(extract_interactive_tool_summary(&block), None);
+    assert_eq!(extract_interactive_capability_summary(&block), None);
 }
 
 #[test]
 fn extract_summary_ask_user_single_question() {
     let block = json!({
-        "type": "tool_use",
+        "type": "capability_invocation",
         "id": "aq_1",
         "name": "agent::ask_user",
         "input": {
@@ -942,7 +953,7 @@ fn extract_summary_ask_user_single_question() {
         }
     });
     assert_eq!(
-        extract_interactive_tool_summary(&block),
+        extract_interactive_capability_summary(&block),
         Some("Asked: \"What's next?\"".to_string())
     );
 }
@@ -950,7 +961,7 @@ fn extract_summary_ask_user_single_question() {
 #[test]
 fn extract_summary_ask_user_multiple_questions_joined() {
     let block = json!({
-        "type": "tool_use",
+        "type": "capability_invocation",
         "id": "aq_1",
         "name": "agent::ask_user",
         "input": {
@@ -960,19 +971,19 @@ fn extract_summary_ask_user_multiple_questions_joined() {
             ]
         }
     });
-    let out = extract_interactive_tool_summary(&block).unwrap();
+    let out = extract_interactive_capability_summary(&block).unwrap();
     assert_eq!(out, "Asked: \"Q one?\"; \"Q two?\"");
 }
 
 #[test]
 fn extract_summary_ask_user_without_questions_returns_none() {
     let block = json!({
-        "type": "tool_use",
+        "type": "capability_invocation",
         "id": "aq_1",
         "name": "agent::ask_user",
         "input": {"questions": []}
     });
-    assert_eq!(extract_interactive_tool_summary(&block), None);
+    assert_eq!(extract_interactive_capability_summary(&block), None);
 }
 
 #[test]
@@ -981,7 +992,7 @@ fn extract_summary_ask_user_omits_options_and_mode() {
     // are the upstream source of transcript pollution. Only the question
     // text itself is preserved.
     let block = json!({
-        "type": "tool_use",
+        "type": "capability_invocation",
         "id": "aq_1",
         "name": "agent::ask_user",
         "input": {
@@ -993,7 +1004,7 @@ fn extract_summary_ask_user_omits_options_and_mode() {
             "context": "ratification gate"
         }
     });
-    let out = extract_interactive_tool_summary(&block).unwrap();
+    let out = extract_interactive_capability_summary(&block).unwrap();
     assert!(!out.contains("Crimson"), "options should be omitted: {out}");
     assert!(
         !out.contains("Cerulean"),
@@ -1011,11 +1022,11 @@ fn extract_summary_ask_user_omits_options_and_mode() {
 #[test]
 fn serialize_preserves_multi_question_ask_user_transcript() {
     let msgs = vec![
-        assistant_ask_user_question(
+        assistant_user_interaction(
             "aq_1",
             &["What's your role?", "What timezone?", "What language?"],
         ),
-        tool_result("aq_1", "verbose recap"),
+        capability_result("aq_1", "verbose recap"),
         user_text("IC; PT; Swift"),
     ];
     let out = serialize_for_memory(&msgs);
@@ -1026,7 +1037,7 @@ fn serialize_preserves_multi_question_ask_user_transcript() {
     assert!(out.contains("\"What timezone?\""), "q2 missing: {out}");
     assert!(out.contains("\"What language?\""), "q3 missing: {out}");
     assert!(
-        !out.contains("[TOOL_RESULT]"),
+        !out.contains("[CAPABILITY_RESULT]"),
         "verbose recap leaked: {out}"
     );
     assert!(out.contains("[USER] IC; PT; Swift"));
@@ -1034,17 +1045,17 @@ fn serialize_preserves_multi_question_ask_user_transcript() {
 
 #[test]
 fn serialize_assistant_mixes_text_and_interactive_summary() {
-    // The agent often writes a short intro text block before the tool_use
+    // The agent often writes a short intro text block before the capability_invocation
     // in the same message. Both should appear on the transcript line.
     let msgs = vec![Message {
         role: "assistant".to_string(),
         content: json!([
             {"type": "text", "text": "Let me ask you something."},
-            {"type": "tool_use", "id": "aq_1", "name": "agent::ask_user", "input": {
+            {"type": "capability_invocation", "id": "aq_1", "name": "agent::ask_user", "input": {
                 "questions": [{"question": "Ready?", "options": [{"label":"Y"},{"label":"N"}]}]
             }}
         ]),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }];
     let out = serialize_for_memory(&msgs);
@@ -1059,14 +1070,14 @@ fn serialize_assistant_mixes_text_and_interactive_summary() {
 }
 
 #[test]
-fn serialize_ignores_non_interactive_tool_use_in_assistant_content() {
+fn serialize_ignores_non_interactive_capability_invocation_in_assistant_content() {
     let msgs = vec![Message {
         role: "assistant".to_string(),
         content: json!([
             {"type": "text", "text": "reading file"},
-            {"type": "tool_use", "id": "r_1", "name": "filesystem::read_file", "input": {"path": "/tmp/x"}}
+            {"type": "capability_invocation", "id": "r_1", "name": "filesystem::read_file", "input": {"path": "/tmp/x"}}
         ]),
-        tool_call_id: None,
+        invocation_id: None,
         is_error: None,
     }];
     let out = serialize_for_memory(&msgs);

@@ -29,9 +29,9 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator.showSettings()
                 }
             }
-            .onChange(of: viewModel.askUserQuestionState.showSheet) { _, show in
+            .onChange(of: viewModel.userInteractionState.showSheet) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showAskUserQuestion()
+                    sheetCoordinator.showUserInteraction()
                 }
             }
             .onChange(of: viewModel.engineApprovalState.showSheet) { _, show in
@@ -59,11 +59,11 @@ struct ChatSheetModifier: ViewModifier {
         // chip status updates are visible during the dismiss animation. The actual
         // prompt send (which triggers isProcessing, keyboard resign, etc.) happens
         // here to avoid concurrent state mutations that glitch the InputBar layout.
-        viewModel.executePendingAskUserQuestionSubmission()
+        viewModel.executePendingUserInteractionSubmission()
         viewModel.executePendingEngineApprovalSubmission()
         viewModel.executePendingSourceChangesSubmission()
 
-        viewModel.askUserQuestionState.showSheet = false
+        viewModel.userInteractionState.showSheet = false
         viewModel.engineApprovalState.showSheet = false
         viewModel.subagentState.showDetailSheet = false
         viewModel.showSettings = false

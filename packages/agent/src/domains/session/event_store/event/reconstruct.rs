@@ -46,8 +46,8 @@ pub struct ReconstructionResult {
 }
 
 /// Pending capability result accumulated between assistant messages.
-struct PendingToolResult {
-    tool_call_id: String,
+struct PendingCapabilityResult {
+    invocation_id: String,
     content: String,
     is_error: bool,
 }
@@ -57,7 +57,7 @@ struct PendingToolResult {
 /// Implements the two-pass reconstruction algorithm matching the TypeScript
 /// `reconstructFromEvents` exactly:
 ///
-/// - **Pass 1**: Metadata collection (deletions, tool args, config)
+/// - **Pass 1**: Metadata collection (deletions, capability args, config)
 /// - **Pass 2**: Message building (merging, compaction, capability result injection)
 ///
 /// # Arguments
@@ -71,7 +71,7 @@ pub fn reconstruct_from_events(ancestors: &[SessionEvent]) -> ReconstructionResu
 /// Pass 1 output: metadata collected from events.
 struct Metadata {
     deleted_event_ids: std::collections::HashSet<String>,
-    tool_call_args_map: std::collections::HashMap<String, Value>,
+    capability_invocation_args_map: std::collections::HashMap<String, Value>,
     reasoning_level: Option<String>,
     system_prompt: Option<String>,
 }
@@ -79,7 +79,7 @@ struct Metadata {
 /// Pass 1: Collect deleted event IDs, capability invocation arguments, and config state.
 fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     let mut deleted_event_ids = std::collections::HashSet::new();
-    let mut tool_call_args_map = std::collections::HashMap::new();
+    let mut capability_invocation_args_map = std::collections::HashMap::new();
     let mut reasoning_level: Option<String> = None;
     let mut system_prompt: Option<String> = None;
 
@@ -91,10 +91,10 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
                 }
             }
             EventType::CapabilityInvocationStarted => {
-                let tc_id = event.payload.get("toolCallId").and_then(Value::as_str);
+                let tc_id = event.payload.get("invocationId").and_then(Value::as_str);
                 let args = event.payload.get("arguments");
                 if let (Some(id), Some(a)) = (tc_id, args) {
-                    let _ = tool_call_args_map.insert(id.to_string(), a.clone());
+                    let _ = capability_invocation_args_map.insert(id.to_string(), a.clone());
                 }
             }
             EventType::ConfigReasoningLevel => {
@@ -122,7 +122,7 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
 
     Metadata {
         deleted_event_ids,
-        tool_call_args_map,
+        capability_invocation_args_map,
         reasoning_level,
         system_prompt,
     }
@@ -135,7 +135,7 @@ struct BuildState {
     tokens: TokenTotals,
     turn_count: i64,
     current_turn: i64,
-    pending_tool_results: Vec<PendingToolResult>,
+    pending_capability_results: Vec<PendingCapabilityResult>,
 }
 
 /// Pass 2: Build messages from events using metadata from pass 1.
@@ -145,7 +145,7 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         tokens: TokenTotals::default(),
         turn_count: 0,
         current_turn: 0,
-        pending_tool_results: Vec::new(),
+        pending_capability_results: Vec::new(),
     };
 
     for event in ancestors {
@@ -155,28 +155,28 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         match event.event_type {
             EventType::CompactSummary => handle_compact_summary(event, &mut st),
             EventType::ContextCleared => handle_context_cleared(&mut st),
-            EventType::CapabilityInvocationCompleted => handle_tool_result(event, &mut st),
+            EventType::CapabilityInvocationCompleted => handle_capability_result(event, &mut st),
             EventType::MessageUser => handle_message_user(event, &mut st),
             EventType::MessageAssistant => handle_message_assistant(event, metadata, &mut st),
             _ => {}
         }
     }
 
-    // End-of-stream flush: if last message is assistant with tool_use
-    if !st.pending_tool_results.is_empty()
+    // End-of-stream flush: if last message is assistant with capability_invocation
+    if !st.pending_capability_results.is_empty()
         && let Some(last) = st.combined.last()
         && last.message.role == "assistant"
-        && content_has_tool_use(&last.message.content)
+        && content_has_capability_invocation(&last.message.content)
     {
-        flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
+        flush_capability_results(&mut st.combined, &mut st.pending_capability_results);
     }
 
     // Inject synthetic error results for any unmatched capability invocations.
     // This happens when: (a) a user interrupt discards pending capability results,
-    // or (b) the session ended mid-tool-execution before results arrived.
+    // or (b) the session ended mid-capability-execution before results arrived.
     // Without this, providers like OpenAI reject the history because every
     // function_call must have a corresponding function_call_output.
-    inject_missing_tool_results(&mut st.combined);
+    inject_missing_capability_results(&mut st.combined);
 
     ReconstructionResult {
         messages_with_event_ids: st.combined,
@@ -195,13 +195,13 @@ fn handle_compact_summary(event: &SessionEvent, st: &mut BuildState) {
         .and_then(Value::as_str)
         .unwrap_or("");
     st.combined.clear();
-    st.pending_tool_results.clear();
+    st.pending_capability_results.clear();
 
     st.combined.push(MessageWithEventId {
         message: Message {
             role: "user".to_string(),
             content: Value::String(format!("{COMPACTION_SUMMARY_PREFIX}\n\n{summary}")),
-            tool_call_id: None,
+            invocation_id: None,
             is_error: None,
         },
         event_ids: vec![None],
@@ -210,7 +210,7 @@ fn handle_compact_summary(event: &SessionEvent, st: &mut BuildState) {
         message: Message {
             role: "assistant".to_string(),
             content: serde_json::json!([{ "type": "text", "text": COMPACTION_ACK_TEXT }]),
-            tool_call_id: None,
+            invocation_id: None,
             is_error: None,
         },
         event_ids: vec![None],
@@ -220,14 +220,14 @@ fn handle_compact_summary(event: &SessionEvent, st: &mut BuildState) {
 /// Handle `context.cleared`: discard all messages.
 fn handle_context_cleared(st: &mut BuildState) {
     st.combined.clear();
-    st.pending_tool_results.clear();
+    st.pending_capability_results.clear();
 }
 
 /// Handle `capability.invocation.completed`: accumulate for later flushing.
-fn handle_tool_result(event: &SessionEvent, st: &mut BuildState) {
+fn handle_capability_result(event: &SessionEvent, st: &mut BuildState) {
     let tc_id = event
         .payload
-        .get("toolCallId")
+        .get("invocationId")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
@@ -243,8 +243,8 @@ fn handle_tool_result(event: &SessionEvent, st: &mut BuildState) {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    st.pending_tool_results.push(PendingToolResult {
-        tool_call_id: tc_id,
+    st.pending_capability_results.push(PendingCapabilityResult {
+        invocation_id: tc_id,
         content,
         is_error,
     });
@@ -252,7 +252,7 @@ fn handle_tool_result(event: &SessionEvent, st: &mut BuildState) {
 
 /// Handle `message.user`: merge consecutive, discard pending capability results.
 fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
-    st.pending_tool_results.clear();
+    st.pending_capability_results.clear();
 
     let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
 
@@ -264,7 +264,7 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
             message: Message {
                 role: "user".to_string(),
                 content,
-                tool_call_id: None,
+                invocation_id: None,
                 is_error: None,
             },
             event_ids: vec![Some(event.id.clone())],
@@ -277,17 +277,18 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
 /// merge consecutive, track turns.
 fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut BuildState) {
     let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
-    let restored_content = restore_truncated_inputs(&content, &metadata.tool_call_args_map);
-    let has_tool_use = content_has_tool_use(&restored_content);
+    let restored_content =
+        restore_truncated_inputs(&content, &metadata.capability_invocation_args_map);
+    let has_capability_invocation = content_has_capability_invocation(&restored_content);
 
     // CASE 1: Last was assistant with pending capability results → flush first
     if st
         .combined
         .last()
         .is_some_and(|e| e.message.role == "assistant")
-        && !st.pending_tool_results.is_empty()
+        && !st.pending_capability_results.is_empty()
     {
-        flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
+        flush_capability_results(&mut st.combined, &mut st.pending_capability_results);
     }
 
     // Re-check after potential flush — merge consecutive assistant messages
@@ -304,16 +305,16 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
             message: Message {
                 role: "assistant".to_string(),
                 content: restored_content,
-                tool_call_id: None,
+                invocation_id: None,
                 is_error: None,
             },
             event_ids: vec![Some(event.id.clone())],
         });
     }
 
-    // CASE 2: This assistant has tool_use and pending results → flush
-    if has_tool_use && !st.pending_tool_results.is_empty() {
-        flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
+    // CASE 2: This assistant has capability_invocation and pending results → flush
+    if has_capability_invocation && !st.pending_capability_results.is_empty() {
+        flush_capability_results(&mut st.combined, &mut st.pending_capability_results);
     }
 
     accumulate_tokens(&event.payload, &mut st.tokens);
@@ -330,26 +331,27 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Inject synthetic error `toolResult` messages for any assistant `tool_use`
-/// blocks that lack a corresponding `toolResult` in the following messages.
+/// Inject synthetic error `capabilityResult` messages for any assistant `capability_invocation`
+/// blocks that lack a corresponding `capabilityResult` in the following messages.
 ///
 /// Scans through the reconstructed message list and, for each assistant message
-/// containing `tool_use` blocks, checks whether matching `toolResult` messages
-/// exist before the next non-toolResult message. Any unmatched capability invocations get
+/// containing `capability_invocation` blocks, checks whether matching `capabilityResult` messages
+/// exist before the next non-capabilityResult message. Any unmatched capability invocations get
 /// a synthetic error result injected immediately after the assistant message.
-fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
+fn inject_missing_capability_results(combined: &mut Vec<MessageWithEventId>) {
     let mut insertions: Vec<(usize, Vec<MessageWithEventId>)> = Vec::new();
 
     let mut i = 0;
     while i < combined.len() {
         if combined[i].message.role == "assistant" {
-            let tool_use_ids = extract_tool_use_ids(&combined[i].message.content);
-            if !tool_use_ids.is_empty() {
-                // Collect tool_call_ids from following toolResult messages
+            let capability_invocation_ids =
+                extract_capability_invocation_ids(&combined[i].message.content);
+            if !capability_invocation_ids.is_empty() {
+                // Collect invocation_ids from following capabilityResult messages
                 let mut matched_ids = std::collections::HashSet::new();
                 let mut j = i + 1;
-                while j < combined.len() && combined[j].message.role == "toolResult" {
-                    if let Some(ref tc_id) = combined[j].message.tool_call_id {
+                while j < combined.len() && combined[j].message.role == "capabilityResult" {
+                    if let Some(ref tc_id) = combined[j].message.invocation_id {
                         let _ = matched_ids.insert(tc_id.clone());
                     }
                     j += 1;
@@ -357,15 +359,15 @@ fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
 
                 // Find unmatched capability invocations
                 let mut synthetic = Vec::new();
-                for tc_id in &tool_use_ids {
+                for tc_id in &capability_invocation_ids {
                     if !matched_ids.contains(tc_id.as_str()) {
                         synthetic.push(MessageWithEventId {
                             message: Message {
-                                role: "toolResult".to_string(),
+                                role: "capabilityResult".to_string(),
                                 content: Value::String(
                                     "Capability invocation was interrupted.".to_string(),
                                 ),
-                                tool_call_id: Some(tc_id.clone()),
+                                invocation_id: Some(tc_id.clone()),
                                 is_error: Some(true),
                             },
                             event_ids: vec![None],
@@ -387,29 +389,31 @@ fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
     }
 }
 
-/// Extract all `tool_use` block IDs from a message's content.
-fn extract_tool_use_ids(content: &Value) -> Vec<String> {
+/// Extract all `capability_invocation` block IDs from a message's content.
+fn extract_capability_invocation_ids(content: &Value) -> Vec<String> {
     match content {
         Value::Array(arr) => arr
             .iter()
-            .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+            .filter(|block| {
+                block.get("type").and_then(Value::as_str) == Some("capability_invocation")
+            })
             .filter_map(|block| block.get("id").and_then(Value::as_str).map(String::from))
             .collect(),
         _ => vec![],
     }
 }
 
-/// Flush pending capability results as `toolResult` messages.
-fn flush_tool_results(
+/// Flush pending capability results as `capabilityResult` messages.
+fn flush_capability_results(
     combined: &mut Vec<MessageWithEventId>,
-    pending: &mut Vec<PendingToolResult>,
+    pending: &mut Vec<PendingCapabilityResult>,
 ) {
     for tr in pending.drain(..) {
         combined.push(MessageWithEventId {
             message: Message {
-                role: "toolResult".to_string(),
+                role: "capabilityResult".to_string(),
                 content: Value::String(tr.content),
-                tool_call_id: Some(tr.tool_call_id),
+                invocation_id: Some(tr.invocation_id),
                 is_error: Some(tr.is_error),
             },
             event_ids: vec![None],
@@ -452,27 +456,28 @@ fn normalize_user_content(content: &Value) -> Vec<Value> {
     }
 }
 
-/// Check if content contains any `tool_use` blocks.
-fn content_has_tool_use(content: &Value) -> bool {
+/// Check if content contains any `capability_invocation` blocks.
+fn content_has_capability_invocation(content: &Value) -> bool {
     match content {
-        Value::Array(arr) => arr
-            .iter()
-            .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use")),
+        Value::Array(arr) => arr.iter().any(|block| {
+            block.get("type").and_then(Value::as_str) == Some("capability_invocation")
+        }),
         _ => false,
     }
 }
 
-/// Restore truncated `tool_use` inputs from the capability invocation args map.
+/// Restore truncated `capability_invocation` inputs from the capability invocation args map.
 fn restore_truncated_inputs(
     content: &Value,
-    tool_call_args_map: &std::collections::HashMap<String, Value>,
+    capability_invocation_args_map: &std::collections::HashMap<String, Value>,
 ) -> Value {
     match content {
         Value::Array(arr) => {
             let restored: Vec<Value> = arr
                 .iter()
                 .map(|block| {
-                    let is_tool_use = block.get("type").and_then(Value::as_str) == Some("tool_use");
+                    let is_capability_invocation =
+                        block.get("type").and_then(Value::as_str) == Some("capability_invocation");
                     let is_truncated = block
                         .get("arguments")
                         .and_then(|i| i.get("_truncated"))
@@ -480,10 +485,10 @@ fn restore_truncated_inputs(
                         .unwrap_or(false);
                     let block_id = block.get("id").and_then(Value::as_str);
 
-                    if is_tool_use
+                    if is_capability_invocation
                         && is_truncated
                         && let Some(id) = block_id
-                        && let Some(full_args) = tool_call_args_map.get(id)
+                        && let Some(full_args) = capability_invocation_args_map.get(id)
                     {
                         let mut restored_block = block.clone();
                         restored_block["arguments"] = full_args.clone();
@@ -632,19 +637,19 @@ mod tests {
     // ── Capability result output format ────────────────────────────────────
 
     #[test]
-    fn tool_results_as_tool_result_messages() {
+    fn capability_results_as_capability_result_messages() {
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Use a tool"}),
+                serde_json::json!({"content": "Use a capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "text", "text": "I will use a tool."},
-                        {"type": "tool_use", "id": "call_123", "name": "TestTool", "arguments": {"arg": "value"}}
+                        {"type": "text", "text": "I will use a capability."},
+                        {"type": "capability_invocation", "id": "call_123", "name": "execute", "arguments": {"arg": "value"}}
                     ],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 50, "outputTokens": 25}
@@ -652,12 +657,12 @@ mod tests {
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_123", "content": "Tool output", "isError": false}),
+                serde_json::json!({"invocationId": "call_123", "content": "Capability output", "isError": false}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "text", "text": "The tool returned: Tool output"}],
+                    "content": [{"type": "text", "text": "The capability returned: Capability output"}],
                     "turn": 2,
                     "tokenUsage": {"inputTokens": 75, "outputTokens": 40}
                 }),
@@ -667,33 +672,33 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant, toolResult, assistant
+        // user, assistant, capabilityResult, assistant
         assert_eq!(msgs.len(), 4);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].role, "capabilityResult");
         assert_eq!(msgs[3].role, "assistant");
 
-        // Verify toolResult format
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_123"));
-        assert_eq!(msgs[2].content, "Tool output");
+        // Verify capabilityResult format
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_123"));
+        assert_eq!(msgs[2].content, "Capability output");
         assert_eq!(msgs[2].is_error, Some(false));
     }
 
     #[test]
-    fn multiple_tool_results_as_separate_messages() {
+    fn multiple_capability_results_as_separate_messages() {
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Use multiple tools"}),
+                serde_json::json!({"content": "Use multiple capabilities"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}},
-                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}
+                        {"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}},
+                        {"type": "capability_invocation", "id": "call_2", "name": "inspect", "arguments": {}}
                     ],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 60, "outputTokens": 30}
@@ -701,11 +706,11 @@ mod tests {
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Result 1", "isError": false}),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_2", "content": "Result 2", "isError": true}),
+                serde_json::json!({"invocationId": "call_2", "content": "Result 2", "isError": true}),
             ),
             ev(
                 EventType::MessageAssistant,
@@ -720,15 +725,15 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant, toolResult, toolResult, assistant
+        // user, assistant, capabilityResult, capabilityResult, assistant
         assert_eq!(msgs.len(), 5);
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[2].content, "Result 1");
         assert_eq!(msgs[2].is_error, Some(false));
 
-        assert_eq!(msgs[3].role, "toolResult");
-        assert_eq!(msgs[3].tool_call_id.as_deref(), Some("call_2"));
+        assert_eq!(msgs[3].role, "capabilityResult");
+        assert_eq!(msgs[3].invocation_id.as_deref(), Some("call_2"));
         assert_eq!(msgs[3].content, "Result 2");
         assert_eq!(msgs[3].is_error, Some(true));
     }
@@ -745,27 +750,27 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}}],
+                    "content": [{"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}}],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 45, "outputTokens": 20}
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Result 1", "isError": false}),
             ),
             // Second capability invocation (continuation)
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}],
+                    "content": [{"type": "capability_invocation", "id": "call_2", "name": "inspect", "arguments": {}}],
                     "turn": 2,
                     "tokenUsage": {"inputTokens": 65, "outputTokens": 28}
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_2", "content": "Result 2", "isError": false}),
+                serde_json::json!({"invocationId": "call_2", "content": "Result 2", "isError": false}),
             ),
             // Final response
             ev(
@@ -781,35 +786,35 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant, toolResult, assistant, toolResult, assistant
+        // user, assistant, capabilityResult, assistant, capabilityResult, assistant
         assert_eq!(msgs.len(), 6);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].role, "capabilityResult");
         assert_eq!(msgs[3].role, "assistant");
-        assert_eq!(msgs[4].role, "toolResult");
+        assert_eq!(msgs[4].role, "capabilityResult");
         assert_eq!(msgs[5].role, "assistant");
     }
 
     #[test]
-    fn tool_results_at_end_of_conversation() {
+    fn capability_results_at_end_of_conversation() {
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Run a tool"}),
+                serde_json::json!({"content": "Run a capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
+                    "content": [{"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}}],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 40, "outputTokens": 18}
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Tool finished", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Capability finished", "isError": false}),
             ),
             // No more events — simulates mid-agentic-loop resume
         ];
@@ -817,13 +822,109 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant, toolResult
+        // user, assistant, capabilityResult
         assert_eq!(msgs.len(), 3);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
-        assert_eq!(msgs[2].content, "Tool finished");
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].content, "Capability finished");
+    }
+
+    #[test]
+    fn reconstructed_capability_history_converts_across_provider_boundaries() {
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Read this file"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{
+                        "type": "capability_invocation",
+                        "id": "toolu_01capability",
+                        "name": "execute",
+                        "arguments": {
+                            "mode": "invoke",
+                            "contractId": "filesystem::read_file",
+                            "payload": {"path": "/tmp/example.txt"}
+                        }
+                    }],
+                    "turn": 1
+                }),
+            ),
+            ev(
+                EventType::CapabilityInvocationCompleted,
+                serde_json::json!({
+                    "invocationId": "toolu_01capability",
+                    "content": "example contents",
+                    "isError": false,
+                    "modelPrimitiveName": "execute",
+                    "contractId": "filesystem::read_file",
+                    "implementationId": "first_party.filesystem.v1.read_file",
+                    "functionId": "filesystem::read_file",
+                    "pluginId": "first_party.filesystem",
+                    "workerId": "filesystem-worker",
+                    "schemaDigest": "sha256:read",
+                    "catalogRevision": 7,
+                    "trustTier": "first_party_signed",
+                    "riskLevel": "low",
+                    "effectClass": "read",
+                    "traceId": "trace-read",
+                    "rootInvocationId": "root-read",
+                    "bindingDecisionId": "binding-read"
+                }),
+            ),
+        ];
+
+        let result = reconstruct_from_events(&events);
+        let runtime_messages: Vec<crate::shared::messages::Message> = result
+            .messages_with_event_ids
+            .iter()
+            .map(|entry| {
+                serde_json::from_value(serde_json::to_value(&entry.message).unwrap()).unwrap()
+            })
+            .collect();
+
+        let anthropic =
+            crate::domains::model::providers::anthropic::message_converter::convert_messages(
+                &runtime_messages,
+            );
+        let anthropic_json = serde_json::to_value(&anthropic).unwrap();
+        assert_eq!(
+            anthropic_json[1]["content"][0]["type"],
+            "capability_invocation"
+        );
+        assert_eq!(anthropic_json[1]["content"][0]["name"], "execute");
+        assert_eq!(anthropic_json[2]["content"][0]["type"], "capability_result");
+        assert_eq!(
+            anthropic_json[2]["content"][0]["capability_invocation_id"],
+            "toolu_01capability"
+        );
+
+        let openai =
+            crate::domains::model::providers::openai::message_converter::convert_to_responses_input(
+                &runtime_messages,
+            );
+        let openai_json = serde_json::to_value(&openai).unwrap();
+        let function_call = openai_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
+            .expect("OpenAI payload should include function_call");
+        let function_output = openai_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output"))
+            .expect("OpenAI payload should include function_call_output");
+        let remapped_id = function_call["call_id"].as_str().unwrap();
+        assert!(remapped_id.starts_with("call_"));
+        assert_eq!(function_call["name"], "execute");
+        assert_eq!(function_output["call_id"], remapped_id);
     }
 
     // ── Message merging ──────────────────────────────────────────────
@@ -903,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    fn user_interrupt_injects_synthetic_tool_result() {
+    fn user_interrupt_injects_synthetic_capability_result() {
         // When user interrupts after capability invocations, pending results are discarded
         // but synthetic error results are injected to keep provider capability-invocation
         // state well-formed.
@@ -911,19 +1012,19 @@ mod tests {
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Use tool"}),
+                serde_json::json!({"content": "Use capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
+                    "content": [{"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}}],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 50, "outputTokens": 25}
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Result", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Result", "isError": false}),
             ),
             // User interrupts — pending capability results are discarded, but
             // synthetic error results keep provider capability-invocation state well-formed.
@@ -936,12 +1037,12 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(tool_use), toolResult(synthetic), user
+        // user, assistant(capability_invocation), capabilityResult(synthetic), user
         assert_eq!(msgs.len(), 4);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[2].is_error, Some(true));
         assert_eq!(msgs[2].content, "Capability invocation was interrupted.");
         assert_eq!(msgs[3].role, "user");
@@ -1018,23 +1119,23 @@ mod tests {
     }
 
     #[test]
-    fn compaction_clears_pending_tool_results() {
+    fn compaction_clears_pending_capability_results() {
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Use tool"}),
+                serde_json::json!({"content": "Use capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
+                    "content": [{"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}}],
                     "turn": 1,
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Result", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Result", "isError": false}),
             ),
             // Compaction clears everything including pending capability results
             ev(
@@ -1218,21 +1319,21 @@ mod tests {
         assert_eq!(result.token_usage.cache_creation_tokens, 0);
     }
 
-    // ── Tool argument restoration ────────────────────────────────────
+    // ── Capability argument restoration ────────────────────────────────────
 
     #[test]
-    fn restore_truncated_tool_arguments() {
+    fn restore_truncated_capability_arguments() {
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Run tool"}),
+                serde_json::json!({"content": "Run capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [{
-                        "type": "tool_use",
+                        "type": "capability_invocation",
                         "id": "call_1",
                         "name": "BigTool",
                         "arguments": {"_truncated": true}
@@ -1244,14 +1345,14 @@ mod tests {
             ev(
                 EventType::CapabilityInvocationStarted,
                 serde_json::json!({
-                    "toolCallId": "call_1",
+                    "invocationId": "call_1",
                     "name": "BigTool",
                     "arguments": {"largeArg": "Full argument value"}
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Done", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Done", "isError": false}),
             ),
         ];
 
@@ -1259,27 +1360,34 @@ mod tests {
         let msgs = get_messages(&result);
 
         // Assistant message should have restored arguments
-        let tool_use = &msgs[1].content[0];
-        assert_eq!(tool_use["arguments"]["largeArg"], "Full argument value");
+        let capability_invocation = &msgs[1].content[0];
+        assert_eq!(
+            capability_invocation["arguments"]["largeArg"],
+            "Full argument value"
+        );
         // _truncated should be gone
-        assert!(tool_use["arguments"].get("_truncated").is_none());
+        assert!(
+            capability_invocation["arguments"]
+                .get("_truncated")
+                .is_none()
+        );
     }
 
     #[test]
-    fn non_truncated_tool_use_unchanged() {
+    fn non_truncated_capability_invocation_unchanged() {
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Run tool"}),
+                serde_json::json!({"content": "Run capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [{
-                        "type": "tool_use",
+                        "type": "capability_invocation",
                         "id": "call_1",
-                        "name": "Tool",
+                        "name": "execute",
                         "arguments": {"arg": "value"}
                     }],
                     "turn": 1,
@@ -1290,8 +1398,8 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        let tool_use = &msgs[1].content[0];
-        assert_eq!(tool_use["arguments"]["arg"], "value");
+        let capability_invocation = &msgs[1].content[0];
+        assert_eq!(capability_invocation["arguments"]["arg"], "value");
     }
 
     // ── Reasoning level ──────────────────────────────────────────────
@@ -1433,39 +1541,39 @@ mod tests {
             // User asks
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Run multiple tools"}),
+                serde_json::json!({"content": "Run multiple capabilities"}),
             ),
-            // Assistant calls first tool
+            // Assistant calls first capability
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "process::run", "arguments": {"command": "ls"}}],
+                    "content": [{"type": "capability_invocation", "id": "call_1", "name": "process::run", "arguments": {"command": "ls"}}],
                     "turn": 1,
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationStarted,
-                serde_json::json!({"toolCallId": "call_1", "name": "process::run", "arguments": {"command": "ls"}}),
+                serde_json::json!({"invocationId": "call_1", "name": "process::run", "arguments": {"command": "ls"}}),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "file1.txt", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "file1.txt", "isError": false}),
             ),
-            // Assistant calls second tool
+            // Assistant calls second capability
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_2", "name": "filesystem::read_file", "arguments": {"path": "file1.txt"}}],
+                    "content": [{"type": "capability_invocation", "id": "call_2", "name": "filesystem::read_file", "arguments": {"path": "file1.txt"}}],
                     "turn": 2,
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationStarted,
-                serde_json::json!({"toolCallId": "call_2", "name": "filesystem::read_file", "arguments": {"path": "file1.txt"}}),
+                serde_json::json!({"invocationId": "call_2", "name": "filesystem::read_file", "arguments": {"path": "file1.txt"}}),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_2", "content": "Hello World", "isError": false}),
+                serde_json::json!({"invocationId": "call_2", "content": "Hello World", "isError": false}),
             ),
             // Assistant gives final answer
             ev(
@@ -1480,13 +1588,13 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(tool_use), toolResult, assistant(tool_use), toolResult, assistant(text)
+        // user, assistant(capability_invocation), capabilityResult, assistant(capability_invocation), capabilityResult, assistant(text)
         assert_eq!(msgs.len(), 6);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].role, "capabilityResult");
         assert_eq!(msgs[3].role, "assistant");
-        assert_eq!(msgs[4].role, "toolResult");
+        assert_eq!(msgs[4].role, "capabilityResult");
         assert_eq!(msgs[5].role, "assistant");
         assert_eq!(msgs[5].content[0]["text"], "The file contains Hello World.");
     }
@@ -1549,32 +1657,32 @@ mod tests {
     // ── Event IDs for synthetic messages ─────────────────────────────
 
     #[test]
-    fn tool_result_messages_have_none_event_ids() {
+    fn capability_result_messages_have_none_event_ids() {
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Tool"}),
+                serde_json::json!({"content": "Capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "T", "arguments": {}}],
+                    "content": [{"type": "capability_invocation", "id": "call_1", "name": "T", "arguments": {}}],
                     "turn": 1,
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "R", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "R", "isError": false}),
             ),
         ];
 
         let result = reconstruct_from_events(&events);
 
-        // The toolResult message should have [None] as event_ids (synthetic)
-        let tool_result_entry = &result.messages_with_event_ids[2];
-        assert_eq!(tool_result_entry.message.role, "toolResult");
-        assert_eq!(tool_result_entry.event_ids, vec![None]);
+        // The capabilityResult message should have [None] as event_ids (synthetic)
+        let capability_result_entry = &result.messages_with_event_ids[2];
+        assert_eq!(capability_result_entry.message.role, "capabilityResult");
+        assert_eq!(capability_result_entry.event_ids, vec![None]);
     }
 
     // ── Ignored event types ──────────────────────────────────────────
@@ -1626,29 +1734,31 @@ mod tests {
     }
 
     #[test]
-    fn content_has_tool_use_true() {
+    fn content_has_capability_invocation_true() {
         let content = serde_json::json!([
             {"type": "text", "text": "hi"},
-            {"type": "tool_use", "id": "call_1", "name": "T", "arguments": {}}
+            {"type": "capability_invocation", "id": "call_1", "name": "T", "arguments": {}}
         ]);
-        assert!(content_has_tool_use(&content));
+        assert!(content_has_capability_invocation(&content));
     }
 
     #[test]
-    fn content_has_tool_use_false() {
+    fn content_has_capability_invocation_false() {
         let content = serde_json::json!([{"type": "text", "text": "hi"}]);
-        assert!(!content_has_tool_use(&content));
+        assert!(!content_has_capability_invocation(&content));
     }
 
     #[test]
-    fn content_has_tool_use_non_array() {
-        assert!(!content_has_tool_use(&Value::String("hello".to_string())));
+    fn content_has_capability_invocation_non_array() {
+        assert!(!content_has_capability_invocation(&Value::String(
+            "hello".to_string()
+        )));
     }
 
     #[test]
     fn restore_truncated_inputs_no_truncation() {
         let content = serde_json::json!([
-            {"type": "tool_use", "id": "call_1", "arguments": {"arg": "val"}}
+            {"type": "capability_invocation", "id": "call_1", "arguments": {"arg": "val"}}
         ]);
         let map = std::collections::HashMap::new();
         let result = restore_truncated_inputs(&content, &map);
@@ -1658,7 +1768,7 @@ mod tests {
     #[test]
     fn restore_truncated_inputs_with_truncation() {
         let content = serde_json::json!([
-            {"type": "tool_use", "id": "call_1", "arguments": {"_truncated": true}}
+            {"type": "capability_invocation", "id": "call_1", "arguments": {"_truncated": true}}
         ]);
         let mut map = std::collections::HashMap::new();
         map.insert(
@@ -1673,7 +1783,7 @@ mod tests {
     #[test]
     fn restore_truncated_inputs_missing_from_map() {
         let content = serde_json::json!([
-            {"type": "tool_use", "id": "call_unknown", "arguments": {"_truncated": true}}
+            {"type": "capability_invocation", "id": "call_unknown", "arguments": {"_truncated": true}}
         ]);
         let map = std::collections::HashMap::new();
         let result = restore_truncated_inputs(&content, &map);
@@ -1687,19 +1797,19 @@ mod tests {
     fn inject_synthetic_results_on_user_interrupt() {
         // Simulates: assistant makes capability invocations, results arrive, user interrupts.
         // The user interrupt discards pending capability results, leaving unmatched
-        // tool_use blocks. Synthetic error results should be injected.
+        // capability_invocation blocks. Synthetic error results should be injected.
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Use tool"}),
+                serde_json::json!({"content": "Use capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}},
-                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}
+                        {"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}},
+                        {"type": "capability_invocation", "id": "call_2", "name": "inspect", "arguments": {}}
                     ],
                     "turn": 1,
                 }),
@@ -1707,11 +1817,11 @@ mod tests {
             // Capability results arrive but will be discarded by user interrupt
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Result 1", "isError": false}),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_2", "content": "Result 2", "isError": false}),
+                serde_json::json!({"invocationId": "call_2", "content": "Result 2", "isError": false}),
             ),
             // User interrupt discards pending capability results
             ev(
@@ -1723,16 +1833,16 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(tool_use x2), toolResult(call_1), toolResult(call_2), user
+        // user, assistant(capability_invocation x2), capabilityResult(call_1), capabilityResult(call_2), user
         assert_eq!(msgs.len(), 5);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[2].is_error, Some(true));
         assert_eq!(msgs[2].content, "Capability invocation was interrupted.");
-        assert_eq!(msgs[3].role, "toolResult");
-        assert_eq!(msgs[3].tool_call_id.as_deref(), Some("call_2"));
+        assert_eq!(msgs[3].role, "capabilityResult");
+        assert_eq!(msgs[3].invocation_id.as_deref(), Some("call_2"));
         assert_eq!(msgs[3].is_error, Some(true));
         assert_eq!(msgs[4].role, "user");
         assert_eq!(msgs[4].content, "Never mind");
@@ -1745,13 +1855,13 @@ mod tests {
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Run tool"}),
+                serde_json::json!({"content": "Run capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}
+                        {"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}}
                     ],
                     "turn": 1,
                 }),
@@ -1762,10 +1872,10 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(tool_use), toolResult(synthetic error)
+        // user, assistant(capability_invocation), capabilityResult(synthetic error)
         assert_eq!(msgs.len(), 3);
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[2].is_error, Some(true));
         assert_eq!(msgs[2].content, "Capability invocation was interrupted.");
     }
@@ -1777,18 +1887,18 @@ mod tests {
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Use tool"}),
+                serde_json::json!({"content": "Use capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
+                    "content": [{"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}}],
                     "turn": 1,
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Done", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Done", "isError": false}),
             ),
             ev(
                 EventType::MessageAssistant,
@@ -1802,28 +1912,28 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant, toolResult, assistant — no synthetics
+        // user, assistant, capabilityResult, assistant — no synthetics
         assert_eq!(msgs.len(), 4);
-        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].role, "capabilityResult");
         assert_eq!(msgs[2].content, "Done");
         assert_eq!(msgs[2].is_error, Some(false));
     }
 
     #[test]
-    fn partial_tool_results_injects_only_missing() {
+    fn partial_capability_results_injects_only_missing() {
         // One of two capability invocations gets a result, the other doesn't.
         let events = vec![
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Use tools"}),
+                serde_json::json!({"content": "Use capabilities"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}},
-                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}
+                        {"type": "capability_invocation", "id": "call_1", "name": "execute", "arguments": {}},
+                        {"type": "capability_invocation", "id": "call_2", "name": "inspect", "arguments": {}}
                     ],
                     "turn": 1,
                 }),
@@ -1831,7 +1941,7 @@ mod tests {
             // Only call_1 gets a result
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
+                serde_json::json!({"invocationId": "call_1", "content": "Result 1", "isError": false}),
             ),
             ev(
                 EventType::MessageAssistant,
@@ -1845,23 +1955,23 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(tool_use x2), synthetic(call_2), toolResult(call_1), assistant
-        // The synthetic is injected right after assistant, before existing toolResults
+        // user, assistant(capability_invocation x2), synthetic(call_2), capabilityResult(call_1), assistant
+        // The synthetic is injected right after assistant, before existing capabilityResults
         assert_eq!(msgs.len(), 5);
         assert_eq!(msgs[1].role, "assistant");
         // Synthetic injected first (for unmatched call_2)
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_2"));
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_2"));
         assert_eq!(msgs[2].is_error, Some(true));
         // Real result for call_1
-        assert_eq!(msgs[3].role, "toolResult");
-        assert_eq!(msgs[3].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[3].role, "capabilityResult");
+        assert_eq!(msgs[3].invocation_id.as_deref(), Some("call_1"));
         assert_eq!(msgs[3].is_error, Some(false));
         assert_eq!(msgs[4].role, "assistant");
     }
 
     #[test]
-    fn cross_provider_resume_with_interrupted_tool_calls() {
+    fn cross_provider_resume_with_interrupted_capability_invocations() {
         // Realistic scenario: Anthropic capability invocations completed, then GPT capability invocations interrupted.
         let events = vec![
             session_start(),
@@ -1870,17 +1980,17 @@ mod tests {
                 EventType::MessageUser,
                 serde_json::json!({"content": "Help me with files"}),
             ),
-            // Anthropic assistant uses tool (completed)
+            // Anthropic assistant uses capability (completed)
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "toolu_abc", "name": "filesystem::read_file", "arguments": {"path": "file.txt"}}],
+                    "content": [{"type": "capability_invocation", "id": "toolu_abc", "name": "filesystem::read_file", "arguments": {"path": "file.txt"}}],
                     "turn": 1,
                 }),
             ),
             ev(
                 EventType::CapabilityInvocationCompleted,
-                serde_json::json!({"toolCallId": "toolu_abc", "content": "file contents", "isError": false}),
+                serde_json::json!({"invocationId": "toolu_abc", "content": "file contents", "isError": false}),
             ),
             ev(
                 EventType::MessageAssistant,
@@ -1894,13 +2004,13 @@ mod tests {
                 EventType::MessageUser,
                 serde_json::json!({"content": "Now use GPT to do more"}),
             ),
-            // GPT assistant uses tools (interrupted before results)
+            // GPT assistant uses capabilities (interrupted before results)
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_gpt_1", "name": "filesystem::write_file", "arguments": {"path": "out.txt"}},
-                        {"type": "tool_use", "id": "call_gpt_2", "name": "process::run", "arguments": {"command": "echo hi"}}
+                        {"type": "capability_invocation", "id": "call_gpt_1", "name": "filesystem::write_file", "arguments": {"path": "out.txt"}},
+                        {"type": "capability_invocation", "id": "call_gpt_2", "name": "process::run", "arguments": {"command": "echo hi"}}
                     ],
                     "turn": 3,
                 }),
@@ -1911,31 +2021,31 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(toolu_abc), toolResult(toolu_abc), assistant(text),
-        // user, assistant(call_gpt_1, call_gpt_2), toolResult(call_gpt_1), toolResult(call_gpt_2)
+        // user, assistant(toolu_abc), capabilityResult(toolu_abc), assistant(text),
+        // user, assistant(call_gpt_1, call_gpt_2), capabilityResult(call_gpt_1), capabilityResult(call_gpt_2)
         assert_eq!(msgs.len(), 8);
 
         // Anthropic calls properly matched
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("toolu_abc"));
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("toolu_abc"));
         assert_eq!(msgs[2].is_error, Some(false));
 
         // GPT calls get synthetic error results
-        assert_eq!(msgs[6].role, "toolResult");
-        assert_eq!(msgs[6].tool_call_id.as_deref(), Some("call_gpt_1"));
+        assert_eq!(msgs[6].role, "capabilityResult");
+        assert_eq!(msgs[6].invocation_id.as_deref(), Some("call_gpt_1"));
         assert_eq!(msgs[6].is_error, Some(true));
         assert_eq!(msgs[6].content, "Capability invocation was interrupted.");
 
-        assert_eq!(msgs[7].role, "toolResult");
-        assert_eq!(msgs[7].tool_call_id.as_deref(), Some("call_gpt_2"));
+        assert_eq!(msgs[7].role, "capabilityResult");
+        assert_eq!(msgs[7].invocation_id.as_deref(), Some("call_gpt_2"));
         assert_eq!(msgs[7].is_error, Some(true));
     }
 
     // ── Interrupted session persistence scenarios ─────────────────
 
     #[test]
-    fn interrupted_assistant_with_tool_use_gets_synthetic_results() {
-        // Server persists partial message.assistant with interrupted=true + tool_use.
+    fn interrupted_assistant_with_capability_invocation_gets_synthetic_results() {
+        // Server persists partial message.assistant with interrupted=true + capability_invocation.
         // Reconstruction should inject synthetic capability results.
         let events = vec![
             session_start(),
@@ -1948,7 +2058,7 @@ mod tests {
                 serde_json::json!({
                     "content": [
                         {"type": "text", "text": "I'll help with"},
-                        {"type": "tool_use", "id": "tc_1", "name": "execute", "arguments": {"command": "ls"}}
+                        {"type": "capability_invocation", "id": "tc_1", "name": "execute", "arguments": {"command": "ls"}}
                     ],
                     "turn": 1,
                     "stopReason": "interrupted",
@@ -1959,12 +2069,12 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(text + tool_use), synthetic toolResult
+        // user, assistant(text + capability_invocation), synthetic capabilityResult
         assert_eq!(msgs.len(), 3);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("tc_1"));
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("tc_1"));
         assert_eq!(msgs[2].is_error, Some(true));
     }
 
@@ -2004,13 +2114,13 @@ mod tests {
             session_start(),
             ev(
                 EventType::MessageUser,
-                serde_json::json!({"content": "Run tool"}),
+                serde_json::json!({"content": "Run capability"}),
             ),
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "tc_1", "name": "execute", "arguments": {}}
+                        {"type": "capability_invocation", "id": "tc_1", "name": "execute", "arguments": {}}
                     ],
                     "turn": 1,
                     "stopReason": "interrupted",
@@ -2033,38 +2143,38 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant(tool_use), synthetic toolResult, user
+        // user, assistant(capability_invocation), synthetic capabilityResult, user
         assert_eq!(msgs.len(), 4);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].role, "capabilityResult");
         assert_eq!(msgs[2].is_error, Some(true));
-        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("tc_1"));
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("tc_1"));
         assert_eq!(msgs[3].role, "user");
         assert_eq!(msgs[3].content, "Try again");
     }
 
     #[test]
-    fn extract_tool_use_ids_from_content() {
+    fn extract_capability_invocation_ids_from_content() {
         let content = serde_json::json!([
             {"type": "text", "text": "hello"},
-            {"type": "tool_use", "id": "call_1", "name": "T", "arguments": {}},
-            {"type": "tool_use", "id": "call_2", "name": "T2", "arguments": {}}
+            {"type": "capability_invocation", "id": "call_1", "name": "T", "arguments": {}},
+            {"type": "capability_invocation", "id": "call_2", "name": "T2", "arguments": {}}
         ]);
-        let ids = extract_tool_use_ids(&content);
+        let ids = extract_capability_invocation_ids(&content);
         assert_eq!(ids, vec!["call_1", "call_2"]);
     }
 
     #[test]
-    fn extract_tool_use_ids_no_tools() {
+    fn extract_capability_invocation_ids_no_capabilities() {
         let content = serde_json::json!([{"type": "text", "text": "hello"}]);
-        let ids = extract_tool_use_ids(&content);
+        let ids = extract_capability_invocation_ids(&content);
         assert!(ids.is_empty());
     }
 
     #[test]
-    fn extract_tool_use_ids_non_array() {
-        let ids = extract_tool_use_ids(&Value::String("hello".to_string()));
+    fn extract_capability_invocation_ids_non_array() {
+        let ids = extract_capability_invocation_ids(&Value::String("hello".to_string()));
         assert!(ids.is_empty());
     }
 
@@ -2148,7 +2258,7 @@ mod tests {
     //
     // 1. Reconstruction completes inside a generous wall-clock budget
     //    (protects against quadratic regressions — e.g. a future
-    //    "look up tool args by scanning the full list" refactor).
+    //    "look up capability args by scanning the full list" refactor).
     // 2. Per-event cost doesn't explode between sizes. An O(N log N)
     //    regression slipped in under the 10k ceiling would show as a
     //    5–10× per-event time ratio between 100-event and 10k-event
@@ -2166,7 +2276,7 @@ mod tests {
         let mut events = Vec::with_capacity(count + 1);
         events.push(session_start());
         // Alternate user / assistant so the test exercises the
-        // consecutive-role merging path and tool-arg-lookup path.
+        // consecutive-role merging path and capability-arg-lookup path.
         for i in 0..count {
             if i.is_multiple_of(2) {
                 events.push(ev(

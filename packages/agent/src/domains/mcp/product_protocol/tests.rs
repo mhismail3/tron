@@ -142,11 +142,11 @@ done
         let config = mock_config("discover-test", &script);
         let client = McpClient::connect_stdio(&config).await.unwrap();
 
-        let tools = client.list_tools().await.unwrap();
-        assert_eq!(tools.len(), 2);
-        assert_eq!(tools[0].name, "query");
-        assert_eq!(tools[1].name, "list_tables");
-        assert_eq!(tools[0].description, "Run SQL query");
+        let capabilities = client.list_tools().await.unwrap();
+        assert_eq!(capabilities.len(), 2);
+        assert_eq!(capabilities[0].name, "query");
+        assert_eq!(capabilities[1].name, "list_tables");
+        assert_eq!(capabilities[0].description, "Run SQL query");
 
         client.shutdown().await;
     }
@@ -297,15 +297,15 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let mut manager = McpServerManager::new(configs);
 
         let discovered = manager.start_all().await;
-        let tool_count: usize = discovered.iter().map(|(_, d)| d.len()).sum();
-        assert_eq!(tool_count, 2);
+        let capability_count: usize = discovered.iter().map(|(_, d)| d.len()).sum();
+        assert_eq!(capability_count, 2);
         assert!(manager.is_connected("mgr-test"));
         assert_eq!(manager.connected_servers().len(), 1);
 
         let status = manager.status();
         assert_eq!(status.len(), 1);
         assert_eq!(status[0].health, McpServerHealth::Healthy);
-        assert_eq!(status[0].tool_count, 2);
+        assert_eq!(status[0].capability_count, 2);
 
         manager.shutdown_all().await;
     }
@@ -329,8 +329,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let mut manager = McpServerManager::new(configs);
 
         let discovered = manager.start_all().await;
-        let tool_count: usize = discovered.iter().map(|(_, d)| d.len()).sum();
-        assert_eq!(tool_count, 2);
+        let capability_count: usize = discovered.iter().map(|(_, d)| d.len()).sum();
+        assert_eq!(capability_count, 2);
         assert!(!manager.is_connected("bad"));
         assert!(manager.is_connected("good"));
 
@@ -349,8 +349,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let mut manager = McpServerManager::new(configs);
 
         let discovered = manager.start_all().await;
-        let tool_count: usize = discovered.iter().map(|(_, d)| d.len()).sum();
-        assert_eq!(tool_count, 2);
+        let capability_count: usize = discovered.iter().map(|(_, d)| d.len()).sum();
+        assert_eq!(capability_count, 2);
 
         // Manual restart should yield fresh tool defs
         let new_defs = manager.manual_restart("restart-test").await.unwrap();
@@ -409,12 +409,12 @@ while true; do read -r line 2>/dev/null || exit 0; done
     }
 
     // -----------------------------------------------------------------------
-    // Tool index integration
+    // ModelCapability index integration
     // -----------------------------------------------------------------------
 
     #[tokio::test]
-    async fn tool_index_populated_at_startup() {
-        use crate::domains::mcp::tool_index::ToolIndex;
+    async fn capability_index_populated_at_startup() {
+        use crate::domains::mcp::capability_index::McpCapabilityIndex;
 
         let script =
             mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
@@ -423,12 +423,12 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
         let discovered = manager.start_all().await;
 
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         for (server, defs) in &discovered {
             index.add_server_tools(server, defs);
         }
 
-        assert_eq!(index.tool_count(), 2);
+        assert_eq!(index.capability_count(), 2);
         let results = index.search("query", None);
         assert!(!results.is_empty());
         assert_eq!(results[0].server, "reg-test");
@@ -471,9 +471,9 @@ done
         let client = McpClient::connect_stdio(&config).await.unwrap();
 
         // list_tools should skip the notification and return the actual response
-        let tools = client.list_tools().await.unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, "test_tool");
+        let capabilities = client.list_tools().await.unwrap();
+        assert_eq!(capabilities.len(), 1);
+        assert_eq!(capabilities[0].name, "test_tool");
 
         client.shutdown().await;
     }
@@ -483,7 +483,7 @@ done
     // -----------------------------------------------------------------------
 
     #[tokio::test]
-    async fn client_handles_error_tool_result() {
+    async fn client_handles_error_capability_result() {
         let error_result = json!({
             "content": [{"type": "text", "text": "Error: table not found"}],
             "isError": true
@@ -517,8 +517,8 @@ done
         let config = mock_config("empty-tools", &script);
         let client = McpClient::connect_stdio(&config).await.unwrap();
 
-        let tools = client.list_tools().await.unwrap();
-        assert!(tools.is_empty());
+        let capabilities = client.list_tools().await.unwrap();
+        assert!(capabilities.is_empty());
 
         client.shutdown().await;
     }
@@ -611,7 +611,7 @@ done
             .join(crate::shared::paths::files::PROFILE_TOML);
 
         // TTL of 1ms so the second call is *guaranteed* stale enough to trigger
-        // a refresh. Startup fetches tools once; the first `.call()` refreshes.
+        // a refresh. Startup fetches capabilities once; the first `.call()` refreshes.
         let mut router = McpRouter::new(vec![config], settings_path, 1).await;
 
         // Initial state: index has one tool from startup.
@@ -632,7 +632,7 @@ done
             .await;
         assert!(result.is_ok(), "expected call to succeed: {result:?}");
 
-        // Index must now contain BOTH tools.
+        // Index must now contain BOTH capabilities.
         let post_drift_matches = router.search("list", None);
         let names: Vec<&str> = post_drift_matches.iter().map(|m| m.tool.as_str()).collect();
         assert!(

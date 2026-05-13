@@ -131,7 +131,7 @@ impl GuardrailEngine {
         let mut block_reason: Option<String> = None;
 
         // Get applicable rules sorted by priority (higher first)
-        let applicable_rule_ids = self.get_applicable_rule_ids(&ctx.tool_name);
+        let applicable_rule_ids = self.get_applicable_rule_ids(&ctx.model_primitive_name);
 
         for rule_id in applicable_rule_ids {
             if !self.is_rule_enabled(&rule_id) {
@@ -176,9 +176,9 @@ impl GuardrailEngine {
         if let Some(audit) = &mut self.audit_logger {
             let _ = audit.log(AuditEntryParams {
                 session_id: ctx.session_id.clone(),
-                tool_name: ctx.tool_name.clone(),
-                tool_call_id: ctx.tool_call_id.clone(),
-                tool_arguments: Some(ctx.tool_arguments.clone()),
+                model_primitive_name: ctx.model_primitive_name.clone(),
+                invocation_id: ctx.invocation_id.clone(),
+                capability_arguments: Some(ctx.capability_arguments.clone()),
                 evaluation: evaluation.clone(),
             });
         }
@@ -197,13 +197,14 @@ impl GuardrailEngine {
     }
 
     /// Get rule IDs applicable to a specific capability, sorted by priority (descending).
-    fn get_applicable_rule_ids(&self, tool_name: &str) -> Vec<String> {
+    fn get_applicable_rule_ids(&self, model_primitive_name: &str) -> Vec<String> {
         let mut applicable: Vec<(&String, i32)> = self
             .rules
             .iter()
             .filter(|(_, rule)| {
                 let base = rule.base();
-                base.capabilities.is_empty() || base.capabilities.iter().any(|t| t == tool_name)
+                base.capabilities.is_empty()
+                    || base.capabilities.iter().any(|t| t == model_primitive_name)
             })
             .map(|(id, rule)| (id, rule.base().priority))
             .collect();

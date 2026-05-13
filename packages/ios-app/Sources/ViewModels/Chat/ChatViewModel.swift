@@ -71,8 +71,8 @@ final class ChatViewModel {
 
     // MARK: - Extracted State Objects
 
-    /// AskUserQuestion state (sheet, current data, answers)
-    let askUserQuestionState = AskUserQuestionState()
+    /// UserInteraction state (sheet, current data, answers)
+    let userInteractionState = UserInteractionState()
     /// EngineApproval state (sheet, current data)
     let engineApprovalState = EngineApprovalState()
     /// Context tracking state (tokens, cost, context window)
@@ -105,13 +105,13 @@ final class ChatViewModel {
     let pullUpPanelState = PullUpPanelState()
     // MARK: - Protocol Conformance (Context Protocols)
 
-    /// Whether AskUserQuestion was called in the current turn (CapabilityInvocationContext, TurnLifecycleContext)
-    var askUserQuestionCalledInTurn: Bool {
-        get { askUserQuestionState.calledInTurn }
-        set { askUserQuestionState.calledInTurn = newValue }
+    /// Whether UserInteraction was called in the current turn (CapabilityInvocationContext, TurnLifecycleContext)
+    var userInteractionCalledInTurn: Bool {
+        get { userInteractionState.calledInTurn }
+        set { userInteractionState.calledInTurn = newValue }
     }
 
-    /// Make a tool visible for rendering (CapabilityInvocationContext)
+    /// Make a capability visible for rendering (CapabilityInvocationContext)
     func makeCapabilityInvocationVisible(_ invocationId: String) {
         animationCoordinator.makeCapabilityInvocationVisible(invocationId)
     }
@@ -185,18 +185,18 @@ final class ChatViewModel {
 
     // MARK: - Sub-Managers
 
-    /// Coordinates pill morph animations, message cascade timing, and tool staggering
+    /// Coordinates pill morph animations, message cascade timing, and capability staggering
     let animationCoordinator = AnimationCoordinator()
     /// Ensures capability invocations appear in order and batches UI updates for 60fps
     let uiUpdateQueue = UIUpdateQueue()
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
     /// Coordinates capability invocation event handling (start/end) for capability invocation messages and UI updates
-    let toolEventCoordinator = CapabilityInvocationCoordinator()
+    let capabilityInvocationCoordinator = CapabilityInvocationCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
-    /// Coordinates AskUserQuestion event handling and user interaction
-    let askUserQuestionCoordinator = AskUserQuestionCoordinator()
+    /// Coordinates UserInteraction event handling and user interaction
+    let userInteractionCoordinator = UserInteractionCoordinator()
     /// Coordinates EngineApproval event handling and user interaction
     let engineApprovalCoordinator = EngineApprovalCoordinator()
     /// Coordinates voice recording and transcription
@@ -213,7 +213,7 @@ final class ChatViewModel {
     let memoryCoordinator = MemoryCoordinator()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
-    var currentToolMessages: [UUID: ChatMessage] = [:]
+    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
 
     /// Track capability invocations for the current turn (for display purposes)
     var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
@@ -329,10 +329,10 @@ final class ChatViewModel {
                 self.compactionInProgressMessageId = nil
                 self.isRetaining = false
                 self.memoryRetainInProgressMessageId = nil
-                self.runningToolCount = 0
+                self.runningCapabilityInvocationCount = 0
                 self.clearDisplayStreamState()
                 self.clearProcessState()
-                self.askUserQuestionState.clearAll()
+                self.userInteractionState.clearAll()
                 self.engineApprovalState.clearAll()
                 self.subagentState.clearAll()
                 self.prunedLiveMessages.removeAll()
@@ -394,18 +394,18 @@ final class ChatViewModel {
                 switch update {
                 case .turnBoundary(let data):
                     // Turn boundaries are handled directly in handleTurnStart/handleTurnEnd
-                    // This callback is for tool ordering confirmation
+                    // This callback is for capability ordering confirmation
                     logger.verbose("UIUpdateQueue: Turn boundary processed (turn=\(data.turnNumber), isStart=\(data.isStart))", category: .events)
 
-                case .capabilityStart(let data):
+                case .capabilityInvocationStarted(let data):
                     // Capability start was already added to messages in handleCapabilityInvocationStarted
                     // Here we trigger the staggered animation appearance
                     animationCoordinator.queueCapabilityInvocationStart(invocationId: data.invocationId)
-                    logger.verbose("UIUpdateQueue: Capability start queued for animation: \(data.modelToolName)", category: .events)
+                    logger.verbose("UIUpdateQueue: Capability start queued for animation: \(data.modelPrimitiveName)", category: .events)
 
-                case .capabilityEnd(let data):
-                    // Capability end arrives here in guaranteed order (earlier tools first)
-                    // Find and update the tool message
+                case .capabilityInvocationCompleted(let data):
+                    // Capability end arrives here in guaranteed order (earlier capabilities first)
+                    // Find and update the capability message
                     processOrderedCapabilityInvocationCompleted(data)
                     animationCoordinator.markCapabilityInvocationComplete(invocationId: data.invocationId)
                     logger.verbose("UIUpdateQueue: Capability end processed in order: \(data.invocationId)", category: .events)
@@ -419,8 +419,8 @@ final class ChatViewModel {
     }
 
     /// Process a capability end update that has been ordered by UIUpdateQueue
-    private func processOrderedCapabilityInvocationCompleted(_ data: UIUpdateQueue.ToolEndData) {
-        // Find the tool message by invocationId (O(1) via index, then a bounded scan)
+    private func processOrderedCapabilityInvocationCompleted(_ data: UIUpdateQueue.CapabilityInvocationEndData) {
+        // Find the capability message by invocationId (O(1) via index, then a bounded scan)
         if let index = messageIndex.index(forCapabilityInvocationId: data.invocationId)
             ?? MessageFinder.lastIndexOfCapabilityInvocation(id: data.invocationId, in: messages) {
             if case .capabilityInvocation(var invocation) = messages[index].content {
@@ -434,8 +434,8 @@ final class ChatViewModel {
                 messages[index].content = .capabilityInvocation(invocation)
                 messageIndex.didUpdate(messages[index], at: index)
 
-                // Decrement running tool counter (clamp to 0 for catch-up scenarios)
-                runningToolCount = max(0, runningToolCount - 1)
+                // Decrement running capability counter (clamp to 0 for catch-up scenarios)
+                runningCapabilityInvocationCount = max(0, runningCapabilityInvocationCount - 1)
             }
         }
     }
@@ -689,7 +689,7 @@ final class ChatViewModel {
     }
 
     /// Show "Processing..." only when the model is thinking and no other
-    /// visual feedback is active (streaming text, thinking block, tool
+    /// visual feedback is active (streaming text, thinking block, capability
     /// spinner, or subagent chip).
     ///
     /// Every property read here must be on an @Observable object so SwiftUI
@@ -699,7 +699,7 @@ final class ChatViewModel {
         guard agentPhase == .processing else { return false }
         if messages.last?.isStreaming == true { return false }
         if isThinkingActivelyStreaming { return false }
-        if hasRunningTools { return false }
+        if hasRunningCapabilityInvocations { return false }
         if subagentState.hasRunningSubagents { return false }
         return true
     }
@@ -713,13 +713,13 @@ final class ChatViewModel {
         return isStreaming
     }
 
-    /// Counter-based running tool detection — O(1) instead of O(n*m) scan.
+    /// Counter-based running capability detection — O(1) instead of O(n*m) scan.
     /// Incremented in capability start handler, decremented in processOrderedCapabilityInvocationCompleted and capability end handler.
     /// Reset on turn start and disconnect.
-    var runningToolCount: Int = 0
+    var runningCapabilityInvocationCount: Int = 0
 
-    private var hasRunningTools: Bool {
-        runningToolCount > 0
+    private var hasRunningCapabilityInvocations: Bool {
+        runningCapabilityInvocationCount > 0
     }
 
     var canSend: Bool {

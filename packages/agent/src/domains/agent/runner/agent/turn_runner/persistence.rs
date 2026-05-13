@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::domains::session::event_store::EventType;
 use crate::shared::events::{
-    ActivatedRuleInfo, AssistantMessage, BaseEvent, ToolCallSummary, TronEvent,
+    ActivatedRuleInfo, AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent,
 };
 use crate::shared::messages::{Provider, TokenUsage};
 use serde_json::{Value, json};
@@ -219,8 +219,8 @@ pub(super) fn emit_response_complete(
             turn,
             stop_reason: stream_result.stop_reason.clone(),
             token_usage: response_token_usage,
-            has_tool_calls: !stream_result.tool_calls.is_empty(),
-            tool_call_count: stream_result.tool_calls.len() as u32,
+            has_capability_invocations: !stream_result.capability_invocations.is_empty(),
+            capability_invocation_count: stream_result.capability_invocations.len() as u32,
             token_record: token_record_json,
             model: Some(model_name.to_owned()),
         },
@@ -243,7 +243,7 @@ pub(super) fn add_assistant_message_to_context(
         content_types = ?stream_result.message.content.iter().map(|c| match c {
             crate::shared::content::AssistantContent::Text { .. } => "Text",
             crate::shared::content::AssistantContent::Thinking { .. } => "Thinking",
-            crate::shared::content::AssistantContent::ToolUse { .. } => "ToolUse",
+            crate::shared::content::AssistantContent::CapabilityInvocation { .. } => "CapabilityInvocation",
         }).collect::<Vec<_>>(),
         "persistence: add_assistant_message_to_context"
     );
@@ -479,17 +479,17 @@ pub(super) async fn emit_turn_end(
 pub(super) fn emit_capability_invocation_batch(
     emitter: &Arc<EventEmitter>,
     session_id: &str,
-    tool_calls: &[crate::shared::messages::ToolCall],
+    capability_invocations: &[crate::shared::messages::CapabilityInvocationDraft],
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) {
-    let summaries: Vec<ToolCallSummary> = tool_calls
+    let summaries: Vec<CapabilityInvocationSummary> = capability_invocations
         .iter()
-        .map(|tool_call| ToolCallSummary {
-            id: tool_call.id.clone(),
-            name: tool_call.name.clone(),
-            arguments: tool_call.arguments.clone(),
+        .map(|capability_invocation| CapabilityInvocationSummary {
+            id: capability_invocation.id.clone(),
+            name: capability_invocation.name.clone(),
+            arguments: capability_invocation.arguments.clone(),
         })
         .collect();
 
@@ -497,7 +497,7 @@ pub(super) fn emit_capability_invocation_batch(
         emitter,
         TronEvent::CapabilityInvocationBatch {
             base: base_event(session_id, trace_id, parent_invocation_id),
-            tool_calls: summaries,
+            capability_invocations: summaries,
         },
         sequence_counter,
     );
@@ -696,7 +696,7 @@ mod tests {
             },
             stop_reason: "end_turn".into(),
             token_usage: None,
-            tool_calls: Vec::new(),
+            capability_invocations: Vec::new(),
             interrupted: false,
             partial_content: None,
             ttft_ms: None,

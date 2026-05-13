@@ -41,12 +41,12 @@ extension ChatViewModel {
     // MARK: - Subagent State Restoration
 
     /// Restore subagent state from reconstructed session data.
-    /// Populates SubagentState from result events and converts SpawnSubagent tool messages
+    /// Populates SubagentState from result events and converts SpawnSubagent capability messages
     /// to subagent chips using lifecycle events (spawned/completed/failed).
     func restoreSubagentState(from state: ReconstructedState) {
         // Populate SubagentState from reconstructed subagent results
         for result in state.subagentResults {
-            var data = SubagentToolData(
+            var data = SubagentInvocationData(
                 invocationId: result.subagentSessionId,
                 subagentSessionId: result.subagentSessionId,
                 task: result.task,
@@ -86,7 +86,7 @@ extension ChatViewModel {
             let failure = state.subagentFailures[sessionId]
             let status: SubagentStatus = completion != nil ? .completed : (failure != nil ? .failed : .running)
 
-            var subagentData = SubagentToolData(
+            var subagentData = SubagentInvocationData(
                 invocationId: invocation.id,
                 subagentSessionId: sessionId,
                 task: spawn.task,
@@ -105,9 +105,9 @@ extension ChatViewModel {
             } else {
                 // Wire contract: server always emits a known spawnType. If we
                 // reach this branch a schema drift has landed — log loudly and
-                // leave the default (.toolAgent) so the subagent still renders.
+                // leave the default (.capabilityAgent) so the subagent still renders.
                 logger.error(
-                    "Subagent reconstruction received unknown spawnType=\(spawn.spawnType ?? "<nil>") for session \(sessionId); defaulting to toolAgent",
+                    "Subagent reconstruction received unknown spawnType=\(spawn.spawnType ?? "<nil>") for session \(sessionId); defaulting to capabilityAgent",
                     category: .session
                 )
             }
@@ -200,7 +200,7 @@ extension ChatViewModel {
 
     /// Prune old messages from memory during long-running live sessions.
     ///
-    /// Called at turn_end boundaries when all messages are stable (no streaming, no running tools).
+    /// Called at turn_end boundaries when all messages are stable (no streaming, no running capabilities).
     /// Moves oldest messages to `prunedLiveMessages` buffer for instant "Load Earlier" recovery.
     /// Only the `messages` array (SwiftUI data source) is trimmed; pruned messages remain in memory
     /// but outside SwiftUI observation, eliminating the observation overhead that causes crashes.

@@ -97,9 +97,9 @@ pub struct EventRow {
     /// Denormalized role.
     pub role: Option<String>,
     /// Denormalized capability id.
-    pub tool_name: Option<String>,
+    pub model_primitive_name: Option<String>,
     /// Denormalized capability invocation ID.
-    pub tool_call_id: Option<String>,
+    pub invocation_id: Option<String>,
     /// Denormalized turn number.
     pub turn: Option<i64>,
     /// Denormalized input tokens.
@@ -116,7 +116,7 @@ pub struct EventRow {
     pub model: Option<String>,
     /// Turn duration in milliseconds.
     pub latency_ms: Option<i64>,
-    /// LLM stop reason (e.g. `end_turn`, `tool_use`).
+    /// LLM stop reason (e.g. `end_turn`, `capability_invocation`).
     pub stop_reason: Option<String>,
     /// Whether the response contained thinking blocks (0 or 1).
     pub has_thinking: Option<i64>,
@@ -141,8 +141,8 @@ impl EventRow {
             content_blob_id: None,
             workspace_id: String::new(),
             role: None,
-            tool_name: None,
-            tool_call_id: None,
+            model_primitive_name: None,
+            invocation_id: None,
             turn: None,
             input_tokens: None,
             output_tokens: None,

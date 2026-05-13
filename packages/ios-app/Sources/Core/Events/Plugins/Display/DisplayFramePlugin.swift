@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-/// Plugin for handling `display.frame` events — live stream frames from the Display tool.
+/// Plugin for handling `display.frame` events — live stream frames from the Display capability.
 /// Decodes base64 JPEG data into a UIImage and dispatches to the ChatViewModel.
 enum DisplayFramePlugin: DispatchableEventPlugin {
     static let eventType = "display.frame"

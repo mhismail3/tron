@@ -4,20 +4,20 @@
 //!
 //! Converts Responses API SSE events into unified [`StreamEvent`]s:
 //! - `response.output_text.delta` → `TextStart` + `TextDelta`
-//! - `response.output_item.added` (`function_call`) → `ToolCallStart`
-//! - `response.function_call_arguments.delta` → `ToolCallDelta`
+//! - `response.output_item.added` (`function_call`) → `CapabilityInvocationDraftStart`
+//! - `response.function_call_arguments.delta` → `CapabilityInvocationDraftDelta`
 //! - `response.reasoning_text.delta` → `ThinkingStart` + `ThinkingDelta` (full reasoning)
 //! - `response.reasoning_summary_text.delta` → `ThinkingStart` + `ThinkingDelta` (summary delta)
-//! - `response.completed` → `ThinkingEnd`, `TextEnd`, `ToolCallEnd`, `Done`
+//! - `response.completed` → `ThinkingEnd`, `TextEnd`, `CapabilityInvocationDraftEnd`, `Done`
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
 //! shared `stream_common` module. OpenAI-specific reasoning dedup and capability invocation
-//! handling (HashMap-based, with `parse_tool_call_arguments`) stays here.
+//! handling (HashMap-based, with `parse_capability_call_arguments`) stays here.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::domains::model::providers::stream_common::StreamAccumulator;
-use crate::domains::model::providers::{ToolCallContext, parse_tool_call_arguments};
+use crate::domains::model::providers::{CapabilityCallContext, parse_capability_call_arguments};
 use crate::shared::content::AssistantContent;
 use crate::shared::events::{AssistantMessage, StreamEvent};
 use crate::shared::messages::TokenUsage;
@@ -31,7 +31,7 @@ pub struct StreamState {
     /// Shared delta accumulator for text, thinking, and token tracking.
     pub acc: StreamAccumulator,
     /// Capability invocations by `call_id` → (id, name, `accumulated_args`).
-    pub tool_calls: HashMap<String, ToolCallState>,
+    pub capability_invocations: HashMap<String, CapabilityInvocationDraftState>,
     /// Deduplication set for reasoning text.
     pub seen_thinking_texts: HashSet<String>,
     /// Whether we received full reasoning text (vs only summary).
@@ -40,10 +40,10 @@ pub struct StreamState {
 
 /// State for an individual capability invocation being accumulated.
 #[derive(Clone, Debug)]
-pub struct ToolCallState {
+pub struct CapabilityInvocationDraftState {
     /// Call ID.
     pub id: String,
-    /// Tool name.
+    /// Capability name.
     pub name: String,
     /// Accumulated JSON arguments string.
     pub args: String,
@@ -54,7 +54,7 @@ pub struct ToolCallState {
 pub fn create_stream_state() -> StreamState {
     StreamState {
         acc: StreamAccumulator::new(),
-        tool_calls: HashMap::new(),
+        capability_invocations: HashMap::new(),
         seen_thinking_texts: HashSet::new(),
         has_reasoning_text: false,
     }
@@ -77,11 +77,11 @@ pub fn process_stream_event(
         }
         SseEventType::FunctionCallArgsDelta => handle_function_call_args_delta(event, state),
         SseEventType::ToolSearchCallSearching => {
-            debug!("Tool search: model is searching for relevant tools");
+            debug!("ModelCapability search: model is searching for relevant tools");
             Vec::new()
         }
         SseEventType::ToolSearchCallCompleted => {
-            debug!("Tool search: completed — selected tools loaded into context");
+            debug!("ModelCapability search: completed — selected capabilities loaded into context");
             Vec::new()
         }
         SseEventType::ComputerCallCompleted => {
@@ -116,8 +116,8 @@ fn handle_output_item_added(
             if let Some(call_id) = &item.call_id {
                 let name = item.name.clone().unwrap_or_default();
                 let initial_args = item.arguments.clone().unwrap_or_default();
-                let is_new = !state.tool_calls.contains_key(call_id.as_str());
-                if let Some(existing) = state.tool_calls.get_mut(call_id.as_str()) {
+                let is_new = !state.capability_invocations.contains_key(call_id.as_str());
+                if let Some(existing) = state.capability_invocations.get_mut(call_id.as_str()) {
                     if existing.name.is_empty() {
                         existing.name.clone_from(&name);
                     }
@@ -125,9 +125,9 @@ fn handle_output_item_added(
                         existing.args = initial_args;
                     }
                 } else {
-                    let _ = state.tool_calls.insert(
+                    let _ = state.capability_invocations.insert(
                         call_id.clone(),
-                        ToolCallState {
+                        CapabilityInvocationDraftState {
                             id: call_id.clone(),
                             name: name.clone(),
                             args: initial_args,
@@ -135,8 +135,8 @@ fn handle_output_item_added(
                     );
                 }
                 if is_new {
-                    events.push(StreamEvent::ToolCallStart {
-                        tool_call_id: call_id.clone(),
+                    events.push(StreamEvent::CapabilityInvocationDraftStart {
+                        invocation_id: call_id.clone(),
                         name,
                     });
                 }
@@ -198,16 +198,16 @@ fn handle_function_call_args_delta(
     let mut events = Vec::new();
     if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta) {
         let tc = state
-            .tool_calls
+            .capability_invocations
             .entry(call_id.clone())
-            .or_insert_with(|| ToolCallState {
+            .or_insert_with(|| CapabilityInvocationDraftState {
                 id: call_id.clone(),
                 name: String::new(),
                 args: String::new(),
             });
         tc.args.push_str(delta);
-        events.push(StreamEvent::ToolCallDelta {
-            tool_call_id: call_id.clone(),
+        events.push(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: call_id.clone(),
             arguments_delta: delta.clone(),
         });
     }
@@ -230,8 +230,10 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     };
     if item.item_type == OutputItemType::FunctionCall {
         merge_function_call_item(item, state);
-        if let Some(tool_call) = tool_call_from_item_state(item, state) {
-            events.push(StreamEvent::ToolCallEnd { tool_call });
+        if let Some(capability_invocation) = capability_invocation_from_item_state(item, state) {
+            events.push(StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            });
         }
         return events;
     }
@@ -261,24 +263,24 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     events
 }
 
-fn tool_call_from_item_state(
+fn capability_invocation_from_item_state(
     item: &super::types::ResponsesOutputItem,
     state: &StreamState,
-) -> Option<crate::shared::messages::ToolCall> {
+) -> Option<crate::shared::messages::CapabilityInvocationDraft> {
     let call_id = item.call_id.as_ref()?;
-    let tc = state.tool_calls.get(call_id.as_str())?;
+    let tc = state.capability_invocations.get(call_id.as_str())?;
     if tc.id.is_empty() || tc.name.is_empty() {
         return None;
     }
-    let ctx = ToolCallContext {
-        tool_call_id: Some(tc.id.clone()),
-        tool_name: Some(tc.name.clone()),
+    let ctx = CapabilityCallContext {
+        invocation_id: Some(tc.id.clone()),
+        model_primitive_name: Some(tc.name.clone()),
         provider: Some("openai".into()),
     };
-    Some(crate::shared::messages::ToolCall::new(
+    Some(crate::shared::messages::CapabilityInvocationDraft::new(
         tc.id.clone(),
         tc.name.clone(),
-        parse_tool_call_arguments(Some(&tc.args), Some(&ctx)),
+        parse_capability_call_arguments(Some(&tc.args), Some(&ctx)),
     ))
 }
 
@@ -308,16 +310,16 @@ fn process_completed_response(
     events.extend(state.acc.close_text(None));
 
     // Emit toolcall_end for each capability invocation
-    for tc in state.tool_calls.values() {
+    for tc in state.capability_invocations.values() {
         if !tc.id.is_empty() && !tc.name.is_empty() {
-            let ctx = ToolCallContext {
-                tool_call_id: Some(tc.id.clone()),
-                tool_name: Some(tc.name.clone()),
+            let ctx = CapabilityCallContext {
+                invocation_id: Some(tc.id.clone()),
+                model_primitive_name: Some(tc.name.clone()),
                 provider: Some("openai".into()),
             };
-            let arguments = parse_tool_call_arguments(Some(&tc.args), Some(&ctx));
-            events.push(StreamEvent::ToolCallEnd {
-                tool_call: crate::shared::messages::ToolCall::new(
+            let arguments = parse_capability_call_arguments(Some(&tc.args), Some(&ctx));
+            events.push(StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation: crate::shared::messages::CapabilityInvocationDraft::new(
                     tc.id.clone(),
                     tc.name.clone(),
                     arguments.clone(),
@@ -344,7 +346,7 @@ fn merge_completed_output_items(
             OutputItemType::Reasoning => merge_reasoning_item(item, state, events),
             OutputItemType::FunctionCall => merge_function_call_item(item, state),
             OutputItemType::ToolSearchCall | OutputItemType::ToolSearchOutput => {
-                debug!(item_type = ?item.item_type, "Tool search output item — transparent");
+                debug!(item_type = ?item.item_type, "ModelCapability search output item — transparent");
             }
             OutputItemType::ComputerCall => {
                 debug!("Computer call output item — not implemented");
@@ -395,7 +397,7 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
     let Some(call_id) = &item.call_id else {
         return;
     };
-    if let Some(existing) = state.tool_calls.get_mut(call_id.as_str()) {
+    if let Some(existing) = state.capability_invocations.get_mut(call_id.as_str()) {
         if let Some(arguments) = &item.arguments
             && existing.args.is_empty()
         {
@@ -407,9 +409,9 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
             existing.name.clone_from(name);
         }
     } else {
-        let _ = state.tool_calls.insert(
+        let _ = state.capability_invocations.insert(
             call_id.clone(),
-            ToolCallState {
+            CapabilityInvocationDraftState {
                 id: call_id.clone(),
                 name: item.name.clone().unwrap_or_default(),
                 args: item.arguments.clone().unwrap_or_default(),
@@ -433,15 +435,15 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
         content.push(AssistantContent::text(&state.acc.accumulated_text));
     }
 
-    for tc in state.tool_calls.values() {
+    for tc in state.capability_invocations.values() {
         if !tc.id.is_empty() && !tc.name.is_empty() {
-            let ctx = ToolCallContext {
-                tool_call_id: Some(tc.id.clone()),
-                tool_name: Some(tc.name.clone()),
+            let ctx = CapabilityCallContext {
+                invocation_id: Some(tc.id.clone()),
+                model_primitive_name: Some(tc.name.clone()),
                 provider: Some("openai".into()),
             };
-            let arguments = parse_tool_call_arguments(Some(&tc.args), Some(&ctx));
-            content.push(AssistantContent::ToolUse {
+            let arguments = parse_capability_call_arguments(Some(&tc.args), Some(&ctx));
+            content.push(AssistantContent::CapabilityInvocation {
                 id: tc.id.clone(),
                 name: tc.name.clone(),
                 arguments,
@@ -450,10 +452,10 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
         }
     }
 
-    let stop_reason = if state.tool_calls.is_empty() {
+    let stop_reason = if state.capability_invocations.is_empty() {
         "end_turn"
     } else {
-        "tool_use"
+        "capability_invocation"
     };
 
     StreamEvent::Done {
@@ -554,7 +556,7 @@ mod tests {
         let state = create_stream_state();
         assert!(state.acc.accumulated_text.is_empty());
         assert!(state.acc.accumulated_thinking.is_empty());
-        assert!(state.tool_calls.is_empty());
+        assert!(state.capability_invocations.is_empty());
         assert_eq!(state.acc.input_tokens, 0);
         assert_eq!(state.acc.output_tokens, 0);
         assert!(!state.acc.text_started);
@@ -622,20 +624,20 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0],
-            StreamEvent::ToolCallStart {
-                tool_call_id: "call_123".into(),
+            StreamEvent::CapabilityInvocationDraftStart {
+                invocation_id: "call_123".into(),
                 name: "read_file".into(),
             }
         );
-        assert!(state.tool_calls.contains_key("call_123"));
+        assert!(state.capability_invocations.contains_key("call_123"));
     }
 
     #[test]
     fn accumulates_function_call_arguments() {
         let mut state = create_stream_state();
-        state.tool_calls.insert(
+        state.capability_invocations.insert(
             "call_123".into(),
-            ToolCallState {
+            CapabilityInvocationDraftState {
                 id: "call_123".into(),
                 name: "read_file".into(),
                 args: String::new(),
@@ -650,12 +652,15 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0],
-            StreamEvent::ToolCallDelta {
-                tool_call_id: "call_123".into(),
+            StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id: "call_123".into(),
                 arguments_delta: r#"{"path":"/test.txt"}"#.into(),
             }
         );
-        assert_eq!(state.tool_calls["call_123"].args, r#"{"path":"/test.txt"}"#);
+        assert_eq!(
+            state.capability_invocations["call_123"].args,
+            r#"{"path":"/test.txt"}"#
+        );
     }
 
     #[test]
@@ -666,15 +671,24 @@ mod tests {
             &mut state,
         );
         assert_eq!(events.len(), 1);
-        assert_eq!(state.tool_calls["call_late"].args, r#"{"command":"date"}"#);
+        assert_eq!(
+            state.capability_invocations["call_late"].args,
+            r#"{"command":"date"}"#
+        );
 
         let events = process_stream_event(
             &function_call_added_event("call_late", "process::run"),
             &mut state,
         );
         assert!(events.is_empty());
-        assert_eq!(state.tool_calls["call_late"].name, "process::run");
-        assert_eq!(state.tool_calls["call_late"].args, r#"{"command":"date"}"#);
+        assert_eq!(
+            state.capability_invocations["call_late"].name,
+            "process::run"
+        );
+        assert_eq!(
+            state.capability_invocations["call_late"].args,
+            r#"{"command":"date"}"#
+        );
     }
 
     // ── Reasoning streaming ────────────────────────────────────────
@@ -821,11 +835,11 @@ mod tests {
     }
 
     #[test]
-    fn completed_emits_toolcall_end_with_tool_use_stop_reason() {
+    fn completed_emits_toolcall_end_with_capability_invocation_stop_reason() {
         let mut state = create_stream_state();
-        state.tool_calls.insert(
+        state.capability_invocations.insert(
             "call_abc".into(),
-            ToolCallState {
+            CapabilityInvocationDraftState {
                 id: "call_abc".into(),
                 name: "read_file".into(),
                 args: r#"{"path":"/test.txt"}"#.into(),
@@ -849,14 +863,14 @@ mod tests {
         let events = process_stream_event(&event, &mut state);
         let capability_completed = events
             .iter()
-            .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
+            .find(|e| matches!(e, StreamEvent::CapabilityInvocationDraftEnd { .. }));
         assert!(capability_completed.is_some());
 
         let done = events
             .iter()
             .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
-            assert_eq!(stop_reason, "tool_use");
+            assert_eq!(stop_reason, "capability_invocation");
         }
     }
 
@@ -883,12 +897,15 @@ mod tests {
         let events = process_stream_event(&event, &mut state);
         let capability_completed = events
             .iter()
-            .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
+            .find(|e| matches!(e, StreamEvent::CapabilityInvocationDraftEnd { .. }));
         assert!(capability_completed.is_some());
-        if let Some(StreamEvent::ToolCallEnd { tool_call }) = capability_completed {
-            assert_eq!(tool_call.name, "process::run");
+        if let Some(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation,
+        }) = capability_completed
+        {
+            assert_eq!(capability_invocation.name, "process::run");
             assert_eq!(
-                tool_call
+                capability_invocation
                     .arguments
                     .get("command")
                     .and_then(|value| value.as_str()),
@@ -955,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_discovers_tool_calls_not_seen_in_deltas() {
+    fn completed_discovers_capability_invocations_not_seen_in_deltas() {
         let mut state = create_stream_state();
         let event = completed_event(
             vec![ResponsesOutputItem {
@@ -974,17 +991,20 @@ mod tests {
         let events = process_stream_event(&event, &mut state);
         let capability_completed = events
             .iter()
-            .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
+            .find(|e| matches!(e, StreamEvent::CapabilityInvocationDraftEnd { .. }));
         assert!(capability_completed.is_some());
-        if let Some(StreamEvent::ToolCallEnd { tool_call }) = capability_completed {
-            assert_eq!(tool_call.name, "write_file");
+        if let Some(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation,
+        }) = capability_completed
+        {
+            assert_eq!(capability_invocation.name, "write_file");
         }
 
         let done = events
             .iter()
             .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
-            assert_eq!(stop_reason, "tool_use");
+            assert_eq!(stop_reason, "capability_invocation");
         }
     }
 
@@ -996,22 +1016,25 @@ mod tests {
             &mut state,
         );
         assert_eq!(events1.len(), 1);
-        assert!(matches!(&events1[0], StreamEvent::ToolCallStart { .. }));
+        assert!(matches!(
+            &events1[0],
+            StreamEvent::CapabilityInvocationDraftStart { .. }
+        ));
 
-        // Second OutputItemAdded for the same call_id should NOT emit ToolCallStart
+        // Second OutputItemAdded for the same call_id should NOT emit CapabilityInvocationDraftStart
         let events2 = process_stream_event(
             &function_call_added_event("call_dup", "read_file"),
             &mut state,
         );
         assert!(
             events2.is_empty(),
-            "duplicate OutputItemAdded should not emit ToolCallStart"
+            "duplicate OutputItemAdded should not emit CapabilityInvocationDraftStart"
         );
         // State should still have exactly one entry
-        assert_eq!(state.tool_calls.len(), 1);
+        assert_eq!(state.capability_invocations.len(), 1);
     }
 
-    // ── Tool search events ────────────────────────────────────────
+    // ── ModelCapability search events ────────────────────────────────────────
 
     #[test]
     fn tool_search_searching_returns_empty() {

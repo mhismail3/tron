@@ -14,7 +14,7 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
         let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let modelToolName: String
+            let modelPrimitiveName: String
             let invocationId: String
             let arguments: [String: AnyCodable]?
             let contractId: String?
@@ -33,7 +33,7 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
-                    modelToolName: modelToolName,
+                    modelPrimitiveName: modelPrimitiveName,
                     contractId: contractId,
                     implementationId: implementationId,
                     functionId: functionId,
@@ -55,18 +55,18 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
     // MARK: - Result
 
     struct Result: EventResult {
-        let modelToolName: String
+        let modelPrimitiveName: String
         let invocationId: String
         let arguments: [String: AnyCodable]?
         let identity: CapabilityIdentity
 
         init(
-            modelToolName: String,
+            modelPrimitiveName: String,
             invocationId: String,
             arguments: [String: AnyCodable]?,
             identity: CapabilityIdentity? = nil
         ) {
-            self.modelToolName = modelToolName
+            self.modelPrimitiveName = modelPrimitiveName
             self.invocationId = invocationId
             self.arguments = arguments
             self.identity = identity ?? CapabilityIdentity()
@@ -80,7 +80,7 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
                 let jsonData = try encoder.encode(args)
                 return String(data: jsonData, encoding: .utf8) ?? ""
             } catch {
-                logger.warning("Failed to format capability arguments for \(modelToolName): \(error.localizedDescription)", category: .events)
+                logger.warning("Failed to format capability arguments for \(modelPrimitiveName): \(error.localizedDescription)", category: .events)
                 return ""
             }
         }
@@ -90,7 +90,7 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
-            modelToolName: event.data.modelToolName,
+            modelPrimitiveName: event.data.modelPrimitiveName,
             invocationId: event.data.invocationId,
             arguments: event.data.arguments,
             identity: event.data.identity

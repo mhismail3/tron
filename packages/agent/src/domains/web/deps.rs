@@ -13,7 +13,7 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
-            client: deps.tool_runtime.http_client.clone(),
+            client: deps.capability_support_config.http_client.clone(),
             auth_path: deps.auth_path.clone(),
         }
     }

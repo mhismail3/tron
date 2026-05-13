@@ -3,7 +3,7 @@
 //! Spawned by the `worktree::resolve_conflicts_with_subagent capability once the
 //! user has tapped "Let Resolver Run" on the iOS conflict sub-sheet. The
 //! subagent runs inside the same worktree as the parent session with a
-//! restricted tool allowlist (`filesystem::read_file`, `filesystem::edit_file`, `filesystem::write_file`, `process::run`) and drives
+//! restricted capability allowlist (`filesystem::read_file`, `filesystem::edit_file`, `filesystem::write_file`, `process::run`) and drives
 //! the merge entirely via `git` shell commands. It is expected to
 //! complete the merge with `git commit --no-edit` (or
 //! `git rebase --continue`) before terminating.
@@ -469,12 +469,16 @@ mod tests {
         );
         // Must NOT expose the subagent capability to prevent recursive resolver
         // spawning.
-        assert!(!allowlist.iter().any(|tool| tool == "agent::spawn_subagent"));
+        assert!(
+            !allowlist
+                .iter()
+                .any(|capability| capability == "agent::spawn_subagent")
+        );
     }
 
     // ─── wait_or_cancel: wall-clock timeout tests (M9) ─────────────────
 
-    use crate::domains::capability_support::implementations::errors::ToolError;
+    use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
     use crate::domains::capability_support::implementations::traits::{JobInfo, SubagentResult};
     use async_trait::async_trait;
 
@@ -516,7 +520,7 @@ mod tests {
         fn list_active_jobs(&self, _parent_session_id: &str) -> Vec<JobInfo> {
             Vec::new()
         }
-        fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError> {
+        fn cancel_subagent(&self, session_id: &str) -> Result<(), CapabilityExecutionError> {
             self.cancel_calls.lock().push(session_id.to_owned());
             // After cancel, flip the behavior so the drain wait succeeds
             // promptly — simulates the subagent unwinding in response to
@@ -529,14 +533,14 @@ mod tests {
             session_ids: &[String],
             _mode: WaitMode,
             timeout_ms: u64,
-        ) -> Result<Vec<SubagentResult>, ToolError> {
+        ) -> Result<Vec<SubagentResult>, CapabilityExecutionError> {
             self.waits.lock().push(timeout_ms);
             if *self.should_timeout.lock() {
                 // Sleep a tick so the test wall-clock advances a little
                 // (keeps the timing ordering realistic without waiting
                 // the full `timeout_ms`).
                 tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                return Err(ToolError::Timeout { timeout_ms });
+                return Err(CapabilityExecutionError::Timeout { timeout_ms });
             }
             Ok(session_ids
                 .iter()
@@ -613,8 +617,8 @@ mod tests {
             fn list_active_jobs(&self, _: &str) -> Vec<JobInfo> {
                 Vec::new()
             }
-            fn cancel_subagent(&self, _: &str) -> Result<(), ToolError> {
-                Err(ToolError::Validation {
+            fn cancel_subagent(&self, _: &str) -> Result<(), CapabilityExecutionError> {
+                Err(CapabilityExecutionError::Validation {
                     message: "not found".into(),
                 })
             }
@@ -623,7 +627,7 @@ mod tests {
                 session_ids: &[String],
                 mode: WaitMode,
                 timeout_ms: u64,
-            ) -> Result<Vec<SubagentResult>, ToolError> {
+            ) -> Result<Vec<SubagentResult>, CapabilityExecutionError> {
                 self.inner
                     .wait_for_agents(session_ids, mode, timeout_ms)
                     .await

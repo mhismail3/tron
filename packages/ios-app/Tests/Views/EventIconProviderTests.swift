@@ -137,9 +137,9 @@ final class EventIconProviderTests: XCTestCase {
         XCTAssertEqual(EventIconProvider.color(for: .memoryRetained), .tronPurple)
     }
 
-    // MARK: - Tool Result Payload Variants
+    // MARK: - Capability Result Payload Variants
 
-    func testToolResult_errorPayload_hasXmarkIcon() {
+    func testCapabilityInvocationResult_errorPayload_hasXmarkIcon() {
         let payload: [String: AnyCodable] = ["isError": AnyCodable(true)]
         XCTAssertEqual(
             EventIconProvider.iconName(for: .capabilityInvocationCompleted, payload: payload),
@@ -147,7 +147,7 @@ final class EventIconProviderTests: XCTestCase {
         )
     }
 
-    func testToolResult_successPayload_hasCheckmarkIcon() {
+    func testCapabilityInvocationResult_successPayload_hasCheckmarkIcon() {
         let payload: [String: AnyCodable] = ["isError": AnyCodable(false)]
         XCTAssertEqual(
             EventIconProvider.iconName(for: .capabilityInvocationCompleted, payload: payload),
@@ -155,14 +155,14 @@ final class EventIconProviderTests: XCTestCase {
         )
     }
 
-    func testToolResult_noPayload_hasCheckmarkIcon() {
+    func testCapabilityInvocationResult_noPayload_hasCheckmarkIcon() {
         XCTAssertEqual(
             EventIconProvider.iconName(for: .capabilityInvocationCompleted),
             "checkmark.circle.fill"
         )
     }
 
-    func testToolResult_errorPayload_hasErrorColor() {
+    func testCapabilityInvocationResult_errorPayload_hasErrorColor() {
         let payload: [String: AnyCodable] = ["isError": AnyCodable(true)]
         XCTAssertEqual(
             EventIconProvider.color(for: .capabilityInvocationCompleted, payload: payload),
@@ -170,7 +170,7 @@ final class EventIconProviderTests: XCTestCase {
         )
     }
 
-    func testToolResult_successPayload_hasSuccessColor() {
+    func testCapabilityInvocationResult_successPayload_hasSuccessColor() {
         XCTAssertEqual(
             EventIconProvider.color(for: .capabilityInvocationCompleted),
             .tronSuccess

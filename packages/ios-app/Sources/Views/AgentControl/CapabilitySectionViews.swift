@@ -4,7 +4,7 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct CapabilitiesSection: View {
-    let toolsContent: [ToolSummaryInfo]
+    let capabilitiesContent: [CapabilitySummaryInfo]
     let tokens: Int
     @State private var isExpanded = false
 
@@ -20,7 +20,7 @@ struct CapabilitiesSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronSlate)
 
-                Text("\(toolsContent.count)")
+                Text("\(capabilitiesContent.count)")
                     .font(TronTypography.pillValue)
                     .countBadge(.tronSlate)
 
@@ -43,7 +43,7 @@ struct CapabilitiesSection: View {
             }
 
             if isExpanded {
-                CapabilityGrid(capabilities: toolsContent)
+                CapabilityGrid(capabilities: capabilitiesContent)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
             }
@@ -57,7 +57,7 @@ struct CapabilitiesSection: View {
 
 @available(iOS 26.0, *)
 struct CapabilityGrid: View {
-    let capabilities: [ToolSummaryInfo]
+    let capabilities: [CapabilitySummaryInfo]
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
 
@@ -72,11 +72,11 @@ struct CapabilityGrid: View {
 
 @available(iOS 26.0, *)
 struct CapabilityGridItem: View {
-    let capability: ToolSummaryInfo
+    let capability: CapabilitySummaryInfo
 
     private var identity: CapabilityIdentity {
         CapabilityIdentity(
-            modelToolName: capability.name,
+            modelPrimitiveName: capability.name,
             contractId: capability.name.contains("::") ? capability.name : nil,
             implementationId: nil,
             functionId: capability.name.contains("::") ? capability.name : nil,

@@ -12,7 +12,7 @@ use std::sync::Arc;
 ///
 /// The optional `extra_metadata` object is merged into the payload (top-level
 /// fields like `messageKind`, `confirmationDecision`, `answerCount` used by
-/// interactive-tool handlers so iOS can render chips from structured data).
+/// interactive capability handlers so iOS can render chips from structured data).
 pub fn build_user_event_payload(
     prompt: &str,
     images: Option<&[Value]>,

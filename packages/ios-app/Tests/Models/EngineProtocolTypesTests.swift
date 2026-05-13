@@ -165,7 +165,7 @@ final class SessionTypesTests: XCTestCase {
                 {
                     "id": "toolu_123",
                     "identity": {
-                        "modelToolName": "execute",
+                        "modelPrimitiveName": "execute",
                         "contractId": "filesystem::read_file",
                         "functionId": "filesystem::read_file"
                     },

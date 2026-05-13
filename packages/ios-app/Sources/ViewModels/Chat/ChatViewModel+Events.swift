@@ -17,10 +17,10 @@ extension ChatViewModel: CompactionContext, MemoryContext {
 extension ChatViewModel {
 
     func handleTextDelta(_ delta: String) {
-        // Skip text if AskUserQuestion was called in this turn
-        // (AskUserQuestion should be the final visible entry when called)
-        guard !askUserQuestionState.calledInTurn else {
-            logger.verbose("Skipping text delta - AskUserQuestion was called in this turn", category: .events)
+        // Skip text if UserInteraction was called in this turn
+        // (UserInteraction should be the final visible entry when called)
+        guard !userInteractionState.calledInTurn else {
+            logger.verbose("Skipping text delta - UserInteraction was called in this turn", category: .events)
             return
         }
 
@@ -77,12 +77,12 @@ extension ChatViewModel {
     }
 
     func handleCapabilityInvocationGenerating(_ pluginResult: CapabilityInvocationGeneratingPlugin.Result) {
-        toolEventCoordinator.handleCapabilityInvocationGenerating(pluginResult, context: self)
+        capabilityInvocationCoordinator.handleCapabilityInvocationGenerating(pluginResult, context: self)
     }
 
     func handleCapabilityInvocationStarted(_ pluginResult: CapabilityInvocationStartedPlugin.Result) {
-        // Delegate directly to coordinator (tool classification absorbed)
-        toolEventCoordinator.handleCapabilityInvocationStarted(pluginResult, context: self)
+        // Delegate directly to coordinator (capability classification absorbed)
+        capabilityInvocationCoordinator.handleCapabilityInvocationStarted(pluginResult, context: self)
     }
 
     func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result) {
@@ -112,14 +112,14 @@ extension ChatViewModel {
 
     func handleCapabilityInvocationCompleted(_ pluginResult: CapabilityInvocationCompletedPlugin.Result) {
         // Delegate directly to coordinator
-        toolEventCoordinator.handleCapabilityInvocationCompleted(pluginResult, context: self)
+        capabilityInvocationCoordinator.handleCapabilityInvocationCompleted(pluginResult, context: self)
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
         // A turn starting means the agent is actively processing.
         // Also clears any stale postProcessing state from a previous cycle.
         agentPhase = .processing
-        runningToolCount = 0
+        runningCapabilityInvocationCount = 0
         pullUpPanelState.awaitingSuggestions = false
 
         if isCompacting {
@@ -205,7 +205,7 @@ extension ChatViewModel {
         compactionInProgressMessageId = nil
         isRetaining = false
         memoryRetainInProgressMessageId = nil
-        askUserQuestionState.clearAll()
+        userInteractionState.clearAll()
         engineApprovalState.clearAll()
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
@@ -309,7 +309,7 @@ extension ChatViewModel {
     private func resetToIdleState(errorPreview: String) {
         uiUpdateQueue.flush()
         uiUpdateQueue.reset()
-        animationCoordinator.resetToolState()
+        animationCoordinator.resetCapabilityState()
         streamingManager.reset()
 
         agentPhase = .idle
@@ -317,7 +317,7 @@ extension ChatViewModel {
         compactionInProgressMessageId = nil
         isRetaining = false
         memoryRetainInProgressMessageId = nil
-        askUserQuestionState.clearAll()
+        userInteractionState.clearAll()
         engineApprovalState.clearAll()
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(

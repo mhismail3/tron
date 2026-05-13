@@ -49,7 +49,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .visibility(VisibilityScope::System)
         .domain_module("capability")
         .request_schema(search_request_schema())
-        .response_schema(tool_result_schema())
+        .response_schema(capability_result_schema())
         .build()?,
         CapabilityContract::new(
             INSPECT_FUNCTION_ID,
@@ -61,7 +61,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .visibility(VisibilityScope::System)
         .domain_module("capability")
         .request_schema(inspect_request_schema())
-        .response_schema(tool_result_schema())
+        .response_schema(capability_result_schema())
         .build()?,
         CapabilityContract::new(
             EXECUTE_FUNCTION_ID,
@@ -73,7 +73,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .visibility(VisibilityScope::System)
         .domain_module("capability")
         .request_schema(execute_request_schema())
-        .response_schema(tool_result_schema())
+        .response_schema(capability_result_schema())
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .build()?,
         admin_read_contract(
@@ -225,10 +225,10 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
     match function_id {
         SEARCH_FUNCTION_ID => json!({
             "capabilityPrimitive": true,
-            "modelToolName": "search",
-            "toolOrder": 10,
-            "toolExecutionMode": {"kind": "serialized", "group": "capability"},
-            "toolSchema": {
+            "modelPrimitiveName": "search",
+            "capabilityOrder": 10,
+            "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
+            "capabilitySchema": {
                 "name": "search",
                 "description": "Search the live Tron capability catalog for contracts, implementations, workers, plugins, examples, and docs visible to this session.",
                 "parameters": search_request_schema()
@@ -236,10 +236,10 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
         }),
         INSPECT_FUNCTION_ID => json!({
             "capabilityPrimitive": true,
-            "modelToolName": "inspect",
-            "toolOrder": 20,
-            "toolExecutionMode": {"kind": "serialized", "group": "capability"},
-            "toolSchema": {
+            "modelPrimitiveName": "inspect",
+            "capabilityOrder": 20,
+            "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
+            "capabilitySchema": {
                 "name": "inspect",
                 "description": "Inspect one capability contract or implementation, including schemas, authority, risk, provenance, idempotency, and expected revision.",
                 "parameters": inspect_request_schema()
@@ -247,10 +247,10 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
         }),
         EXECUTE_FUNCTION_ID => json!({
             "capabilityPrimitive": true,
-            "modelToolName": "execute",
-            "toolOrder": 30,
-            "toolExecutionMode": {"kind": "serialized", "group": "capability"},
-            "toolSchema": {
+            "modelPrimitiveName": "execute",
+            "capabilityOrder": 30,
+            "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
+            "capabilitySchema": {
                 "name": "execute",
                 "description": "Execute a live capability by contract, implementation, capability, or function id. Inspect first for mutating or elevated-risk work.",
                 "parameters": execute_request_schema()
@@ -540,7 +540,7 @@ mod tests {
     }
 }
 
-fn tool_result_schema() -> serde_json::Value {
+fn capability_result_schema() -> serde_json::Value {
     json!({
         "type": "object",
         "additionalProperties": true,

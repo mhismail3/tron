@@ -59,8 +59,8 @@ enum TronSpacing {
     /// Content area item spacing
     static let contentSpacing: CGFloat = 8
 
-    /// Tool stagger item spacing
-    static let toolSpacing: CGFloat = 8
+    /// Capability stagger item spacing
+    static let capabilitySpacing: CGFloat = 8
 
     // MARK: - Corner Radii
 

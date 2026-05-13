@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Tool Code Block
+// MARK: - Capability Code Block
 
 /// Reusable line-numbered code display shared by source and capability views.
 ///
@@ -18,7 +18,7 @@ struct CapabilityCodeBlock: View {
     /// Additional content to display between the header and the code block (e.g. range text).
     var headerNote: String? = nil
 
-    /// Whether the content wraps (Write tool) or scrolls horizontally (Read tool).
+    /// Whether the content wraps (Write capability) or scrolls horizontally (Read capability).
     var wrapsContent: Bool = false
 
     private var lineNumWidth: CGFloat {

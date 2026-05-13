@@ -93,16 +93,16 @@ final class SessionStateInvariantsTests: XCTestCase {
     func testCleanUpStreamingStateClearsTurnTracking() {
         let vm = makeViewModel("sess-clear-\(UUID().uuidString)")
         vm.thinkingMessageId = UUID()
-        let toolId = UUID()
-        vm.currentToolMessages[toolId] = ChatMessage(
-            id: toolId,
+        let capabilityMessageId = UUID()
+        vm.currentCapabilityInvocationMessages[capabilityMessageId] = ChatMessage(
+            id: capabilityMessageId,
             role: .assistant,
             content: .text("")
         )
         vm.currentTurnCapabilityInvocations.append(
             CapabilityInvocationRecord(
                 invocationId: "t",
-                modelToolName: "Bash",
+                modelPrimitiveName: "execute",
                 arguments: ""
             )
         )
@@ -110,7 +110,7 @@ final class SessionStateInvariantsTests: XCTestCase {
         vm.cleanUpStreamingState()
 
         XCTAssertNil(vm.thinkingMessageId)
-        XCTAssertTrue(vm.currentToolMessages.isEmpty)
+        XCTAssertTrue(vm.currentCapabilityInvocationMessages.isEmpty)
         XCTAssertTrue(vm.currentTurnCapabilityInvocations.isEmpty)
     }
 
@@ -120,23 +120,23 @@ final class SessionStateInvariantsTests: XCTestCase {
     func testCompletedReconstructionReconcilesTransientLiveState() {
         let vm = makeViewModel("sess-reconcile-\(UUID().uuidString)")
         vm.agentPhase = .postProcessing
-        vm.runningToolCount = 2
+        vm.runningCapabilityInvocationCount = 2
         vm.pullUpPanelState.awaitingSuggestions = true
         vm.postProcessingTimeoutTask = Task { try? await Task.sleep(for: .seconds(30)) }
         let thinking = ChatMessage.thinking("still thinking", isStreaming: true)
         vm.appendToMessages(thinking)
         vm.thinkingMessageId = thinking.id
-        let toolId = UUID()
-        vm.currentToolMessages[toolId] = ChatMessage(id: toolId, role: .assistant, content: .text(""))
-        vm.currentTurnCapabilityInvocations.append(CapabilityInvocationRecord(invocationId: "t", modelToolName: "Bash", arguments: "{}"))
+        let capabilityMessageId = UUID()
+        vm.currentCapabilityInvocationMessages[capabilityMessageId] = ChatMessage(id: capabilityMessageId, role: .assistant, content: .text(""))
+        vm.currentTurnCapabilityInvocations.append(CapabilityInvocationRecord(invocationId: "t", modelPrimitiveName: "execute", arguments: "{}"))
 
         vm.reconcileCompletedReconstructionState()
 
         XCTAssertEqual(vm.agentPhase, .idle)
-        XCTAssertEqual(vm.runningToolCount, 0)
+        XCTAssertEqual(vm.runningCapabilityInvocationCount, 0)
         XCTAssertFalse(vm.pullUpPanelState.awaitingSuggestions)
         XCTAssertNil(vm.postProcessingTimeoutTask)
-        XCTAssertTrue(vm.currentToolMessages.isEmpty)
+        XCTAssertTrue(vm.currentCapabilityInvocationMessages.isEmpty)
         XCTAssertTrue(vm.currentTurnCapabilityInvocations.isEmpty)
         guard case .thinking(_, _, let isStreaming) = vm.messages[0].content else {
             return XCTFail("expected thinking message")

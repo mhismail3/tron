@@ -24,7 +24,7 @@ use crate::domains::model::providers::provider::{
 use crate::domains::session::context::ContextArtifactsService;
 use crate::domains::session::event_store::EventStore;
 use crate::domains::skills::registry::SkillRegistry;
-use crate::shared::server::context::{AgentDeps, ServerRuntimeContext, ToolRuntimeConfig};
+use crate::shared::server::context::{AgentDeps, CapabilitySupportConfig, ServerRuntimeContext};
 
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -143,8 +143,8 @@ pub fn make_test_agent_deps() -> AgentDeps {
     }
 }
 
-pub(crate) fn make_test_tool_runtime_config() -> ToolRuntimeConfig {
-    ToolRuntimeConfig {
+pub(crate) fn make_test_capability_support_config_config() -> CapabilitySupportConfig {
+    CapabilitySupportConfig {
         http_client: reqwest::Client::new(),
         sandbox_settings: crate::domains::settings::ProcessSandboxSettings::default(),
         computer_use_settings: crate::domains::settings::ComputerUseSettings::default(),
@@ -181,7 +181,7 @@ pub fn make_test_context() -> ServerRuntimeContext {
         settings_path,
         profile_runtime,
         agent_deps: None,
-        tool_runtime: make_test_tool_runtime_config(),
+        capability_support_config: make_test_capability_support_config_config(),
         server_start_time: Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,

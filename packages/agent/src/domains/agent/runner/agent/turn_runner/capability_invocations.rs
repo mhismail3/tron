@@ -3,33 +3,33 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::domains::capability_support::implementations::capability_surface::{
-    CapabilitySurfacePolicy, ResolvedToolSurface,
+    CapabilitySurfacePolicy, ResolvedCapabilitySurface,
 };
 use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::shared::events::ActivatedRuleInfo;
-use crate::shared::messages::{Message, ToolResultMessageContent};
+use crate::shared::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
+use crate::domains::agent::runner::agent::capability_invocation_executor;
 use crate::domains::agent::runner::agent::compaction_handler::CompactionHandler;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
-use crate::domains::agent::runner::agent::tool_executor;
 use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::agent::runner::orchestrator::event_persister::EventPersister;
-use crate::domains::agent::runner::orchestrator::tool_abort_registry::ToolAbortRegistry;
-use crate::domains::agent::runner::types::{StreamResult, ToolExecutionResult};
+use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
+use crate::domains::agent::runner::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::session::event_store::EventType;
 
 use super::persistence;
 
-pub(super) struct ToolPhaseParams<'a> {
+pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
     pub stream_result: &'a StreamResult,
     pub context_manager: &'a mut ContextManager,
-    pub tool_surface: &'a ResolvedToolSurface,
+    pub capability_surface: &'a ResolvedCapabilitySurface,
     pub capability_policy: &'a CapabilitySurfacePolicy,
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     pub hooks: &'a Option<Arc<HookEngine>>,
@@ -58,8 +58,8 @@ pub(super) struct ToolPhaseParams<'a> {
     pub provider_type: crate::shared::messages::Provider,
     pub execution_spec: Option<&'a crate::shared::profile::AgentExecutionSpec>,
     pub profile_spec_hash: Option<&'a str>,
-    /// Optional per-tool abort registry (see `TurnParams::tool_abort_registry`).
-    pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
+    /// Optional per-invocation abort registry (see `TurnParams::invocation_abort_registry`).
+    pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
     /// Optional engine host used to route model-facing capability primitives.
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
     /// Stable run id used for runtime capability-invocation idempotency.
@@ -69,20 +69,20 @@ pub(super) struct ToolPhaseParams<'a> {
 }
 
 #[derive(Default)]
-pub(super) struct ToolPhaseOutcome {
-    pub tool_calls_executed: usize,
+pub(super) struct CapabilityInvocationPhaseOutcome {
+    pub capability_invocations_executed: usize,
     pub stop_turn_requested: bool,
     pub activated_rules: Vec<ActivatedRuleInfo>,
 }
 
 fn target_identity_json(
-    tool_name: &str,
-    tool_surface: &ResolvedToolSurface,
+    model_primitive_name: &str,
+    capability_surface: &ResolvedCapabilitySurface,
     trace_id: Option<&crate::engine::TraceId>,
     parent_invocation_id: Option<&crate::engine::InvocationId>,
 ) -> Value {
-    let Some(target) = tool_surface.targets_by_name.get(tool_name) else {
-        return json!({ "modelToolName": tool_name });
+    let Some(target) = capability_surface.targets_by_name.get(model_primitive_name) else {
+        return json!({ "modelPrimitiveName": model_primitive_name });
     };
     let function = &target.function;
     let metadata_string = |key: &str| {
@@ -94,7 +94,7 @@ fn target_identity_json(
     };
     let function_id = function.id.as_str().to_owned();
     json!({
-        "modelToolName": tool_name,
+        "modelPrimitiveName": model_primitive_name,
         "contractId": metadata_string("contractId")
             .or_else(|| metadata_string("capabilityContractId"))
             .unwrap_or_else(|| function_id.clone()),
@@ -104,7 +104,7 @@ fn target_identity_json(
         "functionId": function_id,
         "pluginId": metadata_string("pluginId"),
         "workerId": function.owner_worker.as_str(),
-        "catalogRevision": tool_surface.catalog_revision.0,
+        "catalogRevision": capability_surface.catalog_revision.0,
         "trustTier": metadata_string("trustTier"),
         "riskLevel": format!("{:?}", function.risk_level),
         "effectClass": format!("{:?}", function.effect_class),
@@ -114,9 +114,9 @@ fn target_identity_json(
 }
 
 fn result_identity_json(
-    tool_name: &str,
+    model_primitive_name: &str,
     base_identity: Value,
-    result: &ToolExecutionResult,
+    result: &CapabilityInvocationExecutionResult,
 ) -> Value {
     let mut identity = base_identity.as_object().cloned().unwrap_or_default();
     let Some(details) = result.result.details.as_ref() else {
@@ -159,13 +159,15 @@ fn result_identity_json(
     {
         identity.insert("pluginId".to_owned(), plugin.clone());
     }
-    identity.insert("modelToolName".to_owned(), json!(tool_name));
+    identity.insert("modelPrimitiveName".to_owned(), json!(model_primitive_name));
     Value::Object(identity)
 }
 
-pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhaseOutcome {
-    if params.stream_result.tool_calls.is_empty() {
-        return ToolPhaseOutcome::default();
+pub(super) async fn execute_capability_invocation_phase(
+    params: CapabilityInvocationPhaseParams<'_>,
+) -> CapabilityInvocationPhaseOutcome {
+    if params.stream_result.capability_invocations.is_empty() {
+        return CapabilityInvocationPhaseOutcome::default();
     }
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
@@ -175,26 +177,26 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
     // from session history. Synchronous append surfaces any DB failure here
     // instead of deferring it to a background warning.
     let mut persist_failed = false;
-    for tool_call in &params.stream_result.tool_calls {
+    for capability_invocation in &params.stream_result.capability_invocations {
         if let Some(persister) = params.persister {
             let seq = params
                 .sequence_counter
                 .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
             let mut payload = json!({
-                "toolCallId": tool_call.id,
-                "name": tool_call.name,
-                "arguments": tool_call.arguments,
+                "invocationId": capability_invocation.id,
+                "name": capability_invocation.name,
+                "arguments": capability_invocation.arguments,
                 "turn": params.turn,
                 "runId": params.run_id,
                 "traceId": params.trace_id.map(|id| id.as_str()),
                 "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                "toolCatalogRevision": params.tool_surface.catalog_revision.0,
+                "catalogRevision": params.capability_surface.catalog_revision.0,
             });
             if let (Some(payload), Some(identity)) = (
                 payload.as_object_mut(),
                 target_identity_json(
-                    &tool_call.name,
-                    params.tool_surface,
+                    &capability_invocation.name,
+                    params.capability_surface,
                     params.trace_id,
                     params.parent_invocation_id,
                 )
@@ -215,7 +217,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                 warn!(
                     params.session_id,
                     turn = params.turn,
-                    tool_call_id = %tool_call.id,
+                    invocation_id = %capability_invocation.id,
                     error = %error,
                     "failed to persist capability-invocation event; skipping broadcast + execution"
                 );
@@ -226,24 +228,27 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
     }
 
     if persist_failed {
-        // Don't execute tools whose call events failed to persist; iOS
+        // Don't execute capabilities whose call events failed to persist; iOS
         // would see no history of them, and the agent would see results
         // for calls that don't exist. Surface the failure upward.
-        return ToolPhaseOutcome::default();
+        return CapabilityInvocationPhaseOutcome::default();
     }
 
     persistence::emit_capability_invocation_batch(
         params.emitter,
         params.session_id,
-        &params.stream_result.tool_calls,
+        &params.stream_result.capability_invocations,
         params.sequence_counter,
         params.trace_id,
         params.parent_invocation_id,
     );
 
-    let waves = build_execution_waves(&params.stream_result.tool_calls, params.tool_surface);
-    let mut results: Vec<Option<ToolExecutionResult>> =
-        vec![None; params.stream_result.tool_calls.len()];
+    let waves = build_execution_waves(
+        &params.stream_result.capability_invocations,
+        params.capability_surface,
+    );
+    let mut results: Vec<Option<CapabilityInvocationExecutionResult>> =
+        vec![None; params.stream_result.capability_invocations.len()];
 
     for wave in &waves {
         if params.cancel.is_cancelled() {
@@ -253,39 +258,40 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         let futures: Vec<_> = wave
             .iter()
             .map(|&idx| {
-                let tool_call = &params.stream_result.tool_calls[idx];
+                let capability_invocation = &params.stream_result.capability_invocations[idx];
                 let working_dir = &working_dir;
-                let tool_ctx = tool_executor::ToolExecutionContext {
-                    tool_surface: params.tool_surface,
-                    capability_policy: params.capability_policy,
-                    guardrails: params.guardrails,
-                    hooks: params.hooks,
-                    emitter: params.emitter,
-                    cancel: params.cancel,
-                    subagent_depth: params.subagent_depth,
-                    subagent_max_depth: params.subagent_max_depth,
-                    workspace_id: params.workspace_id,
-                    process_manager: params.process_manager,
-                    job_manager: params.job_manager,
-                    output_buffer_registry: params.output_buffer_registry,
-                    sequence_counter: params.sequence_counter,
-                    provider_type: params.provider_type,
-                    execution_spec: params.execution_spec,
-                    profile_spec_hash: params.profile_spec_hash,
-                    event_persister: params.persister_arc,
-                    turn: i64::from(params.turn),
-                    tool_abort_registry: params.tool_abort_registry,
-                    engine_host: params.engine_host,
-                    run_id: params.run_id,
-                    trace_id: params.trace_id,
-                    parent_invocation_id: params.parent_invocation_id,
-                };
+                let capability_ctx =
+                    capability_invocation_executor::CapabilityInvocationExecutionContext {
+                        capability_surface: params.capability_surface,
+                        capability_policy: params.capability_policy,
+                        guardrails: params.guardrails,
+                        hooks: params.hooks,
+                        emitter: params.emitter,
+                        cancel: params.cancel,
+                        subagent_depth: params.subagent_depth,
+                        subagent_max_depth: params.subagent_max_depth,
+                        workspace_id: params.workspace_id,
+                        process_manager: params.process_manager,
+                        job_manager: params.job_manager,
+                        output_buffer_registry: params.output_buffer_registry,
+                        sequence_counter: params.sequence_counter,
+                        provider_type: params.provider_type,
+                        execution_spec: params.execution_spec,
+                        profile_spec_hash: params.profile_spec_hash,
+                        event_persister: params.persister_arc,
+                        turn: i64::from(params.turn),
+                        invocation_abort_registry: params.invocation_abort_registry,
+                        engine_host: params.engine_host,
+                        run_id: params.run_id,
+                        trace_id: params.trace_id,
+                        parent_invocation_id: params.parent_invocation_id,
+                    };
                 async move {
-                    let result = tool_executor::execute_tool(
-                        tool_call,
+                    let result = capability_invocation_executor::execute_capability_invocation(
+                        capability_invocation,
                         params.session_id,
                         working_dir,
-                        &tool_ctx,
+                        &capability_ctx,
                     )
                     .await;
 
@@ -298,9 +304,9 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     // matching row in session history.
                     //
                     // The broadcast-vs-persist ordering (broadcast is
-                    // inside tool_executor, persist is here) is not
+                    // inside capability_invocation_executor, persist is here) is not
                     // fully inverted — fully inverting would require
-                    // plumbing the persister into tool_executor.
+                    // plumbing the persister into capability_invocation_executor.
                     // Switching to sync persist makes the failure
                     // visible while keeping the change surgical.
                     if let Some(persister) = params.persister {
@@ -310,14 +316,14 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                             .sequence_counter
                             .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                         let base_identity = target_identity_json(
-                            &tool_call.name,
-                            params.tool_surface,
+                            &capability_invocation.name,
+                            params.capability_surface,
                             params.trace_id,
                             params.parent_invocation_id,
                         );
                         let mut payload = json!({
-                            "toolCallId": tool_call.id,
-                            "name": tool_call.name,
+                            "invocationId": capability_invocation.id,
+                            "name": capability_invocation.name,
                             "content": result_text,
                             "isError": is_error,
                             "duration": result.duration_ms,
@@ -325,13 +331,17 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                             "runId": params.run_id,
                             "traceId": params.trace_id.map(|id| id.as_str()),
                             "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                            "toolCatalogRevision": params.tool_surface.catalog_revision.0,
+                            "catalogRevision": params.capability_surface.catalog_revision.0,
                         });
                         if let (Some(payload), Some(identity)) = (
                             payload.as_object_mut(),
-                            result_identity_json(&tool_call.name, base_identity, &result)
-                                .as_object()
-                                .cloned(),
+                            result_identity_json(
+                                &capability_invocation.name,
+                                base_identity,
+                                &result,
+                            )
+                            .as_object()
+                            .cloned(),
                         ) {
                             payload.extend(identity);
                         }
@@ -347,7 +357,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                             error!(
                                 params.session_id,
                                 turn = params.turn,
-                                tool_call_id = %tool_call.id,
+                                invocation_id = %capability_invocation.id,
                                 error = %error,
                                 "failed to persist capability-result event"
                             );
@@ -364,42 +374,49 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         }
     }
 
-    process_tool_results(results, &working_dir, params).await
+    process_capability_results(results, &working_dir, params).await
 }
 
-async fn process_tool_results(
-    mut results: Vec<Option<ToolExecutionResult>>,
+async fn process_capability_results(
+    mut results: Vec<Option<CapabilityInvocationExecutionResult>>,
     working_dir: &str,
-    params: ToolPhaseParams<'_>,
-) -> ToolPhaseOutcome {
-    let mut outcome = ToolPhaseOutcome {
+    params: CapabilityInvocationPhaseParams<'_>,
+) -> CapabilityInvocationPhaseOutcome {
+    let mut outcome = CapabilityInvocationPhaseOutcome {
         activated_rules: Vec::with_capacity(8),
         ..Default::default()
     };
 
-    for (idx, tool_call) in params.stream_result.tool_calls.iter().enumerate() {
+    for (idx, capability_invocation) in params
+        .stream_result
+        .capability_invocations
+        .iter()
+        .enumerate()
+    {
         let Some(exec_result) = results[idx].take() else {
             continue;
         };
-        outcome.tool_calls_executed += 1;
+        outcome.capability_invocations_executed += 1;
 
         let result_content = extract_result_content(&exec_result);
         let is_error = exec_result.result.is_error.unwrap_or(false);
 
-        // capability.invocation.completed persistence is handled per-tool inside the execution future
+        // capability.invocation.completed persistence is handled per-invocation inside the execution future
         // (before join_all) so the DB reflects completion immediately.
 
         // Add full content (including images) to LLM conversation context
-        params.context_manager.add_message(Message::ToolResult {
-            tool_call_id: tool_call.id.clone(),
-            content: result_content,
-            is_error: if is_error { Some(true) } else { None },
-        });
+        params
+            .context_manager
+            .add_message(Message::CapabilityResult {
+                invocation_id: capability_invocation.id.clone(),
+                content: result_content,
+                is_error: if is_error { Some(true) } else { None },
+            });
 
         let touched_paths =
             crate::domains::agent::runner::context::path_extractor::extract_touched_paths(
-                &tool_call.name,
-                &tool_call.arguments,
+                &capability_invocation.name,
+                &capability_invocation.arguments,
                 std::path::Path::new(working_dir),
                 std::path::Path::new(working_dir),
             );
@@ -409,15 +426,15 @@ async fn process_tool_results(
                 .extend(params.context_manager.touch_file_path(path));
         }
 
-        if tool_call.name == "execute"
+        if capability_invocation.name == "execute"
             && matches!(
-                tool_call
+                capability_invocation
                     .arguments
                     .get("contractId")
                     .and_then(serde_json::Value::as_str),
                 Some("process::run")
             )
-            && let Some(command) = tool_call
+            && let Some(command) = capability_invocation
                 .arguments
                 .get("payload")
                 .and_then(serde_json::Value::as_object)
@@ -437,17 +454,17 @@ async fn process_tool_results(
 
 /// Build execution waves from capability invocations, respecting serialization groups.
 ///
-/// - Parallel tools all go in wave 0
-/// - Serialized tools in the same group spread across ascending waves
-/// - Returns `Vec<Vec<usize>>` where each inner vec is indices into `tool_calls`
+/// - Parallel capabilities all go in wave 0
+/// - Serialized capabilities in the same group spread across ascending waves
+/// - Returns `Vec<Vec<usize>>` where each inner vec is indices into `capability_invocations`
 pub(super) fn build_execution_waves(
-    tool_calls: &[crate::shared::messages::ToolCall],
-    tool_surface: &ResolvedToolSurface,
+    capability_invocations: &[crate::shared::messages::CapabilityInvocationDraft],
+    capability_surface: &ResolvedCapabilitySurface,
 ) -> Vec<Vec<usize>> {
-    let modes: Vec<_> = tool_calls
+    let modes: Vec<_> = capability_invocations
         .iter()
         .map(|tc| {
-            tool_surface
+            capability_surface
                 .targets_by_name
                 .get(&tc.name)
                 .map_or(ExecutionMode::Parallel, |target| {
@@ -457,7 +474,7 @@ pub(super) fn build_execution_waves(
         .collect();
 
     if modes.iter().all(|m| matches!(m, ExecutionMode::Parallel)) {
-        return vec![(0..tool_calls.len()).collect()];
+        return vec![(0..capability_invocations.len()).collect()];
     }
 
     let mut waves: Vec<Vec<usize>> = Vec::with_capacity(4);
@@ -483,14 +500,16 @@ pub(super) fn build_execution_waves(
 }
 
 /// Extract text-only content from a capability result (for event persistence — no images in DB).
-fn extract_result_text(exec_result: &ToolExecutionResult) -> String {
+fn extract_result_text(exec_result: &CapabilityInvocationExecutionResult) -> String {
     match &exec_result.result.content {
-        crate::shared::tools::ToolResultBody::Text(text) => text.clone(),
-        crate::shared::tools::ToolResultBody::Blocks(blocks) => blocks
+        crate::shared::model_capabilities::CapabilityResultBody::Text(text) => text.clone(),
+        crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| match block {
-                crate::shared::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                crate::shared::content::ToolResultContent::Image { .. } => None,
+                crate::shared::content::CapabilityResultContent::Text { text } => {
+                    Some(text.as_str())
+                }
+                crate::shared::content::CapabilityResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -501,29 +520,34 @@ fn extract_result_text(exec_result: &ToolExecutionResult) -> String {
 ///
 /// If no images are present, flattens to `Text` for efficiency.
 /// When images exist, returns `Blocks` so the LLM can see them.
-fn extract_result_content(exec_result: &ToolExecutionResult) -> ToolResultMessageContent {
+fn extract_result_content(
+    exec_result: &CapabilityInvocationExecutionResult,
+) -> CapabilityResultMessageContent {
     match &exec_result.result.content {
-        crate::shared::tools::ToolResultBody::Text(text) => {
-            ToolResultMessageContent::Text(text.clone())
+        crate::shared::model_capabilities::CapabilityResultBody::Text(text) => {
+            CapabilityResultMessageContent::Text(text.clone())
         }
-        crate::shared::tools::ToolResultBody::Blocks(blocks) => {
-            let has_images = blocks
-                .iter()
-                .any(|b| matches!(b, crate::shared::content::ToolResultContent::Image { .. }));
+        crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
+            let has_images = blocks.iter().any(|b| {
+                matches!(
+                    b,
+                    crate::shared::content::CapabilityResultContent::Image { .. }
+                )
+            });
             if has_images {
-                ToolResultMessageContent::Blocks(blocks.clone())
+                CapabilityResultMessageContent::Blocks(blocks.clone())
             } else {
                 let text = blocks
                     .iter()
                     .filter_map(|b| match b {
-                        crate::shared::content::ToolResultContent::Text { text } => {
+                        crate::shared::content::CapabilityResultContent::Text { text } => {
                             Some(text.as_str())
                         }
-                        crate::shared::content::ToolResultContent::Image { .. } => None,
+                        crate::shared::content::CapabilityResultContent::Image { .. } => None,
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                ToolResultMessageContent::Text(text)
+                CapabilityResultMessageContent::Text(text)
             }
         }
     }
@@ -532,13 +556,13 @@ fn extract_result_content(exec_result: &ToolExecutionResult) -> ToolResultMessag
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::agent::runner::types::ToolExecutionResult;
-    use crate::shared::content::ToolResultContent;
-    use crate::shared::tools::{CapabilityResult, ToolResultBody};
+    use crate::domains::agent::runner::types::CapabilityInvocationExecutionResult;
+    use crate::shared::content::CapabilityResultContent;
+    use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 
-    fn make_exec_result(content: ToolResultBody) -> ToolExecutionResult {
-        ToolExecutionResult {
-            tool_call_id: "test".into(),
+    fn make_exec_result(content: CapabilityResultBody) -> CapabilityInvocationExecutionResult {
+        CapabilityInvocationExecutionResult {
+            invocation_id: "test".into(),
             result: CapabilityResult {
                 content,
                 details: None,
@@ -557,55 +581,56 @@ mod tests {
 
     #[test]
     fn extract_result_content_text_body_passthrough() {
-        let exec = make_exec_result(ToolResultBody::Text("hello".into()));
+        let exec = make_exec_result(CapabilityResultBody::Text("hello".into()));
         let content = extract_result_content(&exec);
-        assert!(matches!(content, ToolResultMessageContent::Text(ref t) if t == "hello"));
+        assert!(matches!(content, CapabilityResultMessageContent::Text(ref t) if t == "hello"));
     }
 
     #[test]
     fn extract_result_content_text_blocks_flatten() {
-        let exec = make_exec_result(ToolResultBody::Blocks(vec![
-            ToolResultContent::text("line 1"),
-            ToolResultContent::text("line 2"),
+        let exec = make_exec_result(CapabilityResultBody::Blocks(vec![
+            CapabilityResultContent::text("line 1"),
+            CapabilityResultContent::text("line 2"),
         ]));
         let content = extract_result_content(&exec);
-        assert!(matches!(content, ToolResultMessageContent::Text(ref t) if t == "line 1\nline 2"));
+        assert!(
+            matches!(content, CapabilityResultMessageContent::Text(ref t) if t == "line 1\nline 2")
+        );
     }
 
     #[test]
     fn extract_result_content_mixed_blocks_preserve() {
-        let exec = make_exec_result(ToolResultBody::Blocks(vec![
-            ToolResultContent::text("screenshot taken"),
-            ToolResultContent::image("base64data", "image/png"),
+        let exec = make_exec_result(CapabilityResultBody::Blocks(vec![
+            CapabilityResultContent::text("screenshot taken"),
+            CapabilityResultContent::image("base64data", "image/png"),
         ]));
         let content = extract_result_content(&exec);
         match content {
-            ToolResultMessageContent::Blocks(blocks) => {
+            CapabilityResultMessageContent::Blocks(blocks) => {
                 assert_eq!(blocks.len(), 2);
                 assert!(
-                    matches!(&blocks[0], ToolResultContent::Text { text } if text == "screenshot taken")
+                    matches!(&blocks[0], CapabilityResultContent::Text { text } if text == "screenshot taken")
                 );
                 assert!(
-                    matches!(&blocks[1], ToolResultContent::Image { data, mime_type } if data == "base64data" && mime_type == "image/png")
+                    matches!(&blocks[1], CapabilityResultContent::Image { data, mime_type } if data == "base64data" && mime_type == "image/png")
                 );
             }
-            ToolResultMessageContent::Text(_) => panic!("expected Blocks variant"),
+            CapabilityResultMessageContent::Text(_) => panic!("expected Blocks variant"),
         }
     }
 
     #[test]
     fn extract_result_content_image_only_blocks() {
-        let exec = make_exec_result(ToolResultBody::Blocks(vec![ToolResultContent::image(
-            "imgdata",
-            "image/jpeg",
-        )]));
+        let exec = make_exec_result(CapabilityResultBody::Blocks(vec![
+            CapabilityResultContent::image("imgdata", "image/jpeg"),
+        ]));
         let content = extract_result_content(&exec);
         match content {
-            ToolResultMessageContent::Blocks(blocks) => {
+            CapabilityResultMessageContent::Blocks(blocks) => {
                 assert_eq!(blocks.len(), 1);
-                assert!(matches!(&blocks[0], ToolResultContent::Image { .. }));
+                assert!(matches!(&blocks[0], CapabilityResultContent::Image { .. }));
             }
-            ToolResultMessageContent::Text(_) => panic!("expected Blocks variant"),
+            CapabilityResultMessageContent::Text(_) => panic!("expected Blocks variant"),
         }
     }
 
@@ -613,9 +638,9 @@ mod tests {
 
     #[test]
     fn extract_result_text_drops_images() {
-        let exec = make_exec_result(ToolResultBody::Blocks(vec![
-            ToolResultContent::text("captured"),
-            ToolResultContent::image("base64data", "image/png"),
+        let exec = make_exec_result(CapabilityResultBody::Blocks(vec![
+            CapabilityResultContent::text("captured"),
+            CapabilityResultContent::image("base64data", "image/png"),
         ]));
         let text = extract_result_text(&exec);
         assert_eq!(text, "captured");
@@ -624,16 +649,16 @@ mod tests {
 
     #[test]
     fn extract_result_text_joins_text_blocks() {
-        let exec = make_exec_result(ToolResultBody::Blocks(vec![
-            ToolResultContent::text("a"),
-            ToolResultContent::text("b"),
+        let exec = make_exec_result(CapabilityResultBody::Blocks(vec![
+            CapabilityResultContent::text("a"),
+            CapabilityResultContent::text("b"),
         ]));
         assert_eq!(extract_result_text(&exec), "a\nb");
     }
 
     #[test]
     fn extract_result_text_body_passthrough() {
-        let exec = make_exec_result(ToolResultBody::Text("plain".into()));
+        let exec = make_exec_result(CapabilityResultBody::Text("plain".into()));
         assert_eq!(extract_result_text(&exec), "plain");
     }
 }

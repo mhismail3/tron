@@ -1,6 +1,6 @@
 //! Token estimation utilities.
 //!
-//! Pure functions for estimating token counts from text, messages, tools,
+//! Pure functions for estimating token counts from text, messages, capabilities,
 //! and images. Uses a chars/4 approximation as a cheap pre-call heuristic.
 //! Provider-reported usage remains the source of truth after a model call.
 //!
@@ -12,9 +12,9 @@
 //!   - Minimum 85 tokens per image
 //!   - Default 1500 tokens for URL images (typical 1024×1024)
 
-use crate::shared::content::{AssistantContent, ToolResultContent, UserContent};
-use crate::shared::messages::{Message, ToolResultMessageContent, UserMessageContent};
-use crate::shared::tools::Tool;
+use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
+use crate::shared::model_capabilities::ModelCapability;
 use serde_json::Value;
 
 use super::constants::{CHARS_PER_TOKEN, DEFAULT_URL_IMAGE_TOKENS, MIN_IMAGE_TOKENS, RULES_HEADER};
@@ -93,7 +93,7 @@ fn estimate_block_chars(block: &Value) -> usize {
             .and_then(Value::as_str)
             .map_or(0, str::len),
 
-        "tool_use" => {
+        "capability_invocation" => {
             let mut chars = 0usize;
             if let Some(id) = obj.get("id").and_then(Value::as_str) {
                 chars += id.len();
@@ -107,9 +107,9 @@ fn estimate_block_chars(block: &Value) -> usize {
             chars
         }
 
-        "tool_result" => {
+        "capability_result" => {
             let mut chars = 0usize;
-            if let Some(id) = obj.get("tool_use_id").and_then(Value::as_str) {
+            if let Some(id) = obj.get("capability_invocation_id").and_then(Value::as_str) {
                 chars += id.len();
             }
             if let Some(content) = obj.get("content").and_then(Value::as_str) {
@@ -143,7 +143,7 @@ fn estimate_block_chars(block: &Value) -> usize {
 
 /// Estimate tokens for a content block.
 ///
-/// Handles text, thinking, tool\_use, tool\_result, and image blocks.
+/// Handles text, thinking, capability invocation/result, and image blocks.
 #[must_use]
 pub fn estimate_block_tokens(block: &Value) -> u32 {
     chars_to_tokens(estimate_block_chars(block))
@@ -171,7 +171,7 @@ fn estimate_assistant_content_chars(content: &AssistantContent) -> usize {
     match content {
         AssistantContent::Text { text } => text.len(),
         AssistantContent::Thinking { thinking, .. } => thinking.len(),
-        AssistantContent::ToolUse {
+        AssistantContent::CapabilityInvocation {
             id,
             name,
             arguments,
@@ -183,11 +183,11 @@ fn estimate_assistant_content_chars(content: &AssistantContent) -> usize {
     }
 }
 
-/// Estimate character count for a [`ToolResultContent`] block.
-fn estimate_tool_result_content_chars(content: &ToolResultContent) -> usize {
+/// Estimate character count for a [`CapabilityResultContent`] block.
+fn estimate_capability_result_content_chars(content: &CapabilityResultContent) -> usize {
     match content {
-        ToolResultContent::Text { text } => text.len(),
-        ToolResultContent::Image { data, .. } => {
+        CapabilityResultContent::Text { text } => text.len(),
+        CapabilityResultContent::Image { data, .. } => {
             let source = ImageSource::Base64 { data: data.clone() };
             let tokens = estimate_image_tokens(Some(&source));
             (tokens * CHARS_PER_TOKEN) as usize
@@ -207,7 +207,7 @@ pub fn estimate_message_tokens(message: &Message) -> u32 {
     let role_str = match message {
         Message::User { .. } => "user",
         Message::Assistant { .. } => "assistant",
-        Message::ToolResult { .. } => "toolResult",
+        Message::CapabilityResult { .. } => "capabilityResult",
     };
     let mut chars = role_str.len() + 10;
 
@@ -225,17 +225,17 @@ pub fn estimate_message_tokens(message: &Message) -> u32 {
                 chars += estimate_assistant_content_chars(block);
             }
         }
-        Message::ToolResult {
-            tool_call_id,
+        Message::CapabilityResult {
+            invocation_id,
             content,
             ..
         } => {
-            chars += tool_call_id.len();
+            chars += invocation_id.len();
             match content {
-                ToolResultMessageContent::Text(text) => chars += text.len(),
-                ToolResultMessageContent::Blocks(blocks) => {
+                CapabilityResultMessageContent::Text(text) => chars += text.len(),
+                CapabilityResultMessageContent::Blocks(blocks) => {
                     for block in blocks {
-                        chars += estimate_tool_result_content_chars(block);
+                        chars += estimate_capability_result_content_chars(block);
                     }
                 }
             }
@@ -252,22 +252,25 @@ pub fn estimate_messages_tokens(messages: &[Message]) -> u32 {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// System & Tools Estimation
+// System & Capability Schema Estimation
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Estimate tokens for the system prompt.
 ///
-/// Optionally includes a tool clarification message (for Codex providers).
+/// Optionally includes a capability clarification message (for Codex providers).
 #[must_use]
-pub fn estimate_system_prompt_tokens(system_prompt: &str, tool_clarification: Option<&str>) -> u32 {
-    let total_length = system_prompt.len() + tool_clarification.map_or(0, str::len);
+pub fn estimate_system_prompt_tokens(
+    system_prompt: &str,
+    capability_clarification: Option<&str>,
+) -> u32 {
+    let total_length = system_prompt.len() + capability_clarification.map_or(0, str::len);
     chars_to_tokens(total_length)
 }
 
-/// Estimate tokens for tool definitions.
+/// Estimate tokens for model capability definitions.
 #[must_use]
-pub fn estimate_tools_tokens(tools: &[Tool]) -> u32 {
-    let total_chars: usize = tools
+pub fn estimate_capabilities_tokens(capabilities: &[ModelCapability]) -> u32 {
+    let total_chars: usize = capabilities
         .iter()
         .map(|t| serde_json::to_string(t).map_or(0, |s| s.len()))
         .sum();
@@ -285,12 +288,12 @@ pub fn estimate_rules_tokens(rules_content: Option<&str>) -> u32 {
     }
 }
 
-/// Estimate tokens for system prompt and tools combined.
+/// Estimate tokens for system prompt and capabilities combined.
 #[must_use]
-pub fn estimate_system_tokens(system_prompt: &str, tools: &[Tool]) -> u32 {
+pub fn estimate_system_tokens(system_prompt: &str, capabilities: &[ModelCapability]) -> u32 {
     let mut chars = system_prompt.len();
-    for tool in tools {
-        chars += serde_json::to_string(tool).map_or(0, |s| s.len());
+    for capability in capabilities {
+        chars += serde_json::to_string(capability).map_or(0, |s| s.len());
     }
     chars_to_tokens(chars)
 }
@@ -362,9 +365,9 @@ mod tests {
     }
 
     #[test]
-    fn block_tokens_tool_use() {
+    fn block_tokens_capability_invocation() {
         let block = json!({
-            "type": "tool_use",
+            "type": "capability_invocation",
             "id": "toolu_01",
             "name": "inspect",
             "arguments": {"file_path": "/tmp/test.rs"}
@@ -373,9 +376,9 @@ mod tests {
     }
 
     #[test]
-    fn block_tokens_tool_use_with_input_field() {
+    fn block_tokens_capability_invocation_with_input_field() {
         let block = json!({
-            "type": "tool_use",
+            "type": "capability_invocation",
             "id": "toolu_01",
             "name": "inspect",
             "input": {"file_path": "/tmp/test.rs"}
@@ -384,10 +387,10 @@ mod tests {
     }
 
     #[test]
-    fn block_tokens_tool_result() {
+    fn block_tokens_capability_result() {
         let block = json!({
-            "type": "tool_result",
-            "tool_use_id": "toolu_01",
+            "type": "capability_result",
+            "capability_invocation_id": "toolu_01",
             "content": "File contents here"
         });
         // "toolu_01"(8) + "File contents here"(18) = 26 / 4 = 7
@@ -427,14 +430,14 @@ mod tests {
     }
 
     #[test]
-    fn message_tokens_tool_result() {
-        let msg = Message::ToolResult {
-            tool_call_id: "toolu_01".into(),
-            content: ToolResultMessageContent::Text("result data".into()),
+    fn message_tokens_capability_result() {
+        let msg = Message::CapabilityResult {
+            invocation_id: "toolu_01".into(),
+            content: CapabilityResultMessageContent::Text("result data".into()),
             is_error: None,
         };
-        // "toolResult"(10) + 10 + "toolu_01"(8) + "result data"(11) = 39 / 4 = 10
-        assert_eq!(estimate_message_tokens(&msg), 10);
+        // "capabilityResult"(16) + 10 + "toolu_01"(8) + "result data"(11) = 45 / 4 = 12
+        assert_eq!(estimate_message_tokens(&msg), 12);
     }
 
     #[test]
@@ -464,20 +467,20 @@ mod tests {
     }
 
     #[test]
-    fn message_tokens_tool_result_with_blocks() {
-        let msg = Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Blocks(vec![
-                ToolResultContent::text("line 1"),
-                ToolResultContent::text("line 2"),
+    fn message_tokens_capability_result_with_blocks() {
+        let msg = Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Blocks(vec![
+                CapabilityResultContent::text("line 1"),
+                CapabilityResultContent::text("line 2"),
             ]),
             is_error: None,
         };
-        // "toolResult"(10) + 10 + "tc-1"(4) + "line 1"(6) + "line 2"(6) = 36 / 4 = 9
-        assert_eq!(estimate_message_tokens(&msg), 9);
+        // "capabilityResult"(16) + 10 + "tc-1"(4) + "line 1"(6) + "line 2"(6) = 42 / 4 = 11
+        assert_eq!(estimate_message_tokens(&msg), 11);
     }
 
-    // ── System & tools estimation ────────────────────────────────────────
+    // ── System & capabilities estimation ────────────────────────────────────────
 
     #[test]
     fn system_prompt_tokens_basic() {
@@ -491,7 +494,7 @@ mod tests {
     #[test]
     fn system_prompt_tokens_with_clarification() {
         let prompt = "You are a helpful assistant.";
-        let clarification = "Use tools wisely.";
+        let clarification = "Use capabilities wisely.";
         assert_eq!(
             estimate_system_prompt_tokens(prompt, Some(clarification)),
             chars_to_tokens(prompt.len() + clarification.len())
@@ -499,15 +502,15 @@ mod tests {
     }
 
     #[test]
-    fn tools_tokens_empty() {
-        assert_eq!(estimate_tools_tokens(&[]), 0);
+    fn capabilities_tokens_empty() {
+        assert_eq!(estimate_capabilities_tokens(&[]), 0);
     }
 
-    fn make_test_tool(name: &str, description: &str) -> Tool {
-        Tool {
+    fn make_test_capability(name: &str, description: &str) -> ModelCapability {
+        ModelCapability {
             name: name.to_string(),
             description: description.to_string(),
-            parameters: crate::shared::tools::ToolParameterSchema {
+            parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                 schema_type: "object".to_string(),
                 properties: None,
                 required: None,
@@ -518,9 +521,9 @@ mod tests {
     }
 
     #[test]
-    fn tools_tokens_with_tools() {
-        let tools = vec![make_test_tool("inspect", "Read a file")];
-        assert!(estimate_tools_tokens(&tools) > 0);
+    fn capabilities_tokens_with_capabilities() {
+        let capabilities = vec![make_test_capability("inspect", "Read a file")];
+        assert!(estimate_capabilities_tokens(&capabilities) > 0);
     }
 
     #[test]
@@ -543,8 +546,8 @@ mod tests {
     #[test]
     fn system_tokens_combined() {
         let prompt = "System prompt here";
-        let tools = vec![make_test_tool("execute", "Run commands")];
-        let combined = estimate_system_tokens(prompt, &tools);
+        let capabilities = vec![make_test_capability("execute", "Run commands")];
+        let combined = estimate_system_tokens(prompt, &capabilities);
         assert!(combined > 0);
         assert!(combined >= estimate_system_prompt_tokens(prompt, None));
     }
@@ -599,10 +602,10 @@ mod tests {
     }
 
     #[test]
-    fn typed_assistant_tool_use_chars() {
+    fn typed_assistant_capability_invocation_chars() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("cmd".into(), Value::String("ls".into()));
-        let block = AssistantContent::ToolUse {
+        let block = AssistantContent::CapabilityInvocation {
             id: "call_1".into(),
             name: "execute".into(),
             arguments: args,
@@ -613,19 +616,19 @@ mod tests {
     }
 
     #[test]
-    fn typed_tool_result_text_chars() {
-        let block = ToolResultContent::text("output data");
-        assert_eq!(estimate_tool_result_content_chars(&block), 11);
+    fn typed_capability_result_text_chars() {
+        let block = CapabilityResultContent::text("output data");
+        assert_eq!(estimate_capability_result_content_chars(&block), 11);
     }
 
     #[test]
-    fn typed_tool_result_image_chars() {
-        let block = ToolResultContent::Image {
+    fn typed_capability_result_image_chars() {
+        let block = CapabilityResultContent::Image {
             data: "tiny".into(),
             mime_type: "image/png".into(),
         };
         assert_eq!(
-            estimate_tool_result_content_chars(&block),
+            estimate_capability_result_content_chars(&block),
             (MIN_IMAGE_TOKENS * CHARS_PER_TOKEN) as usize
         );
     }
@@ -644,9 +647,9 @@ mod tests {
         for msg in &[
             Message::user(""),
             Message::assistant(""),
-            Message::ToolResult {
-                tool_call_id: String::new(),
-                content: ToolResultMessageContent::Text(String::new()),
+            Message::CapabilityResult {
+                invocation_id: String::new(),
+                content: CapabilityResultMessageContent::Text(String::new()),
                 is_error: None,
             },
         ] {
@@ -695,14 +698,14 @@ mod tests {
     }
 
     #[test]
-    fn ts_parity_tool_result() {
-        // chars = 10 + 10 + 4 + 2 = 26, ceil(26/4) = 7
-        let msg = Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text("ok".into()),
+    fn ts_parity_capability_result() {
+        // chars = 16 + 10 + 4 + 2 = 32, ceil(32/4) = 8
+        let msg = Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text("ok".into()),
             is_error: None,
         };
-        assert_eq!(estimate_message_tokens(&msg), 7);
+        assert_eq!(estimate_message_tokens(&msg), 8);
     }
 
     #[test]

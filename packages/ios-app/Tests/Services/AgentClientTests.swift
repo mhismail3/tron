@@ -189,9 +189,9 @@ struct AgentClientTests {
             case "agent::abort":
                 #expect((payload as? AgentAbortParams)?.sessionId == sessionId)
                 return EmptyParams()
-            case "agent::abort_tool":
-                #expect((payload as? AgentAbortToolParams)?.sessionId == sessionId)
-                return AgentAbortToolResult(aborted: true)
+            case "agent::abort_invocation":
+                #expect((payload as? AgentAbortInvocationParams)?.sessionId == sessionId)
+                return AgentAbortInvocationResult(aborted: true)
             default:
                 throw EngineConnectionError.invalidResponse
             }
@@ -206,7 +206,7 @@ struct AgentClientTests {
         _ = try await client.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults.test"))
         _ = try await client.submitAnswers(questions: [], idempotencyKey: .userAction("agent.submitAnswers.test"))
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
-        _ = try await client.abortTool(invocationId: "tool-1", idempotencyKey: .userAction("agent.abortTool.test"))
+        _ = try await client.abortCapabilityInvocation(invocationId: "capability-1", idempotencyKey: .userAction("agent.abortCapabilityInvocation.test"))
         #expect(transport.ensureSessionEventSubscriptionCallCount == 6)
         #expect(transport.operationOrder.prefix(2) == [
             "subscribe:\(sessionId)",
@@ -222,7 +222,7 @@ struct AgentClientTests {
             "agent::deliver_subagent_results",
             "agent::submit_answers",
             "agent::abort",
-            "agent::abort_tool"
+            "agent::abort_invocation"
         ])
     }
 

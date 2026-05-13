@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - File Display Helpers
 
-/// Shared file metadata helpers for tool detail sheets (language colors, icons, sizing).
+/// Shared file metadata helpers for capability detail sheets (language colors, icons, sizing).
 enum FileDisplayHelpers {
 
     static func languageColor(for ext: String) -> Color {

@@ -69,7 +69,7 @@ final class DispatchableEventPluginTests: XCTestCase {
 
         // Verify it can be used as each domain protocol
         let _: any StreamingEventHandler = context
-        let _: any ToolEventHandler = context
+        let _: any CapabilityInvocationEventHandler = context
         let _: any TurnLifecycleEventHandler = context
         let _: any ContextEventHandler = context
         let _: any SubagentEventHandler = context

@@ -12,10 +12,10 @@ pub enum RuntimeError {
     Provider(#[from] crate::domains::model::providers::provider::ProviderError),
 
     /// Capability invocation error.
-    #[error("Capability error: {tool_name}: {message}")]
-    Tool {
-        /// Tool name.
-        tool_name: String,
+    #[error("Capability error: {model_primitive_name}: {message}")]
+    ModelCapability {
+        /// Capability name.
+        model_primitive_name: String,
         /// Error description.
         message: String,
     },
@@ -67,7 +67,7 @@ impl RuntimeError {
             | Self::MaxTurns(_)
             | Self::SessionBusy(_)
             | Self::ServerBusy { .. } => true,
-            Self::Tool { .. }
+            Self::ModelCapability { .. }
             | Self::Context(_)
             | Self::SessionNotFound(_)
             | Self::Persistence(_)
@@ -79,7 +79,7 @@ impl RuntimeError {
     pub fn category(&self) -> &str {
         match self {
             Self::Provider(_) => "provider",
-            Self::Tool { .. } => "tool",
+            Self::ModelCapability { .. } => "capability",
             Self::Context(_) => "context",
             Self::Cancelled => "cancelled",
             Self::MaxTurns(_) => "max_turns",
@@ -100,14 +100,15 @@ pub enum StopReason {
     EndTurn,
     /// Turn limit reached.
     MaxTurns,
-    /// Tool requested stop (`agent::ask_user`).
-    ToolStop,
+    /// Capability requested stop (`agent::ask_user`).
+    CapabilityStop,
     /// Unrecoverable error.
     Error,
     /// User abort.
     Interrupted,
-    /// Pure text response (no tools to execute).
-    NoToolCalls,
+    /// Pure text response (no capabilities to execute).
+    #[serde(rename = "no_capability_invocations")]
+    NoCapabilityInvocationDrafts,
 }
 
 impl fmt::Display for StopReason {
@@ -115,10 +116,10 @@ impl fmt::Display for StopReason {
         match self {
             Self::EndTurn => write!(f, "end_turn"),
             Self::MaxTurns => write!(f, "max_turns"),
-            Self::ToolStop => write!(f, "tool_stop"),
+            Self::CapabilityStop => write!(f, "capability_stop"),
             Self::Error => write!(f, "error"),
             Self::Interrupted => write!(f, "interrupted"),
-            Self::NoToolCalls => write!(f, "no_tool_calls"),
+            Self::NoCapabilityInvocationDrafts => write!(f, "no_capability_invocations"),
         }
     }
 }
@@ -129,8 +130,8 @@ mod tests {
 
     #[test]
     fn runtime_error_display() {
-        let err = RuntimeError::Tool {
-            tool_name: "execute".into(),
+        let err = RuntimeError::ModelCapability {
+            model_primitive_name: "execute".into(),
             message: "command failed".into(),
         };
         assert_eq!(err.to_string(), "Capability error: execute: command failed");
@@ -167,12 +168,12 @@ mod tests {
             "persistence"
         );
         assert_eq!(
-            RuntimeError::Tool {
-                tool_name: "t".into(),
+            RuntimeError::ModelCapability {
+                model_primitive_name: "t".into(),
                 message: "m".into()
             }
             .category(),
-            "tool"
+            "capability"
         );
     }
 
@@ -209,10 +210,10 @@ mod tests {
         let reasons = vec![
             StopReason::EndTurn,
             StopReason::MaxTurns,
-            StopReason::ToolStop,
+            StopReason::CapabilityStop,
             StopReason::Error,
             StopReason::Interrupted,
-            StopReason::NoToolCalls,
+            StopReason::NoCapabilityInvocationDrafts,
         ];
         for r in &reasons {
             let json = serde_json::to_string(r).unwrap();
@@ -232,12 +233,12 @@ mod tests {
             "\"max_turns\""
         );
         assert_eq!(
-            serde_json::to_string(&StopReason::ToolStop).unwrap(),
-            "\"tool_stop\""
+            serde_json::to_string(&StopReason::CapabilityStop).unwrap(),
+            "\"capability_stop\""
         );
         assert_eq!(
-            serde_json::to_string(&StopReason::NoToolCalls).unwrap(),
-            "\"no_tool_calls\""
+            serde_json::to_string(&StopReason::NoCapabilityInvocationDrafts).unwrap(),
+            "\"no_capability_invocations\""
         );
     }
 

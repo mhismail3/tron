@@ -1,16 +1,16 @@
-//! `ProcessManager` — centralized management of deterministic tool processes.
+//! `ProcessManager` — centralized management of deterministic capability processes.
 //!
 //! Analogous to `SubagentManager` for LLM invocations, this module manages the
-//! lifecycle of deterministic processes spawned by tools (shell commands, display
+//! lifecycle of deterministic processes spawned by capabilities (shell commands, display
 //! streams, long-running operations). Supports foreground (blocking) and
 //! background (non-blocking) execution, foreground-to-background promotion,
 //! cancellation, and completion notifications.
 //!
 //! ## Key design decisions
 //!
-//! - **Boxed futures, not commands**: Tools wrap their work in a future and hand
+//! - **Boxed futures, not commands**: Capabilities wrap their work in a future and hand
 //!   it to ProcessManager. PM doesn't know about ProcessRunner or StreamConfig.
-//! - **Child CancellationTokens**: Each process gets its own token. Tools are
+//! - **Child CancellationTokens**: Each process gets its own token. Capabilities are
 //!   responsible for passing session cancel through their future closure.
 //! - **Oneshot promotion**: Foreground processes can be promoted to background
 //!   via a oneshot channel that unblocks the awaiting capability invocation.
@@ -29,7 +29,7 @@ use uuid::Uuid;
 use tracing::{debug, warn};
 
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{
     BackgroundReason, ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult,
     ProcessInfo, ProcessManagerOps, ProcessState,
@@ -47,7 +47,7 @@ use crate::shared::events::{BaseEvent, TronEvent};
 struct TrackedProcess {
     process_id: String,
     session_id: String,
-    tool_call_id: String,
+    invocation_id: String,
     config: ManagedProcessConfig,
     state: Mutex<ProcessState>,
     started_at: Instant,
@@ -63,7 +63,7 @@ struct TrackedProcess {
 // ProcessManager
 // =============================================================================
 
-/// Centralized manager for deterministic tool processes.
+/// Centralized manager for deterministic capability processes.
 pub struct ProcessManager {
     processes: DashMap<String, Arc<TrackedProcess>>,
     /// Event emitter for broadcasting process lifecycle events.
@@ -103,8 +103,8 @@ impl ProcessManager {
             crate::domains::capability_support::implementations::traits::ProcessKind::DisplayStream => {
                 "display_stream".into()
             }
-            crate::domains::capability_support::implementations::traits::ProcessKind::ToolOperation => {
-                "tool_operation".into()
+            crate::domains::capability_support::implementations::traits::ProcessKind::CapabilityOperation => {
+                "capability_operation".into()
             }
         }
     }
@@ -125,10 +125,10 @@ impl ProcessManagerOps for ProcessManager {
     async fn spawn_managed(
         &self,
         session_id: &str,
-        tool_call_id: &str,
+        invocation_id: &str,
         config: ManagedProcessConfig,
         task: Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
-    ) -> Result<ManagedProcessHandle, ToolError> {
+    ) -> Result<ManagedProcessHandle, CapabilityExecutionError> {
         let process_id = Self::generate_id();
         let cancel = CancellationToken::new();
         let (promote_tx, promote_rx) = oneshot::channel();
@@ -139,7 +139,7 @@ impl ProcessManagerOps for ProcessManager {
         let tracker = Arc::new(TrackedProcess {
             process_id: process_id.clone(),
             session_id: session_id.to_owned(),
-            tool_call_id: tool_call_id.to_owned(),
+            invocation_id: invocation_id.to_owned(),
             config,
             state: Mutex::new(if background {
                 ProcessState::Background
@@ -164,7 +164,7 @@ impl ProcessManagerOps for ProcessManager {
                 label: tracker.config.label.clone(),
                 kind: Self::kind_string(&tracker.config.kind),
                 background,
-                tool_call_id: tool_call_id.to_owned(),
+                invocation_id: invocation_id.to_owned(),
             });
         }
 
@@ -335,7 +335,7 @@ impl ProcessManagerOps for ProcessManager {
                         job_id: process_id.clone(),
                         reason: "user_action".into(),
                         label: tracker.config.label.clone(),
-                        tool_call_id: tool_call_id.to_owned(),
+                        invocation_id: invocation_id.to_owned(),
                     });
                 }
                 Ok(ManagedProcessHandle {
@@ -353,7 +353,7 @@ impl ProcessManagerOps for ProcessManager {
                         job_id: process_id.clone(),
                         reason: "auto_timeout".into(),
                         label: tracker.config.label.clone(),
-                        tool_call_id: tool_call_id.to_owned(),
+                        invocation_id: invocation_id.to_owned(),
                     });
                 }
                 Ok(ManagedProcessHandle {
@@ -365,13 +365,13 @@ impl ProcessManagerOps for ProcessManager {
         }
     }
 
-    fn promote_to_background(&self, process_id: &str) -> Result<(), ToolError> {
-        let tracker = self
-            .processes
-            .get(process_id)
-            .ok_or_else(|| ToolError::Validation {
-                message: format!("Process not found: {process_id}"),
-            })?;
+    fn promote_to_background(&self, process_id: &str) -> Result<(), CapabilityExecutionError> {
+        let tracker =
+            self.processes
+                .get(process_id)
+                .ok_or_else(|| CapabilityExecutionError::Validation {
+                    message: format!("Process not found: {process_id}"),
+                })?;
 
         let state = tracker.state.lock().clone();
         match state {
@@ -383,29 +383,33 @@ impl ProcessManagerOps for ProcessManager {
                         let _ = tx.send(());
                         Ok(())
                     }
-                    None => Err(ToolError::Validation {
+                    None => Err(CapabilityExecutionError::Validation {
                         message: format!("Process {process_id} promotion channel already consumed"),
                     }),
                 }
             }
-            ProcessState::Background => Err(ToolError::Validation {
+            ProcessState::Background => Err(CapabilityExecutionError::Validation {
                 message: format!("Process {process_id} is already in background"),
             }),
             ProcessState::Completed | ProcessState::Failed | ProcessState::Cancelled => {
-                Err(ToolError::Validation {
+                Err(CapabilityExecutionError::Validation {
                     message: format!("Process {process_id} has already finished"),
                 })
             }
         }
     }
 
-    fn cancel_process(&self, process_id: &str, user_initiated: bool) -> Result<(), ToolError> {
-        let tracker = self
-            .processes
-            .get(process_id)
-            .ok_or_else(|| ToolError::Validation {
-                message: format!("Process not found: {process_id}"),
-            })?;
+    fn cancel_process(
+        &self,
+        process_id: &str,
+        user_initiated: bool,
+    ) -> Result<(), CapabilityExecutionError> {
+        let tracker =
+            self.processes
+                .get(process_id)
+                .ok_or_else(|| CapabilityExecutionError::Validation {
+                    message: format!("Process not found: {process_id}"),
+                })?;
 
         let state = tracker.state.lock().clone();
         match state {
@@ -449,7 +453,7 @@ impl ProcessManagerOps for ProcessManager {
                     state: Self::state_string(&state),
                     elapsed_ms: t.started_at.elapsed().as_millis() as u64,
                     session_id: t.session_id.clone(),
-                    tool_call_id: t.tool_call_id.clone(),
+                    invocation_id: t.invocation_id.clone(),
                 }
             })
             .collect()
@@ -506,13 +510,13 @@ impl ProcessManagerOps for ProcessManager {
         &self,
         process_id: &str,
         timeout_ms: u64,
-    ) -> Result<ManagedProcessResult, ToolError> {
-        let tracker = self
-            .processes
-            .get(process_id)
-            .ok_or_else(|| ToolError::Validation {
-                message: format!("Process not found: {process_id}"),
-            })?;
+    ) -> Result<ManagedProcessResult, CapabilityExecutionError> {
+        let tracker =
+            self.processes
+                .get(process_id)
+                .ok_or_else(|| CapabilityExecutionError::Validation {
+                    message: format!("Process not found: {process_id}"),
+                })?;
 
         // Check if already completed.
         {
@@ -532,11 +536,13 @@ impl ProcessManagerOps for ProcessManager {
         {
             Ok(()) => {
                 let result = tracker.result.lock();
-                result.clone().ok_or_else(|| ToolError::Internal {
-                    message: format!("Process {process_id} notified but no result available"),
-                })
+                result
+                    .clone()
+                    .ok_or_else(|| CapabilityExecutionError::Internal {
+                        message: format!("Process {process_id} notified but no result available"),
+                    })
             }
-            Err(_) => Err(ToolError::Timeout { timeout_ms }),
+            Err(_) => Err(CapabilityExecutionError::Timeout { timeout_ms }),
         }
     }
 }

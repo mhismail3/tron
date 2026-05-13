@@ -27,7 +27,7 @@ use crate::shared::server::events::ServerEventPayload;
 /// 3. iOS receives the event, dispatches to a local handler, and sends the
 ///    result back via the `device::respond` capability.
 /// 4. `device::respond` calls `broker.resolve(requestId, result)`,
-///    which completes the oneshot and unblocks the tool.
+///    which completes the oneshot and unblocks the capability.
 pub struct DeviceRequestBroker {
     pending: Mutex<HashMap<String, PendingRequest>>,
     engine_host: EngineHostHandle,

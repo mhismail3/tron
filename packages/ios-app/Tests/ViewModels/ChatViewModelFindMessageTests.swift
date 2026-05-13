@@ -21,9 +21,9 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         viewModel = nil
     }
 
-    // MARK: - Tool Call Tests
+    // MARK: - Capability Call Tests
 
-    func testFindMessageIdForCapabilityInvocationInToolUse() {
+    func testFindMessageIdForCapabilityInvocationInCapabilityInvocation() {
         // Given: A message with capability invocation content
         let messageId = UUID()
         let message = ChatMessage(
@@ -40,7 +40,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForCapabilityInvocationInToolResult() {
+    func testFindMessageIdForCapabilityInvocationInCapabilityResult() {
         // Given: A message with orphan capability result content
         let messageId = UUID()
         let message = ChatMessage(
@@ -63,7 +63,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         let message = ChatMessage(
             id: messageId,
             role: .assistant,
-            content: .subagent(SubagentToolData(
+            content: .subagent(SubagentInvocationData(
                 invocationId: "toolu_xyz",
                 subagentSessionId: "sess_sub",
                 task: "Do something",
@@ -81,22 +81,22 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForCapabilityInvocationInAskUserQuestion() {
-        // Given: A message with askUserQuestion content
+    func testFindMessageIdForCapabilityInvocationInUserInteraction() {
+        // Given: A message with userInteraction content
         let messageId = UUID()
         let message = ChatMessage(
             id: messageId,
             role: .assistant,
-            content: .askUserQuestion(AskUserQuestionToolData(
+            content: .userInteraction(UserInteractionInvocationData(
                 invocationId: "toolu_question",
-                params: AskUserQuestionParams(
+                params: UserInteractionParams(
                     questions: [
-                        AskUserQuestion(
+                        UserInteraction(
                             id: "q1",
                             question: "Pick one?",
                             options: [
-                                AskUserQuestionOption(label: "A", value: nil, description: nil),
-                                AskUserQuestionOption(label: "B", value: nil, description: nil)
+                                UserInteractionOption(label: "A", value: nil, description: nil),
+                                UserInteractionOption(label: "B", value: nil, description: nil)
                             ],
                             mode: .single,
                             allowOther: nil,

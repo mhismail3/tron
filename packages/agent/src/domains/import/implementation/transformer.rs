@@ -3,12 +3,13 @@
 //! Transforms [`AssembledItem`]s into [`TronEventSpec`]s ready for
 //! appending to the event store. Each assembled item may produce zero
 //! or more events (e.g. an assistant message emits `message.assistant`,
-//! one `capability.invocation.started` per `tool_use` block, and `stream.turn_end`).
+//! and `stream.turn_end`). Provider-native capability blocks are not translated;
+//! the validator rejects them before this mapper is used by the import writer.
 
 use serde_json::{Value, json};
 
 use crate::domains::agent::runner::pipeline::persistence::build_token_record;
-use crate::domains::import::assembler::{AssembledAssistant, AssembledItem};
+use crate::domains::import::assembler::AssembledItem;
 use crate::domains::import::cost::estimate_cost;
 use crate::domains::import::types::ClaudeRecord;
 use crate::domains::session::event_store::types::EventType;
@@ -77,7 +78,7 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
             AssembledItem::UserMessage { record, turn } => {
                 let is_meta = record.is_meta == Some(true);
                 let is_compact = record.is_compact_summary == Some(true);
-                let is_tool_result = record.is_tool_result();
+                let is_capability_result = record.is_capability_result();
 
                 if is_meta {
                     continue;
@@ -101,8 +102,7 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     continue;
                 }
 
-                if is_tool_result {
-                    emit_tool_results(&record, &mut events);
+                if is_capability_result {
                     continue;
                 }
 
@@ -188,12 +188,10 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 }
 
                 // message.assistant
-                // Normalize content blocks: Claude Code uses "input" for tool_use
-                // but Tron's AssistantContent::ToolUse expects "arguments".
                 let normalized_blocks: Vec<Value> = am
                     .content_blocks
                     .iter()
-                    .map(|b| normalize_assistant_block(b))
+                    .filter_map(normalize_assistant_block)
                     .collect();
 
                 // Build tokenRecord (same structure as native sessions) so iOS
@@ -243,9 +241,6 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     payload: assistant_payload,
                 });
                 message_count += 1;
-
-                // capability.invocation.started events — one per tool_use block
-                emit_tool_calls(&am, &mut events);
 
                 // Accumulate into pending turn_end (same turn adds up)
                 if has_pending_turn_end && am.turn == pending_turn {
@@ -359,98 +354,12 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
     }
 }
 
-/// Emit `capability.invocation.started` events for each `tool_use` block in the assistant message.
-fn emit_tool_calls(am: &AssembledAssistant, events: &mut Vec<TronEventSpec>) {
-    for block in &am.content_blocks {
-        if block.get("type").and_then(Value::as_str) != Some("tool_use") {
-            continue;
-        }
-        let tool_call_id = block
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let name = block
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let arguments = block.get("input").cloned().unwrap_or(json!({}));
-
-        events.push(TronEventSpec {
-            event_type: EventType::CapabilityInvocationStarted,
-            payload: json!({
-                "toolCallId": tool_call_id,
-                "name": name,
-                "arguments": arguments,
-                "turn": am.turn,
-            }),
-        });
-    }
-}
-
-/// Emit `capability.invocation.completed` events from a `tool_result` user record.
-fn emit_tool_results(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>) {
-    let Some(msg) = &record.message else { return };
-    let Some(content) = &msg.content else { return };
-    let Some(blocks) = content.as_array() else {
-        return;
-    };
-
-    for block in blocks {
-        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
-            continue;
-        }
-
-        let tool_call_id = block
-            .get("tool_use_id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-
-        let content_str = match block.get("content") {
-            Some(Value::String(s)) => s.clone(),
-            Some(v) => v.to_string(),
-            None => String::new(),
-        };
-
-        let is_error = block
-            .get("is_error")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-
-        events.push(TronEventSpec {
-            event_type: EventType::CapabilityInvocationCompleted,
-            payload: json!({
-                "toolCallId": tool_call_id,
-                "content": content_str,
-                "isError": is_error,
-                "duration": 0,
-            }),
-        });
-    }
-}
-
 /// Normalize an assistant content block into Tron's current import schema.
-///
-/// Claude Code stores tool_use blocks with `"input"` for arguments and an extra
-/// `"caller"` field. Tron's `AssistantContent::ToolUse` expects `"arguments"`
-/// and doesn't recognize `"caller"`, so deserialization silently fails without
-/// this normalization.
-fn normalize_assistant_block(block: &Value) -> Value {
-    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
-        return block.clone();
+fn normalize_assistant_block(block: &Value) -> Option<Value> {
+    if block.get("type").and_then(Value::as_str) != Some("capability_invocation") {
+        return Some(block.clone());
     }
-    let mut b = block.clone();
-    if let Some(obj) = b.as_object_mut() {
-        // Rename "input" → "arguments"
-        if let Some(input) = obj.remove("input") {
-            let _ = obj.insert("arguments".to_string(), input);
-        }
-        // Strip "caller" (Claude Code internal field, not in Tron schema)
-        let _ = obj.remove("caller");
-    }
-    b
+    None
 }
 
 /// Emit compact.boundary + compact.summary from a compact summary user record.

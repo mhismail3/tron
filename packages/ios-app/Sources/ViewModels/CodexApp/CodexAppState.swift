@@ -78,7 +78,7 @@ enum CodexAppItem: Identifiable, Equatable {
     case reasoning(id: String, text: String, isStreaming: Bool)
     case command(id: String, command: String, cwd: String?, status: String, output: String?)
     case fileChange(id: String, status: String, summary: String?)
-    case mcpTool(id: String, server: String?, tool: String?, status: String, detail: String?)
+    case pluginCapability(id: String, source: String?, capability: String?, status: String, detail: String?)
     case webSearch(id: String, query: String?, status: String)
     case plan(id: String, text: String)
     case diff(id: String, text: String)
@@ -90,7 +90,7 @@ enum CodexAppItem: Identifiable, Equatable {
              .reasoning(let id, _, _),
              .command(let id, _, _, _, _),
              .fileChange(let id, _, _),
-             .mcpTool(let id, _, _, _, _),
+             .pluginCapability(let id, _, _, _, _),
              .webSearch(let id, _, _),
              .plan(let id, _),
              .diff(let id, _),
@@ -408,8 +408,8 @@ enum CodexAppReducer {
             return .command(id: id, command: command, cwd: cwd, status: status, output: output)
         case .fileChange(let id, let status, let changes):
             return .fileChange(id: id, status: status, summary: changes?.joined(separator: "\n"))
-        case .mcpCapabilityInvocation(let id, let server, let tool, let status, let error):
-            return .mcpTool(id: id, server: server, tool: tool, status: status, detail: error)
+        case .pluginCapabilityInvocation(let id, let source, let capability, let status, let error):
+            return .pluginCapability(id: id, source: source, capability: capability, status: status, detail: error)
         case .webSearch(let id, let query, let status):
             return .webSearch(id: id, query: query, status: status)
         case .other(let id, let type, let text):

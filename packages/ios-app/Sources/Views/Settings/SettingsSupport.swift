@@ -523,7 +523,7 @@ enum ContextSettingsSummary {
         switch value {
         case "autoRestore":
             return "auto-restores active skills"
-        case "askUser":
+        case "userInteraction":
             return "asks before restoring active skills"
         default:
             return "clears active skills"

@@ -61,8 +61,8 @@ pub struct KimiModelInfo {
     pub max_output: u32,
     /// Supports extended thinking.
     pub supports_thinking: bool,
-    /// Supports tool use.
-    pub supports_tools: bool,
+    /// Supports capability invocation.
+    pub supports_capabilities: bool,
     /// Supports image inputs.
     pub supports_images: bool,
     /// Input cost per million tokens (USD).
@@ -96,7 +96,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             input_cost_per_million: 0.60,
             output_cost_per_million: 3.00,
@@ -117,7 +117,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.60,
             output_cost_per_million: 2.50,
@@ -138,7 +138,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 131_072,
             max_output: 32_768,
             supports_thinking: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.60,
             output_cost_per_million: 2.50,
@@ -159,7 +159,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: false,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 1.15,
             output_cost_per_million: 8.00,
@@ -180,7 +180,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 0.60,
             output_cost_per_million: 2.50,
@@ -201,7 +201,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 262_144,
             max_output: 32_768,
             supports_thinking: true,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: false,
             input_cost_per_million: 1.15,
             output_cost_per_million: 8.00,
@@ -222,7 +222,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 8_192,
             max_output: 4_096,
             supports_thinking: false,
-            supports_tools: false,
+            supports_capabilities: false,
             supports_images: false,
             input_cost_per_million: 0.20,
             output_cost_per_million: 2.00,
@@ -243,7 +243,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 32_768,
             max_output: 4_096,
             supports_thinking: false,
-            supports_tools: false,
+            supports_capabilities: false,
             supports_images: false,
             input_cost_per_million: 1.00,
             output_cost_per_million: 3.00,
@@ -264,7 +264,7 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
             context_window: 131_072,
             max_output: 4_096,
             supports_thinking: false,
-            supports_tools: false,
+            supports_capabilities: false,
             supports_images: false,
             input_cost_per_million: 2.00,
             output_cost_per_million: 5.00,
@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(m.context_window, 262_144);
         assert!(m.supports_thinking);
         assert!(m.supports_images);
-        assert!(m.supports_tools);
+        assert!(m.supports_capabilities);
         assert!(m.recommended);
         assert!(!m.is_retired_generation);
     }
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(m.context_window, 262_144);
         assert!(!m.supports_thinking);
         assert!(!m.supports_images);
-        assert!(m.supports_tools);
+        assert!(m.supports_capabilities);
     }
 
     #[test]
@@ -366,14 +366,14 @@ mod tests {
         let m = get_kimi_model("kimi-k2-turbo-preview").unwrap();
         assert_eq!(m.context_window, 262_144);
         assert!(!m.supports_thinking);
-        assert!(m.supports_tools);
+        assert!(m.supports_capabilities);
     }
 
     #[test]
     fn get_kimi_model_k2_thinking() {
         let m = get_kimi_model("kimi-k2-thinking").unwrap();
         assert!(m.supports_thinking);
-        assert!(m.supports_tools);
+        assert!(m.supports_capabilities);
         assert!(!m.supports_images);
     }
 
@@ -381,7 +381,7 @@ mod tests {
     fn get_kimi_model_k2_thinking_turbo() {
         let m = get_kimi_model("kimi-k2-thinking-turbo").unwrap();
         assert!(m.supports_thinking);
-        assert!(m.supports_tools);
+        assert!(m.supports_capabilities);
     }
 
     #[test]
@@ -390,7 +390,7 @@ mod tests {
         assert_eq!(m.context_window, 8_192);
         assert_eq!(m.max_output, 4_096);
         assert!(!m.supports_thinking);
-        assert!(!m.supports_tools);
+        assert!(!m.supports_capabilities);
         assert!(!m.supports_images);
         assert!(m.is_retired_generation);
     }
@@ -455,9 +455,9 @@ mod tests {
         for id in all_kimi_model_ids() {
             let m = get_kimi_model(id).unwrap();
             if id.starts_with("kimi-") {
-                assert!(m.supports_tools, "{id} should support tools");
+                assert!(m.supports_capabilities, "{id} should support tools");
             } else {
-                assert!(!m.supports_tools, "{id} should not support tools");
+                assert!(!m.supports_capabilities, "{id} should not support tools");
             }
         }
     }

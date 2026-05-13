@@ -149,7 +149,7 @@ impl Default for SharedOutputBuffer {
 /// Process capabilities register buffers after spawning managed processes.
 /// Job capabilities look up buffers to subscribe to output streaming.
 pub struct OutputBufferRegistry {
-    /// Maps job_id → (buffer, tool_call_id).
+    /// Maps job_id → (buffer, invocation_id).
     buffers: DashMap<String, (Arc<SharedOutputBuffer>, String)>,
 }
 
@@ -162,10 +162,10 @@ impl OutputBufferRegistry {
     }
 
     /// Register a buffer for a job.
-    pub fn register(&self, job_id: &str, tool_call_id: &str, buffer: Arc<SharedOutputBuffer>) {
+    pub fn register(&self, job_id: &str, invocation_id: &str, buffer: Arc<SharedOutputBuffer>) {
         let _ = self
             .buffers
-            .insert(job_id.to_owned(), (buffer, tool_call_id.to_owned()));
+            .insert(job_id.to_owned(), (buffer, invocation_id.to_owned()));
     }
 
     /// Look up a buffer by job ID.

@@ -14,8 +14,8 @@ final class UIUpdateQueue {
 
         /// Priority ordering for updates
         static let priorityTurnBoundary = 0
-        static let priorityToolStart = 1
-        static let priorityToolEnd = 2
+        static let priorityCapabilityStart = 1
+        static let priorityCapabilityEnd = 2
         static let priorityMessageAppend = 3
         static let priorityTextDelta = 4
     }
@@ -24,16 +24,16 @@ final class UIUpdateQueue {
 
     enum UpdateType {
         case turnBoundary(TurnBoundaryData)
-        case capabilityStart(ToolStartData)
-        case capabilityEnd(ToolEndData)
+        case capabilityInvocationStarted(CapabilityInvocationStartData)
+        case capabilityInvocationCompleted(CapabilityInvocationEndData)
         case messageAppend(MessageAppendData)
         case textDelta(TextDeltaData)
 
         var priority: Int {
             switch self {
             case .turnBoundary: return Config.priorityTurnBoundary
-            case .capabilityStart: return Config.priorityToolStart
-            case .capabilityEnd: return Config.priorityToolEnd
+            case .capabilityInvocationStarted: return Config.priorityCapabilityStart
+            case .capabilityInvocationCompleted: return Config.priorityCapabilityEnd
             case .messageAppend: return Config.priorityMessageAppend
             case .textDelta: return Config.priorityTextDelta
             }
@@ -45,19 +45,19 @@ final class UIUpdateQueue {
         let isStart: Bool
     }
 
-    struct ToolStartData {
+    struct CapabilityInvocationStartData {
         let invocationId: String
-        let modelToolName: String
+        let modelPrimitiveName: String
         let arguments: String
         let timestamp: Date
     }
 
-    struct ToolEndData {
+    struct CapabilityInvocationEndData {
         let invocationId: String
         let success: Bool
         let result: String
         let durationMs: Int?
-        /// Structured result details from server (tool-specific shape)
+        /// Structured result details from server (capability-specific shape)
         let details: [String: AnyCodable]?
         let identity: CapabilityIdentity
 
@@ -99,16 +99,16 @@ final class UIUpdateQueue {
     /// Callback for processing batched updates
     var onProcessUpdates: (([UpdateType]) -> Void)?
 
-    // MARK: - Tool Enqueueing
+    // MARK: - Capability Enqueueing
 
     /// Register a capability invocation start
-    func enqueueCapabilityInvocationStart(_ data: ToolStartData) {
-        enqueue(.capabilityStart(data))
+    func enqueueCapabilityInvocationStart(_ data: CapabilityInvocationStartData) {
+        enqueue(.capabilityInvocationStarted(data))
     }
 
     /// Register a capability invocation end
-    func enqueueToolEnd(_ data: ToolEndData) {
-        enqueue(.capabilityEnd(data))
+    func enqueueCapabilityInvocationEnd(_ data: CapabilityInvocationEndData) {
+        enqueue(.capabilityInvocationCompleted(data))
     }
 
     // MARK: - General Enqueueing

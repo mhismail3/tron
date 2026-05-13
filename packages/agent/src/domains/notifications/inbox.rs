@@ -14,7 +14,7 @@ use crate::shared::server::errors::CapabilityError;
 pub(crate) struct NotificationInboxEntry {
     pub(crate) event_id: String,
     pub(crate) session_id: String,
-    pub(crate) tool_call_id: Option<String>,
+    pub(crate) invocation_id: Option<String>,
     pub(crate) timestamp: String,
     pub(crate) title: String,
     pub(crate) body: String,
@@ -51,7 +51,7 @@ pub(crate) struct MarkAllReadResult {
 struct NotificationRow {
     event_id: String,
     session_id: String,
-    tool_call_id: Option<String>,
+    invocation_id: Option<String>,
     timestamp: String,
     payload: String,
     session_title: Option<String>,
@@ -80,7 +80,7 @@ impl NotificationInboxService {
                 "SELECT
                     e.id,
                     e.session_id,
-                    e.tool_call_id,
+                    e.invocation_id,
                     e.timestamp,
                     e.payload,
                     s.title AS session_title,
@@ -90,7 +90,7 @@ impl NotificationInboxService {
                  FROM events e
                  JOIN sessions s ON s.id = e.session_id
                  LEFT JOIN notification_read_state nrs ON nrs.event_id = e.id
-                 WHERE e.tool_name = 'NotifyApp'
+                 WHERE e.model_primitive_name = 'notifications::send'
                    AND e.type = 'capability.invocation.started'
                  ORDER BY e.timestamp DESC
                  LIMIT ?1",
@@ -104,7 +104,7 @@ impl NotificationInboxService {
                 Ok(NotificationRow {
                     event_id: row.get(0)?,
                     session_id: row.get(1)?,
-                    tool_call_id: row.get(2)?,
+                    invocation_id: row.get(2)?,
                     timestamp: row.get(3)?,
                     payload: row.get(4)?,
                     session_title: row.get(5)?,
@@ -137,7 +137,7 @@ impl NotificationInboxService {
             notifications.push(NotificationInboxEntry {
                 event_id: row.event_id,
                 session_id: row.session_id,
-                tool_call_id: row.tool_call_id,
+                invocation_id: row.invocation_id,
                 timestamp: row.timestamp,
                 title: content.title,
                 body: content.body,
@@ -184,7 +184,7 @@ impl NotificationInboxService {
                 "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
                  SELECT e.id, datetime('now')
                  FROM events e
-                 WHERE e.tool_name = 'NotifyApp'
+                 WHERE e.model_primitive_name = 'notifications::send'
                    AND e.type = 'capability.invocation.started'
                    AND e.session_id = ?1
                    AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
@@ -195,7 +195,7 @@ impl NotificationInboxService {
                 "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
                  SELECT e.id, datetime('now')
                  FROM events e
-                 WHERE e.tool_name = 'NotifyApp'
+                 WHERE e.model_primitive_name = 'notifications::send'
                    AND e.type = 'capability.invocation.started'
                    AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
                 params![],
@@ -279,7 +279,7 @@ mod tests {
         conn: &Connection,
         event_id: &str,
         session_id: &str,
-        tool_call_id: &str,
+        invocation_id: &str,
         timestamp: &str,
         payload: &Value,
     ) {
@@ -298,9 +298,9 @@ mod tests {
         let payload = serde_json::to_string(payload).unwrap();
         assert_eq!(
             conn.execute(
-                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-                 VALUES (?1, ?2, ?3, 'capability.invocation.started', ?4, ?5, 'ws_1', 'NotifyApp', ?6)",
-                rusqlite::params![event_id, session_id, seq, timestamp, payload.as_str(), tool_call_id],
+                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, model_primitive_name, invocation_id)
+                 VALUES (?1, ?2, ?3, 'capability.invocation.started', ?4, ?5, 'ws_1', 'notifications::send', ?6)",
+                rusqlite::params![event_id, session_id, seq, timestamp, payload.as_str(), invocation_id],
             )
             .unwrap(),
             1
@@ -315,8 +315,8 @@ mod tests {
 
         assert_eq!(
             conn.execute(
-                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-                 VALUES ('evt_bad', 'sess_user', 1, 'capability.invocation.started', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'NotifyApp', 'tc_bad')",
+                "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, model_primitive_name, invocation_id)
+                 VALUES ('evt_bad', 'sess_user', 1, 'capability.invocation.started', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'notifications::send', 'tc_bad')",
                 [],
             )
             .unwrap(),

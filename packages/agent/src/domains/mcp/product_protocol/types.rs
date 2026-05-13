@@ -1,4 +1,4 @@
-//! MCP protocol types — JSON-RPC messages and tool schemas.
+//! MCP protocol types — JSON-RPC messages and capability schemas.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -66,9 +66,9 @@ impl std::fmt::Display for JsonRpcError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolDef {
-    /// Tool name.
+    /// Capability name.
     pub name: String,
-    /// Tool description.
+    /// ModelCapability description.
     #[serde(default)]
     pub description: String,
     /// JSON Schema for input parameters.
@@ -193,7 +193,7 @@ pub enum McpServerHealth {
     Healthy,
     /// Experienced transient failures but still operational.
     Degraded,
-    /// Exceeded max failures — tools disabled until manual restart.
+    /// Exceeded max failures — capabilities disabled until manual restart.
     Failed,
 }
 
@@ -205,8 +205,8 @@ pub struct McpServerStatus {
     pub name: String,
     /// Current health state.
     pub health: McpServerHealth,
-    /// Number of tools registered by this server.
-    pub tool_count: usize,
+    /// Number of capabilities registered by this server.
+    pub capability_count: usize,
     /// Number of consecutive failures since last success.
     pub consecutive_failures: u32,
     /// Most recent error message, if any.
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tool_result_deserialization() {
+    fn mcp_capability_result_deserialization() {
         let json = json!({
             "content": [
                 {"type": "text", "text": "result data"}
@@ -375,14 +375,14 @@ mod tests {
         let status = McpServerStatus {
             name: "sqlite".into(),
             health: McpServerHealth::Healthy,
-            tool_count: 3,
+            capability_count: 3,
             consecutive_failures: 0,
             last_error: None,
             connected_at: Some("2026-03-25T10:00:00Z".into()),
         };
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(json["health"], "healthy");
-        assert_eq!(json["toolCount"], 3);
+        assert_eq!(json["capabilityCount"], 3);
     }
 
     #[test]
@@ -390,7 +390,7 @@ mod tests {
         let status = McpServerStatus {
             name: "github".into(),
             health: McpServerHealth::Degraded,
-            tool_count: 5,
+            capability_count: 5,
             consecutive_failures: 2,
             last_error: Some("connection reset".into()),
             connected_at: Some("2026-03-25T09:00:00Z".into()),
@@ -404,7 +404,7 @@ mod tests {
         let status = McpServerStatus {
             name: "broken".into(),
             health: McpServerHealth::Failed,
-            tool_count: 0,
+            capability_count: 0,
             consecutive_failures: MAX_CONSECUTIVE_FAILURES,
             last_error: Some("command not found".into()),
             connected_at: None,

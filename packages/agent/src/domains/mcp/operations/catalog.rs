@@ -4,7 +4,7 @@ use super::{
     FunctionDefinition, FunctionId, FunctionQuery, IdempotencyContract, ParamSummary, Provenance,
     RiskLevel, WorkerId,
 };
-use super::{McpToolFunctionHandler, mcp_status_value, require_router};
+use super::{McpCapabilityFunctionHandler, mcp_status_value, require_router};
 use crate::domains::mcp::Deps;
 use crate::engine::Invocation;
 use crate::engine::VisibilityScope;
@@ -14,7 +14,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
 
-pub(crate) async fn mcp_list_tools_value(
+pub(crate) async fn mcp_list_capabilities_value(
     params: Option<&Value>,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
@@ -24,7 +24,7 @@ pub(crate) async fn mcp_list_tools_value(
     let guard = router.read().await;
     let matches = guard.search("", server_filter.as_deref());
     drop(guard);
-    refresh_mcp_tool_catalog(deps).await;
+    refresh_mcp_capability_catalog(deps).await;
 
     serde_json::to_value(matches).map_err(|e| CapabilityError::Internal {
         message: e.to_string(),
@@ -40,23 +40,24 @@ pub(crate) async fn publish_mcp_status_changed(invocation: &Invocation, deps: &D
         .await;
 }
 
-pub(crate) async fn refresh_mcp_tool_catalog(deps: &Deps) {
+pub(crate) async fn refresh_mcp_capability_catalog(deps: &Deps) {
     let Some(router) = deps.mcp_router.as_ref() else {
         return;
     };
     let worker_id = WorkerId::new("mcp").expect("valid static mcp worker id");
-    let tools = {
+    let capabilities = {
         let guard = router.read().await;
         guard.search("", None)
     };
     let mut live_ids = std::collections::BTreeSet::new();
-    for tool in tools {
-        let id = mcp_tool_function_id(&tool.server, &tool.tool);
+    for mcp_capability in capabilities {
+        let id = mcp_capability_function_id(&mcp_capability.server, &mcp_capability.tool);
         let Ok(function_id) = FunctionId::new(id) else {
             continue;
         };
         let _ = live_ids.insert(function_id.as_str().to_owned());
-        let classification = classify_mcp_tool(&tool.tool, &tool.description);
+        let classification =
+            classify_mcp_capability(&mcp_capability.tool, &mcp_capability.description);
         let mut authority = AuthorityRequirement::scope(classification.authority_scope);
         if classification.approval_required {
             authority = authority.with_approval_required();
@@ -64,14 +65,17 @@ pub(crate) async fn refresh_mcp_tool_catalog(deps: &Deps) {
         let mut definition = FunctionDefinition::new(
             function_id,
             worker_id.clone(),
-            format!("MCP tool {} on server {}", tool.tool, tool.server),
+            format!(
+                "MCP capability {} on server {}",
+                mcp_capability.tool, mcp_capability.server
+            ),
             VisibilityScope::System,
             classification.effect_class,
         )
         .with_risk(classification.risk_level)
         .with_required_authority(authority)
         .with_provenance(Provenance::system())
-        .with_request_schema(schema_from_mcp_params(&tool.params))
+        .with_request_schema(schema_from_mcp_params(&mcp_capability.params))
         .with_response_schema(json!({
             "type": "object",
             "additionalProperties": true
@@ -82,13 +86,12 @@ pub(crate) async fn refresh_mcp_tool_catalog(deps: &Deps) {
         }
         definition.metadata = json!({
             "domainWorker": "mcp",
-            "mcpTool": true,
-            "modelToolName": mcp_model_tool_name(&tool.server, &tool.tool),
-            "toolOrder": 10_000,
-            "server": tool.server,
-            "tool": tool.tool,
-            "description": tool.description,
-            "params": serde_json::to_value(&tool.params).unwrap_or_else(|_| json!([])),
+            "mcpCapability": true,
+            "capabilityOrder": 10_000,
+            "server": mcp_capability.server,
+            "mcpCapabilityName": mcp_capability.tool,
+            "description": mcp_capability.description,
+            "params": serde_json::to_value(&mcp_capability.params).unwrap_or_else(|_| json!([])),
             "canonicalCapability": definition.id.as_str(),
             "classifier": {
                 "effectClass": effect_class_label(classification.effect_class),
@@ -99,12 +102,12 @@ pub(crate) async fn refresh_mcp_tool_catalog(deps: &Deps) {
                 "confidence": classification.confidence,
             },
         });
-        let handler = McpToolFunctionHandler {
+        let handler = McpCapabilityFunctionHandler {
             server: definition.metadata["server"]
                 .as_str()
                 .unwrap_or_default()
                 .to_owned(),
-            tool: definition.metadata["tool"]
+            mcp_name: definition.metadata["mcpCapabilityName"]
                 .as_str()
                 .unwrap_or_default()
                 .to_owned(),
@@ -130,12 +133,12 @@ pub(crate) async fn refresh_mcp_tool_catalog(deps: &Deps) {
         })
         .await;
     for function in existing {
-        let is_mcp_tool = function
+        let is_mcp_capability = function
             .metadata
-            .get("mcpTool")
+            .get("mcpCapability")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        if is_mcp_tool && !live_ids.contains(function.id.as_str()) {
+        if is_mcp_capability && !live_ids.contains(function.id.as_str()) {
             let _ = deps
                 .engine_host
                 .unregister_function(&function.id, &worker_id)
@@ -144,17 +147,17 @@ pub(crate) async fn refresh_mcp_tool_catalog(deps: &Deps) {
     }
 }
 
-pub(crate) fn mcp_tool_function_id(server: &str, tool: &str) -> String {
+pub(crate) fn mcp_capability_function_id(server: &str, mcp_name: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(server.as_bytes());
     hasher.update([0]);
-    hasher.update(tool.as_bytes());
+    hasher.update(mcp_name.as_bytes());
     let digest = hasher.finalize();
     format!(
         "mcp::{}__{}__{:02x}{:02x}{:02x}{:02x}",
         sanitize_id_part(server),
-        sanitize_id_part(tool),
+        sanitize_id_part(mcp_name),
         digest[0],
         digest[1],
         digest[2],
@@ -162,16 +165,8 @@ pub(crate) fn mcp_tool_function_id(server: &str, tool: &str) -> String {
     )
 }
 
-pub(crate) fn mcp_model_tool_name(server: &str, tool: &str) -> String {
-    format!(
-        "mcp_{}_{}",
-        sanitize_id_part(server),
-        sanitize_id_part(tool)
-    )
-}
-
 #[derive(Clone, Copy)]
-pub(crate) struct McpToolClassification {
+pub(crate) struct McpCapabilityClassification {
     pub(crate) effect_class: EffectClass,
     pub(crate) risk_level: RiskLevel,
     pub(crate) authority_scope: &'static str,
@@ -180,7 +175,10 @@ pub(crate) struct McpToolClassification {
     pub(crate) confidence: f64,
 }
 
-pub(crate) fn classify_mcp_tool(name: &str, description: &str) -> McpToolClassification {
+pub(crate) fn classify_mcp_capability(
+    name: &str,
+    description: &str,
+) -> McpCapabilityClassification {
     let text = format!("{name} {description}").to_lowercase();
     let read_markers = [
         "get", "list", "read", "search", "find", "fetch", "query", "lookup", "inspect", "describe",
@@ -195,7 +193,7 @@ pub(crate) fn classify_mcp_tool(name: &str, description: &str) -> McpToolClassif
         .iter()
         .any(|marker| token_like_match(&text, marker))
     {
-        return McpToolClassification {
+        return McpCapabilityClassification {
             effect_class: EffectClass::ExternalSideEffect,
             risk_level: RiskLevel::Medium,
             authority_scope: "mcp.write",
@@ -208,7 +206,7 @@ pub(crate) fn classify_mcp_tool(name: &str, description: &str) -> McpToolClassif
         .iter()
         .any(|marker| token_like_match(&text, marker))
     {
-        return McpToolClassification {
+        return McpCapabilityClassification {
             effect_class: EffectClass::PureRead,
             risk_level: RiskLevel::Low,
             authority_scope: "mcp.read",
@@ -217,12 +215,12 @@ pub(crate) fn classify_mcp_tool(name: &str, description: &str) -> McpToolClassif
             confidence: 0.65,
         };
     }
-    McpToolClassification {
+    McpCapabilityClassification {
         effect_class: EffectClass::ExternalSideEffect,
         risk_level: RiskLevel::Medium,
         authority_scope: "mcp.write",
         approval_required: true,
-        reason: "unknown_mcp_tool_defaults_to_safe_external_side_effect",
+        reason: "unknown_mcp_capability_defaults_to_safe_external_side_effect",
         confidence: 0.5,
     }
 }

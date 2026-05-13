@@ -488,7 +488,7 @@ struct ImportSessionPreviewView: View {
     fileprivate enum PreviewItem {
         case userMessage(text: String)
         case userCommand(name: String)
-        case assistantMessage(text: String, toolCalls: [CapabilityInvocationChip])
+        case assistantMessage(text: String, capabilityInvocations: [CapabilityInvocationChip])
         case aggregatedCapabilityInvocations([CapabilityInvocationChip])
     }
 
@@ -503,9 +503,9 @@ struct ImportSessionPreviewView: View {
         options: []
     )
 
-    /// Regex to match `[tool: Name]` references.
-    private static let toolRefRegex = try! NSRegularExpression(
-        pattern: "\\[tool: ([^\\]]+)\\]",
+    /// Regex to match `[capability: Name]` references.
+    private static let capabilityRefRegex = try! NSRegularExpression(
+        pattern: "\\[capability: ([^\\]]+)\\]",
         options: []
     )
 
@@ -541,57 +541,57 @@ struct ImportSessionPreviewView: View {
     }
 
     private func processAssistantRun(_ run: [ImportPreviewMessage]) -> [PreviewItem] {
-        // Separate tool-only messages from messages with actual text
+        // Separate capability-only messages from messages with actual text
         var items: [PreviewItem] = []
-        var pendingToolOnly: [String] = [] // model model tool names from consecutive tool-only messages
+        var pendingCapabilityOnly: [String] = []
 
         for msg in run {
             let parsed = parseAssistantContent(msg.contentPreview)
-            if parsed.text.isEmpty && !parsed.tools.isEmpty {
-                // Tool-only message
-                pendingToolOnly.append(contentsOf: parsed.tools)
+            if parsed.text.isEmpty && !parsed.capabilities.isEmpty {
+                // Capability-only message
+                pendingCapabilityOnly.append(contentsOf: parsed.capabilities)
             } else {
-                // Has text content — flush any pending tool-only aggregate first
-                if !pendingToolOnly.isEmpty {
-                    items.append(aggregateCapabilityInvocations(pendingToolOnly))
-                    pendingToolOnly = []
+                // Has text content — flush any pending capability-only aggregate first
+                if !pendingCapabilityOnly.isEmpty {
+                    items.append(aggregateCapabilityInvocations(pendingCapabilityOnly))
+                    pendingCapabilityOnly = []
                 }
-                let chips = parsed.tools.map { CapabilityInvocationChip(name: $0, count: 1) }
-                items.append(.assistantMessage(text: parsed.text, toolCalls: chips))
+                let chips = parsed.capabilities.map { CapabilityInvocationChip(name: $0, count: 1) }
+                items.append(.assistantMessage(text: parsed.text, capabilityInvocations: chips))
             }
         }
 
-        // Flush remaining tool-only messages
-        if !pendingToolOnly.isEmpty {
-            items.append(aggregateCapabilityInvocations(pendingToolOnly))
+        // Flush remaining capability-only messages
+        if !pendingCapabilityOnly.isEmpty {
+            items.append(aggregateCapabilityInvocations(pendingCapabilityOnly))
         }
 
         return items
     }
 
-    private func parseAssistantContent(_ content: String) -> (text: String, tools: [String]) {
-        var tools: [String] = []
+    private func parseAssistantContent(_ content: String) -> (text: String, capabilities: [String]) {
+        var capabilities: [String] = []
         let range = NSRange(content.startIndex..., in: content)
-        let matches = Self.toolRefRegex.matches(in: content, range: range)
+        let matches = Self.capabilityRefRegex.matches(in: content, range: range)
 
         for match in matches {
             if let nameRange = Range(match.range(at: 1), in: content) {
-                tools.append(String(content[nameRange]))
+                capabilities.append(String(content[nameRange]))
             }
         }
 
-        // Remove [tool: ...] references from text
-        let cleaned = Self.toolRefRegex.stringByReplacingMatches(
+        // Remove [capability: ...] references from text
+        let cleaned = Self.capabilityRefRegex.stringByReplacingMatches(
             in: content, range: range, withTemplate: ""
         ).trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return (cleaned, tools)
+        return (cleaned, capabilities)
     }
 
-    private func aggregateCapabilityInvocations(_ modelToolNames: [String]) -> PreviewItem {
+    private func aggregateCapabilityInvocations(_ modelPrimitiveNames: [String]) -> PreviewItem {
         var counts: [String: Int] = [:]
         var order: [String] = []
-        for name in modelToolNames {
+        for name in modelPrimitiveNames {
             if counts[name] == nil { order.append(name) }
             counts[name, default: 0] += 1
         }
@@ -672,10 +672,10 @@ private struct ImportPreviewRow: View {
             userRow(text: text)
         case .userCommand(let name):
             userCommandRow(name: name)
-        case .assistantMessage(let text, let tools):
-            assistantRow(text: text, toolCalls: tools)
-        case .aggregatedCapabilityInvocations(let tools):
-            aggregatedToolRow(tools: tools)
+        case .assistantMessage(let text, let capabilities):
+            assistantRow(text: text, capabilityInvocations: capabilities)
+        case .aggregatedCapabilityInvocations(let capabilities):
+            aggregatedCapabilityRow(capabilities: capabilities)
         }
     }
 
@@ -711,7 +711,7 @@ private struct ImportPreviewRow: View {
     }
 
     @ViewBuilder
-    private func assistantRow(text: String, toolCalls: [ImportSessionPreviewView.CapabilityInvocationChip]) -> some View {
+    private func assistantRow(text: String, capabilityInvocations: [ImportSessionPreviewView.CapabilityInvocationChip]) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Rectangle()
                 .fill(Color.tronEmerald)
@@ -726,8 +726,8 @@ private struct ImportPreviewRow: View {
                         .lineLimit(4)
                 }
 
-                ForEach(toolCalls, id: \.self) { tool in
-                    toolChip(name: tool.name, count: tool.count)
+                ForEach(capabilityInvocations, id: \.self) { capability in
+                    capabilityChip(name: capability.name, count: capability.count)
                 }
             }
 
@@ -737,7 +737,7 @@ private struct ImportPreviewRow: View {
     }
 
     @ViewBuilder
-    private func aggregatedToolRow(tools: [ImportSessionPreviewView.CapabilityInvocationChip]) -> some View {
+    private func aggregatedCapabilityRow(capabilities: [ImportSessionPreviewView.CapabilityInvocationChip]) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Rectangle()
                 .fill(Color.tronEmerald)
@@ -745,8 +745,8 @@ private struct ImportPreviewRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 2))
 
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(tools, id: \.self) { tool in
-                    toolChip(name: tool.name, count: tool.count)
+                ForEach(capabilities, id: \.self) { capability in
+                    capabilityChip(name: capability.name, count: capability.count)
                 }
             }
 
@@ -756,10 +756,10 @@ private struct ImportPreviewRow: View {
     }
 
     @ViewBuilder
-    private func toolChip(name: String, count: Int) -> some View {
+    private func capabilityChip(name: String, count: Int) -> some View {
         let label = count > 1
-            ? "Called \(name) tool \(count) times"
-            : "Called \(name) tool"
+            ? "Invoked \(name) capability \(count) times"
+            : "Invoked \(name) capability"
         Text(label)
             .font(TronTypography.codeCaption)
             .foregroundStyle(.tronEmerald.opacity(0.8))

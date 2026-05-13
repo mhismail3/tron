@@ -19,7 +19,7 @@ use crate::domains::session::event_store::EventStore;
 use crate::domains::skills::registry::SkillRegistry;
 use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerDefinition, WorkerKind};
 use crate::platform::codex_app::CodexAppServerManager;
-use crate::shared::server::context::{AgentDeps, ServerRuntimeContext, ToolRuntimeConfig};
+use crate::shared::server::context::{AgentDeps, CapabilitySupportConfig, ServerRuntimeContext};
 
 #[derive(Clone)]
 pub(crate) struct DomainRegistrationContext {
@@ -60,7 +60,7 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) onboarded_marker_path: PathBuf,
     pub(crate) updater_state_path: PathBuf,
     pub(crate) engine_host: crate::engine::EngineHostHandle,
-    pub(crate) tool_runtime: ToolRuntimeConfig,
+    pub(crate) capability_support_config: CapabilitySupportConfig,
     pub(crate) process_manager: Option<
         Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
     >,
@@ -102,7 +102,7 @@ impl DomainRegistrationContext {
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),
             updater_state_path: ctx.updater_state_path.clone(),
             engine_host: ctx.engine_host.clone(),
-            tool_runtime: ctx.tool_runtime.clone(),
+            capability_support_config: ctx.capability_support_config.clone(),
             process_manager: ctx.process_manager.clone(),
             job_manager: ctx.job_manager.clone(),
             output_buffer_registry: ctx.output_buffer_registry.clone(),

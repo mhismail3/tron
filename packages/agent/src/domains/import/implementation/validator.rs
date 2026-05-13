@@ -1,18 +1,9 @@
-//! Dry-run import validation (M28).
+//! Clean capability-native import validation.
 //!
-//! Runs the full import pipeline — parse → linearize → assemble →
-//! transform — without touching the event store, producing a validation
-//! report that surfaces errors and warnings BEFORE a DB transaction is
-//! opened.
-//!
-//! # Why
-//!
-//! The parser historically swallowed unparseable lines with a single
-//! `debug!` log. A user whose session file had ten truncated records had
-//! no visibility into the loss — the import silently wrote the successful
-//! records and returned a happy `ImportResult`. M28 promotes those
-//! silent skips (and a handful of semantic issues the transformer
-//! previously ignored) to first-class warnings the caller can render.
+//! Runs parse → linearize → assemble → validate → transform without touching
+//! the event store. Provider-native capability history is rejected instead of
+//! migrated: this clean cutover does not translate old `capability_invocation` or
+//! `capability_result` records into current capability events.
 //!
 //! The DB-write phase (`EventStore::import_atomic`) already runs the
 //! whole pipeline inside a single transaction, so "pre-validate before
@@ -29,7 +20,6 @@
 //! Both paths share a single implementation (`validate_and_prepare`) so
 //! they can never drift.
 
-use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde_json::Value;
@@ -51,21 +41,6 @@ pub enum ImportWarningKind {
     UnparseableLine {
         /// 1-indexed line number.
         line_number: usize,
-    },
-    /// A `tool_result` block references a `tool_use_id` that never
-    /// appeared as a capability invocation. The result will be written with no
-    /// matching call — reconstruction may render it as an orphan.
-    OrphanToolResult {
-        /// The `tool_use_id` that had no matching call.
-        tool_call_id: String,
-    },
-    /// A `tool_use` block had no corresponding `tool_result`. Common
-    /// for interrupted sessions (user closed Claude Code before the
-    /// tool finished). Imported as-is; reconstruction renders the call
-    /// with no outcome.
-    OrphanToolUse {
-        /// The `tool_use_id` that had no matching result.
-        tool_call_id: String,
     },
     /// No assistant message carried a model ID. The importer falls
     /// back to the default model (`claude-sonnet-4-20250514`).
@@ -91,26 +66,6 @@ impl ImportWarning {
                 "Line {} failed to parse ({}). Snippet: {}",
                 warning.line_number, warning.reason, warning.snippet
             ),
-        }
-    }
-
-    fn orphan_tool_result(tool_call_id: String) -> Self {
-        let message = format!(
-            "Capability result references tool_use_id '{tool_call_id}' but no matching capability invocation was found in the session."
-        );
-        Self {
-            kind: ImportWarningKind::OrphanToolResult { tool_call_id },
-            message,
-        }
-    }
-
-    fn orphan_tool_use(tool_call_id: String) -> Self {
-        let message = format!(
-            "Capability invocation '{tool_call_id}' has no matching result — the turn may have been interrupted."
-        );
-        Self {
-            kind: ImportWarningKind::OrphanToolUse { tool_call_id },
-            message,
         }
     }
 
@@ -202,10 +157,12 @@ pub(crate) fn validate_and_prepare(path: &Path) -> Result<ValidatedImport, Impor
         return Err(ImportError::EmptySession);
     }
 
-    // Detect orphan capability invocations / results BEFORE transform, so the
-    // warnings carry the original `tool_use_id`s without depending on
-    // transformer output ordering.
-    warnings.extend(detect_tool_orphans(&assembled));
+    let provider_capability_blocks = count_provider_capability_history(&assembled);
+    if provider_capability_blocks > 0 {
+        return Err(ImportError::UnsupportedProviderCapabilityHistory {
+            block_count: provider_capability_blocks,
+        });
+    }
 
     let result = transform(assembled);
 
@@ -259,38 +216,14 @@ pub(crate) fn validate_and_prepare(path: &Path) -> Result<ValidatedImport, Impor
     })
 }
 
-/// Walk assembled items collecting `tool_use_id`s on both sides and
-/// report any mismatch.
-///
-/// A session file generally pairs each `tool_use` block (on an assistant
-/// record) with exactly one `tool_result` block (on a subsequent user
-/// record). Claude Code CAN emit an interrupted session where a call has
-/// no result (user killed the agent) or an out-of-order session where a
-/// result references a call that didn't make it into the file. Neither
-/// is fatal, but both are worth surfacing.
-fn detect_tool_orphans(items: &[AssembledItem]) -> Vec<ImportWarning> {
-    let mut tool_uses: HashSet<String> = HashSet::new();
-    let mut tool_results: HashSet<String> = HashSet::new();
-    // Preserve first-seen order for deterministic warning output.
-    let mut use_order: Vec<String> = Vec::new();
-    let mut result_order: Vec<String> = Vec::new();
-    let mut seen_in_uses: HashMap<String, ()> = HashMap::new();
-    let mut seen_in_results: HashMap<String, ()> = HashMap::new();
-
+fn count_provider_capability_history(items: &[AssembledItem]) -> usize {
+    let mut count = 0;
     for item in items {
         match item {
             AssembledItem::AssistantMessage(am) => {
                 for block in &am.content_blocks {
-                    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
-                        continue;
-                    }
-                    if let Some(id) = block.get("id").and_then(Value::as_str) {
-                        let id = id.to_string();
-                        if tool_uses.insert(id.clone())
-                            && seen_in_uses.insert(id.clone(), ()).is_none()
-                        {
-                            use_order.push(id);
-                        }
+                    if block.get("type").and_then(Value::as_str) == Some("capability_invocation") {
+                        count += 1;
                     }
                 }
             }
@@ -303,36 +236,15 @@ fn detect_tool_orphans(items: &[AssembledItem]) -> Vec<ImportWarning> {
                     continue;
                 };
                 for block in blocks {
-                    if block.get("type").and_then(Value::as_str) != Some("tool_result") {
-                        continue;
-                    }
-                    if let Some(id) = block.get("tool_use_id").and_then(Value::as_str) {
-                        let id = id.to_string();
-                        if tool_results.insert(id.clone())
-                            && seen_in_results.insert(id.clone(), ()).is_none()
-                        {
-                            result_order.push(id);
-                        }
+                    if block.get("type").and_then(Value::as_str) == Some("capability_result") {
+                        count += 1;
                     }
                 }
             }
             _ => {}
         }
     }
-
-    let mut warnings = Vec::new();
-    for id in use_order {
-        if !tool_results.contains(&id) {
-            warnings.push(ImportWarning::orphan_tool_use(id));
-        }
-    }
-    for id in result_order {
-        if !tool_uses.contains(&id) {
-            warnings.push(ImportWarning::orphan_tool_result(id));
-        }
-    }
-
-    warnings
+    count
 }
 
 #[cfg(test)]

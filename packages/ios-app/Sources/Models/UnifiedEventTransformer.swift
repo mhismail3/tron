@@ -23,12 +23,12 @@ import Foundation
 /// of text and capability invocations as they appeared during streaming:
 ///
 /// ```
-/// [text: "I'll run sleep 3...", tool_use: {id: "t1"}, text: "Done!", ...]
+/// [text: "I'll run sleep 3...", capability_invocation: {id: "t1"}, text: "Done!", ...]
 /// ```
 ///
 /// Capability details come from separate `capability.invocation.started` events (identity, arguments, turn).
 /// Capability results come from `capability.invocation.completed` events. Both are combined when rendering
-/// tool_use content blocks from the message.assistant.
+/// capability_invocation content blocks from the message.assistant.
 ///
 /// ## Usage
 /// ```swift
@@ -193,7 +193,7 @@ struct UnifiedEventTransformer {
 
     /// Result of the first-pass collection over events.
     /// Both `transformPersistedEvents` and `reconstructSessionState` need these maps
-    /// to resolve provider `tool_use` content blocks and filter consumed notifications.
+    /// to resolve provider `capability_invocation` content blocks and filter consumed notifications.
     struct CapabilityInvocationMapResult {
         var startedInvocations: [String: CapabilityInvocationStartedPayload] = [:]
         var completedInvocations: [String: CapabilityInvocationCompletedPayload] = [:]
@@ -260,7 +260,7 @@ extension UnifiedEventTransformer {
     /// - Pass 1: Collect deleted event IDs, capability invocation maps, and config state
     /// - Pass 2: Build messages while filtering deleted events
     ///
-    /// **AskUserQuestion Status Detection**:
+    /// **UserInteraction Status Detection**:
     /// Events are passed to `InterleavedContentProcessor` to enable proper
     /// status detection (pending/answered/superseded) by examining subsequent
     /// user messages.

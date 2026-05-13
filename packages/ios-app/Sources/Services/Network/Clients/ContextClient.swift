@@ -28,7 +28,7 @@ final class ContextClient: EngineDomainClient {
         )
     }
 
-    /// Clear all messages from context, preserving system prompt and tools
+    /// Clear all messages from context, preserving system prompt and capabilities
     func clear(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws -> ContextClearResult {
         _ = try requireTransport().requireConnection()
 

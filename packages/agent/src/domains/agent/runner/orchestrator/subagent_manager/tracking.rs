@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{SubagentResult, WaitMode};
 use parking_lot::Mutex;
 use tokio::sync::Notify;
@@ -38,13 +38,13 @@ impl SubagentManager {
         &self,
         tracker: &Arc<TrackedSubagent>,
         timeout_ms: u64,
-    ) -> Result<Option<SubagentResult>, ToolError> {
+    ) -> Result<Option<SubagentResult>, CapabilityExecutionError> {
         let timeout = Duration::from_millis(timeout_ms);
         let wait_result = tokio::time::timeout(timeout, tracker.done.notified()).await;
 
         if wait_result.is_err() {
             tracker.cancel.cancel();
-            return Err(ToolError::Timeout { timeout_ms });
+            return Err(CapabilityExecutionError::Timeout { timeout_ms });
         }
 
         Ok(tracker.result.lock().clone())
@@ -95,13 +95,13 @@ impl SubagentManager {
     ///
     /// Returns Ok(()) if the subagent was found and cancelled (or already finished).
     /// Returns error if the session ID is not found.
-    pub fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError> {
-        let tracker = self
-            .subagents
-            .get(session_id)
-            .ok_or_else(|| ToolError::Validation {
-                message: format!("Subagent not found: {session_id}"),
-            })?;
+    pub fn cancel_subagent(&self, session_id: &str) -> Result<(), CapabilityExecutionError> {
+        let tracker =
+            self.subagents
+                .get(session_id)
+                .ok_or_else(|| CapabilityExecutionError::Validation {
+                    message: format!("Subagent not found: {session_id}"),
+                })?;
 
         // If already completed, no-op.
         if tracker.result.lock().is_some() {
@@ -129,9 +129,9 @@ impl SubagentManager {
         session_ids: &[String],
         mode: WaitMode,
         timeout_ms: u64,
-    ) -> Result<Vec<SubagentResult>, ToolError> {
+    ) -> Result<Vec<SubagentResult>, CapabilityExecutionError> {
         if session_ids.is_empty() {
-            return Err(ToolError::Validation {
+            return Err(CapabilityExecutionError::Validation {
                 message: "No session IDs provided".into(),
             });
         }
@@ -143,12 +143,11 @@ impl SubagentManager {
             WaitMode::All => {
                 let mut results = Vec::with_capacity(session_ids.len());
                 for sid in session_ids {
-                    let tracker = self
-                        .subagents
-                        .get(sid)
-                        .ok_or_else(|| ToolError::Validation {
+                    let tracker = self.subagents.get(sid).ok_or_else(|| {
+                        CapabilityExecutionError::Validation {
                             message: format!("Unknown subagent session: {sid}"),
-                        })?;
+                        }
+                    })?;
 
                     if let Some(result) = tracker.result.lock().clone() {
                         results.push(result);
@@ -157,12 +156,12 @@ impl SubagentManager {
 
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     if remaining.is_zero() {
-                        return Err(ToolError::Timeout { timeout_ms });
+                        return Err(CapabilityExecutionError::Timeout { timeout_ms });
                     }
 
                     let wait = tokio::time::timeout(remaining, tracker.done.notified()).await;
                     if wait.is_err() {
-                        return Err(ToolError::Timeout { timeout_ms });
+                        return Err(CapabilityExecutionError::Timeout { timeout_ms });
                     }
 
                     results.push(tracker_result_or_unknown(&tracker, sid));
@@ -178,7 +177,7 @@ impl SubagentManager {
                             .map(|tracker| (sid.clone(), tracker.clone()))
                     })
                     .collect::<Option<Vec<_>>>()
-                    .ok_or_else(|| ToolError::Validation {
+                    .ok_or_else(|| CapabilityExecutionError::Validation {
                         message: "One or more unknown subagent sessions".into(),
                     })?;
 
@@ -201,10 +200,10 @@ impl SubagentManager {
 
                 match tokio::time::timeout(timeout, result_rx.recv()).await {
                     Ok(Some(result)) => Ok(vec![result]),
-                    Ok(None) => Err(ToolError::Internal {
+                    Ok(None) => Err(CapabilityExecutionError::Internal {
                         message: "All wait tasks completed without result".into(),
                     }),
-                    Err(_) => Err(ToolError::Timeout { timeout_ms }),
+                    Err(_) => Err(CapabilityExecutionError::Timeout { timeout_ms }),
                 }
             }
         }

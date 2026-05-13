@@ -168,26 +168,26 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNotNil(view)
     }
 
-    /// `.askUser` mode renders the interactive picker with chips. A non-nil
+    /// `.userInteraction` mode renders the interactive picker with chips. A non-nil
     /// `onReactivate` callback is required for the chip taps to fire the
     /// `.reactivateSkill` tap action. This asserts the view accepts a
     /// stateless callback; the tap payload shape is covered separately by
     /// `testReactivateSkillTapActionCarriesSkillName`.
-    func testSkillsClearedNotificationViewAskUser() {
+    func testSkillsClearedNotificationViewUserInteraction() {
         let view = SkillsClearedNotificationView(
             clearedSkills: ["alpha", "beta", "gamma"],
-            mode: .askUser,
+            mode: .userInteraction,
             onReactivate: { _ in }
         )
         XCTAssertNotNil(view)
     }
 
-    /// `.askUser` mode with nil callback is still renderable (e.g. when the
+    /// `.userInteraction` mode with nil callback is still renderable (e.g. when the
     /// tap pipeline is deliberately disconnected in preview/testing).
-    func testSkillsClearedNotificationViewAskUserNilCallback() {
+    func testSkillsClearedNotificationViewUserInteractionNilCallback() {
         let view = SkillsClearedNotificationView(
             clearedSkills: ["skill-x"],
-            mode: .askUser,
+            mode: .userInteraction,
             onReactivate: nil
         )
         XCTAssertNotNil(view)
@@ -199,9 +199,9 @@ final class NotificationPillTests: XCTestCase {
     /// skill-family notifications (activated/deactivated).
     func testSkillsClearedTintColor() {
         let clearAll = SystemEvent.skillsCleared(clearedSkills: ["a"], mode: .clearAll)
-        let askUser = SystemEvent.skillsCleared(clearedSkills: ["a"], mode: .askUser)
+        let userInteraction = SystemEvent.skillsCleared(clearedSkills: ["a"], mode: .userInteraction)
         XCTAssertEqual(clearAll.tintColor, .tronCyan)
-        XCTAssertEqual(askUser.tintColor, .tronCyan)
+        XCTAssertEqual(userInteraction.tintColor, .tronCyan)
     }
 
     /// `.clearAll` textContent: "Cleared N skills on compaction" — noun
@@ -219,24 +219,24 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertEqual(event.textContent, "Cleared 1 skill on compaction")
     }
 
-    /// `.askUser` textContent: "Re-activate N skills?" — noun pluralizes on count.
-    func testSkillsClearedTextContentAskUserPlural() {
+    /// `.userInteraction` textContent: "Re-activate N skills?" — noun pluralizes on count.
+    func testSkillsClearedTextContentUserInteractionPlural() {
         let event = SystemEvent.skillsCleared(
             clearedSkills: ["x", "y"],
-            mode: .askUser
+            mode: .userInteraction
         )
         XCTAssertEqual(event.textContent, "Re-activate 2 skills?")
     }
 
-    func testSkillsClearedTextContentAskUserSingular() {
-        let event = SystemEvent.skillsCleared(clearedSkills: ["only"], mode: .askUser)
+    func testSkillsClearedTextContentUserInteractionSingular() {
+        let event = SystemEvent.skillsCleared(clearedSkills: ["only"], mode: .userInteraction)
         XCTAssertEqual(event.textContent, "Re-activate 1 skill?")
     }
 
     /// `.skillsCleared` is not a compaction/memory-retain animation container
     /// event — it renders as a regular pill via the default path.
     func testSkillsClearedIsNotCompactionOrMemoryRetainNotification() {
-        let event = SystemEvent.skillsCleared(clearedSkills: ["x"], mode: .askUser)
+        let event = SystemEvent.skillsCleared(clearedSkills: ["x"], mode: .userInteraction)
         XCTAssertFalse(event.isCompactionNotification)
         XCTAssertFalse(event.isMemoryRetainNotification)
     }
@@ -279,7 +279,7 @@ final class NotificationPillTests: XCTestCase {
     /// event. Mirrors Rust's `serde_json::from_value::<SkillsClearedPayload>`
     /// which errors on unknown variants (see
     /// `skills_cleared_mode_rejects_unknown_variant` in skill.rs). Silently
-    /// rendering a future server mode as `.askUser` would mis-render an
+    /// rendering a future server mode as `.userInteraction` would mis-render an
     /// informational event as an interactive picker.
     func testSkillsClearedPayloadUnknownModeReturnsNil() {
         let payload: [String: AnyCodable] = [
@@ -295,7 +295,7 @@ final class NotificationPillTests: XCTestCase {
     func testSkillsClearedPayloadMissingSkillsReturnsNil() {
         let payload: [String: AnyCodable] = [
             "reason": AnyCodable("compaction"),
-            "mode": AnyCodable("askUser")
+            "mode": AnyCodable("userInteraction")
         ]
         let parsed = SkillsClearedPayload(from: payload)
         XCTAssertNil(parsed)
@@ -306,7 +306,7 @@ final class NotificationPillTests: XCTestCase {
     func testSkillsClearedPayloadMissingReasonReturnsNil() {
         let payload: [String: AnyCodable] = [
             "clearedSkills": AnyCodable(["x"]),
-            "mode": AnyCodable("askUser")
+            "mode": AnyCodable("userInteraction")
         ]
         let parsed = SkillsClearedPayload(from: payload)
         XCTAssertNil(parsed)

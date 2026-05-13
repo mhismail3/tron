@@ -8,17 +8,19 @@ use crate::domains::session::event_store::types::state::Message;
 
 const INTERACTIVE_TOOL_NAMES: &[&str] = &["agent::ask_user"];
 
-/// First-pass scan to collect `tool_use` block IDs that belong to an
-/// interactive tool. Their matching `tool_result` messages are then filtered
+/// First-pass scan to collect `capability_invocation` block IDs that belong to an
+/// interactive capability. Their matching `capability_result` messages are then filtered
 /// by [`serialize_for_memory`].
-pub(super) fn collect_interactive_tool_use_ids(messages: &[Message]) -> HashSet<String> {
+pub(super) fn collect_interactive_capability_invocation_ids(
+    messages: &[Message],
+) -> HashSet<String> {
     let mut ids = HashSet::new();
     for msg in messages {
         let Some(arr) = msg.content.as_array() else {
             continue;
         };
         for block in arr {
-            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+            if block.get("type").and_then(Value::as_str) != Some("capability_invocation") {
                 continue;
             }
             let Some(name) = block.get("name").and_then(Value::as_str) else {
@@ -35,10 +37,10 @@ pub(super) fn collect_interactive_tool_use_ids(messages: &[Message]) -> HashSet<
     ids
 }
 
-/// Extract a compact natural-language summary from an interactive-tool
-/// `tool_use` block so the transcript preserves what the agent asked.
-pub(super) fn extract_interactive_tool_summary(block: &Value) -> Option<String> {
-    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+/// Extract a compact natural-language summary from an interactive-capability
+/// `capability_invocation` block so the transcript preserves what the agent asked.
+pub(super) fn extract_interactive_capability_summary(block: &Value) -> Option<String> {
+    if block.get("type").and_then(Value::as_str) != Some("capability_invocation") {
         return None;
     }
     let name = block.get("name").and_then(Value::as_str)?;
@@ -65,10 +67,10 @@ pub(super) fn extract_interactive_tool_summary(block: &Value) -> Option<String> 
 /// Serialize reconstructed messages to a plain-text transcript for summarization.
 pub(super) fn serialize_for_memory(messages: &[Message]) -> String {
     const MAX_TEXT: usize = 300;
-    const MAX_TOOL: usize = 150;
+    const MAX_CAPABILITY_RESULT: usize = 150;
     const MAX_TOTAL: usize = 20_000;
 
-    let interactive_ids = collect_interactive_tool_use_ids(messages);
+    let interactive_ids = collect_interactive_capability_invocation_ids(messages);
 
     let mut lines = Vec::new();
     for msg in messages {
@@ -102,7 +104,8 @@ pub(super) fn serialize_for_memory(messages: &[Message]) -> String {
                                 if !t.is_empty() {
                                     parts.push(t.to_string());
                                 }
-                            } else if let Some(summary) = extract_interactive_tool_summary(b) {
+                            } else if let Some(summary) = extract_interactive_capability_summary(b)
+                            {
                                 parts.push(summary);
                             }
                         }
@@ -115,8 +118,8 @@ pub(super) fn serialize_for_memory(messages: &[Message]) -> String {
                     lines.push(format!("[ASSISTANT] {t}"));
                 }
             }
-            "tool_result" | "toolResult" => {
-                if let Some(id) = msg.tool_call_id.as_deref() {
+            "capability_result" | "capabilityResult" => {
+                if let Some(id) = msg.invocation_id.as_deref() {
                     if interactive_ids.contains(id) {
                         continue;
                     }
@@ -131,11 +134,11 @@ pub(super) fn serialize_for_memory(messages: &[Message]) -> String {
                         .join(" "),
                     _ => continue,
                 };
-                let t = truncate_str(&text, MAX_TOOL);
+                let t = truncate_str(&text, MAX_CAPABILITY_RESULT);
                 let label = if msg.is_error == Some(true) {
-                    "[TOOL_ERROR]"
+                    "[CAPABILITY_ERROR]"
                 } else {
-                    "[TOOL_RESULT]"
+                    "[CAPABILITY_RESULT]"
                 };
                 if !t.is_empty() {
                     lines.push(format!("{label} {t}"));

@@ -432,12 +432,12 @@ echo "{\"action\":\"continue\",\"message\":\"session=$SESSION_ID\"}"
     fn test_hook_type_returns_configured_value() {
         let handler = ScriptHookHandler::new(
             "test".to_string(),
-            HookType::PostToolUse,
+            HookType::PostCapabilityInvocation,
             PathBuf::from("/tmp/test.sh"),
             0,
             5000,
         );
-        assert_eq!(handler.hook_type(), HookType::PostToolUse);
+        assert_eq!(handler.hook_type(), HookType::PostCapabilityInvocation);
     }
 
     // --- resolve_command tests ---

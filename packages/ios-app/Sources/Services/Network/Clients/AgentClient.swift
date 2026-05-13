@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for agent-related engine capabilities.
-/// Handles prompts, abort, state queries, and tool results.
+/// Handles prompts, abort, state queries, and capability results.
 final class AgentClient: EngineDomainClient {
 
     // MARK: - Agent Methods
@@ -128,7 +128,7 @@ final class AgentClient: EngineDomainClient {
 
     // MARK: - Confirmation/Answer Submission
 
-    /// Submit answers for an AskUserQuestion capability invocation.
+    /// Submit answers for an UserInteraction capability invocation.
     /// Server constructs the prompt and spawns a prompt run (or queues if busy).
     func submitAnswers(
         questions: [AnswerSubmission],
@@ -158,14 +158,14 @@ final class AgentClient: EngineDomainClient {
     }
 
     /// Abort a single in-flight capability invocation without aborting the rest of the turn.
-    /// Returns `true` when the server cancelled a registered tool, `false` when
-    /// the tool had already finished or no call matched the id.
+    /// Returns `true` when the server cancelled a registered capability, `false` when
+    /// the invocation had already finished or no call matched the id.
     @discardableResult
-    func abortTool(invocationId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
+    func abortCapabilityInvocation(invocationId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
         let (_, sessionId) = try requireTransport().requireSession()
-        let params = AgentAbortToolParams(sessionId: sessionId, invocationId: invocationId)
-        let result: AgentAbortToolResult = try await invokeWrite(
-            "agent::abort_tool",
+        let params = AgentAbortInvocationParams(sessionId: sessionId, invocationId: invocationId)
+        let result: AgentAbortInvocationResult = try await invokeWrite(
+            "agent::abort_invocation",
             params,
             idempotencyKey: idempotencyKey,
             context: sessionInvocationContext(sessionId)

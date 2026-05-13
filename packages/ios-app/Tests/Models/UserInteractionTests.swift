@@ -1,19 +1,19 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for AskUserQuestion models and state handling
+/// Tests for UserInteraction models and state handling
 ///
 /// These tests verify:
 /// - Model JSON decoding/encoding
 /// - Answer state management
 /// - Completion detection
 /// - Selection mode behavior (single vs multi)
-final class AskUserQuestionTests: XCTestCase {
+final class UserInteractionTests: XCTestCase {
 
-    // MARK: - Tests: AskUserQuestionOption Decoding
+    // MARK: - Tests: UserInteractionOption Decoding
 
     /// Test decoding option with explicit value
-    func testAskUserQuestionOptionDecodingWithValue() throws {
+    func testUserInteractionOptionDecodingWithValue() throws {
         let json = """
         {
             "label": "Option A",
@@ -23,7 +23,7 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let option = try decoder.decode(AskUserQuestionOption.self, from: json)
+        let option = try decoder.decode(UserInteractionOption.self, from: json)
 
         XCTAssertEqual(option.label, "Option A")
         XCTAssertEqual(option.value, "option_a")
@@ -31,7 +31,7 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test decoding option without explicit value
-    func testAskUserQuestionOptionDecodingWithoutValue() throws {
+    func testUserInteractionOptionDecodingWithoutValue() throws {
         let json = """
         {
             "label": "Option B"
@@ -39,7 +39,7 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let option = try decoder.decode(AskUserQuestionOption.self, from: json)
+        let option = try decoder.decode(UserInteractionOption.self, from: json)
 
         XCTAssertEqual(option.label, "Option B")
         XCTAssertNil(option.value)
@@ -47,8 +47,8 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test option ID uses value when present
-    func testAskUserQuestionOptionIdUsesValueWhenPresent() throws {
-        let option = AskUserQuestionOption(
+    func testUserInteractionOptionIdUsesValueWhenPresent() throws {
+        let option = UserInteractionOption(
             label: "Display Label",
             value: "actual_value",
             description: nil
@@ -58,8 +58,8 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test option ID uses label as fallback
-    func testAskUserQuestionOptionIdUsesLabelAsFallback() throws {
-        let option = AskUserQuestionOption(
+    func testUserInteractionOptionIdUsesLabelAsFallback() throws {
+        let option = UserInteractionOption(
             label: "Display Label",
             value: nil,
             description: nil
@@ -68,10 +68,10 @@ final class AskUserQuestionTests: XCTestCase {
         XCTAssertEqual(option.id, "Display Label")
     }
 
-    // MARK: - Tests: AskUserQuestion Decoding
+    // MARK: - Tests: UserInteraction Decoding
 
     /// Test decoding single-select question
-    func testAskUserQuestionDecodingSingleMode() throws {
+    func testUserInteractionDecodingSingleMode() throws {
         let json = """
         {
             "id": "q1",
@@ -85,7 +85,7 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let question = try decoder.decode(AskUserQuestion.self, from: json)
+        let question = try decoder.decode(UserInteraction.self, from: json)
 
         XCTAssertEqual(question.id, "q1")
         XCTAssertEqual(question.question, "What approach do you prefer?")
@@ -94,7 +94,7 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test decoding multi-select question
-    func testAskUserQuestionDecodingMultiMode() throws {
+    func testUserInteractionDecodingMultiMode() throws {
         let json = """
         {
             "id": "q2",
@@ -109,7 +109,7 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let question = try decoder.decode(AskUserQuestion.self, from: json)
+        let question = try decoder.decode(UserInteraction.self, from: json)
 
         XCTAssertEqual(question.id, "q2")
         XCTAssertEqual(question.mode, .multi)
@@ -117,7 +117,7 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test default allowOther is nil
-    func testAskUserQuestionDefaultAllowOther() throws {
+    func testUserInteractionDefaultAllowOther() throws {
         let json = """
         {
             "id": "q1",
@@ -128,14 +128,14 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let question = try decoder.decode(AskUserQuestion.self, from: json)
+        let question = try decoder.decode(UserInteraction.self, from: json)
 
         XCTAssertNil(question.allowOther)
         XCTAssertNil(question.otherPlaceholder)
     }
 
     /// Test decoding question with allowOther
-    func testAskUserQuestionWithAllowOther() throws {
+    func testUserInteractionWithAllowOther() throws {
         let json = """
         {
             "id": "q1",
@@ -148,16 +148,16 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let question = try decoder.decode(AskUserQuestion.self, from: json)
+        let question = try decoder.decode(UserInteraction.self, from: json)
 
         XCTAssertEqual(question.allowOther, true)
         XCTAssertEqual(question.otherPlaceholder, "Enter your answer...")
     }
 
-    // MARK: - Tests: AskUserQuestionParams Decoding
+    // MARK: - Tests: UserInteractionParams Decoding
 
     /// Test decoding params with questions
-    func testAskUserQuestionParamsDecoding() throws {
+    func testUserInteractionParamsDecoding() throws {
         let json = """
         {
             "questions": [
@@ -178,7 +178,7 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let params = try decoder.decode(AskUserQuestionParams.self, from: json)
+        let params = try decoder.decode(UserInteractionParams.self, from: json)
 
         XCTAssertEqual(params.questions.count, 2)
         XCTAssertEqual(params.questions[0].id, "q1")
@@ -187,7 +187,7 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test decoding params with context
-    func testAskUserQuestionParamsWithContext() throws {
+    func testUserInteractionParamsWithContext() throws {
         let json = """
         {
             "questions": [
@@ -203,16 +203,16 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let params = try decoder.decode(AskUserQuestionParams.self, from: json)
+        let params = try decoder.decode(UserInteractionParams.self, from: json)
 
         XCTAssertEqual(params.context, "Additional context about the questions")
     }
 
-    // MARK: - Tests: AskUserQuestionAnswer Encoding
+    // MARK: - Tests: UserInteractionAnswer Encoding
 
     /// Test encoding answer
-    func testAskUserQuestionAnswerEncoding() throws {
-        let answer = AskUserQuestionAnswer(
+    func testUserInteractionAnswerEncoding() throws {
+        let answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["Option A", "Option B"],
             otherValue: nil
@@ -227,8 +227,8 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test encoding answer with otherValue
-    func testAskUserQuestionAnswerWithOtherValue() throws {
-        let answer = AskUserQuestionAnswer(
+    func testUserInteractionAnswerWithOtherValue() throws {
+        let answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: [],
             otherValue: "My custom answer"
@@ -242,14 +242,14 @@ final class AskUserQuestionTests: XCTestCase {
         XCTAssertEqual(json?["selectedValues"] as? [String], [])
     }
 
-    // MARK: - Tests: AskUserQuestionResult
+    // MARK: - Tests: UserInteractionResult
 
     /// Test result marked complete when all answered
-    func testAskUserQuestionResultComplete() throws {
-        let result = AskUserQuestionResult(
+    func testUserInteractionResultComplete() throws {
+        let result = UserInteractionResult(
             answers: [
-                AskUserQuestionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil),
-                AskUserQuestionAnswer(questionId: "q2", selectedValues: ["B", "C"], otherValue: nil)
+                UserInteractionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil),
+                UserInteractionAnswer(questionId: "q2", selectedValues: ["B", "C"], otherValue: nil)
             ],
             complete: true,
             submittedAt: ISO8601DateFormatter().string(from: Date())
@@ -260,10 +260,10 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test result marked incomplete
-    func testAskUserQuestionResultIncomplete() throws {
-        let result = AskUserQuestionResult(
+    func testUserInteractionResultIncomplete() throws {
+        let result = UserInteractionResult(
             answers: [
-                AskUserQuestionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)
+                UserInteractionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)
             ],
             complete: false,
             submittedAt: ISO8601DateFormatter().string(from: Date())
@@ -273,12 +273,12 @@ final class AskUserQuestionTests: XCTestCase {
     }
 
     /// Test result includes valid ISO timestamp
-    func testAskUserQuestionResultTimestamp() throws {
+    func testUserInteractionResultTimestamp() throws {
         let now = Date()
         let formatter = ISO8601DateFormatter()
         let timestamp = formatter.string(from: now)
 
-        let result = AskUserQuestionResult(
+        let result = UserInteractionResult(
             answers: [],
             complete: false,
             submittedAt: timestamp
@@ -289,18 +289,18 @@ final class AskUserQuestionTests: XCTestCase {
         XCTAssertNotNil(parsed)
     }
 
-    // MARK: - Tests: AskUserQuestionToolData
+    // MARK: - Tests: UserInteractionInvocationData
 
-    /// Test tool data initialization
-    func testAskUserQuestionToolDataInitialization() throws {
-        let params = AskUserQuestionParams(
+    /// Test capability data initialization
+    func testUserInteractionInvocationDataInitialization() throws {
+        let params = UserInteractionParams(
             questions: [
-                AskUserQuestion(
+                UserInteraction(
                     id: "q1",
                     question: "Test?",
                     options: [
-                        AskUserQuestionOption(label: "A", value: nil, description: nil),
-                        AskUserQuestionOption(label: "B", value: nil, description: nil)
+                        UserInteractionOption(label: "A", value: nil, description: nil),
+                        UserInteractionOption(label: "B", value: nil, description: nil)
                     ],
                     mode: .single,
                     allowOther: nil,
@@ -310,7 +310,7 @@ final class AskUserQuestionTests: XCTestCase {
             context: nil
         )
 
-        let toolData = AskUserQuestionToolData(
+        let capabilityData = UserInteractionInvocationData(
             invocationId: "call_123",
             params: params,
             answers: [:],
@@ -318,46 +318,46 @@ final class AskUserQuestionTests: XCTestCase {
             result: nil
         )
 
-        XCTAssertEqual(toolData.invocationId, "call_123")
-        XCTAssertEqual(toolData.params.questions.count, 1)
-        XCTAssertTrue(toolData.answers.isEmpty)
-        XCTAssertEqual(toolData.status, .pending)
-        XCTAssertNil(toolData.result)
+        XCTAssertEqual(capabilityData.invocationId, "call_123")
+        XCTAssertEqual(capabilityData.params.questions.count, 1)
+        XCTAssertTrue(capabilityData.answers.isEmpty)
+        XCTAssertEqual(capabilityData.status, .pending)
+        XCTAssertNil(capabilityData.result)
     }
 
-    /// Test tool data status transitions (async mode)
-    func testAskUserQuestionToolDataStatusTransitions() throws {
-        var toolData = AskUserQuestionToolData(
+    /// Test capability data status transitions (async mode)
+    func testUserInteractionInvocationDataStatusTransitions() throws {
+        var capabilityData = UserInteractionInvocationData(
             invocationId: "call_123",
-            params: AskUserQuestionParams(questions: [], context: nil),
+            params: UserInteractionParams(questions: [], context: nil),
             answers: [:],
             status: .pending,
             result: nil
         )
 
-        XCTAssertEqual(toolData.status, .pending)
+        XCTAssertEqual(capabilityData.status, .pending)
 
         // User answers the question
-        toolData.status = .answered
-        XCTAssertEqual(toolData.status, .answered)
+        capabilityData.status = .answered
+        XCTAssertEqual(capabilityData.status, .answered)
 
         // Test superseded status
-        var toolData2 = AskUserQuestionToolData(
+        var interactionData2 = UserInteractionInvocationData(
             invocationId: "call_456",
-            params: AskUserQuestionParams(questions: [], context: nil),
+            params: UserInteractionParams(questions: [], context: nil),
             answers: [:],
             status: .pending,
             result: nil
         )
-        toolData2.status = .superseded
-        XCTAssertEqual(toolData2.status, .superseded)
+        interactionData2.status = .superseded
+        XCTAssertEqual(interactionData2.status, .superseded)
     }
 
-    /// Test tool data equality
-    func testAskUserQuestionToolDataEquality() throws {
-        let params = AskUserQuestionParams(questions: [], context: nil)
+    /// Test capability data equality
+    func testUserInteractionInvocationDataEquality() throws {
+        let params = UserInteractionParams(questions: [], context: nil)
 
-        let data1 = AskUserQuestionToolData(
+        let data1 = UserInteractionInvocationData(
             invocationId: "call_123",
             params: params,
             answers: [:],
@@ -365,7 +365,7 @@ final class AskUserQuestionTests: XCTestCase {
             result: nil
         )
 
-        let data2 = AskUserQuestionToolData(
+        let data2 = UserInteractionInvocationData(
             invocationId: "call_123",
             params: params,
             answers: [:],
@@ -373,7 +373,7 @@ final class AskUserQuestionTests: XCTestCase {
             result: nil
         )
 
-        let data3 = AskUserQuestionToolData(
+        let data3 = UserInteractionInvocationData(
             invocationId: "call_456",
             params: params,
             answers: [:],
@@ -390,14 +390,14 @@ final class AskUserQuestionTests: XCTestCase {
     /// Test single select replaces existing answer
     func testSingleSelectReplacesExistingAnswer() throws {
         // For single select, only one value should be in selectedValues
-        var answer = AskUserQuestionAnswer(
+        var answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["A"],
             otherValue: nil
         )
 
         // Replace with new selection (in single mode)
-        answer = AskUserQuestionAnswer(
+        answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["B"],
             otherValue: nil
@@ -409,7 +409,7 @@ final class AskUserQuestionTests: XCTestCase {
 
     /// Test multi select toggles answers
     func testMultiSelectTogglesAnswers() throws {
-        var answer = AskUserQuestionAnswer(
+        var answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["A"],
             otherValue: nil
@@ -418,7 +418,7 @@ final class AskUserQuestionTests: XCTestCase {
         // Add B (toggle on)
         var selected = Set(answer.selectedValues)
         selected.insert("B")
-        answer = AskUserQuestionAnswer(
+        answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: Array(selected),
             otherValue: nil
@@ -430,7 +430,7 @@ final class AskUserQuestionTests: XCTestCase {
 
     /// Test multi select can add multiple
     func testMultiSelectCanAddMultiple() throws {
-        let answer = AskUserQuestionAnswer(
+        let answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["A", "B", "C"],
             otherValue: nil
@@ -444,7 +444,7 @@ final class AskUserQuestionTests: XCTestCase {
         var selected = Set(["A", "B", "C"])
         selected.remove("B")
 
-        let answer = AskUserQuestionAnswer(
+        let answer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: Array(selected),
             otherValue: nil
@@ -460,23 +460,23 @@ final class AskUserQuestionTests: XCTestCase {
     /// Test all questions answered detection
     func testAllQuestionsAnsweredDetection() throws {
         let questions = [
-            AskUserQuestion(
+            UserInteraction(
                 id: "q1",
                 question: "Q1?",
                 options: [
-                    AskUserQuestionOption(label: "A", value: nil, description: nil),
-                    AskUserQuestionOption(label: "B", value: nil, description: nil)
+                    UserInteractionOption(label: "A", value: nil, description: nil),
+                    UserInteractionOption(label: "B", value: nil, description: nil)
                 ],
                 mode: .single,
                 allowOther: nil,
                 otherPlaceholder: nil
             ),
-            AskUserQuestion(
+            UserInteraction(
                 id: "q2",
                 question: "Q2?",
                 options: [
-                    AskUserQuestionOption(label: "X", value: nil, description: nil),
-                    AskUserQuestionOption(label: "Y", value: nil, description: nil)
+                    UserInteractionOption(label: "X", value: nil, description: nil),
+                    UserInteractionOption(label: "Y", value: nil, description: nil)
                 ],
                 mode: .single,
                 allowOther: nil,
@@ -484,9 +484,9 @@ final class AskUserQuestionTests: XCTestCase {
             )
         ]
 
-        let answers: [String: AskUserQuestionAnswer] = [
-            "q1": AskUserQuestionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil),
-            "q2": AskUserQuestionAnswer(questionId: "q2", selectedValues: ["Y"], otherValue: nil)
+        let answers: [String: UserInteractionAnswer] = [
+            "q1": UserInteractionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil),
+            "q2": UserInteractionAnswer(questionId: "q2", selectedValues: ["Y"], otherValue: nil)
         ]
 
         // Check all questions have answers with non-empty selections
@@ -503,23 +503,23 @@ final class AskUserQuestionTests: XCTestCase {
     /// Test partial answers not complete
     func testPartialAnswersNotComplete() throws {
         let questions = [
-            AskUserQuestion(
+            UserInteraction(
                 id: "q1",
                 question: "Q1?",
                 options: [
-                    AskUserQuestionOption(label: "A", value: nil, description: nil),
-                    AskUserQuestionOption(label: "B", value: nil, description: nil)
+                    UserInteractionOption(label: "A", value: nil, description: nil),
+                    UserInteractionOption(label: "B", value: nil, description: nil)
                 ],
                 mode: .single,
                 allowOther: nil,
                 otherPlaceholder: nil
             ),
-            AskUserQuestion(
+            UserInteraction(
                 id: "q2",
                 question: "Q2?",
                 options: [
-                    AskUserQuestionOption(label: "X", value: nil, description: nil),
-                    AskUserQuestionOption(label: "Y", value: nil, description: nil)
+                    UserInteractionOption(label: "X", value: nil, description: nil),
+                    UserInteractionOption(label: "Y", value: nil, description: nil)
                 ],
                 mode: .single,
                 allowOther: nil,
@@ -528,8 +528,8 @@ final class AskUserQuestionTests: XCTestCase {
         ]
 
         // Only q1 answered
-        let answers: [String: AskUserQuestionAnswer] = [
-            "q1": AskUserQuestionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)
+        let answers: [String: UserInteractionAnswer] = [
+            "q1": UserInteractionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)
         ]
 
         let allAnswered = questions.allSatisfy { question in
@@ -559,7 +559,7 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let question = try decoder.decode(AskUserQuestion.self, from: json)
+        let question = try decoder.decode(UserInteraction.self, from: json)
 
         XCTAssertEqual(question.question, "どのアプローチ？ 🤔")
         XCTAssertEqual(question.options[0].label, "选项 A 🅰️")
@@ -581,7 +581,7 @@ final class AskUserQuestionTests: XCTestCase {
         """.data(using: .utf8)!
 
         let decoder = JSONDecoder()
-        let question = try decoder.decode(AskUserQuestion.self, from: json)
+        let question = try decoder.decode(UserInteraction.self, from: json)
 
         XCTAssertEqual(question.options[0].label, "Option with \"quotes\"")
         XCTAssertEqual(question.options[1].label, "Option with <html> & entities")
@@ -593,11 +593,11 @@ final class AskUserQuestionTests: XCTestCase {
     func testSelectionModeEncoding() throws {
         let encoder = JSONEncoder()
 
-        let singleData = try encoder.encode(AskUserQuestion.SelectionMode.single)
+        let singleData = try encoder.encode(UserInteraction.SelectionMode.single)
         let singleString = String(data: singleData, encoding: .utf8)
         XCTAssertEqual(singleString, "\"single\"")
 
-        let multiData = try encoder.encode(AskUserQuestion.SelectionMode.multi)
+        let multiData = try encoder.encode(UserInteraction.SelectionMode.multi)
         let multiString = String(data: multiData, encoding: .utf8)
         XCTAssertEqual(multiString, "\"multi\"")
     }

@@ -12,7 +12,7 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
             "sessionId": "session-123",
             "timestamp": "2025-01-26T10:00:00Z",
             "data": {
-                "modelToolName": "Write",
+                "modelPrimitiveName": "execute",
                 "invocationId": "tc1"
             }
         }
@@ -22,7 +22,7 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
 
         XCTAssertEqual(event.type, "capability.invocation.generating")
         XCTAssertEqual(event.sessionId, "session-123")
-        XCTAssertEqual(event.data.modelToolName, "Write")
+        XCTAssertEqual(event.data.modelPrimitiveName, "execute")
         XCTAssertEqual(event.data.invocationId, "tc1")
     }
 
@@ -35,7 +35,7 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
             "sessionId": "session-456",
             "timestamp": "2025-01-26T10:00:00Z",
             "data": {
-                "modelToolName": "Bash",
+                "modelPrimitiveName": "execute",
                 "invocationId": "tc2"
             }
         }
@@ -45,13 +45,13 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
         let result = CapabilityInvocationGeneratingPlugin.transform(event)
 
         XCTAssertNotNil(result)
-        guard let toolResult = result as? CapabilityInvocationGeneratingPlugin.Result else {
+        guard let capabilityResult = result as? CapabilityInvocationGeneratingPlugin.Result else {
             XCTFail("Expected CapabilityInvocationGeneratingPlugin.Result")
             return
         }
 
-        XCTAssertEqual(toolResult.modelToolName, "Bash")
-        XCTAssertEqual(toolResult.invocationId, "tc2")
+        XCTAssertEqual(capabilityResult.modelPrimitiveName, "execute")
+        XCTAssertEqual(capabilityResult.invocationId, "tc2")
     }
 
     func testTransformMinimalPayload() throws {
@@ -59,7 +59,7 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
         {
             "type": "capability.invocation.generating",
             "data": {
-                "modelToolName": "Read",
+                "modelPrimitiveName": "execute",
                 "invocationId": "tc3"
             }
         }
@@ -69,12 +69,12 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
         let result = CapabilityInvocationGeneratingPlugin.transform(event)
 
         XCTAssertNotNil(result)
-        guard let toolResult = result as? CapabilityInvocationGeneratingPlugin.Result else {
+        guard let capabilityResult = result as? CapabilityInvocationGeneratingPlugin.Result else {
             XCTFail("Expected CapabilityInvocationGeneratingPlugin.Result")
             return
         }
 
-        XCTAssertEqual(toolResult.modelToolName, "Read")
-        XCTAssertEqual(toolResult.invocationId, "tc3")
+        XCTAssertEqual(capabilityResult.modelPrimitiveName, "execute")
+        XCTAssertEqual(capabilityResult.invocationId, "tc3")
     }
 }

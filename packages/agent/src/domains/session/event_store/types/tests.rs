@@ -155,7 +155,7 @@ mod session_event_tests {
         let payload = event.typed_payload().unwrap();
         match payload {
             SessionEventPayload::CapabilityInvocationStarted(p) => {
-                assert_eq!(p.tool_call_id, "tc-1");
+                assert_eq!(p.invocation_id, "tc-1");
                 assert_eq!(p.name, "execute");
             }
             other => panic!("expected CapabilityInvocationStarted, got {other:?}"),
@@ -176,7 +176,7 @@ mod session_event_tests {
         let payload = event.typed_payload().unwrap();
         match payload {
             SessionEventPayload::CapabilityInvocationCompleted(p) => {
-                assert_eq!(p.tool_call_id, "tc-1");
+                assert_eq!(p.invocation_id, "tc-1");
                 assert!(!p.is_error);
                 assert_eq!(p.duration, 250);
             }
@@ -466,7 +466,7 @@ mod session_event_tests {
             ),
             (
                 EventType::ErrorCapability,
-                json!({"modelToolName": "execute", "invocationId": "tc", "error": "e"}),
+                json!({"modelPrimitiveName": "execute", "invocationId": "tc", "error": "e"}),
             ),
             (
                 EventType::ErrorProvider,
@@ -494,7 +494,7 @@ mod session_event_tests {
             ),
             (
                 EventType::TodoWrite,
-                json!({"todos": [], "trigger": "tool"}),
+                json!({"todos": [], "trigger": "capability"}),
             ),
             (
                 EventType::TurnFailed,
@@ -502,19 +502,19 @@ mod session_event_tests {
             ),
             (
                 EventType::HookTriggered,
-                json!({"hookNames": ["h"], "hookEvent": "PreToolUse", "timestamp": "t"}),
+                json!({"hookNames": ["h"], "hookEvent": "PreCapabilityInvocation", "timestamp": "t"}),
             ),
             (
                 EventType::HookCompleted,
-                json!({"hookNames": ["h"], "hookEvent": "PreToolUse", "result": "continue", "timestamp": "t"}),
+                json!({"hookNames": ["h"], "hookEvent": "PreCapabilityInvocation", "result": "continue", "timestamp": "t"}),
             ),
             (
                 EventType::HookBackgroundStarted,
-                json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "timestamp": "t"}),
+                json!({"hookNames": ["h"], "hookEvent": "PostCapabilityInvocation", "executionId": "x", "timestamp": "t"}),
             ),
             (
                 EventType::HookBackgroundCompleted,
-                json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"}),
+                json!({"hookNames": ["h"], "hookEvent": "PostCapabilityInvocation", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"}),
             ),
             (
                 EventType::LlmHookResult,
@@ -582,7 +582,7 @@ mod type_guard_tests {
     }
 
     #[test]
-    fn tool_guards() {
+    fn capability_invocation_guards() {
         assert_eq!(
             EventType::CapabilityInvocationStarted,
             EventType::CapabilityInvocationStarted
@@ -677,26 +677,26 @@ mod state_type_tests {
         let msg = Message {
             role: "user".into(),
             content: json!("Hello"),
-            tool_call_id: None,
+            invocation_id: None,
             is_error: None,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["role"], "user");
-        assert!(json.get("toolCallId").is_none());
+        assert!(json.get("invocationId").is_none());
         let back: Message = serde_json::from_value(json).unwrap();
         assert_eq!(msg, back);
     }
 
     #[test]
-    fn message_tool_result() {
+    fn message_capability_result() {
         let msg = Message {
-            role: "toolResult".into(),
+            role: "capabilityResult".into(),
             content: json!("ls output"),
-            tool_call_id: Some("tc-1".into()),
+            invocation_id: Some("tc-1".into()),
             is_error: Some(false),
         };
         let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["toolCallId"], "tc-1");
+        assert_eq!(json["invocationId"], "tc-1");
         assert_eq!(json["isError"], false);
     }
 
@@ -706,7 +706,7 @@ mod state_type_tests {
             message: Message {
                 role: "assistant".into(),
                 content: json!([{"type": "text", "text": "Hi"}]),
-                tool_call_id: None,
+                invocation_id: None,
                 is_error: None,
             },
             event_ids: vec![Some("evt-1".into()), None],

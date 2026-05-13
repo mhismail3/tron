@@ -84,7 +84,7 @@ struct ServerSettings: Decodable {
 
     /// Proactive schema-refresh TTL in milliseconds. `0` disables.
     /// When non-zero, plugin-source-derived capability plugins refresh the target
-    /// server's `tools/list` metadata when the cached schema set is older
+    /// server's capability metadata when the cached schema set is older
     /// than this TTL.
     let mcpSchemaRefreshTtlMs: UInt64
 
@@ -413,7 +413,7 @@ enum QueueDrainMode: String, Encodable {
 }
 
 enum SkillsCompactionPolicy: String, Encodable {
-    case clearAll, autoRestore, askUser
+    case clearAll, autoRestore, userInteraction
 
     static func from(_ raw: String?) -> Self? {
         raw.flatMap { Self(rawValue: $0) }

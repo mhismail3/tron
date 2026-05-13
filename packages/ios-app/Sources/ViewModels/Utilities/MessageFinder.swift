@@ -50,7 +50,7 @@ enum MessageFinder {
                 return result.id == invocationId
             case .subagent(let data):
                 return data.invocationId == invocationId
-            case .askUserQuestion(let data):
+            case .userInteraction(let data):
                 return data.invocationId == invocationId
             case .engineApproval(let data):
                 return data.invocationId == invocationId
@@ -60,12 +60,12 @@ enum MessageFinder {
         })
     }
 
-    // MARK: - By AskUserQuestion
+    // MARK: - By UserInteraction
 
-    /// Find LAST message index with matching invocationId in askUserQuestion content.
-    static func lastIndexOfAskUserQuestion(invocationId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find LAST message index with matching invocationId in userInteraction content.
+    static func lastIndexOfUserInteraction(invocationId: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
-            if case .askUserQuestion(let data) = message.content {
+            if case .userInteraction(let data) = message.content {
                 return data.invocationId == invocationId
             }
             return false
@@ -96,8 +96,8 @@ enum MessageFinder {
         })
     }
 
-    /// Find message index for SpawnSubagent tool by invocationId.
-    static func indexOfSpawnSubagentTool(invocationId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find message index for SpawnSubagent capability by invocationId.
+    static func indexOfSpawnSubagentInvocation(invocationId: String, in messages: [ChatMessage]) -> Int? {
         messages.firstIndex(where: { message in
             if case .capabilityInvocation(let invocation) = message.content {
                 return invocation.id == invocationId

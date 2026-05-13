@@ -156,7 +156,7 @@ fn global_blocking_supervisor() -> Arc<BlockingTaskSupervisor> {
 pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>) {
     let supervisor = global_blocking_supervisor();
     shutdown.register_phase_hook(
-        ShutdownPhase::Tools,
+        ShutdownPhase::Capabilities,
         "capability-blocking",
         move || async move {
             if !supervisor.drain(BLOCKING_SHUTDOWN_DRAIN_TIMEOUT).await {
@@ -179,10 +179,10 @@ pub struct AgentDeps {
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
 }
 
-/// Runtime dependencies used by the tools domain to construct built-in tool
+/// Runtime dependencies used by the capabilities domain to construct built-in capability
 /// capability handlers.
 #[derive(Clone)]
-pub struct ToolRuntimeConfig {
+pub struct CapabilitySupportConfig {
     /// Shared HTTP client (connection pool reused across web/MCP-related capabilities).
     pub http_client: reqwest::Client,
     /// Process sandbox settings from the active profile.
@@ -195,7 +195,7 @@ pub struct ToolRuntimeConfig {
         Arc<dyn crate::domains::capability_support::implementations::traits::NotifyDelegate>,
 }
 
-impl Default for ToolRuntimeConfig {
+impl Default for CapabilitySupportConfig {
     fn default() -> Self {
         Self {
             http_client: reqwest::Client::new(),
@@ -236,8 +236,8 @@ pub struct ServerRuntimeContext {
     pub profile_runtime: Arc<crate::domains::agent::runner::profile_runtime::ProfileRuntime>,
     /// Agent execution dependencies (None = prompt handler returns error).
     pub agent_deps: Option<AgentDeps>,
-    /// Built-in tool capability construction dependencies.
-    pub tool_runtime: ToolRuntimeConfig,
+    /// Domain-owned capability construction dependencies.
+    pub capability_support_config: CapabilitySupportConfig,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
     /// MLX transcription engine (lazily loaded via `OnceLock`).
@@ -274,10 +274,10 @@ pub struct ServerRuntimeContext {
     /// MCP router for managing MCP servers. Production contexts always provide
     /// one; isolated handler tests may leave it absent.
     pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::domains::mcp::router::McpRouter>>>,
-    /// Active display stream registry (shared with DisplayTool for on-demand cancellation).
+    /// Active display stream registry (shared with display capabilities for on-demand cancellation).
     pub display_stream_registry:
         Option<crate::domains::capability_support::implementations::ui::display_stream::ActiveStreamRegistry>,
-    /// Process manager for background process lifecycle (shared with tools).
+    /// Process manager for background process lifecycle (shared with capabilities).
     pub process_manager:
         Option<Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>>,
     /// Unified job manager for waiting on and managing processes + subagents.

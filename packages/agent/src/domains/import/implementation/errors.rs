@@ -24,6 +24,11 @@ pub enum ImportError {
     #[error("Empty session: no importable records after parsing")]
     EmptySession,
 
+    #[error(
+        "Unsupported provider capability history: {block_count} provider capability block(s) require migration, which this clean capability-only build intentionally refuses"
+    )]
+    UnsupportedProviderCapabilityHistory { block_count: usize },
+
     #[error("No Claude Code directory found at {}", path.display())]
     NoClaudeDirectory { path: PathBuf },
 }

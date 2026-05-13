@@ -19,7 +19,7 @@ struct ContentLineParser {
         var lastLineNum = 0
 
         for (index, line) in rawLines.enumerated() {
-            // Match server-side line number prefixes (from Read tool output)
+            // Match server-side line number prefixes (from Read capability output)
             if let match = line.firstMatch(of: /^\s*(\d+)[→\t:](.*)/) {
                 let num = Int(match.1) ?? (lastLineNum + 1)
                 lastLineNum = num

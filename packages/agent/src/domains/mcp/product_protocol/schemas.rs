@@ -3,7 +3,7 @@
 //! Pure diff logic used by [`crate::domains::mcp::server_manager`] to decide whether a
 //! TTL-driven re-fetch observed any change. Emitted as a structured
 //! [`SchemaDiff`] so the router can log actionable context and refresh the
-//! [`crate::domains::mcp::tool_index::ToolIndex`] only when something actually shifted.
+//! [`crate::domains::mcp::capability_index::McpCapabilityIndex`] only when something actually shifted.
 
 use std::collections::HashMap;
 
@@ -14,18 +14,18 @@ use crate::domains::mcp::types::McpToolDef;
 /// Structured diff between two tool-definition sets for the same MCP server.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct SchemaDiff {
-    /// Tool names that appeared in `new` but not `old`.
+    /// Capability names that appeared in `new` but not `old`.
     pub added: Vec<String>,
-    /// Tool names that appeared in `old` but not `new`.
+    /// Capability names that appeared in `old` but not `new`.
     pub removed: Vec<String>,
-    /// Tool names present in both sets whose `description` or `input_schema`
+    /// Capability names present in both sets whose `description` or `input_schema`
     /// differs. Name match is the equivalence key; this list captures renames
     /// against identical schemas as (removed, added) rather than modified.
     pub modified: Vec<String>,
 }
 
 impl SchemaDiff {
-    /// Returns `true` when no tools were added, removed, or modified.
+    /// Returns `true` when no capabilities were added, removed, or modified.
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.removed.is_empty() && self.modified.is_empty()
     }
@@ -33,7 +33,7 @@ impl SchemaDiff {
 
 /// Compute the diff between two tool-definition vectors.
 ///
-/// The comparison keys tools by `name`. For names present in both sets, a
+/// The comparison keys capabilities by `name`. For names present in both sets, a
 /// tool is considered "modified" when its description or canonicalized
 /// `input_schema` differs. Order-independence is guaranteed: schemas whose
 /// JSON-equivalent content differs only in property ordering are treated as

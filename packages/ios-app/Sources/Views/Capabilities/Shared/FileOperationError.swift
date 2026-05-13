@@ -2,12 +2,12 @@ import Foundation
 
 // MARK: - File Operation Error
 
-/// Structured error classification for file operations (Read, Write, Edit).
+/// Structured error classification for filesystem capabilities.
 ///
-/// Reads `tool.details.errorClass` + `tool.details.error` + `tool.details.path`
+/// Reads `capability.details.errorClass` + `capability.details.error` + `capability.details.path`
 /// directly — never scans error message text. The server
-/// (`packages/agent/src/tools/utils/fs_errors.rs`) populates these fields for
-/// every fs-tool failure.
+/// (`packages/agent/src/domains/filesystem`) populates these fields for
+/// every filesystem-capability failure.
 enum FileOperationError {
     case fileNotFound(path: String)
     case permissionDenied(path: String)
@@ -30,7 +30,7 @@ enum FileOperationError {
         case edit = "Edit"
     }
 
-    /// Build a FileOperationError from server-provided tool details.
+    /// Build a FileOperationError from server-provided capability details.
     /// Falls back to `.generic` when `details` is absent or carries an
     /// unknown `errorClass`.
     static func from(

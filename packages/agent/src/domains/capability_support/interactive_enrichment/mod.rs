@@ -17,7 +17,7 @@
 //! ## Wire format (what iOS reads)
 //!
 //! For agent::ask_user, the enriched `payload` gets:
-//! - `toolStatus`: `"pending"` | `"answered"` | `"superseded"`
+//! - `interactionStatus`: `"pending"` | `"answered"` | `"superseded"`
 //! - `parsedAnswers`: array of
 //!   `{questionId, selectedValues: [...], otherValue: String?}`
 //!
@@ -63,7 +63,7 @@ use subagent::enrich_subagent_result_messages;
 /// The matching `message.user` event also gets back-filled with the same
 /// structured `messageKind` + decision/count fields that the live path
 /// emits via `build_user_event_payload`.
-pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
+pub fn enrich_interactive_capability_statuses(events: &mut [Value]) {
     // First pass: collect positions of interactive capability.invocation.started events so we
     // can mutate them afterward without running into borrow-checker issues
     // from simultaneous iteration + mutation.
@@ -74,7 +74,10 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
             if e.get("type").and_then(Value::as_str)? != "capability.invocation.started" {
                 return None;
             }
-            let name = e.get("toolName").and_then(Value::as_str)?.to_string();
+            let name = e
+                .get("modelPrimitiveName")
+                .and_then(Value::as_str)?
+                .to_string();
             if name == "agent::ask_user" {
                 Some((i, name))
             } else {
@@ -83,7 +86,7 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
         })
         .collect();
 
-    for (call_idx, tool_name) in positions {
+    for (call_idx, model_capability_id) in positions {
         let user_msg_position = find_first_user_message_after(events, call_idx);
         let user_msg_content = user_msg_position.map(|idx| {
             events[idx]
@@ -94,7 +97,7 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
                 .unwrap_or_default()
         });
 
-        let fields = match tool_name.as_str() {
+        let fields = match model_capability_id.as_str() {
             "agent::ask_user" => {
                 let questions = extract_questions(&events[call_idx]);
                 parse_answers(user_msg_content.as_deref(), &questions)
@@ -107,10 +110,10 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
         // the marker was actually found (status is approved/denied/answered).
         if let (Some(user_idx), Some(status)) = (
             user_msg_position,
-            fields.get("toolStatus").and_then(Value::as_str),
+            fields.get("interactionStatus").and_then(Value::as_str),
         ) && status == "answered"
         {
-            let user_fields = build_user_message_metadata(tool_name.as_str(), &fields);
+            let user_fields = build_user_message_metadata(model_capability_id.as_str(), &fields);
             inject_into_payload(&mut events[user_idx], user_fields);
         }
 

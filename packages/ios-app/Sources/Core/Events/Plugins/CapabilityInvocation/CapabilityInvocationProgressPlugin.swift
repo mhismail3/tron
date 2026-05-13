@@ -1,7 +1,7 @@
 import Foundation
 
-/// Plugin for handling long-running tool progress heartbeats.
-/// Delivers optional status messages + completion fractions for tools like
+/// Plugin for handling long-running capability progress heartbeats.
+/// Delivers optional status messages + completion fractions for capabilities like
 /// Bash (stdout tail), WebFetch (bytes downloaded), and SpawnSubagent
 /// (child turn count).
 enum CapabilityInvocationProgressPlugin: DispatchableEventPlugin {
@@ -19,7 +19,7 @@ enum CapabilityInvocationProgressPlugin: DispatchableEventPlugin {
             let invocationId: String
             let message: String?
             let percent: Double?
-            let modelToolName: String?
+            let modelPrimitiveName: String?
             let contractId: String?
             let implementationId: String?
             let functionId: String?
@@ -36,7 +36,7 @@ enum CapabilityInvocationProgressPlugin: DispatchableEventPlugin {
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
-                    modelToolName: modelToolName,
+                    modelPrimitiveName: modelPrimitiveName,
                     contractId: contractId,
                     implementationId: implementationId,
                     functionId: functionId,

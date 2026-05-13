@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{Notification, NotifyResult};
 use crate::domains::session::event_store::sqlite::repositories::device_token::{
     DeactivatedTokenInfo, DeviceTokenRepo,
@@ -55,12 +55,15 @@ pub(crate) struct TokenGroup<'a> {
 }
 
 /// Query all active device tokens from the database.
-pub(crate) fn active_tokens(pool: &ConnectionPool) -> Result<Vec<DeviceToken>, ToolError> {
-    let conn = pool
-        .get()
-        .map_err(|e| ToolError::internal(format!("Failed to get DB connection: {e}")))?;
-    let tokens = DeviceTokenRepo::get_all_active(&conn)
-        .map_err(|e| ToolError::internal(format!("Failed to query device tokens: {e}")))?;
+pub(crate) fn active_tokens(
+    pool: &ConnectionPool,
+) -> Result<Vec<DeviceToken>, CapabilityExecutionError> {
+    let conn = pool.get().map_err(|e| {
+        CapabilityExecutionError::internal(format!("Failed to get DB connection: {e}"))
+    })?;
+    let tokens = DeviceTokenRepo::get_all_active(&conn).map_err(|e| {
+        CapabilityExecutionError::internal(format!("Failed to query device tokens: {e}"))
+    })?;
     Ok(tokens
         .into_iter()
         .map(|t| DeviceToken {
@@ -98,7 +101,7 @@ pub(crate) fn group_tokens(tokens: &[DeviceToken]) -> Vec<TokenGroup<'_>> {
         .collect()
 }
 
-/// Convert a tool-level [`Notification`] to a platform-level [`ApnsNotification`].
+/// Convert a capability-level [`Notification`] to a platform-level [`ApnsNotification`].
 pub(crate) fn to_apns_notification(notification: &Notification) -> ApnsNotification {
     let mut data = HashMap::new();
 

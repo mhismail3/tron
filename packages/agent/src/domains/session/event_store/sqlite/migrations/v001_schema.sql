@@ -121,8 +121,8 @@ CREATE TABLE IF NOT EXISTS events (
   workspace_id         TEXT    NOT NULL,
   -- Denormalized fields extracted from payload for indexed queries
   role                 TEXT,
-  tool_name            TEXT,
-  tool_call_id         TEXT,
+  model_primitive_name            TEXT,
+  invocation_id         TEXT,
   turn                 INTEGER,
   input_tokens         INTEGER,
   output_tokens        INTEGER,
@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     stuck_timeout_secs INTEGER NOT NULL DEFAULT 7200,
     tags TEXT NOT NULL DEFAULT '[]',
     workspace_id TEXT,
-    tool_restrictions_json TEXT,
+    capability_restrictions_json TEXT,
     -- Runtime state (scheduler-managed, NOT from config file)
     next_run_at TEXT,
     last_run_at TEXT,

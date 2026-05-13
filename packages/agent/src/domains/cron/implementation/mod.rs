@@ -37,7 +37,7 @@
 //!   their row count is always 1 by construction.
 //! - **DB-before-memory**: Runtime state updates always write to SQLite first. If
 //!   the DB write fails, the in-memory update is skipped to prevent divergence.
-//! - **Allowlist-only restrictions**: `ToolRestrictions` uses `deny_unknown_fields` —
+//! - **Allowlist-only restrictions**: `CapabilityRestrictions` uses `deny_unknown_fields` —
 //!   unknown `deniedCapabilities` JSON is rejected at parse time.
 //! - **Full-file hashing**: The config watcher hashes the entire file, not a prefix.
 //! - **Minimum timeout**: Shell (1s–3600s) and webhook (1s–300s) payloads reject 0s timeout.
@@ -80,6 +80,6 @@ pub use errors::CronError;
 pub use executor::{AgentTurnResult, ExecutorDeps};
 pub use scheduler::CronScheduler;
 pub use types::{
-    CronConfig, CronJob, CronRun, Delivery, ExecutionOutput, JobRuntimeState, MisfirePolicy,
-    OverlapPolicy, Payload, RunStatus, Schedule, ToolRestrictions,
+    CapabilityRestrictions, CronConfig, CronJob, CronRun, Delivery, ExecutionOutput,
+    JobRuntimeState, MisfirePolicy, OverlapPolicy, Payload, RunStatus, Schedule,
 };

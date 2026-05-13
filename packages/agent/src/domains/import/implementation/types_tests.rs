@@ -34,7 +34,7 @@ fn deserialize_user_plain_text() {
         record.prompt_id.as_deref(),
         Some("1b3c12a5-e0a3-4e8d-ab2f-9068910081c0")
     );
-    assert!(!record.is_tool_result());
+    assert!(!record.is_capability_result());
 
     let msg = record.message.unwrap();
     assert_eq!(msg.role.as_deref(), Some("user"));
@@ -59,7 +59,7 @@ fn deserialize_user_with_image() {
     });
 
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
-    assert!(!record.is_tool_result());
+    assert!(!record.is_capability_result());
     let content = record.message.unwrap().content.unwrap();
     let blocks = content.as_array().unwrap();
     assert_eq!(blocks.len(), 2);
@@ -68,7 +68,7 @@ fn deserialize_user_with_image() {
 }
 
 #[test]
-fn deserialize_user_tool_result() {
+fn deserialize_user_capability_result() {
     let raw = json!({
         "type": "user",
         "uuid": "tr1",
@@ -78,24 +78,30 @@ fn deserialize_user_tool_result() {
         "message": {
             "role": "user",
             "content": [{
-                "type": "tool_result",
-                "tool_use_id": "toolu_01QZ",
+                "type": "capability_result",
+                "capability_invocation_id": "toolu_01QZ",
                 "content": "file contents here",
                 "is_error": false
             }]
         },
-        "sourceToolUseId": "toolu_01QZ",
-        "sourceToolAssistantUUID": "a1"
+        "sourceCapabilityInvocationId": "toolu_01QZ",
+        "sourceCapabilityAssistantUUID": "a1"
     });
 
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
-    assert!(record.is_tool_result());
-    assert_eq!(record.source_tool_use_id.as_deref(), Some("toolu_01QZ"));
-    assert_eq!(record.source_tool_assistant_uuid.as_deref(), Some("a1"));
+    assert!(record.is_capability_result());
+    assert_eq!(
+        record.source_capability_invocation_id.as_deref(),
+        Some("toolu_01QZ")
+    );
+    assert_eq!(
+        record.source_capability_assistant_uuid.as_deref(),
+        Some("a1")
+    );
 }
 
 #[test]
-fn deserialize_user_tool_result_with_error() {
+fn deserialize_user_capability_result_with_error() {
     let raw = json!({
         "type": "user",
         "uuid": "tr2",
@@ -104,16 +110,16 @@ fn deserialize_user_tool_result_with_error() {
         "message": {
             "role": "user",
             "content": [{
-                "type": "tool_result",
-                "tool_use_id": "toolu_err",
-                "content": "<tool_use_error>Command failed</tool_use_error>",
+                "type": "capability_result",
+                "capability_invocation_id": "toolu_err",
+                "content": "<capability_invocation_error>Command failed</capability_invocation_error>",
                 "is_error": true
             }]
         }
     });
 
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
-    assert!(record.is_tool_result());
+    assert!(record.is_capability_result());
     let content = record.message.unwrap().content.unwrap();
     let block = &content.as_array().unwrap()[0];
     assert_eq!(block["is_error"], true);
@@ -136,7 +142,7 @@ fn deserialize_user_is_meta() {
 
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
     assert_eq!(record.is_meta, Some(true));
-    assert!(!record.is_tool_result());
+    assert!(!record.is_capability_result());
 }
 
 #[test]
@@ -207,7 +213,7 @@ fn deserialize_assistant_text() {
 }
 
 #[test]
-fn deserialize_assistant_tool_use() {
+fn deserialize_assistant_capability_invocation() {
     let raw = json!({
         "type": "assistant",
         "uuid": "a3",
@@ -218,19 +224,19 @@ fn deserialize_assistant_tool_use() {
             "id": "msg_01Rw",
             "role": "assistant",
             "content": [{
-                "type": "tool_use",
+                "type": "capability_invocation",
                 "id": "toolu_01QZ",
                 "name": "process::run",
                 "input": { "command": "ls -la" }
             }],
-            "stop_reason": "tool_use",
+            "stop_reason": "capability_invocation",
             "usage": { "input_tokens": 100, "output_tokens": 50 }
         }
     });
 
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
     let msg = record.message.unwrap();
-    assert_eq!(msg.stop_reason.as_deref(), Some("tool_use"));
+    assert_eq!(msg.stop_reason.as_deref(), Some("capability_invocation"));
     let content = msg.content.unwrap();
     let block = &content.as_array().unwrap()[0];
     assert_eq!(block["name"], "process::run");
@@ -377,7 +383,7 @@ fn record_kind_parse_all_variants() {
 }
 
 #[test]
-fn is_tool_result_false_for_assistant() {
+fn is_capability_result_false_for_assistant() {
     let raw = json!({
         "type": "assistant",
         "uuid": "a1",
@@ -387,11 +393,11 @@ fn is_tool_result_false_for_assistant() {
         }
     });
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
-    assert!(!record.is_tool_result());
+    assert!(!record.is_capability_result());
 }
 
 #[test]
-fn is_tool_result_false_for_plain_user() {
+fn is_capability_result_false_for_plain_user() {
     let raw = json!({
         "type": "user",
         "uuid": "u1",
@@ -401,15 +407,15 @@ fn is_tool_result_false_for_plain_user() {
         }
     });
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
-    assert!(!record.is_tool_result());
+    assert!(!record.is_capability_result());
 }
 
 #[test]
-fn is_tool_result_false_when_no_message() {
+fn is_capability_result_false_when_no_message() {
     let raw = json!({
         "type": "user",
         "uuid": "u1"
     });
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
-    assert!(!record.is_tool_result());
+    assert!(!record.is_capability_result());
 }

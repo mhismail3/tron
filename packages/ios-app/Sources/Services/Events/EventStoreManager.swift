@@ -3,13 +3,14 @@ import Foundation
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 // Do NOT define a local logger property - it would shadow the global one
 
-// MARK: - Tool Call Record (for persistence)
+// MARK: - Capability Call Record (for persistence)
 
 /// Tracks capability invocations during a turn for event-sourced persistence
 struct CapabilityInvocationRecord {
     let invocationId: String
-    let modelToolName: String
+    let modelPrimitiveName: String
     var arguments: String
+    var identity: CapabilityIdentity = CapabilityIdentity()
     var result: String?
     var isError: Bool = false
 }
@@ -191,7 +192,7 @@ final class EventStoreManager {
                let result = event.getResult() as? CapabilityInvocationStartedPlugin.Result {
                 guard result.identity.contractId != "agent::spawn_subagent" else { break }
                 dashboardStreamManager.handleEvent(
-                    .capabilityStart(identity: result.identity, invocationId: result.invocationId, arguments: result.arguments),
+                    .capabilityInvocationStarted(identity: result.identity, invocationId: result.invocationId, arguments: result.arguments),
                     sessionId: sessionId)
             }
 
@@ -200,7 +201,7 @@ final class EventStoreManager {
                let result = event.getResult() as? CapabilityInvocationCompletedPlugin.Result {
                 guard result.identity.contractId != "agent::spawn_subagent" else { break }
                 dashboardStreamManager.handleEvent(
-                    .capabilityEnd(identity: result.identity, invocationId: result.invocationId, success: result.success, durationMs: result.duration),
+                    .capabilityInvocationCompleted(identity: result.identity, invocationId: result.invocationId, success: result.success, durationMs: result.duration),
                     sessionId: sessionId)
             }
 

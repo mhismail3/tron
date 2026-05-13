@@ -20,7 +20,7 @@ pub(super) fn snapshot_response(
         "isLocalModel": snapshot.is_local_model,
         "breakdown": {
             "systemPrompt": snapshot.breakdown.system_prompt,
-            "tools": snapshot.breakdown.tools,
+            "capabilities": snapshot.breakdown.capabilities,
             "rules": snapshot.breakdown.rules,
             "memory": snapshot.breakdown.memory,
             "skillIndex": snapshot.breakdown.skill_index,
@@ -109,7 +109,7 @@ pub(super) fn build_detailed_snapshot_response(
         "isLocalModel": context_manager.is_local_model(),
         "breakdown": {
             "systemPrompt": detailed.snapshot.breakdown.system_prompt,
-            "tools": detailed.snapshot.breakdown.tools,
+            "capabilities": detailed.snapshot.breakdown.capabilities,
             "rules": detailed.snapshot.breakdown.rules,
             "memory": detailed.snapshot.breakdown.memory,
             "skillIndex": detailed.snapshot.breakdown.skill_index,
@@ -121,8 +121,8 @@ pub(super) fn build_detailed_snapshot_response(
         },
         "messages": build_detailed_messages(&detailed.messages),
         "systemPromptContent": detailed.system_prompt_content,
-        "toolClarificationContent": detailed.tool_clarification_content,
-        "toolsContent": detailed.tools_content,
+        "capabilityClarificationContent": detailed.capability_clarification_content,
+        "capabilitiesContent": detailed.capabilities_content,
         "addedSkills": added_skills,
         "rules": build_rules_info(event_store, session_id, &session, &artifacts, detailed.snapshot.breakdown.rules),
         "memory": memory_wire_json,
@@ -149,21 +149,21 @@ fn build_detailed_messages(
                 "summary": message.summary,
                 "content": message.content,
             });
-            if let Some(tool_calls) = message.tool_calls.as_ref() {
-                value["toolCalls"] = json!(
-                    tool_calls
+            if let Some(capability_invocations) = message.capability_invocations.as_ref() {
+                value["capabilityInvocations"] = json!(
+                    capability_invocations
                         .iter()
-                        .map(|tool_call| json!({
-                            "id": tool_call.id,
-                            "name": tool_call.name,
-                            "tokens": tool_call.tokens,
-                            "arguments": tool_call.arguments,
+                        .map(|capability_invocation| json!({
+                            "id": capability_invocation.id,
+                            "name": capability_invocation.name,
+                            "tokens": capability_invocation.tokens,
+                            "arguments": capability_invocation.arguments,
                         }))
                         .collect::<Vec<_>>()
                 );
             }
-            if let Some(tool_call_id) = message.tool_call_id.as_ref() {
-                value["toolCallId"] = json!(tool_call_id);
+            if let Some(invocation_id) = message.invocation_id.as_ref() {
+                value["invocationId"] = json!(invocation_id);
             }
             if let Some(is_error) = message.is_error {
                 value["isError"] = json!(is_error);

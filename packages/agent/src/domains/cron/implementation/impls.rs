@@ -102,7 +102,7 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
         model: Option<&str>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
-        tool_restrictions: Option<&crate::domains::cron::ToolRestrictions>,
+        capability_restrictions: Option<&crate::domains::cron::CapabilityRestrictions>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<crate::domains::cron::AgentTurnResult, CronError> {
         // Resolve model and profile from the current compiled profile runtime.
@@ -192,9 +192,9 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             ..crate::domains::agent::runner::AgentConfig::default()
         };
 
-        // 4. Build denied tools list from user restrictions using the live capability catalog.
-        let tool_names =
-            match crate::domains::capability_support::implementations::capability_surface::list_model_tool_names(
+        // 4. Build denied capabilities list from user restrictions using the live capability catalog.
+        let model_capability_names =
+            match crate::domains::capability_support::implementations::capability_surface::list_model_capability_ids(
                 &self.engine_host,
                 &session_id,
                 workspace_id,
@@ -207,8 +207,8 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
                     Vec::new()
                 }
             };
-        let denied_capabilities = tool_restrictions
-            .map(|r| r.to_denied_list(&tool_names))
+        let denied_capabilities = capability_restrictions
+            .map(|r| r.to_denied_list(&model_capability_names))
             .unwrap_or_default();
         // Interactive capabilities such as `agent::ask_user`.
         // are removed automatically by AgentFactory when is_unattended=true.

@@ -20,8 +20,8 @@ struct TurnGroup: Identifiable, Equatable {
         if let preview = userMessagePreview ?? assistantMessagePreview {
             return preview
         }
-        // Fall back to first model tool name if the turn is tool-use-only
-        return TurnGrouping.extractToolUsePreview(from: events)
+        // Fall back to first model capability name if the turn is capability-invocation-only
+        return TurnGrouping.extractCapabilityInvocationPreview(from: events)
     }
 
     static func == (lhs: TurnGroup, rhs: TurnGroup) -> Bool {
@@ -244,7 +244,7 @@ enum TurnGrouping {
             // Try content array format (array of blocks with text)
             if let contentArray = event.payload["content"]?.value as? [[String: Any]] {
                 for block in contentArray {
-                    if block["type"] as? String == "tool_use" { continue }
+                    if block["type"] as? String == "capability_invocation" { continue }
                     if let text = block["text"] as? String, !text.isEmpty {
                         return truncatePreview(text)
                     }
@@ -255,19 +255,19 @@ enum TurnGrouping {
     }
 
     /// Extracts a preview from capability invocation events when no message text is available.
-    static func extractToolUsePreview(from events: [SessionEvent]) -> String? {
+    static func extractCapabilityInvocationPreview(from events: [SessionEvent]) -> String? {
         for event in events {
             guard event.eventType == .capabilityInvocationStarted else { continue }
-            if let name = event.payload["name"]?.value as? String, !name.isEmpty {
+            if let name = event.payload["modelPrimitiveName"]?.value as? String, !name.isEmpty {
                 return "Capability invocation: \(name)"
             }
         }
-        // Also check assistant message content blocks for inline tool_use
+        // Also check assistant message content blocks for inline capability_invocation
         for event in events {
             guard event.eventType == .messageAssistant else { continue }
             if let contentArray = event.payload["content"]?.value as? [[String: Any]] {
                 for block in contentArray {
-                    if block["type"] as? String == "tool_use",
+                    if block["type"] as? String == "capability_invocation",
                        let name = block["name"] as? String, !name.isEmpty {
                         return "Capability invocation: \(name)"
                     }

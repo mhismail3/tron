@@ -8,16 +8,16 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
         TronEvent::HookTriggered {
             hook_names,
             hook_event,
-            tool_name,
-            tool_call_id,
+            model_primitive_name,
+            invocation_id,
             ..
         } => {
             let mut data = json!({
                 "hookNames": hook_names,
                 "hookEvent": hook_event,
             });
-            set_opt(&mut data, "toolName", tool_name);
-            set_opt(&mut data, "toolCallId", tool_call_id);
+            set_opt(&mut data, "modelPrimitiveName", model_primitive_name);
+            set_opt(&mut data, "invocationId", invocation_id);
             Some(session_scoped(event, "hook.triggered", Some(data)))
         }
         TronEvent::HookCompleted {
@@ -26,8 +26,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             result,
             duration,
             reason,
-            tool_name,
-            tool_call_id,
+            model_primitive_name,
+            invocation_id,
             ..
         } => {
             let mut data = json!({
@@ -37,8 +37,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             });
             set_opt(&mut data, "duration", duration);
             set_opt(&mut data, "reason", reason);
-            set_opt(&mut data, "toolName", tool_name);
-            set_opt(&mut data, "toolCallId", tool_call_id);
+            set_opt(&mut data, "modelPrimitiveName", model_primitive_name);
+            set_opt(&mut data, "invocationId", invocation_id);
             Some(session_scoped(event, "hook.completed", Some(data)))
         }
         TronEvent::HookBackgroundStarted {

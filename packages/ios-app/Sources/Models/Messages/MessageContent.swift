@@ -16,12 +16,12 @@ enum MessageContent: Equatable {
     // System events (notifications) - consolidated
     case systemEvent(SystemEvent)
 
-    // Special tool invocations (rendered as interactive chips)
-    case askUserQuestion(AskUserQuestionToolData)
-    case engineApproval(EngineApprovalToolData)
+    // Special capability invocations (rendered as interactive chips)
+    case userInteraction(UserInteractionInvocationData)
+    case engineApproval(EngineApprovalData)
     case answeredQuestions(questionCount: Int)
     case subagentResultsDelivered(subagentCount: Int)
-    case subagent(SubagentToolData)
+    case subagent(SubagentInvocationData)
 
     // MARK: - Convenience Factories (forward to systemEvent)
     // These provide cleaner API for common system event patterns
@@ -69,7 +69,7 @@ enum MessageContent: Equatable {
     /// In-chat notification that active skills were cleared by compaction (M6).
     ///
     /// - `.clearAll` mode renders an informational banner.
-    /// - `.askUser` mode renders a tappable picker that re-activates each
+    /// - `.userInteraction` mode renders a tappable picker that re-activates each
     ///   skill via `skills::activate` engine protocol.
     static func skillsCleared(clearedSkills: [String], mode: SkillsClearedMode) -> MessageContent {
         .systemEvent(.skillsCleared(clearedSkills: clearedSkills, mode: mode))
@@ -136,7 +136,7 @@ enum MessageContent: Equatable {
             return "[\(count) \(count == 1 ? "attachment" : "attachments")]"
         case .systemEvent(let event):
             return event.textContent
-        case .askUserQuestion(let data):
+        case .userInteraction(let data):
             return "[\(data.params.questions.count) questions]"
         case .engineApproval(let data):
             return data.params.action
@@ -158,7 +158,7 @@ enum MessageContent: Equatable {
         }
     }
 
-    var isToolRelated: Bool {
+    var isCapabilityRelated: Bool {
         switch self {
         case .capabilityInvocation, .capabilityResult:
             return true
@@ -174,8 +174,8 @@ enum MessageContent: Equatable {
         return false
     }
 
-    var isAskUserQuestion: Bool {
-        if case .askUserQuestion = self {
+    var isUserInteraction: Bool {
+        if case .userInteraction = self {
             return true
         }
         return false

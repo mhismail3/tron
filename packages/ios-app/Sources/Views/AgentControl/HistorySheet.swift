@@ -189,20 +189,20 @@ struct HistorySheet: View {
                         }
                     }
 
-                    Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Pre-session activity" : "Tool use"))
+                    Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Pre-session activity" : "Capability invocation"))
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if let data = turn.analyticsData, data.latency > 0 || data.toolCount > 0 || data.errorCount > 0 {
+                    if let data = turn.analyticsData, data.latency > 0 || data.capabilityCount > 0 || data.errorCount > 0 {
                         HStack(spacing: 8) {
-                            if data.toolCount > 0 {
+                            if data.capabilityCount > 0 {
                                 HStack(spacing: 3) {
                                     Image(systemName: "hammer.fill")
                                         .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .bold))
-                                    Text("\(data.toolCount)")
+                                    Text("\(data.capabilityCount)")
                                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                                 }
                                 .foregroundStyle(muted ? .tronTextMuted : .tronCyan)
@@ -314,21 +314,21 @@ struct HistorySheet: View {
                 onFork: { await performFork(eventId: event.id) }
             )
 
-        case .mergedTool(let call, let result):
-            mergedToolRow(call: call, result: result, turn: turn)
+        case .mergedCapability(let call, let result):
+            mergedCapabilityRow(call: call, result: result, turn: turn)
         }
     }
 
-    // MARK: - Merged Tool Row
+    // MARK: - Merged Capability Row
 
-    private func mergedToolRow(call: SessionEvent, result: SessionEvent?, turn: TurnGroup) -> some View {
-        let modelToolName = call.payload.string("name") ?? "unknown"
+    private func mergedCapabilityRow(call: SessionEvent, result: SessionEvent?, turn: TurnGroup) -> some View {
+        let modelPrimitiveName = call.payload.string("modelPrimitiveName") ?? "unknown"
         let args = call.payload.dict("arguments") ?? [:]
-        let keyArg = call.extractKeyArgument(modelToolName: modelToolName, from: args)
+        let keyArg = call.extractKeyArgument(modelPrimitiveName: modelPrimitiveName, from: args)
         let isError = result?.payload.bool("isError") ?? false
         let duration = result?.payload.int("duration")
 
-        let displayName = keyArg.isEmpty ? modelToolName : "\(modelToolName): \(keyArg)"
+        let displayName = keyArg.isEmpty ? modelPrimitiveName : "\(modelPrimitiveName): \(keyArg)"
         let statusIcon = isError ? "xmark.circle.fill" : "checkmark.circle.fill"
         let statusColor: Color = isError ? .tronError : .tronSuccess
 

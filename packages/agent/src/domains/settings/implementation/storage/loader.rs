@@ -415,8 +415,8 @@ authProfile = "default"
         assert_eq!(settings.agent.max_turns, defaults.agent.max_turns);
         assert_eq!(settings.agent.subagent_model, defaults.agent.subagent_model);
         assert_eq!(
-            settings.tools.process.default_timeout_ms,
-            defaults.tools.process.default_timeout_ms
+            settings.capabilities.process.default_timeout_ms,
+            defaults.capabilities.process.default_timeout_ms
         );
         assert_eq!(
             settings.context.compactor.max_tokens,
@@ -630,14 +630,17 @@ maxEntries = 500
         let path = temp_settings_path(&dir);
         write_sparse_settings(
             &path,
-            r#"[settings.tools.process]
+            r#"[settings.capabilities.process]
 dangerousPatterns = ["^rm -rf /"]
 "#,
         );
 
         let settings = load_settings_from_path(&path).unwrap();
-        assert_eq!(settings.tools.process.dangerous_patterns.len(), 1);
-        assert_eq!(settings.tools.process.dangerous_patterns[0], "^rm -rf /");
+        assert_eq!(settings.capabilities.process.dangerous_patterns.len(), 1);
+        assert_eq!(
+            settings.capabilities.process.dangerous_patterns[0],
+            "^rm -rf /"
+        );
     }
 
     #[test]

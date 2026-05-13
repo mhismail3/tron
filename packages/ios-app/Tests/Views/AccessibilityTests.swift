@@ -7,21 +7,21 @@ import SwiftUI
 struct AccessibilityTests {
 
     @Test("chipAccessibility produces correct label with capability and status")
-    func chipAccessibilityToolAndStatus() {
-        // The modifier should produce "Tool, Status" when summary is empty
-        let label = chipAccessibilityLabel(tool: "Run", status: "Completed", summary: "")
+    func chipAccessibilityCapabilityAndStatus() {
+        // The modifier should produce "Capability, Status" when summary is empty
+        let label = chipAccessibilityLabel(capability: "Run", status: "Completed", summary: "")
         #expect(label == "Run, Completed")
     }
 
-    @Test("chipAccessibility produces correct label with tool, status, and summary")
+    @Test("chipAccessibility produces correct label with capability, status, and summary")
     func chipAccessibilityWithSummary() {
-        let label = chipAccessibilityLabel(tool: "Read File", status: "Completed", summary: "config.json")
+        let label = chipAccessibilityLabel(capability: "Read File", status: "Completed", summary: "config.json")
         #expect(label == "Read File, Completed, config.json")
     }
 
     @Test("chipAccessibility empty summary does not produce trailing comma")
     func chipAccessibilityEmptySummary() {
-        let label = chipAccessibilityLabel(tool: "Write File", status: "Failed", summary: "")
+        let label = chipAccessibilityLabel(capability: "Write File", status: "Failed", summary: "")
         #expect(!label.hasSuffix(", "))
         #expect(!label.hasSuffix(","))
     }
@@ -36,10 +36,10 @@ struct AccessibilityTests {
             ("Wait", "Completed"),
         ]
 
-        for (tool, status) in statuses {
-            let label = chipAccessibilityLabel(tool: tool, status: status, summary: "")
-            #expect(!label.isEmpty, "Label for \(tool) should not be empty")
-            #expect(label.contains(tool), "Label should contain model tool name")
+        for (capability, status) in statuses {
+            let label = chipAccessibilityLabel(capability: capability, status: status, summary: "")
+            #expect(!label.isEmpty, "Label for \(capability) should not be empty")
+            #expect(label.contains(capability), "Label should contain model capability name")
             #expect(label.contains(status), "Label should contain status")
         }
     }
@@ -47,7 +47,7 @@ struct AccessibilityTests {
     // MARK: - Helper
 
     /// Replicates the chipAccessibility label construction logic for testing
-    private func chipAccessibilityLabel(tool: String, status: String, summary: String) -> String {
-        summary.isEmpty ? "\(tool), \(status)" : "\(tool), \(status), \(summary)"
+    private func chipAccessibilityLabel(capability: String, status: String, summary: String) -> String {
+        summary.isEmpty ? "\(capability), \(status)" : "\(capability), \(status), \(summary)"
     }
 }

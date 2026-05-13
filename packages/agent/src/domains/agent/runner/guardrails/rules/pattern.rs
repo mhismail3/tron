@@ -1,4 +1,4 @@
-//! Pattern rule: matches regex patterns against tool argument values.
+//! Pattern rule: matches regex patterns against capability argument values.
 //!
 //! Used for detecting dangerous command patterns (e.g., `rm -rf /`,
 //! fork bombs, raw disk writes).
@@ -22,7 +22,8 @@ pub struct PatternRule {
 impl PatternRule {
     /// Evaluate this pattern rule against the context.
     pub fn evaluate(&self, ctx: &EvaluationContext) -> RuleEvaluationResult {
-        let Some(serde_json::Value::String(value)) = ctx.tool_arguments.get(&self.target_argument)
+        let Some(serde_json::Value::String(value)) =
+            ctx.capability_arguments.get(&self.target_argument)
         else {
             return RuleEvaluationResult::not_triggered(&self.base.id);
         };

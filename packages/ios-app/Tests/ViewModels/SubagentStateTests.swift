@@ -189,24 +189,24 @@ final class SubagentStateTests: XCTestCase {
 
     // MARK: - 1B: Capability-Native Forwarded Events
 
-    func testAddForwardedEvent_capabilityStarted() {
+    func testAddForwardedEvent_capabilityInvocationStarted() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "process::run", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events.first?.type, .capabilityInvocation)
     }
 
-    func testAddForwardedEvent_retiredToolStartFormat_isIgnored() {
+    func testAddForwardedEvent_retiredCapabilityInvocationStartFormat_isIgnored() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool" + "_start", eventData: AnyCodable(["modelToolName": "read", "invocationId": "t2"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability" + "_start", eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "filesystem::read_file", "invocationId": "t2"]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertTrue(events.isEmpty)
     }
 
-    func testAddForwardedEvent_retiredToolDotFormat_isIgnored() {
+    func testAddForwardedEvent_retiredCapabilityDotFormat_isIgnored() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "tool" + ".call", eventData: AnyCodable(["modelToolName": "edit", "invocationId": "t3"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability" + ".call", eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "filesystem::edit_file", "invocationId": "t3"]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertTrue(events.isEmpty)
     }
@@ -248,9 +248,9 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertTrue(events.isEmpty)
     }
 
-    func testAddForwardedEvent_capabilityStartedThenCompleted_mergesEvents() {
+    func testAddForwardedEvent_capabilityInvocationStartedThenCompleted_mergesEvents() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "tc-100"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "process::run", "invocationId": "tc-100"]), timestamp: "2026-01-01T00:00:00Z")
         sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["success": true, "invocationId": "tc-100", "result": "output"]), timestamp: "2026-01-01T00:00:01Z")
 
         let events = sut.getEvents(for: "sub-1")
@@ -276,18 +276,18 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertEqual(events.count, 1, "Consecutive text deltas should merge into single output event")
     }
 
-    func testAddForwardedEvent_textDelta_afterTool_createsNewOutputBlock() {
+    func testAddForwardedEvent_textDelta_afterCapability_createsNewOutputBlock() {
         spawnDefault()
         // First output block
         sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "First"]), timestamp: "2026-01-01T00:00:00Z")
-        // Tool interrupts
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
-        // Second output block after tool
+        // Capability interrupts
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "process::run", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
+        // Second output block after capability
         sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "Second"]), timestamp: "2026-01-01T00:00:02Z")
 
         let events = sut.getEvents(for: "sub-1")
         let outputEvents = events.filter { $0.type == .output }
-        XCTAssertEqual(outputEvents.count, 2, "Text after tool should create a new output block")
+        XCTAssertEqual(outputEvents.count, 2, "Text after capability should create a new output block")
     }
 
     func testAddForwardedEvent_thinkingDelta_onlyAddsOnce() {
@@ -300,7 +300,7 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertEqual(thinkingEvents.count, 1, "Multiple thinking deltas should only create one thinking indicator")
     }
 
-    func testAddForwardedEvent_capabilityStart_finalizesRunningOutputEvents() {
+    func testAddForwardedEvent_capabilityInvocationStarted_finalizesRunningOutputEvents() {
         spawnDefault()
         sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "agent.text_delta", eventData: AnyCodable(["delta": "Running text"]), timestamp: "2026-01-01T00:00:00Z")
 
@@ -309,7 +309,7 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertTrue(beforeEvents.last?.isRunning ?? false)
 
         // Capability start should finalize running output
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "process::run", "invocationId": "t1"]), timestamp: "2026-01-01T00:00:01Z")
 
         let afterEvents = sut.subagentEvents["sub-1"] ?? []
         let outputEvent = afterEvents.first(where: { $0.type == .output })
@@ -379,7 +379,7 @@ final class SubagentStateTests: XCTestCase {
     }
 
     func testShowDetailsWithData_addsToTrackedIfNew() {
-        let data = SubagentToolData(
+        let data = SubagentInvocationData(
             invocationId: "tc-ext",
             subagentSessionId: "sub-ext",
             task: "External task",
@@ -413,13 +413,13 @@ final class SubagentStateTests: XCTestCase {
         sut.addForwardedEvent(
             subagentSessionId: "sub-1",
             eventType: "capability.invocation.started",
-            eventData: AnyCodable(["modelToolName": "execute", "contractId": "process::run", "invocationId": "t1"]),
+            eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "process::run", "invocationId": "t1"]),
             timestamp: "2026-01-01T00:00:00Z"
         )
         sut.addForwardedEvent(
             subagentSessionId: "sub-1",
             eventType: "capability.invocation.started",
-            eventData: AnyCodable(["modelToolName": "execute", "contractId": "filesystem::read_file", "invocationId": "t2"]),
+            eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "filesystem::read_file", "invocationId": "t2"]),
             timestamp: "2026-01-01T00:00:01Z"
         )
 
@@ -430,7 +430,7 @@ final class SubagentStateTests: XCTestCase {
     }
 
     func testPopulateFromReconstruction_addsSubagent() {
-        let data = SubagentToolData(
+        let data = SubagentInvocationData(
             invocationId: "tc-r",
             subagentSessionId: "sub-r",
             task: "Reconstructed",
@@ -450,9 +450,9 @@ final class SubagentStateTests: XCTestCase {
 
     // MARK: - Spawn Type Filtering
 
-    func testTrackSpawn_defaultSpawnType_isToolAgent() {
+    func testTrackSpawn_defaultSpawnType_isCapabilityAgent() {
         spawnDefault()
-        XCTAssertEqual(sut.subagents["sub-1"]?.spawnType, .toolAgent)
+        XCTAssertEqual(sut.subagents["sub-1"]?.spawnType, .capabilityAgent)
     }
 
     func testTrackSpawn_withHookSpawnType() {
@@ -463,8 +463,8 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertEqual(sut.subagents["sub-hook"]?.spawnType, .hook)
     }
 
-    func testHasRunningSubagents_trueForToolAgent() {
-        spawnDefault()  // default is .toolAgent
+    func testHasRunningSubagents_trueForCapabilityAgent() {
+        spawnDefault()  // default is .capabilityAgent
         XCTAssertTrue(sut.hasRunningSubagents)
     }
 
@@ -477,8 +477,8 @@ final class SubagentStateTests: XCTestCase {
             "Hook-only subagents should not count as running subagents")
     }
 
-    func testHasRunningSubagents_mixedTypes_hookAndCompletedTool() {
-        // Running hook + completed tool → false
+    func testHasRunningSubagents_mixedTypes_hookAndCompletedCapability() {
+        // Running hook + completed capability → false
         sut.trackSpawn(
             invocationId: "hook-1", subagentSessionId: "sub-hook",
             task: "Generate title", model: nil, spawnType: .hook
@@ -491,8 +491,8 @@ final class SubagentStateTests: XCTestCase {
         XCTAssertFalse(sut.hasRunningSubagents)
     }
 
-    func testHasRunningSubagents_mixedTypes_toolRunning() {
-        // Running tool + running hook → true (tool counts)
+    func testHasRunningSubagents_mixedTypes_capabilityRunning() {
+        // Running capability + running hook → true (capability counts)
         sut.trackSpawn(
             invocationId: "hook-1", subagentSessionId: "sub-hook",
             task: "Generate title", model: nil, spawnType: .hook
@@ -523,7 +523,7 @@ final class SubagentStateTests: XCTestCase {
             sut.addForwardedEvent(
                 subagentSessionId: "sub-1",
                 eventType: "capability.invocation.started",
-                eventData: AnyCodable(["modelToolName": "bash", "invocationId": "t\(i)"]),
+                eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "process::run", "invocationId": "t\(i)"]),
                 timestamp: "2026-01-01T00:00:00Z"
             )
         }

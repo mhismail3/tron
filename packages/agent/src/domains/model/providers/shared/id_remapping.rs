@@ -1,4 +1,4 @@
-//! # Tool Call ID Remapping
+//! # ModelCapability Call ID Remapping
 //!
 //! When switching providers mid-session, capability invocation IDs from one provider
 //! (e.g., Anthropic's `toolu_01abc...`) may not be recognized by another
@@ -46,14 +46,14 @@ pub fn detect_id_format(id: &str) -> Option<IdFormat> {
 /// Synthetic IDs are generated as `toolu_remap_N` or `call_remap_N`.
 ///
 /// Returns an empty map if all IDs already match the target format.
-pub fn build_tool_call_id_mapping(
-    tool_call_ids: &[&str],
+pub fn build_invocation_id_mapping(
+    invocation_ids: &[&str],
     target_format: IdFormat,
 ) -> HashMap<String, String> {
     let mut mapping = HashMap::new();
     let mut remap_counter = 0u32;
 
-    for &id in tool_call_ids {
+    for &id in invocation_ids {
         let needs_remap = match target_format {
             IdFormat::Anthropic => !is_anthropic_id(id),
             IdFormat::OpenAi => !is_openai_id(id),
@@ -75,7 +75,7 @@ pub fn build_tool_call_id_mapping(
 /// Remap a capability invocation ID using a previously built mapping.
 ///
 /// Returns the mapped ID if found, or the original ID unchanged.
-pub fn remap_tool_call_id<'a, S: std::hash::BuildHasher>(
+pub fn remap_invocation_id<'a, S: std::hash::BuildHasher>(
     id: &'a str,
     mapping: &'a HashMap<String, String, S>,
 ) -> &'a str {
@@ -118,14 +118,14 @@ mod tests {
     #[test]
     fn build_mapping_all_match_target() {
         let ids = vec!["toolu_01abc", "toolu_02def"];
-        let mapping = build_tool_call_id_mapping(&ids, IdFormat::Anthropic);
+        let mapping = build_invocation_id_mapping(&ids, IdFormat::Anthropic);
         assert!(mapping.is_empty());
     }
 
     #[test]
     fn build_mapping_needs_remap_to_anthropic() {
         let ids = vec!["call_abc", "toolu_01def", "call_xyz"];
-        let mapping = build_tool_call_id_mapping(&ids, IdFormat::Anthropic);
+        let mapping = build_invocation_id_mapping(&ids, IdFormat::Anthropic);
 
         assert_eq!(mapping.len(), 2);
         assert_eq!(mapping["call_abc"], "toolu_remap_0");
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn build_mapping_needs_remap_to_openai() {
         let ids = vec!["toolu_01abc", "call_def", "toolu_02ghi"];
-        let mapping = build_tool_call_id_mapping(&ids, IdFormat::OpenAi);
+        let mapping = build_invocation_id_mapping(&ids, IdFormat::OpenAi);
 
         assert_eq!(mapping.len(), 2);
         assert_eq!(mapping["toolu_01abc"], "call_remap_0");
@@ -147,14 +147,14 @@ mod tests {
     #[test]
     fn build_mapping_empty_input() {
         let ids: Vec<&str> = vec![];
-        let mapping = build_tool_call_id_mapping(&ids, IdFormat::Anthropic);
+        let mapping = build_invocation_id_mapping(&ids, IdFormat::Anthropic);
         assert!(mapping.is_empty());
     }
 
     #[test]
     fn build_mapping_unknown_format_ids() {
         let ids = vec!["random_123", "another_456"];
-        let mapping = build_tool_call_id_mapping(&ids, IdFormat::Anthropic);
+        let mapping = build_invocation_id_mapping(&ids, IdFormat::Anthropic);
         assert_eq!(mapping.len(), 2);
         assert_eq!(mapping["random_123"], "toolu_remap_0");
         assert_eq!(mapping["another_456"], "toolu_remap_1");
@@ -167,19 +167,19 @@ mod tests {
         let mut mapping = HashMap::new();
         let _ = mapping.insert("call_abc".to_string(), "toolu_remap_0".to_string());
 
-        assert_eq!(remap_tool_call_id("call_abc", &mapping), "toolu_remap_0");
+        assert_eq!(remap_invocation_id("call_abc", &mapping), "toolu_remap_0");
     }
 
     #[test]
     fn remap_not_in_mapping_returns_original() {
         let mapping = HashMap::new();
-        assert_eq!(remap_tool_call_id("toolu_01abc", &mapping), "toolu_01abc");
+        assert_eq!(remap_invocation_id("toolu_01abc", &mapping), "toolu_01abc");
     }
 
     #[test]
     fn remap_empty_mapping_returns_original() {
         let mapping = HashMap::new();
-        assert_eq!(remap_tool_call_id("any_id", &mapping), "any_id");
+        assert_eq!(remap_invocation_id("any_id", &mapping), "any_id");
     }
 
     // ── Integration: build + remap ───────────────────────────────────────
@@ -187,13 +187,13 @@ mod tests {
     #[test]
     fn roundtrip_build_and_remap() {
         let ids = vec!["call_foo", "toolu_01bar", "call_baz"];
-        let mapping = build_tool_call_id_mapping(&ids, IdFormat::Anthropic);
+        let mapping = build_invocation_id_mapping(&ids, IdFormat::Anthropic);
 
         // OpenAI IDs get remapped
-        assert_eq!(remap_tool_call_id("call_foo", &mapping), "toolu_remap_0");
-        assert_eq!(remap_tool_call_id("call_baz", &mapping), "toolu_remap_1");
+        assert_eq!(remap_invocation_id("call_foo", &mapping), "toolu_remap_0");
+        assert_eq!(remap_invocation_id("call_baz", &mapping), "toolu_remap_1");
 
         // Anthropic ID stays the same
-        assert_eq!(remap_tool_call_id("toolu_01bar", &mapping), "toolu_01bar");
+        assert_eq!(remap_invocation_id("toolu_01bar", &mapping), "toolu_01bar");
     }
 }

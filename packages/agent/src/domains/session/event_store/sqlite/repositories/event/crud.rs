@@ -2,7 +2,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
 use super::extractors::{
-    extract_bool_as_int, extract_i64, extract_role, extract_str, extract_tokens, extract_tool_name,
+    extract_bool_as_int, extract_i64, extract_model_primitive_name, extract_role, extract_str,
+    extract_tokens,
 };
 use super::{EVENT_COLUMNS, EventRepo};
 use crate::domains::session::event_store::errors::Result;
@@ -13,8 +14,8 @@ impl EventRepo {
     /// Insert a single event, extracting denormalized fields from the payload.
     pub fn insert(conn: &Connection, event: &SessionEvent) -> Result<()> {
         let role = extract_role(event);
-        let tool_name = extract_tool_name(event);
-        let tool_call_id = extract_str(&event.payload, "toolCallId");
+        let model_primitive_name = extract_model_primitive_name(event);
+        let invocation_id = extract_str(&event.payload, "invocationId");
         let turn = extract_i64(&event.payload, "turn");
         let depth = Self::compute_depth(conn, event.parent_id.as_deref())?;
 
@@ -77,8 +78,8 @@ impl EventRepo {
             Option::<String>::None, // content_blob_id
             event.workspace_id,
             role,
-            tool_name,
-            tool_call_id,
+            model_primitive_name,
+            invocation_id,
             turn,
             input_tokens,
             output_tokens,

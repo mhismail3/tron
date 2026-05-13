@@ -14,37 +14,37 @@ use std::collections::HashMap;
 
 fn make_process_ctx(command: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": command}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": command}),
         session_id: Some("test-session".into()),
-        tool_call_id: Some("call-1".into()),
+        invocation_id: Some("call-1".into()),
     }
 }
 
 fn make_write_ctx(file_path: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "filesystem::write_file".into(),
-        tool_arguments: serde_json::json!({"file_path": file_path, "content": "test"}),
+        model_primitive_name: "filesystem::write_file".into(),
+        capability_arguments: serde_json::json!({"file_path": file_path, "content": "test"}),
         session_id: Some("test-session".into()),
-        tool_call_id: Some("call-1".into()),
+        invocation_id: Some("call-1".into()),
     }
 }
 
 fn make_edit_ctx(file_path: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "filesystem::edit_file".into(),
-        tool_arguments: serde_json::json!({"file_path": file_path}),
+        model_primitive_name: "filesystem::edit_file".into(),
+        capability_arguments: serde_json::json!({"file_path": file_path}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     }
 }
 
 fn make_read_ctx(file_path: &str) -> EvaluationContext {
     EvaluationContext {
-        tool_name: "filesystem::read_file".into(),
-        tool_arguments: serde_json::json!({"file_path": file_path}),
+        model_primitive_name: "filesystem::read_file".into(),
+        capability_arguments: serde_json::json!({"file_path": file_path}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     }
 }
 
@@ -82,7 +82,10 @@ fn rule_tier_serde_roundtrip() {
 
 #[test]
 fn scope_serde_roundtrip() {
-    for (variant, expected) in [(Scope::Global, "\"global\""), (Scope::Tool, "\"tool\"")] {
+    for (variant, expected) in [
+        (Scope::Global, "\"global\""),
+        (Scope::ModelCapability, "\"capability\""),
+    ] {
         let json = serde_json::to_string(&variant).unwrap();
         assert_eq!(json, expected);
         let back: Scope = serde_json::from_str(&json).unwrap();
@@ -93,29 +96,29 @@ fn scope_serde_roundtrip() {
 #[test]
 fn evaluation_context_serde_roundtrip() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": "ls"}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": "ls"}),
         session_id: Some("sess-1".into()),
-        tool_call_id: None,
+        invocation_id: None,
     };
     let json = serde_json::to_string(&ctx).unwrap();
     let back: EvaluationContext = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.tool_name, "process::run");
+    assert_eq!(back.model_primitive_name, "process::run");
     assert_eq!(back.session_id, Some("sess-1".into()));
-    assert_eq!(back.tool_call_id, None);
+    assert_eq!(back.invocation_id, None);
 }
 
 #[test]
 fn evaluation_context_omits_none_fields() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let json = serde_json::to_string(&ctx).unwrap();
     assert!(!json.contains("sessionId"));
-    assert!(!json.contains("toolCallId"));
+    assert!(!json.contains("invocationId"));
 }
 
 #[test]
@@ -169,8 +172,8 @@ fn audit_entry_serde_roundtrip() {
         id: "audit-1".into(),
         timestamp: "2026-01-01T00:00:00Z".into(),
         session_id: Some("sess-1".into()),
-        tool_name: "process::run".into(),
-        tool_call_id: None,
+        model_primitive_name: "process::run".into(),
+        invocation_id: None,
         evaluation: GuardrailEvaluation {
             blocked: false,
             block_reason: None,
@@ -180,12 +183,12 @@ fn audit_entry_serde_roundtrip() {
             timestamp: "2026-01-01T00:00:00Z".into(),
             duration_ms: 0,
         },
-        tool_arguments: Some(serde_json::json!({"command": "ls"})),
+        capability_arguments: Some(serde_json::json!({"command": "ls"})),
     };
     let json = serde_json::to_string(&entry).unwrap();
     let back: AuditEntry = serde_json::from_str(&json).unwrap();
     assert_eq!(back.id, "audit-1");
-    assert_eq!(back.tool_name, "process::run");
+    assert_eq!(back.model_primitive_name, "process::run");
 }
 
 #[test]
@@ -299,10 +302,10 @@ fn pattern_trash_tron_blocked() {
 #[test]
 fn pattern_target_argument_missing_not_triggered() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"timeout": 5000}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"timeout": 5000}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let mut engine = default_engine();
     let eval = engine.evaluate(&ctx);
@@ -450,10 +453,10 @@ fn path_process_redirect_to_tron_home_auth_blocked() {
 #[test]
 fn resource_timeout_exceeds_max_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": "sleep 1000", "timeout": 4_000_000}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": "sleep 1000", "timeout": 4_000_000}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let mut engine = default_engine();
     let eval = engine.evaluate(&ctx);
@@ -468,10 +471,10 @@ fn resource_timeout_exceeds_max_blocked() {
 #[test]
 fn resource_timeout_above_600s_warns_but_not_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": "build", "timeout": 900_000}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": "build", "timeout": 900_000}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let mut engine = default_engine();
     let eval = engine.evaluate(&ctx);
@@ -488,10 +491,10 @@ fn resource_timeout_above_600s_warns_but_not_blocked() {
 #[test]
 fn resource_timeout_within_limit_not_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 500_000}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": "sleep 5", "timeout": 500_000}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let mut engine = default_engine();
     let eval = engine.evaluate(&ctx);
@@ -506,10 +509,10 @@ fn resource_timeout_within_limit_not_blocked() {
 #[test]
 fn resource_timeout_exact_max_not_blocked() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": "sleep 5", "timeout": 600_000}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": "sleep 5", "timeout": 600_000}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let mut engine = default_engine();
     let eval = engine.evaluate(&ctx);
@@ -524,10 +527,10 @@ fn resource_timeout_exact_max_not_blocked() {
 #[test]
 fn resource_missing_argument_not_triggered() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": "ls"}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": "ls"}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let mut engine = default_engine();
     let eval = engine.evaluate(&ctx);
@@ -542,10 +545,10 @@ fn resource_missing_argument_not_triggered() {
 #[test]
 fn resource_non_numeric_argument_not_triggered() {
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"command": "ls", "timeout": "not-a-number"}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"command": "ls", "timeout": "not-a-number"}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let mut engine = default_engine();
     let eval = engine.evaluate(&ctx);
@@ -565,7 +568,7 @@ fn resource_min_value_check() {
             name: "Min Test".into(),
             description: "Test min value".into(),
             severity: Severity::Block,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Custom,
             capabilities: vec!["process::run".into()],
             priority: 100,
@@ -577,10 +580,10 @@ fn resource_min_value_check() {
         min_value: Some(10.0),
     };
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"value": 5}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"value": 5}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let result = rule.evaluate(&ctx);
     assert!(result.triggered);
@@ -594,7 +597,7 @@ fn resource_both_min_max() {
             name: "Range Test".into(),
             description: "Test range".into(),
             severity: Severity::Warn,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Custom,
             capabilities: vec![],
             priority: 100,
@@ -607,26 +610,26 @@ fn resource_both_min_max() {
     };
 
     let ctx = EvaluationContext {
-        tool_name: "Test".into(),
-        tool_arguments: serde_json::json!({"count": 50}),
+        model_primitive_name: "Test".into(),
+        capability_arguments: serde_json::json!({"count": 50}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     assert!(!rule.evaluate(&ctx).triggered);
 
     let ctx2 = EvaluationContext {
-        tool_name: "Test".into(),
-        tool_arguments: serde_json::json!({"count": 150}),
+        model_primitive_name: "Test".into(),
+        capability_arguments: serde_json::json!({"count": 150}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     assert!(rule.evaluate(&ctx2).triggered);
 
     let ctx3 = EvaluationContext {
-        tool_name: "Test".into(),
-        tool_arguments: serde_json::json!({"count": 0}),
+        model_primitive_name: "Test".into(),
+        capability_arguments: serde_json::json!({"count": 0}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     assert!(rule.evaluate(&ctx3).triggered);
 }
@@ -646,20 +649,20 @@ fn context_rule_condition_true_triggers() {
             enabled: true,
             tags: vec![],
         },
-        condition: Box::new(|ctx| ctx.tool_name == "DangerousTool"),
-        block_message: "DangerousTool is not allowed".into(),
+        condition: Box::new(|ctx| ctx.model_primitive_name == "DangerousCapability"),
+        block_message: "DangerousCapability is not allowed".into(),
     };
     let ctx = EvaluationContext {
-        tool_name: "DangerousTool".into(),
-        tool_arguments: serde_json::json!({}),
+        model_primitive_name: "DangerousCapability".into(),
+        capability_arguments: serde_json::json!({}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let result = rule.evaluate(&ctx);
     assert!(result.triggered);
     assert_eq!(
         result.reason.as_deref(),
-        Some("DangerousTool is not allowed")
+        Some("DangerousCapability is not allowed")
     );
 }
 
@@ -678,14 +681,14 @@ fn context_rule_condition_false_not_triggered() {
             enabled: true,
             tags: vec![],
         },
-        condition: Box::new(|ctx| ctx.tool_name == "DangerousTool"),
+        condition: Box::new(|ctx| ctx.model_primitive_name == "DangerousCapability"),
         block_message: "not allowed".into(),
     };
     let ctx = EvaluationContext {
-        tool_name: "SafeTool".into(),
-        tool_arguments: serde_json::json!({}),
+        model_primitive_name: "SafeCapability".into(),
+        capability_arguments: serde_json::json!({}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let result = rule.evaluate(&ctx);
     assert!(!result.triggered);
@@ -1111,10 +1114,10 @@ fn engine_unregister_nonexistent_returns_false() {
 fn engine_evaluate_no_applicable_rules_not_blocked() {
     let mut engine = default_engine();
     let ctx = EvaluationContext {
-        tool_name: "UnknownTool".into(),
-        tool_arguments: serde_json::json!({}),
+        model_primitive_name: "UnknownCapability".into(),
+        capability_arguments: serde_json::json!({}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let eval = engine.evaluate(&ctx);
     assert!(!eval.blocked);
@@ -1222,10 +1225,10 @@ fn engine_priority_ordering() {
     }));
 
     let ctx = EvaluationContext {
-        tool_name: "Test".into(),
-        tool_arguments: serde_json::json!({"cmd": "match"}),
+        model_primitive_name: "Test".into(),
+        capability_arguments: serde_json::json!({"cmd": "match"}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let eval = engine.evaluate(&ctx);
     assert!(eval.blocked);
@@ -1244,9 +1247,9 @@ fn engine_capability_filtering() {
             name: "Special Only".into(),
             description: "test".into(),
             severity: Severity::Block,
-            scope: Scope::Tool,
+            scope: Scope::ModelCapability,
             tier: RuleTier::Custom,
-            capabilities: vec!["SpecialTool".into()],
+            capabilities: vec!["SpecialCapability".into()],
             priority: 100,
             enabled: true,
             tags: vec![],
@@ -1256,10 +1259,10 @@ fn engine_capability_filtering() {
     }));
 
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({"input": "anything"}),
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({"input": "anything"}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let eval = engine.evaluate(&ctx);
     assert!(
@@ -1270,10 +1273,10 @@ fn engine_capability_filtering() {
     );
 
     let ctx2 = EvaluationContext {
-        tool_name: "SpecialTool".into(),
-        tool_arguments: serde_json::json!({"input": "anything"}),
+        model_primitive_name: "SpecialCapability".into(),
+        capability_arguments: serde_json::json!({"input": "anything"}),
         session_id: None,
-        tool_call_id: None,
+        invocation_id: None,
     };
     let eval2 = engine.evaluate(&ctx2);
     assert!(
@@ -1380,9 +1383,9 @@ fn audit_log_and_retrieve() {
     let mut logger = AuditLogger::new(None);
     let entry = logger.log(AuditEntryParams {
         session_id: Some("sess-1".into()),
-        tool_name: "process::run".into(),
-        tool_call_id: Some("call-1".into()),
-        tool_arguments: Some(serde_json::json!({"command": "ls"})),
+        model_primitive_name: "process::run".into(),
+        invocation_id: Some("call-1".into()),
+        capability_arguments: Some(serde_json::json!({"command": "ls"})),
         evaluation: GuardrailEvaluation {
             blocked: false,
             block_reason: None,
@@ -1403,9 +1406,9 @@ fn audit_capacity_enforcement() {
     for i in 0..5 {
         let _ = logger.log(AuditEntryParams {
             session_id: None,
-            tool_name: format!("Tool{i}"),
-            tool_call_id: None,
-            tool_arguments: None,
+            model_primitive_name: format!("Capability{i}"),
+            invocation_id: None,
+            capability_arguments: None,
             evaluation: GuardrailEvaluation {
                 blocked: false,
                 block_reason: None,
@@ -1419,7 +1422,7 @@ fn audit_capacity_enforcement() {
     }
     assert_eq!(logger.len(), 3);
     let entries = logger.entries(None);
-    assert_eq!(entries[0].tool_name, "Tool2");
+    assert_eq!(entries[0].model_primitive_name, "Capability2");
 }
 
 #[test]
@@ -1428,9 +1431,9 @@ fn audit_entries_for_session() {
     for session in &["sess-1", "sess-2", "sess-1"] {
         let _ = logger.log(AuditEntryParams {
             session_id: Some((*session).to_string()),
-            tool_name: "process::run".into(),
-            tool_call_id: None,
-            tool_arguments: None,
+            model_primitive_name: "process::run".into(),
+            invocation_id: None,
+            capability_arguments: None,
             evaluation: GuardrailEvaluation {
                 blocked: false,
                 block_reason: None,
@@ -1452,9 +1455,9 @@ fn audit_triggered_entries_filter() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "process::run".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "process::run".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: true,
             block_reason: Some("test".into()),
@@ -1471,9 +1474,9 @@ fn audit_triggered_entries_filter() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "filesystem::read_file".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "filesystem::read_file".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: false,
             block_reason: None,
@@ -1495,9 +1498,9 @@ fn audit_blocked_entries_filter() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "process::run".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "process::run".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: true,
             block_reason: Some("test".into()),
@@ -1510,9 +1513,9 @@ fn audit_blocked_entries_filter() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "filesystem::read_file".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "filesystem::read_file".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: false,
             block_reason: None,
@@ -1532,9 +1535,9 @@ fn audit_clear() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "process::run".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "process::run".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: false,
             block_reason: None,
@@ -1556,9 +1559,9 @@ fn audit_stats() {
     let mut logger = AuditLogger::new(None);
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "process::run".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "process::run".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: true,
             block_reason: Some("test".into()),
@@ -1575,9 +1578,9 @@ fn audit_stats() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "filesystem::write_file".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "filesystem::write_file".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: false,
             block_reason: None,
@@ -1594,9 +1597,9 @@ fn audit_stats() {
     });
     let _ = logger.log(AuditEntryParams {
         session_id: None,
-        tool_name: "process::run".into(),
-        tool_call_id: None,
-        tool_arguments: None,
+        model_primitive_name: "process::run".into(),
+        invocation_id: None,
+        capability_arguments: None,
         evaluation: GuardrailEvaluation {
             blocked: false,
             block_reason: None,
@@ -1613,8 +1616,8 @@ fn audit_stats() {
     assert_eq!(stats.blocked, 1);
     assert_eq!(stats.warnings, 1);
     assert_eq!(stats.passed, 1);
-    assert_eq!(stats.by_tool.get("process::run"), Some(&2));
-    assert_eq!(stats.by_tool.get("filesystem::write_file"), Some(&1));
+    assert_eq!(stats.by_capability.get("process::run"), Some(&2));
+    assert_eq!(stats.by_capability.get("filesystem::write_file"), Some(&1));
     assert_eq!(stats.by_rule.get("rule-a"), Some(&1));
     assert_eq!(stats.by_rule.get("rule-b"), Some(&1));
 }
@@ -1623,21 +1626,21 @@ fn audit_stats() {
 fn audit_redaction_in_logged_entry() {
     let mut engine = default_engine();
     let ctx = EvaluationContext {
-        tool_name: "process::run".into(),
-        tool_arguments: serde_json::json!({
+        model_primitive_name: "process::run".into(),
+        capability_arguments: serde_json::json!({
             "command": "ls",
             "password": "secret123",
             "apiToken": "tok-abc"
         }),
         session_id: Some("sess".into()),
-        tool_call_id: None,
+        invocation_id: None,
     };
     let _ = engine.evaluate(&ctx);
 
     let audit = engine.audit_logger().unwrap();
     let entries = audit.entries(None);
     assert_eq!(entries.len(), 1);
-    let args = entries[0].tool_arguments.as_ref().unwrap();
+    let args = entries[0].capability_arguments.as_ref().unwrap();
     assert_eq!(args["password"], "[REDACTED]");
     assert_eq!(args["apiToken"], "[REDACTED]");
     assert_eq!(args["command"], "ls");
@@ -1682,7 +1685,7 @@ fn integration_write_to_tron_skills_allowed() {
 }
 
 #[test]
-fn integration_read_tool_not_affected_by_path_protection() {
+fn integration_read_capability_not_affected_by_path_protection() {
     let home = crate::shared::paths::home_dir();
     let mut engine = default_engine();
     let eval = engine.evaluate(&make_read_ctx(&format!(

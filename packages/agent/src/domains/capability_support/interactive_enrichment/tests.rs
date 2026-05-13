@@ -1,13 +1,13 @@
-use super::enrich_interactive_tool_statuses;
+use super::enrich_interactive_capability_statuses;
 use serde_json::{Value, json};
 
-fn make_tool_call(name: &str, id: &str, args: Value) -> Value {
+fn make_capability_invocation(name: &str, id: &str, args: Value) -> Value {
     json!({
         "type": "capability.invocation.started",
-        "toolName": name,
-        "toolCallId": id,
+        "modelPrimitiveName": name,
+        "invocationId": id,
         "payload": {
-            "toolCallId": id,
+            "invocationId": id,
             "name": name,
             "arguments": args,
             "turn": 1,
@@ -30,12 +30,12 @@ fn answers_single_select() {
         "questions": [{"id": "q1", "question": "Color?"}]
     });
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**Color?**\nAnswer: Red"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let p = &events[0]["payload"];
-    assert_eq!(p["toolStatus"], "answered");
+    assert_eq!(p["interactionStatus"], "answered");
     let parsed = p["parsedAnswers"].as_array().unwrap();
     assert_eq!(parsed.len(), 1);
     assert_eq!(parsed[0]["questionId"], "q1");
@@ -47,10 +47,10 @@ fn answers_single_select() {
 fn answers_multi_select() {
     let args = json!({"questions": [{"id": "q1", "question": "Tags?"}]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**Tags?**\nAnswer: bug, urgent, ui"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let parsed = events[0]["payload"]["parsedAnswers"][0].clone();
     let values = parsed["selectedValues"].as_array().unwrap();
     assert_eq!(values.len(), 3);
@@ -63,10 +63,10 @@ fn answers_multi_select() {
 fn answers_other_value() {
     let args = json!({"questions": [{"id": "q1", "question": "Why?"}]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**Why?**\nAnswer: [Other] custom reason"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let parsed = events[0]["payload"]["parsedAnswers"][0].clone();
     assert_eq!(parsed["otherValue"], "custom reason");
     assert_eq!(parsed["selectedValues"].as_array().unwrap().len(), 0);
@@ -76,10 +76,10 @@ fn answers_other_value() {
 fn answers_other_value_empty() {
     let args = json!({"questions": [{"id": "q1", "question": "Why?"}]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**Why?**\nAnswer: [Other] "),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let parsed = events[0]["payload"]["parsedAnswers"][0].clone();
     assert!(parsed["otherValue"].is_null());
     assert_eq!(parsed["selectedValues"].as_array().unwrap().len(), 0);
@@ -89,10 +89,10 @@ fn answers_other_value_empty() {
 fn answers_no_selection() {
     let args = json!({"questions": [{"id": "q1", "question": "Skip?"}]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**Skip?**\nAnswer: (no selection)"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let parsed = events[0]["payload"]["parsedAnswers"][0].clone();
     assert_eq!(parsed["selectedValues"].as_array().unwrap().len(), 0);
     assert!(parsed["otherValue"].is_null());
@@ -101,9 +101,9 @@ fn answers_no_selection() {
 #[test]
 fn answers_pending_no_message() {
     let args = json!({"questions": [{"id": "q1", "question": "?"}]});
-    let mut events = vec![make_tool_call("agent::ask_user", "tc1", args)];
-    enrich_interactive_tool_statuses(&mut events);
-    assert_eq!(events[0]["payload"]["toolStatus"], "pending");
+    let mut events = vec![make_capability_invocation("agent::ask_user", "tc1", args)];
+    enrich_interactive_capability_statuses(&mut events);
+    assert_eq!(events[0]["payload"]["interactionStatus"], "pending");
     assert!(events[0]["payload"].get("parsedAnswers").is_none());
 }
 
@@ -111,23 +111,23 @@ fn answers_pending_no_message() {
 fn answers_superseded_plain_user_message() {
     let args = json!({"questions": [{"id": "q1", "question": "?"}]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("ignore that"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
-    assert_eq!(events[0]["payload"]["toolStatus"], "superseded");
+    enrich_interactive_capability_statuses(&mut events);
+    assert_eq!(events[0]["payload"]["interactionStatus"], "superseded");
 }
 
 #[test]
 fn answers_question_text_mismatch_dropped() {
     let args = json!({"questions": [{"id": "q1", "question": "Color?"}]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**Different question?**\nAnswer: x"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     // Status is still answered (marker present) but parsedAnswers is empty.
-    assert_eq!(events[0]["payload"]["toolStatus"], "answered");
+    assert_eq!(events[0]["payload"]["interactionStatus"], "answered");
     assert_eq!(
         events[0]["payload"]["parsedAnswers"]
             .as_array()
@@ -144,10 +144,10 @@ fn answers_multiple_questions() {
         {"id": "q2", "question": "B?"}
     ]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**A?**\nAnswer: yes\n\n**B?**\nAnswer: no"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let parsed = events[0]["payload"]["parsedAnswers"].as_array().unwrap();
     assert_eq!(parsed.len(), 2);
     assert_eq!(parsed[0]["questionId"], "q1");
@@ -164,13 +164,14 @@ fn answers_arguments_as_json_string() {
         "questions": [{"id": "q1", "question": "Color?"}]
     }))
     .unwrap();
-    let mut tool_call = make_tool_call("agent::ask_user", "tc1", Value::Null);
-    tool_call["payload"]["arguments"] = json!(args_string);
+    let mut capability_invocation =
+        make_capability_invocation("agent::ask_user", "tc1", Value::Null);
+    capability_invocation["payload"]["arguments"] = json!(args_string);
     let mut events = vec![
-        tool_call,
+        capability_invocation,
         make_user_msg("[Answers to your questions]\n\n**Color?**\nAnswer: Red"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let parsed = events[0]["payload"]["parsedAnswers"][0].clone();
     assert_eq!(parsed["selectedValues"][0], "Red");
 }
@@ -184,10 +185,10 @@ fn user_message_backfilled_for_answered_questions() {
         {"id": "q2", "question": "B?"}
     ]});
     let mut events = vec![
-        make_tool_call("agent::ask_user", "tc1", args),
+        make_capability_invocation("agent::ask_user", "tc1", args),
         make_user_msg("[Answers to your questions]\n\n**A?**\nAnswer: yes\n\n**B?**\nAnswer: no"),
     ];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let user_payload = &events[1]["payload"];
     assert_eq!(user_payload["messageKind"], "answered_questions");
     assert_eq!(user_payload["answerCount"], 2);
@@ -220,7 +221,7 @@ fn make_subagent_results_content(agents: &[(&str, bool)]) -> String {
 fn subagent_results_message_gets_backfilled() {
     let content = make_subagent_results_content(&[("sub-1", true)]);
     let mut events = vec![make_user_msg(&content)];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let p = &events[0]["payload"];
     assert_eq!(p["messageKind"], "subagent_results_delivered");
     assert_eq!(p["subagentCount"], 1);
@@ -231,7 +232,7 @@ fn subagent_results_multiple_agents_correct_count() {
     let content =
         make_subagent_results_content(&[("sub-1", true), ("sub-2", true), ("sub-3", true)]);
     let mut events = vec![make_user_msg(&content)];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     assert_eq!(events[0]["payload"]["subagentCount"], 3);
 }
 
@@ -239,7 +240,7 @@ fn subagent_results_multiple_agents_correct_count() {
 fn subagent_results_mixed_success_failure_counted() {
     let content = make_subagent_results_content(&[("sub-1", true), ("sub-2", false)]);
     let mut events = vec![make_user_msg(&content)];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     assert_eq!(events[0]["payload"]["subagentCount"], 2);
 }
 
@@ -254,7 +255,7 @@ fn subagent_results_already_tagged_not_overwritten() {
             "subagentCount": 42,
         }
     })];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     // Should not overwrite the existing count
     assert_eq!(events[0]["payload"]["subagentCount"], 42);
 }
@@ -268,14 +269,14 @@ fn subagent_results_array_content_skipped() {
             "content": [{"type": "text", "text": content}]
         }
     })];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     assert!(events[0]["payload"].get("messageKind").is_none());
 }
 
 #[test]
 fn subagent_results_regular_message_untouched() {
     let mut events = vec![make_user_msg("Hello, how are you?")];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     assert!(events[0]["payload"].get("messageKind").is_none());
 }
 
@@ -284,14 +285,14 @@ fn subagent_results_partial_marker_no_match() {
     let mut events = vec![make_user_msg(
         "The user mentioned # Completed Sub-Agent Results in their message",
     )];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     assert!(events[0]["payload"].get("messageKind").is_none());
 }
 
 #[test]
 fn subagent_results_empty_content_no_match() {
     let mut events = vec![make_user_msg("")];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     assert!(events[0]["payload"].get("messageKind").is_none());
 }
 
@@ -301,7 +302,7 @@ fn subagent_results_no_sections_defaults_to_one() {
     let mut events = vec![make_user_msg(
         "# Completed Sub-Agent Results\n\nSome malformed content without section headers.",
     )];
-    enrich_interactive_tool_statuses(&mut events);
+    enrich_interactive_capability_statuses(&mut events);
     let p = &events[0]["payload"];
     assert_eq!(p["messageKind"], "subagent_results_delivered");
     assert_eq!(p["subagentCount"], 1);

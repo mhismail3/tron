@@ -1,7 +1,7 @@
-//! `AskUserPrompt` tool types.
+//! User interaction capability payload types.
 //!
-//! Types for the interactive question tool that lets the agent ask
-//! the user multiple-choice or free-form questions.
+//! Types for the `agent::ask_user` capability, which lets the agent ask the
+//! user multiple-choice or free-form questions through the native client.
 
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +35,7 @@ pub enum SelectionMode {
 /// A single question with options.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AskUserPrompt {
+pub struct UserInteractionPrompt {
     /// Unique identifier.
     pub id: String,
     /// The question text.
@@ -52,11 +52,11 @@ pub struct AskUserPrompt {
     pub other_placeholder: Option<String>,
 }
 
-/// Parameters for the `AskUserPrompt` capability invocation.
+/// Parameters for the `UserInteractionPrompt` capability invocation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct AskUserParams {
+pub struct UserInteractionParams {
     /// Array of questions (1–5).
-    pub questions: Vec<AskUserPrompt>,
+    pub questions: Vec<UserInteractionPrompt>,
     /// Optional context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
@@ -75,10 +75,10 @@ pub struct QuestionAnswer {
     pub other_value: Option<String>,
 }
 
-/// The complete result from the `AskUserPrompt` tool.
+/// The complete result from the `agent::ask_user` capability.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AskUserResult {
+pub struct UserInteractionResult {
     /// All answers.
     pub answers: Vec<QuestionAnswer>,
     /// Whether all questions were answered.
@@ -100,9 +100,9 @@ pub struct ValidationResult {
     pub error: Option<String>,
 }
 
-/// Validate [`AskUserParams`].
+/// Validate [`UserInteractionParams`].
 #[must_use]
-pub fn validate_params(params: &AskUserParams) -> ValidationResult {
+pub fn validate_params(params: &UserInteractionParams) -> ValidationResult {
     if params.questions.is_empty() {
         return ValidationResult {
             valid: false,
@@ -148,7 +148,7 @@ pub fn validate_params(params: &AskUserParams) -> ValidationResult {
 
 /// Check if all questions have been answered.
 #[must_use]
-pub fn is_complete(questions: &[AskUserPrompt], answers: &[QuestionAnswer]) -> bool {
+pub fn is_complete(questions: &[UserInteractionPrompt], answers: &[QuestionAnswer]) -> bool {
     for question in questions {
         let answer = answers.iter().find(|a| a.question_id == question.id);
         match answer {
@@ -181,8 +181,8 @@ mod tests {
         }
     }
 
-    fn make_question(id: &str) -> AskUserPrompt {
-        AskUserPrompt {
+    fn make_question(id: &str) -> UserInteractionPrompt {
+        UserInteractionPrompt {
             id: id.into(),
             question: format!("Question {id}?"),
             options: vec![make_option("A"), make_option("B")],
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn validate_empty_questions() {
-        let params = AskUserParams {
+        let params = UserInteractionParams {
             questions: vec![],
             context: None,
         };
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn validate_too_many_questions() {
-        let params = AskUserParams {
+        let params = UserInteractionParams {
             questions: (0..6).map(|i| make_question(&i.to_string())).collect(),
             context: None,
         };
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn validate_duplicate_ids() {
-        let params = AskUserParams {
+        let params = UserInteractionParams {
             questions: vec![make_question("q1"), make_question("q1")],
             context: None,
         };
@@ -231,7 +231,7 @@ mod tests {
     fn validate_too_few_options() {
         let mut q = make_question("q1");
         q.options = vec![make_option("only-one")];
-        let params = AskUserParams {
+        let params = UserInteractionParams {
             questions: vec![q],
             context: None,
         };
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn validate_valid_params() {
-        let params = AskUserParams {
+        let params = UserInteractionParams {
             questions: vec![make_question("q1"), make_question("q2")],
             context: Some("context".into()),
         };
@@ -342,10 +342,10 @@ mod tests {
     }
 
     #[test]
-    fn ask_user_question_serde_roundtrip() {
+    fn user_interaction_serde_roundtrip() {
         let q = make_question("q1");
         let json = serde_json::to_string(&q).unwrap();
-        let back: AskUserPrompt = serde_json::from_str(&json).unwrap();
+        let back: UserInteractionPrompt = serde_json::from_str(&json).unwrap();
         assert_eq!(q, back);
     }
 

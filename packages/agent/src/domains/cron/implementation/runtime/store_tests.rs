@@ -36,7 +36,7 @@ fn make_job(id: &str, name: &str) -> CronJob {
         auto_disable_after: 0,
         stuck_timeout_secs: 7200,
         tags: vec!["test".into()],
-        tool_restrictions: None,
+        capability_restrictions: None,
         workspace_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -425,20 +425,20 @@ fn complete_stuck_runs_no_match() {
     assert_eq!(updated, 0);
 }
 
-// ── Tool restrictions persistence ───────────────────────────────
+// ── ModelCapability restrictions persistence ───────────────────────────────
 
 #[test]
-fn upsert_job_with_tool_restrictions() {
+fn upsert_job_with_capability_restrictions() {
     let pool = setup_pool();
     let mut job = make_job("cron_tr", "Restricted");
-    job.tool_restrictions = Some(crate::domains::cron::types::ToolRestrictions {
+    job.capability_restrictions = Some(crate::domains::cron::types::CapabilityRestrictions {
         allowed_capabilities: Some(vec!["filesystem::read_file".into(), "Grep".into()]),
     });
     upsert_job(&pool, &job).unwrap();
 
     let loaded = get_job(&pool, "cron_tr").unwrap().unwrap();
-    assert!(loaded.tool_restrictions.is_some());
-    let tr = loaded.tool_restrictions.unwrap();
+    assert!(loaded.capability_restrictions.is_some());
+    let tr = loaded.capability_restrictions.unwrap();
     assert_eq!(
         tr.allowed_capabilities,
         Some(vec![
@@ -449,14 +449,14 @@ fn upsert_job_with_tool_restrictions() {
 }
 
 #[test]
-fn upsert_job_null_tool_restrictions() {
+fn upsert_job_null_capability_restrictions() {
     let pool = setup_pool();
     let mut job = make_job("cron_null_tr", "Null TR");
-    job.tool_restrictions = None;
+    job.capability_restrictions = None;
     upsert_job(&pool, &job).unwrap();
 
     let loaded = get_job(&pool, "cron_null_tr").unwrap().unwrap();
-    assert!(loaded.tool_restrictions.is_none());
+    assert!(loaded.capability_restrictions.is_none());
 }
 
 #[test]

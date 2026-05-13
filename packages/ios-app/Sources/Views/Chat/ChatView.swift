@@ -463,8 +463,8 @@ struct ChatView: View {
         switch action {
         case .skill(let skill):
             sheetCoordinator.showSkillDetail(skill)
-        case .askUserQuestion(let data):
-            viewModel.openAskUserQuestionSheet(for: data)
+        case .userInteraction(let data):
+            viewModel.openUserInteractionSheet(for: data)
         case .engineApproval(let data):
             viewModel.openEngineApprovalSheet(for: data)
         case .thinking(let content):
@@ -485,7 +485,7 @@ struct ChatView: View {
         case .capabilityInvocation(let data):
             sheetCoordinator.showCapabilityInvocationDetail(data)
         case .cancelCapabilityInvocation(let id):
-            viewModel.abortTool(invocationId: id, idempotencyKey: .userAction("agent.abortTool"))
+            viewModel.abortCapabilityInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortCapabilityInvocation"))
         case .subagentResult(let sid):
             viewModel.subagentState.showDetails(for: sid)
         case .subagentResultsReady:
@@ -495,7 +495,7 @@ struct ChatView: View {
         case .memoryRetainDetail(let title, let summary):
             sheetCoordinator.showMemoryRetainDetail(title: title, summary: summary)
         case .reactivateSkill(let skillName):
-            // M6: user tapped a chip in the skills-cleared AskUser picker.
+            // M6: user tapped a chip in the skills-cleared UserInteraction picker.
             // Reuses the existing `skills::activate` engine protocol path used by sidebar
             // activation and @skill-name resolution — server emits
             // `skills::activated` which the chip tracks via `SkillsClearedNotificationView`.

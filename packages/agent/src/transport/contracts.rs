@@ -1,7 +1,7 @@
 //! Engine client protocol contracts.
 //!
 //! Public `/engine` message types are worker/client transport bindings over
-//! engine-owned functions. They are not model-facing tools; domain workers do
+//! engine-owned functions. They are not model-facing primitives; domain workers do
 //! not own these message contracts.
 
 use serde_json::json;
@@ -122,12 +122,12 @@ pub(crate) fn engine_ws_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     Ok(definition)
 }
 
-/// Manual in-process trigger type used by tests and internal tools.
+/// Manual in-process trigger type used by tests and internal capabilities.
 pub(crate) fn manual_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     let mut definition = TriggerTypeDefinition::new(
         TriggerTypeId::new("manual")?,
         worker_id("engine")?,
-        "Manual in-process dispatch for tests and future agent tools",
+        "Manual in-process dispatch for tests and future agent capabilities",
     );
     definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
     definition.visibility = VisibilityScope::Internal;

@@ -66,14 +66,15 @@ pub enum Scope {
     /// Applies to all capabilities globally.
     Global,
     /// Applies to specific capabilities only.
-    Tool,
+    #[serde(rename = "capability")]
+    ModelCapability,
 }
 
 impl std::fmt::Display for Scope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Global => write!(f, "global"),
-            Self::Tool => write!(f, "capability"),
+            Self::ModelCapability => write!(f, "capability"),
         }
     }
 }
@@ -86,15 +87,15 @@ impl std::fmt::Display for Scope {
 #[serde(rename_all = "camelCase")]
 pub struct EvaluationContext {
     /// Capability being invoked, usually a contract id such as `process::run`.
-    pub tool_name: String,
+    pub model_primitive_name: String,
     /// Arguments passed to the capability as a JSON object.
-    pub tool_arguments: serde_json::Value,
+    pub capability_arguments: serde_json::Value,
     /// Session ID for audit logging.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     /// Capability invocation ID.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub invocation_id: Option<String>,
 }
 
 /// Result of evaluating a single rule.
@@ -184,15 +185,15 @@ pub struct AuditEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     /// Capability being invoked.
-    pub tool_name: String,
+    pub model_primitive_name: String,
     /// Provider call ID.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub invocation_id: Option<String>,
     /// Evaluation result.
     pub evaluation: GuardrailEvaluation,
-    /// Tool arguments (may be redacted).
+    /// Capability arguments (may be redacted).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_arguments: Option<serde_json::Value>,
+    pub capability_arguments: Option<serde_json::Value>,
 }
 
 /// Statistics about audit log entries.
@@ -208,7 +209,7 @@ pub struct AuditStats {
     /// Number of evaluations that passed.
     pub passed: usize,
     /// Counts by capability id.
-    pub by_tool: HashMap<String, usize>,
+    pub by_capability: HashMap<String, usize>,
     /// Counts by rule ID.
     pub by_rule: HashMap<String, usize>,
 }
@@ -237,12 +238,12 @@ pub struct RuleOverride {
 pub struct AuditEntryParams {
     /// Session ID.
     pub session_id: Option<String>,
-    /// Tool name.
-    pub tool_name: String,
+    /// Capability name.
+    pub model_primitive_name: String,
     /// Capability invocation ID.
-    pub tool_call_id: Option<String>,
-    /// Tool arguments (will be redacted).
-    pub tool_arguments: Option<serde_json::Value>,
+    pub invocation_id: Option<String>,
+    /// Capability arguments (will be redacted).
+    pub capability_arguments: Option<serde_json::Value>,
     /// Evaluation result.
     pub evaluation: GuardrailEvaluation,
 }

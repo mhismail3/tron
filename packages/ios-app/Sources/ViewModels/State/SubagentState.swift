@@ -10,7 +10,7 @@ struct SubagentEventItem: Identifiable, Equatable {
     var detail: String?
     /// For capability invocation events, tracks the capability invocation ID for merging start/end
     var invocationId: String?
-    /// For capability invocation events, tracks if tool is still running
+    /// For capability invocation events, tracks if capability is still running
     var isRunning: Bool
 
     init(
@@ -52,13 +52,13 @@ enum SubagentEventItemType: Equatable {
 @MainActor
 final class SubagentState {
     /// All tracked subagents keyed by subagent session ID
-    private(set) var subagents: [String: SubagentToolData] = [:]
+    private(set) var subagents: [String: SubagentInvocationData] = [:]
 
     /// Forwarded events from subagents (for detail sheet real-time display)
     private(set) var subagentEvents: [String: [SubagentEventItem]] = [:]
 
     /// Currently selected subagent for detail sheet
-    var selectedSubagent: SubagentToolData?
+    var selectedSubagent: SubagentInvocationData?
 
     /// Whether to show the subagent detail sheet
     var showDetailSheet = false
@@ -71,7 +71,7 @@ final class SubagentState {
     // MARK: - Private Helpers
 
     /// Mutate a tracked subagent and sync selectedSubagent if it matches.
-    private func updateAndSync(_ subagentSessionId: String, mutate: (inout SubagentToolData) -> Void) {
+    private func updateAndSync(_ subagentSessionId: String, mutate: (inout SubagentInvocationData) -> Void) {
         guard var data = subagents[subagentSessionId] else { return }
         mutate(&data)
         subagents[subagentSessionId] = data
@@ -83,8 +83,8 @@ final class SubagentState {
     // MARK: - Subagent Lifecycle
 
     /// Track a newly spawned subagent
-    func trackSpawn(invocationId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false, spawnType: SubagentSpawnType = .toolAgent) {
-        var data = SubagentToolData(
+    func trackSpawn(invocationId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false, spawnType: SubagentSpawnType = .capabilityAgent) {
+        var data = SubagentInvocationData(
             invocationId: invocationId,
             subagentSessionId: subagentSessionId,
             task: task,
@@ -160,7 +160,7 @@ final class SubagentState {
     // MARK: - Computed Properties
 
     /// Subagents with pending results awaiting user action
-    var pendingSubagents: [SubagentToolData] {
+    var pendingSubagents: [SubagentInvocationData] {
         subagents.values
             .filter { ($0.status == .completed || $0.status == .failed) && $0.resultDeliveryStatus == .pending }
             .sorted { $0.subagentSessionId < $1.subagentSessionId }
@@ -179,7 +179,7 @@ final class SubagentState {
     /// Show details for a subagent using data directly (for persisted/resumed sessions)
     /// This is used when the subagent data comes from persisted capability invocation events
     /// rather than live WebSocket events tracked in the subagents dictionary
-    func showDetails(with data: SubagentToolData) {
+    func showDetails(with data: SubagentInvocationData) {
         // Update the tracked subagent if not already present (for consistency)
         if subagents[data.subagentSessionId] == nil {
             subagents[data.subagentSessionId] = data
@@ -422,7 +422,7 @@ final class SubagentState {
                 }
 
             default:
-                break // Skip other content types (streaming, thinking, toolResult, etc.)
+                break // Skip other content types (streaming, thinking, capabilityResult, etc.)
             }
         }
 
@@ -432,24 +432,24 @@ final class SubagentState {
     // MARK: - Queries
 
     /// Get subagent data by session ID
-    func getSubagent(sessionId: String) -> SubagentToolData? {
+    func getSubagent(sessionId: String) -> SubagentInvocationData? {
         subagents[sessionId]
     }
 
     /// Get subagent data by capability invocation ID
-    func getSubagentByInvocationId(_ invocationId: String) -> SubagentToolData? {
+    func getSubagentByInvocationId(_ invocationId: String) -> SubagentInvocationData? {
         subagents.values.first { $0.invocationId == invocationId }
     }
 
-    /// Check if there are any running user-facing subagents (tool agents).
+    /// Check if there are any running user-facing subagents (capability agents).
     /// Hook and system subsessions don't count — they're internal and shouldn't
     /// suppress the breathing line or other UI indicators.
     var hasRunningSubagents: Bool {
-        subagents.values.contains { $0.status == .running && $0.spawnType == .toolAgent }
+        subagents.values.contains { $0.status == .running && $0.spawnType == .capabilityAgent }
     }
 
     /// Get all subagents sorted by creation (most recent first)
-    var allSubagentsSorted: [SubagentToolData] {
+    var allSubagentsSorted: [SubagentInvocationData] {
         // Since we don't have a timestamp, return in order added (by iterating values)
         Array(subagents.values)
     }
@@ -458,7 +458,7 @@ final class SubagentState {
 
     /// Populate a subagent directly from reconstructed data.
     /// Used when resuming a session to restore subagent state from persisted events.
-    func populateFromReconstruction(_ data: SubagentToolData) {
+    func populateFromReconstruction(_ data: SubagentInvocationData) {
         subagents[data.subagentSessionId] = data
     }
 

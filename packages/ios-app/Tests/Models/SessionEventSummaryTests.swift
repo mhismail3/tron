@@ -153,15 +153,15 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertTrue(event.summary.contains("unknown"))
     }
 
-    func testCapabilityInvocation_showsModelToolName() {
+    func testCapabilityInvocation_showsModelPrimitiveName() {
         let event = makeEvent(type: "capability.invocation.started", payload: [
-            "name": AnyCodable("Read"),
+            "modelPrimitiveName": AnyCodable("execute"),
             "arguments": AnyCodable(["file_path": "/foo/bar.swift"]),
         ])
-        XCTAssertTrue(event.summary.contains("Read"))
+        XCTAssertTrue(event.summary.contains("Execute"))
     }
 
-    func testToolResult_success_showsDuration() {
+    func testCapabilityInvocationResult_success_showsDuration() {
         let event = makeEvent(type: "capability.invocation.completed", payload: [
             "isError": AnyCodable(false),
             "duration": AnyCodable(522),
@@ -169,7 +169,7 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertEqual(event.summary, "522ms • success")
     }
 
-    func testToolResult_error_showsError() {
+    func testCapabilityInvocationResult_error_showsError() {
         let event = makeEvent(type: "capability.invocation.completed", payload: [
             "isError": AnyCodable(true),
         ])
@@ -223,14 +223,14 @@ final class SessionEventSummaryTests: XCTestCase {
 
     // MARK: - Skills Cleared (M6)
 
-    /// AskUser summary promises re-activation. Must track the transformer's
+    /// UserInteraction summary promises re-activation. Must track the transformer's
     /// render mode in `Core/Events/Payloads/ExtendedPayloads.swift` and the
     /// view wiring in `Views/MessageBubble/NotificationViews.swift`.
-    func testSkillsCleared_askUser_summary() {
+    func testSkillsCleared_userInteraction_summary() {
         let event = makeEvent(type: "skills.cleared", payload: [
             "clearedSkills": AnyCodable(["a", "b"]),
             "reason": AnyCodable("compaction"),
-            "mode": AnyCodable("askUser"),
+            "mode": AnyCodable("userInteraction"),
         ])
         XCTAssertEqual(event.summary, "Skills cleared — re-activate? (2)")
     }
@@ -279,7 +279,7 @@ final class SessionEventSummaryTests: XCTestCase {
     /// is acceptable.
     func testSkillsCleared_missingSkills_zeroCount() {
         let event = makeEvent(type: "skills.cleared", payload: [
-            "mode": AnyCodable("askUser"),
+            "mode": AnyCodable("userInteraction"),
         ])
         XCTAssertEqual(event.summary, "Skills cleared — re-activate? (0)")
     }

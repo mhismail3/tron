@@ -17,8 +17,8 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
     let payload_json = serde_json::to_string(&job.payload)?;
     let delivery_json = serde_json::to_string(&job.delivery)?;
     let tags_json = serde_json::to_string(&job.tags)?;
-    let tool_restrictions_json = job
-        .tool_restrictions
+    let capability_restrictions_json = job
+        .capability_restrictions
         .as_ref()
         .map(serde_json::to_string)
         .transpose()?;
@@ -30,7 +30,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
         "INSERT INTO cron_jobs (
             id, name, description, enabled, schedule_json, payload_json,
             delivery_json, overlap_policy, misfire_policy, max_retries,
-            auto_disable_after, stuck_timeout_secs, tags, tool_restrictions_json,
+            auto_disable_after, stuck_timeout_secs, tags, capability_restrictions_json,
             workspace_id, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ON CONFLICT(id) DO UPDATE SET
@@ -46,7 +46,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
             auto_disable_after = excluded.auto_disable_after,
             stuck_timeout_secs = excluded.stuck_timeout_secs,
             tags = excluded.tags,
-            tool_restrictions_json = excluded.tool_restrictions_json,
+            capability_restrictions_json = excluded.capability_restrictions_json,
             workspace_id = excluded.workspace_id,
             updated_at = excluded.updated_at",
         params![
@@ -63,7 +63,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
             job.auto_disable_after,
             job.stuck_timeout_secs,
             tags_json,
-            tool_restrictions_json,
+            capability_restrictions_json,
             job.workspace_id,
             job.created_at.to_rfc3339(),
             job.updated_at.to_rfc3339(),
@@ -79,7 +79,7 @@ pub fn get_job(pool: &ConnectionPool, job_id: &str) -> Result<Option<CronJob>, C
         "SELECT id, name, description, enabled, schedule_json, payload_json,
                 delivery_json, overlap_policy, misfire_policy, max_retries,
                 auto_disable_after, stuck_timeout_secs, tags, workspace_id,
-                created_at, updated_at, tool_restrictions_json
+                created_at, updated_at, capability_restrictions_json
          FROM cron_jobs WHERE id = ?1",
     )?;
     let result = stmt.query_row(params![job_id], row_to_job);
@@ -108,7 +108,7 @@ pub fn list_all_jobs(pool: &ConnectionPool) -> Result<Vec<CronJob>, CronError> {
         "SELECT id, name, description, enabled, schedule_json, payload_json,
                 delivery_json, overlap_policy, misfire_policy, max_retries,
                 auto_disable_after, stuck_timeout_secs, tags, workspace_id,
-                created_at, updated_at, tool_restrictions_json
+                created_at, updated_at, capability_restrictions_json
          FROM cron_jobs",
     )?;
     let jobs = stmt
@@ -587,7 +587,7 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let tags_json: String = row.get(12)?;
     let created_str: String = row.get(14)?;
     let updated_str: String = row.get(15)?;
-    let tool_restrictions_json: Option<String> = row.get(16)?;
+    let capability_restrictions_json: Option<String> = row.get(16)?;
 
     let schedule = serde_json::from_str(&schedule_json).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -617,14 +617,14 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
             format!("corrupt tags_json for job {id}: {e}").into(),
         )
     })?;
-    let tool_restrictions = tool_restrictions_json
+    let capability_restrictions = capability_restrictions_json
         .map(|s| serde_json::from_str(&s))
         .transpose()
         .map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
                 16,
                 rusqlite::types::Type::Text,
-                format!("corrupt tool_restrictions_json for job {id}: {e}").into(),
+                format!("corrupt capability_restrictions_json for job {id}: {e}").into(),
             )
         })?;
     let created_at = DateTime::parse_from_rfc3339(&created_str)
@@ -659,7 +659,7 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         auto_disable_after: row.get(10)?,
         stuck_timeout_secs: row.get(11)?,
         tags,
-        tool_restrictions,
+        capability_restrictions,
         workspace_id: row.get(13)?,
         created_at,
         updated_at,

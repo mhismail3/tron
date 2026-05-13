@@ -2,7 +2,7 @@
 //!
 //! These are the primitive building blocks that appear inside messages.
 //! Extracted as a standalone module to break circular dependencies between
-//! messages and tools (both reference content types).
+//! messages and capabilities (both reference content types).
 
 use serde::{Deserialize, Serialize};
 
@@ -109,14 +109,14 @@ pub enum AssistantContent {
         #[serde(skip_serializing_if = "Option::is_none")]
         signature: Option<String>,
     },
-    /// Tool use content.
-    #[serde(rename = "tool_use")]
-    ToolUse {
+    /// ModelCapability use content.
+    #[serde(rename = "capability_invocation")]
+    CapabilityInvocation {
         /// Capability invocation ID.
         id: String,
-        /// Tool name.
+        /// Capability name.
         name: String,
-        /// Tool arguments.
+        /// Capability arguments.
         arguments: serde_json::Map<String, serde_json::Value>,
         /// Thought signature (Gemini models).
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
@@ -127,7 +127,7 @@ pub enum AssistantContent {
 /// Content that can appear in capability result messages.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ToolResultContent {
+pub enum CapabilityResultContent {
     /// Text content.
     #[serde(rename = "text")]
     Text {
@@ -236,10 +236,10 @@ impl AssistantContent {
         matches!(self, Self::Thinking { .. })
     }
 
-    /// Returns `true` if this is a tool use block.
+    /// Returns `true` if this is a capability invocation block.
     #[must_use]
-    pub fn is_tool_use(&self) -> bool {
-        matches!(self, Self::ToolUse { .. })
+    pub fn is_capability_invocation(&self) -> bool {
+        matches!(self, Self::CapabilityInvocation { .. })
     }
 
     /// Returns the text if this is a text block, `None` otherwise.
@@ -252,7 +252,7 @@ impl AssistantContent {
     }
 }
 
-impl ToolResultContent {
+impl CapabilityResultContent {
     /// Create a text capability result content block.
     #[must_use]
     pub fn text(text: impl Into<String>) -> Self {
@@ -286,12 +286,12 @@ pub fn extract_text_from_user_content(content: &[UserContent]) -> String {
 }
 
 /// Extract text from capability result content blocks.
-pub fn extract_text_from_tool_result_content(content: &[ToolResultContent]) -> String {
+pub fn extract_text_from_capability_result_content(content: &[CapabilityResultContent]) -> String {
     content
         .iter()
         .filter_map(|c| match c {
-            ToolResultContent::Text { text } => Some(text.as_str()),
-            ToolResultContent::Image { .. } => None,
+            CapabilityResultContent::Text { text } => Some(text.as_str()),
+            CapabilityResultContent::Image { .. } => None,
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -432,7 +432,7 @@ mod tests {
         let ac = AssistantContent::text("response");
         assert!(ac.is_text());
         assert!(!ac.is_thinking());
-        assert!(!ac.is_tool_use());
+        assert!(!ac.is_capability_invocation());
         assert_eq!(ac.as_text(), Some("response"));
     }
 
@@ -446,28 +446,28 @@ mod tests {
     }
 
     #[test]
-    fn assistant_content_tool_use() {
-        let ac = AssistantContent::ToolUse {
+    fn assistant_content_capability_invocation() {
+        let ac = AssistantContent::CapabilityInvocation {
             id: "call-1".into(),
             name: "execute".into(),
             arguments: serde_json::Map::new(),
             thought_signature: None,
         };
-        assert!(ac.is_tool_use());
+        assert!(ac.is_capability_invocation());
     }
 
     #[test]
-    fn assistant_content_tool_use_serde() {
+    fn assistant_content_capability_invocation_serde() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("command".into(), json!("ls"));
-        let ac = AssistantContent::ToolUse {
+        let ac = AssistantContent::CapabilityInvocation {
             id: "call-1".into(),
             name: "execute".into(),
             arguments: args,
             thought_signature: None,
         };
         let json = serde_json::to_value(&ac).unwrap();
-        assert_eq!(json["type"], "tool_use");
+        assert_eq!(json["type"], "capability_invocation");
         assert_eq!(json["name"], "execute");
         assert_eq!(json["arguments"]["command"], "ls");
         let back: AssistantContent = serde_json::from_value(json).unwrap();
@@ -475,9 +475,9 @@ mod tests {
     }
 
     #[test]
-    fn assistant_content_tool_use_rejects_input_alias() {
+    fn assistant_content_capability_invocation_rejects_input_alias() {
         let json = json!({
-            "type": "tool_use",
+            "type": "capability_invocation",
             "id": "toolu_01abc",
             "name": "execute",
             "input": {"command": "ls"}
@@ -486,24 +486,24 @@ mod tests {
         assert!(err.to_string().contains("arguments"));
     }
 
-    // -- ToolResultContent enum --
+    // -- CapabilityResultContent enum --
 
     #[test]
-    fn tool_result_content_text() {
-        let trc = ToolResultContent::text("output");
+    fn capability_result_content_text() {
+        let trc = CapabilityResultContent::text("output");
         let json = serde_json::to_value(&trc).unwrap();
         assert_eq!(json, json!({"type": "text", "text": "output"}));
     }
 
     #[test]
-    fn tool_result_content_image_serde() {
-        let trc = ToolResultContent::image("imgdata", "image/png");
+    fn capability_result_content_image_serde() {
+        let trc = CapabilityResultContent::image("imgdata", "image/png");
         let json = serde_json::to_value(&trc).unwrap();
         assert_eq!(
             json,
             json!({"type": "image", "data": "imgdata", "mimeType": "image/png"})
         );
-        let back: ToolResultContent = serde_json::from_value(json).unwrap();
+        let back: CapabilityResultContent = serde_json::from_value(json).unwrap();
         assert_eq!(trc, back);
     }
 
@@ -526,14 +526,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_text_from_tool_result_content_mixed() {
+    fn extract_text_from_capability_result_content_mixed() {
         let content = vec![
-            ToolResultContent::text("line1"),
-            ToolResultContent::image("d", "image/png"),
-            ToolResultContent::text("line2"),
+            CapabilityResultContent::text("line1"),
+            CapabilityResultContent::image("d", "image/png"),
+            CapabilityResultContent::text("line2"),
         ];
         assert_eq!(
-            extract_text_from_tool_result_content(&content),
+            extract_text_from_capability_result_content(&content),
             "line1\nline2"
         );
     }

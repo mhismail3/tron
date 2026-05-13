@@ -2,17 +2,17 @@ import XCTest
 import UIKit
 @testable import TronMobile
 
-/// Tests for AskUserQuestionCoordinator - handles AskUserQuestion capability invocation events and user interaction
+/// Tests for UserInteractionCoordinator - handles UserInteraction capability invocation events and user interaction
 /// Uses TDD: Tests written first, then implementation follows
 @MainActor
-final class AskUserQuestionCoordinatorTests: XCTestCase {
+final class UserInteractionCoordinatorTests: XCTestCase {
 
-    var coordinator: AskUserQuestionCoordinator!
-    var mockContext: MockAskUserQuestionContext!
+    var coordinator: UserInteractionCoordinator!
+    var mockContext: MockUserInteractionContext!
 
     override func setUp() async throws {
-        mockContext = MockAskUserQuestionContext()
-        coordinator = AskUserQuestionCoordinator()
+        mockContext = MockUserInteractionContext()
+        coordinator = UserInteractionCoordinator()
     }
 
     override func tearDown() async throws {
@@ -23,46 +23,46 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
     // MARK: - Sheet Management Tests
 
     func testOpenSheetForPendingQuestion() {
-        // Given: A pending AskUserQuestion tool data
-        let data = createTestToolData(status: .pending)
+        // Given: A pending UserInteraction capability data
+        let data = createTestInteractionData(status: .pending)
 
         // When: Opening sheet
         coordinator.openSheet(for: data, context: mockContext)
 
         // Then: Sheet should be shown with data
-        XCTAssertTrue(mockContext.askUserQuestionState.showSheet)
-        XCTAssertNotNil(mockContext.askUserQuestionState.currentData)
-        XCTAssertEqual(mockContext.askUserQuestionState.currentData?.invocationId, "tc-123")
+        XCTAssertTrue(mockContext.userInteractionState.showSheet)
+        XCTAssertNotNil(mockContext.userInteractionState.currentData)
+        XCTAssertEqual(mockContext.userInteractionState.currentData?.invocationId, "tc-123")
     }
 
     func testOpenSheetForAnsweredQuestion() {
-        // Given: An answered AskUserQuestion (for read-only viewing)
-        let data = createTestToolData(status: .answered)
+        // Given: An answered UserInteraction (for read-only viewing)
+        let data = createTestInteractionData(status: .answered)
 
         // When: Opening sheet
         coordinator.openSheet(for: data, context: mockContext)
 
         // Then: Sheet should be shown (read-only mode)
-        XCTAssertTrue(mockContext.askUserQuestionState.showSheet)
-        XCTAssertNotNil(mockContext.askUserQuestionState.currentData)
+        XCTAssertTrue(mockContext.userInteractionState.showSheet)
+        XCTAssertNotNil(mockContext.userInteractionState.currentData)
     }
 
     func testOpenSheetIgnoresSupersededQuestion() {
-        // Given: A superseded AskUserQuestion
-        let data = createTestToolData(status: .superseded)
+        // Given: A superseded UserInteraction
+        let data = createTestInteractionData(status: .superseded)
 
         // When: Opening sheet
         coordinator.openSheet(for: data, context: mockContext)
 
         // Then: Sheet should NOT be shown
-        XCTAssertFalse(mockContext.askUserQuestionState.showSheet)
-        XCTAssertNil(mockContext.askUserQuestionState.currentData)
+        XCTAssertFalse(mockContext.userInteractionState.showSheet)
+        XCTAssertNil(mockContext.userInteractionState.currentData)
     }
 
     func testOpenSheetInitializesAnswersFromData() {
         // Given: A pending question with existing partial answers
-        var data = createTestToolData(status: .pending)
-        let existingAnswer = AskUserQuestionAnswer(
+        var data = createTestInteractionData(status: .pending)
+        let existingAnswer = UserInteractionAnswer(
             questionId: "q1",
             selectedValues: ["Option A"],
             otherValue: nil
@@ -73,28 +73,28 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         coordinator.openSheet(for: data, context: mockContext)
 
         // Then: Answers should be initialized from data
-        XCTAssertEqual(mockContext.askUserQuestionState.answers["q1"]?.selectedValues, ["Option A"])
+        XCTAssertEqual(mockContext.userInteractionState.answers["q1"]?.selectedValues, ["Option A"])
     }
 
     func testDismissSheetClearsShowFlag() {
         // Given: Sheet is shown
-        mockContext.askUserQuestionState.showSheet = true
+        mockContext.userInteractionState.showSheet = true
 
         // When: Dismissing sheet
         coordinator.dismissSheet(context: mockContext)
 
         // Then: Sheet should be hidden
-        XCTAssertFalse(mockContext.askUserQuestionState.showSheet)
+        XCTAssertFalse(mockContext.userInteractionState.showSheet)
     }
 
     // MARK: - Prepare Submission Tests (Phase 1: before sheet dismiss)
 
     func testPrepareSubmissionUpdatesChipToAnswered() {
         // Given: A pending question with message in context
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
         mockContext.messages = [
-            ChatMessage(role: .assistant, content: .askUserQuestion(data))
+            ChatMessage(role: .assistant, content: .userInteraction(data))
         ]
 
         // When: Preparing submission
@@ -102,31 +102,31 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         coordinator.prepareSubmission(answers, context: mockContext)
 
         // Then: Message should be updated to answered status
-        if case .askUserQuestion(let updatedData) = mockContext.messages.first?.content {
+        if case .userInteraction(let updatedData) = mockContext.messages.first?.content {
             XCTAssertEqual(updatedData.status, .answered)
             XCTAssertNotNil(updatedData.result)
         } else {
-            XCTFail("Expected askUserQuestion content")
+            XCTFail("Expected userInteraction content")
         }
     }
 
     func testPrepareSubmissionStoresPendingSubmission() {
         // Given: A pending question
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
 
         // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["Option A"])]
         coordinator.prepareSubmission(answers, context: mockContext)
 
         // Then: Pending submission should be stored with structured data
-        XCTAssertNotNil(mockContext.askUserQuestionState.pendingSubmission)
+        XCTAssertNotNil(mockContext.userInteractionState.pendingSubmission)
     }
 
     func testPrepareSubmissionDoesNotSendPrompt() {
         // Given: A pending question
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
 
         // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["Option A"])]
@@ -138,10 +138,10 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
     func testPrepareSubmissionClearsSheetStateButKeepsCurrentData() {
         // Given: A pending question with state
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
-        mockContext.askUserQuestionState.showSheet = true
-        mockContext.askUserQuestionState.answers["q1"] = createTestAnswer(questionId: "q1", selectedValues: ["A"])
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
+        mockContext.userInteractionState.showSheet = true
+        mockContext.userInteractionState.answers["q1"] = createTestAnswer(questionId: "q1", selectedValues: ["A"])
 
         // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
@@ -149,39 +149,39 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
         // Then: Sheet flag and answers cleared, but currentData kept alive
         // (sheet reads currentData during dismiss animation — clearing it causes white flash)
-        XCTAssertFalse(mockContext.askUserQuestionState.showSheet)
-        XCTAssertNotNil(mockContext.askUserQuestionState.currentData)
-        XCTAssertTrue(mockContext.askUserQuestionState.answers.isEmpty)
+        XCTAssertFalse(mockContext.userInteractionState.showSheet)
+        XCTAssertNotNil(mockContext.userInteractionState.currentData)
+        XCTAssertTrue(mockContext.userInteractionState.answers.isEmpty)
     }
 
     func testPrepareSubmissionSetsQuestionCount() {
         // Given: A pending question
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
 
         // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
         coordinator.prepareSubmission(answers, context: mockContext)
 
         // Then: Question count should be set
-        XCTAssertEqual(mockContext.askUserQuestionState.lastAnsweredQuestionCount, 1)
+        XCTAssertEqual(mockContext.userInteractionState.lastAnsweredQuestionCount, 1)
     }
 
     func testPrepareSubmissionRejectsNilCurrentData() {
         // Given: No current data
-        mockContext.askUserQuestionState.currentData = nil
+        mockContext.userInteractionState.currentData = nil
 
         // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
         coordinator.prepareSubmission(answers, context: mockContext)
 
         // Then: No pending submission stored
-        XCTAssertNil(mockContext.askUserQuestionState.pendingSubmission)
+        XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
     }
 
     func testPrepareSubmissionRejectsNonPendingStatus() {
         // Given: Question is already answered
-        mockContext.askUserQuestionState.currentData = createTestToolData(status: .answered)
+        mockContext.userInteractionState.currentData = createTestInteractionData(status: .answered)
 
         // When: Preparing submission
         let answers = [createTestAnswer(questionId: "q1", selectedValues: ["A"])]
@@ -189,17 +189,17 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
         // Then: Should show error, clear state, no pending submission
         XCTAssertTrue(mockContext.showErrorCalled)
-        XCTAssertNil(mockContext.askUserQuestionState.pendingSubmission)
-        XCTAssertFalse(mockContext.askUserQuestionState.showSheet)
+        XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
+        XCTAssertFalse(mockContext.userInteractionState.showSheet)
     }
 
     func testPrepareSubmissionWithOtherValue() {
         // Given: A pending question
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
 
         // When: Preparing submission with "Other" value
-        let answers = [AskUserQuestionAnswer(
+        let answers = [UserInteractionAnswer(
             questionId: "q1",
             selectedValues: [],
             otherValue: "My custom response"
@@ -207,14 +207,14 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         coordinator.prepareSubmission(answers, context: mockContext)
 
         // Then: Pending submission should be stored
-        XCTAssertNotNil(mockContext.askUserQuestionState.pendingSubmission)
+        XCTAssertNotNil(mockContext.userInteractionState.pendingSubmission)
     }
 
     // MARK: - Execute Pending Submission Tests (Phase 2: after sheet dismiss)
 
     func testExecutePendingSubmissionAppendsAnswerChip() {
         // Given: A pending submission was stored during prepare
-        mockContext.askUserQuestionState.pendingSubmission = [
+        mockContext.userInteractionState.pendingSubmission = [
             AnswerSubmission(id: "q1", question: "Test?", selectedValues: ["Option A"], otherValue: nil)
         ]
 
@@ -227,22 +227,22 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
     func testExecutePendingSubmissionClearsPendingStateAndCurrentData() {
         // Given: A pending submission and currentData still alive from prepare phase
-        mockContext.askUserQuestionState.pendingSubmission = [
+        mockContext.userInteractionState.pendingSubmission = [
             AnswerSubmission(id: "q1", question: "Test?", selectedValues: ["Option A"], otherValue: nil)
         ]
-        mockContext.askUserQuestionState.currentData = createTestToolData(status: .answered)
+        mockContext.userInteractionState.currentData = createTestInteractionData(status: .answered)
 
         // When: Executing pending submission
         coordinator.executePendingSubmission(context: mockContext)
 
         // Then: Both pending submission and currentData should be cleared
-        XCTAssertNil(mockContext.askUserQuestionState.pendingSubmission)
-        XCTAssertNil(mockContext.askUserQuestionState.currentData)
+        XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
+        XCTAssertNil(mockContext.userInteractionState.currentData)
     }
 
     func testExecutePendingSubmissionNoOpWhenNothingPending() {
         // Given: No pending submission
-        mockContext.askUserQuestionState.pendingSubmission = nil
+        mockContext.userInteractionState.pendingSubmission = nil
 
         // When: Executing pending submission (e.g., swipe dismiss without submit)
         coordinator.executePendingSubmission(context: mockContext)
@@ -253,10 +253,10 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
     func testFullPrepareAndExecuteFlow() {
         // Given: A pending question with message
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
         mockContext.messages = [
-            ChatMessage(role: .assistant, content: .askUserQuestion(data))
+            ChatMessage(role: .assistant, content: .userInteraction(data))
         ]
 
         // When: Full two-phase flow (prepare then execute)
@@ -264,25 +264,25 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         coordinator.prepareSubmission(answers, context: mockContext)
 
         // Verify intermediate state: chip updated but no send yet
-        if case .askUserQuestion(let updatedData) = mockContext.messages.first?.content {
+        if case .userInteraction(let updatedData) = mockContext.messages.first?.content {
             XCTAssertEqual(updatedData.status, .answered)
         }
         XCTAssertTrue(mockContext.appendedMessages.isEmpty)
-        XCTAssertNotNil(mockContext.askUserQuestionState.pendingSubmission)
+        XCTAssertNotNil(mockContext.userInteractionState.pendingSubmission)
 
         // Execute (simulates onDismiss callback)
         coordinator.executePendingSubmission(context: mockContext)
 
         // Then: Message should now be appended and pending cleared
         XCTAssertFalse(mockContext.appendedMessages.isEmpty)
-        XCTAssertNil(mockContext.askUserQuestionState.pendingSubmission)
+        XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
     }
 
     func testSwipeDismissWithoutSubmitDoesNotTriggerSubmission() {
         // Given: Sheet was opened but user swiped to dismiss (no prepareSubmission called)
-        let data = createTestToolData(status: .pending)
-        mockContext.askUserQuestionState.currentData = data
-        mockContext.askUserQuestionState.showSheet = true
+        let data = createTestInteractionData(status: .pending)
+        mockContext.userInteractionState.currentData = data
+        mockContext.userInteractionState.showSheet = true
 
         // When: Execute is called (from onDismiss) without prior prepare
         coordinator.executePendingSubmission(context: mockContext)
@@ -293,29 +293,29 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
     func testClearAllClearsPendingSubmission() {
         // Given: A pending submission exists
-        mockContext.askUserQuestionState.pendingSubmission = [
+        mockContext.userInteractionState.pendingSubmission = [
             AnswerSubmission(id: "q1", question: "Test?", selectedValues: ["A"], otherValue: nil)
         ]
 
         // When: clearAll is called
-        mockContext.askUserQuestionState.clearAll()
+        mockContext.userInteractionState.clearAll()
 
         // Then: Pending submission should be cleared
-        XCTAssertNil(mockContext.askUserQuestionState.pendingSubmission)
+        XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
     }
 
     // MARK: - Mark Superseded Tests
 
     func testMarkPendingQuestionsAsSuperseded() {
         // Given: Multiple messages with pending questions
-        let data1 = createTestToolData(status: .pending, invocationId: "tc-1")
-        let data2 = createTestToolData(status: .pending, invocationId: "tc-2")
-        let data3 = createTestToolData(status: .answered, invocationId: "tc-3")
+        let data1 = createTestInteractionData(status: .pending, invocationId: "tc-1")
+        let data2 = createTestInteractionData(status: .pending, invocationId: "tc-2")
+        let data3 = createTestInteractionData(status: .answered, invocationId: "tc-3")
 
         mockContext.messages = [
-            ChatMessage(role: .assistant, content: .askUserQuestion(data1)),
-            ChatMessage(role: .assistant, content: .askUserQuestion(data2)),
-            ChatMessage(role: .assistant, content: .askUserQuestion(data3))
+            ChatMessage(role: .assistant, content: .userInteraction(data1)),
+            ChatMessage(role: .assistant, content: .userInteraction(data2)),
+            ChatMessage(role: .assistant, content: .userInteraction(data3))
         ]
 
         // When: Marking pending questions as superseded
@@ -323,7 +323,7 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
         // Then: Pending questions should be superseded, answered should remain
         for message in mockContext.messages {
-            if case .askUserQuestion(let data) = message.content {
+            if case .userInteraction(let data) = message.content {
                 if data.invocationId == "tc-1" || data.invocationId == "tc-2" {
                     XCTAssertEqual(data.status, .superseded)
                 } else if data.invocationId == "tc-3" {
@@ -333,12 +333,12 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testMarkPendingQuestionsIgnoresNonAskUserQuestionMessages() {
+    func testMarkPendingQuestionsIgnoresNonUserInteractionMessages() {
         // Given: Mixed message types
-        let auqData = createTestToolData(status: .pending)
+        let auqData = createTestInteractionData(status: .pending)
         mockContext.messages = [
             ChatMessage(role: .user, content: .text("Hello")),
-            ChatMessage(role: .assistant, content: .askUserQuestion(auqData)),
+            ChatMessage(role: .assistant, content: .userInteraction(auqData)),
             ChatMessage(role: .user, content: .text("World"))
         ]
 
@@ -350,27 +350,27 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         if case .text(let text) = mockContext.messages[0].content {
             XCTAssertEqual(text, "Hello")
         }
-        if case .askUserQuestion(let data) = mockContext.messages[1].content {
+        if case .userInteraction(let data) = mockContext.messages[1].content {
             XCTAssertEqual(data.status, .superseded)
         }
     }
 
     // MARK: - Helpers
 
-    private func createTestToolData(status: AskUserQuestionStatus, invocationId: String = "tc-123") -> AskUserQuestionToolData {
-        let question = AskUserQuestion(
+    private func createTestInteractionData(status: UserInteractionStatus, invocationId: String = "tc-123") -> UserInteractionInvocationData {
+        let question = UserInteraction(
             id: "q1",
             question: "Test question?",
             options: [
-                AskUserQuestionOption(label: "Option A", value: nil, description: nil),
-                AskUserQuestionOption(label: "Option B", value: nil, description: nil)
+                UserInteractionOption(label: "Option A", value: nil, description: nil),
+                UserInteractionOption(label: "Option B", value: nil, description: nil)
             ],
             mode: .single,
             allowOther: nil,
             otherPlaceholder: nil
         )
-        let params = AskUserQuestionParams(questions: [question], context: nil)
-        return AskUserQuestionToolData(
+        let params = UserInteractionParams(questions: [question], context: nil)
+        return UserInteractionInvocationData(
             invocationId: invocationId,
             params: params,
             answers: [:],
@@ -379,8 +379,8 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
         )
     }
 
-    private func createTestAnswer(questionId: String, selectedValues: [String]) -> AskUserQuestionAnswer {
-        return AskUserQuestionAnswer(
+    private func createTestAnswer(questionId: String, selectedValues: [String]) -> UserInteractionAnswer {
+        return UserInteractionAnswer(
             questionId: questionId,
             selectedValues: selectedValues,
             otherValue: nil
@@ -390,11 +390,11 @@ final class AskUserQuestionCoordinatorTests: XCTestCase {
 
 // MARK: - Mock Context
 
-/// Mock implementation of AskUserQuestionContext for testing
+/// Mock implementation of UserInteractionContext for testing
 @MainActor
-final class MockAskUserQuestionContext: AskUserQuestionContext {
+final class MockUserInteractionContext: UserInteractionContext {
     // MARK: - State
-    let askUserQuestionState = AskUserQuestionState()
+    let userInteractionState = UserInteractionState()
     var messages: [ChatMessage] = []
     var appendedMessages: [ChatMessage] = []
     var currentTurn: Int = 0

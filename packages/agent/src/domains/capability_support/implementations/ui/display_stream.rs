@@ -1,4 +1,4 @@
-//! Screen capture frame producer for Display tool streaming.
+//! Screen capture frame producer for Display capability streaming.
 //!
 //! Polls `screencapture` at a configurable interval (~3 FPS default) and emits
 //! `DisplayFrame` events via a broadcast channel. The producer runs as a
@@ -70,7 +70,7 @@ pub struct StreamConfig {
     /// Unique stream identifier.
     pub stream_id: String,
     /// Capability invocation that initiated the stream.
-    pub tool_call_id: String,
+    pub invocation_id: String,
 }
 
 /// Run the screen capture loop, emitting `DisplayFrame` events until cancelled.
@@ -177,7 +177,7 @@ pub async fn screen_capture_loop(
         let _ = event_tx.send(TronEvent::DisplayFrame {
             base: BaseEvent::now(&config.session_id),
             stream_id: config.stream_id.clone(),
-            tool_call_id: config.tool_call_id.clone(),
+            invocation_id: config.invocation_id.clone(),
             data: b64,
             frame_id,
             width,
@@ -280,7 +280,7 @@ mod tests {
             interval: Duration::from_millis(100),
             session_id: "test".into(),
             stream_id: "s1".into(),
-            tool_call_id: "t1".into(),
+            invocation_id: "t1".into(),
         };
 
         // Cancel immediately
@@ -306,7 +306,7 @@ mod tests {
             interval: Duration::from_millis(200),
             session_id: "test".into(),
             stream_id: "s1".into(),
-            tool_call_id: "t1".into(),
+            invocation_id: "t1".into(),
         };
 
         let handle = tokio::spawn(screen_capture_loop(tx, config, cancel));
@@ -346,7 +346,7 @@ mod tests {
             interval: Duration::from_millis(200),
             session_id: "test".into(),
             stream_id: "s1".into(),
-            tool_call_id: "t1".into(),
+            invocation_id: "t1".into(),
         };
 
         let handle = tokio::spawn(screen_capture_loop(tx, config, cancel));
@@ -379,11 +379,11 @@ mod tests {
             interval: Duration::from_millis(333),
             session_id: "s1".into(),
             stream_id: "stream-1".into(),
-            tool_call_id: "tool-1".into(),
+            invocation_id: "capability-1".into(),
         };
         assert_eq!(config.interval, Duration::from_millis(333));
         assert_eq!(config.session_id, "s1");
         assert_eq!(config.stream_id, "stream-1");
-        assert_eq!(config.tool_call_id, "tool-1");
+        assert_eq!(config.invocation_id, "capability-1");
     }
 }

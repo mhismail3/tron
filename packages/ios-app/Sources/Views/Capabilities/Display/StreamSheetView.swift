@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Live stream sheet that displays frames from the Display tool's stream type.
+/// Live stream sheet that displays frames from the Display capability's stream type.
 /// Auto-presented on first frame, can be dismissed and re-opened via toolbar icon.
 /// When the stream has ended, shows the last captured frame with stop button disabled.
 ///

@@ -49,10 +49,12 @@ impl AuditLogger {
             id: format!("audit-{}", self.id_counter),
             timestamp: chrono::Utc::now().to_rfc3339(),
             session_id: params.session_id,
-            tool_name: params.tool_name,
-            tool_call_id: params.tool_call_id,
+            model_primitive_name: params.model_primitive_name,
+            invocation_id: params.invocation_id,
             evaluation: params.evaluation,
-            tool_arguments: params.tool_arguments.map(|args| redact_sensitive(&args)),
+            capability_arguments: params
+                .capability_arguments
+                .map(|args| redact_sensitive(&args)),
         };
 
         self.entries.push_back(entry.clone());
@@ -133,7 +135,10 @@ impl AuditLogger {
                 stats.passed += 1;
             }
 
-            *stats.by_tool.entry(entry.tool_name.clone()).or_insert(0) += 1;
+            *stats
+                .by_capability
+                .entry(entry.model_primitive_name.clone())
+                .or_insert(0) += 1;
 
             for rule in &entry.evaluation.triggered_rules {
                 *stats.by_rule.entry(rule.rule_id.clone()).or_insert(0) += 1;
@@ -164,7 +169,7 @@ impl std::fmt::Debug for AuditLogger {
     }
 }
 
-/// Redact sensitive information from tool arguments.
+/// Redact sensitive information from capability arguments.
 ///
 /// Keys containing "password", "token", "secret", "key", "auth", or "credential"
 /// are replaced with "[REDACTED]". Strings longer than 1000 chars are truncated.

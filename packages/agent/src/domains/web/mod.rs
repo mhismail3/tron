@@ -1,7 +1,7 @@
 //! web domain worker.
 //!
 //! This worker owns HTTP fetch and web search capabilities. Provider integrations
-//! never receive web-specific model tools; agents discover and invoke these
+//! never receive web-specific model capabilities; agents discover and invoke these
 //! capabilities through `search`, `inspect`, and `execute`.
 
 pub(crate) mod contract;

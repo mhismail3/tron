@@ -92,9 +92,9 @@ struct MessageBubble: View {
         case .systemEvent(let event):
             SystemEventView(event: event, onTap: onTap)
 
-        case .askUserQuestion(let data):
-            AskUserQuestionToolViewer(data: data) {
-                onTap?(.askUserQuestion(data))
+        case .userInteraction(let data):
+            UserInteractionCapabilityViewer(data: data) {
+                onTap?(.userInteraction(data))
             }
 
         case .engineApproval(let data):
@@ -227,9 +227,9 @@ private struct ErrorContentView: View {
 
             // Test markdown table rendering
             MessageBubble(message: .assistant("""
-            All tools working! Here's a summary:
+            All capabilities working! Here's a summary:
 
-            | Tool | Status | What it did |
+            | Capability | Status | What it did |
             |------|--------|-------------|
             | ls | OK | Listed 8 files/folders |
             | read | OK | Read README.md |

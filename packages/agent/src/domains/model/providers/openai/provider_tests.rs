@@ -3,7 +3,7 @@ use crate::domains::model::providers::openai::types::{
     ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_PLATFORM_BASE_URL, OpenAIApiSettings, OpenAIAuth,
     ReasoningEffort,
 };
-use crate::shared::tools::{Tool, ToolParameterSchema};
+use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
 fn test_tokens() -> crate::domains::auth::provider_credentials::OAuthTokens {
     crate::domains::auth::provider_credentials::OAuthTokens {
@@ -55,11 +55,11 @@ fn api_key_config(model: &str) -> OpenAIConfig {
     }
 }
 
-fn test_tool() -> Tool {
-    Tool {
+fn test_tool() -> ModelCapability {
+    ModelCapability {
         name: "echo".into(),
         description: "Echo input".into(),
-        parameters: ToolParameterSchema {
+        parameters: CapabilityParameterSchema {
             schema_type: "object".into(),
             properties: Some(serde_json::Map::new()),
             required: None,
@@ -386,7 +386,7 @@ fn base_url_override_codex_preserves_path() {
     assert_eq!(url, "https://custom.example.com/codex/responses");
 }
 
-// ── Tool search availability ─────────────────────────────────────
+// ── ModelCapability search availability ─────────────────────────────────────
 
 #[test]
 fn tool_search_disabled_on_codex_even_for_54() {
@@ -671,13 +671,13 @@ fn build_request_gpt5_platform_sends_minimal_reasoning() {
 fn build_request_text_only_model_omits_reasoning_and_tools() {
     let provider = OpenAIProvider::new(api_key_config("gpt-4"));
     let context = Context {
-        tools: Some(vec![test_tool()]),
+        capabilities: Some(vec![test_tool()]),
         ..Default::default()
     };
     let request = provider.build_request(&context, &ProviderStreamOptions::default());
     assert_eq!(request.model, "gpt-4");
     assert!(request.reasoning.is_none());
-    assert!(request.tools.is_none());
+    assert!(request.capabilities.is_none());
 }
 
 #[tokio::test]

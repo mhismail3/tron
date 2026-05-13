@@ -583,7 +583,7 @@ This is the body.";
     #[test]
     fn test_denied_patterns_in_frontmatter_ignored() {
         // deniedPatterns was removed; unknown keys are silently skipped
-        let content = "---\ndeniedPatterns:\n  - tool: process::run\n---\nBody";
+        let content = "---\ndeniedPatterns:\n  - removedKey: process::run\n---\nBody";
         let result = parse_skill_md(content).unwrap();
         assert_eq!(result.content, "Body");
         assert!(result.frontmatter.denied_capabilities.is_none());

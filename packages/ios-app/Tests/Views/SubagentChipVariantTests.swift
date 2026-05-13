@@ -1,10 +1,10 @@
 import XCTest
 @testable import TronMobile
 
-/// The Wait tool's chip must be visually distinguishable from the
+/// The Wait capability's chip must be visually distinguishable from the
 /// Spawn chip so a user glancing at the conversation can tell
 /// "I'm waiting for an agent to return" apart from "I spawned an
-/// agent". Both share the same `SubagentToolData`, but the chip's
+/// agent". Both share the same `SubagentInvocationData`, but the chip's
 /// render is driven by an explicit `SubagentChipVariant` passed from
 /// the `MessageBubble` dispatch site so the data stays the ground
 /// truth for the subagent's lifecycle.
@@ -20,8 +20,8 @@ final class SubagentChipVariantTests: XCTestCase {
         status: SubagentStatus = .running,
         currentTurn: Int = 3,
         duration: Int? = nil
-    ) -> SubagentToolData {
-        SubagentToolData(
+    ) -> SubagentInvocationData {
+        SubagentInvocationData(
             invocationId: "call_1",
             subagentSessionId: sessionId,
             task: "anything",
@@ -127,7 +127,7 @@ final class SubagentChipVariantTests: XCTestCase {
 
     // MARK: - Data-shape invariants
 
-    /// Reusing SubagentToolData for both variants is intentional (both
+    /// Reusing SubagentInvocationData for both variants is intentional (both
     /// refer to the same lifecycle). Verify that a Wait chip is built
     /// from the EXACT same fields the Spawn chip reads, so updates to
     /// status / currentTurn / duration drive both identically.

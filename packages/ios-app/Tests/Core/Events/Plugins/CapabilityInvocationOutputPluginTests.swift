@@ -31,7 +31,7 @@ final class CapabilityInvocationOutputPluginTests: XCTestCase {
         {
             "type": "capability.invocation.output",
             "data": {
-                "invocationId": "tool-1",
+                "invocationId": "capability-1",
                 "output": "chunk"
             }
         }
@@ -40,7 +40,7 @@ final class CapabilityInvocationOutputPluginTests: XCTestCase {
         let event = try CapabilityInvocationOutputPlugin.parse(from: json)
 
         XCTAssertNil(event.sessionId)
-        XCTAssertEqual(event.data.invocationId, "tool-1")
+        XCTAssertEqual(event.data.invocationId, "capability-1")
         XCTAssertEqual(event.data.output, "chunk")
     }
 

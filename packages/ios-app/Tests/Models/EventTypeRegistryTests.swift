@@ -50,7 +50,7 @@ final class EventTypeRegistryTests: XCTestCase {
         XCTAssertFalse(t.isMetadataOnly)
     }
 
-    func testToolResultClassification() {
+    func testCapabilityInvocationResultClassification() {
         let t = PersistedEventType.capabilityInvocationCompleted
         XCTAssertTrue(t.rendersAsChatMessage)
         XCTAssertTrue(t.affectsSessionState)

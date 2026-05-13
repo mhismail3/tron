@@ -61,7 +61,7 @@ struct ContextSettingsPage: View {
         switch settingsState.skillsCompactionPolicy {
         case "autoRestore":
             return "Active skills are automatically re-injected after compaction."
-        case "askUser":
+        case "userInteraction":
             return "Active skills are cleared on compaction and you'll be prompted to re-activate."
         default:
             return "All active skills are cleared when context is compacted."
@@ -210,7 +210,7 @@ struct ContextSettingsPage: View {
             options: [
                 ("clearAll", "Clear All"),
                 ("autoRestore", "Auto-Restore"),
-                ("askUser", "Ask User"),
+                ("userInteraction", "Ask User"),
             ],
             current: settingsState.skillsCompactionPolicy
         ) { newValue in

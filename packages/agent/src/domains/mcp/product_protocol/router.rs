@@ -1,6 +1,6 @@
 //! Central MCP coordinator.
 //!
-//! Wraps [`McpServerManager`] and [`ToolIndex`] into a single struct shared
+//! Wraps [`McpServerManager`] and [`McpCapabilityIndex`] into a single struct shared
 //! via `Arc<tokio::sync::RwLock<McpRouter>>`. Provides search, call routing,
 //! server lifecycle management, and settings persistence. Settings writes go
 //! through `settings::SettingsStore`; this module deliberately has no
@@ -11,7 +11,7 @@
 //! MCP servers may update their tool set mid-session (feature flags, schema
 //! bumps, tool additions). The router proactively re-fetches `tools/list` on
 //! every `call` when the per-server cache is older than
-//! `schema_refresh_ttl_ms`. If a drift is detected, the [`ToolIndex`] is
+//! `schema_refresh_ttl_ms`. If a drift is detected, the [`McpCapabilityIndex`] is
 //! rebuilt for that server so the next capability search result shows
 //! the live schema. TTL `0` disables proactive refresh entirely.
 
@@ -21,9 +21,9 @@ use std::time::Duration;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
+use crate::domains::mcp::capability_index::{McpCapabilityIndex, McpCapabilityMatch};
 use crate::domains::mcp::client::McpError;
 use crate::domains::mcp::server_manager::McpServerManager;
-use crate::domains::mcp::tool_index::{ToolIndex, ToolMatch};
 use crate::domains::mcp::types::{
     McpServerConfig, McpServerHealth, McpServerStatus, McpToolResult,
 };
@@ -31,14 +31,14 @@ use crate::domains::mcp::types::{
 /// Central coordinator for MCP servers and tool discovery.
 pub struct McpRouter {
     manager: McpServerManager,
-    index: ToolIndex,
+    index: McpCapabilityIndex,
     settings_path: PathBuf,
     /// Proactive schema-refresh TTL. `None` ⇒ disabled.
     schema_refresh_ttl: Option<Duration>,
 }
 
 impl McpRouter {
-    /// Create a new router, start all enabled servers, and index their tools.
+    /// Create a new router, start all enabled servers, and index their capabilities.
     ///
     /// `schema_refresh_ttl_ms` of `0` disables proactive TTL-driven refresh.
     /// See module docs for the refresh contract.
@@ -50,7 +50,7 @@ impl McpRouter {
         let mut manager = McpServerManager::new(configs);
         let discovered = manager.start_all().await;
 
-        let mut index = ToolIndex::new();
+        let mut index = McpCapabilityIndex::new();
         for (server, defs) in &discovered {
             index.add_server_tools(server, defs);
         }
@@ -81,22 +81,22 @@ impl McpRouter {
             .unwrap_or(0)
     }
 
-    /// Search for tools matching keywords.
-    pub fn search(&self, query: &str, server_filter: Option<&str>) -> Vec<ToolMatch> {
+    /// Search for capabilities matching keywords.
+    pub fn search(&self, query: &str, server_filter: Option<&str>) -> Vec<McpCapabilityMatch> {
         self.index.search(query, server_filter)
     }
 
     /// Format search results as compact text for LLM consumption.
     pub fn format_search_results(&self, query: &str, server_filter: Option<&str>) -> String {
         let matches = self.search(query, server_filter);
-        ToolIndex::format_results(&matches)
+        McpCapabilityIndex::format_results(&matches)
     }
 
     /// Call a tool on an MCP server.
     ///
-    /// Before forwarding, the server's tool schemas are re-fetched if the
+    /// Before forwarding, the server's capability schemas are re-fetched if the
     /// per-server cache is older than `schema_refresh_ttl_ms` (C8). On drift,
-    /// the [`ToolIndex`] is rebuilt for that server so subsequent
+    /// the [`McpCapabilityIndex`] is rebuilt for that server so subsequent
     /// capability search results reflect the live schema. Refresh failures are
     /// logged and the call proceeds with the cached schema — the actual tool
     /// call will surface its own error if the server is truly unreachable.
@@ -123,7 +123,7 @@ impl McpRouter {
                         "MCP schema drift detected; rebuilding tool index"
                     );
                     self.index.remove_server(server);
-                    self.index.add_server_tools(server, &refresh.tools);
+                    self.index.add_server_tools(server, &refresh.capabilities);
                 }
                 Ok(Some(_)) => {
                     debug!(server, "MCP schema refreshed; no drift");
@@ -180,13 +180,13 @@ impl McpRouter {
         }
     }
 
-    /// Add a new server, connect, discover tools, persist to settings.
+    /// Add a new server, connect, discover capabilities, persist to settings.
     pub async fn add_server(&mut self, config: McpServerConfig) -> Result<usize, McpError> {
         let name = config.name.clone();
         let enabled = config.enabled;
         self.manager.add_config(config);
 
-        let tool_count = if enabled {
+        let capability_count = if enabled {
             let defs = match self.manager.manual_restart(&name).await {
                 Ok(defs) => defs,
                 Err(error) => {
@@ -194,9 +194,9 @@ impl McpRouter {
                     return Err(error);
                 }
             };
-            let tool_count = defs.len();
+            let capability_count = defs.len();
             self.index.add_server_tools(&name, &defs);
-            tool_count
+            capability_count
         } else {
             0
         };
@@ -213,8 +213,8 @@ impl McpRouter {
             });
         };
 
-        info!(server = %name, tool_count, "MCP server added");
-        Ok(tool_count)
+        info!(server = %name, capability_count, "MCP server added");
+        Ok(capability_count)
     }
 
     /// Remove a server, shut it down, remove from index, persist.
@@ -233,7 +233,7 @@ impl McpRouter {
         Ok(())
     }
 
-    /// Enable a disabled server: toggle config, connect, index tools.
+    /// Enable a disabled server: toggle config, connect, index capabilities.
     pub async fn enable_server(&mut self, name: &str) -> Result<(), McpError> {
         let old_config = if let Some(config) = self.manager.config_mut(name) {
             let old = config.clone();
@@ -323,10 +323,10 @@ impl McpRouter {
     /// a restart via RPC, so any prior `Failed` state is forgiven.
     pub async fn restart_server(&mut self, name: &str) -> Result<usize, McpError> {
         let defs = self.manager.manual_restart(name).await?;
-        let tool_count = defs.len();
+        let capability_count = defs.len();
         self.index.remove_server(name);
         self.index.add_server_tools(name, &defs);
-        Ok(tool_count)
+        Ok(capability_count)
     }
 
     /// Reload configs from settings file, diff against current state.
@@ -347,7 +347,7 @@ impl McpRouter {
             }
         }
 
-        let mut staged_index = ToolIndex::new();
+        let mut staged_index = McpCapabilityIndex::new();
         for (server, defs) in &discovered {
             staged_index.add_server_tools(server, defs);
         }

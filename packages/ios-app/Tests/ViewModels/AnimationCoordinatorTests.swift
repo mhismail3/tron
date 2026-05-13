@@ -19,77 +19,77 @@ final class AnimationCoordinatorTests: XCTestCase {
 
     // MARK: - Initial State Tests
 
-    func test_initialState_noToolsVisible() {
+    func test_initialState_noCapabilitiesVisible() {
         XCTAssertTrue(coordinator.visibleInvocationIds.isEmpty)
     }
 
-    // MARK: - Tool Call Staggering Tests
+    // MARK: - Capability Call Staggering Tests
 
-    func test_queueCapabilityInvocationStart_makesToolVisible() {
+    func test_queueCapabilityInvocationStart_makesCapabilityVisible() {
         // When
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
 
         // Then
-        XCTAssertTrue(coordinator.isToolVisible("tool-1"))
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
     }
 
-    func test_queueCapabilityInvocationStart_queuesMultipleTools() {
+    func test_queueCapabilityInvocationStart_queuesMultipleCapabilities() {
         // When
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-2")
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-3")
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-2")
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-3")
 
         // Then
-        XCTAssertTrue(coordinator.isToolVisible("tool-1"))
-        XCTAssertTrue(coordinator.isToolVisible("tool-2"))
-        XCTAssertTrue(coordinator.isToolVisible("tool-3"))
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-2"))
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-3"))
     }
 
-    func test_markCapabilityInvocationComplete_makesToolVisible() {
+    func test_markCapabilityInvocationComplete_makesCapabilityVisible() {
         // When
-        coordinator.markCapabilityInvocationComplete(invocationId: "tool-1")
+        coordinator.markCapabilityInvocationComplete(invocationId: "capability-1")
 
         // Then
-        XCTAssertTrue(coordinator.isToolVisible("tool-1"))
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
     }
 
-    func test_makeCapabilityInvocationVisible_directlyAddsToolId() {
+    func test_makeCapabilityInvocationVisible_directlyAddsCapabilityId() {
         // When
-        coordinator.makeCapabilityInvocationVisible("tool-direct")
+        coordinator.makeCapabilityInvocationVisible("capability-direct")
 
         // Then
-        XCTAssertTrue(coordinator.isToolVisible("tool-direct"))
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-direct"))
     }
 
-    func test_resetToolState_clearsPendingButKeepsVisible() {
-        // Given - some tools visible
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-2")
+    func test_resetCapabilityState_clearsPendingButKeepsVisible() {
+        // Given - some capabilities visible
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-2")
 
         // When
-        coordinator.resetToolState()
+        coordinator.resetCapabilityState()
 
-        // Then - visible tools preserved
-        XCTAssertTrue(coordinator.isToolVisible("tool-1"))
-        XCTAssertTrue(coordinator.isToolVisible("tool-2"))
+        // Then - visible capabilities preserved
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-1"))
+        XCTAssertTrue(coordinator.isCapabilityInvocationVisible("capability-2"))
     }
 
-    func test_fullReset_clearsAllToolState() {
+    func test_fullReset_clearsAllCapabilityState() {
         // Given
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-1")
-        coordinator.queueCapabilityInvocationStart(invocationId: "tool-2")
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-1")
+        coordinator.queueCapabilityInvocationStart(invocationId: "capability-2")
 
         // When
         coordinator.fullReset()
 
         // Then
-        XCTAssertFalse(coordinator.isToolVisible("tool-1"))
-        XCTAssertFalse(coordinator.isToolVisible("tool-2"))
+        XCTAssertFalse(coordinator.isCapabilityInvocationVisible("capability-1"))
+        XCTAssertFalse(coordinator.isCapabilityInvocationVisible("capability-2"))
         XCTAssertTrue(coordinator.visibleInvocationIds.isEmpty)
     }
 
-    func test_isToolVisible_returnsFalseForUnknownTool() {
-        XCTAssertFalse(coordinator.isToolVisible("unknown-tool"))
+    func test_isCapabilityInvocationVisible_returnsFalseForUnknownCapability() {
+        XCTAssertFalse(coordinator.isCapabilityInvocationVisible("unknown-capability"))
     }
 
     // MARK: - Message Cascade Tests
@@ -158,7 +158,7 @@ final class AnimationCoordinatorTests: XCTestCase {
     func test_staticAnimations_exist() {
         // Verify animation helpers return valid animations
         _ = AnimationCoordinator.pillAnimation
-        _ = AnimationCoordinator.toolAnimation
+        _ = AnimationCoordinator.capabilityAnimation
         _ = AnimationCoordinator.cascadeAnimation
     }
 
@@ -169,8 +169,8 @@ final class AnimationCoordinatorTests: XCTestCase {
         XCTAssertGreaterThan(AnimationCoordinator.Timing.cascadeMaxMessages, 0)
         XCTAssertGreaterThan(AnimationCoordinator.Timing.cascadeSpringResponse, 0)
 
-        // Tool stagger
-        XCTAssertGreaterThan(AnimationCoordinator.Timing.toolStaggerInterval, 0)
-        XCTAssertGreaterThan(AnimationCoordinator.Timing.toolStaggerCap, 0)
+        // Capability stagger
+        XCTAssertGreaterThan(AnimationCoordinator.Timing.capabilityStaggerInterval, 0)
+        XCTAssertGreaterThan(AnimationCoordinator.Timing.capabilityStaggerCap, 0)
     }
 }

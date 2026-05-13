@@ -5,12 +5,12 @@ import Foundation
 /// Payload for capability.invocation.started event
 struct CapabilityInvocationStartedPayload {
     let invocationId: String
-    let name: String
+    let modelPrimitiveName: String
     let arguments: String  // JSON string for display
     let turn: Int
     let identity: CapabilityIdentity
     /// Full payload dict preserved so transformers can access
-    /// server-enriched fields such as `toolStatus` and `parsedAnswers`
+    /// server-enriched fields such as `interactionStatus` and `parsedAnswers`
     /// from `session::reconstruct` enrichment.
     let rawPayload: [String: AnyCodable]
 
@@ -20,22 +20,21 @@ struct CapabilityInvocationStartedPayload {
         // (non-optional `i64`) — dropping the back-compat `?? 1` default
         // keeps reconstruction from silently pinning a stray event to turn 1.
         guard let id = payload.string("invocationId") ?? payload.string("id"),
-              let name = payload.string("name"),
-              let modelToolName = payload.string("modelToolName"),
+              let modelPrimitiveName = payload.string("modelPrimitiveName"),
               let turn = payload.int("turn") else {
             TronLogger.shared.warning(
-                "capability.invocation.started event missing required field(s) invocationId/name/modelToolName/turn; dropping",
+                "capability.invocation.started event missing required field(s) invocationId/modelPrimitiveName/turn; dropping",
                 category: .events
             )
             return nil
         }
 
         self.invocationId = id
-        self.name = name
+        self.modelPrimitiveName = modelPrimitiveName
         self.turn = turn
         self.rawPayload = payload
         self.identity = CapabilityIdentity(
-            modelToolName: modelToolName,
+            modelPrimitiveName: modelPrimitiveName,
             contractId: payload.string("contractId"),
             implementationId: payload.string("implementationId"),
             functionId: payload.string("functionId"),
@@ -62,6 +61,8 @@ struct CapabilityInvocationStartedPayload {
             self.arguments = "{}"
         }
     }
+
+    var name: String { modelPrimitiveName }
 }
 
 /// Payload for capability.invocation.completed event
@@ -85,17 +86,17 @@ struct CapabilityInvocationCompletedPayload {
     init?(from payload: [String: AnyCodable]) {
         // `content`, `isError`, `duration` are all non-optional on the
         // server's `CapabilityInvocationCompletedPayload`. Empty string is a legitimate
-        // `content` value (tools that return no text); missing the key
+        // `content` value (capabilities that return no text); missing the key
         // entirely is a schema violation.
         guard
             let invocationId = payload.string("invocationId"),
-            let modelToolName = payload.string("modelToolName"),
+            let modelPrimitiveName = payload.string("modelPrimitiveName"),
             let content = payload.string("content"),
             let isError = payload.bool("isError"),
             let durationMs = payload.int("duration")
         else {
             TronLogger.shared.warning(
-                "capability.invocation.completed event missing required field(s) invocationId/modelToolName/content/isError/duration; dropping",
+                "capability.invocation.completed event missing required field(s) invocationId/modelPrimitiveName/content/isError/duration; dropping",
                 category: .events
             )
             return nil
@@ -109,7 +110,7 @@ struct CapabilityInvocationCompletedPayload {
         self.truncated = payload.bool("truncated")
         self.blobId = payload.string("blobId")
         self.identity = CapabilityIdentity(
-            modelToolName: modelToolName,
+            modelPrimitiveName: modelPrimitiveName,
             contractId: payload.string("contractId"),
             implementationId: payload.string("implementationId"),
             functionId: payload.string("functionId"),
@@ -137,7 +138,7 @@ struct CapabilityInvocationCompletedPayload {
             self.arguments = nil
         }
 
-        // Tool-specific details (new field persisted by Rust agent)
+        // Capability-specific details (new field persisted by Rust agent)
         if let detailsValue = payload["details"],
            let detailsDict = detailsValue.value as? [String: Any] {
             self.details = detailsDict.mapValues { AnyCodable($0) }
@@ -181,19 +182,19 @@ struct AgentErrorPayload {
 /// Payload for error.capability event
 /// Server: ErrorCapabilityEvent.payload
 struct CapabilityErrorPayload {
-    let modelToolName: String
+    let modelPrimitiveName: String
     let invocationId: String
     let error: String
     let code: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let modelToolName = payload.string("modelToolName"),
+        guard let modelPrimitiveName = payload.string("modelPrimitiveName"),
               let invocationId = payload.string("invocationId"),
               let error = payload.string("error") else {
             return nil
         }
 
-        self.modelToolName = modelToolName
+        self.modelPrimitiveName = modelPrimitiveName
         self.invocationId = invocationId
         self.error = error
         self.code = payload.string("code")

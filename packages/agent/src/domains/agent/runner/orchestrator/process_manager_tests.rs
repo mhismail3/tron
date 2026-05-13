@@ -311,7 +311,7 @@ async fn promote_then_process_completes_in_background() {
 async fn promote_nonexistent_returns_error() {
     let pm = ProcessManager::new();
     let err = pm.promote_to_background("proc-nonexistent").unwrap_err();
-    assert!(matches!(err, ToolError::Validation { .. }));
+    assert!(matches!(err, CapabilityExecutionError::Validation { .. }));
 }
 
 #[tokio::test]
@@ -322,7 +322,7 @@ async fn promote_already_background_returns_error() {
         .await
         .unwrap();
     let err = pm.promote_to_background(&handle.process_id).unwrap_err();
-    assert!(matches!(err, ToolError::Validation { .. }));
+    assert!(matches!(err, CapabilityExecutionError::Validation { .. }));
 }
 
 #[tokio::test]
@@ -339,7 +339,7 @@ async fn promote_already_completed_returns_error() {
         .unwrap();
     // Process is already completed.
     let err = pm.promote_to_background(&handle.process_id).unwrap_err();
-    assert!(matches!(err, ToolError::Validation { .. }));
+    assert!(matches!(err, CapabilityExecutionError::Validation { .. }));
 }
 
 // ── Cancellation ──
@@ -389,7 +389,7 @@ async fn cancel_completed_process_is_noop() {
 async fn cancel_nonexistent_returns_error() {
     let pm = ProcessManager::new();
     let err = pm.cancel_process("proc-nonexistent", false).unwrap_err();
-    assert!(matches!(err, ToolError::Validation { .. }));
+    assert!(matches!(err, CapabilityExecutionError::Validation { .. }));
 }
 
 #[tokio::test]
@@ -714,7 +714,7 @@ async fn wait_timeout_returns_error() {
     let err = pm.wait_for_process(&handle.process_id, 50).await;
     assert!(err.is_err());
     match err.unwrap_err() {
-        ToolError::Timeout { timeout_ms } => assert_eq!(timeout_ms, 50),
+        CapabilityExecutionError::Timeout { timeout_ms } => assert_eq!(timeout_ms, 50),
         other => panic!("expected Timeout, got: {other:?}"),
     }
 }
@@ -746,7 +746,7 @@ async fn wait_unknown_process_returns_error() {
     let err = pm.wait_for_process("proc-nonexistent", 1000).await;
     assert!(err.is_err());
     match err.unwrap_err() {
-        ToolError::Validation { message } => assert!(message.contains("not found")),
+        CapabilityExecutionError::Validation { message } => assert!(message.contains("not found")),
         other => panic!("expected Validation, got: {other:?}"),
     }
 }

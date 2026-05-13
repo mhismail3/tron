@@ -28,7 +28,7 @@
 //! - Cache breakpoints are capped at 4 per request
 //!   (Anthropic API limit); [`cache_pruning`] strips the oldest when the
 //!   cap would be exceeded. The system-prompt marker is permanent.
-//! - Tool-call blocks must come before capability-result blocks in a single
+//! - ModelCapability-call blocks must come before capability-result blocks in a single
 //!   message; [`message_sanitizer`] re-orders if the orchestrator
 //!   emitted out of order.
 //! - v1beta (ApiKey) rejects unknown fields; v1internal (OAuth / SDK)

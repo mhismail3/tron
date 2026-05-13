@@ -54,13 +54,13 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleThinkingDeltaCalledWith, "Let me think...")
     }
 
-    // MARK: - Tool Event Tests
+    // MARK: - Capability Event Tests
 
-    func testDispatch_capabilityStart_callsHandleToolStart() {
+    func testDispatch_capabilityInvocationStarted_callsHandleCapabilityInvocationStart() {
         // Given: A capability start result
         let result = CapabilityInvocationStartedPlugin.Result(
-            modelToolName: "Read",
-            invocationId: "tool_123",
+            modelPrimitiveName: "execute",
+            invocationId: "inv_123",
             arguments: nil
         )
 
@@ -72,15 +72,15 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleCapabilityInvocationStartedCalledWith?.invocationId, "tool_123")
-        XCTAssertEqual(mockContext.handleCapabilityInvocationStartedCalledWith?.modelToolName, "Read")
+        XCTAssertEqual(mockContext.handleCapabilityInvocationStartedCalledWith?.invocationId, "inv_123")
+        XCTAssertEqual(mockContext.handleCapabilityInvocationStartedCalledWith?.modelPrimitiveName, "execute")
     }
 
-    func testDispatch_capabilityEnd_callsHandleToolEnd() {
+    func testDispatch_capabilityInvocationCompleted_callsHandleCapabilityInvocationEnd() {
         // Given: A capability end result
         let result = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "tool_123",
-            modelToolName: "Read",
+            invocationId: "inv_123",
+            modelPrimitiveName: "execute",
             success: true,
             output: "file contents",
             error: nil,
@@ -97,7 +97,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleCapabilityInvocationCompletedCalledWith?.invocationId, "tool_123")
+        XCTAssertEqual(mockContext.handleCapabilityInvocationCompletedCalledWith?.invocationId, "inv_123")
         XCTAssertEqual(mockContext.handleCapabilityInvocationCompletedCalledWith?.duration, 150)
     }
 
@@ -452,7 +452,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleTextDeltaCalledWith: String?
     var handleThinkingDeltaCalledWith: String?
 
-    // MARK: - Tools
+    // MARK: - Capabilities
     var handleCapabilityInvocationGeneratingCalledWith: CapabilityInvocationGeneratingPlugin.Result?
     var handleCapabilityInvocationStartedCalledWith: CapabilityInvocationStartedPlugin.Result?
     var handleCapabilityInvocationProgressCalledWith: CapabilityInvocationProgressPlugin.Result?

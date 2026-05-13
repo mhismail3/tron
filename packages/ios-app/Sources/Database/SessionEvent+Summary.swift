@@ -50,12 +50,12 @@ extension SessionEvent {
             let hasThinking = payload.bool("hasThinking") == true
             let stopReason = payload.string("stopReason")
 
-            if hasThinking && stopReason == "tool_use" {
-                parts.append("Thinking → tool use")
+            if hasThinking && stopReason == "capability_invocation" {
+                parts.append("Thinking → capability invocation")
             } else if hasThinking {
                 parts.append("Thinking response")
-            } else if stopReason == "tool_use" {
-                parts.append("Tool use")
+            } else if stopReason == "capability_invocation" {
+                parts.append("Capability invocation")
             } else {
                 parts.append("Assistant response")
             }
@@ -70,12 +70,11 @@ extension SessionEvent {
             let name = payload.string("contractId") ??
                 payload.string("functionId") ??
                 payload.string("implementationId") ??
-                payload.string("modelToolName") ??
-                payload.string("name") ??
+                payload.string("modelPrimitiveName") ??
                 "unknown"
             let displayName = formatCapabilityName(name)
             let args = payload.dict("arguments") ?? [:]
-            let keyArg = extractKeyArgument(modelToolName: name, from: args)
+            let keyArg = extractKeyArgument(modelPrimitiveName: name, from: args)
             if !keyArg.isEmpty {
                 return "\(displayName): \(keyArg)"
             }
@@ -117,8 +116,8 @@ extension SessionEvent {
             return "\(provider) error"
 
         case .errorCapability:
-            let modelToolName = payload.string("modelToolName") ?? "tool"
-            return "\(modelToolName) failed"
+            let modelPrimitiveName = payload.string("modelPrimitiveName") ?? "capability"
+            return "\(modelPrimitiveName) failed"
 
         case .configModelSwitch:
             let from = payload.string("previousModel")?.shortModelName ?? "?"
@@ -175,7 +174,7 @@ extension SessionEvent {
             // event entirely rather than produce an interactive picker.
             let count = payload.stringArray("clearedSkills")?.count ?? 0
             switch payload.string("mode") {
-            case "askUser":
+            case "userInteraction":
                 return "Skills cleared — re-activate? (\(count))"
             case "clearAll":
                 return "Skills cleared (\(count))"
@@ -325,21 +324,21 @@ extension SessionEvent {
         }
     }
 
-    /// Helper to extract key argument for tool display
-    func extractKeyArgument(modelToolName: String, from args: [String: Any]) -> String {
-        if modelToolName.hasPrefix("filesystem::") {
+    /// Helper to extract key argument for capability display
+    func extractKeyArgument(modelPrimitiveName: String, from args: [String: Any]) -> String {
+        if modelPrimitiveName.hasPrefix("filesystem::") {
             if let path = args["file_path"] as? String ?? args["path"] as? String {
                 return URL(fileURLWithPath: path).lastPathComponent
             }
-        } else if modelToolName.hasPrefix("process::") {
+        } else if modelPrimitiveName.hasPrefix("process::") {
             if let cmd = args["command"] as? String {
                 return String(cmd.prefix(25))
             }
-        } else if modelToolName.contains("search") {
+        } else if modelPrimitiveName.contains("search") {
             if let pattern = args["pattern"] as? String {
                 return "\"\(String(pattern.prefix(20)))\""
             }
-        } else if modelToolName.contains("glob") {
+        } else if modelPrimitiveName.contains("glob") {
             if let pattern = args["pattern"] as? String {
                 return pattern
             }

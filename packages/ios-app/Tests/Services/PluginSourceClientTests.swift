@@ -67,12 +67,12 @@ struct PluginSourceClientTests {
         }
     }
 
-    @Test("listTools throws when engineConnection is nil")
-    func listToolsNoConnection() async {
+    @Test("listCapabilities throws when engineConnection is nil")
+    func listCapabilitiesNoConnection() async {
         let transport = MockEngineTransport()
         transport.engineConnection = nil
         let client = PluginSourceClient(transport: transport)
-        await #expect(throws: EngineClientError.self) { _ = try await client.listTools(server: nil) }
+        await #expect(throws: EngineClientError.self) { _ = try await client.listCapabilities(server: nil) }
     }
 
     @Test("reload throws when engineConnection is nil")

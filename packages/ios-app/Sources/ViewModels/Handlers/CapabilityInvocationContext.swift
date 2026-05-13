@@ -5,22 +5,22 @@ import Foundation
 ///
 /// Inherits from:
 /// - LoggingContext: Logging and error display
-/// - ToolStateTracking: Capability invocation state (currentToolMessages, currentTurnCapabilityInvocations, etc.)
+/// - CapabilityInvocationStateTracking: Capability invocation state (currentCapabilityInvocationMessages, currentTurnCapabilityInvocations, etc.)
 /// - MessageMutating: Centralized message array mutations with automatic index sync
 ///
 /// Note: Streaming methods (flushPendingTextUpdates, finalizeStreamingMessage) are declared
 /// directly rather than inheriting StreamingManaging, since resetStreamingManager is not needed.
 @MainActor
-protocol CapabilityInvocationContext: LoggingContext, ToolStateTracking, MessageMutating {
+protocol CapabilityInvocationContext: LoggingContext, CapabilityInvocationStateTracking, MessageMutating {
 
     // MARK: - Messages State
 
-    /// Running tool counter for O(1) hasRunningTools check
-    var runningToolCount: Int { get set }
+    /// Running capability counter for O(1) hasRunningCapabilityInvocations check
+    var runningCapabilityInvocationCount: Int { get set }
 
     // MARK: - Streaming Management
 
-    /// Flush any pending text updates before tool processing
+    /// Flush any pending text updates before capability processing
     func flushPendingTextUpdates()
 
     /// Finalize the current streaming message
@@ -28,24 +28,24 @@ protocol CapabilityInvocationContext: LoggingContext, ToolStateTracking, Message
 
     // MARK: - UI Coordination
 
-    /// Make a tool visible for animation
+    /// Make a capability visible for animation
     func makeCapabilityInvocationVisible(_ invocationId: String)
 
     /// Enqueue a capability start for ordered processing
-    func enqueueCapabilityInvocationStart(_ data: UIUpdateQueue.ToolStartData)
+    func enqueueCapabilityInvocationStart(_ data: UIUpdateQueue.CapabilityInvocationStartData)
 
     /// Enqueue a capability end for ordered processing
-    func enqueueToolEnd(_ data: UIUpdateQueue.ToolEndData)
+    func enqueueCapabilityInvocationEnd(_ data: UIUpdateQueue.CapabilityInvocationEndData)
 
-    // MARK: - AskUserQuestion
+    // MARK: - UserInteraction
 
-    /// Open the AskUserQuestion sheet for a capability invocation
-    func openAskUserQuestionSheet(for data: AskUserQuestionToolData)
+    /// Open the UserInteraction sheet for a capability invocation
+    func openUserInteractionSheet(for data: UserInteractionInvocationData)
 
     // MARK: - Thinking State
 
     /// Reset thinking state for a new thinking block
-    /// Called after tool completion so subsequent thinking starts fresh
+    /// Called after capability completion so subsequent thinking starts fresh
     func resetThinkingForNewBlock()
 
     /// Mark the current thinking message as no longer streaming (if present)

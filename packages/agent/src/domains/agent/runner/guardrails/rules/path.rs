@@ -35,7 +35,8 @@ impl PathRule {
         let homedir = home_dir();
 
         for arg_name in &self.path_arguments {
-            let Some(serde_json::Value::String(value)) = ctx.tool_arguments.get(arg_name.as_str())
+            let Some(serde_json::Value::String(value)) =
+                ctx.capability_arguments.get(arg_name.as_str())
             else {
                 continue;
             };

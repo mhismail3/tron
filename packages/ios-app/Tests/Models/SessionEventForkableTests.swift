@@ -97,53 +97,53 @@ final class SessionEventForkableTests: XCTestCase {
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_withToolUseBlock_isForkable() {
+    func testAssistant_withCapabilityInvocationBlock_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "text", "text": "Let me run that"],
-                ["type": "tool_use", "id": "toolu_123", "name": "Bash", "input": ["command": "ls"]],
+                ["type": "capability_invocation", "id": "toolu_123", "name": "execute", "input": ["command": "ls"]],
             ]),
-            "stopReason": AnyCodable("tool_use"),
+            "stopReason": AnyCodable("capability_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_stopReasonToolUse_isForkable() {
+    func testAssistant_stopReasonCapabilityInvocation_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
-                ["type": "tool_use", "id": "toolu_456", "name": "Read", "input": ["path": "/tmp"]],
+                ["type": "capability_invocation", "id": "toolu_456", "name": "execute", "input": ["path": "/tmp"]],
             ]),
-            "stopReason": AnyCodable("tool_use"),
+            "stopReason": AnyCodable("capability_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_interruptedWithToolUseInContent_isForkable() {
+    func testAssistant_interruptedWithCapabilityInvocationInContent_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "text", "text": "Running..."],
-                ["type": "tool_use", "id": "toolu_789", "name": "Bash", "input": ["command": "test"]],
+                ["type": "capability_invocation", "id": "toolu_789", "name": "execute", "input": ["command": "test"]],
             ]),
             "stopReason": AnyCodable("interrupted"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_mixedContentWithToolUse_isForkable() {
+    func testAssistant_mixedContentWithCapabilityInvocation_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "thinking", "thinking": "Let me think..."],
                 ["type": "text", "text": "I'll check that file"],
-                ["type": "tool_use", "id": "toolu_abc", "name": "Read", "input": ["path": "/etc"]],
+                ["type": "capability_invocation", "id": "toolu_abc", "name": "execute", "input": ["path": "/etc"]],
             ]),
-            "stopReason": AnyCodable("tool_use"),
+            "stopReason": AnyCodable("capability_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_stopReasonToolUse_noContent_isForkable() {
+    func testAssistant_stopReasonCapabilityInvocation_noContent_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
-            "stopReason": AnyCodable("tool_use"),
+            "stopReason": AnyCodable("capability_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
@@ -152,13 +152,13 @@ final class SessionEventForkableTests: XCTestCase {
 
     func testCapabilityInvocation_isNotForkable() {
         let event = makeEvent(type: "capability.invocation.started", payload: [
-            "name": AnyCodable("Bash"),
+            "modelPrimitiveName": AnyCodable("execute"),
             "arguments": AnyCodable(["command": "ls"]),
         ])
         XCTAssertFalse(event.isForkable)
     }
 
-    func testToolResult_isNotForkable() {
+    func testCapabilityInvocationResult_isNotForkable() {
         let event = makeEvent(type: "capability.invocation.completed", payload: [
             "content": AnyCodable("file1.txt\nfile2.txt"),
             "isError": AnyCodable(false),

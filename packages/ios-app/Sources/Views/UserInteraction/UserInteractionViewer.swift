@@ -1,13 +1,13 @@
 import SwiftUI
 
-// MARK: - AskUserQuestion Tool Viewer
+// MARK: - UserInteraction Viewer
 
-/// In-chat viewer for AskUserQuestion capability invocations
+/// In-chat viewer for UserInteraction capability invocations
 /// Compact chip style matching SkillChip - glassy capsule with status colors
 /// Uses async model: pending → answered or superseded
 @available(iOS 26.0, *)
-struct AskUserQuestionToolViewer: View {
-    let data: AskUserQuestionToolData
+struct UserInteractionCapabilityViewer: View {
+    let data: UserInteractionInvocationData
     let onTap: () -> Void
 
     private var questionCount: Int {
@@ -115,17 +115,17 @@ struct AskUserQuestionToolViewer: View {
 #Preview("All States") {
     VStack(spacing: 16) {
         // Pending - single question
-        AskUserQuestionToolViewer(
-            data: AskUserQuestionToolData(
+        UserInteractionCapabilityViewer(
+            data: UserInteractionInvocationData(
                 invocationId: "call_1",
-                params: AskUserQuestionParams(
+                params: UserInteractionParams(
                     questions: [
-                        AskUserQuestion(
+                        UserInteraction(
                             id: "q1",
                             question: "What approach?",
                             options: [
-                                AskUserQuestionOption(label: "A", value: nil, description: nil),
-                                AskUserQuestionOption(label: "B", value: nil, description: nil)
+                                UserInteractionOption(label: "A", value: nil, description: nil),
+                                UserInteractionOption(label: "B", value: nil, description: nil)
                             ],
                             mode: .single,
                             allowOther: nil,
@@ -142,28 +142,28 @@ struct AskUserQuestionToolViewer: View {
         )
 
         // Pending - multiple questions
-        AskUserQuestionToolViewer(
-            data: AskUserQuestionToolData(
+        UserInteractionCapabilityViewer(
+            data: UserInteractionInvocationData(
                 invocationId: "call_2",
-                params: AskUserQuestionParams(
+                params: UserInteractionParams(
                     questions: [
-                        AskUserQuestion(
+                        UserInteraction(
                             id: "q1",
                             question: "What approach?",
                             options: [
-                                AskUserQuestionOption(label: "A", value: nil, description: nil),
-                                AskUserQuestionOption(label: "B", value: nil, description: nil)
+                                UserInteractionOption(label: "A", value: nil, description: nil),
+                                UserInteractionOption(label: "B", value: nil, description: nil)
                             ],
                             mode: .single,
                             allowOther: nil,
                             otherPlaceholder: nil
                         ),
-                        AskUserQuestion(
+                        UserInteraction(
                             id: "q2",
                             question: "Which files?",
                             options: [
-                                AskUserQuestionOption(label: "File1", value: nil, description: nil),
-                                AskUserQuestionOption(label: "File2", value: nil, description: nil)
+                                UserInteractionOption(label: "File1", value: nil, description: nil),
+                                UserInteractionOption(label: "File2", value: nil, description: nil)
                             ],
                             mode: .multi,
                             allowOther: nil,
@@ -180,17 +180,17 @@ struct AskUserQuestionToolViewer: View {
         )
 
         // Answered
-        AskUserQuestionToolViewer(
-            data: AskUserQuestionToolData(
+        UserInteractionCapabilityViewer(
+            data: UserInteractionInvocationData(
                 invocationId: "call_3",
-                params: AskUserQuestionParams(
+                params: UserInteractionParams(
                     questions: [
-                        AskUserQuestion(
+                        UserInteraction(
                             id: "q1",
                             question: "What approach?",
                             options: [
-                                AskUserQuestionOption(label: "A", value: nil, description: nil),
-                                AskUserQuestionOption(label: "B", value: nil, description: nil)
+                                UserInteractionOption(label: "A", value: nil, description: nil),
+                                UserInteractionOption(label: "B", value: nil, description: nil)
                             ],
                             mode: .single,
                             allowOther: nil,
@@ -199,10 +199,10 @@ struct AskUserQuestionToolViewer: View {
                     ],
                     context: nil
                 ),
-                answers: ["q1": AskUserQuestionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)],
+                answers: ["q1": UserInteractionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)],
                 status: .answered,
-                result: AskUserQuestionResult(
-                    answers: [AskUserQuestionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)],
+                result: UserInteractionResult(
+                    answers: [UserInteractionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)],
                     complete: true,
                     submittedAt: DateParser.now
                 )
@@ -211,17 +211,17 @@ struct AskUserQuestionToolViewer: View {
         )
 
         // Superseded
-        AskUserQuestionToolViewer(
-            data: AskUserQuestionToolData(
+        UserInteractionCapabilityViewer(
+            data: UserInteractionInvocationData(
                 invocationId: "call_4",
-                params: AskUserQuestionParams(
+                params: UserInteractionParams(
                     questions: [
-                        AskUserQuestion(
+                        UserInteraction(
                             id: "q1",
                             question: "What approach?",
                             options: [
-                                AskUserQuestionOption(label: "A", value: nil, description: nil),
-                                AskUserQuestionOption(label: "B", value: nil, description: nil)
+                                UserInteractionOption(label: "A", value: nil, description: nil),
+                                UserInteractionOption(label: "B", value: nil, description: nil)
                             ],
                             mode: .single,
                             allowOther: nil,

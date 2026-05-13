@@ -106,12 +106,12 @@ struct AgentAbortParams: Encodable {
     let sessionId: String
 }
 
-struct AgentAbortToolParams: Encodable {
+struct AgentAbortInvocationParams: Encodable {
     let sessionId: String
     let invocationId: String
 }
 
-struct AgentAbortToolResult: Decodable {
+struct AgentAbortInvocationResult: Decodable {
     let aborted: Bool
 }
 
@@ -160,7 +160,7 @@ struct CurrentTurnCapabilityInvocation: Decodable {
     let completedAt: String?
     /// Progressive output accumulated during execution
     let streamingOutput: String?
-    let modelToolName: String?
+    let modelPrimitiveName: String?
     let contractId: String?
     let implementationId: String?
     let functionId: String?
@@ -176,11 +176,11 @@ struct CurrentTurnCapabilityInvocation: Decodable {
     let bindingDecisionId: String?
 }
 
-/// Structured content sequence item (interleaved text/thinking/tool_ref)
+/// Structured content sequence item (interleaved text/thinking/capability_ref)
 enum ContentSequenceItem: Decodable {
     case text(String)
     case thinking(String)
-    case toolRef(invocationId: String)
+    case capabilityRef(invocationId: String)
 
     private enum CodingKeys: String, CodingKey {
         case type, text, thinking, invocationId
@@ -194,8 +194,8 @@ enum ContentSequenceItem: Decodable {
             self = .text(try container.decode(String.self, forKey: .text))
         case "thinking":
             self = .thinking(try container.decode(String.self, forKey: .thinking))
-        case "tool_ref":
-            self = .toolRef(invocationId: try container.decode(String.self, forKey: .invocationId))
+        case "capability_ref":
+            self = .capabilityRef(invocationId: try container.decode(String.self, forKey: .invocationId))
         default:
             self = .text("")
         }

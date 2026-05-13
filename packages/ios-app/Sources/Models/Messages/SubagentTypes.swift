@@ -35,7 +35,7 @@ enum SubagentStatus: String, Codable, Equatable {
 }
 
 /// Tracks how completed subagent results are delivered to the parent agent.
-/// Used for non-blocking subagents only (blocking subagents deliver via tool result).
+/// Used for non-blocking subagents only (blocking subagents deliver via capability result).
 ///
 /// When a non-blocking subagent completes during an active turn, the backend
 /// delivers results via system prompt injection — no iOS-side action needed.
@@ -59,9 +59,9 @@ enum SubagentResultDeliveryStatus: String, Codable, Equatable {
 /// carries a non-empty `spawnType` string from `SpawnType::as_str` on
 /// the Rust side. A missing or unrecognised value on the wire indicates
 /// a schema drift (iOS/server out of sync) and MUST be surfaced as a
-/// decode failure, not silently coerced into `.toolAgent`.
+/// decode failure, not silently coerced into `.capabilityAgent`.
 enum SubagentSpawnType: String, Codable, Equatable {
-    case toolAgent
+    case capabilityAgent
     case subsession
     case hook
 
@@ -70,7 +70,7 @@ enum SubagentSpawnType: String, Codable, Equatable {
     /// record, log a warning, or fall back to a safe default.
     init?(from rawValue: String?) {
         switch rawValue {
-        case "toolAgent": self = .toolAgent
+        case "capabilityAgent": self = .capabilityAgent
         case "subsession": self = .subsession
         case "hook": self = .hook
         default: return nil
@@ -79,7 +79,7 @@ enum SubagentSpawnType: String, Codable, Equatable {
 }
 
 /// Data for tracking a spawned subagent (rendered as a chip in chat)
-struct SubagentToolData: Equatable {
+struct SubagentInvocationData: Equatable {
     /// The capability invocation ID from SpawnSubagent
     let invocationId: String
     /// Session ID of the spawned subagent
@@ -107,10 +107,10 @@ struct SubagentToolData: Equatable {
     var error: String?
     /// Token usage (when completed)
     var tokenUsage: TokenUsage?
-    /// Whether this subagent was spawned in blocking mode (parent waits for result via tool result)
+    /// Whether this subagent was spawned in blocking mode (parent waits for result via capability result)
     var blocking: Bool = false
-    /// Origin of the subagent (tool, hook, subsession) — controls UI behavior
-    var spawnType: SubagentSpawnType = .toolAgent
+    /// Origin of the subagent (capability, hook, subsession) — controls UI behavior
+    var spawnType: SubagentSpawnType = .capabilityAgent
     /// Tracks whether results need user action (for non-blocking subagents that complete while parent idle)
     var resultDeliveryStatus: SubagentResultDeliveryStatus = .notApplicable
 

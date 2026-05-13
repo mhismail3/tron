@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{
     SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner, WaitMode,
 };
@@ -33,11 +33,11 @@ mod tracking;
 // SpawnType — taxonomy for tracked subagents
 // =============================================================================
 
-/// Distinguishes tool-spawned agents from system-spawned `subsessions`.
+/// Distinguishes capability-spawned agents from system-spawned `subsessions`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpawnType {
     /// Spawned by the LLM through the `agent::spawn_subagent` capability.
-    ToolAgent,
+    CapabilityAgent,
     /// Spawned programmatically for internal tasks (compaction, memory, etc.).
     Subsession,
     /// Spawned by LLM hooks (title-gen, branch-name-gen, suggest-prompts).
@@ -48,7 +48,7 @@ impl SpawnType {
     /// Returns the wire-protocol string for this spawn type (camelCase for JSON).
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::ToolAgent => "toolAgent",
+            Self::CapabilityAgent => "capabilityAgent",
             Self::Subsession => "subsession",
             Self::Hook => "hook",
         }
@@ -61,7 +61,7 @@ impl SpawnType {
 
 /// Configuration for a system-spawned subsession.
 pub struct SubsessionConfig {
-    /// Profile process id that defines prompt/model/tool/permission policy.
+    /// Profile process id that defines prompt/model/capability/permission policy.
     pub process_id: Option<String>,
     /// Parent session ID (for audit trail).
     pub parent_session_id: String,
@@ -84,10 +84,10 @@ pub struct SubsessionConfig {
     pub max_depth: u32,
     /// Whether to inherit capabilities from the parent's live catalog policy (default false).
     pub inherit_capabilities: bool,
-    /// Tools to deny from the inherited set.
+    /// Capabilities to deny from the inherited set.
     pub denied_capabilities: Vec<String>,
     /// Optional strict allowlist — when `Some`, ONLY these capabilities are kept
-    /// (applied after `denied_capabilities`). Future-proof: newly registered tools
+    /// (applied after `denied_capabilities`). Future-proof: newly registered capabilities
     /// will not leak into a restricted subagent.
     pub allowed_capabilities: Option<Vec<String>>,
     /// Reasoning effort level (default Some(Medium)).
@@ -153,7 +153,7 @@ pub struct SubagentManager {
     hooks: Option<Arc<HookEngine>>,
     /// Worktree coordinator for subagent isolation (each subagent gets its own worktree).
     worktree_coordinator: std::sync::OnceLock<Arc<crate::domains::worktree::WorktreeCoordinator>>,
-    /// Engine host used by child agents to resolve live provider tool schemas
+    /// Engine host used by child agents to resolve live provider capability schemas
     /// and route capability invocation through canonical capabilities.
     engine_host: std::sync::OnceLock<crate::engine::EngineHostHandle>,
     /// Self-reference for passing to child agents (set after wrapping in Arc).
@@ -255,10 +255,10 @@ impl SubagentManager {
     }
 
     /// Wire the skill registry so that `SubagentConfig.skills` names can be
-    /// resolved to frontmatter-derived tool denials at spawn time.
+    /// resolved to frontmatter-derived capability denials at spawn time.
     ///
     /// INVARIANT: If this setter is not called, `SubagentConfig.skills` is
-    /// silently no-op'd (skills contribute no tool denials). This matches
+    /// silently no-op'd (skills contribute no capability denials). This matches
     /// the `Option<SkillRegistry>` contract in [`compute_denied_capabilities`] and
     /// keeps skill wiring opt-in for isolated tests and minimal runtimes.
     pub fn set_skill_registry(
@@ -272,10 +272,10 @@ impl SubagentManager {
     pub fn plan_process(
         &self,
         process_id: &str,
-    ) -> Result<crate::domains::agent::runner::ProcessExecutionPlan, ToolError> {
+    ) -> Result<crate::domains::agent::runner::ProcessExecutionPlan, CapabilityExecutionError> {
         self.profile_runtime
             .plan_process(process_id, None)
-            .map_err(|error| ToolError::Internal {
+            .map_err(|error| CapabilityExecutionError::Internal {
                 message: format!("Failed to plan process `{process_id}`: {error}"),
             })
     }
@@ -292,7 +292,7 @@ impl SubagentManager {
         &self,
         explicit_denied: &[String],
         skills: Option<&[String]>,
-        all_tool_names: &[String],
+        all_model_capability_ids: &[String],
     ) -> Vec<String> {
         let mut denied: std::collections::HashSet<String> =
             explicit_denied.iter().cloned().collect();
@@ -305,10 +305,10 @@ impl SubagentManager {
                 };
                 if let Some(cfg) = crate::domains::skills::denials::skill_frontmatter_to_denials(
                     &meta.frontmatter,
-                    all_tool_names,
+                    all_model_capability_ids,
                 ) {
-                    for tool in cfg.denied_capabilities {
-                        let _ = denied.insert(tool);
+                    for capability in cfg.denied_capabilities {
+                        let _ = denied.insert(capability);
                     }
                 }
             }
@@ -317,11 +317,11 @@ impl SubagentManager {
         denied.into_iter().collect()
     }
 
-    async fn current_tool_names(&self, session_id: &str) -> Vec<String> {
+    async fn current_model_capability_ids(&self, session_id: &str) -> Vec<String> {
         let Some(host) = self.engine_host.get() else {
             return Vec::new();
         };
-        match crate::domains::capability_support::implementations::capability_surface::list_model_tool_names(
+        match crate::domains::capability_support::implementations::capability_surface::list_model_capability_ids(
             host, session_id, None,
         )
         .await
@@ -336,7 +336,7 @@ impl SubagentManager {
 
     /// Spawn a system subsession for programmatic tasks (hooks, compaction, memory).
     ///
-    /// Unlike `spawn()` (tool-agent path), the caller provides the system prompt
+    /// Unlike `spawn()` (capability-agent path), the caller provides the system prompt
     /// directly, capabilities are optional, and the subsession is tracked as
     /// `SpawnType::Subsession`.
     ///
@@ -348,7 +348,7 @@ impl SubagentManager {
     pub async fn spawn_subsession(
         &self,
         config: SubsessionConfig,
-    ) -> Result<SubsessionOutput, ToolError> {
+    ) -> Result<SubsessionOutput, CapabilityExecutionError> {
         let model = config
             .model
             .as_deref()
@@ -367,7 +367,7 @@ impl SubagentManager {
                 "subsession",
                 &task,
             )
-            .map_err(|e| ToolError::Internal {
+            .map_err(|e| CapabilityExecutionError::Internal {
                 message: format!("Failed to create subsession: {e}"),
             })?;
 
@@ -392,7 +392,7 @@ impl SubagentManager {
             model: model.to_owned(),
             max_turns: config.max_turns,
             spawn_depth: 0,
-            tool_call_id: None,
+            invocation_id: None,
             blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
             spawn_type: Some(spawn_type.as_str().to_owned()),
@@ -435,7 +435,7 @@ impl SubagentManager {
         if let Some(timeout) = config.blocking_timeout_ms {
             if let Some(result) = self.wait_for_tracker_result(&tracker, timeout).await? {
                 if result.status == "failed" {
-                    return Err(ToolError::Internal {
+                    return Err(CapabilityExecutionError::Internal {
                         message: result.output,
                     });
                 }
@@ -467,10 +467,13 @@ impl SubagentManager {
 #[async_trait]
 impl SubagentSpawner for SubagentManager {
     #[allow(clippy::too_many_lines)]
-    async fn spawn(&self, config: SubagentConfig) -> Result<SubagentHandle, ToolError> {
+    async fn spawn(
+        &self,
+        config: SubagentConfig,
+    ) -> Result<SubagentHandle, CapabilityExecutionError> {
         // Validate mode
         if config.mode == SubagentMode::Tmux {
-            return Err(ToolError::Validation {
+            return Err(CapabilityExecutionError::Validation {
                 message: "Tmux mode is not yet supported. Use inProcess mode.".into(),
             });
         }
@@ -480,19 +483,19 @@ impl SubagentSpawner for SubagentManager {
         // agent's remaining child-spawn budget; zero means the child is a
         // leaf agent and is valid.
 
-        let all_tool_names = self
-            .current_tool_names(config.parent_session_id.as_deref().unwrap_or("subagent"))
+        let all_model_capability_ids = self
+            .current_model_capability_ids(config.parent_session_id.as_deref().unwrap_or("subagent"))
             .await;
 
         // INVARIANT: subagent denied_capabilities = union(explicit_deniedCapabilities,
         // each skill's frontmatter denials). AgentFactory applies this merged
-        // policy to the live catalog tool surface for the child agent. Without
+        // policy to the live catalog capability surface for the child agent. Without
         // this merge, skills with `deniedCapabilities: [...]` or `allowedCapabilities: [...]`
-        // frontmatter would not affect the child agent's model-visible tools.
+        // frontmatter would not affect the child agent's model-visible capabilities.
         let merged_denied_capabilities = self.compute_denied_capabilities(
             &config.denied_capabilities,
             config.skills.as_deref(),
-            &all_tool_names,
+            &all_model_capability_ids,
         );
 
         let model = config
@@ -519,7 +522,7 @@ impl SubagentSpawner for SubagentManager {
                 "inProcess",
                 &task,
             )
-            .map_err(|e| ToolError::Internal {
+            .map_err(|e| CapabilityExecutionError::Internal {
                 message: format!("Failed to create subagent session: {e}"),
             })?;
 
@@ -527,7 +530,7 @@ impl SubagentSpawner for SubagentManager {
             child_session_id.clone(),
             parent_sid.clone(),
             task.clone(),
-            SpawnType::ToolAgent,
+            SpawnType::CapabilityAgent,
         );
 
         // INVARIANT: persist subagent.spawned to the parent session
@@ -542,10 +545,10 @@ impl SubagentSpawner for SubagentManager {
             model: model.to_owned(),
             max_turns: config.max_turns,
             spawn_depth: config.current_depth,
-            tool_call_id: config.tool_call_id.clone(),
+            invocation_id: config.invocation_id.clone(),
             blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
-            spawn_type: Some(SpawnType::ToolAgent.as_str().to_owned()),
+            spawn_type: Some(SpawnType::CapabilityAgent.as_str().to_owned()),
         };
 
         if parent_sid.is_empty() {
@@ -563,10 +566,10 @@ impl SubagentSpawner for SubagentManager {
                             "model": model,
                             "maxTurns": config.max_turns,
                             "spawnDepth": config.current_depth,
-                            "toolCallId": config.tool_call_id,
+                            "invocationId": config.invocation_id,
                             "blockingTimeoutMs": config.blocking_timeout_ms,
                             "workingDirectory": config.working_directory,
-                            "spawnType": SpawnType::ToolAgent.as_str(),
+                            "spawnType": SpawnType::CapabilityAgent.as_str(),
                         }),
                         parent_id: None,
                         sequence: None,
@@ -591,7 +594,7 @@ impl SubagentSpawner for SubagentManager {
                 .map(|prompt| prompt.content.clone())
         });
 
-        execution::spawn_tool_agent_task(execution::ToolAgentTaskLaunch {
+        execution::spawn_capability_agent_task(execution::CapabilityAgentTaskLaunch {
             session_manager: self.session_manager.clone(),
             event_store: self.event_store.clone(),
             broadcast: self.broadcast.clone(),
@@ -615,7 +618,7 @@ impl SubagentSpawner for SubagentManager {
             cancel,
             denied_capabilities: merged_denied_capabilities,
             run_state_probe: self.probe_clone(),
-            spawn_type: SpawnType::ToolAgent.as_str().to_owned(),
+            spawn_type: SpawnType::CapabilityAgent.as_str().to_owned(),
             engine_host: self.engine_host.get().cloned(),
         });
 
@@ -662,7 +665,7 @@ impl SubagentSpawner for SubagentManager {
         session_ids: &[String],
         mode: WaitMode,
         timeout_ms: u64,
-    ) -> Result<Vec<SubagentResult>, ToolError> {
+    ) -> Result<Vec<SubagentResult>, CapabilityExecutionError> {
         self.wait_for_agents_impl(session_ids, mode, timeout_ms)
             .await
     }
@@ -677,7 +680,7 @@ impl crate::domains::capability_support::implementations::traits::SubagentOps fo
         self.list_active_jobs(parent_session_id)
     }
 
-    fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError> {
+    fn cancel_subagent(&self, session_id: &str) -> Result<(), CapabilityExecutionError> {
         self.cancel_subagent(session_id)
     }
 
@@ -688,7 +691,7 @@ impl crate::domains::capability_support::implementations::traits::SubagentOps fo
         timeout_ms: u64,
     ) -> Result<
         Vec<crate::domains::capability_support::implementations::traits::SubagentResult>,
-        ToolError,
+        CapabilityExecutionError,
     > {
         self.wait_for_agents_impl(session_ids, mode, timeout_ms)
             .await

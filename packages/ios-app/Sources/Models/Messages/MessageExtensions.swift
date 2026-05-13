@@ -10,7 +10,7 @@ extension ChatMessage {
             return data.id
         case .capabilityResult(let data):
             return data.id
-        case .askUserQuestion(let data):
+        case .userInteraction(let data):
             return data.invocationId
         case .engineApproval(let data):
             return data.invocationId

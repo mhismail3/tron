@@ -101,6 +101,7 @@ async fn preview_session(payload: &Value, _deps: &Deps) -> Result<Value, Capabil
     let session_path = require_string_param(Some(payload), "sessionPath")?;
     run_blocking_task("import::preview_session", move || {
             let path = PathBuf::from(&session_path);
+            let validation = crate::domains::import::validate_session(&path).map_err(map_import_error)?;
             let records = crate::domains::import::parser::parse_session_detailed(&path)
                 .map_err(map_import_error)?
                 .records;
@@ -117,33 +118,23 @@ async fn preview_session(payload: &Value, _deps: &Deps) -> Result<Value, Capabil
                             "id": format!("preview_{msg_idx}"),
                             "role": "user",
                             "contentPreview": content_preview(content, 200),
-                            "hasToolUse": false,
+                            "hasCapabilityInvocation": false,
                         }));
                         msg_idx += 1;
                     }
                     crate::domains::session::event_store::EventType::MessageAssistant => {
                         let content = spec.payload.get("content");
-                        let has_tool_use =
+                        let has_capability_history =
                             content.and_then(Value::as_array).is_some_and(|blocks| {
                                 blocks.iter().any(|block| {
-                                    block.get("type").and_then(Value::as_str) == Some("tool_use")
+                                    block.get("type").and_then(Value::as_str) == Some("capability_invocation")
                                 })
                             });
-                        let tool_name = content.and_then(Value::as_array).and_then(|blocks| {
-                            blocks.iter().find_map(|block| {
-                                if block.get("type").and_then(Value::as_str) == Some("tool_use") {
-                                    block.get("name").and_then(Value::as_str).map(String::from)
-                                } else {
-                                    None
-                                }
-                            })
-                        });
                         messages.push(json!({
                             "id": format!("preview_{msg_idx}"),
                             "role": "assistant",
                             "contentPreview": content_preview(content, 200),
-                            "hasToolUse": has_tool_use,
-                            "toolName": tool_name,
+                            "hasCapabilityHistory": has_capability_history,
                         }));
                         msg_idx += 1;
                     }
@@ -153,7 +144,6 @@ async fn preview_session(payload: &Value, _deps: &Deps) -> Result<Value, Capabil
                     break;
                 }
             }
-            let validation = crate::domains::import::validate_session(&path).map_err(map_import_error)?;
             let warnings_json = validation
                 .warnings
                 .iter()
@@ -270,11 +260,12 @@ fn content_preview(content: Option<&Value>, max_len: usize) -> String {
                     .and_then(Value::as_str)
                     .filter(|value| !value.is_empty())
                     .map(|value| format!("[thinking] {value}")),
-                Some("tool_use") => block
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(|name| format!("[tool: {name}]")),
-                Some("tool_result") => Some("[capability result]".to_owned()),
+                Some("capability_invocation") => {
+                    Some("[unsupported provider capability history]".to_owned())
+                }
+                Some("capability_result") => {
+                    Some("[unsupported provider capability result]".to_owned())
+                }
                 _ => None,
             })
             .collect::<Vec<String>>()
@@ -292,13 +283,6 @@ fn import_warning_to_json(warning: &crate::domains::import::ImportWarning) -> Va
     let (kind, details) = match &warning.kind {
         crate::domains::import::ImportWarningKind::UnparseableLine { line_number } => {
             ("unparseable-line", json!({ "lineNumber": line_number }))
-        }
-        crate::domains::import::ImportWarningKind::OrphanToolResult { tool_call_id } => (
-            "orphan-capability-result",
-            json!({ "toolCallId": tool_call_id }),
-        ),
-        crate::domains::import::ImportWarningKind::OrphanToolUse { tool_call_id } => {
-            ("orphan-tool-use", json!({ "toolCallId": tool_call_id }))
         }
         crate::domains::import::ImportWarningKind::AssistantMissingModel => {
             ("assistant-missing-model", json!({}))

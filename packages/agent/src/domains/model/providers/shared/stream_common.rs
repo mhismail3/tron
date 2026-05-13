@@ -11,14 +11,14 @@
 use serde_json::Map;
 
 use crate::shared::events::StreamEvent;
-use crate::shared::messages::ToolCall;
+use crate::shared::messages::CapabilityInvocationDraft;
 
 /// In-progress capability invocation being accumulated from streaming deltas.
 #[derive(Clone, Debug)]
-pub struct ToolCallAccumulator {
+pub struct CapabilityInvocationAccumulator {
     /// Capability invocation ID.
     pub id: String,
-    /// Tool name.
+    /// Capability name.
     pub name: String,
     /// Accumulated JSON arguments string.
     pub args: String,
@@ -41,7 +41,7 @@ pub struct StreamAccumulator {
     /// Whether a `ThinkingStart` event has been emitted.
     pub thinking_started: bool,
     /// In-progress capability invocations keyed by capability invocation ID.
-    tool_calls: Vec<ToolCallAccumulator>,
+    capability_invocations: Vec<CapabilityInvocationAccumulator>,
     /// Input token count.
     pub input_tokens: u64,
     /// Output token count.
@@ -58,7 +58,7 @@ impl StreamAccumulator {
             accumulated_signature: String::new(),
             text_started: false,
             thinking_started: false,
-            tool_calls: Vec::new(),
+            capability_invocations: Vec::new(),
             input_tokens: 0,
             output_tokens: 0,
         }
@@ -136,26 +136,31 @@ impl StreamAccumulator {
         self.accumulated_signature.push_str(sig);
     }
 
-    /// Start tracking a new capability invocation. Emits `ToolCallStart`.
-    pub fn start_tool_call(&mut self, id: String, name: String) -> Vec<StreamEvent> {
-        let events = vec![StreamEvent::ToolCallStart {
-            tool_call_id: id.clone(),
+    /// Start tracking a new capability invocation. Emits `CapabilityInvocationDraftStart`.
+    pub fn start_capability_invocation(&mut self, id: String, name: String) -> Vec<StreamEvent> {
+        let events = vec![StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: id.clone(),
             name: name.clone(),
         }];
-        self.tool_calls.push(ToolCallAccumulator {
-            id,
-            name,
-            args: String::new(),
-        });
+        self.capability_invocations
+            .push(CapabilityInvocationAccumulator {
+                id,
+                name,
+                args: String::new(),
+            });
         events
     }
 
-    /// Append argument JSON delta to a capability invocation. Emits `ToolCallDelta`.
+    /// Append argument JSON delta to a capability invocation. Emits `CapabilityInvocationDraftDelta`.
     pub fn append_tool_args(&mut self, id: &str, delta: &str) -> Vec<StreamEvent> {
-        if let Some(tc) = self.tool_calls.iter_mut().find(|tc| tc.id == id) {
+        if let Some(tc) = self
+            .capability_invocations
+            .iter_mut()
+            .find(|tc| tc.id == id)
+        {
             tc.args.push_str(delta);
-            vec![StreamEvent::ToolCallDelta {
-                tool_call_id: id.to_string(),
+            vec![StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id: id.to_string(),
                 arguments_delta: delta.to_string(),
             }]
         } else {
@@ -163,15 +168,18 @@ impl StreamAccumulator {
         }
     }
 
-    /// Finish a capability invocation by ID. Parses accumulated args and emits `ToolCallEnd`.
+    /// Finish a capability invocation by ID. Parses accumulated args and emits `CapabilityInvocationDraftEnd`.
     ///
     /// Returns the events and removes the capability invocation from the active set.
-    pub fn finish_tool_call(&mut self, id: &str) -> Vec<StreamEvent> {
-        let pos = self.tool_calls.iter().position(|tc| tc.id == id);
+    pub fn finish_capability_invocation(&mut self, id: &str) -> Vec<StreamEvent> {
+        let pos = self
+            .capability_invocations
+            .iter()
+            .position(|tc| tc.id == id);
         let Some(idx) = pos else {
             return vec![];
         };
-        let tc = self.tool_calls.remove(idx);
+        let tc = self.capability_invocations.remove(idx);
         // INVARIANT: a provider never emits partial JSON on a capability invocation —
         // parse failures here indicate an upstream bug (stream chunk lost,
         // wire corruption, or a provider quirk). Log so the operator has
@@ -180,36 +188,43 @@ impl StreamAccumulator {
             Ok(m) => m,
             Err(error) => {
                 tracing::warn!(
-                    tool_call_id = %tc.id,
-                    tool_name = %tc.name,
+                    invocation_id = %tc.id,
+                    model_primitive_name = %tc.name,
                     error = %error,
                     raw_args_len = tc.args.len(),
-                    "tool_call args are not valid JSON — dispatching with empty args"
+                    "capability_invocation args are not valid JSON — dispatching with empty args"
                 );
                 Map::new()
             }
         };
-        let tool_call = ToolCall::new(tc.id, tc.name, arguments);
-        vec![StreamEvent::ToolCallEnd { tool_call }]
+        let capability_invocation = CapabilityInvocationDraft::new(tc.id, tc.name, arguments);
+        vec![StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation,
+        }]
     }
 
     /// Finish a capability invocation with pre-parsed arguments and optional thought signature.
-    pub fn finish_tool_call_with(
+    pub fn finish_capability_invocation_with(
         &mut self,
         id: &str,
         arguments: Map<String, serde_json::Value>,
         thought_signature: Option<String>,
     ) -> Vec<StreamEvent> {
-        let pos = self.tool_calls.iter().position(|tc| tc.id == id);
+        let pos = self
+            .capability_invocations
+            .iter()
+            .position(|tc| tc.id == id);
         let Some(idx) = pos else {
             return vec![];
         };
-        let tc = self.tool_calls.remove(idx);
-        let mut tool_call = ToolCall::new(tc.id, tc.name, arguments);
+        let tc = self.capability_invocations.remove(idx);
+        let mut capability_invocation = CapabilityInvocationDraft::new(tc.id, tc.name, arguments);
         if let Some(sig) = thought_signature {
-            tool_call = tool_call.with_thought_signature(&sig);
+            capability_invocation = capability_invocation.with_thought_signature(&sig);
         }
-        vec![StreamEvent::ToolCallEnd { tool_call }]
+        vec![StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation,
+        }]
     }
 
     /// Emit `ThinkingEnd` if thinking was started, closing the thinking block.
@@ -263,13 +278,18 @@ impl StreamAccumulator {
     }
 
     /// Get a reference to the accumulated capability invocations.
-    pub fn tool_calls(&self) -> &[ToolCallAccumulator] {
-        &self.tool_calls
+    pub fn capability_invocations(&self) -> &[CapabilityInvocationAccumulator] {
+        &self.capability_invocations
     }
 
     /// Get a mutable reference to a capability invocation by ID.
-    pub fn tool_call_mut(&mut self, id: &str) -> Option<&mut ToolCallAccumulator> {
-        self.tool_calls.iter_mut().find(|tc| tc.id == id)
+    pub fn capability_invocation_mut(
+        &mut self,
+        id: &str,
+    ) -> Option<&mut CapabilityInvocationAccumulator> {
+        self.capability_invocations
+            .iter_mut()
+            .find(|tc| tc.id == id)
     }
 
     /// Set input and output token counts.
@@ -303,7 +323,7 @@ mod tests {
         assert!(acc.accumulated_signature.is_empty());
         assert!(!acc.text_started);
         assert!(!acc.thinking_started);
-        assert!(acc.tool_calls.is_empty());
+        assert!(acc.capability_invocations.is_empty());
         assert_eq!(acc.input_tokens, 0);
         assert_eq!(acc.output_tokens, 0);
     }
@@ -409,37 +429,40 @@ mod tests {
     // ── capability invocation lifecycle ─────────────────────────────────────────
 
     #[test]
-    fn start_tool_call_emits_start_event() {
+    fn start_capability_invocation_emits_start_event() {
         let mut acc = StreamAccumulator::new();
-        let events = acc.start_tool_call("call_1".into(), "execute".into());
+        let events = acc.start_capability_invocation("call_1".into(), "execute".into());
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ToolCallStart { tool_call_id, name } => {
-                assert_eq!(tool_call_id, "call_1");
+            StreamEvent::CapabilityInvocationDraftStart {
+                invocation_id,
+                name,
+            } => {
+                assert_eq!(invocation_id, "call_1");
                 assert_eq!(name, "execute");
             }
-            _ => panic!("expected ToolCallStart"),
+            _ => panic!("expected CapabilityInvocationDraftStart"),
         }
-        assert_eq!(acc.tool_calls.len(), 1);
+        assert_eq!(acc.capability_invocations.len(), 1);
     }
 
     #[test]
     fn append_tool_args_emits_delta() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "execute".into());
+        let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
         let events = acc.append_tool_args("call_1", r#"{"cmd":"#);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ToolCallDelta {
-                tool_call_id,
+            StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id,
                 arguments_delta,
             } => {
-                assert_eq!(tool_call_id, "call_1");
+                assert_eq!(invocation_id, "call_1");
                 assert_eq!(arguments_delta, r#"{"cmd":"#);
             }
-            _ => panic!("expected ToolCallDelta"),
+            _ => panic!("expected CapabilityInvocationDraftDelta"),
         }
-        assert_eq!(acc.tool_calls[0].args, r#"{"cmd":"#);
+        assert_eq!(acc.capability_invocations[0].args, r#"{"cmd":"#);
     }
 
     #[test]
@@ -450,55 +473,64 @@ mod tests {
     }
 
     #[test]
-    fn finish_tool_call_emits_end_with_parsed_args() {
+    fn finish_capability_invocation_emits_end_with_parsed_args() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "execute".into());
+        let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
         let _ = acc.append_tool_args("call_1", r#"{"cmd":"ls"}"#);
-        let events = acc.finish_tool_call("call_1");
+        let events = acc.finish_capability_invocation("call_1");
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ToolCallEnd { tool_call } => {
-                assert_eq!(tool_call.id, "call_1");
-                assert_eq!(tool_call.name, "execute");
-                assert_eq!(tool_call.arguments["cmd"], "ls");
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
+                assert_eq!(capability_invocation.id, "call_1");
+                assert_eq!(capability_invocation.name, "execute");
+                assert_eq!(capability_invocation.arguments["cmd"], "ls");
             }
-            _ => panic!("expected ToolCallEnd"),
+            _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
-        assert!(acc.tool_calls.is_empty());
+        assert!(acc.capability_invocations.is_empty());
     }
 
     #[test]
-    fn finish_tool_call_unknown_id_returns_empty() {
+    fn finish_capability_invocation_unknown_id_returns_empty() {
         let mut acc = StreamAccumulator::new();
-        let events = acc.finish_tool_call("unknown");
+        let events = acc.finish_capability_invocation("unknown");
         assert!(events.is_empty());
     }
 
     #[test]
-    fn finish_tool_call_empty_args_gives_empty_map() {
+    fn finish_capability_invocation_empty_args_gives_empty_map() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "execute".into());
-        let events = acc.finish_tool_call("call_1");
+        let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
+        let events = acc.finish_capability_invocation("call_1");
         match &events[0] {
-            StreamEvent::ToolCallEnd { tool_call } => {
-                assert!(tool_call.arguments.is_empty());
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
+                assert!(capability_invocation.arguments.is_empty());
             }
-            _ => panic!("expected ToolCallEnd"),
+            _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
     }
 
     #[test]
-    fn finish_tool_call_with_thought_signature() {
+    fn finish_capability_invocation_with_thought_signature() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "execute".into());
+        let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
         let _ = acc.append_tool_args("call_1", r#"{"cmd":"ls"}"#);
         let args: Map<String, serde_json::Value> = serde_json::from_str(r#"{"cmd":"ls"}"#).unwrap();
-        let events = acc.finish_tool_call_with("call_1", args, Some("sig-abc".into()));
+        let events = acc.finish_capability_invocation_with("call_1", args, Some("sig-abc".into()));
         match &events[0] {
-            StreamEvent::ToolCallEnd { tool_call } => {
-                assert_eq!(tool_call.thought_signature.as_deref(), Some("sig-abc"));
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
+                assert_eq!(
+                    capability_invocation.thought_signature.as_deref(),
+                    Some("sig-abc")
+                );
             }
-            _ => panic!("expected ToolCallEnd"),
+            _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
     }
 
@@ -600,26 +632,26 @@ mod tests {
         assert_eq!(acc.output_tokens, 50);
     }
 
-    // ── tool_calls accessor ─────────────────────────────────────────
+    // ── capability_invocations accessor ─────────────────────────────────────────
 
     #[test]
-    fn tool_calls_returns_active_calls() {
+    fn capability_invocations_returns_active_calls() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("a".into(), "tool_a".into());
-        let _ = acc.start_tool_call("b".into(), "tool_b".into());
-        assert_eq!(acc.tool_calls().len(), 2);
-        let _ = acc.finish_tool_call("a");
-        assert_eq!(acc.tool_calls().len(), 1);
-        assert_eq!(acc.tool_calls()[0].id, "b");
+        let _ = acc.start_capability_invocation("a".into(), "tool_a".into());
+        let _ = acc.start_capability_invocation("b".into(), "tool_b".into());
+        assert_eq!(acc.capability_invocations().len(), 2);
+        let _ = acc.finish_capability_invocation("a");
+        assert_eq!(acc.capability_invocations().len(), 1);
+        assert_eq!(acc.capability_invocations()[0].id, "b");
     }
 
     #[test]
-    fn tool_call_mut_returns_mutable_ref() {
+    fn capability_invocation_mut_returns_mutable_ref() {
         let mut acc = StreamAccumulator::new();
-        let _ = acc.start_tool_call("call_1".into(), "execute".into());
-        let tc = acc.tool_call_mut("call_1").unwrap();
+        let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
+        let tc = acc.capability_invocation_mut("call_1").unwrap();
         tc.args.push_str("modified");
-        assert_eq!(acc.tool_calls()[0].args, "modified");
+        assert_eq!(acc.capability_invocations()[0].args, "modified");
     }
 
     // ── full lifecycle ──────────────────────────────────────────────
@@ -652,23 +684,25 @@ mod tests {
     }
 
     #[test]
-    fn full_tool_call_lifecycle() {
+    fn full_capability_invocation_lifecycle() {
         let mut acc = StreamAccumulator::new();
-        let start = acc.start_tool_call("call_1".into(), "execute".into());
+        let start = acc.start_capability_invocation("call_1".into(), "execute".into());
         let d1 = acc.append_tool_args("call_1", r#"{"cm"#);
         let d2 = acc.append_tool_args("call_1", r#"d":"ls"}"#);
-        let end = acc.finish_tool_call("call_1");
+        let end = acc.finish_capability_invocation("call_1");
 
         assert_eq!(start.len(), 1);
         assert_eq!(d1.len(), 1);
         assert_eq!(d2.len(), 1);
         assert_eq!(end.len(), 1);
         match &end[0] {
-            StreamEvent::ToolCallEnd { tool_call } => {
-                assert_eq!(tool_call.id, "call_1");
-                assert_eq!(tool_call.arguments["cmd"], "ls");
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => {
+                assert_eq!(capability_invocation.id, "call_1");
+                assert_eq!(capability_invocation.arguments["cmd"], "ls");
             }
-            _ => panic!("expected ToolCallEnd"),
+            _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
     }
 }

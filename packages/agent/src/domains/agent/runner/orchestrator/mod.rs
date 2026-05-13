@@ -9,7 +9,7 @@
 //! | `session_reconstructor` | Rebuild session state from persisted events |
 //! | `session_context` | Per-session context (workspace path, rules, skills) |
 //! | `agent_runner` | High-level agent run: skill injection → run → event ordering |
-//! | `agent_factory` | Creates `TronAgent` instances with provider/tools/hooks |
+//! | `agent_factory` | Creates `TronAgent` instances with provider/capabilities/hooks |
 //! | `event_persister` | Persists agent events to the event store (supports pre-assigned sequences) |
 //! | `subagent_manager` | Spawns/manages child agents for parallel capability invocation |
 //! | `process_manager` | Centralized lifecycle management for deterministic processes |
@@ -18,8 +18,8 @@
 //! | `turn_accumulator` | In-memory per-session scratchpad of in-flight turn content for `session.reconstruct` |
 //! | `streaming_journal` | Per-turn append-only WAL for crash recovery of partial LLM output |
 //! | `recovery` | Startup crash recovery — persists orphaned journal content |
-//! | `tool_call_tracker` | Tracks in-flight capability invocations for cancellation |
-//! | `tool_abort_registry` | Per-tool `CancellationToken` registry for `agent.abortTool` |
+//! | `capability_invocation_tracker` | Tracks in-flight capability invocations for cancellation |
+//! | `invocation_abort_registry` | Per-invocation `CancellationToken` registry for `agent.abortCapabilityInvocation` |
 //!
 //! ## Event Sequencing
 //!
@@ -27,7 +27,7 @@
 //! `Orchestrator::sequence_counters` (`DashMap<String, Arc<AtomicI64>>`). The counter
 //! is initialized on session create (start=0) or resume (start=MAX from DB), and
 //! threaded through: `Orchestrator → AgentRunner → TronAgent → TurnRunner →
-//! StreamProcessor / ToolExecutor`. All emitted events carry `sequence` in both
+//! StreamProcessor / CapabilityInvocationExecutor`. All emitted events carry `sequence` in both
 //! the `TronEvent` (via `BaseEvent.sequence`) and server stream event sequence fields.
 //!
 //! ## Streaming Journal (Crash Recovery)
@@ -46,7 +46,9 @@
 
 pub mod agent_factory;
 pub mod agent_runner;
+pub mod capability_invocation_tracker;
 pub mod event_persister;
+pub mod invocation_abort_registry;
 pub mod job_manager;
 #[allow(clippy::module_inception)]
 pub mod orchestrator;
@@ -58,6 +60,4 @@ pub mod session_manager;
 pub mod session_reconstructor;
 pub mod streaming_journal;
 pub mod subagent_manager;
-pub mod tool_abort_registry;
-pub mod tool_call_tracker;
 pub mod turn_accumulator;

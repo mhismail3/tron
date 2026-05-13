@@ -81,7 +81,7 @@ extension ChatViewModel {
             return true
         case .subagent(let data) where data.invocationId == invocationId:
             return true
-        case .askUserQuestion(let data) where data.invocationId == invocationId:
+        case .userInteraction(let data) where data.invocationId == invocationId:
             return true
         case .engineApproval(let data) where data.invocationId == invocationId:
             return true

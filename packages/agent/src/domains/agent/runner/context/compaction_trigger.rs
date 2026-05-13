@@ -82,7 +82,7 @@ impl CompactionTrigger {
 
         // 2b. Progress signals — capability invocation patterns
         let patterns = progress_patterns();
-        for cmd in &input.recent_tool_calls {
+        for cmd in &input.recent_capability_invocations {
             for pattern in patterns {
                 if pattern.is_match(cmd) {
                     return CompactionTriggerResult {
@@ -113,7 +113,7 @@ mod tests {
         CompactionTriggerInput {
             current_token_ratio: ratio,
             recent_event_types: Vec::new(),
-            recent_tool_calls: Vec::new(),
+            recent_capability_invocations: Vec::new(),
         }
     }
 
@@ -146,7 +146,7 @@ mod tests {
         let input = CompactionTriggerInput {
             current_token_ratio: 0.3,
             recent_event_types: vec!["worktree.commit".to_string()],
-            recent_tool_calls: Vec::new(),
+            recent_capability_invocations: Vec::new(),
         };
         let result = trigger.should_compact(&input);
         assert!(result.compact);
@@ -159,7 +159,7 @@ mod tests {
         let input = CompactionTriggerInput {
             current_token_ratio: 0.3,
             recent_event_types: Vec::new(),
-            recent_tool_calls: vec!["git push origin main".to_string()],
+            recent_capability_invocations: vec!["git push origin main".to_string()],
         };
         let result = trigger.should_compact(&input);
         assert!(result.compact);

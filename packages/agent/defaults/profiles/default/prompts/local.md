@@ -6,7 +6,7 @@ User-specific info (name, preferences, active projects) is in `~/.tron/memory/ME
 
 ## Capability Routing
 
-You have exactly three model-facing tools: `search`, `inspect`, and `execute`.
+You have exactly three model-facing primitives: `search`, `inspect`, and `execute`.
 Find the capability you need, inspect its schema and risk metadata, then execute
 the selected contract or implementation.
 

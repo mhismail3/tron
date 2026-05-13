@@ -8,8 +8,8 @@ use crate::shared::messages::Message;
 
 use super::token_estimator::estimate_message_tokens;
 use super::types::{
-    ContextSnapshot, DetailedContextSnapshot, DetailedMessageInfo, ThresholdLevel, TokenBreakdown,
-    ToolCallInfo, ToolSummary,
+    CapabilityInvocationDraftInfo, CapabilitySummary, ContextSnapshot, DetailedContextSnapshot,
+    DetailedMessageInfo, ThresholdLevel, TokenBreakdown,
 };
 
 // =============================================================================
@@ -28,8 +28,8 @@ pub trait SnapshotDeps: Send + Sync {
     fn get_messages(&self) -> Vec<Message>;
     /// Estimated system prompt tokens.
     fn estimate_system_prompt_tokens(&self) -> u64;
-    /// Estimated tools tokens.
-    fn estimate_tools_tokens(&self) -> u64;
+    /// Estimated capabilities tokens.
+    fn estimate_capabilities_tokens(&self) -> u64;
     /// Estimated rules tokens.
     fn estimate_rules_tokens(&self) -> u64;
     /// Estimated skill index tokens.
@@ -50,10 +50,10 @@ pub trait SnapshotDeps: Send + Sync {
     fn get_volatile_skill_removal_tokens(&self) -> u64;
     /// Volatile: background job results tokens.
     fn get_volatile_job_results_tokens(&self) -> u64;
-    /// Tool clarification text (Codex mode).
-    fn get_tool_clarification(&self) -> Option<String>;
-    /// Tool summaries for the detailed snapshot.
-    fn get_tool_summaries(&self) -> Vec<ToolSummary>;
+    /// ModelCapability clarification text (Codex mode).
+    fn get_capability_clarification(&self) -> Option<String>;
+    /// ModelCapability summaries for the detailed snapshot.
+    fn get_capability_summaries(&self) -> Vec<CapabilitySummary>;
     /// Whether this is a local (Ollama) model session.
     fn is_local_model(&self) -> bool;
 }
@@ -88,7 +88,7 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
 
         let threshold_level = ThresholdLevel::from_ratio(usage_percent);
         let component_total = self.deps.estimate_system_prompt_tokens()
-            + self.deps.estimate_tools_tokens()
+            + self.deps.estimate_capabilities_tokens()
             + self.deps.estimate_rules_tokens()
             + self.deps.estimate_memory_tokens()
             + self.deps.estimate_skill_index_tokens()
@@ -105,7 +105,7 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
             threshold_level,
             breakdown: TokenBreakdown {
                 system_prompt: self.deps.estimate_system_prompt_tokens(),
-                tools: self.deps.estimate_tools_tokens(),
+                capabilities: self.deps.estimate_capabilities_tokens(),
                 rules: self.deps.estimate_rules_tokens(),
                 memory: self.deps.estimate_memory_tokens(),
                 skill_index: self.deps.estimate_skill_index_tokens(),
@@ -137,8 +137,8 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
             snapshot,
             messages: detailed_messages,
             system_prompt_content: self.deps.get_system_prompt(),
-            tool_clarification_content: self.deps.get_tool_clarification(),
-            tools_content: self.deps.get_tool_summaries(),
+            capability_clarification_content: self.deps.get_capability_clarification(),
+            capabilities_content: self.deps.get_capability_summaries(),
         }
     }
 }
@@ -165,28 +165,28 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
                 summary: summarize_content(&text, 100),
                 content: text,
                 event_id: None,
-                tool_calls: None,
-                tool_call_id: None,
+                capability_invocations: None,
+                invocation_id: None,
                 is_error: None,
             }
         }
         Message::Assistant { content, .. } => {
             let mut text_parts = Vec::new();
-            let mut tool_calls = Vec::new();
+            let mut capability_invocations = Vec::new();
 
             for block in content {
                 match block {
                     AssistantContent::Text { text } => {
                         text_parts.push(text.clone());
                     }
-                    AssistantContent::ToolUse {
+                    AssistantContent::CapabilityInvocation {
                         id,
                         name,
                         arguments,
                         ..
                     } => {
                         let args_str = serde_json::to_string(arguments).unwrap_or_default();
-                        tool_calls.push(ToolCallInfo {
+                        capability_invocations.push(CapabilityInvocationDraftInfo {
                             id: id.clone(),
                             name: name.clone(),
                             tokens: u64::from(estimate_message_tokens(msg)),
@@ -205,42 +205,42 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
                 summary: summarize_content(&full_text, 100),
                 content: full_text,
                 event_id: None,
-                tool_calls: if tool_calls.is_empty() {
+                capability_invocations: if capability_invocations.is_empty() {
                     None
                 } else {
-                    Some(tool_calls)
+                    Some(capability_invocations)
                 },
-                tool_call_id: None,
+                invocation_id: None,
                 is_error: None,
             }
         }
-        Message::ToolResult {
-            tool_call_id,
+        Message::CapabilityResult {
+            invocation_id,
             content,
             is_error,
         } => {
             let text = match content {
-                crate::shared::messages::ToolResultMessageContent::Text(t) => t.clone(),
-                crate::shared::messages::ToolResultMessageContent::Blocks(blocks) => blocks
+                crate::shared::messages::CapabilityResultMessageContent::Text(t) => t.clone(),
+                crate::shared::messages::CapabilityResultMessageContent::Blocks(blocks) => blocks
                     .iter()
                     .filter_map(|b| match b {
-                        crate::shared::content::ToolResultContent::Text { text } => {
+                        crate::shared::content::CapabilityResultContent::Text { text } => {
                             Some(text.as_str())
                         }
-                        crate::shared::content::ToolResultContent::Image { .. } => None,
+                        crate::shared::content::CapabilityResultContent::Image { .. } => None,
                     })
                     .collect::<Vec<_>>()
                     .join("\n"),
             };
             DetailedMessageInfo {
                 index,
-                role: "tool_result".into(),
+                role: "capability_result".into(),
                 tokens,
                 summary: summarize_content(&text, 100),
                 content: text,
                 event_id: None,
-                tool_calls: None,
-                tool_call_id: Some(tool_call_id.clone()),
+                capability_invocations: None,
+                invocation_id: Some(invocation_id.clone()),
                 is_error: *is_error,
             }
         }
@@ -259,14 +259,14 @@ fn summarize_content(text: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::messages::{ToolResultMessageContent, UserMessageContent};
+    use crate::shared::messages::{CapabilityResultMessageContent, UserMessageContent};
 
     struct MockDeps {
         current_tokens: u64,
         context_limit: u64,
         messages: Vec<Message>,
         system_prompt_tokens: u64,
-        tools_tokens: u64,
+        capabilities_tokens: u64,
         rules_tokens: u64,
         messages_tokens: u64,
         message_token_value: u64,
@@ -279,7 +279,7 @@ mod tests {
                 context_limit: 100_000,
                 messages: vec![Message::user("Hello"), Message::assistant("Hi there")],
                 system_prompt_tokens: 2_000,
-                tools_tokens: 1_000,
+                capabilities_tokens: 1_000,
                 rules_tokens: 500,
                 messages_tokens: 5_000,
                 message_token_value: 100,
@@ -300,8 +300,8 @@ mod tests {
         fn estimate_system_prompt_tokens(&self) -> u64 {
             self.system_prompt_tokens
         }
-        fn estimate_tools_tokens(&self) -> u64 {
-            self.tools_tokens
+        fn estimate_capabilities_tokens(&self) -> u64 {
+            self.capabilities_tokens
         }
         fn estimate_rules_tokens(&self) -> u64 {
             self.rules_tokens
@@ -333,16 +333,16 @@ mod tests {
         fn get_system_prompt(&self) -> String {
             "You are a helpful assistant.".into()
         }
-        fn get_tool_clarification(&self) -> Option<String> {
+        fn get_capability_clarification(&self) -> Option<String> {
             None
         }
-        fn get_tool_summaries(&self) -> Vec<ToolSummary> {
+        fn get_capability_summaries(&self) -> Vec<CapabilitySummary> {
             vec![
-                ToolSummary {
+                CapabilitySummary {
                     name: "execute".into(),
                     description: "Execute a shell command.".into(),
                 },
-                ToolSummary {
+                CapabilitySummary {
                     name: "inspect".into(),
                     description: "Read file contents.".into(),
                 },
@@ -372,7 +372,7 @@ mod tests {
         let builder = ContextSnapshotBuilder::new(deps);
         let snap = builder.build();
         assert_eq!(snap.breakdown.system_prompt, 2_000);
-        assert_eq!(snap.breakdown.tools, 1_000);
+        assert_eq!(snap.breakdown.capabilities, 1_000);
         assert_eq!(snap.breakdown.rules, 500);
         assert_eq!(snap.breakdown.messages, 5_000);
         assert_eq!(snap.breakdown.provider_adjustment, 41_500);
@@ -384,7 +384,7 @@ mod tests {
         let deps = MockDeps {
             current_tokens: 10_000,
             system_prompt_tokens: 1_000,
-            tools_tokens: 2_000,
+            capabilities_tokens: 2_000,
             rules_tokens: 500,
             messages_tokens: 1_500,
             ..MockDeps::default()
@@ -421,10 +421,10 @@ mod tests {
             detailed.system_prompt_content,
             "You are a helpful assistant."
         );
-        assert!(detailed.tool_clarification_content.is_none());
-        assert_eq!(detailed.tools_content.len(), 2);
-        assert_eq!(detailed.tools_content[0].name, "execute");
-        assert_eq!(detailed.tools_content[1].name, "inspect");
+        assert!(detailed.capability_clarification_content.is_none());
+        assert_eq!(detailed.capabilities_content.len(), 2);
+        assert_eq!(detailed.capabilities_content[0].name, "execute");
+        assert_eq!(detailed.capabilities_content[1].name, "inspect");
     }
 
     #[test]
@@ -456,8 +456,8 @@ mod tests {
         assert_eq!(info.role, "user");
         assert_eq!(info.content, "Hello world");
         assert_eq!(info.tokens, 50);
-        assert!(info.tool_calls.is_none());
-        assert!(info.tool_call_id.is_none());
+        assert!(info.capability_invocations.is_none());
+        assert!(info.invocation_id.is_none());
     }
 
     #[test]
@@ -469,11 +469,11 @@ mod tests {
     }
 
     #[test]
-    fn assistant_with_tool_calls() {
+    fn assistant_with_capability_invocations() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("command".into(), serde_json::json!("ls"));
         let msg = Message::Assistant {
-            content: vec![AssistantContent::ToolUse {
+            content: vec![AssistantContent::CapabilityInvocation {
                 id: "tc-1".into(),
                 name: "execute".into(),
                 arguments: args,
@@ -485,31 +485,31 @@ mod tests {
             thinking: None,
         };
         let info = build_message_info(&msg, 2, 80);
-        assert!(info.tool_calls.is_some());
-        let calls = info.tool_calls.unwrap();
+        assert!(info.capability_invocations.is_some());
+        let calls = info.capability_invocations.unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "execute");
         assert!(calls[0].arguments.contains("ls"));
     }
 
     #[test]
-    fn tool_result_message_info() {
-        let msg = Message::ToolResult {
-            tool_call_id: "tc-1".into(),
-            content: ToolResultMessageContent::Text("file contents".into()),
+    fn capability_result_message_info() {
+        let msg = Message::CapabilityResult {
+            invocation_id: "tc-1".into(),
+            content: CapabilityResultMessageContent::Text("file contents".into()),
             is_error: Some(false),
         };
         let info = build_message_info(&msg, 3, 20);
-        assert_eq!(info.role, "tool_result");
-        assert_eq!(info.tool_call_id, Some("tc-1".into()));
+        assert_eq!(info.role, "capability_result");
+        assert_eq!(info.invocation_id, Some("tc-1".into()));
         assert_eq!(info.is_error, Some(false));
     }
 
     #[test]
-    fn tool_result_error_flag() {
-        let msg = Message::ToolResult {
-            tool_call_id: "tc-2".into(),
-            content: ToolResultMessageContent::Text("error".into()),
+    fn capability_result_error_flag() {
+        let msg = Message::CapabilityResult {
+            invocation_id: "tc-2".into(),
+            content: CapabilityResultMessageContent::Text("error".into()),
             is_error: Some(true),
         };
         let info = build_message_info(&msg, 0, 10);

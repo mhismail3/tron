@@ -11,7 +11,7 @@
 //! JSON lines with compact keys for write efficiency:
 //! - `{"t":"text","c":"delta content"}`
 //! - `{"t":"thinking","c":"delta content"}`
-//! - `{"t":"tool_use","c":"{...}"}`  (JSON-encoded capability invocation)
+//! - `{"t":"capability_invocation","c":"{...}"}`  (JSON-encoded capability invocation)
 //!
 //! Each `append_delta` writes one line and flushes, providing crash safety to
 //! line granularity.
@@ -34,7 +34,7 @@ use crate::shared::paths;
 /// A single delta entry in the journal WAL.
 #[derive(Debug, Serialize, Deserialize)]
 struct JournalEntry {
-    /// Delta type: "text", "thinking", or "tool_use"
+    /// Delta type: "text", "thinking", or "capability_invocation"
     t: String,
     /// Delta content
     c: String,
@@ -52,7 +52,7 @@ pub struct RecoveredTurn {
     /// Accumulated thinking/reasoning content from all thinking deltas.
     pub accumulated_thinking: String,
     /// Partial capability invocation data recovered from the journal.
-    pub tool_calls: Vec<serde_json::Value>,
+    pub capability_invocations: Vec<serde_json::Value>,
 }
 
 /// Append-only WAL for a single turn's streaming output.
@@ -148,7 +148,7 @@ impl StreamingJournal {
         let reader = BufReader::new(file);
         let mut text = String::new();
         let mut thinking = String::new();
-        let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+        let mut capability_invocations: Vec<serde_json::Value> = Vec::new();
         let mut recovered_lines = 0u64;
 
         for line_result in reader.lines() {
@@ -187,9 +187,9 @@ impl StreamingJournal {
             match entry.t.as_str() {
                 "text" => text.push_str(&entry.c),
                 "thinking" => thinking.push_str(&entry.c),
-                "tool_use" => {
+                "capability_invocation" => {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&entry.c) {
-                        tool_calls.push(val);
+                        capability_invocations.push(val);
                     }
                 }
                 other => {
@@ -214,7 +214,7 @@ impl StreamingJournal {
             recovered_lines,
             text_len = text.len(),
             thinking_len = thinking.len(),
-            tool_calls = tool_calls.len(),
+            capability_invocations = capability_invocations.len(),
             "journal recovery loaded"
         );
 
@@ -223,7 +223,7 @@ impl StreamingJournal {
             turn,
             accumulated_text: text,
             accumulated_thinking: thinking,
-            tool_calls,
+            capability_invocations,
         }))
     }
 
@@ -438,7 +438,7 @@ mod tests {
         writeln!(f, r#"{{"t":"thinking","c":"I should greet"}}"#).unwrap();
         writeln!(
             f,
-            r#"{{"t":"tool_use","c":"{{\"name\":\"execute\",\"id\":\"tc1\"}}"}}"#
+            r#"{{"t":"capability_invocation","c":"{{\"name\":\"execute\",\"id\":\"tc1\"}}"}}"#
         )
         .unwrap();
         drop(f);
@@ -448,7 +448,7 @@ mod tests {
         let reader = BufReader::new(file);
         let mut text = String::new();
         let mut thinking = String::new();
-        let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+        let mut capability_invocations: Vec<serde_json::Value> = Vec::new();
 
         for line_result in reader.lines() {
             let line = line_result.unwrap();
@@ -459,9 +459,9 @@ mod tests {
             match entry.t.as_str() {
                 "text" => text.push_str(&entry.c),
                 "thinking" => thinking.push_str(&entry.c),
-                "tool_use" => {
+                "capability_invocation" => {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&entry.c) {
-                        tool_calls.push(val);
+                        capability_invocations.push(val);
                     }
                 }
                 _ => {}
@@ -470,8 +470,8 @@ mod tests {
 
         assert_eq!(text, "Hello world");
         assert_eq!(thinking, "I should greet");
-        assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0]["name"], "execute");
+        assert_eq!(capability_invocations.len(), 1);
+        assert_eq!(capability_invocations[0]["name"], "execute");
     }
 
     // ── Test 6: load_recovery_nonexistent_returns_none ─────────────────────

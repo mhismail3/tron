@@ -92,11 +92,11 @@ cacheClass = "session"
 providerSurface = "instructions"
 
 [[blocks]]
-id = "tools.schemas"
-name = "Tool Schemas"
+id = "capabilities.schemas"
+name = "Capability Schemas"
 home = "profiles"
 cacheClass = "session"
-providerSurface = "tool"
+providerSurface = "capability"
 
 [[blocks]]
 id = "conversation.messages"

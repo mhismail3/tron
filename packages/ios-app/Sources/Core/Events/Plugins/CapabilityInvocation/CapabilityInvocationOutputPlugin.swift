@@ -1,7 +1,7 @@
 import Foundation
 
-/// Plugin for handling streaming tool output events.
-/// These events deliver incremental stdout/stderr chunks while a tool is running.
+/// Plugin for handling streaming capability output events.
+/// These events deliver incremental stdout/stderr chunks while a capability is running.
 enum CapabilityInvocationOutputPlugin: DispatchableEventPlugin {
     static let eventType = "capability.invocation.output"
 

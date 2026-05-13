@@ -14,8 +14,8 @@ struct ConsolidatedAnalytics {
         let cacheCreation1hTokens: Int
         let cost: Double
         let latency: Int
-        let toolCount: Int
-        let tools: [String]
+        let capabilityCount: Int
+        let capabilities: [String]
         let errorCount: Int
         let errors: [String]
         let model: String?
@@ -278,7 +278,7 @@ struct ConsolidatedAnalytics {
             var cacheCreation1h: Int = 0
             var cost: Double? = nil
             var latency: Int = 0
-            var tools: [String] = []
+            var capabilities: [String] = []
             var errors: [String] = []
             var model: String? = nil
         }
@@ -294,7 +294,7 @@ struct ConsolidatedAnalytics {
         var previousModel: String? = nil
         var latencySum = 0
         var latencyCount = 0
-        var totalTools = 0
+        var totalCapabilities = 0
         var totalErrs = 0
 
         for event in events {
@@ -399,13 +399,13 @@ struct ConsolidatedAnalytics {
 
             case .capabilityInvocationStarted:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value),
-                      let modelToolName = event.payload["name"]?.value as? String,
+                      let modelPrimitiveName = event.payload["modelPrimitiveName"]?.value as? String,
                       let index = turnNumberToLatestIndex[turn] else { continue }
 
-                if !turnEntries[index].tools.contains(modelToolName) {
-                    turnEntries[index].tools.append(modelToolName)
+                if !turnEntries[index].capabilities.contains(modelPrimitiveName) {
+                    turnEntries[index].capabilities.append(modelPrimitiveName)
                 }
-                totalTools += 1
+                totalCapabilities += 1
 
             case .errorAgent, .errorProvider, .errorCapability:
                 let errorMsg = (event.payload["error"]?.value as? String) ?? "Unknown error"
@@ -441,8 +441,8 @@ struct ConsolidatedAnalytics {
                 cacheCreation1hTokens: value.cacheCreation1h,
                 cost: value.cost ?? 0,
                 latency: value.latency,
-                toolCount: value.tools.count,
-                tools: value.tools,
+                capabilityCount: value.capabilities.count,
+                capabilities: value.capabilities,
                 errorCount: value.errors.count,
                 errors: value.errors,
                 model: value.model?.shortModelName
@@ -451,7 +451,7 @@ struct ConsolidatedAnalytics {
 
         self.totalCost = self.turns.reduce(0) { $0 + $1.cost }
         self.totalTurns = self.turns.count
-        self.totalCapabilityInvocations = totalTools
+        self.totalCapabilityInvocations = totalCapabilities
         self.totalErrors = totalErrs
         self.avgLatency = latencyCount > 0 ? latencySum / latencyCount : 0
     }

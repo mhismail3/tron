@@ -3,10 +3,10 @@
 use serde_json::json;
 
 use crate::domains::mcp::types::{McpContentBlock, McpToolResult};
-use crate::shared::tools::{CapabilityResult, ToolResultBody};
+use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 
 /// Convert an MCP capability result to a `CapabilityResult` payload used by `execute`.
-pub fn mcp_result_to_tron_result(
+pub fn mcp_result_to_capability_result(
     result: &McpToolResult,
     server: &str,
     tool: &str,
@@ -30,9 +30,9 @@ pub fn mcp_result_to_tron_result(
     };
 
     CapabilityResult {
-        content: ToolResultBody::Blocks(vec![crate::shared::content::ToolResultContent::text(
-            content,
-        )]),
+        content: CapabilityResultBody::Blocks(vec![
+            crate::shared::content::CapabilityResultContent::text(content),
+        ]),
         details: Some(json!({
             "mcpServer": server,
             "mcpTool": tool,
@@ -54,7 +54,7 @@ mod tests {
             }],
             is_error: false,
         };
-        let converted = mcp_result_to_tron_result(&result, "server", "query");
+        let converted = mcp_result_to_capability_result(&result, "server", "query");
         assert_eq!(converted.is_error, None);
         assert!(converted.details.unwrap()["mcpServer"] == "server");
     }

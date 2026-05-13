@@ -17,23 +17,23 @@ final class AnimationCoordinator {
         static let cascadeSpringDamping: Double = 0.85
 
         // Capability invocation stagger
-        static let toolStaggerInterval: UInt64 = 80_000_000    // 80ms between tools
-        static let toolStaggerCap: UInt64 = 200_000_000        // Max 200ms delay
+        static let capabilityStaggerInterval: UInt64 = 80_000_000    // 80ms between capability invocations
+        static let capabilityStaggerCap: UInt64 = 200_000_000        // Max 200ms delay
     }
 
     // MARK: - Published State
 
-    // Tool stagger state
+    // Capability stagger state
     private(set) var visibleInvocationIds: Set<String> = []
     private var pendingCapabilityInvocations: [PendingCapabilityInvocation] = []
-    private var toolProcessingTask: Task<Void, Never>?
+    private var capabilityProcessingTask: Task<Void, Never>?
 
     // Message cascade state
     private(set) var cascadeProgress: Int = 0
     private(set) var totalCascadeMessages: Int = 0
     private var cascadeTask: Task<Void, Never>?
 
-    // MARK: - Tool Call Staggering
+    // MARK: - Capability Call Staggering
 
     struct PendingCapabilityInvocation {
         let invocationId: String
@@ -41,16 +41,16 @@ final class AnimationCoordinator {
     }
 
     /// Queue a capability invocation to appear with staggered timing
-    /// Tools are immediately made visible (so they always render)
+    /// Capabilities are immediately made visible (so they always render)
     /// The stagger animation queue is just for the visual appearance timing
     func queueCapabilityInvocationStart(invocationId: String) {
-        // CRITICAL: Make tool immediately visible so it always renders
-        // This prevents tools from disappearing when visibility is checked
+        // CRITICAL: Make capability immediately visible so it always renders
+        // This prevents capabilities from disappearing when visibility is checked
         visibleInvocationIds.insert(invocationId)
 
         // Also queue for staggered animation effect (purely visual)
         pendingCapabilityInvocations.append(PendingCapabilityInvocation(invocationId: invocationId, queuedAt: Date()))
-        processToolQueue()
+        processCapabilityQueue()
     }
 
     /// Mark a capability invocation as complete (for ordering capability ends)
@@ -59,44 +59,44 @@ final class AnimationCoordinator {
     }
 
     /// Check if a capability invocation should be visible
-    func isToolVisible(_ invocationId: String) -> Bool {
+    func isCapabilityInvocationVisible(_ invocationId: String) -> Bool {
         visibleInvocationIds.contains(invocationId)
     }
 
-    /// Directly mark a tool as visible (for catch-up and historical tools)
+    /// Directly mark a capability as visible (for catch-up and historical capabilities)
     func makeCapabilityInvocationVisible(_ invocationId: String) {
         visibleInvocationIds.insert(invocationId)
     }
 
-    /// Reset tool animation state for new turn (preserves visibility of existing tools)
+    /// Reset capability animation state for new turn (preserves visibility of existing capabilities)
     /// Called at turn boundaries to reset stagger queue for new capability invocations
-    func resetToolState() {
-        toolProcessingTask?.cancel()
-        toolProcessingTask = nil
+    func resetCapabilityState() {
+        capabilityProcessingTask?.cancel()
+        capabilityProcessingTask = nil
         pendingCapabilityInvocations.removeAll()
-        // NOTE: Do NOT clear visibleInvocationIds - tools already in messages should stay visible
+        // NOTE: Do NOT clear visibleInvocationIds - capabilities already in messages should stay visible
         // They will be naturally cleaned up when the session ends or view is dismissed
     }
 
     /// Full reset including visibility (called when leaving session)
     func fullReset() {
-        toolProcessingTask?.cancel()
-        toolProcessingTask = nil
+        capabilityProcessingTask?.cancel()
+        capabilityProcessingTask = nil
         pendingCapabilityInvocations.removeAll()
         visibleInvocationIds.removeAll()
     }
 
-    private func processToolQueue() {
-        guard toolProcessingTask == nil else { return }
+    private func processCapabilityQueue() {
+        guard capabilityProcessingTask == nil else { return }
 
-        toolProcessingTask = Task { @MainActor in
+        capabilityProcessingTask = Task { @MainActor in
             while !pendingCapabilityInvocations.isEmpty {
                 let pending = pendingCapabilityInvocations.removeFirst()
 
                 // Calculate stagger delay (capped)
                 let staggerDelay = min(
-                    Timing.toolStaggerInterval * UInt64(visibleInvocationIds.count),
-                    Timing.toolStaggerCap
+                    Timing.capabilityStaggerInterval * UInt64(visibleInvocationIds.count),
+                    Timing.capabilityStaggerCap
                 )
 
                 if staggerDelay > 0 {
@@ -108,7 +108,7 @@ final class AnimationCoordinator {
                 }
             }
 
-            toolProcessingTask = nil
+            capabilityProcessingTask = nil
         }
     }
 
@@ -194,8 +194,8 @@ final class AnimationCoordinator {
         .spring(response: 0.32, dampingFraction: 0.86)
     }
 
-    /// Tool appearance animation
-    static var toolAnimation: Animation {
+    /// Capability appearance animation
+    static var capabilityAnimation: Animation {
         .spring(response: 0.35, dampingFraction: 0.8)
     }
 

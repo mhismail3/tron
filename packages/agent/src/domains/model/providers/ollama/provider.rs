@@ -8,7 +8,7 @@
 //! Ollama's `/v1/chat/completions` endpoint **ignores** the `num_ctx` parameter —
 //! it only works via the native `/api/chat` endpoint's `options.num_ctx` field.
 //! Without this, Ollama defaults to a 4K context window, silently truncating
-//! Tron's ~12K system prompt + tools, which destroys reasoning/thinking output.
+//! Tron's ~12K system prompt + capabilities, which destroys reasoning/thinking output.
 //!
 //! We solve this by sending a lightweight non-streaming request to `/api/chat`
 //! with the desired `num_ctx` before the first streaming request. This forces
@@ -103,9 +103,9 @@ impl OllamaProvider {
         get_ollama_model(&self.config.model).is_some_and(|m| m.supports_images)
     }
 
-    /// Check if the current model supports tools.
-    fn model_supports_tools(&self) -> bool {
-        get_ollama_model(&self.config.model).is_some_and(|m| m.supports_tools)
+    /// Check if the current model supports capabilities.
+    fn model_supports_capabilities(&self) -> bool {
+        get_ollama_model(&self.config.model).is_some_and(|m| m.supports_capabilities)
     }
 
     /// Build the request body for the chat completions API.
@@ -139,11 +139,11 @@ impl OllamaProvider {
         body["messages"] = Value::Array(api_messages);
 
         // Tools (only for tool-capable models)
-        if self.model_supports_tools()
-            && let Some(ref tools) = context.tools
-            && !tools.is_empty()
+        if self.model_supports_capabilities()
+            && let Some(ref capabilities) = context.capabilities
+            && !capabilities.is_empty()
         {
-            let tool_defs = convert_tools(tools);
+            let tool_defs = convert_tools(capabilities);
             body["tools"] = serde_json::to_value(&tool_defs).unwrap_or_default();
         }
 
@@ -503,7 +503,7 @@ mod tests {
     fn e4b_supports_images_and_tools() {
         let provider = OllamaProvider::new(test_config());
         assert!(provider.model_supports_images());
-        assert!(provider.model_supports_tools());
+        assert!(provider.model_supports_capabilities());
     }
 
     #[test]
@@ -512,7 +512,7 @@ mod tests {
         cfg.model = "unknown".into();
         let provider = OllamaProvider::new(cfg);
         assert!(!provider.model_supports_images());
-        assert!(!provider.model_supports_tools());
+        assert!(!provider.model_supports_capabilities());
     }
 
     // ── Request body ─────────────────────────────────────────────────────
@@ -585,10 +585,10 @@ mod tests {
     fn request_body_with_tools() {
         let provider = OllamaProvider::new(test_config());
         let ctx = Context {
-            tools: Some(vec![crate::shared::tools::Tool {
+            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
                 name: "execute".into(),
                 description: "Run commands".into(),
-                parameters: crate::shared::tools::ToolParameterSchema {
+                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
                     schema_type: "object".into(),
                     properties: None,
                     required: None,
@@ -600,16 +600,16 @@ mod tests {
         };
         let options = ProviderStreamOptions::default();
         let body = provider.build_request_body(&ctx, &options);
-        let tools = body["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["type"], "function");
+        let capabilities = body["tools"].as_array().unwrap();
+        assert_eq!(capabilities.len(), 1);
+        assert_eq!(capabilities[0]["type"], "function");
     }
 
     #[test]
     fn request_body_no_tools_when_empty() {
         let provider = OllamaProvider::new(test_config());
         let ctx = Context {
-            tools: Some(vec![]),
+            capabilities: Some(vec![]),
             ..Context::default()
         };
         let options = ProviderStreamOptions::default();

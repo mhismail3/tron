@@ -136,21 +136,21 @@ fn extract_text_from_payload(payload_str: &str) -> String {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySummaryLine {
-    /// Discriminator for the line type (e.g. `"user"`, `"assistant"`, `"tool_use"`, `"subagent"`).
+    /// Discriminator for the line type (for example `"userPrompt"`, `"text"`, `"capability"`).
     pub kind: String,
-    /// Plain-text excerpt, present for `user` and `assistant` lines.
+    /// Plain-text excerpt, present for prompt and assistant-text lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    /// Tool identifier, present for `tool_use` lines.
+    /// Provider-visible primitive name or resolved capability id for capability lines.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-    /// Tool input arguments, present for `tool_use` lines.
+    pub model_primitive_name: Option<String>,
+    /// Capability invocation arguments, present for capability lines.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_args: Option<Value>,
-    /// Capability invocation time in milliseconds, present for `tool_use` lines.
+    pub capability_args: Option<Value>,
+    /// Capability invocation time in milliseconds, present for `capability_invocation` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
-    /// Whether the capability invocation produced an error, present for `tool_use` lines.
+    /// Whether the capability invocation produced an error, present for `capability_invocation` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
     /// Number of agent turns, present for `subagent` lines.
@@ -578,7 +578,7 @@ impl SessionRepo {
         session_id: &str,
     ) -> Result<Vec<ActivitySummaryLine>> {
         let mut stmt = conn.prepare(
-            "SELECT type, payload, tool_call_id FROM events
+            "SELECT type, payload, invocation_id FROM events
              WHERE session_id = ?1
                AND type IN ('message.user', 'message.assistant', 'capability.invocation.completed',
                             'subagent.spawned', 'subagent.completed', 'subagent.failed')
@@ -595,27 +595,27 @@ impl SessionRepo {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        // Pass 1: collect capability result info by toolCallId
-        let mut tool_results: HashMap<String, (bool, Option<i64>)> = HashMap::new();
+        // Pass 1: collect capability result info by invocationId
+        let mut capability_results: HashMap<String, (bool, Option<i64>)> = HashMap::new();
         for (event_type, payload_str, _) in &rows {
             if event_type == "capability.invocation.completed" {
                 if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
-                    if let Some(tcid) = payload.get("toolCallId").and_then(|v| v.as_str()) {
+                    if let Some(tcid) = payload.get("invocationId").and_then(|v| v.as_str()) {
                         let is_error = payload
                             .get("isError")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
                         let duration = payload.get("duration").and_then(|v| v.as_i64());
-                        let _ = tool_results.insert(tcid.to_string(), (is_error, duration));
+                        let _ = capability_results.insert(tcid.to_string(), (is_error, duration));
                     }
                 }
             }
         }
 
-        // Pass 1b: collect hook subagent IDs (spawned with tool_call_id IS NULL)
+        // Pass 1b: collect hook subagent IDs (spawned with invocation_id IS NULL)
         let mut hook_subagent_ids: HashSet<String> = HashSet::new();
-        for (event_type, payload_str, tool_call_id) in &rows {
-            if event_type == "subagent.spawned" && tool_call_id.is_none() {
+        for (event_type, payload_str, invocation_id) in &rows {
+            if event_type == "subagent.spawned" && invocation_id.is_none() {
                 if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
                     if let Some(sub_id) = payload.get("subagentSessionId").and_then(|v| v.as_str())
                     {
@@ -628,7 +628,7 @@ impl SessionRepo {
         // Pass 2: walk events in order, building activity lines
         let mut lines: Vec<ActivitySummaryLine> = Vec::new();
 
-        for (event_type, payload_str, tool_call_id) in &rows {
+        for (event_type, payload_str, invocation_id) in &rows {
             let payload: Value = serde_json::from_str(payload_str).unwrap_or(Value::Null);
 
             match event_type.as_str() {
@@ -661,7 +661,7 @@ impl SessionRepo {
                                         }
                                     }
                                 }
-                                Some("tool_use") => {
+                                Some("capability_invocation") => {
                                     let name = block
                                         .get("name")
                                         .and_then(|n| n.as_str())
@@ -669,17 +669,18 @@ impl SessionRepo {
                                     if name == "agent::spawn_subagent" {
                                         continue;
                                     }
-                                    let tool_id = block.get("id").and_then(|id| id.as_str());
+                                    let invocation_id = block.get("id").and_then(|id| id.as_str());
                                     let input = block
                                         .get("input")
                                         .cloned()
                                         .or_else(|| block.get("arguments").cloned());
-                                    let result = tool_id.and_then(|id| tool_results.get(id));
+                                    let result =
+                                        invocation_id.and_then(|id| capability_results.get(id));
 
                                     lines.push(ActivitySummaryLine {
-                                        kind: "tool".into(),
-                                        tool_name: Some(name.to_string()),
-                                        tool_args: input,
+                                        kind: "capability".into(),
+                                        model_primitive_name: Some(name.to_string()),
+                                        capability_args: input,
                                         duration_ms: result.and_then(|(_, d)| *d),
                                         is_error: result.map(|(e, _)| *e),
                                         ..Default::default()
@@ -697,7 +698,7 @@ impl SessionRepo {
                     }
                 }
                 "subagent.spawned" => {
-                    if tool_call_id.is_some() {
+                    if invocation_id.is_some() {
                         let task = payload
                             .get("task")
                             .and_then(|t| t.as_str())
@@ -1608,7 +1609,7 @@ mod tests {
     #[test]
     fn extract_text_skips_non_text_blocks() {
         let text = extract_text_from_payload(
-            r#"{"content": [{"type": "text", "text": "hi"}, {"type": "tool_use", "name": "execute"}]}"#,
+            r#"{"content": [{"type": "text", "text": "hi"}, {"type": "capability_invocation", "name": "execute"}]}"#,
         );
         assert_eq!(text, "hi");
     }

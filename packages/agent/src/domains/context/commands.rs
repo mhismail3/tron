@@ -119,7 +119,7 @@ async fn execute_compaction(
             message: format!("Compaction failed: {error}"),
         })?;
 
-    // Total context tokens (system prompt + tools + rules + messages) — for the
+    // Total context tokens (system prompt + capabilities + rules + messages) — for the
     // progress pill. Distinct from result.tokens_after which is message-only.
     let total_context_after = context_manager.get_current_tokens();
 

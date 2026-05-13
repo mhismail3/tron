@@ -5,11 +5,11 @@ import UIKit
 ///
 /// Responsibilities:
 /// - Creating capability invocation messages on capability.invocation.started
-/// - Handling special tools: AskUserQuestion
+/// - Handling special capabilities: UserInteraction
 /// - Tracking capability invocations for the current turn
 /// - Enqueuing capability invocation events for ordered UI processing
 ///
-/// This coordinator extracts the complex tool handling logic from ChatViewModel+Events.swift,
+/// This coordinator extracts the complex capability handling logic from ChatViewModel+Events.swift,
 /// making it independently testable while maintaining the same behavior.
 @MainActor
 final class CapabilityInvocationCoordinator {
@@ -18,15 +18,15 @@ final class CapabilityInvocationCoordinator {
 
     init() {}
 
-    // MARK: - Tool Generating Handling
+    // MARK: - Capability Generating Handling
 
-    /// Handle a tool generating event — emitted when the LLM starts a capability invocation block,
+    /// Handle a capability generating event — emitted when the LLM starts a capability invocation block,
     /// BEFORE arguments are fully streamed. Creates a spinning chip immediately.
     func handleCapabilityInvocationGenerating(
         _ pluginResult: CapabilityInvocationGeneratingPlugin.Result,
         context: CapabilityInvocationContext
     ) {
-        // Finalize any active thinking message before tool chip appears
+        // Finalize any active thinking message before capability chip appears
         context.finalizeThinkingMessageIfNeeded()
 
         // Skip if chip already exists (catch-up/reconstruction)
@@ -35,17 +35,17 @@ final class CapabilityInvocationCoordinator {
         context.flushPendingTextUpdates()
         context.finalizeStreamingMessage()
 
-        // Build the chip content based on tool kind
+        // Build the chip content based on capability kind
         let content: MessageContent
-        if pluginResult.identity.isAskUserCapability {
-            let toolData = AskUserQuestionToolData(
+        if pluginResult.identity.isUserInteractionCapability {
+            let capabilityData = UserInteractionInvocationData(
                 invocationId: pluginResult.invocationId,
-                params: AskUserQuestionParams(questions: [], context: nil),
+                params: UserInteractionParams(questions: [], context: nil),
                 answers: [:],
                 status: .generating,
                 result: nil
             )
-            content = .askUserQuestion(toolData)
+            content = .userInteraction(capabilityData)
         } else {
             let invocation = CapabilityInvocationData(
                 id: pluginResult.invocationId,
@@ -56,27 +56,27 @@ final class CapabilityInvocationCoordinator {
             content = .capabilityInvocation(invocation)
         }
 
-        // Append, track, and record — shared across all tool kinds
+        // Append, track, and record — shared across all capability kinds
         trackGeneratingChip(
             content: content,
             invocationId: pluginResult.invocationId,
-            modelToolName: pluginResult.modelToolName,
+            modelPrimitiveName: pluginResult.modelPrimitiveName,
             context: context
         )
 
-        // Only regular tools enqueue for staggered animation
-        if !pluginResult.identity.isAskUserCapability {
-            let capabilityStartData = UIUpdateQueue.ToolStartData(
+        // Only regular capabilities enqueue for staggered animation
+        if !pluginResult.identity.isUserInteractionCapability {
+            let invocationStartedData = UIUpdateQueue.CapabilityInvocationStartData(
                 invocationId: pluginResult.invocationId,
-                modelToolName: pluginResult.modelToolName,
+                modelPrimitiveName: pluginResult.modelPrimitiveName,
                 arguments: "",
                 timestamp: Date()
             )
-            context.enqueueCapabilityInvocationStart(capabilityStartData)
+            context.enqueueCapabilityInvocationStart(invocationStartedData)
         }
     }
 
-    // MARK: - Tool Start Handling
+    // MARK: - Capability Start Handling
 
     /// Handle a capability start event.
     ///
@@ -88,17 +88,17 @@ final class CapabilityInvocationCoordinator {
         _ pluginResult: CapabilityInvocationStartedPlugin.Result,
         context: CapabilityInvocationContext
     ) {
-        let isAskUserQuestion = pluginResult.identity.isAskUserCapability
+        let isUserInteraction = pluginResult.identity.isUserInteractionCapability
 
-        // Parse AskUserQuestion params if applicable
-        var askUserQuestionParams: AskUserQuestionParams?
-        if isAskUserQuestion {
+        // Parse UserInteraction params if applicable
+        var userInteractionParams: UserInteractionParams?
+        if isUserInteraction {
             if let paramsData = pluginResult.formattedArguments.data(using: .utf8) {
-                askUserQuestionParams = try? JSONDecoder().decode(AskUserQuestionParams.self, from: paramsData)
+                userInteractionParams = try? JSONDecoder().decode(UserInteractionParams.self, from: paramsData)
             }
         }
 
-        // Create tool data
+        // Create capability data
         let invocation = CapabilityInvocationData(
             id: pluginResult.invocationId,
             status: .running,
@@ -107,26 +107,26 @@ final class CapabilityInvocationCoordinator {
             identity: pluginResult.identity
         )
 
-        context.logInfo("Capability started: \(pluginResult.modelToolName) [\(pluginResult.invocationId)]")
-        context.logDebug("Tool args: \(pluginResult.formattedArguments.prefix(200))")
+        context.logInfo("Capability started: \(pluginResult.modelPrimitiveName) [\(pluginResult.invocationId)]")
+        context.logDebug("Capability args: \(pluginResult.formattedArguments.prefix(200))")
 
-        // Finalize any active thinking message before tools begin
+        // Finalize any active thinking message before capability invocations begin
         context.finalizeThinkingMessageIfNeeded()
 
-        // CRITICAL: Check if this tool already exists from catch-up or capability.invocation.generating.
-        // When resuming an in-progress session, catch-up creates capability invocation messages for running/completed tools.
+        // CRITICAL: Check if this capability already exists from catch-up or capability.invocation.generating.
+        // When resuming an in-progress session, catch-up creates capability invocation messages for running/completed capabilities.
         // capability.invocation.generating also pre-creates chips before capability.invocation.started arrives.
-        // The server then continues streaming those same tools, which would cause duplicates.
+        // The server then continues streaming those same capabilities, which would cause duplicates.
         if let existingIndex = context.messageIndex.index(forCapabilityInvocationId: pluginResult.invocationId)
             ?? MessageFinder.lastIndexOfCapabilityInvocation(id: pluginResult.invocationId, in: context.messages) {
 
-            // AskUserQuestion messages need special update logic (status transition, params).
-            // Let them fall through to handleAskUserQuestionToolStart below.
-            if case .askUserQuestion = context.messages[existingIndex].content {
-                // Fall through — handled below at line "if isAskUserQuestion"
+            // UserInteraction messages need special update logic (status transition, params).
+            // Let them fall through to handleUserInteractionCapabilityInvocationStart below.
+            if case .userInteraction = context.messages[existingIndex].content {
+                // Fall through — handled below at line "if isUserInteraction"
             } else {
-                context.logInfo("Updating existing capability.invocation.started for \(pluginResult.modelToolName) (invocationId: \(pluginResult.invocationId)) with arguments")
-                // Still make the tool visible (in case it wasn't)
+                context.logInfo("Updating existing capability.invocation.started for \(pluginResult.modelPrimitiveName) (invocationId: \(pluginResult.invocationId)) with arguments")
+                // Still make the capability visible (in case it wasn't)
                 context.makeCapabilityInvocationVisible(pluginResult.invocationId)
 
                 // Update the existing chip with full arguments from capability.invocation.started
@@ -136,7 +136,7 @@ final class CapabilityInvocationCoordinator {
                     existing.status = .running
                     existing.identity = pluginResult.identity
                     context.messages[existingIndex].content = .capabilityInvocation(existing)
-                    context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
+                    context.currentCapabilityInvocationMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
                 }
 
                 // Update tracked capability invocation arguments
@@ -152,42 +152,43 @@ final class CapabilityInvocationCoordinator {
         context.flushPendingTextUpdates()
         context.finalizeStreamingMessage()
 
-        // Handle AskUserQuestion specially
-        if isAskUserQuestion {
-            handleAskUserQuestionToolStart(pluginResult, params: askUserQuestionParams, context: context)
+        // Handle UserInteraction specially
+        if isUserInteraction {
+            handleUserInteractionCapabilityInvocationStart(pluginResult, params: userInteractionParams, context: context)
             return
         }
 
-        // Create the tool message
+        // Create the capability message
         let message = ChatMessage(role: .assistant, content: .capabilityInvocation(invocation))
 
         // Append message to chat
         context.appendToMessages(message)
-        context.currentToolMessages[message.id] = message
-        context.runningToolCount += 1
+        context.currentCapabilityInvocationMessages[message.id] = message
+        context.runningCapabilityInvocationCount += 1
 
-        // Make tool immediately visible for rendering
+        // Make capability immediately visible for rendering
         context.makeCapabilityInvocationVisible(pluginResult.invocationId)
 
         // Track capability invocation for persistence
         let record = CapabilityInvocationRecord(
             invocationId: pluginResult.invocationId,
-            modelToolName: pluginResult.modelToolName,
-            arguments: pluginResult.formattedArguments
+            modelPrimitiveName: pluginResult.modelPrimitiveName,
+            arguments: pluginResult.formattedArguments,
+            identity: pluginResult.identity
         )
         context.currentTurnCapabilityInvocations.append(record)
 
         // Enqueue capability start for ordered processing and staggered animation
-        let capabilityStartData = UIUpdateQueue.ToolStartData(
+        let invocationStartedData = UIUpdateQueue.CapabilityInvocationStartData(
             invocationId: pluginResult.invocationId,
-            modelToolName: pluginResult.modelToolName,
+            modelPrimitiveName: pluginResult.modelPrimitiveName,
             arguments: pluginResult.formattedArguments,
             timestamp: Date()
         )
-        context.enqueueCapabilityInvocationStart(capabilityStartData)
+        context.enqueueCapabilityInvocationStart(invocationStartedData)
     }
 
-    // MARK: - Tool End Handling
+    // MARK: - Capability End Handling
 
     /// Handle a capability end event.
     ///
@@ -206,17 +207,17 @@ final class CapabilityInvocationCoordinator {
         // Finalize the current thinking message before starting a new block
         context.finalizeThinkingMessageIfNeeded()
 
-        // Reset thinking state after tool completion
+        // Reset thinking state after capability completion
         // Any subsequent thinking deltas should start a new thinking block
         context.resetThinkingForNewBlock()
 
-        // Check if this is an AskUserQuestion capability end
-        if let index = MessageFinder.lastIndexOfAskUserQuestion(invocationId: pluginResult.invocationId, in: context.messages) {
-            if case .askUserQuestion(let data) = context.messages[index].content {
+        // Check if this is an UserInteraction capability end
+        if let index = MessageFinder.lastIndexOfUserInteraction(invocationId: pluginResult.invocationId, in: context.messages) {
+            if case .userInteraction(let data) = context.messages[index].content {
                 // In async mode, capability.invocation.completed means questions are ready for user
                 // Status is already .pending, now auto-open the sheet
-                context.logInfo("AskUserQuestion capability.invocation.completed - opening sheet for user input")
-                context.openAskUserQuestionSheet(for: data)
+                context.logInfo("UserInteraction capability.invocation.completed - opening sheet for user input")
+                context.openUserInteractionSheet(for: data)
             }
             return
         }
@@ -228,7 +229,7 @@ final class CapabilityInvocationCoordinator {
         }
 
         // Enqueue capability end for ordered processing
-        let capabilityEndData = UIUpdateQueue.ToolEndData(
+        let invocationCompletedData = UIUpdateQueue.CapabilityInvocationEndData(
             invocationId: pluginResult.invocationId,
             success: pluginResult.success,
             result: pluginResult.displayResult,
@@ -236,58 +237,75 @@ final class CapabilityInvocationCoordinator {
             details: pluginResult.rawDetails,
             identity: pluginResult.identity
         )
-        context.enqueueToolEnd(capabilityEndData)
+        context.enqueueCapabilityInvocationEnd(invocationCompletedData)
     }
 
     // MARK: - Private Helpers
 
-    /// Append a generating chip to chat, track in currentToolMessages, and record for persistence.
-    /// Shared by AskUserQuestion and regular tool chips.
+    /// Append a generating chip to chat, track in currentCapabilityInvocationMessages, and record for persistence.
+    /// Shared by UserInteraction and regular capability chips.
     private func trackGeneratingChip(
         content: MessageContent,
         invocationId: String,
-        modelToolName: String,
+        modelPrimitiveName: String,
         context: CapabilityInvocationContext
     ) {
         let message = ChatMessage(role: .assistant, content: content)
         context.appendToMessages(message)
-        context.currentToolMessages[message.id] = message
-        context.runningToolCount += 1
+        context.currentCapabilityInvocationMessages[message.id] = message
+        context.runningCapabilityInvocationCount += 1
         context.makeCapabilityInvocationVisible(invocationId)
+
+        let identity: CapabilityIdentity = {
+            switch content {
+            case .capabilityInvocation(let data):
+                return data.identity
+            case .userInteraction:
+                return CapabilityIdentity(
+                    modelPrimitiveName: modelPrimitiveName,
+                    contractId: "agent::ask_user",
+                    implementationId: "first_party.agent.v1.ask_user",
+                    functionId: "agent::ask_user"
+                )
+            default:
+                return CapabilityIdentity(modelPrimitiveName: modelPrimitiveName)
+            }
+        }()
 
         let record = CapabilityInvocationRecord(
             invocationId: invocationId,
-            modelToolName: modelToolName,
-            arguments: ""
+            modelPrimitiveName: modelPrimitiveName,
+            arguments: "",
+            identity: identity
         )
         context.currentTurnCapabilityInvocations.append(record)
     }
 
-    /// Handle AskUserQuestion capability start - creates or updates special message
-    private func handleAskUserQuestionToolStart(
+    /// Handle UserInteraction capability start - creates or updates special message
+    private func handleUserInteractionCapabilityInvocationStart(
         _ pluginResult: CapabilityInvocationStartedPlugin.Result,
-        params: AskUserQuestionParams?,
+        params: UserInteractionParams?,
         context: CapabilityInvocationContext
     ) {
-        context.logInfo("AskUserQuestion tool detected")
+        context.logInfo("UserInteraction capability detected")
 
-        // Mark that AskUserQuestion was called in this turn
+        // Mark that UserInteraction was called in this turn
         // This suppresses any subsequent text deltas (question should be final entry)
-        context.askUserQuestionCalledInTurn = true
+        context.userInteractionCalledInTurn = true
 
         // Check if a generating chip already exists from capability.invocation.generating
-        if let existingIndex = MessageFinder.lastIndexOfAskUserQuestion(invocationId: pluginResult.invocationId, in: context.messages) {
+        if let existingIndex = MessageFinder.lastIndexOfUserInteraction(invocationId: pluginResult.invocationId, in: context.messages) {
             // Update existing generating chip with real params
-            if case .askUserQuestion(var toolData) = context.messages[existingIndex].content {
+            if case .userInteraction(var capabilityData) = context.messages[existingIndex].content {
                 if let params = params {
-                    toolData.params = params
-                    toolData.status = .pending
+                    capabilityData.params = params
+                    capabilityData.status = .pending
                 } else {
-                    context.logError("Failed to parse AskUserQuestion params: \(pluginResult.formattedArguments.prefix(500))")
-                    toolData.status = .pending
+                    context.logError("Failed to parse UserInteraction params: \(pluginResult.formattedArguments.prefix(500))")
+                    capabilityData.status = .pending
                 }
-                context.messages[existingIndex].content = .askUserQuestion(toolData)
-                context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
+                context.messages[existingIndex].content = .userInteraction(capabilityData)
+                context.currentCapabilityInvocationMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
             }
 
             // Update tracked capability invocation arguments
@@ -299,9 +317,9 @@ final class CapabilityInvocationCoordinator {
 
         // No existing chip — create fresh (e.g. reconstruction without capability.invocation.generating)
 
-        // Use pre-parsed params, fall back to regular tool display if parsing failed
+        // Use pre-parsed params, fall back to regular capability display if parsing failed
         guard let params = params else {
-            context.logError("Failed to parse AskUserQuestion params: \(pluginResult.formattedArguments.prefix(500))")
+            context.logError("Failed to parse UserInteraction params: \(pluginResult.formattedArguments.prefix(500))")
             let invocation = CapabilityInvocationData(
                 id: pluginResult.invocationId,
                 status: .error,
@@ -316,8 +334,8 @@ final class CapabilityInvocationCoordinator {
             return
         }
 
-        // Create AskUserQuestion tool data with pending status
-        let toolData = AskUserQuestionToolData(
+        // Create UserInteraction capability data with pending status
+        let capabilityData = UserInteractionInvocationData(
             invocationId: pluginResult.invocationId,
             params: params,
             answers: [:],
@@ -325,14 +343,15 @@ final class CapabilityInvocationCoordinator {
             result: nil
         )
 
-        let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
+        let message = ChatMessage(role: .assistant, content: .userInteraction(capabilityData))
         context.appendToMessages(message)
 
         // Track capability invocation for persistence
         let record = CapabilityInvocationRecord(
             invocationId: pluginResult.invocationId,
-            modelToolName: pluginResult.modelToolName,
-            arguments: pluginResult.formattedArguments
+            modelPrimitiveName: pluginResult.modelPrimitiveName,
+            arguments: pluginResult.formattedArguments,
+            identity: pluginResult.identity
         )
         context.currentTurnCapabilityInvocations.append(record)
     }

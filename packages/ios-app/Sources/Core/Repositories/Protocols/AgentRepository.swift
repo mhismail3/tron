@@ -23,7 +23,7 @@ protocol AgentRepository: AnyObject {
     /// Abort the current agent operation.
     func abort(idempotencyKey: EngineIdempotencyKey) async throws
 
-    /// Send a tool result for interactive tools.
+    /// Send a capability result for interactive capabilities.
     /// - Parameters:
     ///   - sessionId: The session ID
     ///   - invocationId: The capability invocation ID to respond to

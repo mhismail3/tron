@@ -1,7 +1,7 @@
 //! process domain worker.
 //!
 //! This worker owns host process execution as a capability. The model never
-//! receives a shell-specific tool; it discovers and invokes `process::run`
+//! receives a shell-specific capability; it discovers and invokes `process::run`
 //! through the capability primitives.
 
 pub(crate) mod contract;

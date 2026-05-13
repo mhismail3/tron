@@ -16,9 +16,9 @@ pub struct SubagentSpawnedPayload {
     pub task: String,
     /// Model ID.
     pub model: String,
-    /// Tools available.
+    /// Capabilities available.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<String>>,
+    pub capabilities: Option<Vec<String>>,
     /// Skills available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,

@@ -7,7 +7,7 @@ use crate::domains::agent::runner::context::types::{CompactionConfig, ContextMan
 use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
 use crate::domains::session::event_store::sqlite::contention::{self, BusyRetryPolicy};
 use crate::domains::skills::registry::SkillRegistry;
-use crate::shared::tools::Tool;
+use crate::shared::model_capabilities::ModelCapability;
 use parking_lot::RwLock;
 
 use crate::domains::context::Deps;
@@ -26,7 +26,7 @@ pub(crate) fn build_context_manager_for_session(
     event_store: &crate::domains::session::event_store::EventStore,
     context_artifacts: &crate::domains::session::context::ContextArtifactsService,
     profile_runtime: &crate::domains::agent::runner::ProfileRuntime,
-    tool_definitions: Vec<Tool>,
+    model_capability_definitions: Vec<ModelCapability>,
 ) -> Result<PreparedSessionContext, CapabilityError> {
     let session = session_manager
         .get_session(session_id)
@@ -93,7 +93,7 @@ pub(crate) fn build_context_manager_for_session(
         },
         context_policy: session_plan.runtime_context_policy(),
         working_directory: state.working_directory.clone(),
-        tools: tool_definitions,
+        capabilities: model_capability_definitions,
         rules_content: artifacts.rules.merged_content.clone(),
         compaction: CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
@@ -206,15 +206,18 @@ pub(crate) fn build_summarizer(
     }
 }
 
-pub(crate) async fn tool_definitions(deps: &Deps, session_id: &str) -> Vec<Tool> {
-    match crate::domains::capability_support::implementations::capability_surface::list_model_tools(
+pub(crate) async fn model_capability_definitions(
+    deps: &Deps,
+    session_id: &str,
+) -> Vec<ModelCapability> {
+    match crate::domains::capability_support::implementations::capability_surface::list_model_capabilities(
         &deps.engine_host,
         session_id,
         None,
     )
     .await
     {
-        Ok(tools) => tools,
+        Ok(capabilities) => capabilities,
         Err(error) => {
             tracing::warn!(
                 session_id,

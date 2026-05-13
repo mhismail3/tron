@@ -1,19 +1,19 @@
-//! Stub implementations of DI traits for tools whose backends aren't yet wired.
+//! Stub implementations of DI traits for capabilities whose backends aren't yet wired.
 //!
-//! These support product-degraded tool capability handlers while gracefully
+//! These support product-degraded capability handlers while gracefully
 //! returning "not available" errors at execution time.
 
 use async_trait::async_trait;
 use tracing::warn;
 
-use crate::domains::capability_support::implementations::errors::ToolError;
+use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{
     Notification, NotifyDelegate, NotifyResult, SubagentConfig, SubagentHandle, SubagentResult,
     SubagentSpawner, WaitMode,
 };
 
-fn not_available(feature: &str) -> ToolError {
-    ToolError::Internal {
+fn not_available(feature: &str) -> CapabilityExecutionError {
+    CapabilityExecutionError::Internal {
         message: format!("{feature} is not yet available on this server"),
     }
 }
@@ -25,7 +25,10 @@ pub struct StubSubagentSpawner;
 
 #[async_trait]
 impl SubagentSpawner for StubSubagentSpawner {
-    async fn spawn(&self, _config: SubagentConfig) -> Result<SubagentHandle, ToolError> {
+    async fn spawn(
+        &self,
+        _config: SubagentConfig,
+    ) -> Result<SubagentHandle, CapabilityExecutionError> {
         Err(not_available("Subagent spawning"))
     }
     async fn wait_for_agents(
@@ -33,7 +36,7 @@ impl SubagentSpawner for StubSubagentSpawner {
         _session_ids: &[String],
         _mode: WaitMode,
         _timeout_ms: u64,
-    ) -> Result<Vec<SubagentResult>, ToolError> {
+    ) -> Result<Vec<SubagentResult>, CapabilityExecutionError> {
         Err(not_available("Subagent waiting"))
     }
 }
@@ -43,7 +46,7 @@ impl SubagentSpawner for StubSubagentSpawner {
 /// Stub notification delegate — no push service configured on this server.
 ///
 /// Returns a non-error `NotifyResult` with `success: false` and a
-/// `warning` field explaining the state. Erroring the tool blocks the
+/// `warning` field explaining the state. Erroring the capability blocks the
 /// agent's flow when a user simply hasn't wired push yet; a warning
 /// instead lets the agent continue while still telling the user that the
 /// engine inbox record exists and device push needs configuration.
@@ -60,7 +63,7 @@ impl NotifyDelegate for StubNotifyDelegate {
     async fn send_notification(
         &self,
         notification: &Notification,
-    ) -> Result<NotifyResult, ToolError> {
+    ) -> Result<NotifyResult, CapabilityExecutionError> {
         warn!(
             title = %notification.title,
             priority = %notification.priority,
@@ -100,7 +103,7 @@ mod tests {
             skills: None,
             max_depth: 0,
             current_depth: 0,
-            tool_call_id: None,
+            invocation_id: None,
         };
         let err = spawner.spawn(config).await;
         assert!(err.is_err());
@@ -111,7 +114,7 @@ mod tests {
         // The stub must NOT error (erroring blocks the agent's flow
         // on an unconfigured-push setup). It returns a well-formed
         // NotifyResult whose `warning` field explains the state so
-        // the NotifyApp tool can surface it.
+        // the NotifyApp capability can surface it.
         let delegate = StubNotifyDelegate;
         let notification = Notification {
             title: "Test".into(),

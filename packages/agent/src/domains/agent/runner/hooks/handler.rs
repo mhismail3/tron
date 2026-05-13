@@ -23,7 +23,7 @@ use super::types::{HookContext, HookExecutionMode, HookResult, HookType};
 /// # Execution Mode
 ///
 /// Handlers declare whether they should run in blocking or background mode.
-/// Forced-blocking hook types (`PreToolUse`, `UserPromptSubmit`,
+/// Forced-blocking hook types (`PreCapabilityInvocation`, `UserPromptSubmit`,
 /// `PreCompact`) override to blocking by default. Handlers that return
 /// `true` from [`bypass_forced_blocking`](HookHandler::bypass_forced_blocking)
 /// keep their declared mode instead.
@@ -129,43 +129,43 @@ mod tests {
     }
 
     fn make_context() -> HookContext {
-        HookContext::PreToolUse {
+        HookContext::PreCapabilityInvocation {
             session_id: "s1".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
-            tool_name: "process::run".to_string(),
-            tool_arguments: serde_json::json!({}),
-            tool_call_id: "tc1".to_string(),
+            model_primitive_name: "process::run".to_string(),
+            capability_arguments: serde_json::json!({}),
+            invocation_id: "tc1".to_string(),
         }
     }
 
     #[tokio::test]
     async fn test_handler_default_priority() {
-        let handler = make_handler("test", HookType::PreToolUse);
+        let handler = make_handler("test", HookType::PreCapabilityInvocation);
         assert_eq!(handler.priority(), 0);
     }
 
     #[tokio::test]
     async fn test_handler_default_mode() {
-        let handler = make_handler("test", HookType::PreToolUse);
+        let handler = make_handler("test", HookType::PreCapabilityInvocation);
         assert_eq!(handler.execution_mode(), HookExecutionMode::Blocking);
     }
 
     #[tokio::test]
     async fn test_handler_default_should_handle() {
-        let handler = make_handler("test", HookType::PreToolUse);
+        let handler = make_handler("test", HookType::PreCapabilityInvocation);
         let ctx = make_context();
         assert!(handler.should_handle(&ctx));
     }
 
     #[tokio::test]
     async fn test_handler_default_description() {
-        let handler = make_handler("test", HookType::PreToolUse);
+        let handler = make_handler("test", HookType::PreCapabilityInvocation);
         assert!(handler.description().is_none());
     }
 
     #[tokio::test]
     async fn test_handler_default_timeout() {
-        let handler = make_handler("test", HookType::PreToolUse);
+        let handler = make_handler("test", HookType::PreCapabilityInvocation);
         assert!(handler.timeout_ms().is_none());
     }
 
@@ -179,7 +179,7 @@ mod tests {
     async fn test_handler_returns_result() {
         let handler = TestHandler {
             name: "blocker".to_string(),
-            hook_type: HookType::PreToolUse,
+            hook_type: HookType::PreCapabilityInvocation,
             priority: 100,
             mode: HookExecutionMode::Blocking,
             result: HookResult::block("unsafe"),

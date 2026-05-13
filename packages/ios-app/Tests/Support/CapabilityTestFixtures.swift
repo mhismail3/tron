@@ -2,14 +2,14 @@ import Foundation
 @testable import TronMobile
 
 func testCapabilityIdentity(
-    modelToolName: String = "execute",
+    modelPrimitiveName: String = "execute",
     contractId: String? = "filesystem::read_file",
     implementationId: String? = "first_party.filesystem.v1.read_file",
     functionId: String? = "filesystem::read_file",
     bindingDecisionId: String? = "binding_decision_test"
 ) -> CapabilityIdentity {
     CapabilityIdentity(
-        modelToolName: modelToolName,
+        modelPrimitiveName: modelPrimitiveName,
         contractId: contractId,
         implementationId: implementationId,
         functionId: functionId,
@@ -26,9 +26,9 @@ func testCapabilityIdentity(
     )
 }
 
-func testAskUserCapabilityIdentity(modelToolName: String = "execute") -> CapabilityIdentity {
+func testUserInteractionCapabilityIdentity(modelPrimitiveName: String = "execute") -> CapabilityIdentity {
     CapabilityIdentity(
-        modelToolName: modelToolName,
+        modelPrimitiveName: modelPrimitiveName,
         contractId: "agent::ask_user",
         implementationId: "first_party.agent.v1.ask_user",
         functionId: "agent::ask_user",

@@ -226,13 +226,13 @@ enum ContentBlockType: String {
     case text = "text"
     case image = "image"
     case document = "document"
-    case toolUse = "tool_use"
-    case toolResult = "tool_result"
+    case capabilityInvocation = "capability_invocation"
+    case capabilityResult = "capability_result"
     case thinking = "thinking"
 }
 
 // =============================================================================
-// MARK: - Tool Call Status (from server CapabilityInvocationEvent)
+// MARK: - Capability Call Status (from server CapabilityInvocationEvent)
 // =============================================================================
 
 /// Status of a capability invocation execution.
@@ -251,7 +251,7 @@ enum CapabilityInvocationStatusDTO: String {
 /// This EXACTLY mirrors the server's stopReason union.
 enum StopReason: String {
     case endTurn = "end_turn"
-    case toolUse = "tool_use"
+    case capabilityInvocation = "capability_invocation"
     case maxTokens = "max_tokens"
     case stopSequence = "stop_sequence"
 }

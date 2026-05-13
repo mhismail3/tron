@@ -146,7 +146,7 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var codexAppServer: CodexAppServerClient = CodexAppServerClient(transport: self)
 
-    /// Blob storage client (for Display tool image loading).
+    /// Blob storage client (for Display capability image loading).
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
 
@@ -413,16 +413,17 @@ final class EngineClient: EngineTransport {
             NotificationCenter.default.post(name: .mcpStatusChanged, object: nil)
         }
 
-        // NotifyApp is a normal engine tool capability. When its tool
+        // Notifications are normal engine capabilities. When the notification
         // completion event arrives over `/engine`, refresh the inbox through
         // the same thin-client notification path APNs uses. APNs is still the
         // background transport; this foreground path keeps the notification
         // bell current without adding a second server API.
         if eventType == CapabilityInvocationCompletedPlugin.eventType,
            let result = eventV2.getResult() as? CapabilityInvocationCompletedPlugin.Result,
-           result.modelToolName?.lowercased() == "notifyapp" {
+           result.identity.contractId == "notifications::send"
+                || result.identity.functionId == "notifications::send" {
             logger.info(
-                "NotifyApp tool completion received from engine stream; refreshing notification inbox",
+                "Notification capability completion received from engine stream; refreshing notification inbox",
                 category: .notification
             )
             NotificationCenter.default.post(name: .notificationReceived, object: nil)

@@ -58,7 +58,7 @@ struct SessionEvent: Identifiable, Codable, EventTransformable, Sendable {
     /// Whether this event is a safe fork point for session branching.
     ///
     /// Only events where the message reconstruction state is consistent
-    /// (no pending tool results, no unmatched tool_use blocks) are forkable.
+    /// (no pending capability results, no unmatched capability_invocation blocks) are forkable.
     /// Mirrors the invariants in the Rust `build_messages` function in reconstruct.rs.
     var isForkable: Bool {
         switch eventType {

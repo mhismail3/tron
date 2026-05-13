@@ -36,7 +36,7 @@
 //!   request is sent.
 //! - Capability invocations arrive as streaming deltas over multiple SSE events.
 //!   [`stream_handler`] accumulates them until the closing `finish_reason`
-//!   before emitting a single `StreamEvent::ToolCall` — the orchestrator
+//!   before emitting a single `StreamEvent::CapabilityInvocationDraft` — the orchestrator
 //!   never sees a partial capability invocation.
 //! - The converter normalises capability results into Responses input items so the
 //!   provider can resume multi-turn tool loops without leaking provider-specific

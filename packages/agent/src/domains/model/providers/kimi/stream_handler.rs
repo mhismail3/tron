@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::shared::content::AssistantContent;
 use crate::shared::events::StreamEvent;
-use crate::shared::messages::{TokenUsage, ToolCall};
+use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
 
 // ─── SSE chunk types ──────────────────────────────────────────────────────
 
@@ -39,23 +39,23 @@ pub struct ChunkDelta {
     /// Reasoning/thinking content (mutually exclusive with `content` per delta).
     pub reasoning_content: Option<String>,
     /// Capability invocations being constructed.
-    pub tool_calls: Option<Vec<ChunkToolCall>>,
+    pub capability_invocations: Option<Vec<ChunkCapabilityInvocationDraft>>,
 }
 
 /// A capability invocation delta within a streaming chunk.
 #[derive(Debug, Deserialize)]
-pub struct ChunkToolCall {
+pub struct ChunkCapabilityInvocationDraft {
     /// Capability invocation index (for multiple concurrent capability invocations).
     pub index: u32,
     /// Capability invocation ID (present in the first delta for this capability invocation).
     pub id: Option<String>,
     /// Function details.
-    pub function: Option<ChunkToolCallFunction>,
+    pub function: Option<ChunkCapabilityInvocationDraftFunction>,
 }
 
 /// Function details within a capability invocation delta.
 #[derive(Debug, Deserialize)]
-pub struct ChunkToolCallFunction {
+pub struct ChunkCapabilityInvocationDraftFunction {
     /// Function name (present in the first delta).
     pub name: Option<String>,
     /// Partial arguments string.
@@ -75,7 +75,7 @@ pub struct ChunkUsage {
 
 /// Active capability invocation being accumulated.
 #[derive(Debug, Clone)]
-struct ActiveToolCall {
+struct ActiveCapabilityInvocationDraft {
     id: String,
     name: String,
     arguments: String,
@@ -93,7 +93,7 @@ pub struct KimiStreamState {
     /// Accumulated text content.
     text_content: String,
     /// Active capability invocations by index.
-    active_tools: Vec<Option<ActiveToolCall>>,
+    active_capabilities: Vec<Option<ActiveCapabilityInvocationDraft>>,
     /// Token usage from the final chunk.
     usage: Option<TokenUsage>,
     /// Stop reason.
@@ -110,7 +110,7 @@ impl KimiStreamState {
             in_text: false,
             thinking_text: String::new(),
             text_content: String::new(),
-            active_tools: Vec::new(),
+            active_capabilities: Vec::new(),
             usage: None,
             stop_reason: None,
             content_blocks: Vec::new(),
@@ -182,7 +182,7 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
         }
 
         // Process capability invocations
-        if let Some(ref tool_calls) = choice.delta.tool_calls {
+        if let Some(ref capability_invocations) = choice.delta.capability_invocations {
             // End thinking/text blocks before capability invocations
             if state.in_thinking {
                 state.in_thinking = false;
@@ -206,11 +206,11 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 });
             }
 
-            for tc in tool_calls {
+            for tc in capability_invocations {
                 let idx = tc.index as usize;
-                // Ensure active_tools is large enough
-                while state.active_tools.len() <= idx {
-                    state.active_tools.push(None);
+                // Ensure active_capabilities is large enough
+                while state.active_capabilities.len() <= idx {
+                    state.active_capabilities.push(None);
                 }
 
                 if let Some(ref id) = tc.id {
@@ -220,13 +220,13 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                         .as_ref()
                         .and_then(|f| f.name.clone())
                         .unwrap_or_default();
-                    state.active_tools[idx] = Some(ActiveToolCall {
+                    state.active_capabilities[idx] = Some(ActiveCapabilityInvocationDraft {
                         id: id.clone(),
                         name: name.clone(),
                         arguments: String::new(),
                     });
-                    events.push(StreamEvent::ToolCallStart {
-                        tool_call_id: id.clone(),
+                    events.push(StreamEvent::CapabilityInvocationDraftStart {
+                        invocation_id: id.clone(),
                         name,
                     });
                 }
@@ -235,11 +235,11 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 if let Some(ref func) = tc.function
                     && let Some(ref args) = func.arguments
                     && !args.is_empty()
-                    && let Some(ref mut active) = state.active_tools[idx]
+                    && let Some(ref mut active) = state.active_capabilities[idx]
                 {
                     active.arguments.push_str(args);
-                    events.push(StreamEvent::ToolCallDelta {
-                        tool_call_id: active.id.clone(),
+                    events.push(StreamEvent::CapabilityInvocationDraftDelta {
+                        invocation_id: active.id.clone(),
                         arguments_delta: args.clone(),
                     });
                 }
@@ -270,7 +270,7 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
 fn map_finish_reason(reason: &str) -> String {
     match reason {
         "stop" => "end_turn".into(),
-        "tool_calls" => "tool_use".into(),
+        "capability_invocations" => "capability_invocation".into(),
         "length" => "max_tokens".into(),
         "content_filter" => "content_filter".into(),
         other => other.into(),
@@ -302,18 +302,24 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
     }
 
     // End any open capability invocations
-    for slot in &mut state.active_tools {
+    for slot in &mut state.active_capabilities {
         if let Some(active) = slot.take() {
             let arguments: Map<String, Value> =
                 serde_json::from_str(&active.arguments).unwrap_or_default();
-            state.content_blocks.push(AssistantContent::ToolUse {
-                id: active.id.clone(),
-                name: active.name.clone(),
-                arguments: arguments.clone(),
-                thought_signature: None,
-            });
-            events.push(StreamEvent::ToolCallEnd {
-                tool_call: ToolCall::new(active.id, active.name, arguments),
+            state
+                .content_blocks
+                .push(AssistantContent::CapabilityInvocation {
+                    id: active.id.clone(),
+                    name: active.name.clone(),
+                    arguments: arguments.clone(),
+                    thought_signature: None,
+                });
+            events.push(StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation: CapabilityInvocationDraft::new(
+                    active.id,
+                    active.name,
+                    arguments,
+                ),
             });
         }
     }
@@ -351,7 +357,7 @@ mod tests {
                 delta: ChunkDelta {
                     content: Some(content.into()),
                     reasoning_content: None,
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
                 finish_reason: None,
             }],
@@ -365,7 +371,7 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: Some(content.into()),
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
                 finish_reason: None,
             }],
@@ -379,7 +385,7 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
                 finish_reason: Some(reason.into()),
             }],
@@ -430,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_stream() {
+    fn capability_invocation_stream() {
         let mut state = KimiStreamState::new();
 
         // First chunk: capability invocation start with name
@@ -439,10 +445,10 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: Some(vec![ChunkToolCall {
+                    capability_invocations: Some(vec![ChunkCapabilityInvocationDraft {
                         index: 0,
                         id: Some("call_abc".into()),
-                        function: Some(ChunkToolCallFunction {
+                        function: Some(ChunkCapabilityInvocationDraftFunction {
                             name: Some("execute".into()),
                             arguments: Some("{\"cm".into()),
                         }),
@@ -453,8 +459,14 @@ mod tests {
             usage: None,
         };
         let events = process_chunk(&chunk, &mut state);
-        assert!(matches!(events[0], StreamEvent::ToolCallStart { .. }));
-        assert!(matches!(events[1], StreamEvent::ToolCallDelta { .. }));
+        assert!(matches!(
+            events[0],
+            StreamEvent::CapabilityInvocationDraftStart { .. }
+        ));
+        assert!(matches!(
+            events[1],
+            StreamEvent::CapabilityInvocationDraftDelta { .. }
+        ));
 
         // Second chunk: more arguments
         let chunk2 = ChatCompletionChunk {
@@ -462,10 +474,10 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: Some(vec![ChunkToolCall {
+                    capability_invocations: Some(vec![ChunkCapabilityInvocationDraft {
                         index: 0,
                         id: None,
-                        function: Some(ChunkToolCallFunction {
+                        function: Some(ChunkCapabilityInvocationDraftFunction {
                             name: None,
                             arguments: Some("d\":\"ls\"}".into()),
                         }),
@@ -477,11 +489,14 @@ mod tests {
         };
         let events2 = process_chunk(&chunk2, &mut state);
         assert_eq!(events2.len(), 1);
-        assert!(matches!(events2[0], StreamEvent::ToolCallDelta { .. }));
+        assert!(matches!(
+            events2[0],
+            StreamEvent::CapabilityInvocationDraftDelta { .. }
+        ));
     }
 
     #[test]
-    fn multiple_tool_calls() {
+    fn multiple_capability_invocations() {
         let mut state = KimiStreamState::new();
 
         let chunk = ChatCompletionChunk {
@@ -489,19 +504,19 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: Some(vec![
-                        ChunkToolCall {
+                    capability_invocations: Some(vec![
+                        ChunkCapabilityInvocationDraft {
                             index: 0,
                             id: Some("call_1".into()),
-                            function: Some(ChunkToolCallFunction {
+                            function: Some(ChunkCapabilityInvocationDraftFunction {
                                 name: Some("execute".into()),
                                 arguments: Some("{}".into()),
                             }),
                         },
-                        ChunkToolCall {
+                        ChunkCapabilityInvocationDraft {
                             index: 1,
                             id: Some("call_2".into()),
-                            function: Some(ChunkToolCallFunction {
+                            function: Some(ChunkCapabilityInvocationDraftFunction {
                                 name: Some("inspect".into()),
                                 arguments: Some("{}".into()),
                             }),
@@ -516,7 +531,7 @@ mod tests {
         let events = process_chunk(&chunk, &mut state);
         let starts: Vec<_> = events
             .iter()
-            .filter(|e| matches!(e, StreamEvent::ToolCallStart { .. }))
+            .filter(|e| matches!(e, StreamEvent::CapabilityInvocationDraftStart { .. }))
             .collect();
         assert_eq!(starts.len(), 2);
     }
@@ -531,7 +546,7 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
                 finish_reason: Some("stop".into()),
             }],
@@ -551,9 +566,9 @@ mod tests {
     }
 
     #[test]
-    fn finish_reason_tool_calls() {
+    fn finish_reason_capability_invocations() {
         let mut state = KimiStreamState::new();
-        state.stop_reason = Some("tool_use".into());
+        state.stop_reason = Some("capability_invocation".into());
         state.usage = Some(TokenUsage::default());
         let events = process_chunk(
             &ChatCompletionChunk {
@@ -590,7 +605,7 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
                 finish_reason: Some("stop".into()),
             }],
@@ -620,7 +635,7 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
                 finish_reason: None,
             }],
@@ -638,7 +653,7 @@ mod tests {
                 delta: ChunkDelta {
                     content: Some(String::new()),
                     reasoning_content: None,
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
                 finish_reason: None,
             }],
@@ -649,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_plus_tool_calls() {
+    fn thinking_plus_capability_invocations() {
         let mut state = KimiStreamState::new();
 
         // Thinking
@@ -661,10 +676,10 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: Some(vec![ChunkToolCall {
+                    capability_invocations: Some(vec![ChunkCapabilityInvocationDraft {
                         index: 0,
                         id: Some("call_1".into()),
-                        function: Some(ChunkToolCallFunction {
+                        function: Some(ChunkCapabilityInvocationDraftFunction {
                             name: Some("execute".into()),
                             arguments: Some("{}".into()),
                         }),
@@ -676,11 +691,14 @@ mod tests {
         };
         let events = process_chunk(&chunk, &mut state);
         assert!(matches!(events[0], StreamEvent::ThinkingEnd { .. }));
-        assert!(matches!(events[1], StreamEvent::ToolCallStart { .. }));
+        assert!(matches!(
+            events[1],
+            StreamEvent::CapabilityInvocationDraftStart { .. }
+        ));
     }
 
     #[test]
-    fn tool_call_arguments_accumulation() {
+    fn capability_invocation_arguments_accumulation() {
         let mut state = KimiStreamState::new();
 
         // Start
@@ -689,10 +707,10 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: Some(vec![ChunkToolCall {
+                    capability_invocations: Some(vec![ChunkCapabilityInvocationDraft {
                         index: 0,
                         id: Some("call_1".into()),
-                        function: Some(ChunkToolCallFunction {
+                        function: Some(ChunkCapabilityInvocationDraftFunction {
                             name: Some("execute".into()),
                             arguments: Some("{\"cm".into()),
                         }),
@@ -710,10 +728,10 @@ mod tests {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: Some(vec![ChunkToolCall {
+                    capability_invocations: Some(vec![ChunkCapabilityInvocationDraft {
                         index: 0,
                         id: None,
-                        function: Some(ChunkToolCallFunction {
+                        function: Some(ChunkCapabilityInvocationDraftFunction {
                             name: None,
                             arguments: Some("d\":\"ls\"}".into()),
                         }),
@@ -725,15 +743,15 @@ mod tests {
         };
         let _ = process_chunk(&chunk2, &mut state);
 
-        // Finish — should emit ToolCallEnd with complete arguments
+        // Finish — should emit CapabilityInvocationDraftEnd with complete arguments
         let chunk3 = ChatCompletionChunk {
             choices: vec![ChunkChoice {
                 delta: ChunkDelta {
                     content: None,
                     reasoning_content: None,
-                    tool_calls: None,
+                    capability_invocations: None,
                 },
-                finish_reason: Some("tool_calls".into()),
+                finish_reason: Some("capability_invocations".into()),
             }],
             usage: Some(ChunkUsage {
                 prompt_tokens: 100,
@@ -744,11 +762,14 @@ mod tests {
 
         let capability_completed = events
             .iter()
-            .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
+            .find(|e| matches!(e, StreamEvent::CapabilityInvocationDraftEnd { .. }));
         assert!(capability_completed.is_some());
-        if let StreamEvent::ToolCallEnd { tool_call } = capability_completed.unwrap() {
-            assert_eq!(tool_call.name, "execute");
-            assert_eq!(tool_call.arguments["cmd"], "ls");
+        if let StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation,
+        } = capability_completed.unwrap()
+        {
+            assert_eq!(capability_invocation.name, "execute");
+            assert_eq!(capability_invocation.arguments["cmd"], "ls");
         }
     }
 
@@ -778,7 +799,10 @@ mod tests {
     #[test]
     fn map_finish_reasons() {
         assert_eq!(map_finish_reason("stop"), "end_turn");
-        assert_eq!(map_finish_reason("tool_calls"), "tool_use");
+        assert_eq!(
+            map_finish_reason("capability_invocations"),
+            "capability_invocation"
+        );
         assert_eq!(map_finish_reason("length"), "max_tokens");
         assert_eq!(map_finish_reason("content_filter"), "content_filter");
         assert_eq!(map_finish_reason("unknown_reason"), "unknown_reason");

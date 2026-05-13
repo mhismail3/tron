@@ -289,7 +289,7 @@ private struct CodexItemRow: View {
         case .reasoning: "brain"
         case .command: "terminal"
         case .fileChange: "doc.text"
-        case .mcpTool: "point.3.connected.trianglepath.dotted"
+        case .pluginCapability: "point.3.connected.trianglepath.dotted"
         case .webSearch: "magnifyingglass"
         case .plan: "checklist"
         case .diff: "doc.text.magnifyingglass"
@@ -303,7 +303,7 @@ private struct CodexItemRow: View {
         case .reasoning: "Reasoning"
         case .command(_, let command, _, let status, _): "\(status): \(command)"
         case .fileChange(_, let status, _): "File change \(status)"
-        case .mcpTool(_, let server, let tool, let status, _): "\(server ?? "Plugin Source") \(tool ?? "capability") \(status)"
+        case .pluginCapability(_, let source, let capability, let status, _): "\(source ?? "Plugin source") \(capability ?? "capability") \(status)"
         case .webSearch(_, let query, let status): "Search \(status): \(query ?? "")"
         case .plan: "Plan"
         case .diff: "Diff"
@@ -321,7 +321,7 @@ private struct CodexItemRow: View {
         case .command(_, _, let cwd, _, let output):
             [cwd, output].compactMap { $0 }.joined(separator: "\n").nilIfBlank
         case .fileChange(_, _, let summary),
-             .mcpTool(_, _, _, _, let summary),
+             .pluginCapability(_, _, _, _, let summary),
              .other(_, _, let summary):
             summary
         case .webSearch:

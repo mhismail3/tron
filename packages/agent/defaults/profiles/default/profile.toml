@@ -52,7 +52,7 @@
 #        blockingTimeoutMs = 120000
 #        maxTurns = 25
 #
-# - Give local models a different primitive tool set:
+# - Give local models a different primitive capability set:
 #
 #        [capabilityPolicies.localModel]
 #        allowedCapabilities = ["search", "inspect"]
@@ -103,13 +103,13 @@
 #   "high", "xhigh", or "max". Providers clamp unsupported values.
 # - context cache class: "foundation", "profile", "session", "turn", "none".
 # - cache behavior: "cacheIfSupported" or "noCache".
-# - provider surface: "instructions", "message", "tool", "excluded".
-# - provider systemPromptSurface: "providerDefault" or "toolClarification".
+# - provider surface: "instructions", "message", "capability", "excluded".
+# - provider systemPromptSurface: "providerDefault" or "capabilityClarification".
 # - output contract kind: "plainText", "plainTextList",
 #   "compactionSummary", "memoryRetention", or "capabilityAnswer".
 # - resultInjection ids currently used by runtime: "nextParentTurn" and
 #   "automationLedger".
-# - model-facing tool ids are search, inspect, and execute. First-party
+# - model-facing capability ids are search, inspect, and execute. First-party
 #   filesystem, web, shell, MCP, app, and agent actions are live worker
 #   capabilities discovered and invoked through those primitives.
 
@@ -138,7 +138,7 @@ redirectUri = "https://console.anthropic.com/oauth/code/callback"
 clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 scopes = ["org:create_api_key", "user:profile", "user:inference"]
 systemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
-oauthBetaHeaders = "oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+oauthBetaHeaders = "oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-capability-streaming-2025-05-14"
 tokenExpiryBufferSeconds = 300
 
 [settings.retry]
@@ -147,26 +147,26 @@ baseDelayMs = 1000
 maxDelayMs = 60000
 jitterFactor = 0.2
 
-[settings.tools.process]
+[settings.capabilities.process]
 defaultTimeoutMs = 120000
 maxTimeoutMs = 600000
 maxOutputLength = 40000
 dangerousPatterns = ["^rm\\s+(-rf?|--force)\\s+/\\s*$", "rm\\s+-rf?\\s+/", "^sudo\\s+", "^chmod\\s+777\\s+/\\s*$", "^mkfs\\.", "^dd\\s+if=.*of=/dev/", ">\\s*/dev/sd[a-z]"]
 
-[settings.tools.process.sandbox]
+[settings.capabilities.process.sandbox]
 defaultImage = "ubuntu:latest"
 networkEnabled = true
 
-[settings.tools.filesystemRead]
+[settings.capabilities.filesystemRead]
 defaultLimitLines = 2000
 maxLineLength = 2000
 maxOutputTokens = 20000
 
-[settings.tools.find]
+[settings.capabilities.find]
 defaultMaxResults = 100
 defaultMaxDepth = 10
 
-[settings.tools.search]
+[settings.capabilities.search]
 defaultMaxResults = 100
 maxFileSizeBytes = 10485760
 binaryExtensions = ["png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "svg", "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "tar", "gz", "bz2", "7z", "rar", "exe", "dll", "so", "dylib", "o", "a", "woff", "woff2", "ttf", "eot", "otf", "db", "sqlite", "bin"]
@@ -179,17 +179,17 @@ astBinaryPath = "sg"
 requireConfirmationForReplace = false
 defaultTimeoutMs = 60000
 
-[settings.tools.web.fetch]
+[settings.capabilities.web.fetch]
 timeoutMs = 30000
 
-[settings.tools.web.cache]
+[settings.capabilities.web.cache]
 ttlMs = 900000
 maxEntries = 100
 
-[settings.tools.browser]
+[settings.capabilities.browser]
 headed = false
 
-[settings.tools.computerUse]
+[settings.capabilities.computerUse]
 confirmBeforeAction = true
 screenshotThrottleMs = 500
 
@@ -311,9 +311,9 @@ prompt = "\u203a"
 user = "\u203a"
 assistant = "\u25c6"
 system = "\u25c7"
-toolRunning = "\u25c7"
-toolSuccess = "\u25c6"
-toolError = "\u25c8"
+capabilityRunning = "\u25c7"
+capabilitySuccess = "\u25c6"
+capabilityError = "\u25c8"
 ready = "\u25c6"
 thinking = "\u25c7"
 streaming = "\u25c6"
@@ -435,7 +435,7 @@ auditPolicy = "default"
 # Processes are every harness-spawned child execution contract, model-backed or
 # otherwise. Summarizers are not separate primitives; they are processes with
 # kind = "summarizer". A process may be invoked automatically by the harness,
-# by a capability, by a hook, by automation, or by an LLM tool call.
+# by a capability, by a hook, by automation, or by an LLM capability call.
 #
 # Process fields:
 #
@@ -694,9 +694,9 @@ skipPendingJobsBootstrap = true
 # - manifest: optional capability presentation file for descriptions/schema policy.
 # - allowedCapabilities: if present, only listed capabilities survive.
 # - deniedCapabilities: listed capabilities are removed after allowlist/inheritance.
-# - exposeInteractiveTools: false hides user-blocking UI capabilities when a runtime
+# - exposeInteractiveCapabilities: false hides user-blocking UI capabilities when a runtime
 #   path applies interactive filtering, such as unattended jobs.
-# - removeSpawnToolsAtMaxDepth: hides child-spawn capabilities when depth is exhausted.
+# - removeSpawnCapabilitiesAtMaxDepth: hides child-spawn capabilities when depth is exhausted.
 #
 # Capability policy is not a security boundary by itself. It pairs with permission
 # policy and executor checks so hidden/denied capabilities cannot be called anyway.
@@ -704,42 +704,42 @@ skipPendingJobsBootstrap = true
 manifest = "capabilities/presentation.toml"
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveTools = true
-removeSpawnToolsAtMaxDepth = true
+exposeInteractiveCapabilities = true
+removeSpawnCapabilitiesAtMaxDepth = true
 
 [capabilityPolicies.localModel]
 allowedCapabilities = ["search", "inspect", "execute"]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveTools = true
-removeSpawnToolsAtMaxDepth = true
+exposeInteractiveCapabilities = true
+removeSpawnCapabilitiesAtMaxDepth = true
 
 [capabilityPolicies.none]
 allowedCapabilities = []
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "disabled"
-exposeInteractiveTools = false
-removeSpawnToolsAtMaxDepth = true
+exposeInteractiveCapabilities = false
+removeSpawnCapabilitiesAtMaxDepth = true
 
 [capabilityPolicies.subagentInherited]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveTools = false
-removeSpawnToolsAtMaxDepth = true
+exposeInteractiveCapabilities = false
+removeSpawnCapabilitiesAtMaxDepth = true
 
 [capabilityPolicies.unattended]
 deniedCapabilities = []
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveTools = false
-removeSpawnToolsAtMaxDepth = true
+exposeInteractiveCapabilities = false
+removeSpawnCapabilitiesAtMaxDepth = true
 
 [capabilityPolicies.conflictResolver]
 allowedCapabilities = ["search", "inspect", "execute"]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveTools = false
-removeSpawnToolsAtMaxDepth = true
+exposeInteractiveCapabilities = false
+removeSpawnCapabilitiesAtMaxDepth = true
 
 [capabilitySearchPolicies.hybridLocal]
 lexical = true
@@ -799,8 +799,8 @@ allowAuthEscalation = false
 #
 # - systemPromptSurface = "providerDefault" lets the provider payload use the provider's
 #   normal system/developer/instruction slot.
-# - systemPromptSurface = "toolClarification" adds provider-specific guidance
-#   for providers that need extra tool-use instruction text.
+# - systemPromptSurface = "capabilityClarification" adds provider-specific guidance
+#   for providers that need extra capability-invocation instruction text.
 # - allowDuplicateSystemPrompt must normally remain false; true is only for a
 #   provider payload implementation that intentionally needs duplicate system text.
 [providerPolicies.default]
@@ -810,8 +810,8 @@ allowDuplicateSystemPrompt = false
 
 [providerPolicies.openaiCodex]
 prompt = "providers/openai/codex-instructions.md"
-systemPromptSurface = "toolClarification"
-toolClarification = true
+systemPromptSurface = "capabilityClarification"
+capabilityClarification = true
 cachePolicy = "default"
 allowDuplicateSystemPrompt = false
 

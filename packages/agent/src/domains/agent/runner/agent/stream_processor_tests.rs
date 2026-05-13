@@ -3,17 +3,17 @@ use async_stream::stream;
 use std::collections::HashSet;
 use std::pin::Pin;
 
-use super::super::stream_state::{build_message, finalize_tool_call};
+use super::super::stream_state::{build_message, finalize_capability_invocation};
 use crate::domains::model::providers::provider::ProviderError;
 use crate::shared::content::AssistantContent;
 use crate::shared::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
-use crate::shared::messages::{TokenUsage, ToolCall};
+use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
 
 fn make_emitter() -> Arc<EventEmitter> {
     Arc::new(EventEmitter::new())
 }
 
-fn no_stopping_tools() -> HashSet<String> {
+fn no_stopping_capabilities() -> HashSet<String> {
     HashSet::new()
 }
 
@@ -62,7 +62,7 @@ fn thinking_then_text_stream() -> StreamEventStream {
     Box::pin(s)
 }
 
-fn tool_call_stream() -> StreamEventStream {
+fn capability_invocation_stream() -> StreamEventStream {
     let mut args = serde_json::Map::new();
     let _ = args.insert("command".into(), serde_json::json!("ls"));
     let s = stream! {
@@ -70,10 +70,10 @@ fn tool_call_stream() -> StreamEventStream {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "Running:".into() });
         yield Ok(StreamEvent::TextEnd { text: "Running:".into(), signature: None });
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "execute".into() });
-        yield Ok(StreamEvent::ToolCallDelta { tool_call_id: "tc-1".into(), arguments_delta: r#"{"command":"ls"}"#.into() });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-1", "execute", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "execute".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta { invocation_id: "tc-1".into(), arguments_delta: r#"{"command":"ls"}"#.into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-1", "execute", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -83,7 +83,7 @@ fn tool_call_stream() -> StreamEventStream {
             message: AssistantMessage {
                 content: vec![
                     AssistantContent::text("Running:"),
-                    AssistantContent::ToolUse {
+                    AssistantContent::CapabilityInvocation {
                         id: "tc-1".into(),
                         name: "execute".into(),
                         arguments: {
@@ -96,7 +96,7 @@ fn tool_call_stream() -> StreamEventStream {
                 ],
                 token_usage: Some(TokenUsage { input_tokens: 50, output_tokens: 30, ..Default::default() }),
             },
-            stop_reason: "tool_use".into(),
+            stop_reason: "capability_invocation".into(),
         });
     };
     Box::pin(s)
@@ -112,7 +112,7 @@ async fn pure_text_response() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -122,7 +122,7 @@ async fn pure_text_response() {
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
     assert!(result.partial_content.is_none());
-    assert!(result.tool_calls.is_empty());
+    assert!(result.capability_invocations.is_empty());
     assert!(result.token_usage.is_some());
     assert_eq!(result.token_usage.as_ref().unwrap().input_tokens, 10);
 }
@@ -138,7 +138,7 @@ async fn thinking_plus_text_response() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -166,46 +166,46 @@ async fn thinking_plus_text_response() {
 }
 
 #[tokio::test]
-async fn text_plus_tool_call() {
+async fn text_plus_capability_invocation() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
 
     let result = process_stream(
-        tool_call_stream(),
+        capability_invocation_stream(),
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.stop_reason, "tool_use");
-    assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "execute");
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.capability_invocations[0].name, "execute");
     assert_eq!(
-        result.tool_calls[0].arguments["command"],
+        result.capability_invocations[0].arguments["command"],
         serde_json::json!("ls")
     );
 }
 
 #[tokio::test]
-async fn multiple_tool_calls() {
+async fn multiple_capability_invocations() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "inspect".into() });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-1", "inspect", serde_json::Map::new()),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "inspect".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-1", "inspect", serde_json::Map::new()),
         });
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-2".into(), name: "search".into() });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-2", "search", serde_json::Map::new()),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-2".into(), name: "search".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-2", "search", serde_json::Map::new()),
         });
         yield Ok(StreamEvent::Done {
             message: AssistantMessage { content: vec![], token_usage: None },
-            stop_reason: "tool_use".into(),
+            stop_reason: "capability_invocation".into(),
         });
     };
 
@@ -216,16 +216,16 @@ async fn multiple_tool_calls() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.tool_calls.len(), 2);
-    assert_eq!(result.tool_calls[0].name, "inspect");
-    assert_eq!(result.tool_calls[1].name, "search");
+    assert_eq!(result.capability_invocations.len(), 2);
+    assert_eq!(result.capability_invocations[0].name, "inspect");
+    assert_eq!(result.capability_invocations[1].name, "search");
 }
 
 #[tokio::test]
@@ -248,7 +248,7 @@ async fn error_mid_stream() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -281,7 +281,7 @@ async fn abort_mid_stream() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -327,7 +327,7 @@ async fn retry_event_emission() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -361,7 +361,7 @@ async fn safety_block_returns_error() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -389,7 +389,7 @@ async fn empty_response() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -398,7 +398,7 @@ async fn empty_response() {
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
-    assert!(result.tool_calls.is_empty());
+    assert!(result.capability_invocations.is_empty());
 }
 
 #[tokio::test]
@@ -411,7 +411,7 @@ async fn token_usage_extraction() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -434,7 +434,7 @@ async fn message_update_events_emitted() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -452,17 +452,17 @@ async fn message_update_events_emitted() {
 }
 
 #[tokio::test]
-async fn tool_call_generating_event_emitted() {
+async fn capability_invocation_generating_event_emitted() {
     let emitter = make_emitter();
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
     let _ = process_stream(
-        tool_call_stream(),
+        capability_invocation_stream(),
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -537,16 +537,16 @@ fn build_message_preserves_internal_newlines() {
 }
 
 #[tokio::test]
-async fn duplicate_tool_calls_deduped_by_id() {
+async fn duplicate_capability_invocations_deduped_by_id() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         // First occurrence — empty/malformed args
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "execute".into() });
-        yield Ok(StreamEvent::ToolCallDelta { tool_call_id: "tc-dup".into(), arguments_delta: "{}".into() });
-        // Second occurrence — valid args (replaces via ToolCallEnd dedup)
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "execute".into() });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-dup", "execute", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-dup".into(), name: "execute".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta { invocation_id: "tc-dup".into(), arguments_delta: "{}".into() });
+        // Second occurrence — valid args (replaces via CapabilityInvocationDraftEnd dedup)
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-dup".into(), name: "execute".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-dup", "execute", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -554,7 +554,7 @@ async fn duplicate_tool_calls_deduped_by_id() {
         });
         yield Ok(StreamEvent::Done {
             message: AssistantMessage { content: vec![], token_usage: None },
-            stop_reason: "tool_use".into(),
+            stop_reason: "capability_invocation".into(),
         });
     };
 
@@ -565,7 +565,7 @@ async fn duplicate_tool_calls_deduped_by_id() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -573,60 +573,63 @@ async fn duplicate_tool_calls_deduped_by_id() {
     .unwrap();
 
     assert_eq!(
-        result.tool_calls.len(),
+        result.capability_invocations.len(),
         1,
         "duplicate capability invocations should be deduped"
     );
-    assert_eq!(result.tool_calls[0].id, "tc-dup");
+    assert_eq!(result.capability_invocations[0].id, "tc-dup");
     assert_eq!(
-        result.tool_calls[0].arguments["command"],
+        result.capability_invocations[0].arguments["command"],
         serde_json::json!("ls")
     );
 }
 
-// -- finalize_tool_call unit tests --
+// -- finalize_capability_invocation unit tests --
 
 #[test]
-fn finalize_tool_call_with_valid_json() {
-    let mut tool_calls = Vec::new();
+fn finalize_capability_invocation_with_valid_json() {
+    let mut capability_invocations = Vec::new();
     let mut id = Some("tc-1".to_string());
     let mut name = Some("execute".to_string());
     let mut args = r#"{"command":"ls"}"#.to_string();
 
-    finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
+    finalize_capability_invocation(&mut capability_invocations, &mut id, &mut name, &mut args);
 
-    assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0].name, "execute");
-    assert_eq!(tool_calls[0].id, "tc-1");
-    assert_eq!(tool_calls[0].arguments["command"], serde_json::json!("ls"));
+    assert_eq!(capability_invocations.len(), 1);
+    assert_eq!(capability_invocations[0].name, "execute");
+    assert_eq!(capability_invocations[0].id, "tc-1");
+    assert_eq!(
+        capability_invocations[0].arguments["command"],
+        serde_json::json!("ls")
+    );
 }
 
 #[test]
-fn finalize_tool_call_with_malformed_json() {
-    let mut tool_calls = Vec::new();
+fn finalize_capability_invocation_with_malformed_json() {
+    let mut capability_invocations = Vec::new();
     let mut id = Some("tc-2".to_string());
     let mut name = Some("inspect".to_string());
     let mut args = "{ not valid".to_string();
 
-    finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
+    finalize_capability_invocation(&mut capability_invocations, &mut id, &mut name, &mut args);
 
-    assert_eq!(tool_calls.len(), 1);
-    assert_eq!(tool_calls[0].name, "inspect");
-    assert_eq!(tool_calls[0].id, "tc-2");
-    assert!(tool_calls[0].arguments.is_empty());
+    assert_eq!(capability_invocations.len(), 1);
+    assert_eq!(capability_invocations[0].name, "inspect");
+    assert_eq!(capability_invocations[0].id, "tc-2");
+    assert!(capability_invocations[0].arguments.is_empty());
 }
 
 #[test]
-fn finalize_tool_call_with_empty_string() {
-    let mut tool_calls = Vec::new();
+fn finalize_capability_invocation_with_empty_string() {
+    let mut capability_invocations = Vec::new();
     let mut id = Some("tc-3".to_string());
     let mut name = Some("search".to_string());
     let mut args = String::new();
 
-    finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
+    finalize_capability_invocation(&mut capability_invocations, &mut id, &mut name, &mut args);
 
     assert!(
-        tool_calls.is_empty(),
+        capability_invocations.is_empty(),
         "empty partial arguments are ignored because providers may send the final capability-invocation arguments on the done item"
     );
     assert!(args.is_empty());
@@ -679,7 +682,7 @@ async fn abort_mid_thinking_preserves_signature() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -701,11 +704,11 @@ async fn abort_mid_thinking_preserves_signature() {
 
 // -- drain mode tests --
 
-fn ask_user_stopping_tools() -> HashSet<String> {
+fn ask_user_stopping_capabilities() -> HashSet<String> {
     HashSet::from(["agent::ask_user".to_string()])
 }
 
-fn both_stopping_tools() -> HashSet<String> {
+fn both_stopping_capabilities() -> HashSet<String> {
     HashSet::from(["agent::ask_user".to_string(), "agent::ask_user".to_string()])
 }
 
@@ -725,22 +728,22 @@ fn done_with_usage(content: Vec<AssistantContent>, stop_reason: &str) -> StreamE
 }
 
 #[tokio::test]
-async fn drain_after_interactive_tool_drops_trailing_text() {
+async fn drain_after_interactive_capability_drops_trailing_text() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
-        yield Ok(StreamEvent::ToolCallStart {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "tc-ask".into(),
             name: "agent::ask_user".into(),
         });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q1"]}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q1"]));
                 m
@@ -760,7 +763,7 @@ async fn drain_after_interactive_tool_drops_trailing_text() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_tools(),
+        &ask_user_stopping_capabilities(),
         None,
         None,
     )
@@ -768,16 +771,16 @@ async fn drain_after_interactive_tool_drops_trailing_text() {
     .unwrap();
 
     assert!(!result.interrupted);
-    assert_eq!(result.stop_reason, "tool_use");
-    assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "agent::ask_user");
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.capability_invocations[0].name, "agent::ask_user");
 
     // Token usage captured from Done event
     let usage = result.token_usage.expect("should have token usage");
     assert_eq!(usage.input_tokens, 100);
     assert_eq!(usage.output_tokens, 42);
 
-    // Message should have text + tool use, no trailing text
+    // Message should have text + capability invocation, no trailing text
     let text_blocks: Vec<_> = result
         .message
         .content
@@ -788,13 +791,13 @@ async fn drain_after_interactive_tool_drops_trailing_text() {
     if let AssistantContent::Text { text, .. } = &text_blocks[0] {
         assert_eq!(text, "hello");
     }
-    let tool_blocks: Vec<_> = result
+    let capability_blocks: Vec<_> = result
         .message
         .content
         .iter()
-        .filter(|c| matches!(c, AssistantContent::ToolUse { .. }))
+        .filter(|c| matches!(c, AssistantContent::CapabilityInvocation { .. }))
         .collect();
-    assert_eq!(tool_blocks.len(), 1);
+    assert_eq!(capability_blocks.len(), 1);
 }
 
 #[tokio::test]
@@ -807,16 +810,16 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "answer".into() });
         yield Ok(StreamEvent::TextEnd { text: "answer".into(), signature: None });
-        yield Ok(StreamEvent::ToolCallStart {
-            tool_call_id: "tc-ask-confirm".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "tc-ask-confirm".into(),
             name: "agent::ask_user".into(),
         });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-ask-confirm".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-ask-confirm".into(),
             arguments_delta: r#"{"questions":[{"question":"Proceed?"}]}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask-confirm", "agent::ask_user", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask-confirm", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!([{ "question": "Proceed?" }]));
                 m
@@ -834,7 +837,7 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
         "s1",
         &emitter,
         &cancel,
-        &both_stopping_tools(),
+        &both_stopping_capabilities(),
         None,
         None,
     )
@@ -867,52 +870,52 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
     if let AssistantContent::Text { text: t, .. } = text.unwrap() {
         assert_eq!(t, "answer");
     }
-    // Tool preserved
-    assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "agent::ask_user");
+    // ModelCapability preserved
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.capability_invocations[0].name, "agent::ask_user");
 }
 
 #[tokio::test]
 async fn drain_with_preceding_tools_keeps_all_before_interactive() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-bash".into(), name: "process::run".into() });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-bash".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-bash".into(), name: "process::run".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-bash".into(),
             arguments_delta: r#"{"command":"ls"}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-bash", "process::run", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-bash", "process::run", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
             }),
         });
-        yield Ok(StreamEvent::ToolCallStart {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "tc-ask".into(),
             name: "agent::ask_user".into(),
         });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q"]}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q"]));
                 m
             }),
         });
-        // Tool after interactive — should be drained
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-edit".into(), name: "filesystem::edit_file".into() });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-edit".into(),
+        // ModelCapability after interactive — should be drained
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-edit".into(), name: "filesystem::edit_file".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-edit".into(),
             arguments_delta: r#"{"file":"x"}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-edit", "filesystem::edit_file", serde_json::Map::new()),
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-edit", "filesystem::edit_file", serde_json::Map::new()),
         });
-        yield Ok(done_with_usage(vec![], "tool_use"));
+        yield Ok(done_with_usage(vec![], "capability_invocation"));
     };
 
     let emitter = make_emitter();
@@ -922,39 +925,39 @@ async fn drain_with_preceding_tools_keeps_all_before_interactive() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_tools(),
+        &ask_user_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.tool_calls.len(), 2);
-    assert_eq!(result.tool_calls[0].name, "process::run");
-    assert_eq!(result.tool_calls[1].name, "agent::ask_user");
-    // filesystem::edit_file should NOT be in tool_calls
+    assert_eq!(result.capability_invocations.len(), 2);
+    assert_eq!(result.capability_invocations[0].name, "process::run");
+    assert_eq!(result.capability_invocations[1].name, "agent::ask_user");
+    // filesystem::edit_file should NOT be in capability_invocations
     assert!(
         !result
-            .tool_calls
+            .capability_invocations
             .iter()
             .any(|tc| tc.name == "filesystem::edit_file")
     );
 }
 
 #[tokio::test]
-async fn no_drain_for_non_stopping_tools() {
+async fn no_drain_for_non_stopping_capabilities() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
-        yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "process::run".into() });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-1".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "process::run".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-1".into(),
             arguments_delta: r#"{"command":"ls"}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-1", "process::run", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-1", "process::run", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
@@ -967,7 +970,7 @@ async fn no_drain_for_non_stopping_tools() {
             message: AssistantMessage {
                 content: vec![
                     AssistantContent::text("hello world"),
-                    AssistantContent::ToolUse {
+                    AssistantContent::CapabilityInvocation {
                         id: "tc-1".into(),
                         name: "process::run".into(),
                         arguments: serde_json::Map::new(),
@@ -976,7 +979,7 @@ async fn no_drain_for_non_stopping_tools() {
                 ],
                 token_usage: Some(TokenUsage { input_tokens: 50, output_tokens: 20, ..Default::default() }),
             },
-            stop_reason: "tool_use".into(),
+            stop_reason: "capability_invocation".into(),
         });
     };
 
@@ -988,7 +991,7 @@ async fn no_drain_for_non_stopping_tools() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_tools(),
+        &ask_user_stopping_capabilities(),
         None,
         None,
     )
@@ -996,9 +999,9 @@ async fn no_drain_for_non_stopping_tools() {
     .unwrap();
 
     assert!(!result.interrupted);
-    assert_eq!(result.stop_reason, "tool_use");
-    assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "process::run");
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.capability_invocations[0].name, "process::run");
     // Message should come from final_message (has combined text)
     let usage = result.token_usage.unwrap();
     assert_eq!(usage.input_tokens, 50);
@@ -1011,16 +1014,16 @@ async fn cancel_during_drain_returns_interrupted() {
 
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::ToolCallStart {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "tc-ask".into(),
             name: "agent::ask_user".into(),
         });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q"]}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q"]));
                 m
@@ -1038,7 +1041,7 @@ async fn cancel_during_drain_returns_interrupted() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_tools(),
+        &ask_user_stopping_capabilities(),
         None,
         None,
     )
@@ -1048,8 +1051,8 @@ async fn cancel_during_drain_returns_interrupted() {
     assert!(result.interrupted);
     assert_eq!(result.stop_reason, "interrupted");
     // Capability invocation should still be in the result (was finalized before drain)
-    assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.tool_calls[0].name, "agent::ask_user");
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.capability_invocations[0].name, "agent::ask_user");
 }
 
 #[tokio::test]
@@ -1059,16 +1062,16 @@ async fn drain_empty_stopping_set_no_change() {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
-        yield Ok(StreamEvent::ToolCallStart {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "tc-ask".into(),
             name: "agent::ask_user".into(),
         });
-        yield Ok(StreamEvent::ToolCallDelta {
-            tool_call_id: "tc-ask".into(),
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-ask".into(),
             arguments_delta: r#"{"questions":["q"]}"#.into(),
         });
-        yield Ok(StreamEvent::ToolCallEnd {
-            tool_call: ToolCall::new("tc-ask", "agent::ask_user", {
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
                 let mut m = serde_json::Map::new();
                 let _ = m.insert("questions".into(), serde_json::json!(["q"]));
                 m
@@ -1082,7 +1085,7 @@ async fn drain_empty_stopping_set_no_change() {
                 content: vec![AssistantContent::text("hello trailing")],
                 token_usage: Some(TokenUsage { input_tokens: 10, output_tokens: 5, ..Default::default() }),
             },
-            stop_reason: "tool_use".into(),
+            stop_reason: "capability_invocation".into(),
         });
     };
 
@@ -1094,7 +1097,7 @@ async fn drain_empty_stopping_set_no_change() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_tools(),
+        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -1102,8 +1105,8 @@ async fn drain_empty_stopping_set_no_change() {
     .unwrap();
 
     // Trailing text should be present (from final_message)
-    assert_eq!(result.stop_reason, "tool_use");
-    assert_eq!(result.tool_calls.len(), 1);
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.capability_invocations.len(), 1);
     // Message comes from final_message which has combined text
     let has_text = result
         .message

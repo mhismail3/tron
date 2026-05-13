@@ -288,7 +288,7 @@ pub struct InlineDataContent {
     pub data: String,
 }
 
-/// Tool definition for the Gemini API.
+/// ModelCapability definition for the Gemini API.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiTool {
@@ -441,8 +441,8 @@ pub struct GeminiModelInfo {
     pub context_window: u64,
     /// Maximum output tokens.
     pub max_output: u64,
-    /// Whether the model supports tool use.
-    pub supports_tools: bool,
+    /// Whether the model supports capability invocation.
+    pub supports_capabilities: bool,
     /// Whether the model supports image inputs.
     pub supports_images: bool,
     /// Whether the model supports thinking mode.
@@ -488,7 +488,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             short_name: "Gemini 3.1 Pro",
             context_window: 1_048_576,
             max_output: 65_536,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             supports_thinking: true,
             tier: "pro",
@@ -513,7 +513,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             short_name: "Gemini 3 Pro",
             context_window: 1_048_576,
             max_output: 65_536,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             supports_thinking: true,
             tier: "pro",
@@ -538,7 +538,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             short_name: "Gemini 3.1 Flash Lite",
             context_window: 1_048_576,
             max_output: 65_536,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             supports_thinking: false,
             tier: "flash-lite",
@@ -563,7 +563,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             short_name: "Gemini 3 Flash",
             context_window: 1_048_576,
             max_output: 65_536,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             supports_thinking: false,
             tier: "flash",
@@ -588,7 +588,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             short_name: "Gemini 2.5 Pro",
             context_window: 2_097_152,
             max_output: 16_384,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             supports_thinking: true,
             tier: "pro",
@@ -613,7 +613,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             short_name: "Gemini 2.5 Flash",
             context_window: 1_048_576,
             max_output: 16_384,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             supports_thinking: true,
             tier: "flash",
@@ -638,7 +638,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             short_name: "Gemini 2.5 Flash Lite",
             context_window: 1_048_576,
             max_output: 8_192,
-            supports_tools: true,
+            supports_capabilities: true,
             supports_images: true,
             supports_thinking: false,
             tier: "flash-lite",
@@ -947,12 +947,12 @@ mod tests {
     fn gemini_part_function_response_serde() {
         let part = GeminiPart::FunctionResponse {
             function_response: FunctionResponseData {
-                name: "tool_result".into(),
+                name: "capability_result".into(),
                 response: serde_json::json!({"result": "ok"}),
             },
         };
         let json = serde_json::to_value(&part).unwrap();
-        assert_eq!(json["functionResponse"]["name"], "tool_result");
+        assert_eq!(json["functionResponse"]["name"], "capability_result");
     }
 
     #[test]

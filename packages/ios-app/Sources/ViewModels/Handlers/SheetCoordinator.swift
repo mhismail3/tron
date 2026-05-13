@@ -94,8 +94,8 @@ final class SheetCoordinator {
     }
 
     /// Show ask user question sheet
-    func showAskUserQuestion() {
-        present(.askUserQuestion)
+    func showUserInteraction() {
+        present(.userInteraction)
     }
 
     /// Show the engine approval sheet.

@@ -17,7 +17,7 @@ struct DiagnosticsBundleBuilderTests {
             timestamp: "2026-04-29T21:00:00Z",
             sequence: 1,
             payload: [
-                "modelToolName": AnyCodable("Read"),
+                "modelPrimitiveName": AnyCodable("execute"),
                 "durationMs": AnyCodable(42),
                 "arguments": AnyCodable(#"{"path":"/Users/alice/project/file.swift"}"#),
                 "prompt": AnyCodable("secret prompt body"),
@@ -27,7 +27,7 @@ struct DiagnosticsBundleBuilderTests {
 
         let summary = DiagnosticsEventSanitizer.summarize(event)
         #expect(summary.idHash != "event-raw")
-        #expect(summary.payload["modelToolName"]?.stringValue == "Read")
+        #expect(summary.payload["modelPrimitiveName"]?.stringValue == "execute")
         #expect(summary.payload["durationMs"]?.intValue == 42)
         #expect(summary.payload["arguments"] == nil)
         #expect(summary.payload["prompt"] == nil)
@@ -190,7 +190,7 @@ struct DiagnosticsBundleBuilderTests {
             timestamp: "2026-04-29T21:00:00Z",
             sequence: sequence,
             payload: [
-                "modelToolName": AnyCodable("Read"),
+                "modelPrimitiveName": AnyCodable("execute"),
                 "prompt": AnyCodable("secret prompt body"),
                 "arguments": AnyCodable(#"{"path":"/Users/alice/project/file.swift"}"#),
             ]

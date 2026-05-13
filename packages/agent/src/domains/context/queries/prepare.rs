@@ -1,6 +1,6 @@
 use super::{
     Deps, PreparedSessionContext, RwLock, build_active_skill_context,
-    build_context_manager_for_session, retry_context_read, tool_definitions,
+    build_context_manager_for_session, model_capability_definitions, retry_context_read,
 };
 use crate::domains::skills::registry::SkillRegistry;
 use crate::shared::server::context::run_blocking_task;
@@ -17,7 +17,7 @@ pub(crate) async fn prepare_session_context(
     let event_store = deps.event_store.clone();
     let context_artifacts = deps.context_artifacts.clone();
     let profile_runtime = deps.profile_runtime.clone();
-    let tool_definitions = tool_definitions(deps, session_id).await;
+    let capabilities_for_model = model_capability_definitions(deps, session_id).await;
     let session_id = session_id.to_owned();
     run_blocking_task(task_name, move || {
         retry_context_read(task_name, || {
@@ -27,7 +27,7 @@ pub(crate) async fn prepare_session_context(
                 event_store.as_ref(),
                 context_artifacts.as_ref(),
                 profile_runtime.as_ref(),
-                tool_definitions.clone(),
+                capabilities_for_model.clone(),
             )
         })
     })

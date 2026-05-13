@@ -22,7 +22,7 @@ pub struct ResourceRule {
 impl ResourceRule {
     /// Evaluate this resource rule against the context.
     pub fn evaluate(&self, ctx: &EvaluationContext) -> RuleEvaluationResult {
-        let value = match ctx.tool_arguments.get(&self.target_argument) {
+        let value = match ctx.capability_arguments.get(&self.target_argument) {
             Some(serde_json::Value::Number(n)) => {
                 if let Some(f) = n.as_f64() {
                     f

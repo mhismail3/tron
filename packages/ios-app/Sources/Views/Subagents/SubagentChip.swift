@@ -6,7 +6,7 @@ import SwiftUI
 /// state label and whether the target session id is surfaced so the
 /// Wait chip is visually distinguishable from Spawn.
 ///
-/// Both tools share the same `SubagentToolData` shape server-side, so
+/// Both capability paths share the same `SubagentInvocationData` shape server-side, so
 /// this flag is passed in by the call site (MessageBubble) rather
 /// than carried on the data itself — the data is the ground truth
 /// about the subagent's lifecycle, the variant is about which surface
@@ -26,7 +26,7 @@ enum SubagentChipVariant: Equatable, Sendable {
 /// Shows real-time status updates: running (with turn count) → completed/failed
 /// Tappable to open detail sheet with full output
 struct SubagentChip: View {
-    let data: SubagentToolData
+    let data: SubagentInvocationData
     var variant: SubagentChipVariant = .spawn
     let onTap: () -> Void
 
@@ -122,7 +122,7 @@ struct SubagentChip: View {
         }
         .buttonStyle(.plain)
         .chipStyle(data.status.color)
-        .chipAccessibility(tool: variant == .wait ? "Wait for agent" : "Subagent", status: label)
+        .chipAccessibility(capability: variant == .wait ? "Wait for agent" : "Subagent", status: label)
     }
 
     @ViewBuilder
@@ -152,7 +152,7 @@ struct SubagentChip: View {
 #Preview("Subagent States") {
     VStack(spacing: 16) {
         SubagentChip(
-            data: SubagentToolData(
+            data: SubagentInvocationData(
                 invocationId: "call_2",
                 subagentSessionId: "sess_def456",
                 task: "Analyze codebase structure",
@@ -170,7 +170,7 @@ struct SubagentChip: View {
         )
 
         SubagentChip(
-            data: SubagentToolData(
+            data: SubagentInvocationData(
                 invocationId: "call_wait_1",
                 subagentSessionId: "sess_def456",
                 task: "Analyze codebase structure",
@@ -188,7 +188,7 @@ struct SubagentChip: View {
         )
 
         SubagentChip(
-            data: SubagentToolData(
+            data: SubagentInvocationData(
                 invocationId: "call_3",
                 subagentSessionId: "sess_ghi789",
                 task: "Fix the bug in authentication",
@@ -206,7 +206,7 @@ struct SubagentChip: View {
         )
 
         SubagentChip(
-            data: SubagentToolData(
+            data: SubagentInvocationData(
                 invocationId: "call_wait_2",
                 subagentSessionId: "sess_ghi789",
                 task: "Fix the bug in authentication",
@@ -224,7 +224,7 @@ struct SubagentChip: View {
         )
 
         SubagentChip(
-            data: SubagentToolData(
+            data: SubagentInvocationData(
                 invocationId: "call_4",
                 subagentSessionId: "sess_jkl012",
                 task: "Deploy to production",

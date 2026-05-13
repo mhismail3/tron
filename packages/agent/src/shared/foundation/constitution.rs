@@ -67,8 +67,8 @@ pub enum ProviderSurface {
     Instructions,
     /// User/message surface.
     Message,
-    /// Tool schema or tool-description surface.
-    Tool,
+    /// Capability schema or capability-description surface.
+    ModelCapability,
     /// Excluded from provider payload.
     Excluded,
 }

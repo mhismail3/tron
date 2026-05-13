@@ -1,9 +1,9 @@
-//! Turn runner — orchestrates a single turn: context → stream → tools → events.
+//! Turn runner — orchestrates a single turn: context → stream → capabilities → events.
 
+mod capability_invocations;
 mod persistence;
 mod provider;
 mod result;
-mod tools;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -14,7 +14,7 @@ use crate::domains::agent::runner::context::local_policy;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::capability_support::implementations::capability_surface::{
-    self, CapabilitySurfacePolicy, ResolvedToolSurface,
+    self, CapabilitySurfacePolicy, ResolvedCapabilitySurface,
 };
 use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::Provider;
@@ -24,6 +24,7 @@ use crate::shared::messages::Context;
 use metrics::{counter, histogram};
 use tracing::{debug, error, instrument, warn};
 
+use self::capability_invocations::CapabilityInvocationPhaseParams;
 use self::persistence::{
     add_assistant_message_to_context, build_completed_assistant_payload,
     build_interrupted_message_payload, build_token_record_json, emit_response_complete,
@@ -32,14 +33,13 @@ use self::persistence::{
 };
 use self::provider::{build_stream_options, open_stream};
 use self::result::determine_turn_stop_reason;
-use self::tools::ToolPhaseParams;
 use crate::domains::agent::runner::agent::compaction_handler::CompactionHandler;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::agent::stream_processor;
 use crate::domains::agent::runner::errors::StopReason;
 use crate::domains::agent::runner::orchestrator::event_persister::EventPersister;
+use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::runner::orchestrator::streaming_journal::StreamingJournal;
-use crate::domains::agent::runner::orchestrator::tool_abort_registry::ToolAbortRegistry;
 use crate::domains::agent::runner::types::{RunContext, TurnResult};
 
 fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
@@ -63,11 +63,11 @@ pub struct TurnParams<'a> {
     pub context_manager: &'a mut ContextManager,
     /// LLM provider for streaming.
     pub provider: &'a Arc<dyn Provider>,
-    /// Live catalog policy for tool lookup and execution.
-    pub tool_surface_policy: &'a CapabilitySurfacePolicy,
-    /// Optional guardrail engine for tool argument validation.
+    /// Live catalog policy for capability lookup and execution.
+    pub capability_surface_policy: &'a CapabilitySurfacePolicy,
+    /// Optional guardrail engine for capability argument validation.
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-    /// Optional hook engine for pre/post tool use hooks.
+    /// Optional hook engine for pre/post capability invocation hooks.
     pub hooks: &'a Option<Arc<HookEngine>>,
     /// Compaction handler for pre-turn context checks.
     pub compaction: &'a CompactionHandler,
@@ -95,7 +95,7 @@ pub struct TurnParams<'a> {
     pub retry_config: Option<&'a crate::shared::retry::RetryConfig>,
     /// Optional provider health tracker for circuit-breaking.
     pub health_tracker: Option<&'a Arc<ProviderHealthTracker>>,
-    /// Workspace ID for scoping tool context (e.g. memory recall).
+    /// Workspace ID for scoping capability context (e.g. memory recall).
     pub workspace_id: Option<&'a str>,
     /// Server origin (e.g. `"localhost:9847"`) for system prompt.
     pub server_origin: Option<&'a str>,
@@ -113,10 +113,10 @@ pub struct TurnParams<'a> {
     >,
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
-    /// Optional per-tool abort registry. Threaded into `ToolExecutionContext`
+    /// Optional per-invocation abort registry. Threaded into `CapabilityInvocationExecutionContext`
     /// so each in-flight capability invocation registers a child `CancellationToken` that
-    /// `agent.abortTool` can cancel independently of the turn token.
-    pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
+    /// `agent.abortCapabilityInvocation` can cancel independently of the turn token.
+    pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
     /// Optional engine host for engine-owned capability invocation.
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
 }
@@ -129,7 +129,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn,
         context_manager,
         provider,
-        tool_surface_policy,
+        capability_surface_policy,
         guardrails,
         hooks,
         compaction,
@@ -150,7 +150,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         job_manager,
         output_buffer_registry,
         sequence_counter,
-        tool_abort_registry,
+        invocation_abort_registry,
         engine_host,
     } = params;
     let turn_start = Instant::now();
@@ -211,19 +211,19 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         &resolved_profile.spec,
         "main",
     );
-    let tool_surface = match resolve_provider_tool_surface(
+    let capability_surface = match resolve_provider_capability_surface(
         engine_host,
         session_id,
         workspace_id,
         provider.provider_type(),
         &context_policy,
-        tool_surface_policy,
+        capability_surface_policy,
     )
     .await
     {
-        Ok(tools) => tools,
+        Ok(capabilities) => capabilities,
         Err(error) => {
-            let error_msg = format!("failed to resolve live engine tool surface: {error}");
+            let error_msg = format!("failed to resolve live engine capability surface: {error}");
             error!(session_id, turn, error = %error_msg);
             let _ = emitter.emit(TronEvent::TurnFailed {
                 base: run_base(session_id, run_context),
@@ -269,7 +269,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         run_context,
         server_origin,
         &context_policy,
-        tool_surface.tools.clone(),
+        capability_surface.capabilities.clone(),
         capability_primer_context,
     );
 
@@ -294,8 +294,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             resolved_turn_policy_ids(&resolved_profile, provider.provider_type());
         let metadata = serde_json::json!({
             "messageCount": context.messages.len(),
-            "toolCount": context.tools.as_ref().map_or(0, Vec::len),
-            "toolCatalogRevision": tool_surface.catalog_revision.0,
+            "capabilityCount": context.capabilities.as_ref().map_or(0, Vec::len),
+            "catalogRevision": capability_surface.catalog_revision.0,
             "streamOptions": &stream_options,
             "providerSurface": "preProjection",
                 "profileChain": resolved_profile.profile_chain.clone(),
@@ -490,13 +490,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     };
 
-    // 7. Process stream (drain after turn-stopping tools to capture token usage cleanly)
+    // 7. Process stream (drain after turn-stopping capabilities to capture token usage cleanly)
     let stream_result = match stream_processor::process_stream_with_trace(
         stream,
         session_id,
         emitter,
         cancel,
-        &tool_surface.turn_stopping_tools,
+        &capability_surface.turn_stopping_capabilities,
         sequence_counter,
         journal.as_mut(),
         run_context.engine_trace_id.as_ref(),
@@ -687,42 +687,44 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     }
 
-    let tool_phase = tools::execute_tool_phase(ToolPhaseParams {
-        turn,
-        stream_result: &stream_result,
-        context_manager,
-        tool_surface: &tool_surface,
-        capability_policy: tool_surface_policy,
-        guardrails,
-        hooks,
-        compaction,
-        session_id,
-        emitter,
-        cancel,
-        subagent_depth,
-        subagent_max_depth,
-        workspace_id,
-        persister,
-        persister_arc,
-        process_manager,
-        job_manager,
-        output_buffer_registry,
-        sequence_counter,
-        provider_type: provider.provider_type(),
-        execution_spec: run_context
-            .resolved_profile
-            .as_deref()
-            .map(|profile| &profile.spec),
-        profile_spec_hash: run_context
-            .resolved_profile
-            .as_deref()
-            .map(|profile| profile.spec_hash.as_str()),
-        tool_abort_registry,
-        engine_host,
-        run_id: run_context.run_id.as_deref(),
-        trace_id: run_context.engine_trace_id.as_ref(),
-        parent_invocation_id: run_context.parent_invocation_id.as_ref(),
-    })
+    let invocation_phase = capability_invocations::execute_capability_invocation_phase(
+        CapabilityInvocationPhaseParams {
+            turn,
+            stream_result: &stream_result,
+            context_manager,
+            capability_surface: &capability_surface,
+            capability_policy: capability_surface_policy,
+            guardrails,
+            hooks,
+            compaction,
+            session_id,
+            emitter,
+            cancel,
+            subagent_depth,
+            subagent_max_depth,
+            workspace_id,
+            persister,
+            persister_arc,
+            process_manager,
+            job_manager,
+            output_buffer_registry,
+            sequence_counter,
+            provider_type: provider.provider_type(),
+            execution_spec: run_context
+                .resolved_profile
+                .as_deref()
+                .map(|profile| &profile.spec),
+            profile_spec_hash: run_context
+                .resolved_profile
+                .as_deref()
+                .map(|profile| profile.spec_hash.as_str()),
+            invocation_abort_registry,
+            engine_host,
+            run_id: run_context.run_id.as_deref(),
+            trace_id: run_context.engine_trace_id.as_ref(),
+            parent_invocation_id: run_context.parent_invocation_id.as_ref(),
+        },
+    )
     .await;
 
     // 9b. Persist + broadcast batched rules.activated if any new rules activated.
@@ -732,7 +734,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // already applied to the in-process context manager; only the
     // notification to iOS is lost). Unlike the assistant message path, this
     // is a secondary signal and does not warrant a hard turn failure.
-    if !tool_phase.activated_rules.is_empty() {
+    if !invocation_phase.activated_rules.is_empty() {
         let total = context_manager
             .rules_tracker()
             .activated_scoped_rules_count() as u32;
@@ -740,7 +742,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             persister,
             session_id,
             turn,
-            &tool_phase.activated_rules,
+            &invocation_phase.activated_rules,
             total,
             sequence_counter,
         )
@@ -751,7 +753,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 let _ = emitter.emit_sequenced(
                     TronEvent::RulesActivated {
                         base: run_base(session_id, run_context),
-                        rules: tool_phase.activated_rules.clone(),
+                        rules: invocation_phase.activated_rules.clone(),
                         total_activated: total,
                     },
                     counter,
@@ -759,7 +761,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             } else {
                 let _ = emitter.emit(TronEvent::RulesActivated {
                     base: run_base(session_id, run_context),
-                    rules: tool_phase.activated_rules.clone(),
+                    rules: invocation_phase.activated_rules.clone(),
                     total_activated: total,
                 });
             }
@@ -791,7 +793,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         duration_ms = duration,
         model = provider.model(),
         stop_reason = %stream_result.stop_reason,
-        tools = tool_phase.tool_calls_executed,
+        capabilities = invocation_phase.capability_invocations_executed,
         has_thinking,
         "turn completed"
     );
@@ -803,8 +805,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // Determine stop reason for this turn
     let stop_reason = determine_turn_stop_reason(
-        tool_phase.stop_turn_requested,
-        stream_result.tool_calls.len(),
+        invocation_phase.stop_turn_requested,
+        stream_result.capability_invocations.len(),
         &stream_result.stop_reason,
     );
 
@@ -814,10 +816,10 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     TurnResult {
         success: true,
-        tool_calls_executed: tool_phase.tool_calls_executed,
+        capability_invocations_executed: invocation_phase.capability_invocations_executed,
         token_usage: stream_result.token_usage,
         stop_reason,
-        stop_turn_requested: tool_phase.stop_turn_requested,
+        stop_turn_requested: invocation_phase.stop_turn_requested,
         model: Some(model_name),
         latency_ms: duration,
         has_thinking,
@@ -832,7 +834,7 @@ fn build_turn_context(
     run_context: &RunContext,
     server_origin: Option<&str>,
     context_policy: &local_policy::ContextPolicy,
-    tool_surface: Vec<crate::shared::tools::Tool>,
+    capability_surface: Vec<crate::shared::model_capabilities::ModelCapability>,
     capability_primer_context: Option<String>,
 ) -> Context {
     let is_local = context_policy.is_local();
@@ -855,10 +857,10 @@ fn build_turn_context(
     context.messages = context_manager.get_messages_arc();
     context.hook_context.clone_from(&run_context.hook_context);
 
-    // Tool schemas are resolved from the live engine catalog at the provider
+    // ModelCapability schemas are resolved from the live engine catalog at the provider
     // request boundary. The context policy has already been applied by
-    // `resolve_provider_tool_surface`.
-    context.tools = Some(tool_surface);
+    // `resolve_provider_capability_surface`.
+    context.capabilities = Some(capability_surface);
 
     context
         .skill_activation_context
@@ -910,7 +912,7 @@ fn build_turn_context(
             .is_some_and(|r| r.ends_with(&truncation_suffix));
         debug!(
             provider = "ollama",
-            tool_count = context.tools.as_ref().map_or(0, Vec::len),
+            capability_count = context.capabilities.as_ref().map_or(0, Vec::len),
             memory_stripped = context_policy.strip_memory(),
             skill_index_stripped = context_policy.strip_skill_index(),
             job_results_stripped = context_policy.strip_job_results(),
@@ -954,16 +956,16 @@ async fn build_capability_primer_context(
         .await
 }
 
-async fn resolve_provider_tool_surface(
+async fn resolve_provider_capability_surface(
     engine_host: Option<&crate::engine::EngineHostHandle>,
     session_id: &str,
     workspace_id: Option<&str>,
     provider_type: crate::shared::messages::Provider,
     context_policy: &local_policy::ContextPolicy,
     capability_policy: &CapabilitySurfacePolicy,
-) -> Result<ResolvedToolSurface, String> {
+) -> Result<ResolvedCapabilitySurface, String> {
     if let Some(host) = engine_host {
-        return capability_surface::resolve_provider_tools(
+        return capability_surface::resolve_provider_capabilities(
             host,
             session_id,
             workspace_id,
@@ -983,12 +985,12 @@ async fn resolve_provider_tool_surface(
             context_policy,
             capability_policy,
         );
-        return Ok(ResolvedToolSurface {
+        return Ok(ResolvedCapabilitySurface {
             catalog_revision: crate::engine::CatalogRevision(0),
-            tools: Vec::new(),
+            capabilities: Vec::new(),
             targets_by_name: Default::default(),
-            all_tool_names: Vec::new(),
-            turn_stopping_tools: Default::default(),
+            all_model_capability_ids: Vec::new(),
+            turn_stopping_capabilities: Default::default(),
         });
     }
 
@@ -1001,7 +1003,7 @@ async fn resolve_provider_tool_surface(
             context_policy,
             capability_policy,
         );
-        Err("engine host is required for provider tool schema resolution".to_owned())
+        Err("engine host is required for provider capability schema resolution".to_owned())
     }
 }
 
@@ -1034,13 +1036,13 @@ fn resolved_turn_policy_ids(
 mod tests {
     use super::*;
     use crate::domains::capability_support::implementations::capability_surface::{
-        EngineToolTarget, ResolvedToolSurface,
+        EngineCapabilityTarget, ResolvedCapabilitySurface,
     };
     use crate::domains::capability_support::implementations::traits::ExecutionMode;
     use crate::engine::{EffectClass, FunctionDefinition, FunctionId, VisibilityScope, WorkerId};
     use std::collections::{BTreeMap, HashSet};
 
-    fn surface(modes: Vec<(&str, ExecutionMode)>) -> ResolvedToolSurface {
+    fn surface(modes: Vec<(&str, ExecutionMode)>) -> ResolvedCapabilitySurface {
         let mut targets_by_name = BTreeMap::new();
         for (name, mode) in modes {
             let function_id = FunctionId::new(format!("capability::{}", name.to_ascii_lowercase()))
@@ -1054,8 +1056,8 @@ mod tests {
             );
             let _ = targets_by_name.insert(
                 name.to_owned(),
-                EngineToolTarget {
-                    model_tool_name: name.to_owned(),
+                EngineCapabilityTarget {
+                    model_capability_id: name.to_owned(),
                     function_id,
                     function,
                     stops_turn: false,
@@ -1064,13 +1066,13 @@ mod tests {
                 },
             );
         }
-        let all_tool_names = targets_by_name.keys().cloned().collect();
-        ResolvedToolSurface {
+        let all_model_capability_ids = targets_by_name.keys().cloned().collect();
+        ResolvedCapabilitySurface {
             catalog_revision: crate::engine::CatalogRevision(0),
-            tools: Vec::new(),
+            capabilities: Vec::new(),
             targets_by_name,
-            all_tool_names,
-            turn_stopping_tools: HashSet::new(),
+            all_model_capability_ids,
+            turn_stopping_capabilities: HashSet::new(),
         }
     }
 
@@ -1078,42 +1080,50 @@ mod tests {
     fn turn_result_success() {
         let tr = TurnResult {
             success: true,
-            tool_calls_executed: 2,
+            capability_invocations_executed: 2,
             stop_reason: Some(StopReason::EndTurn),
             ..Default::default()
         };
         assert!(tr.success);
-        assert_eq!(tr.tool_calls_executed, 2);
+        assert_eq!(tr.capability_invocations_executed, 2);
         assert_eq!(tr.stop_reason, Some(StopReason::EndTurn));
     }
 
     #[test]
-    fn build_execution_waves_parallel_tools_share_one_wave() {
+    fn build_execution_waves_parallel_capabilities_share_one_wave() {
         let calls = vec![
-            crate::shared::messages::ToolCall::new("1", "search", Default::default()),
-            crate::shared::messages::ToolCall::new("2", "inspect", Default::default()),
+            crate::shared::messages::CapabilityInvocationDraft::new(
+                "1",
+                "search",
+                Default::default(),
+            ),
+            crate::shared::messages::CapabilityInvocationDraft::new(
+                "2",
+                "inspect",
+                Default::default(),
+            ),
         ];
         let surface = surface(vec![
             ("search", ExecutionMode::Parallel),
             ("inspect", ExecutionMode::Parallel),
         ]);
-        let waves = tools::build_execution_waves(&calls, &surface);
+        let waves = capability_invocations::build_execution_waves(&calls, &surface);
         assert_eq!(waves, vec![vec![0, 1]]);
     }
 
     #[test]
-    fn build_execution_waves_serialized_tools_are_sequenced() {
+    fn build_execution_waves_serialized_capabilities_are_sequenced() {
         let calls = vec![
-            crate::shared::messages::ToolCall::new("1", "A", Default::default()),
-            crate::shared::messages::ToolCall::new("2", "B", Default::default()),
-            crate::shared::messages::ToolCall::new("3", "C", Default::default()),
+            crate::shared::messages::CapabilityInvocationDraft::new("1", "A", Default::default()),
+            crate::shared::messages::CapabilityInvocationDraft::new("2", "B", Default::default()),
+            crate::shared::messages::CapabilityInvocationDraft::new("3", "C", Default::default()),
         ];
         let surface = surface(vec![
             ("A", ExecutionMode::Serialized("browser".into())),
             ("B", ExecutionMode::Serialized("browser".into())),
             ("C", ExecutionMode::Parallel),
         ]);
-        let waves = tools::build_execution_waves(&calls, &surface);
+        let waves = capability_invocations::build_execution_waves(&calls, &surface);
         assert_eq!(waves, vec![vec![0, 2], vec![1]]);
     }
 }

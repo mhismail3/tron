@@ -165,12 +165,12 @@ final class SessionEventTests: XCTestCase {
             timestamp: ISO8601DateFormatter().string(from: Date()),
             sequence: 1,
             payload: [
-                "modelToolName": AnyCodable("Bash"),
+                "modelPrimitiveName": AnyCodable("execute"),
                 "arguments": AnyCodable(["command": "ls -la"])
             ]
         )
 
-        XCTAssertNotNil(event.payload["modelToolName"])
+        XCTAssertNotNil(event.payload["modelPrimitiveName"])
         XCTAssertNotNil(event.payload["arguments"])
     }
 }

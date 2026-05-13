@@ -118,7 +118,8 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         profile_runtime: profile_runtime_for_settings_path(&settings_path),
         settings_path,
         agent_deps: None,
-        tool_runtime: tron::shared::server::context::ToolRuntimeConfig::default(),
+        capability_support_config: tron::shared::server::context::CapabilitySupportConfig::default(
+        ),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,
@@ -408,7 +409,8 @@ async fn boot_server_with_provider_and_handles(
             provider_factory: Arc::new(FixedProviderFactory(provider)),
             guardrails: None,
         }),
-        tool_runtime: tron::shared::server::context::ToolRuntimeConfig::default(),
+        capability_support_config: tron::shared::server::context::CapabilitySupportConfig::default(
+        ),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
         subagent_manager: None,

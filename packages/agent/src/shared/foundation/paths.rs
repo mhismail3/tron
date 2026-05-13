@@ -68,7 +68,7 @@ pub mod dirs {
     pub const RENDERS: &str = "renders";
     /// Throwaway output and intermediate results.
     pub const SCRATCH: &str = "scratch";
-    /// Saved screenshots from computer-use tool.
+    /// Saved screenshots from the computer-use capability.
     pub const SCREENSHOTS: &str = "screenshots";
     /// Experimental semi-long-lived spaces before promotion.
     pub const LABS: &str = "labs";

@@ -62,7 +62,7 @@ pub enum GuardrailTier {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GuardrailRuleType {
-    /// Regex pattern matching on tool arguments.
+    /// Regex pattern matching on capability arguments.
     Pattern,
     /// File path protection via glob patterns.
     Path,

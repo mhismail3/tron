@@ -16,7 +16,7 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
         let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let modelToolName: String
+            let modelPrimitiveName: String
             let invocationId: String
             let contractId: String?
             let implementationId: String?
@@ -34,7 +34,7 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
-                    modelToolName: modelToolName,
+                    modelPrimitiveName: modelPrimitiveName,
                     contractId: contractId,
                     implementationId: implementationId,
                     functionId: functionId,
@@ -56,12 +56,12 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
     // MARK: - Result
 
     struct Result: EventResult {
-        let modelToolName: String
+        let modelPrimitiveName: String
         let invocationId: String
         let identity: CapabilityIdentity
 
-        init(modelToolName: String, invocationId: String, identity: CapabilityIdentity? = nil) {
-            self.modelToolName = modelToolName
+        init(modelPrimitiveName: String, invocationId: String, identity: CapabilityIdentity? = nil) {
+            self.modelPrimitiveName = modelPrimitiveName
             self.invocationId = invocationId
             self.identity = identity ?? CapabilityIdentity()
         }
@@ -71,7 +71,7 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
-            modelToolName: event.data.modelToolName,
+            modelPrimitiveName: event.data.modelPrimitiveName,
             invocationId: event.data.invocationId,
             identity: event.data.identity
         )

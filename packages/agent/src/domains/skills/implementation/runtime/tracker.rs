@@ -786,7 +786,7 @@ mod tests {
         let events = vec![serde_json::json!({
             "type": "skill.activated",
             "id": "evt-1",
-            "payload": { "skillName": "tool", "source": "project" }
+            "payload": { "skillName": "project-skill", "source": "project" }
         })];
         let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         let skills = tracker.added_skills();

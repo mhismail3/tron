@@ -10,7 +10,7 @@ struct MockDeps {
     current_tokens: u64,
     context_limit: u64,
     system_prompt_tokens: u64,
-    tools_tokens: u64,
+    capabilities_tokens: u64,
     message_token_value: u64,
     /// Optional token function for per-message token values.
     token_fn: Option<Box<dyn Fn(&Message) -> u64 + Send + Sync>>,
@@ -23,7 +23,7 @@ impl MockDeps {
             current_tokens: 80_000,
             context_limit: 100_000,
             system_prompt_tokens: 1_000,
-            tools_tokens: 500,
+            capabilities_tokens: 500,
             message_token_value: 100,
             token_fn: None,
         }
@@ -64,8 +64,8 @@ impl CompactionDeps for MockDeps {
         self.system_prompt_tokens
     }
 
-    fn estimate_tools_tokens(&self) -> u64 {
-        self.tools_tokens
+    fn estimate_capabilities_tokens(&self) -> u64 {
+        self.capabilities_tokens
     }
 
     fn get_message_tokens(&self, msg: &Message) -> u64 {
@@ -116,14 +116,14 @@ fn default_messages() -> Vec<Message> {
     ]
 }
 
-/// Helper: create an assistant message with `tool_use` blocks.
-fn assistant_with_tool_use(ids: &[&str]) -> Message {
+/// Helper: create an assistant message with `capability_invocation` blocks.
+fn assistant_with_capability_invocation(ids: &[&str]) -> Message {
     Message::Assistant {
         content: ids
             .iter()
-            .map(|id| AssistantContent::ToolUse {
+            .map(|id| AssistantContent::CapabilityInvocation {
                 id: (*id).into(),
-                name: "test_tool".into(),
+                name: "test_capability".into(),
                 arguments: serde_json::Map::new(),
                 thought_signature: None,
             })
@@ -136,10 +136,10 @@ fn assistant_with_tool_use(ids: &[&str]) -> Message {
 }
 
 /// Helper: create a capability result message.
-fn tool_result(id: &str) -> Message {
-    Message::ToolResult {
-        tool_call_id: id.into(),
-        content: crate::shared::messages::ToolResultMessageContent::Text("ok".into()),
+fn capability_result(id: &str) -> Message {
+    Message::CapabilityResult {
+        invocation_id: id.into(),
+        content: crate::shared::messages::CapabilityResultMessageContent::Text("ok".into()),
         is_error: None,
     }
 }
@@ -246,18 +246,18 @@ fn basic_preserve_zero() {
 }
 
 // ========================================================================
-// compute_split_point — Category 2: Tool-heavy turns
+// compute_split_point — Category 2: ModelCapability-heavy turns
 // ========================================================================
 
 #[test]
-fn tool_heavy_single_turn() {
+fn capability_heavy_single_turn() {
     // [U, A(tc), TR, A(tc), TR, A(text)] — 1 turn = 6 messages
     let msgs = vec![
         Message::user("do stuff"),
-        assistant_with_tool_use(&["tc1"]),
-        tool_result("tc1"),
-        assistant_with_tool_use(&["tc2"]),
-        tool_result("tc2"),
+        assistant_with_capability_invocation(&["tc1"]),
+        capability_result("tc1"),
+        assistant_with_capability_invocation(&["tc2"]),
+        capability_result("tc2"),
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
@@ -267,15 +267,15 @@ fn tool_heavy_single_turn() {
 }
 
 #[test]
-fn tool_heavy_preserve_1_of_2() {
+fn capability_heavy_preserve_1_of_2() {
     // [U,A, U,A(tc),TR,TR,A] — 2 turns, preserve 1
     let msgs = vec![
         Message::user("q1"),
         Message::assistant("r1"),
         Message::user("q2"),
-        assistant_with_tool_use(&["tc2", "tc3"]),
-        tool_result("tc2"),
-        tool_result("tc3"),
+        assistant_with_capability_invocation(&["tc2", "tc3"]),
+        capability_result("tc2"),
+        capability_result("tc3"),
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
@@ -285,13 +285,13 @@ fn tool_heavy_preserve_1_of_2() {
 }
 
 #[test]
-fn parallel_tools_one_turn() {
+fn parallel_capabilities_one_turn() {
     // [U, A(tc1,tc2), TR1, TR2, A] — 1 turn
     let msgs = vec![
         Message::user("do both"),
-        assistant_with_tool_use(&["tc1", "tc2"]),
-        tool_result("tc1"),
-        tool_result("tc2"),
+        assistant_with_capability_invocation(&["tc1", "tc2"]),
+        capability_result("tc1"),
+        capability_result("tc2"),
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
@@ -301,15 +301,15 @@ fn parallel_tools_one_turn() {
 }
 
 #[test]
-fn mixed_tool_and_simple() {
+fn mixed_capability_and_simple() {
     // [U,A, U,A(tc),TR,A, U,A] — 3 turns, preserve 2
     let msgs = vec![
         Message::user("q1"),
         Message::assistant("r1"),
         Message::user("q2"),
-        assistant_with_tool_use(&["tc1"]),
-        tool_result("tc1"),
-        Message::assistant("done tool"),
+        assistant_with_capability_invocation(&["tc1"]),
+        capability_result("tc1"),
+        Message::assistant("done capability"),
         Message::user("q3"),
         Message::assistant("r3"),
     ];
@@ -490,7 +490,7 @@ fn recompact_multiple_summaries() {
 }
 
 // ========================================================================
-// compute_split_point — Category 5: Orphaned ToolResult prevention
+// compute_split_point — Category 5: Orphaned CapabilityResult prevention
 // ========================================================================
 
 #[test]
@@ -498,8 +498,8 @@ fn orphan_split_on_user_is_clean() {
     // Turn-based split always lands on User, no fixup needed
     let msgs = vec![
         Message::user("q1"),
-        assistant_with_tool_use(&["tc1"]),
-        tool_result("tc1"),
+        assistant_with_capability_invocation(&["tc1"]),
+        capability_result("tc1"),
         Message::user("q2"),
         Message::assistant("done"),
     ];
@@ -511,10 +511,10 @@ fn orphan_split_on_user_is_clean() {
 }
 
 #[test]
-fn degenerate_leading_tool_result() {
-    // [TR, U, A] — ToolResult before any User (shouldn't happen but must not panic)
+fn degenerate_leading_capability_result() {
+    // [TR, U, A] — CapabilityResult before any User (shouldn't happen but must not panic)
     let msgs = vec![
-        tool_result("tc_orphan"),
+        capability_result("tc_orphan"),
         Message::user("q"),
         Message::assistant("a"),
     ];
@@ -525,12 +525,12 @@ fn degenerate_leading_tool_result() {
 }
 
 #[test]
-fn degenerate_all_tool_results() {
+fn degenerate_all_capability_results() {
     // [A(tc), TR, TR] — no user turns, preserve everything
     let msgs = vec![
-        assistant_with_tool_use(&["tc1"]),
-        tool_result("tc1"),
-        tool_result("tc2"),
+        assistant_with_capability_invocation(&["tc1"]),
+        capability_result("tc1"),
+        capability_result("tc2"),
     ];
     let deps = MockDeps::new(msgs.clone());
     let engine = CompactionEngine::new(0.70, 1, deps);
@@ -913,7 +913,7 @@ fn token_estimation_uses_deps() {
         current_tokens: 80_000,
         context_limit: 100_000,
         system_prompt_tokens: 1_000,
-        tools_tokens: 500,
+        capabilities_tokens: 500,
         message_token_value: 250,
         token_fn: None,
     };
@@ -928,16 +928,16 @@ fn token_estimation_uses_deps() {
 // Integration: no orphaned capability results
 // ========================================================================
 
-/// Assert that every `ToolResult` in `messages` has a preceding `Assistant`
-/// containing a `ToolUse` with the matching ID.
-fn assert_no_orphaned_tool_results(messages: &[Message]) {
+/// Assert that every `CapabilityResult` in `messages` has a preceding `Assistant`
+/// containing a `CapabilityInvocation` with the matching ID.
+fn assert_no_orphaned_capability_results(messages: &[Message]) {
     for (i, msg) in messages.iter().enumerate() {
-        if let Message::ToolResult { tool_call_id, .. } = msg {
-            let has_matching_tool_use = (0..i).rev().any(|j| {
+        if let Message::CapabilityResult { invocation_id, .. } = msg {
+            let has_matching_capability_invocation = (0..i).rev().any(|j| {
                 if let Message::Assistant { content, .. } = &messages[j] {
                     content.iter().any(|c| {
-                        if let AssistantContent::ToolUse { id, .. } = c {
-                            id == tool_call_id
+                        if let AssistantContent::CapabilityInvocation { id, .. } = c {
+                            id == invocation_id
                         } else {
                             false
                         }
@@ -947,50 +947,50 @@ fn assert_no_orphaned_tool_results(messages: &[Message]) {
                 }
             });
             assert!(
-                has_matching_tool_use,
-                "ToolResult(tool_call_id={tool_call_id}) at index {i} has no \
-                 preceding Assistant with matching ToolUse"
+                has_matching_capability_invocation,
+                "CapabilityResult(invocation_id={invocation_id}) at index {i} has no \
+                 preceding Assistant with matching CapabilityInvocation"
             );
         }
     }
 }
 
 #[tokio::test]
-async fn execute_compaction_no_orphaned_tool_results() {
+async fn execute_compaction_no_orphaned_capability_results() {
     let msgs = vec![
         Message::user("q1"),
-        assistant_with_tool_use(&["tc1"]),
-        tool_result("tc1"),
+        assistant_with_capability_invocation(&["tc1"]),
+        capability_result("tc1"),
         Message::user("q2"),
-        assistant_with_tool_use(&["tc2", "tc3"]),
-        tool_result("tc2"),
-        tool_result("tc3"),
+        assistant_with_capability_invocation(&["tc2", "tc3"]),
+        capability_result("tc2"),
+        capability_result("tc3"),
         Message::user("q3"),
         Message::assistant("final"),
     ];
     // 3 turns, preserve 1
     let deps = MockDeps::new(msgs);
     let engine = CompactionEngine::new(0.70, 1, deps);
-    let summarizer = MockSummarizer::new("Summary of tool usage");
+    let summarizer = MockSummarizer::new("Summary of capability usage");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
     assert!(result.success);
 
-    assert_no_orphaned_tool_results(&engine.deps.get_messages());
+    assert_no_orphaned_capability_results(&engine.deps.get_messages());
 }
 
 #[tokio::test]
 async fn execute_turn_based_no_orphans() {
-    // Tool-heavy conversation, preserve 2 turns
+    // ModelCapability-heavy conversation, preserve 2 turns
     let msgs = vec![
         Message::user("q1"),
-        assistant_with_tool_use(&["tc1"]),
-        tool_result("tc1"),
+        assistant_with_capability_invocation(&["tc1"]),
+        capability_result("tc1"),
         Message::assistant("r1"),
         Message::user("q2"),
-        assistant_with_tool_use(&["tc2", "tc3"]),
-        tool_result("tc2"),
-        tool_result("tc3"),
+        assistant_with_capability_invocation(&["tc2", "tc3"]),
+        capability_result("tc2"),
+        capability_result("tc3"),
         Message::assistant("r2"),
         Message::user("q3"),
         Message::assistant("r3"),
@@ -1001,7 +1001,7 @@ async fn execute_turn_based_no_orphans() {
 
     let result = engine.execute(&summarizer, None).await.unwrap();
     assert!(result.success);
-    assert_no_orphaned_tool_results(&engine.deps.get_messages());
+    assert_no_orphaned_capability_results(&engine.deps.get_messages());
 }
 
 // ========================================================================

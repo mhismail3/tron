@@ -195,12 +195,10 @@ mod tests {
         // but the reconstruction should not error
     }
 
-    /// Verify that assistant messages with `tool_use` blocks survive the serde
-    /// roundtrip. Persistence stores `"input"` (API wire format) but the typed
-    /// `AssistantContent::ToolUse` expects `"arguments"`. The `#[serde(alias)]`
-    /// on `arguments` makes this work.
+    /// Verify that provider-native capability invocation blocks survive the
+    /// serde roundtrip used to resume sessions across model providers.
     #[test]
-    fn reconstruct_tool_use_survives_serde_roundtrip() {
+    fn reconstruct_provider_capability_invocation_survives_serde_roundtrip() {
         let store = make_store();
         let session = store
             .create_session("test-model", "/tmp", Some("test"), None, None, None)
@@ -217,14 +215,14 @@ mod tests {
             })
             .unwrap();
 
-        // Assistant message with tool_use using "input" (API wire format, as persistence stores it)
+        // Assistant message with capability_invocation using "input" (API wire format, as persistence stores it)
         let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
                 "content": [
                     {"type": "thinking", "thinking": "I'll write the file", "signature": "sig123"},
-                    {"type": "tool_use", "id": "toolu_01abc", "name": "filesystem::write_file", "arguments": {"file_path": "/tmp/test.txt", "content": "hello"}}
+                    {"type": "capability_invocation", "id": "toolu_01abc", "name": "filesystem::write_file", "arguments": {"file_path": "/tmp/test.txt", "content": "hello"}}
                 ],
                 "turn": 1
             }),
@@ -235,7 +233,7 @@ mod tests {
         let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::CapabilityInvocationCompleted,
-            payload: serde_json::json!({"toolCallId": "toolu_01abc", "content": "File written", "isError": false}),
+            payload: serde_json::json!({"invocationId": "toolu_01abc", "content": "File written", "isError": false}),
             parent_id: None,
             sequence: None,
         }).unwrap();
@@ -254,7 +252,7 @@ mod tests {
             .unwrap();
 
         let state = reconstruct(&store, sid).unwrap();
-        // All 4 messages must survive: user, assistant(tool_use), toolResult, assistant(text)
+        // All 4 messages must survive: user, assistant(capability_invocation), capabilityResult, assistant(text)
         assert_eq!(
             state.messages.len(),
             4,
@@ -267,21 +265,21 @@ mod tests {
         );
         assert!(state.messages[0].is_user());
         assert!(state.messages[1].is_assistant());
-        assert!(state.messages[2].is_tool_result());
+        assert!(state.messages[2].is_capability_result());
         assert!(state.messages[3].is_assistant());
 
-        // Verify the tool_use arguments are preserved
+        // Verify the capability_invocation arguments are preserved
         if let Message::Assistant { content, .. } = &state.messages[1] {
-            let tool_use = content
+            let capability_invocation = content
                 .iter()
-                .find(|c| c.is_tool_use())
-                .expect("should have tool_use");
-            if let crate::shared::content::AssistantContent::ToolUse {
+                .find(|c| c.is_capability_invocation())
+                .expect("should have capability_invocation");
+            if let crate::shared::content::AssistantContent::CapabilityInvocation {
                 id,
                 name,
                 arguments,
                 ..
-            } = tool_use
+            } = capability_invocation
             {
                 assert_eq!(id, "toolu_01abc");
                 assert_eq!(name, "filesystem::write_file");

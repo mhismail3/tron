@@ -61,8 +61,8 @@ struct ImportPreviewMessage: Decodable, Identifiable {
     let id: String
     let role: String
     let contentPreview: String
-    let hasToolUse: Bool?
-    let modelToolName: String?
+    let hasCapabilityInvocation: Bool?
+    let modelPrimitiveName: String?
 }
 
 struct ImportSessionStats: Decodable {

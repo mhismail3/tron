@@ -325,8 +325,8 @@ fn parse_yaml_fields(content: &str) -> std::collections::HashMap<String, String>
 /// Map a type value string to [`HookType`].
 fn parse_type_value(value: &str) -> Option<HookType> {
     match value.trim() {
-        "pre-tool-use" => Some(HookType::PreToolUse),
-        "post-tool-use" => Some(HookType::PostToolUse),
+        "pre-capability-invocation" => Some(HookType::PreCapabilityInvocation),
+        "post-capability-invocation" => Some(HookType::PostCapabilityInvocation),
         "session-start" => Some(HookType::SessionStart),
         "session-end" => Some(HookType::SessionEnd),
         "stop" => Some(HookType::Stop),
@@ -457,9 +457,9 @@ mod tests {
 
     #[test]
     fn test_parse_frontmatter_script_hash() {
-        let content = "# ---\n# type: pre-tool-use\n# label: Safety check\n# priority: 100\n# ---\n#!/bin/bash\necho ok";
+        let content = "# ---\n# type: pre-capability-invocation\n# label: Safety check\n# priority: 100\n# ---\n#!/bin/bash\necho ok";
         let config = parse_script_frontmatter(content).unwrap();
-        assert_eq!(config.hook_type, HookType::PreToolUse);
+        assert_eq!(config.hook_type, HookType::PreCapabilityInvocation);
         assert_eq!(config.label, "Safety check");
         assert_eq!(config.priority, 100);
         assert!(config.enabled);
@@ -513,10 +513,9 @@ mod tests {
 
     #[test]
     fn test_parse_frontmatter_script_slash_prefix() {
-        let content =
-            "// ---\n// type: post-tool-use\n// label: Logger\n// ---\nconsole.log('ok');";
+        let content = "// ---\n// type: post-capability-invocation\n// label: Logger\n// ---\nconsole.log('ok');";
         let config = parse_script_frontmatter(content).unwrap();
-        assert_eq!(config.hook_type, HookType::PostToolUse);
+        assert_eq!(config.hook_type, HookType::PostCapabilityInvocation);
         assert_eq!(config.label, "Logger");
     }
 
@@ -577,7 +576,7 @@ mod tests {
         write_hook(
             &hooks_dir,
             "safety.sh",
-            "# ---\n# type: pre-tool-use\n# ---\n#!/bin/bash\necho ok",
+            "# ---\n# type: pre-capability-invocation\n# ---\n#!/bin/bash\necho ok",
         );
 
         let config = DiscoveryConfig {
@@ -588,7 +587,7 @@ mod tests {
 
         let hooks = discover_hooks(&config);
         assert_eq!(hooks.len(), 1);
-        assert_eq!(hooks[0].config.hook_type, HookType::PreToolUse);
+        assert_eq!(hooks[0].config.hook_type, HookType::PreCapabilityInvocation);
         assert!(hooks[0].is_script());
     }
 
@@ -776,10 +775,13 @@ mod tests {
 
     #[test]
     fn test_parse_type_value_all_valid() {
-        assert_eq!(parse_type_value("pre-tool-use"), Some(HookType::PreToolUse));
         assert_eq!(
-            parse_type_value("post-tool-use"),
-            Some(HookType::PostToolUse)
+            parse_type_value("pre-capability-invocation"),
+            Some(HookType::PreCapabilityInvocation)
+        );
+        assert_eq!(
+            parse_type_value("post-capability-invocation"),
+            Some(HookType::PostCapabilityInvocation)
         );
         assert_eq!(
             parse_type_value("session-start"),

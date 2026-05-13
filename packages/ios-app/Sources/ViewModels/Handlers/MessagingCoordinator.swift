@@ -58,7 +58,7 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Append the interrupted message
     func appendInterruptedMessage()
 
-    /// Mark pending AskUserQuestion chips as superseded
+    /// Mark pending UserInteraction chips as superseded
     func markPendingQuestionsAsSuperseded()
 
     /// Dismiss pending subagent results (user chose to send a different message)
@@ -133,7 +133,7 @@ final class MessagingCoordinator {
 
         // Answer submissions and subagent results are delivered via dedicated
         // engine protocols, not through sendMessage. Any regular user message
-        // sent here supersedes pending question tools and dismisses subagent
+        // sent here supersedes pending question capabilities and dismisses subagent
         // notifications. Engine approval chips are server-owned and are never
         // locally superseded by a typed prompt.
         context.markPendingQuestionsAsSuperseded()
