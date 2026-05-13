@@ -148,6 +148,7 @@
 		2BEB553D3EA47FF8F900B23A /* SubagentResultsListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3457DE79C9F473B5C1A3340 /* SubagentResultsListSheet.swift */; };
 		2C023B43C34B01278C3387DF /* ProtocolConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9921E926BA75C7BD21CF3EE5 /* ProtocolConstantsTests.swift */; };
 		2C2EFC59C7D11A634CFADF52 /* WorktreeClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F189F52E753C66DA1390BDAC /* WorktreeClientTests.swift */; };
+		2C3813F1EC7034E1439AB685 /* CapabilityInvocationDisplayModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AAF9DA8C9313C835E2C59ED /* CapabilityInvocationDisplayModelTests.swift */; };
 		2CAB1CA5549FA0B92A8CD994 /* MemorySectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B223ED62D974D65D6BE578B /* MemorySectionTests.swift */; };
 		2CCD475F4752E753C7819137 /* SettingsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE1EA756D77574BA5C34843 /* SettingsCard.swift */; };
 		2CDFC9770405CFDABEEC0011 /* CompactionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8402228A0E801A01CDF39FB /* CompactionPlugin.swift */; };
@@ -958,6 +959,7 @@
 		19201A745774A4FE8633AE2D /* ConfigPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigPayloads.swift; sourceTree = "<group>"; };
 		19DE40628931B3781D2ED9AA /* AsyncClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncClock.swift; sourceTree = "<group>"; };
 		1A0ED2A1D7582E1ECFC7FFDA /* ThinkingIndicatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingIndicatorTests.swift; sourceTree = "<group>"; };
+		1AAF9DA8C9313C835E2C59ED /* CapabilityInvocationDisplayModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationDisplayModelTests.swift; sourceTree = "<group>"; };
 		1B4015C0F0BEDCF2EE9F5FF6 /* DonegalOne-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DonegalOne-Regular.ttf"; sourceTree = "<group>"; };
 		1C9791FD669564830645DA0B /* AsyncEventStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncEventStream.swift; sourceTree = "<group>"; };
 		1CA3462B5E6E278A66E9E9B7 /* VoiceNotesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesListView.swift; sourceTree = "<group>"; };
@@ -3657,6 +3659,7 @@
 			isa = PBXGroup;
 			children = (
 				BC99588D580139AE1C2967AE /* AttachmentTests.swift */,
+				1AAF9DA8C9313C835E2C59ED /* CapabilityInvocationDisplayModelTests.swift */,
 				A6704CE7E76B248474B6745B /* DraftMetadataTests.swift */,
 				00DA3EB863F9959787CFF26D /* EngineProtocolTypesTests.swift */,
 				B3E729EBF19BB143F74A6C41 /* EventTypeRegistryTests.swift */,
@@ -4425,6 +4428,7 @@
 				DF35C64DDF98FD476C0976F4 /* CapabilityErrorRenderingTests.swift in Sources */,
 				FF23E2D3982C419C712A5F7E /* CapabilityInvocationCompletedPluginTests.swift in Sources */,
 				CF56B8BFB6DF77BE2D6523D6 /* CapabilityInvocationCoordinatorTests.swift in Sources */,
+				2C3813F1EC7034E1439AB685 /* CapabilityInvocationDisplayModelTests.swift in Sources */,
 				9E47118FCF32ED0E44E62D6A /* CapabilityInvocationGeneratingPluginTests.swift in Sources */,
 				67D3E9D5F5CA898D18E63864 /* CapabilityInvocationOutputPluginTests.swift in Sources */,
 				AB4FABEDD42AAD40907EFA4A /* CapabilitySchemaFormTests.swift in Sources */,

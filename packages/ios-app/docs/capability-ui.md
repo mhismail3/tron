@@ -94,6 +94,21 @@ store raw secret values.
 
 ## Rendering Rules
 
+Chat capability invocations render from `CapabilityInvocationDisplayModel`.
+The display model keeps the provider-visible primitive (`Search`, `Inspect`, or
+`Execute`) as the prominent label and derives the follow-on detail from the
+canonical capability payload: search query, inspected target, resolved contract,
+or execute payload summary. This keeps the chat chip provider-neutral while
+still showing the concrete operation being performed, such as
+`Execute process::run · cargo test`.
+
+Invocation detail sheets use the same display model. The top of the sheet is a
+human-readable summary; request fields, result summaries, logs, and technical
+identity are separated into sheet-native sections. Raw argument JSON is kept
+behind a disclosure group for auditability instead of leading the sheet. Search
+results and inspect results get capability-specific structured summaries, while
+unknown results still render through a generic readable JSON/text block.
+
 The current Engine Console is a sheet-native operator surface built from
 capability cards, metric grids, status banners, section chips, generated action
 rows, and detail sheets. It renders overview, capability search/inspect, a

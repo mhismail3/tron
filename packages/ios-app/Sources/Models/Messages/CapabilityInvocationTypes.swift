@@ -52,20 +52,11 @@ struct CapabilityInvocationData: Equatable, Identifiable {
     }
 
     var displayName: String {
-        CapabilityPresentation.title(for: identity)
+        display.primitiveTitle
     }
 
     var subtitle: String {
-        if let progressMessage, !progressMessage.isEmpty {
-            return progressMessage
-        }
-        if let contractId = identity.contractId, identity.modelPrimitiveName == "execute" {
-            return contractId
-        }
-        if let implementationId = identity.implementationId {
-            return implementationId
-        }
-        return identity.modelPrimitiveName ?? "Capability"
+        display.commandText
     }
 
     var formattedDuration: String? {
@@ -78,6 +69,10 @@ struct CapabilityInvocationData: Equatable, Identifiable {
 
     var truncatedArguments: String {
         arguments.truncated(to: 203)
+    }
+
+    var display: CapabilityInvocationDisplayModel {
+        CapabilityInvocationDisplayModel(data: self)
     }
 }
 
@@ -133,6 +128,296 @@ struct CapabilityErrorClassification: Equatable, Sendable {
     var recoverable: Bool?
 }
 
+struct CapabilityDisplayRow: Equatable, Identifiable {
+    let label: String
+    let value: String
+    var isTechnical: Bool = false
+
+    var id: String { "\(label)|\(value)" }
+}
+
+struct CapabilityInvocationDisplayModel: Equatable {
+    let primitiveTitle: String
+    let commandText: String
+    let statusText: String
+    let statusWithDuration: String
+    let targetId: String?
+    let payloadSummary: String?
+    let requestRows: [CapabilityDisplayRow]
+    let technicalRows: [CapabilityDisplayRow]
+    let prettyArguments: String?
+
+    init(data: CapabilityInvocationData) {
+        let argumentObject = Self.argumentObject(from: data)
+        let primitive = Self.normalizedPrimitive(from: data.identity)
+        let target = Self.targetId(for: primitive, identity: data.identity, arguments: argumentObject)
+        let payload = argumentObject["payload"] as? [String: Any]
+        let payloadSummary = Self.payloadSummary(from: payload ?? argumentObject)
+        let query = Self.firstString(["query", "q", "searchQuery"], in: argumentObject)
+            ?? Self.firstString(["query"], in: data.details?.rawValues ?? [:])
+
+        self.primitiveTitle = Self.primitiveTitle(primitive)
+        self.targetId = target
+        self.payloadSummary = payloadSummary
+        self.statusText = Self.statusText(data.status)
+        self.statusWithDuration = [Self.statusText(data.status), data.formattedDuration]
+            .compactMap { $0?.nilIfEmpty }
+            .joined(separator: " · ")
+        self.commandText = Self.commandText(
+            primitive: primitive,
+            query: query,
+            target: target,
+            payloadSummary: payloadSummary,
+            identity: data.identity
+        )
+        self.requestRows = Self.requestRows(
+            primitive: primitive,
+            query: query,
+            target: target,
+            payloadSummary: payloadSummary,
+            arguments: argumentObject
+        )
+        self.technicalRows = Self.technicalRows(identity: data.identity)
+        self.prettyArguments = Self.prettyJSONString(data.arguments) ?? data.arguments.nilIfEmpty
+    }
+
+    private static func normalizedPrimitive(from identity: CapabilityIdentity) -> String {
+        if let modelPrimitiveName = identity.modelPrimitiveName?.lowercased(),
+           ["search", "inspect", "execute"].contains(modelPrimitiveName) {
+            return modelPrimitiveName
+        }
+        let id = identity.contractId ?? identity.functionId ?? ""
+        if id == "capability::search" { return "search" }
+        if id == "capability::inspect" { return "inspect" }
+        return "execute"
+    }
+
+    private static func primitiveTitle(_ primitive: String) -> String {
+        switch primitive {
+        case "search": return "Search"
+        case "inspect": return "Inspect"
+        default: return "Execute"
+        }
+    }
+
+    private static func statusText(_ status: CapabilityInvocationStatus) -> String {
+        switch status {
+        case .generating: return "Preparing"
+        case .running: return "Running"
+        case .approvalRequired: return "Approval required"
+        case .success: return "Completed"
+        case .error: return "Failed"
+        case .unavailable: return "Unavailable"
+        }
+    }
+
+    private static func commandText(
+        primitive: String,
+        query: String?,
+        target: String?,
+        payloadSummary: String?,
+        identity: CapabilityIdentity
+    ) -> String {
+        switch primitive {
+        case "search":
+            if let query = query?.nilIfEmpty {
+                return "“\(query.truncated(to: 96))”"
+            }
+            return "Capability catalog"
+        case "inspect":
+            return (target ?? identity.contractId ?? identity.functionId ?? "Capability metadata")
+                .truncated(to: 120)
+        default:
+            if let target, let payloadSummary {
+                return "\(target) · \(payloadSummary)".truncated(to: 140)
+            }
+            if let target {
+                return target.truncated(to: 120)
+            }
+            if let payloadSummary {
+                return payloadSummary.truncated(to: 120)
+            }
+            return "Capability invocation"
+        }
+    }
+
+    private static func targetId(
+        for primitive: String,
+        identity: CapabilityIdentity,
+        arguments: [String: Any]
+    ) -> String? {
+        let argumentTarget = firstString(
+            ["capabilityId", "contractId", "implementationId", "functionId", "capability", "contract", "function"],
+            in: arguments
+        )
+        if let argumentTarget = argumentTarget?.nilIfEmpty {
+            return argumentTarget
+        }
+
+        switch primitive {
+        case "search":
+            return nil
+        case "inspect":
+            return identity.contractId ?? identity.functionId ?? identity.implementationId
+        default:
+            if let contractId = identity.contractId, !contractId.hasPrefix("capability::") {
+                return contractId
+            }
+            if let functionId = identity.functionId, !functionId.hasPrefix("capability::") {
+                return functionId
+            }
+            return identity.implementationId
+        }
+    }
+
+    private static func payloadSummary(from object: [String: Any]) -> String? {
+        if let command = firstString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
+            return command.truncated(to: 96)
+        }
+        if let path = firstString(["path", "filePath", "cwd"], in: object)?.nilIfEmpty {
+            return path.abbreviatingHomeDirectory.truncated(to: 96)
+        }
+        if let query = firstString(["query", "q", "searchQuery"], in: object)?.nilIfEmpty {
+            return "query: \(query.truncated(to: 80))"
+        }
+        if let url = firstString(["url", "apiUrl", "endpoint"], in: object)?.nilIfEmpty {
+            return url.truncated(to: 96)
+        }
+        if let code = firstString(["code"], in: object)?.nilIfEmpty {
+            let firstLine = code.lines.first?.trimmed.nilIfEmpty ?? "program"
+            return firstLine.truncated(to: 96)
+        }
+
+        let simplePairs = object
+            .filter { key, value in
+                !["payload", "allowedContracts", "allowedImplementations"].contains(key)
+                    && Self.simpleDisplayValue(value) != nil
+            }
+            .sorted { $0.key < $1.key }
+            .prefix(2)
+            .compactMap { key, value in
+                simpleDisplayValue(value).map { "\(key)=\($0)" }
+            }
+        guard !simplePairs.isEmpty else { return nil }
+        return simplePairs.joined(separator: ", ").truncated(to: 96)
+    }
+
+    private static func requestRows(
+        primitive: String,
+        query: String?,
+        target: String?,
+        payloadSummary: String?,
+        arguments: [String: Any]
+    ) -> [CapabilityDisplayRow] {
+        var rows: [CapabilityDisplayRow] = []
+        func append(_ label: String, _ value: String?) {
+            guard let value = value?.nilIfEmpty else { return }
+            rows.append(CapabilityDisplayRow(label: label, value: value))
+        }
+
+        switch primitive {
+        case "search":
+            append("Query", query)
+            append("Kind", firstString(["kind"], in: arguments))
+            append("Namespace", firstString(["namespace"], in: arguments))
+            append("Contract", firstString(["contractId"], in: arguments))
+            append("Plugin", firstString(["pluginId"], in: arguments))
+            append("Risk ceiling", firstString(["riskMax"], in: arguments))
+            append("Trust floor", firstString(["trustTierMin"], in: arguments))
+        case "inspect":
+            append("Target", target)
+            append("Contract", firstString(["contractId"], in: arguments))
+            append("Implementation", firstString(["implementationId"], in: arguments))
+            append("Function", firstString(["functionId"], in: arguments))
+        default:
+            append("Target", target)
+            append("Mode", firstString(["mode"], in: arguments))
+            append("Payload", payloadSummary)
+            append("Reason", firstString(["reason"], in: arguments))
+            append("Idempotency", firstString(["idempotencyKey"], in: arguments))
+        }
+
+        if rows.isEmpty, let payloadSummary {
+            rows.append(CapabilityDisplayRow(label: "Request", value: payloadSummary))
+        }
+        return rows
+    }
+
+    private static func technicalRows(identity: CapabilityIdentity) -> [CapabilityDisplayRow] {
+        var rows: [CapabilityDisplayRow] = []
+        func append(_ label: String, _ value: String?) {
+            guard let value = value?.nilIfEmpty else { return }
+            rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: true))
+        }
+        append("Primitive", identity.modelPrimitiveName)
+        append("Contract", identity.contractId)
+        append("Implementation", identity.implementationId)
+        append("Function", identity.functionId)
+        append("Plugin", identity.pluginId)
+        append("Worker", identity.workerId)
+        append("Catalog", identity.catalogRevision.map(String.init))
+        append("Schema", identity.schemaDigest)
+        append("Trust", identity.trustTier)
+        append("Risk", identity.riskLevel)
+        append("Effect", identity.effectClass)
+        append("Trace", identity.traceId)
+        append("Root invocation", identity.rootInvocationId)
+        append("Binding", identity.bindingDecisionId)
+        return rows
+    }
+
+    private static func argumentObject(from data: CapabilityInvocationData) -> [String: Any] {
+        if let payloadJSON = data.payloadJSON {
+            return payloadJSON.rawValues
+        }
+        return objectFromJSONString(data.arguments) ?? [:]
+    }
+
+    private static func objectFromJSONString(_ text: String) -> [String: Any]? {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any] else {
+            return nil
+        }
+        return dictionary
+    }
+
+    private static func prettyJSONString(_ text: String) -> String? {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(object),
+              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        else { return nil }
+        return String(data: pretty, encoding: .utf8)
+    }
+
+    private static func firstString(_ keys: [String], in object: [String: Any]) -> String? {
+        for key in keys {
+            if let value = object[key], let string = simpleDisplayValue(value)?.nilIfEmpty {
+                return string
+            }
+        }
+        return nil
+    }
+
+    private static func simpleDisplayValue(_ value: Any) -> String? {
+        switch value {
+        case let string as String:
+            return string
+        case let int as Int:
+            return String(int)
+        case let double as Double:
+            return String(double)
+        case let bool as Bool:
+            return String(bool)
+        case let number as NSNumber:
+            return number.stringValue
+        default:
+            return nil
+        }
+    }
+}
+
 enum CapabilityPresentation {
     static func title(for identity: CapabilityIdentity) -> String {
         if let contractId = identity.contractId, identity.modelPrimitiveName != contractId {
@@ -186,6 +471,12 @@ enum CapabilityPresentation {
                 return first.uppercased() + word.dropFirst()
             }
             .joined(separator: " ")
+    }
+}
+
+private extension Dictionary where Key == String, Value == AnyCodable {
+    var rawValues: [String: Any] {
+        mapValues(\.value)
     }
 }
 
