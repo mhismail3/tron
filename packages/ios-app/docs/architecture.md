@@ -376,7 +376,9 @@ Foreground ping failures and ping timeouts transition the stale socket out of
 `.connected` so the status pill and settings sheets immediately render the
 reconnecting or unavailable state instead of waiting on server-backed engine protocol
 timeouts. While foregrounded, the WebSocket heartbeat pings every five seconds
-with the same bounded verification timeout, and URLSession's WebSocket close
+with a ten-second verification timeout so local engine cold starts, capability
+index warm-up, and embedding initialization do not cause false disconnects.
+URLSession's WebSocket close
 delegate feeds remote closes into the reconnect state machine. Failed WebSocket
 upgrade completions also resume the open wait immediately, leaving the 10-second
 open timeout as a secondary guard instead of the primary failure signal. If a failed

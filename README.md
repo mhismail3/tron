@@ -316,9 +316,11 @@ lexical-only search. Profile TOML selects search/context behavior through
 `capabilitySearchPolicies.hybridLocal`,
 `capabilityPolicies.*.contextPrimerPolicy`, and
 `capabilityContextPrimerPolicies.*`.
-Engine Console/admin status refreshes opportunistically build the same
-persistent vector index and report `ready`, `unavailable`, or degraded status
-without making the operator UI fail closed while the local model warms up.
+Engine Console/admin status refreshes synchronously update registry metadata,
+then warm the persistent vector index on a detached path. Operator search can
+request an explicit degraded lexical mode while the local model or vector rows
+warm up; the response reports `ready`, `unavailable`, or degraded status so the
+UI never silently pretends semantic search ran.
 
 Mutating or medium/high-risk execution requires a fresh `inspect` result and
 the returned `inspectionHandle`, `expectedRevision`, and

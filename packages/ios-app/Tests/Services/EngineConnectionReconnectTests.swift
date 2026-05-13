@@ -30,9 +30,9 @@ struct EngineConnectionReconnectTests {
         #expect(ws.connectionState == .disconnected)
     }
 
-    @Test("foreground verification ping is bounded")
+    @Test("foreground verification ping allows local engine warm-up")
     func foregroundVerificationPingIsBounded() {
-        #expect(EngineConnection.connectionVerificationTimeout == 3.0)
+        #expect(EngineConnection.connectionVerificationTimeout == 10.0)
         #expect(EngineConnection.connectionVerificationTimeout < 30.0)
     }
 
@@ -53,7 +53,8 @@ struct EngineConnectionReconnectTests {
     func foregroundHeartbeatDetectsIdleDisconnectsQuickly() {
         #expect(EngineConnection.heartbeatInterval == 5.0)
         #expect(EngineConnection.heartbeatInterval < 30.0)
-        #expect(EngineConnection.connectionVerificationTimeout < EngineConnection.heartbeatInterval)
+        #expect(EngineConnection.connectionVerificationTimeout >= EngineConnection.heartbeatInterval)
+        #expect(EngineConnection.connectionVerificationTimeout < 30.0)
     }
 
     @Test(".failed reason after probe failure uses tap-to-retry copy")

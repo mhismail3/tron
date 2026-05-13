@@ -150,7 +150,7 @@ final class EngineConnection {
     private let reconnectPolicy = ReconnectProbePolicy()
 
     private let requestTimeout: TimeInterval = 30.0
-    nonisolated static let connectionVerificationTimeout: TimeInterval = 3.0
+    nonisolated static let connectionVerificationTimeout: TimeInterval = 10.0
     nonisolated static let connectionOpenTimeout: TimeInterval = 10.0
     nonisolated static let manualRetryOpenTimeout: TimeInterval = connectionOpenTimeout
     nonisolated static let automaticReconnectProbeTimeout: TimeInterval = ReconnectProbePolicy().probeTimeout

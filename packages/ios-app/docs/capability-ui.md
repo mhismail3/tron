@@ -66,6 +66,8 @@ search policy when the local vector index is unavailable. This is a visible
 degraded operator mode: search results show the degraded status and reason.
 Agent/model capability search still follows the active profile policy and does
 not inherit the console's degraded search allowance.
+Server status refreshes keep metadata responsive and trigger vector warm-up
+without requiring the console to wait for the embedding model on first use.
 
 When the server is disconnected, the state object loads
 `EngineConsoleCache.Snapshot` and marks it stale. Mutations must stay disabled

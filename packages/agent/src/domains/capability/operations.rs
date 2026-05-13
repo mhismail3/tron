@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::Deps;
 use super::registry::{
@@ -20,8 +21,8 @@ use super::registry::{
     u64_field,
 };
 use super::types::{
-    CapabilityBindingDecision, CapabilityExecutionRecord, CapabilityPluginManifest,
-    CapabilityRejectedCandidate,
+    CapabilityBindingDecision, CapabilityExecutionRecord, CapabilityIndexStatus,
+    CapabilityPluginManifest, CapabilityRejectedCandidate,
 };
 use crate::engine::{
     ActorContext, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EffectClass,
@@ -40,6 +41,7 @@ const DEFAULT_LIMIT: usize = 12;
 const MAX_LIMIT: usize = 50;
 const CAPABILITY_ALLOW_SCOPE_PREFIX: &str = "capability.allow:";
 const CAPABILITY_DENY_SCOPE_PREFIX: &str = "capability.deny:";
+static LAST_VECTOR_WARMUP_REVISION: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) async fn search_value(
     invocation: &Invocation,
@@ -74,6 +76,12 @@ pub(crate) async fn search_value(
     let catalog_revision = deps.engine_host.catalog_revision().await;
     let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
     let policy = search_policy_from_runtime(invocation)?;
+    let allow_operator_degraded_vector = allows_degraded_vector_search(&policy);
+    let warmup_snapshot = if allow_operator_degraded_vector {
+        Some(snapshot.clone())
+    } else {
+        None
+    };
     let query_for_index = query.clone();
     let index_limit = cursor_offset.saturating_add(limit).saturating_add(1);
     let store = deps.registry_store.clone();
@@ -85,7 +93,14 @@ pub(crate) async fn search_value(
         let mut store = store.lock().map_err(|_| CapabilityError::Internal {
             message: "capability registry store mutex poisoned".to_owned(),
         })?;
-        if let Err(error) = store.sync_snapshot(&snapshot, embedding_provider.as_ref(), &policy) {
+        let sync_policy = if allow_operator_degraded_vector {
+            registry_metadata_sync_policy()
+        } else {
+            policy.clone()
+        };
+        if let Err(error) =
+            store.sync_snapshot(&snapshot, embedding_provider.as_ref(), &sync_policy)
+        {
             let _ = store.record_audit_event(
                 "capability.search",
                 Some(&trace_id),
@@ -98,15 +113,32 @@ pub(crate) async fn search_value(
             );
             return Err(registry_store_error(error));
         }
-        let result = store
+        let mut effective_policy = policy.clone();
+        let mut degraded_status = None;
+        if allow_operator_degraded_vector {
+            let admin = store.admin_status().map_err(registry_store_error)?;
+            if !admin_vector_ready(&admin) {
+                effective_policy.local_vector = false;
+                effective_policy.require_local_vector = false;
+                degraded_status = Some(degraded_operator_status(
+                    &admin,
+                    &policy,
+                    embedding_provider.as_ref(),
+                ));
+            }
+        }
+        let mut result = store
             .search(
                 &query_for_index,
                 &filters_for_index,
-                &policy,
+                &effective_policy,
                 index_limit,
                 embedding_provider.as_ref(),
             )
             .map_err(registry_store_error)?;
+        if let Some(status) = degraded_status {
+            result.status = status;
+        }
         store
             .record_audit_event(
                 "capability.search",
@@ -127,6 +159,9 @@ pub(crate) async fn search_value(
         Ok(result)
     })
     .await?;
+    if let Some(snapshot) = warmup_snapshot {
+        schedule_vector_warmup(snapshot, deps, catalog_revision.0);
+    }
     let next_cursor = if search_result.hits.len() > cursor_offset.saturating_add(limit) {
         Some(cursor_offset.saturating_add(limit).to_string())
     } else {
@@ -1594,6 +1629,58 @@ fn registry_operator_sync_policy() -> CapabilitySearchPolicy {
     }
 }
 
+fn allows_degraded_vector_search(policy: &CapabilitySearchPolicy) -> bool {
+    policy.local_vector && !policy.require_local_vector && policy.allow_lexical_only_when_degraded
+}
+
+fn admin_vector_ready(admin: &Value) -> bool {
+    admin
+        .get("indexStatus")
+        .and_then(|status| status.get("state"))
+        .and_then(Value::as_str)
+        == Some("ready")
+}
+
+fn degraded_operator_status(
+    admin: &Value,
+    policy: &CapabilitySearchPolicy,
+    embedding_provider: &dyn super::embeddings::EmbeddingProvider,
+) -> CapabilityIndexStatus {
+    let index = admin.get("indexStatus").unwrap_or(&Value::Null);
+    let state = index
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("unavailable");
+    let degraded_reason = index
+        .get("degradedReason")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            if state == "unavailable" {
+                "local vector index is warming; lexical operator search returned".to_owned()
+            } else {
+                format!("local vector index state is {state}; lexical operator search returned")
+            }
+        });
+    CapabilityIndexStatus {
+        lexical: policy.lexical,
+        local_vector: policy.local_vector,
+        cloud_embeddings: false,
+        vector_store: index
+            .get("vectorStore")
+            .and_then(Value::as_str)
+            .unwrap_or("sqlite-vec")
+            .to_owned(),
+        embedding_model: index
+            .get("embeddingModel")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| embedding_provider.model_id())
+            .to_owned(),
+        state: state.to_owned(),
+        degraded_reason: Some(degraded_reason),
+    }
+}
+
 fn search_policy_from_runtime(
     invocation: &Invocation,
 ) -> Result<CapabilitySearchPolicy, CapabilityError> {
@@ -1646,6 +1733,7 @@ async fn sync_registry_for_admin(
         .await;
     let catalog_revision = deps.engine_host.catalog_revision().await.0;
     let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision);
+    let warmup_snapshot = snapshot.clone();
     let store = deps.registry_store.clone();
     let embedding_provider = deps.embedding_provider.clone();
     run_blocking_task("capability.admin.sync_registry", move || {
@@ -1656,13 +1744,46 @@ async fn sync_registry_for_admin(
             .sync_snapshot(
                 &snapshot,
                 embedding_provider.as_ref(),
-                &registry_operator_sync_policy(),
+                &registry_metadata_sync_policy(),
             )
             .map_err(registry_store_error)?;
         Ok(())
     })
     .await?;
+    schedule_vector_warmup(warmup_snapshot, deps, catalog_revision);
     Ok(catalog_revision)
+}
+
+fn schedule_vector_warmup(
+    snapshot: CapabilityRegistrySnapshot,
+    deps: &Deps,
+    catalog_revision: u64,
+) {
+    if LAST_VECTOR_WARMUP_REVISION.swap(catalog_revision, Ordering::SeqCst) == catalog_revision {
+        return;
+    }
+    let store = deps.registry_store.clone();
+    let embedding_provider = deps.embedding_provider.clone();
+    tokio::spawn(async move {
+        let result = run_blocking_task("capability.registry.vector_warmup", move || {
+            let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+                message: "capability registry store mutex poisoned".to_owned(),
+            })?;
+            store
+                .sync_snapshot(
+                    &snapshot,
+                    embedding_provider.as_ref(),
+                    &registry_operator_sync_policy(),
+                )
+                .map_err(registry_store_error)?;
+            Ok(())
+        })
+        .await;
+        if let Err(error) = result {
+            LAST_VECTOR_WARMUP_REVISION.store(0, Ordering::SeqCst);
+            tracing::warn!(%error, "capability vector warm-up failed");
+        }
+    });
 }
 
 async fn registry_snapshot_from_store(deps: &Deps) -> Result<Value, CapabilityError> {
@@ -2337,6 +2458,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_target_ignores_blank_higher_priority_fields() {
+        let params = json!({
+            "functionId": "",
+            "implementationId": "   ",
+            "contractId": "",
+            "capabilityId": " process::run "
+        });
+        let target = parse_target(&params).expect("target");
+        assert!(matches!(
+            target,
+            super::super::registry::CapabilityTarget::Capability(value)
+                if value == "process::run"
+        ));
+    }
+
+    #[test]
+    fn function_target_accepts_implementation_id_for_model_recovery() {
+        let function = test_function("process::run");
+        let entry = super::super::registry::CapabilityRegistryEntry::from_function(function, 7);
+        let target = super::super::registry::CapabilityTarget::Function(
+            "first_party.process.v1.run".to_owned(),
+        );
+        assert!(target.matches(&entry));
+    }
+
+    #[test]
     fn agent_search_requires_profile_policy_runtime_metadata() {
         let causal = CausalContext::new(
             crate::engine::ActorId::new("agent:s1").expect("actor id"),
@@ -2384,12 +2531,13 @@ mod tests {
     }
 
     #[test]
-    fn admin_registry_sync_builds_vectors_without_blocking_console() {
+    fn operator_vector_warmup_policy_allows_visible_degradation() {
         let policy = registry_operator_sync_policy();
 
         assert!(policy.local_vector);
         assert!(!policy.require_local_vector);
         assert!(policy.allow_lexical_only_when_degraded);
+        assert!(allows_degraded_vector_search(&policy));
     }
 
     #[test]

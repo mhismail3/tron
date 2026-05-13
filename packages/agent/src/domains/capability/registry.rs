@@ -2471,7 +2471,7 @@ pub(crate) enum CapabilityTarget {
 impl CapabilityTarget {
     pub(crate) fn matches(&self, entry: &CapabilityRegistryEntry) -> bool {
         match self {
-            Self::Function(id) => entry.function_id == *id,
+            Self::Function(id) => entry.function_id == *id || entry.implementation_id == *id,
             Self::Implementation(id) => {
                 entry.implementation_id == *id
                     || id.strip_prefix("function:") == Some(entry.function_id.as_str())
@@ -2630,6 +2630,8 @@ pub(crate) fn string_field(params: &Value, key: &str) -> Option<String> {
     params
         .get(key)
         .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
 }
 
