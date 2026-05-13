@@ -702,6 +702,7 @@ impl EngineWsSession {
             trace_id: override_context.trace_id,
             parent_invocation_id: override_context.parent_invocation_id,
             authority_scopes: override_context.authority_scopes,
+            runtime_metadata: override_context.runtime_metadata,
         }
     }
 
@@ -967,6 +968,8 @@ struct WireContext {
     parent_invocation_id: Option<String>,
     #[serde(default)]
     authority_scopes: Vec<String>,
+    #[serde(default)]
+    runtime_metadata: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1289,14 +1292,21 @@ mod tests {
             "payload": {"protocolVersion": 1},
             "expectedRevision": 3,
             "idempotencyKey": "idem-1",
-            "context": {"sessionId": "s1", "traceId": "trace-1", "authorityScopes": ["system.read"]}
+            "context": {
+                "sessionId": "s1",
+                "traceId": "trace-1",
+                "authorityScopes": ["system.read"],
+                "runtimeMetadata": {"capability.searchPolicyId": "operatorConsoleHybridLexical"}
+            }
         });
         let message: InvokeMessage = serde_json::from_value(value).unwrap();
         assert_eq!(message.function_id, "system::ping");
         assert_eq!(message.expected_revision, Some(3));
+        let context = message.context.unwrap();
+        assert_eq!(context.authority_scopes, vec!["system.read".to_owned()]);
         assert_eq!(
-            message.context.unwrap().authority_scopes,
-            vec!["system.read".to_owned()]
+            context.runtime_metadata.get("capability.searchPolicyId"),
+            Some(&"operatorConsoleHybridLexical".to_owned())
         );
     }
 

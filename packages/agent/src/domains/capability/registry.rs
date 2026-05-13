@@ -988,16 +988,20 @@ impl SqliteCapabilityRegistryStore {
 
     fn ensure_vector_table(&self, dimensions: usize, model_id: &str) -> Result<(), String> {
         register_sqlite_vec_extension()?;
-        let current: Option<usize> = self
+        let current: Option<(usize, String)> = self
             .conn
             .query_row(
-                "SELECT dimension FROM capability_vector_metadata WHERE name = 'default'",
+                "SELECT dimension, model_id FROM capability_vector_metadata WHERE name = 'default'",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(|error| format!("read capability vector metadata: {error}"))?;
-        if current != Some(dimensions) {
+        let table_exists = self.vector_table_exists()?;
+        let metadata_matches = current.as_ref().is_some_and(|(dimension, current_model)| {
+            *dimension == dimensions && current_model == model_id
+        });
+        if !metadata_matches || !table_exists {
             self.conn
                 .execute_batch(
                     "DROP TABLE IF EXISTS capability_index_vectors;
@@ -1025,6 +1029,48 @@ impl SqliteCapabilityRegistryStore {
                 .map_err(|error| format!("write capability vector metadata: {error}"))?;
         }
         Ok(())
+    }
+
+    fn vector_table_exists(&self) -> Result<bool, String> {
+        self.conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE name = 'capability_index_vectors'
+                      AND type IN ('table', 'virtual table')
+                 )",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|value| value != 0)
+            .map_err(|error| format!("check capability vector table: {error}"))
+    }
+
+    fn record_vector_unavailable(
+        &self,
+        dimensions: usize,
+        model_id: &str,
+        error: &str,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO capability_vector_metadata(name, dimension, model_id, state, degraded_reason, updated_at)
+                 VALUES ('default', ?1, ?2, 'unavailable', ?3, ?4)
+                 ON CONFLICT(name) DO UPDATE SET
+                    dimension = excluded.dimension,
+                    model_id = excluded.model_id,
+                    state = excluded.state,
+                    degraded_reason = excluded.degraded_reason,
+                    updated_at = excluded.updated_at",
+                params![
+                    dimensions as i64,
+                    model_id,
+                    error,
+                    Utc::now().to_rfc3339()
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("record capability vector unavailable: {error}"))
     }
 
     fn upsert_document(&self, document: &CapabilityIndexDocument) -> Result<i64, String> {
@@ -1202,56 +1248,35 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
         tx.commit()
             .map_err(|error| format!("commit capability registry sync: {error}"))?;
 
+        let mut vector_jobs = Vec::new();
         for document in &documents {
             let rowid = self.upsert_document(document)?;
             if policy.local_vector {
-                match embedding_provider.embed(std::slice::from_ref(&document.text)) {
-                    Ok(vectors) => {
-                        self.ensure_vector_table(
-                            embedding_provider.dimensions(),
-                            embedding_provider.model_id(),
-                        )?;
-                        let Some(vector) = vectors.first() else {
-                            return Err("embedding provider returned no vector".to_owned());
-                        };
-                        self.conn
-                            .execute(
-                                "DELETE FROM capability_index_vectors WHERE rowid = ?1",
-                                params![rowid],
-                            )
-                            .map_err(|error| format!("delete stale capability vector: {error}"))?;
-                        self.conn
-                            .execute(
-                                "INSERT INTO capability_index_vectors(rowid, embedding) VALUES (?1, ?2)",
-                                params![rowid, bytemuck::cast_slice::<f32, u8>(vector)],
-                            )
-                            .map_err(|error| format!("insert capability vector: {error}"))?;
-                        self.conn
-                            .execute(
-                                "UPDATE capability_vector_metadata
-                                 SET state = 'ready', degraded_reason = NULL, model_id = ?1, updated_at = ?2
-                                 WHERE name = 'default'",
-                                params![embedding_provider.model_id(), Utc::now().to_rfc3339()],
-                            )
-                            .map_err(|error| {
-                                format!("update capability vector metadata: {error}")
-                            })?;
-                    }
-                    Err(error) => {
-                        status.state = "unavailable".to_owned();
-                        status.degraded_reason = Some(error.clone());
-                        self.conn
-                            .execute(
-                                "UPDATE capability_vector_metadata
-                                 SET state = 'unavailable', degraded_reason = ?1, updated_at = ?2
-                                 WHERE name = 'default'",
-                                params![error, Utc::now().to_rfc3339()],
-                            )
-                            .ok();
-                        if policy.require_local_vector && !policy.allow_lexical_only_when_degraded {
-                            return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
-                        }
-                        break;
+                vector_jobs.push((rowid, document.text.clone()));
+            }
+        }
+        if policy.local_vector && !vector_jobs.is_empty() {
+            match self.write_vectors(&vector_jobs, embedding_provider) {
+                Ok(()) => {
+                    self.conn
+                        .execute(
+                            "UPDATE capability_vector_metadata
+                             SET state = 'ready', degraded_reason = NULL, model_id = ?1, updated_at = ?2
+                             WHERE name = 'default'",
+                            params![embedding_provider.model_id(), Utc::now().to_rfc3339()],
+                        )
+                        .map_err(|error| format!("update capability vector metadata: {error}"))?;
+                }
+                Err(error) => {
+                    status.state = "unavailable".to_owned();
+                    status.degraded_reason = Some(error.clone());
+                    let _ = self.record_vector_unavailable(
+                        embedding_provider.dimensions(),
+                        embedding_provider.model_id(),
+                        &error,
+                    );
+                    if policy.require_local_vector && !policy.allow_lexical_only_when_degraded {
+                        return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
                     }
                 }
             }
@@ -1888,6 +1913,46 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
 }
 
 impl SqliteCapabilityRegistryStore {
+    fn write_vectors(
+        &self,
+        jobs: &[(i64, String)],
+        embedding_provider: &dyn EmbeddingProvider,
+    ) -> Result<(), String> {
+        self.ensure_vector_table(
+            embedding_provider.dimensions(),
+            embedding_provider.model_id(),
+        )?;
+        for chunk in jobs.chunks(32) {
+            let texts = chunk
+                .iter()
+                .map(|(_, text)| text.clone())
+                .collect::<Vec<_>>();
+            let vectors = embedding_provider.embed(&texts)?;
+            if vectors.len() != chunk.len() {
+                return Err(format!(
+                    "embedding provider returned {} vectors for {} texts",
+                    vectors.len(),
+                    chunk.len()
+                ));
+            }
+            for ((rowid, _), vector) in chunk.iter().zip(vectors.iter()) {
+                self.conn
+                    .execute(
+                        "DELETE FROM capability_index_vectors WHERE rowid = ?1",
+                        params![rowid],
+                    )
+                    .map_err(|error| format!("delete stale capability vector: {error}"))?;
+                self.conn
+                    .execute(
+                        "INSERT INTO capability_index_vectors(rowid, embedding) VALUES (?1, ?2)",
+                        params![rowid, bytemuck::cast_slice::<f32, u8>(vector)],
+                    )
+                    .map_err(|error| format!("insert capability vector: {error}"))?;
+            }
+        }
+        Ok(())
+    }
+
     fn vector_search(
         &self,
         query: &str,
@@ -3244,6 +3309,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use serde_json::json;
 
     use super::*;
@@ -3262,6 +3329,51 @@ mod tests {
 
         fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
             Err("embedding assets unavailable".to_owned())
+        }
+    }
+
+    struct CountingEmbeddingProvider {
+        calls: AtomicUsize,
+        max_batch: AtomicUsize,
+    }
+
+    impl CountingEmbeddingProvider {
+        fn new() -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+                max_batch: AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+
+        fn max_batch(&self) -> usize {
+            self.max_batch.load(Ordering::SeqCst)
+        }
+    }
+
+    impl EmbeddingProvider for CountingEmbeddingProvider {
+        fn model_id(&self) -> &'static str {
+            "test:counting"
+        }
+
+        fn dimensions(&self) -> usize {
+            64
+        }
+
+        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.max_batch.fetch_max(texts.len(), Ordering::SeqCst);
+            Ok(texts
+                .iter()
+                .map(|text| {
+                    let mut vector = vec![0.0; 64];
+                    vector[text.len() % 64] = 1.0;
+                    vector
+                })
+                .collect())
         }
     }
 
@@ -3400,6 +3512,101 @@ mod tests {
             !store
                 .validate_inspection(&handle.handle, &stale_entry)
                 .expect("stale inspection rejected")
+        );
+    }
+
+    #[test]
+    fn sqlite_registry_records_degraded_vector_metadata() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        let snapshot =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 11);
+        let policy = CapabilitySearchPolicy {
+            require_local_vector: false,
+            allow_lexical_only_when_degraded: true,
+            ..CapabilitySearchPolicy::default()
+        };
+
+        let status = store
+            .sync_snapshot(&snapshot, &FailingEmbeddingProvider, &policy)
+            .expect("degraded sync");
+
+        assert_eq!(status.state, "unavailable");
+        let admin = store.admin_status().expect("status");
+        assert_eq!(admin["indexStatus"]["state"], "unavailable");
+        assert_eq!(
+            admin["indexStatus"]["degradedReason"],
+            "embedding assets unavailable"
+        );
+        assert_eq!(admin["indexStatus"]["embeddingModel"], "test:failing");
+    }
+
+    #[test]
+    fn sqlite_registry_recreates_missing_vector_table_when_metadata_remains() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        let snapshot =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 11);
+        let policy = CapabilitySearchPolicy::default();
+        let provider = HashEmbeddingProvider::new(64);
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("initial vector sync");
+        store
+            .conn
+            .execute_batch("DROP TABLE capability_index_vectors;")
+            .expect("drop vector table");
+
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("resync recreates vector table");
+        let vector_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM capability_index_vectors", [], |row| {
+                row.get(0)
+            })
+            .expect("vector count");
+        assert!(
+            vector_count > 0,
+            "resync should recreate and repopulate the vector table"
+        );
+    }
+
+    #[test]
+    fn sqlite_registry_batches_vector_indexing_for_registry_warmup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        let functions = (0..20)
+            .map(|index| test_function(&format!("test{index}::capability")))
+            .collect::<Vec<_>>();
+        let snapshot = CapabilityRegistrySnapshot::new(functions, 11);
+        let policy = CapabilitySearchPolicy::default();
+        let provider = CountingEmbeddingProvider::new();
+
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("batched vector sync");
+
+        let vector_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM capability_index_vectors", [], |row| {
+                row.get(0)
+            })
+            .expect("vector count");
+        assert!(
+            vector_count > 32,
+            "test should exercise multiple vector jobs"
+        );
+        assert!(
+            provider.calls() < vector_count as usize,
+            "vector writes should use batched embedding calls"
+        );
+        assert!(
+            provider.max_batch() > 1,
+            "at least one embedding call should contain multiple documents"
         );
     }
 

@@ -8,6 +8,7 @@
 //! correlation ids.
 
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 use crate::domains::catalog;
 use crate::domains::catalog::TransportIdempotencyMode;
@@ -33,6 +34,8 @@ pub struct EngineTransportContext {
     pub parent_invocation_id: Option<String>,
     /// Additional authority scopes explicitly granted by the transport.
     pub authority_scopes: Vec<String>,
+    /// Engine-internal runtime metadata supplied by trusted clients.
+    pub runtime_metadata: BTreeMap<String, String>,
 }
 
 /// Input used to build a protocol-neutral engine transport envelope.
@@ -106,6 +109,11 @@ pub fn build_engine_transport_request(
             causal_context = causal_context.with_scope(scope.clone());
         }
     }
+    for (key, value) in &input.context.runtime_metadata {
+        if !key.trim().is_empty() {
+            causal_context = causal_context.with_runtime_metadata(key.clone(), value.clone());
+        }
+    }
     if spec.effect_class.is_mutating() {
         match spec.idempotency_mode {
             TransportIdempotencyMode::ExplicitRequired => {
@@ -160,6 +168,7 @@ pub async fn dispatch_engine_transport_request(
     let mut dispatch =
         TriggerDispatchRequest::new(envelope.trigger_id, envelope.payload, actor_id, actor_kind);
     dispatch.authority_scopes = authority_scopes;
+    dispatch.runtime_metadata = envelope.causal_context.runtime_metadata.clone();
     dispatch.trace_id = trace_id;
     dispatch.session_id = session_id;
     dispatch.workspace_id = workspace_id;
@@ -301,6 +310,7 @@ fn extract_string(payload: &Value, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use std::collections::BTreeMap;
 
     use super::*;
 
@@ -344,5 +354,35 @@ mod tests {
 
         assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
         assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-client");
+    }
+
+    #[test]
+    fn transport_context_runtime_metadata_reaches_causal_context() {
+        let mut runtime_metadata = BTreeMap::new();
+        let _ = runtime_metadata.insert(
+            "capability.searchPolicyId".to_owned(),
+            "operatorConsoleHybridLexical".to_owned(),
+        );
+        let envelope = build_engine_transport_request(EngineTransportBuildRequest {
+            correlation_id: "request-1".to_owned(),
+            public_method: "invoke".to_owned(),
+            params_payload: json!({
+                "functionId": "capability::search",
+                "payload": {"query": "read file"}
+            }),
+            context: EngineTransportContext {
+                runtime_metadata,
+                ..EngineTransportContext::default()
+            },
+        })
+        .expect("transport envelope builds")
+        .expect("invoke maps to engine transport");
+
+        assert_eq!(
+            envelope
+                .causal_context
+                .runtime_metadata("capability.searchPolicyId"),
+            Some("operatorConsoleHybridLexical")
+        );
     }
 }

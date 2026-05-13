@@ -1,6 +1,73 @@
 import Foundation
 
 @MainActor
+protocol EngineConsoleCapabilityClient: AnyObject {
+    func status(includeSnapshot: Bool) async throws -> CapabilityStatusDTO
+    func registrySnapshot(includeDocuments: Bool, includeBindings: Bool) async throws -> CapabilityRegistrySnapshotDTO
+    func auditQuery(_ query: CapabilityAuditQueryDTO) async throws -> CapabilityAuditQueryResultDTO
+    func programRunList(_ query: CapabilityProgramRunQueryDTO) async throws -> CapabilityProgramRunQueryResultDTO
+    func getPolicy(policyId: String?) async throws -> CapabilityPolicyGetDTO
+    func search(_ request: CapabilitySearchRequestDTO) async throws -> CapabilitySearchResponseDTO
+    func inspect(
+        capabilityId: String?,
+        contractId: String?,
+        implementationId: String?,
+        functionId: String?
+    ) async throws -> CapabilityInspectionDTO
+    func executeProgram(
+        code: String,
+        args: [String: AnyCodable],
+        allowedContracts: [String],
+        allowedImplementations: [String],
+        timeoutMs: UInt64?,
+        budget: AnyCodable?,
+        inspectionHandle: String,
+        expectedRevision: UInt64,
+        expectedSchemaDigest: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> CapabilityProgramExecutionDTO
+    func setBinding(
+        contractId: String,
+        selectedImplementation: String,
+        scopeKind: String,
+        scopeValue: String,
+        selectionPolicy: String,
+        secondaryImplementations: [String],
+        priority: Int,
+        enabled: Bool,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> AnyCodable
+    func setImplementationState(
+        implementationId: String,
+        state: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> AnyCodable
+    func setPluginState(
+        pluginId: String,
+        state: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> AnyCodable
+    func promotePlugin(
+        pluginId: String,
+        targetVisibility: String,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> AnyCodable
+    func runConformance(
+        pluginId: String,
+        implementationId: String?,
+        reason: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> AnyCodable
+}
+
+extension CapabilityClient: EngineConsoleCapabilityClient {}
+
+@MainActor
 @Observable
 final class EngineConsoleState {
     enum LoadState: Equatable {
@@ -11,7 +78,23 @@ final class EngineConsoleState {
         case failed(String)
     }
 
-    private let engineClient: EngineClient
+    enum CapabilitySearchState: Equatable {
+        case idle
+        case loading
+        case results(count: Int, degradedReason: String?)
+        case empty(degradedReason: String?)
+        case failed(String)
+    }
+
+    enum MutationState: Equatable {
+        case idle
+        case running(String)
+        case succeeded(String)
+        case failed(String)
+    }
+
+    private let capabilityClient: EngineConsoleCapabilityClient
+    private let connectionState: () -> ConnectionState
     private let cache: EngineConsoleCache
 
     private(set) var loadState: LoadState = .idle
@@ -26,6 +109,10 @@ final class EngineConsoleState {
     private(set) var programResult: CapabilityProgramExecutionDTO?
     private(set) var programError: String?
     private(set) var searchResults: [CapabilityIndexHitDTO] = []
+    private(set) var capabilitySearchState: CapabilitySearchState = .idle
+    private(set) var capabilitySearchMode: CapabilityIndexStatusDTO?
+    private(set) var capabilitySearchCatalogRevision: UInt64?
+    private(set) var mutationState: MutationState = .idle
     var searchText: String = ""
     var programCode: String = "return args;"
     var programArgsJSON: String = "{}"
@@ -35,7 +122,7 @@ final class EngineConsoleState {
     var isMutatingDisabled: Bool {
         switch loadState {
         case .offlineCached: true
-        default: !engineClient.connectionState.isConnected
+        default: !connectionState().isConnected
         }
     }
 
@@ -43,7 +130,19 @@ final class EngineConsoleState {
         engineClient: EngineClient,
         cache: EngineConsoleCache = EngineConsoleCache()
     ) {
-        self.engineClient = engineClient
+        self.capabilityClient = engineClient.capability
+        self.connectionState = { engineClient.connectionState }
+        self.cache = cache
+        self.cachedSnapshot = cache.load()
+    }
+
+    init(
+        capabilityClient: EngineConsoleCapabilityClient,
+        connectionState: @escaping () -> ConnectionState = { .connected },
+        cache: EngineConsoleCache = EngineConsoleCache()
+    ) {
+        self.capabilityClient = capabilityClient
+        self.connectionState = connectionState
         self.cache = cache
         self.cachedSnapshot = cache.load()
     }
@@ -51,15 +150,18 @@ final class EngineConsoleState {
     func refresh() async {
         loadState = .loading
         do {
-            let status = try await engineClient.capability.status()
-            let registry = try await engineClient.capability.registrySnapshot()
-            let audit = try await engineClient.capability.auditQuery(
+            let status = try await capabilityClient.status(includeSnapshot: false)
+            let registry = try await capabilityClient.registrySnapshot(
+                includeDocuments: true,
+                includeBindings: true
+            )
+            let audit = try await capabilityClient.auditQuery(
                 CapabilityAuditQueryDTO(eventType: nil, traceId: nil, limit: 50, revealPayloads: false)
             )
-            let programRuns = try await engineClient.capability.programRunList(
+            let programRuns = try await capabilityClient.programRunList(
                 CapabilityProgramRunQueryDTO(traceId: nil, status: nil, limit: 50, revealPayloads: false)
             )
-            let policies = try await engineClient.capability.getPolicy()
+            let policies = try await capabilityClient.getPolicy(policyId: nil)
             self.status = status
             self.registry = registry
             self.audit = audit
@@ -95,21 +197,35 @@ final class EngineConsoleState {
     func search() async {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             searchResults = []
+            capabilitySearchMode = nil
+            capabilitySearchCatalogRevision = nil
+            capabilitySearchState = .idle
             return
         }
+        capabilitySearchState = .loading
         do {
-            let response = try await engineClient.capability.search(
+            let response = try await capabilityClient.search(
                 CapabilitySearchRequestDTO(query: searchText, limit: 25)
             )
-            searchResults = response.results ?? []
+            let results = response.results ?? []
+            searchResults = results
+            capabilitySearchMode = response.searchMode
+            capabilitySearchCatalogRevision = response.catalogRevision
+            let degradedReason = response.searchMode?.degradedReason
+            capabilitySearchState = results.isEmpty
+                ? .empty(degradedReason: degradedReason)
+                : .results(count: results.count, degradedReason: degradedReason)
         } catch {
-            loadState = .failed(error.localizedDescription)
+            searchResults = []
+            capabilitySearchMode = nil
+            capabilitySearchCatalogRevision = nil
+            capabilitySearchState = .failed(error.localizedDescription)
         }
     }
 
     func inspect(_ hit: CapabilityIndexHitDTO) async {
         do {
-            selectedInspection = try await engineClient.capability.inspect(
+            selectedInspection = try await capabilityClient.inspect(
                 capabilityId: hit.capabilityId,
                 contractId: hit.contractId,
                 implementationId: hit.implementationId,
@@ -123,7 +239,10 @@ final class EngineConsoleState {
     func inspectProgramRuntime() async {
         guard !isMutatingDisabled else { return }
         do {
-            programInspection = try await engineClient.capability.inspect(
+            programInspection = try await capabilityClient.inspect(
+                capabilityId: nil,
+                contractId: nil,
+                implementationId: nil,
                 functionId: "program::run_javascript"
             )
             programError = nil
@@ -157,11 +276,13 @@ final class EngineConsoleState {
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            programResult = try await engineClient.capability.executeProgram(
+            programResult = try await capabilityClient.executeProgram(
                 code: programCode,
                 args: args,
                 allowedContracts: allowedContracts,
                 allowedImplementations: allowedImplementations,
+                timeoutMs: nil,
+                budget: nil,
                 inspectionHandle: handle,
                 expectedRevision: expectedRevision,
                 expectedSchemaDigest: expectedSchemaDigest,
@@ -180,47 +301,97 @@ final class EngineConsoleState {
         state: String
     ) async {
         guard !isMutatingDisabled else { return }
+        mutationState = .running("Updating implementation state")
         do {
-            _ = try await engineClient.capability.setImplementationState(
+            _ = try await capabilityClient.setImplementationState(
                 implementationId: implementationId,
                 state: state,
                 reason: "ios_engine_console",
                 idempotencyKey: .userAction("capability.implementation_state")
             )
+            mutationState = .succeeded("Implementation updated")
             await refresh()
         } catch {
-            loadState = .failed(error.localizedDescription)
+            mutationState = .failed(error.localizedDescription)
         }
     }
 
     func setPluginState(pluginId: String, state: String) async {
         guard !isMutatingDisabled else { return }
+        mutationState = .running("Updating plugin state")
         do {
-            _ = try await engineClient.capability.setPluginState(
+            _ = try await capabilityClient.setPluginState(
                 pluginId: pluginId,
                 state: state,
                 reason: "ios_engine_console",
                 idempotencyKey: .userAction("capability.plugin_state")
             )
+            mutationState = .succeeded("Plugin updated")
             await refresh()
         } catch {
-            loadState = .failed(error.localizedDescription)
+            mutationState = .failed(error.localizedDescription)
         }
     }
 
     func runConformance(pluginId: String, implementationId: String? = nil) async {
         guard !isMutatingDisabled else { return }
+        mutationState = .running("Running conformance")
         do {
-            _ = try await engineClient.capability.runConformance(
+            _ = try await capabilityClient.runConformance(
                 pluginId: pluginId,
                 implementationId: implementationId,
                 reason: "ios_engine_console",
                 idempotencyKey: .userAction("capability.conformance")
             )
+            mutationState = .succeeded("Conformance run completed")
             await refresh()
         } catch {
-            loadState = .failed(error.localizedDescription)
+            mutationState = .failed(error.localizedDescription)
         }
+    }
+
+    func promotePlugin(pluginId: String, targetVisibility: String = "workspace") async {
+        guard !isMutatingDisabled else { return }
+        mutationState = .running("Promoting plugin")
+        do {
+            _ = try await capabilityClient.promotePlugin(
+                pluginId: pluginId,
+                targetVisibility: targetVisibility,
+                reason: "ios_engine_console",
+                idempotencyKey: .userAction("capability.plugin_promote")
+            )
+            mutationState = .succeeded("Plugin promotion requested")
+            await refresh()
+        } catch {
+            mutationState = .failed(error.localizedDescription)
+        }
+    }
+
+    func setBindingEnabled(_ binding: CapabilityBindingDTO, enabled: Bool) async {
+        guard !isMutatingDisabled else { return }
+        mutationState = .running(enabled ? "Enabling binding" : "Disabling binding")
+        do {
+            _ = try await capabilityClient.setBinding(
+                contractId: binding.contractId,
+                selectedImplementation: binding.selectedImplementation,
+                scopeKind: binding.scopeKind ?? "system",
+                scopeValue: binding.scopeValue ?? "default",
+                selectionPolicy: binding.selectionPolicy ?? "explicit",
+                secondaryImplementations: binding.secondaryImplementations ?? [],
+                priority: binding.priority ?? 0,
+                enabled: enabled,
+                reason: "ios_engine_console",
+                idempotencyKey: .userAction("capability.binding_set")
+            )
+            mutationState = .succeeded(enabled ? "Binding enabled" : "Binding disabled")
+            await refresh()
+        } catch {
+            mutationState = .failed(error.localizedDescription)
+        }
+    }
+
+    func clearMutationState() {
+        mutationState = .idle
     }
 
     private func parseProgramArgs() throws -> [String: AnyCodable] {

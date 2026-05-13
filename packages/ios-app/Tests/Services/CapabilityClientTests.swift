@@ -21,6 +21,43 @@ struct CapabilityClientTests {
         #expect(status.catalogRevision == 42)
     }
 
+    @Test("search uses explicit operator lexical-degraded policy")
+    func searchUsesOperatorLexicalPolicy() async throws {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://localhost:8082")!)
+        let client = CapabilityClient(transport: transport)
+        transport.readHandler = { functionId, _, options in
+            #expect(functionId.rawValue == "capability::search")
+            #expect(options.context?.authorityScopes.contains("capability.search") == true)
+            let metadata = options.context?.runtimeMetadata ?? [:]
+            #expect(metadata["capability.searchPolicyId"] == "operatorConsoleHybridLexical")
+            #expect(metadata["capability.searchPolicy"]?.contains(#""requireLocalVector":false"#) == true)
+            #expect(metadata["capability.searchPolicy"]?.contains(#""allowLexicalOnlyWhenDegraded":true"#) == true)
+            return CapabilityPrimitiveResultDTO(
+                content: nil,
+                details: AnyCodable([
+                    "query": "read file",
+                    "catalogRevision": 303,
+                    "results": [],
+                    "searchMode": [
+                        "lexical": true,
+                        "localVector": true,
+                        "state": "unavailable",
+                        "degradedReason": "embedding assets unavailable"
+                    ]
+                ]),
+                isError: nil,
+                stopTurn: nil
+            )
+        }
+
+        let result = try await client.search(CapabilitySearchRequestDTO(query: "read file", limit: 25))
+
+        #expect(result.catalogRevision == 303)
+        #expect(result.searchMode?.state == "unavailable")
+        #expect(result.searchMode?.degradedReason == "embedding assets unavailable")
+    }
+
     @Test("set binding invokes capability binding set with write scope")
     func setBindingUsesCapabilityWriteScope() async throws {
         let transport = MockEngineTransport()

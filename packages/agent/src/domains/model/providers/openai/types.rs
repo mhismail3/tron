@@ -2507,7 +2507,8 @@ pub struct ResponsesRequest {
     /// Temperature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
-    /// ModelCapability definitions (functions, tool search, computer use).
+    /// Provider-wire tools generated from Tron capability primitives.
+    #[serde(rename = "tools")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<Vec<ResponsesToolEntry>>,
     /// Max output tokens.

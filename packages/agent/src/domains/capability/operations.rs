@@ -1585,6 +1585,15 @@ fn registry_metadata_sync_policy() -> CapabilitySearchPolicy {
     }
 }
 
+fn registry_operator_sync_policy() -> CapabilitySearchPolicy {
+    CapabilitySearchPolicy {
+        local_vector: true,
+        require_local_vector: false,
+        allow_lexical_only_when_degraded: true,
+        ..CapabilitySearchPolicy::default()
+    }
+}
+
 fn search_policy_from_runtime(
     invocation: &Invocation,
 ) -> Result<CapabilitySearchPolicy, CapabilityError> {
@@ -1647,7 +1656,7 @@ async fn sync_registry_for_admin(
             .sync_snapshot(
                 &snapshot,
                 embedding_provider.as_ref(),
-                &registry_metadata_sync_policy(),
+                &registry_operator_sync_policy(),
             )
             .map_err(registry_store_error)?;
         Ok(())
@@ -2372,6 +2381,23 @@ mod tests {
         let parsed = search_policy_from_runtime(&invocation).expect("policy");
         assert!(!parsed.require_local_vector);
         assert!(parsed.allow_lexical_only_when_degraded);
+    }
+
+    #[test]
+    fn admin_registry_sync_builds_vectors_without_blocking_console() {
+        let policy = registry_operator_sync_policy();
+
+        assert!(policy.local_vector);
+        assert!(!policy.require_local_vector);
+        assert!(policy.allow_lexical_only_when_degraded);
+    }
+
+    #[test]
+    fn binding_resolution_sync_stays_metadata_only() {
+        let policy = registry_metadata_sync_policy();
+
+        assert!(!policy.local_vector);
+        assert!(!policy.require_local_vector);
     }
 
     #[test]

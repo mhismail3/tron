@@ -1450,7 +1450,7 @@ const KNOWN_CONTEXT_BLOCKS: &[&str] = &[
     "conversation.messages",
 ];
 
-fn validate_context_block_manifest(path: &Path) -> io::Result<()> {
+pub(crate) fn validate_context_block_manifest(path: &Path) -> io::Result<()> {
     let content = fs::read_to_string(path)?;
     let manifest: ContextBlockManifest = toml::from_str(&content).map_err(|error| {
         io::Error::new(
@@ -1642,6 +1642,24 @@ store = "auth.json"
         assert!(spec.cache_policies.contains_key("default"));
         assert_eq!(spec.settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(spec.settings.server.default_provider, "anthropic");
+        assert!(
+            spec.settings
+                .api
+                .anthropic
+                .oauth_beta_headers
+                .contains("fine-grained-tool-streaming-2025-05-14")
+        );
+        assert!(
+            !spec
+                .settings
+                .api
+                .anthropic
+                .oauth_beta_headers
+                .contains(&format!(
+                    "{}{}{}",
+                    "fine-grained-", "capability", "-streaming"
+                ))
+        );
     }
 
     #[test]

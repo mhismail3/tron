@@ -9,12 +9,15 @@ and iOS caches are disposable for this cutover.
 1. Stop any running dev takeover with `scripts/tron dev --stop`.
 2. Remove disposable local state as needed: `~/.tron/internal/database/`,
    `~/.tron/internal/run/Tron-Dev.app`, and iOS simulator app data.
-3. Run `cargo fmt --all -- --check && cargo check` from `packages/agent`.
-4. Run `scripts/tron ci fmt check clippy test` before a checkpoint intended for
+3. Keep `~/.tron/profiles/default/` managed by the agent. Startup repairs
+   stale bundled defaults, including the capability context manifest, from the
+   repo defaults before profile validation.
+4. Run `cargo fmt --all -- --check && cargo check` from `packages/agent`.
+5. Run `scripts/tron ci fmt check clippy test` before a checkpoint intended for
    manual QA.
-5. Run `cd packages/ios-app && xcodegen generate`, then targeted simulator
+6. Run `cd packages/ios-app && xcodegen generate`, then targeted simulator
    tests for the touched iOS areas.
-6. Run `cd packages/relay && npm test` when relay or onboarding smoke paths are
+7. Run `cd packages/relay && npm test` when relay or onboarding smoke paths are
    part of the testing pass.
 
 ## Helper Packaging
@@ -49,15 +52,25 @@ and iOS caches are disposable for this cutover.
 ## Engine Console
 
 1. Overview shows connection, catalog revision, registry revision, vector index
-   state, plugins, implementations, bindings, audit rows, and program runs.
-2. Capabilities search, inspect, and program execution work only while online.
-3. Plugins show manifests, trust/signature/conformance state, namespace claims,
-   and support conformance plus state changes through capability admin
-   functions.
-4. Bindings show selected implementations, policy, scope, and enabled state.
-5. Policies show the active capability policies and search/primer policy ids.
-6. Audit, traces, and program runs show redacted summaries by default.
-7. Disconnect the server and confirm the console is cache-only with mutations
+   state, plugin/implementation counts, audit rows, program runs, and a plain
+   readiness card.
+2. Capabilities search works from either the search field or suggestion chips.
+   If local vectors are not ready, the result banner must explicitly say the
+   console is using degraded lexical search.
+3. Program Runs supports the inspect-to-run flow and blocks submit until the
+   fresh handle, revision, and schema digest are available.
+4. Advanced sections are hidden by default. Toggle Advanced and confirm Plugins,
+   Workers, Bindings, Policies, Audit, Traces, and Primer remain available for
+   operator work.
+5. Plugins show manifests, trust/signature/conformance state, namespace claims,
+   and support conformance, promotion, quarantine, and disable actions through
+   capability admin functions.
+6. Bindings show selected implementations, policy, scope, enabled state, and
+   allow enable/disable through capability admin functions.
+7. Policies show the active capability policies and search/primer policy ids
+   without requiring end users to understand them during normal testing.
+8. Audit, traces, and program runs show redacted summaries by default.
+9. Disconnect the server and confirm the console is cache-only with mutations
    disabled.
 
 ## Provider And History Smoke
@@ -83,6 +96,9 @@ and iOS caches are disposable for this cutover.
 
 - Missing `tron-program-worker` beside `tron` prevents bundle creation or
   program execution with a clear error.
+- Stale managed profile defaults are repaired before validation; a copied
+  default context manifest with retired provider-surface values must not block
+  `tron dev`.
 - Program form opened before inspection cannot submit.
 - Catalog revision or schema digest changes after inspection force re-inspect.
 - Offline console disables all mutations.

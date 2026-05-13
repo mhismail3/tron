@@ -14,7 +14,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A separate Codex mode that connects directly to a Tron-managed `codex app-server` on the active paired machine without using Tron agent sessions
-- A top-level Engine Console mode for live capability registry, plugin, worker, binding, policy, index, trace, primer, program-run, and redacted audit inspection
+- A top-level Engine Console mode for live capability registry search, program runs, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
 
@@ -201,10 +201,24 @@ APNs remains the background device-delivery transport.
 architecture. It calls `capability::status`, `capability::registry_snapshot`,
 `capability::audit_query`, binding functions, plugin functions, conformance, and
 policy functions through `CapabilityClient`; it never reads a hardcoded tool
-descriptor catalog. `EngineConsoleState` owns refresh, search, inspect,
-mutation gating, and disconnected read-only cache snapshots. The server remains the source
-of truth for policy, authority, approval, audit redaction, plugin lifecycle, and
-binding selection.
+descriptor catalog. The default console surface is intentionally small:
+Overview, Capabilities, and Program Runs. Advanced sections expose plugins,
+workers, bindings, policies, audit, traces, and primer internals only after the
+user opts in. `EngineConsoleState` owns refresh, search, inspect, local mutation
+state, mutation gating, and disconnected read-only cache snapshots. The server
+remains the source of truth for policy, authority, approval, audit redaction,
+plugin lifecycle, and binding selection.
+
+The Engine Console uses sheet-native Tron components: section chips, compact
+metric grids, capability cards, status banners, generated action rows, and
+inspection sheets. Capability search has its own loading/error/empty/results
+state, so a failed search does not replace the overview or cached registry
+state. Capability mutations also have local action state, so conformance,
+plugin, binding, and implementation updates report success/failure without
+collapsing the whole console into a failed load state. Operator search sends
+explicit runtime metadata requesting degraded lexical search only when vectors
+are unavailable; that policy is visible in the search result status and is not
+applied to model turns.
 
 The console cache is intentionally read-only. On disconnect, the UI shows stale
 catalog/registry/index summaries and disables mutations. Reconnect refreshes the

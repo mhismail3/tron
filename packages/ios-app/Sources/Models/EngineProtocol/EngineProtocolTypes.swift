@@ -48,19 +48,22 @@ struct EngineInvocationContext: Codable, Equatable, Sendable {
     var traceId: String?
     var parentInvocationId: String?
     var authorityScopes: [String]
+    var runtimeMetadata: [String: String]
 
     init(
         sessionId: String? = nil,
         workspaceId: String? = nil,
         traceId: String? = nil,
         parentInvocationId: String? = nil,
-        authorityScopes: [String] = []
+        authorityScopes: [String] = [],
+        runtimeMetadata: [String: String] = [:]
     ) {
         self.sessionId = sessionId
         self.workspaceId = workspaceId
         self.traceId = traceId
         self.parentInvocationId = parentInvocationId
         self.authorityScopes = authorityScopes
+        self.runtimeMetadata = runtimeMetadata
     }
 }
 

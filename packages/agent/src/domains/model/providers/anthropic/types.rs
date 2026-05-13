@@ -832,7 +832,8 @@ pub struct AnthropicRequest {
     /// System prompt (string or array of blocks).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<Value>,
-    /// Available capabilities.
+    /// Provider-wire tools generated from Tron capability primitives.
+    #[serde(rename = "tools")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<Vec<AnthropicTool>>,
     /// Stream mode.

@@ -732,6 +732,38 @@ mod tests {
     }
 
     #[test]
+    fn request_serializes_capabilities_as_provider_tools() {
+        let provider = AnthropicProvider::new(api_key_config());
+        let ctx = Context {
+            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
+                name: "execute".into(),
+                description: "Execute inspected capabilities".into(),
+                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::default(),
+                },
+            }]),
+            ..Context::default()
+        };
+        let request = provider.build_request(
+            &ctx,
+            &ProviderStreamOptions::default(),
+            vec![AnthropicMessageParam {
+                role: "user".into(),
+                content: vec![json!({"type": "text", "text": "hi"})],
+            }],
+        );
+        let body = serde_json::to_value(&request).expect("request serializes");
+
+        assert!(body.get("tools").is_some());
+        assert!(body.get("capabilities").is_none());
+        assert_eq!(body["tools"][0]["name"], "execute");
+    }
+
+    #[test]
     fn build_tools_oauth_last_has_cache() {
         let provider = AnthropicProvider::new(oauth_config());
         let ctx = Context {

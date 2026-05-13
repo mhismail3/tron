@@ -3,7 +3,8 @@
 //! Normal runtime code reads the five constitutional roots only:
 //! `internal/`, `skills/`, `profiles/`, `memory/`, and `workspace/`.
 //! Managed defaults are repaired from the compiled bundle when they are
-//! missing, malformed, or stale relative to the current strict profile schema.
+//! missing, malformed, or stale relative to the current strict profile and
+//! context-manifest schemas.
 
 use std::fs;
 use std::io;
@@ -328,6 +329,9 @@ fn managed_default_valid(path: &Path, kind: DefaultKind) -> bool {
                     .and_then(toml::Value::as_str)
                     .is_some_and(|active| !active.trim().is_empty() && active != DEFAULT_PROFILE);
             }
+            if path.file_name().and_then(|name| name.to_str()) == Some("context-blocks.toml") {
+                return super::profile::validate_context_block_manifest(path).is_ok();
+            }
             if path.file_name().and_then(|name| name.to_str()) == Some(files::PROFILE_TOML)
                 && let Some(profile_name) = path
                     .parent()
@@ -538,6 +542,39 @@ mod tests {
         );
         let repaired = fs::read_to_string(&default_profile).unwrap();
         assert!(!repaired.contains("removedProcessMode ="));
+        crate::shared::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
+    }
+
+    #[test]
+    fn seeding_repairs_stale_context_block_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        ensure_tron_home_at(&home).unwrap();
+
+        let manifest = home
+            .join(dirs::PROFILES)
+            .join(DEFAULT_PROFILE)
+            .join(dirs::CONTEXT)
+            .join("context-blocks.toml");
+        let stale = fs::read_to_string(&manifest)
+            .unwrap()
+            .replace("capabilities.schemas", &["tools", "schemas"].join("."))
+            .replace("Capability Schemas", &["To", "ol Schemas"].concat())
+            .replace(
+                "providerSurface = \"capability\"",
+                &format!("providerSurface = \"{}\"", ["to", "ol"].concat()),
+            );
+        fs::write(&manifest, stale).unwrap();
+
+        let report = ensure_tron_home_at(&home).unwrap();
+
+        assert!(
+            report.repaired.contains(&manifest),
+            "stale managed context manifest should be repaired from bundled defaults"
+        );
+        let repaired = fs::read_to_string(&manifest).unwrap();
+        assert!(repaired.contains("capabilities.schemas"));
+        assert!(repaired.contains("providerSurface = \"capability\""));
         crate::shared::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
     }
 

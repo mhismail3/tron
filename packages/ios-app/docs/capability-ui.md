@@ -52,11 +52,20 @@ metadata; it should not map retired tool names into capability identity.
 `EngineConsoleState` owns live console state:
 
 - status and registry snapshot refresh
-- capability search and inspect
+- capability search and inspect, with search state scoped to the Capabilities
+  section rather than the global console load state
 - redacted audit query refresh
-- implementation state changes
+- plugin, implementation, conformance, promotion, and binding state changes
+  tracked through a local mutation state so an action failure does not replace
+  the whole console load state
 - program-runtime inspection and program execution
 - read-only stale cache snapshots
+
+The operator console asks the server for an explicit lexical-allowed capability
+search policy when the local vector index is unavailable. This is a visible
+degraded operator mode: search results show the degraded status and reason.
+Agent/model capability search still follows the active profile policy and does
+not inherit the console's degraded search allowance.
 
 When the server is disconnected, the state object loads
 `EngineConsoleCache.Snapshot` and marks it stale. Mutations must stay disabled
@@ -83,10 +92,16 @@ store raw secret values.
 
 ## Rendering Rules
 
-The current Engine Console renders overview, capability search/inspect, a
+The current Engine Console is a sheet-native operator surface built from
+capability cards, metric grids, status banners, section chips, generated action
+rows, and detail sheets. It renders overview, capability search/inspect, a
 program-run form backed by a fresh inspection handle, plugin lifecycle
 summaries, worker health, binding summaries, profile policies, redacted audit
 rows, trace summaries, primer inputs, and redacted program-run records.
+The default section set is intentionally small: Overview, Capabilities, and
+Program Runs. Advanced operator sections expose plugins, workers, bindings,
+policies, audit, traces, and primer details behind an explicit Advanced toggle
+so end users can test the system without thinking about policy internals.
 Program-run rows include parent/root invocation ids, binding decision ids, trace
 id, hashes, selected implementations, child invocations, approval state,
 artifact/log counts, and compensation-attempt counts while payload details
@@ -94,6 +109,11 @@ remain redacted by default. Generated invoke/program forms and result renderers
 use contract and implementation metadata, not retired built-in-name dispatch.
 First-party capabilities may provide presentation hints, but those hints are
 advisory metadata attached to capability records.
+
+Long contract, implementation, plugin, worker, trace, and schema identifiers
+must wrap or truncate inside cards without overlapping neighboring controls.
+Badge rows use a wrapping layout so multiple capability metadata labels remain
+legible on phone-width screens.
 
 Provider protocol terminology is confined to provider-boundary and transcript payloads.
 Capability UI surfaces use `CapabilityIdentity` and registry DTOs as the active

@@ -11,7 +11,7 @@ Tron builds model context through a layered runtime path:
 
 1. Startup initializes the profile-first Constitution home, compiles the active
    `ProfileRuntime`, initializes settings from that compiled spec, then starts
-   the database, provider factory, tool factory, skill registry, memory
+   the database, provider factory, capability registry, skill registry, memory
    registry, and orchestrator.
 2. `agent::prompt` reconstructs session state, loads rules/memory/job results,
    refreshes skills, applies hook-injected context, and creates a per-run
@@ -21,8 +21,8 @@ Tron builds model context through a layered runtime path:
 4. `turn_runner` asks `ContextManager` for the stable context, attaches
    per-turn volatile context from `RunContext`, records Constitution audit rows,
    asks the provider transport for its request payload, streams the response, and
-   executes requested tools.
-5. Tool results and assistant messages are appended back into `ContextManager`
+   executes requested capability invocations.
+5. Capability results and assistant messages are appended back into `ContextManager`
    and persisted to the event store, so the next turn sees the updated history.
 
 The profile-first implementation makes the execution spec auditable: the
@@ -51,10 +51,10 @@ flowchart TD
     Compose --> Audit["Constitution context + provider payload audit"]
     Audit --> Provider["Provider transport request"]
     Provider --> Stream["Stream processor + streaming journal"]
-    Stream --> Tools["Tool execution waves"]
-    Tools --> Events["Persist assistant/tool/rules/events"]
+    Stream --> Capabilities["Capability invocation waves"]
+    Capabilities --> Events["Persist assistant/capability/rules/events"]
     Events --> Next["Next turn context"]
-    Tools --> Next
+    Capabilities --> Next
 ```
 
 ### Startup and Service Construction
@@ -106,8 +106,9 @@ The prompt path is centered on
   the seeded default prompt loaded by `ContextManager`. Chat sessions directly
   use the seeded `chat` prompt. Local-provider sessions use the seeded `local`
   prompt regardless of chat/default source.
-- `AgentFactory::create_agent` receives provider, tools, hooks, rules, memory,
-  messages, rules index, and compaction settings, then builds a `ContextManager`.
+- `AgentFactory::create_agent` receives provider, capability surface, hooks,
+  rules, memory, messages, rules index, and compaction settings, then builds a
+  `ContextManager`.
 
 ### Skill, Hook, and Current User Prompt Injection
 
@@ -137,25 +138,27 @@ gravity.
 - Compaction can run before the provider call. If compaction occurs, dynamic
   rules are cleared so path-sensitive context can be rebuilt.
 - `build_turn_context` starts from `ContextManager::build_base_context`, attaches
-  message history, tool schemas, server origin, skill contexts, job results, and
-  dynamic rules from `RunContext`.
+  message history, capability schemas, server origin, skill contexts, job
+  results, and dynamic rules from `RunContext`.
 - Local providers use
   `packages/agent/src/domains/agent/runner/context/local_policy.rs` as a thin
-  projection over the active AgentExecutionSpec: reduced tool schemas including
-  `agent::ask_user`, no memory, no skill index, no job results, truncated rules,
-  but explicit skill activation/active/removal context is retained.
+  projection over the active AgentExecutionSpec: reduced capability schemas
+  including `agent::ask_user`, no memory, no skill index, no job results,
+  truncated rules, but explicit skill activation/active/removal context is
+  retained.
 - `compose_context_audit_blocks` compiles the provider-independent audit view.
-  It includes prompt blocks plus audit-only hook context, tool schemas, and
-  conversation messages.
+  It includes prompt blocks plus audit-only hook context, capability schemas,
+  and conversation messages.
 - The provider transport also builds an exact or near-exact provider payload via
   `Provider::audit_payload`. Audit write failures currently fail the turn before
   the model call.
-- The provider stream is processed into assistant deltas, thinking deltas, tool
-  calls, token usage, and final stop reason. A streaming journal under
+- The provider stream is processed into assistant deltas, thinking deltas,
+  provider-native tool/function-call deltas at the provider boundary, token usage,
+  and final stop reason. A streaming journal under
   `~/.tron/internal/database/journals/` is required for crash recovery.
-- Tool calls are persisted before execution, executed in waves according to tool
-  execution mode, then tool results are persisted and appended back into
-  `ContextManager`.
+- Capability invocation drafts are persisted before execution, executed in waves
+  according to capability execution policy, then capability results are persisted
+  and appended back into `ContextManager`.
 - Touched paths can activate scoped rules, which are persisted as
   `rules.activated` and injected into later turns.
 
@@ -180,8 +183,8 @@ gravity.
 | Working directory | `AgentConfig`/`ContextManager` | Every turn | Session | Provider instructions | Session | `environment` bucket | Session working directory/worktree |
 | Message history | `ContextManager` `MessageStore`, reconstructed from events | Every turn | Turn/session history | Provider messages | Turn | `messages` bucket | Session events, compaction |
 | Current user prompt | `TronAgent::run`; optional multimodal override | Current turn | Turn | Provider message | Turn | `messages` bucket | engine prompt payload, hook AddContext |
-| Tool schemas | Live engine catalog projection of `capability::search`, `capability::inspect`, and `capability::execute` only | Every turn; reduced for local models only by capability policy | Session | Provider tools | Session | `tools` bucket | Capability primitive specs, denied capabilities, local policy |
-| Tool results | Tool executor -> `ContextManager` messages | After tool execution, next provider request | Turn/history | Provider messages | Turn | `messages` bucket | Tool behavior and compaction |
+| Capability schemas | Live engine catalog projection of `capability::search`, `capability::inspect`, and `capability::execute` only | Every turn; reduced for local models only by capability policy | Session | Provider-native tool/function definitions | Session | `capabilities` bucket | Capability primitive specs, denied capabilities, local policy |
+| Capability results | Capability invocation executor -> `ContextManager` messages | After capability execution, next provider request | Turn/history | Provider messages | Turn | `messages` bucket | Capability behavior and compaction |
 | Compaction summaries | `compaction_engine`/event reconstruction | After compaction boundaries | Session/history | Provider messages | Session | `messages` bucket | Context compactor settings/capabilities |
 | Hook AddContext | Hook engine `UserPromptSubmit` action | Hook returns non-empty context under budget | Turn | User message content | Turn | `messages` bucket | Hook files/settings |
 
@@ -209,7 +212,7 @@ The audit-only view adds:
 
 | Precedence | Block id | Source home | Surface | Cache class |
 | --- | --- | --- | --- | --- |
-| 120 | `tools.schemas` | `profiles` | Tool | Session |
+| 120 | `capabilities.schemas` | `profiles` | Capability | Session |
 | 130 | `conversation.messages` | `workspace` | Message | Turn |
 
 This ordering is provider-independent. Provider transports can flatten it, split
@@ -307,19 +310,19 @@ knowledge from runtime call sites:
 - Managed defaults are listed once in `constitution.rs` through a
   `managed_default!` macro whose include path and seeded path share the same
   relative source string.
-- Prompt, process, provider, tools, context, settings, and auth references are
-  profile-owned. Runtime call sites consume compiled `SessionExecutionPlan` and
-  `ProcessExecutionPlan` snapshots; only the profile compiler resolves profile
-  files, and only managed profile defaults are restored through the canonical
-  recovery contract.
+- Prompt, process, provider, capability, context, settings, and auth references
+  are profile-owned. Runtime call sites consume compiled
+  `SessionExecutionPlan` and `ProcessExecutionPlan` snapshots; only the profile
+  compiler resolves profile files, and only managed profile defaults are
+  restored through the canonical recovery contract.
 - Profile hashes cover the merged TOML plus referenced prompt, provider,
-  context, tool, and auth-registry file hashes. Editing a referenced behavior
-  file changes the resolved spec hash even when `profile.toml` itself is
-  unchanged.
+  context, capability, and auth-registry file hashes. Editing a referenced
+  behavior file changes the resolved spec hash even when `profile.toml` itself
+  is unchanged.
 - `profile.toml` is now a typed AgentExecutionSpec v2: entrypoints, unified
-  processes, model/context/tool/permission/provider/cache/output/audit policies,
-  profile-owned settings values, and auth refs are validated before runtime
-  starts.
+  processes, model/context/capability/permission/provider/cache/output/audit
+  policies, profile-owned settings values, and auth refs are validated before
+  runtime starts.
 - Contributor shell paths are centralized in `scripts/tron-lib.sh`; the Mac
   wrapper resolves its data-root paths through `TronPaths.swift`; iOS settings
   remain engine-backed instead of duplicating filesystem layout.
@@ -333,7 +336,7 @@ These findings were the original audit gaps that drove the profile-first pass.
 
 | Finding | Why it matters | Evidence to inspect |
 | --- | --- | --- |
-| Seeded `context-blocks.toml` was incomplete | The default policy now names all emitted prompt blocks plus the audit-only tool/message blocks. | `packages/agent/defaults/profiles/default/context/context-blocks.toml`; `packages/agent/src/domains/model/providers/shared/context_composition.rs` |
+| Seeded `context-blocks.toml` was incomplete | The default policy now names all emitted prompt blocks plus the audit-only capability/message blocks. | `packages/agent/defaults/profiles/default/context/context-blocks.toml`; `packages/agent/src/domains/model/providers/shared/context_composition.rs` |
 | Google system prompt appeared duplicated | Google now uses only `compose_context_parts`, so `system.prompt` is included once. | `packages/agent/src/domains/model/providers/google/provider.rs` |
 | Global rules path migration was uneven | Global rules route through `~/.tron/memory/rules`; global behavior routes through `~/.tron/profiles`. | `packages/agent/src/domains/agent/runner/context/`; `packages/agent/src/shared/foundation/paths.rs`; `packages/agent/src/domains/agent/runner/memory/registry.rs` |
 | `self-inspect` docs showed old home layout | Managed self-inspect docs now describe the five-root profile-first home. | `packages/agent/skills/self-inspect/SKILL.md`; `reference/schema.md` |
@@ -368,8 +371,8 @@ Current behavior:
 | Startup and service wiring | `packages/agent/src/main.rs`, `packages/agent/src/app/` | DB/settings init, domain registration, cron startup |
 | Runtime module map | `packages/agent/src/domains/agent/runner/mod.rs` | Module docs and exported runtime types |
 | Prompt orchestration | `packages/agent/src/domains/agent/runtime/service/` | `execute_prompt_run`, prompt bootstrap, skill/hook setup |
-| Agent construction | `packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs`, `packages/agent/src/domains/agent/runner/agent/tron_agent.rs` | `AgentConfig`, tool filtering, `TronAgent::run` |
-| Single-turn execution | `packages/agent/src/domains/agent/runner/agent/turn_runner.rs` | `execute_turn`, `build_turn_context`, audit writes, stream/tool phases |
+| Agent construction | `packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs`, `packages/agent/src/domains/agent/runner/agent/tron_agent.rs` | `AgentConfig`, capability filtering, `TronAgent::run` |
+| Single-turn execution | `packages/agent/src/domains/agent/runner/agent/turn_runner.rs` | `execute_turn`, `build_turn_context`, audit writes, stream/capability phases |
 | Capability primer/search | `packages/agent/src/domains/capability/registry.rs` | registry projection, hybrid local index, binding decisions, primer rendering |
 | Context state | `packages/agent/src/domains/agent/runner/context/context_manager.rs` | base context, snapshots, compaction triggers, volatile token generation |
 | Context composition | `packages/agent/src/domains/model/providers/shared/context_composition.rs` | canonical block order and audit-only blocks |
@@ -437,8 +440,8 @@ Current behavior:
 - Path-contract tests covering `~/.tron` homes, project rules, global rules,
   memory details, managed skills, and seeded instruction defaults.
 - A user-facing per-turn context report that combines event history, block
-  metadata, token estimates, tool schemas, provider payload identity/hash, and
-  compaction state.
+  metadata, token estimates, capability schemas, provider payload identity/hash,
+  and compaction state.
 
 ## Verification Notes
 

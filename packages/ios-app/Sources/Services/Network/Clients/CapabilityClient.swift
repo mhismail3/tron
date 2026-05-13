@@ -33,7 +33,7 @@ final class CapabilityClient: EngineDomainClient {
         let result: CapabilityPrimitiveResultDTO = try await invokeRead(
             "capability::search",
             request,
-            context: primitiveContext
+            context: operatorSearchContext
         )
         return try decodeDetails(CapabilitySearchResponseDTO.self, from: result)
     }
@@ -355,6 +355,20 @@ final class CapabilityClient: EngineDomainClient {
             "capability.inspect",
             "capability.execute"
         ])
+    }
+
+    private var operatorSearchContext: EngineInvocationContext {
+        EngineInvocationContext(
+            authorityScopes: [
+                "capability.search",
+                "capability.inspect",
+                "capability.execute"
+            ],
+            runtimeMetadata: [
+                "capability.searchPolicyId": "operatorConsoleHybridLexical",
+                "capability.searchPolicy": #"{"lexical":true,"localVector":true,"cloudEmbeddings":false,"maxResults":50,"requireLocalVector":false,"allowLexicalOnlyWhenDegraded":true}"#
+            ]
+        )
     }
 
     private var programContext: EngineInvocationContext {
