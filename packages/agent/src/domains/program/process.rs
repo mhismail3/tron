@@ -526,3 +526,59 @@ fn resolve_worker_path() -> Option<PathBuf> {
     };
     Some(dir.join(name))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    struct NoopToolHost;
+
+    impl ProgramToolHost for NoopToolHost {
+        fn call(
+            &self,
+            _primitive: ProgramToolPrimitive,
+            _payload: Value,
+        ) -> Result<Value, ProgramRuntimeError> {
+            Ok(json!({}))
+        }
+    }
+
+    fn request() -> ProgramRunRequest {
+        ProgramRunRequest {
+            language: "javascript".to_owned(),
+            code: "return args;".to_owned(),
+            args: json!({"ok": true}),
+            allowed_contracts: Vec::new(),
+            allowed_implementations: Vec::new(),
+            timeout_ms: Some(50),
+            budget: None,
+            idempotency_key: Some("test-program".to_owned()),
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn missing_program_worker_returns_structured_failed_run() {
+        let executor = ProcessProgramExecutor {
+            worker_path: Some(PathBuf::from("/definitely/not/tron-program-worker")),
+            startup_timeout: Duration::from_millis(5),
+        };
+
+        let result = executor
+            .execute(request(), Arc::new(NoopToolHost))
+            .expect("missing worker is represented as a failed program run");
+
+        assert_eq!(result.status, "worker_disconnected");
+        assert_eq!(
+            result
+                .error
+                .as_ref()
+                .and_then(|error| error.get("code"))
+                .and_then(Value::as_str),
+            Some("PROGRAM_WORKER_NOT_FOUND")
+        );
+        assert!(result.program_run_id.starts_with("program_run_"));
+        assert!(result.child_invocations.is_empty());
+    }
+}

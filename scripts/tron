@@ -63,7 +63,9 @@ source "$SCRIPT_DIR/tron-lib.sh"
 # Rust workspace
 RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
+RELEASE_PROGRAM_WORKER="$RUST_WORKSPACE/target/release/tron-program-worker"
 DEV_SERVER_BINARY="$RUST_WORKSPACE/target/dev-server/tron"
+DEV_SERVER_PROGRAM_WORKER="$RUST_WORKSPACE/target/dev-server/tron-program-worker"
 MAC_APP_LOCAL_ENV_FILE="$PROJECT_DIR/packages/mac-app/.env.local"
 BENCH_SCRIPT="$SCRIPT_DIR/benchmarks/bench.py"
 BENCH_BASELINE_DIR="$SCRIPT_DIR/benchmarks/baselines"
@@ -90,15 +92,26 @@ ensure_prod_binary() {
 
     print_warning "Contributor service binary is missing or corrupt"
 
-    if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
+    if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] \
+        && [ -f "$CONTRIBUTOR_DIR/tron-program-worker.bak" ] \
+        && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O" \
+        && file "$CONTRIBUTOR_DIR/tron-program-worker.bak" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from backup..."
-        create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"
+        cp "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
+        if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
+            rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
+            return 1
+        fi
+        rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
         codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from backup"
         return 0
     fi
 
-    if [ -f "$RELEASE_BINARY" ] && file "$RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O"; then
+    if [ -f "$RELEASE_BINARY" ] \
+        && [ -f "$RELEASE_PROGRAM_WORKER" ] \
+        && file "$RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O" \
+        && file "$RELEASE_PROGRAM_WORKER" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from release build..."
         create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
         codesign_bundle "$INSTALLED_BUNDLE"
@@ -571,7 +584,7 @@ dev_start_foreground() {
 
     # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
     prepare_dev_relay_env
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
+    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron --bin tron-program-worker
     local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"
@@ -605,7 +618,7 @@ dev_start_background() {
 
     # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
     prepare_dev_relay_env
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
+    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron --bin tron-program-worker
     local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"
@@ -739,10 +752,13 @@ cmd_preflight() {
     fi
 
     # 3. Release binary exists
-    if [ -f "$RELEASE_BINARY" ] && file "$RELEASE_BINARY" | grep -q "Mach-O"; then
+    if [ -f "$RELEASE_BINARY" ] \
+        && [ -f "$RELEASE_PROGRAM_WORKER" ] \
+        && file "$RELEASE_BINARY" | grep -q "Mach-O" \
+        && file "$RELEASE_PROGRAM_WORKER" | grep -q "Mach-O"; then
         print_success "Release binary exists ($(ls -lh "$RELEASE_BINARY" | awk '{print $5}'))"
     else
-        print_warning "No release binary — build required"
+        print_warning "Release helper binaries incomplete — build required"
     fi
 
     # 4. Service installed
@@ -888,11 +904,17 @@ cmd_deploy() {
     local previous_commit
     previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
 
-    # Backup current binary
-    if [ -f "$INSTALLED_BINARY" ]; then
-        print_status "Backing up current binary..."
+    # Backup the current helper only when both required executables are present.
+    # Older local helpers that predate the program worker are incompatible with
+    # the current runtime contract and must be replaced as a pair.
+    if [ -f "$INSTALLED_BINARY" ] && [ -f "$INSTALLED_PROGRAM_WORKER" ]; then
+        print_status "Backing up current helper executables..."
         mkdir -p "$CONTRIBUTOR_DIR"
         cp "$INSTALLED_BINARY" "$CONTRIBUTOR_DIR/tron.bak"
+        cp "$INSTALLED_PROGRAM_WORKER" "$CONTRIBUTOR_DIR/tron-program-worker.bak"
+    elif [ -f "$INSTALLED_BINARY" ]; then
+        print_warning "Existing helper is missing tron-program-worker; no rollback backup will be created for this incompatible helper."
+        rm -f "$CONTRIBUTOR_DIR/tron.bak" "$CONTRIBUTOR_DIR/tron-program-worker.bak"
     fi
 
     # Stop service
@@ -967,7 +989,7 @@ SENTINEL
             print_success "Health check passed"
 
             # Remove backup (deploy succeeded)
-            rm -f "$CONTRIBUTOR_DIR/tron.bak"
+            rm -f "$CONTRIBUTOR_DIR/tron.bak" "$CONTRIBUTOR_DIR/tron-program-worker.bak"
 
             write_deployment_result "success"
         else
@@ -978,11 +1000,15 @@ SENTINEL
         print_error "Service failed to start!"
 
         # Auto-rollback
-        if [ -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
+        if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] && [ -f "$CONTRIBUTOR_DIR/tron-program-worker.bak" ]; then
             print_status "Rolling back..."
-            create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"
+            cp "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
+            if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
+                rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
+                return 1
+            fi
             codesign_bundle "$INSTALLED_BUNDLE"
-            rm -f "$CONTRIBUTOR_DIR/tron.bak"
+            rm -f "$CONTRIBUTOR_DIR/tron.bak" "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
             launchd_start "$PLIST_NAME"
             sleep 2
             if service_is_running; then
@@ -1053,15 +1079,15 @@ cmd_install() {
     ensure_default_configs
     _emit_event configs ok ""
 
-    if [ ! -f "$RELEASE_BINARY" ]; then
+    if [ ! -f "$RELEASE_BINARY" ] || [ ! -f "$RELEASE_PROGRAM_WORKER" ]; then
         _emit_event build start "cargo build --release"
         if ! build_rust; then
             _emit_event build fail "cargo build exited non-zero"
             return 1
         fi
-        _emit_event build ok "$RELEASE_BINARY"
+        _emit_event build ok "$RELEASE_BINARY,$RELEASE_PROGRAM_WORKER"
     else
-        _emit_event build ok "prebuilt: $RELEASE_BINARY"
+        _emit_event build ok "prebuilt: $RELEASE_BINARY,$RELEASE_PROGRAM_WORKER"
     fi
 
     _emit_event bundle start "$INSTALLED_BUNDLE"

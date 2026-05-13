@@ -38,7 +38,7 @@
 //! ## Module Position
 //!
 //! Standalone (no tron module dependencies).
-//! Depended on by: runtime, server.
+//! Depended on by: the agent runner, skill domain handlers, and context assembly.
 
 #![deny(unsafe_code)]
 

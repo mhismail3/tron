@@ -1,9 +1,12 @@
-//! # llm
+//! # Provider boundary
 //!
-//! LLM provider trait and shared streaming utilities.
+//! Model provider trait and shared streaming utilities.
 //!
-//! This module defines the [`Provider`] trait that all LLM backends implement,
-//! plus shared infrastructure used across providers:
+//! This module defines the [`Provider`] trait that model backends implement,
+//! plus shared infrastructure used across providers. Provider-native
+//! function-call and tool-call wire details stay inside provider modules and
+//! `domains::model::provider_protocol`; the rest of Tron consumes canonical
+//! capability invocation drafts, results, and history.
 //!
 //! - [`provider`] — Core [`Provider`] trait, [`ProviderStreamOptions`], [`ProviderError`]
 //! - [`models`] — Model registry, ID constants, provider detection, capability queries
@@ -16,14 +19,15 @@
 //!
 //! # Architecture
 //!
-//! Each provider module (`llm::anthropic`, `llm::openai`, `llm::google`)
-//! implements the [`Provider`] trait. The shared utilities
-//! here eliminate duplication while allowing provider-specific behavior.
+//! Each provider module (`providers::anthropic`, `providers::openai`,
+//! `providers::google`, and peers) implements the [`Provider`] trait. Shared
+//! utilities eliminate duplication while keeping provider-specific wire
+//! protocol handling physically isolated.
 //!
 //! ## Module Position
 //!
-//! Depends on: core.
-//! Depended on by: runtime, server.
+//! Depends on: model contracts and provider-protocol conversion helpers.
+//! Depended on by: the capability-native agent runner.
 
 #![deny(unsafe_code)]
 

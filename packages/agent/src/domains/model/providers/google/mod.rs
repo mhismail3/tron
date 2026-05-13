@@ -1,4 +1,4 @@
-//! # llm/google — Google / Gemini provider
+//! # providers/google — Google / Gemini provider
 //!
 //! Generative-Language API client for Gemini models. Follows the
 //! composition pattern every provider shares: a `provider` entry point

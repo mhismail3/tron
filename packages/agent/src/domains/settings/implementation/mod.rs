@@ -29,7 +29,7 @@
 //! ## Module Position
 //!
 //! Depends on: core foundation paths/Constitution defaults.
-//! Depended on by: events, runtime, server.
+//! Depended on by: domain registration, profile policy, transport handlers, and iOS settings sync.
 
 #![deny(unsafe_code)]
 

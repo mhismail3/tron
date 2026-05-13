@@ -1,7 +1,7 @@
 import Foundation
 
 /// Utility for parsing content with server-side line number prefixes
-/// Centralizes the logic from ReadResultViewer for reuse across all viewers
+/// Centralizes line-prefix parsing for reuse across capability result viewers.
 struct ContentLineParser {
     struct ParsedLine: Identifiable {
         let id: Int
@@ -19,7 +19,7 @@ struct ContentLineParser {
         var lastLineNum = 0
 
         for (index, line) in rawLines.enumerated() {
-            // Match server-side line number prefixes (from Read capability output)
+            // Match server-side line number prefixes from capability output.
             if let match = line.firstMatch(of: /^\s*(\d+)[→\t:](.*)/) {
                 let num = Int(match.1) ?? (lastLineNum + 1)
                 lastLineNum = num

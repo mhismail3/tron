@@ -120,6 +120,7 @@ struct EngineConsoleView: View {
 
     private var capabilities: some View {
         List {
+            programRunForm
             Section {
                 HStack {
                     TextField("Search capabilities", text: $state.searchText)
@@ -146,6 +147,61 @@ struct EngineConsoleView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+    }
+
+    private var programRunForm: some View {
+        Section("Program Executor") {
+            Button {
+                Task { await state.inspectProgramRuntime() }
+            } label: {
+                Label("Inspect Program Runtime", systemImage: "doc.text.magnifyingglass")
+            }
+            .disabled(state.isMutatingDisabled)
+
+            if let inspection = state.programInspection {
+                metricRow("Handle", inspection.inspectionHandle?.handle ?? "missing")
+                metricRow("Revision", inspection.inspectionHandle?.functionRevision.map(String.init) ?? "missing")
+                metricRow("Schema", inspection.inspectionHandle?.schemaDigest ?? inspection.implementation?.schemaDigest ?? "missing")
+            }
+
+            TextEditor(text: $state.programCode)
+                .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .regular))
+                .frame(minHeight: 120)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+
+            TextField("Args JSON object", text: $state.programArgsJSON, axis: .vertical)
+                .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .regular))
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+
+            TextField("Allowed contracts, comma-separated", text: $state.programAllowedContractsText, axis: .vertical)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            TextField("Allowed implementations, comma-separated", text: $state.programAllowedImplementationsText, axis: .vertical)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if let programError = state.programError {
+                Text(programError)
+                    .foregroundStyle(.red)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+            }
+
+            if let result = state.programResult {
+                metricRow("Last Status", result.status ?? "unknown")
+                metricRow("Program Run", result.programRunId ?? "unknown")
+                metricRow("Trace", result.traceId ?? "unknown")
+            }
+
+            Button {
+                Task { await state.executeProgramFromInspection() }
+            } label: {
+                Label("Run Program", systemImage: "play.fill")
+            }
+            .disabled(state.isMutatingDisabled || state.programInspection == nil)
+        }
     }
 
     private var plugins: some View {

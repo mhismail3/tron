@@ -1,9 +1,8 @@
 import Foundation
 
 /// Plugin for handling long-running capability progress heartbeats.
-/// Delivers optional status messages + completion fractions for capabilities like
-/// Bash (stdout tail), WebFetch (bytes downloaded), and SpawnSubagent
-/// (child turn count).
+/// Delivers optional status messages and completion fractions from any
+/// capability invocation that emits progress.
 enum CapabilityInvocationProgressPlugin: DispatchableEventPlugin {
     static let eventType = "capability.invocation.progress"
 

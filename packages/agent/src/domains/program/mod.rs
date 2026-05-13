@@ -7,6 +7,9 @@
 //! owns the QuickJS runtime. Child capability calls return to the parent over
 //! the program protocol, so the engine remains the sole authority for search,
 //! inspect, execute, policy, trace, and audit.
+//! Packaged and dev flows must stage `tron-program-worker` beside the running
+//! `tron` executable; production code does not rely on `TRON_PROGRAM_WORKER_BIN`
+//! except as a focused test override.
 //!
 //! ## Submodules
 //!

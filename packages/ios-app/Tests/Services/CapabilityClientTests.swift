@@ -50,6 +50,7 @@ struct CapabilityClientTests {
             #expect(functionId.rawValue == "capability::execute")
             #expect(idempotencyKey.rawValue.contains("test.program"))
             #expect(options.context?.authorityScopes.contains("capability.execute") == true)
+            #expect(options.context?.authorityScopes.contains("capability.allow:program::run_javascript") == true)
             let fields = Dictionary(
                 uniqueKeysWithValues: Mirror(reflecting: payload).children.compactMap { child in
                     child.label.map { ($0, child.value) }
@@ -58,6 +59,9 @@ struct CapabilityClientTests {
             #expect(fields["mode"] as? String == "program")
             #expect(fields["language"] as? String == "javascript")
             #expect(fields["code"] as? String == "return args;")
+            #expect(fields["inspectionHandle"] as? String == "capability-inspection:v1:program")
+            #expect(fields["expectedRevision"] as? UInt64 == 12)
+            #expect(fields["expectedSchemaDigest"] as? String == "sha256:program")
             return CapabilityPrimitiveResultDTO(
                 content: nil,
                 details: AnyCodable([
@@ -79,6 +83,9 @@ struct CapabilityClientTests {
 
         let result = try await client.executeProgram(
             code: "return args;",
+            inspectionHandle: "capability-inspection:v1:program",
+            expectedRevision: 12,
+            expectedSchemaDigest: "sha256:program",
             idempotencyKey: .userAction("test.program")
         )
 

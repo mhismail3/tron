@@ -97,6 +97,9 @@ final class CapabilityClient: EngineDomainClient {
         allowedImplementations: [String] = [],
         timeoutMs: UInt64? = nil,
         budget: AnyCodable? = nil,
+        inspectionHandle: String,
+        expectedRevision: UInt64,
+        expectedSchemaDigest: String,
         reason: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> CapabilityProgramExecutionDTO {
@@ -112,11 +115,14 @@ final class CapabilityClient: EngineDomainClient {
                 allowedImplementations: allowedImplementations,
                 timeoutMs: timeoutMs,
                 budget: budget,
+                inspectionHandle: inspectionHandle,
+                expectedRevision: expectedRevision,
+                expectedSchemaDigest: expectedSchemaDigest,
                 idempotencyKey: idempotencyKey.rawValue,
                 reason: reason
             ),
             idempotencyKey: idempotencyKey,
-            context: primitiveContext
+            context: programContext
         )
         return try decodeDetails(CapabilityProgramExecutionDTO.self, from: result)
     }
@@ -351,6 +357,15 @@ final class CapabilityClient: EngineDomainClient {
         ])
     }
 
+    private var programContext: EngineInvocationContext {
+        EngineInvocationContext(authorityScopes: [
+            "capability.search",
+            "capability.inspect",
+            "capability.execute",
+            "capability.allow:program::run_javascript"
+        ])
+    }
+
     private var readContext: EngineInvocationContext {
         EngineInvocationContext(authorityScopes: [
             "capability.admin.read",
@@ -416,6 +431,9 @@ private struct ProgramExecuteParams: Encodable {
     let allowedImplementations: [String]
     let timeoutMs: UInt64?
     let budget: AnyCodable?
+    let inspectionHandle: String
+    let expectedRevision: UInt64
+    let expectedSchemaDigest: String
     let idempotencyKey: String
     let reason: String?
 }

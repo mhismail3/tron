@@ -9,7 +9,7 @@
 //!   requests. Generated during first server startup; rotated via
 //!   `tron auth rotate` (CLI) or the
 //!   menu-bar action in the Mac wrapper. File mode is `0o600` and writes
-//!   are owned by `llm::auth::storage` so provider credentials and the
+//!   are owned by the provider-credentials store so provider credentials and the
 //!   pairing bearer share one secure auth document. Fresh Mac installs seed
 //!   `auth.json` as `{}`; first server boot materializes that pristine
 //!   sentinel into the full auth schema plus `bearerToken`.
@@ -27,7 +27,7 @@
 //!   safe to embed verbatim in a `tron://pair?token=…` deep link without
 //!   percent-encoding.
 //! - `auth.json` is never world-readable. The 0o600 perms are set by
-//!   `llm::auth::storage` at `open(2)` time, before any bytes are
+//!   provider-credentials store at `open(2)` time, before any bytes are
 //!   written; the atomic `rename` preserves them.
 //! - Rotation is serialized through a per-process mutex so two
 //!   concurrent `rotate_bearer_token` calls cannot corrupt the file.

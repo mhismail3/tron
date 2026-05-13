@@ -19,9 +19,9 @@ approval, audit redaction, plugin lifecycle, and execution.
 - Console mutations: `capability::binding_set`, plugin install/update/state,
   plugin promotion, conformance run, implementation state, and policy update
 
-The client sends internal authority scopes through `EngineInvocationContext`.
-Those scopes are descriptive request metadata, not permission grants. The server
-still evaluates the active profile/session/workspace policy before every
+The client sends requested authority scopes through `EngineInvocationContext`.
+Those scopes are narrow claims for the current admin/operator action; the
+server still evaluates active profile/session/workspace policy before every
 mutation and writes audit records for accepted and denied operations.
 
 ## DTOs
@@ -55,12 +55,19 @@ metadata; it should not map retired tool names into capability identity.
 - capability search and inspect
 - redacted audit query refresh
 - implementation state changes
+- program-runtime inspection and program execution
 - read-only stale cache snapshots
 
 When the server is disconnected, the state object loads
 `EngineConsoleCache.Snapshot` and marks it stale. Mutations must stay disabled
 while stale because the cache is read-only and may not reflect current policy,
 binding, approval, or plugin state.
+
+Program execution is an inspect-to-run flow. `EngineConsoleState` first
+inspects `program::run_javascript`, stores the returned inspection handle,
+function revision, and schema digest, and only then lets `CapabilityClient`
+submit `execute(mode: "program")`. A catalog revision change clears that
+inspection and forces a fresh inspect before another run.
 
 ## Schema Forms
 
@@ -76,16 +83,17 @@ store raw secret values.
 
 ## Rendering Rules
 
-The current Engine Console renders overview, capability search/inspect, plugin
-lifecycle summaries, worker health, binding summaries, profile policies,
-redacted audit rows, trace summaries, primer inputs, and redacted program-run
-records. Program-run rows include parent/root invocation ids, binding decision
-ids, trace id, hashes, selected implementations, child invocations, approval
-state, artifact/log counts, and compensation-attempt counts while payload
-details remain redacted by default. Generated invoke/program forms and result
-renderers use contract and implementation metadata, not retired built-in-name
-dispatch. First-party capabilities may provide presentation hints, but those
-hints are advisory metadata attached to capability records.
+The current Engine Console renders overview, capability search/inspect, a
+program-run form backed by a fresh inspection handle, plugin lifecycle
+summaries, worker health, binding summaries, profile policies, redacted audit
+rows, trace summaries, primer inputs, and redacted program-run records.
+Program-run rows include parent/root invocation ids, binding decision ids, trace
+id, hashes, selected implementations, child invocations, approval state,
+artifact/log counts, and compensation-attempt counts while payload details
+remain redacted by default. Generated invoke/program forms and result renderers
+use contract and implementation metadata, not retired built-in-name dispatch.
+First-party capabilities may provide presentation hints, but those hints are
+advisory metadata attached to capability records.
 
 Provider protocol terminology is confined to provider-boundary and transcript payloads.
 Capability UI surfaces use `CapabilityIdentity` and registry DTOs as the active

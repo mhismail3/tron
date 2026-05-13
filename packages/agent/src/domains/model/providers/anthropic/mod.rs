@@ -1,4 +1,4 @@
-//! # llm/anthropic — Anthropic / Claude provider
+//! # providers/anthropic — Anthropic / Claude provider
 //!
 //! Messages-API client with prompt-cache support and interleaved
 //! thinking. Two auth paths: API key (v1beta public surface, strict

@@ -11,7 +11,7 @@
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
-`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The release binary is produced by `cargo build --release --bin tron` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`; the helper is signed before the outer app. The helper binary embeds the first-party capability-search ONNX/tokenizer bundle during the Rust build, so semantic capability search is offline and independent of mutable runtime model files. The app bundle also carries managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/internal/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
+`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. Release helper executables are produced by `cargo build --release --bin tron --bin tron-program-worker` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/`; `tron` is the LaunchAgent entrypoint and `tron-program-worker` is the required sibling process for `execute(mode: "program")`. The helper is signed before the outer app. The agent binary embeds the first-party capability-search ONNX/tokenizer bundle during the Rust build, so semantic capability search is offline and independent of mutable runtime model files. The app bundle also carries managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/internal/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
 
 ## Directory Structure
 
@@ -267,7 +267,7 @@ GitHub issue opens with a short note.
 0. Wait for user: Install CTA increments WizardState.installRequestID; no disk or launchd mutation happens before this
    - WizardState.handledInstallRequestID suppresses replay when the install page remounts after back/forward navigation
 1. Validate location: Release builds must run from `/Applications/Tron.app`; Debug builds may run from DerivedData.
-2. Validate helper: Ensure bundled `Tron Server.app`, helper binary, LaunchAgent plist, `BundleProgram`, wrapper `AssociatedBundleIdentifiers`, and signature are present.
+2. Validate helper: Ensure bundled `Tron Server.app`, both helper executables, LaunchAgent plist, `BundleProgram`, wrapper `AssociatedBundleIdentifiers`, and signature are present.
 3. Plan:          InstallPlanner.plan(…) → Result<InstallPlan, Failure>
 4. Register:      SMAppService.agent(plistName: "<active-label>.plist").register()
    - Installed Release manages `com.tron.server` on port `9847`; the isolated install scheme manages `com.tron.server.dev` on port `9848`.
@@ -305,7 +305,7 @@ files are still preserved.
 
 ## Key Invariants
 
-- **`Tron.app` never builds the Rust agent.** The helper binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helper/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine capability/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`. Local relay dogfood is configured through the ignored `packages/mac-app/.env.local` file that the bundle script reads before Cargo compiles the helper; production releases use GitHub Actions secrets instead.
+- **`Tron.app` never builds the Rust agent.** The `tron` and `tron-program-worker` helper executables are staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helpers/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine capability/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`. Local relay dogfood is configured through the ignored `packages/mac-app/.env.local` file that the bundle script reads before Cargo compiles the helpers; production releases use GitHub Actions secrets instead.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper registers the service.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.

@@ -167,6 +167,64 @@ fn tron_dev_background_start_is_file_logged_and_health_checked() {
 }
 
 #[test]
+fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
+    let repo_root = repo_root();
+    let script_path = repo_root.join("scripts").join("tron");
+    let script = std::fs::read_to_string(&script_path)
+        .unwrap_or_else(|e| panic!("failed to read {script_path:?}: {e}"));
+    assert!(
+        script.contains("--bin tron --bin tron-program-worker"),
+        "tron dev/install flows must build the server and program-worker binaries together"
+    );
+    assert!(
+        script.contains("RELEASE_PROGRAM_WORKER="),
+        "workspace script must track the release program worker beside tron"
+    );
+    assert!(
+        script.contains("tron-program-worker.bak"),
+        "deploy rollback must back up the program worker with the server binary"
+    );
+
+    let lib_path = repo_root.join("scripts").join("tron-lib.sh");
+    let lib = std::fs::read_to_string(&lib_path)
+        .unwrap_or_else(|e| panic!("failed to read {lib_path:?}: {e}"));
+    assert!(
+        lib.contains("INSTALLED_PROGRAM_WORKER=")
+            && lib.contains("tron-program-worker")
+            && lib.contains("Cannot create app bundle: sibling tron-program-worker missing"),
+        "shared bundle creation must require and stage the sibling program-worker binary"
+    );
+
+    let bundle_script_path = repo_root
+        .join("packages")
+        .join("mac-app")
+        .join("scripts")
+        .join("bundle-agent.sh");
+    let bundle_script = std::fs::read_to_string(&bundle_script_path)
+        .unwrap_or_else(|e| panic!("failed to read {bundle_script_path:?}: {e}"));
+    assert!(
+        bundle_script.contains("--bin tron --bin tron-program-worker")
+            && bundle_script.contains("STAGING_WORKER_PATH=")
+            && bundle_script.contains("--worker-source"),
+        "Mac helper staging must build and copy both helper executables"
+    );
+
+    for workflow in [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release-mac.yml",
+    ] {
+        let path = repo_root.join(workflow);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        assert!(
+            content.contains("--bin tron --bin tron-program-worker")
+                && content.contains("tron-program-worker"),
+            "{workflow} must build and validate the program-worker helper"
+        );
+    }
+}
+
+#[test]
 fn lower_layers_do_not_depend_on_server_transport_modules() {
     let crate_root = crate_root();
     for dir in [

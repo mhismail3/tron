@@ -2478,7 +2478,7 @@ pub enum ResponsesToolEntry {
     /// ModelCapability search sentinel — enables the model to dynamically discover capabilities.
     #[serde(rename = "tool_search")]
     ToolSearch {},
-    /// Computer use tool (stub — full implementation deferred).
+    /// Provider wire variant for future computer-use responses.
     #[serde(rename = "computer")]
     Computer {
         /// Viewport width in pixels.
@@ -2661,7 +2661,7 @@ pub enum SseEventType {
     /// ModelCapability search call completed (hosted tool search).
     #[serde(rename = "response.tool_search_call.completed")]
     ToolSearchCallCompleted,
-    /// Computer call output (stub).
+    /// Provider wire variant for computer-call completion events.
     #[serde(rename = "response.computer_call.completed")]
     ComputerCallCompleted,
     /// Final complete response.

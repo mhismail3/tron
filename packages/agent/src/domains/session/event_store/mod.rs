@@ -16,7 +16,7 @@
 //! ## Module Position
 //!
 //! Depends on: core, settings.
-//! Depended on by: runtime, server.
+//! Depended on by: the agent runner, transport layer, audit, and domain stores.
 
 #![deny(unsafe_code)]
 

@@ -254,15 +254,15 @@ struct CapabilityArgumentParserTests {
 
     // MARK: - Real-world capability argument samples
 
-    @Test("Parses real Read capability arguments")
-    func testRealReadArgs() {
+    @Test("Parses filesystem read-file arguments")
+    func testFilesystemReadFileArgs() {
         let args = "{\"file_path\": \"/Users/test/Workspace/tron/packages/agent/src/index.ts\"}"
         #expect(CapabilityArgumentParser.filePath(from: args) == "/Users/test/Workspace/tron/packages/agent/src/index.ts")
         #expect(CapabilityArgumentParser.shortenPath(CapabilityArgumentParser.filePath(from: args)) == "index.ts")
     }
 
-    @Test("Parses real Bash capability arguments")
-    func testRealBashArgs() {
+    @Test("Parses process run arguments")
+    func testProcessRunArgs() {
         let args = "{\"command\": \"git status --short\"}"
         #expect(CapabilityArgumentParser.command(from: args) == "git status --short")
     }
@@ -274,28 +274,28 @@ struct CapabilityArgumentParserTests {
         #expect(CapabilityArgumentParser.path(from: args) == "./src")
     }
 
-    @Test("Parses real WebFetch arguments with escaped URL")
-    func testRealWebFetchArgs() {
+    @Test("Parses web fetch arguments with escaped URL")
+    func testHttpFetchContractInput() {
         let args = "{\"url\": \"https:\\/\\/docs.anthropic.com\\/overview\", \"prompt\": \"What models are available?\"}"
         #expect(CapabilityArgumentParser.url(from: args) == "https://docs.anthropic.com/overview")
         #expect(CapabilityArgumentParser.string("prompt", from: args) == "What models are available?")
     }
 
-    @Test("Parses real WebSearch arguments")
-    func testRealWebSearchArgs() {
+    @Test("Parses web search arguments")
+    func testWebQueryContractInput() {
         let args = "{\"query\": \"Swift async await tutorial\"}"
         #expect(CapabilityArgumentParser.query(from: args) == "Swift async await tutorial")
     }
 
-    @Test("Parses real Write capability arguments with content")
-    func testRealWriteArgs() {
+    @Test("Parses filesystem write-file arguments with content")
+    func testFilesystemWriteFileArgs() {
         let args = "{\"file_path\": \"/path/to/config.json\", \"content\": \"{\\n  \\\"name\\\": \\\"MyApp\\\"\\n}\"}"
         #expect(CapabilityArgumentParser.filePath(from: args) == "/path/to/config.json")
         #expect(CapabilityArgumentParser.content(from: args) == "{\n  \"name\": \"MyApp\"\n}")
     }
 
-    @Test("Parses real Edit capability arguments")
-    func testRealEditArgs() {
+    @Test("Parses filesystem edit-file arguments")
+    func testFilesystemEditFileArgs() {
         let args = "{\"file_path\": \"/Users/test/server.py\"}"
         #expect(CapabilityArgumentParser.filePath(from: args) == "/Users/test/server.py")
     }
@@ -373,55 +373,55 @@ struct CapabilityArgumentParserTests {
         #expect(CapabilityArgumentParser.objectArray("ptyInput", from: args) == nil)
     }
 
-    // MARK: - Phase 2 Bash argument parsing
+    // MARK: - process::run argument parsing
 
-    @Test("Parses Bash args with shell field")
-    func testBashShellField() {
+    @Test("Parses process args with shell field")
+    func testProcessShellField() {
         let args = "{\"command\": \"echo $0\", \"shell\": \"zsh\"}"
         #expect(CapabilityArgumentParser.string("shell", from: args) == "zsh")
     }
 
-    @Test("Parses Bash args with interactive field")
-    func testBashInteractiveField() {
+    @Test("Parses process args with interactive field")
+    func testProcessInteractiveField() {
         let args = "{\"command\": \"ssh host\", \"interactive\": true}"
         #expect(CapabilityArgumentParser.boolean("interactive", from: args) == true)
     }
 
-    @Test("Parses Bash args with stdin field")
-    func testBashStdinField() {
+    @Test("Parses process args with stdin field")
+    func testProcessStdinField() {
         let args = "{\"command\": \"cat\", \"stdin\": \"hello world\"}"
         #expect(CapabilityArgumentParser.string("stdin", from: args) == "hello world")
     }
 
-    @Test("Parses Bash args with env field")
-    func testBashEnvField() {
+    @Test("Parses process args with env field")
+    func testProcessEnvField() {
         let args = "{\"command\": \"echo $FOO\", \"env\": {\"FOO\": \"bar\"}}"
         let env = CapabilityArgumentParser.dictionary("env", from: args)
         #expect(env?["FOO"] == "bar")
     }
 
-    @Test("Parses Bash args with sandbox boolean")
-    func testBashSandboxBool() {
+    @Test("Parses process args with sandbox boolean")
+    func testProcessSandboxBool() {
         let args = "{\"command\": \"ls\", \"sandbox\": true}"
         #expect(CapabilityArgumentParser.boolean("sandbox", from: args) == true)
     }
 
-    @Test("Parses Bash args with sandbox string")
-    func testBashSandboxString() {
+    @Test("Parses process args with sandbox string")
+    func testProcessSandboxString() {
         let args = "{\"command\": \"ls\", \"sandbox\": \"docker\"}"
         #expect(CapabilityArgumentParser.string("sandbox", from: args) == "docker")
     }
 
-    @Test("Parses Bash args with ptyInput")
-    func testBashPtyInput() {
+    @Test("Parses process args with ptyInput")
+    func testProcessPtyInput() {
         let args = "{\"command\": \"ssh\", \"interactive\": true, \"ptyInput\": [{\"wait\": \"password:\", \"send\": \"pass123\"}]}"
         let pty = CapabilityArgumentParser.objectArray("ptyInput", from: args)
         #expect(pty?.count == 1)
         #expect(pty?[0]["wait"] == "password:")
     }
 
-    @Test("Parses full Phase 2 Bash args")
-    func testFullPhase2BashArgs() {
+    @Test("Parses full process run args")
+    func testFullProcessRunArgs() {
         let args = """
         {"command": "make build", "shell": "zsh", "env": {"CC": "clang"}, "timeout": 900000, "description": "Build project"}
         """

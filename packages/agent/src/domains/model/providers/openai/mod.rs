@@ -1,4 +1,4 @@
-//! # llm/openai — OpenAI / GPT provider
+//! # providers/openai — OpenAI / GPT provider
 //!
 //! Responses API client for OpenAI models. OAuth credentials use the
 //! ChatGPT/Codex backend; API keys use the OpenAI Platform `/v1/responses`

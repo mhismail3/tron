@@ -18,7 +18,7 @@ struct CapabilityCodeBlock: View {
     /// Additional content to display between the header and the code block (e.g. range text).
     var headerNote: String? = nil
 
-    /// Whether the content wraps (Write capability) or scrolls horizontally (Read capability).
+    /// Whether the content wraps or scrolls horizontally.
     var wrapsContent: Bool = false
 
     private var lineNumWidth: CGFloat {
