@@ -213,7 +213,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testAddForwardedEvent_capabilityCompleted() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["success": true, "invocationId": "t1"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["isError": false, "invocationId": "t1", "content": "ok"]), timestamp: "2026-01-01T00:00:00Z")
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1)
     }
@@ -251,7 +251,7 @@ final class SubagentStateTests: XCTestCase {
     func testAddForwardedEvent_capabilityInvocationStartedThenCompleted_mergesEvents() {
         spawnDefault()
         sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.started", eventData: AnyCodable(["modelPrimitiveName": "execute", "contractId": "process::run", "invocationId": "tc-100"]), timestamp: "2026-01-01T00:00:00Z")
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["success": true, "invocationId": "tc-100", "result": "output"]), timestamp: "2026-01-01T00:00:01Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["isError": false, "invocationId": "tc-100", "content": "output"]), timestamp: "2026-01-01T00:00:01Z")
 
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1, "capability completion should merge into started event, not add a new event")
@@ -260,7 +260,7 @@ final class SubagentStateTests: XCTestCase {
 
     func testAddForwardedEvent_capabilityCompletedWithoutStart_createsStandaloneEvent() {
         spawnDefault()
-        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["success": false, "invocationId": "orphan"]), timestamp: "2026-01-01T00:00:00Z")
+        sut.addForwardedEvent(subagentSessionId: "sub-1", eventType: "capability.invocation.completed", eventData: AnyCodable(["isError": true, "invocationId": "orphan", "content": "failed"]), timestamp: "2026-01-01T00:00:00Z")
 
         let events = sut.getEvents(for: "sub-1")
         XCTAssertEqual(events.count, 1)

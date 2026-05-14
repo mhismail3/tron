@@ -1,9 +1,9 @@
 import Foundation
 
-/// Plugin for handling capability invocation completion events.
-/// These events signal the completion of a capability invocation with results.
-///
-/// Note: Uses custom parsing to handle output as either String or [ContentBlock] array.
+/// Plugin for handling canonical capability invocation completion events.
+/// The stream and event-store payload both use `content` + `isError`; success
+/// is derived in the view model layer so live and reconstructed sessions cannot
+/// drift into parallel schemas.
 enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
     static let eventType = "capability.invocation.completed"
 
@@ -18,17 +18,16 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         struct DataPayload: Decodable, Sendable {
             let invocationId: String
             let modelPrimitiveName: String?
-            let success: Bool
-            let output: String?
-            let error: String?
-            let duration: Int?
+            let content: String
+            let isError: Bool
+            let duration: Int
             let details: CapabilityResultDetails?
             /// Raw details dictionary for capability-specific structured results
             let rawDetails: [String: AnyCodable]?
             let identity: CapabilityIdentity
 
             enum CodingKeys: String, CodingKey {
-                case invocationId, modelPrimitiveName, success, output, error, duration, details
+                case invocationId, modelPrimitiveName, content, isError, duration, details
                 case contractId, implementationId, functionId, pluginId, workerId
                 case schemaDigest, catalogRevision, trustTier, riskLevel, effectClass, traceId
                 case rootInvocationId, bindingDecisionId
@@ -38,9 +37,9 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 invocationId = try container.decode(String.self, forKey: .invocationId)
                 modelPrimitiveName = try container.decodeIfPresent(String.self, forKey: .modelPrimitiveName)
-                success = try container.decode(Bool.self, forKey: .success)
-                error = try container.decodeIfPresent(String.self, forKey: .error)
-                duration = try container.decodeIfPresent(Int.self, forKey: .duration)
+                content = try container.decode(String.self, forKey: .content)
+                isError = try container.decode(Bool.self, forKey: .isError)
+                duration = try container.decode(Int.self, forKey: .duration)
                 details = try container.decodeIfPresent(CapabilityResultDetails.self, forKey: .details)
                 rawDetails = try container.decodeIfPresent([String: AnyCodable].self, forKey: .details)
                 identity = CapabilityIdentity(
@@ -59,15 +58,6 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                     rootInvocationId: try container.decodeIfPresent(String.self, forKey: .rootInvocationId),
                     bindingDecisionId: try container.decodeIfPresent(String.self, forKey: .bindingDecisionId)
                 )
-
-                // Handle output as either String or [ContentBlock] array
-                if let outputString = try? container.decodeIfPresent(String.self, forKey: .output) {
-                    output = outputString
-                } else if let outputBlocks = try? container.decodeIfPresent([CapabilityOutputBlock].self, forKey: .output) {
-                    output = outputBlocks.compactMap { $0.text }.joined()
-                } else {
-                    output = nil
-                }
             }
         }
 
@@ -78,20 +68,13 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         }
     }
 
-    /// Helper struct for decoding capability output content blocks.
-    private struct CapabilityOutputBlock: Decodable {
-        let type: String
-        let text: String?
-    }
-
     // MARK: - Result
 
     struct Result: EventResult {
         let invocationId: String
         let modelPrimitiveName: String?
         let success: Bool
-        let output: String?
-        let error: String?
+        let content: String
         let duration: Int?
         let details: EventData.CapabilityResultDetails?
         /// Raw details dictionary for capability-specific structured results
@@ -101,9 +84,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         init(
             invocationId: String,
             modelPrimitiveName: String?,
-            success: Bool,
-            output: String?,
-            error: String?,
+            isError: Bool,
+            content: String,
             duration: Int?,
             details: EventData.CapabilityResultDetails?,
             rawDetails: [String: AnyCodable]?,
@@ -111,9 +93,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         ) {
             self.invocationId = invocationId
             self.modelPrimitiveName = modelPrimitiveName
-            self.success = success
-            self.output = output
-            self.error = error
+            self.success = !isError
+            self.content = content
             self.duration = duration
             self.details = details
             self.rawDetails = rawDetails
@@ -122,11 +103,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
 
         /// Display-friendly result text.
         var displayResult: String {
-            if success {
-                return output ?? ""
-            } else {
-                return error ?? "Error"
-            }
+            content
         }
     }
 
@@ -136,9 +113,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         Result(
             invocationId: event.data.invocationId,
             modelPrimitiveName: event.data.modelPrimitiveName,
-            success: event.data.success,
-            output: event.data.output,
-            error: event.data.error,
+            isError: event.data.isError,
+            content: event.data.content,
             duration: event.data.duration,
             details: event.data.details,
             rawDetails: event.data.rawDetails,

@@ -168,15 +168,23 @@ and `SessionEvent` conform trivially since they already have all required fields
 
 Both `transformPersistedEvents` and `reconstructSessionState` run a shared first
 pass over the event array via `buildCapabilityInvocationMaps(from:)`. This
-builds lookup dictionaries for transport-level `capability.invocation.started`
-/ `capability.invocation.completed` rows and consumed subagent event IDs so
+builds lookup dictionaries for transport-level
+`capability.invocation.generating`, `capability.invocation.started`, and
+`capability.invocation.completed` rows plus consumed subagent event IDs so
 downstream handlers can resolve provider-boundary invocation blocks into
 capability-native invocation messages and filter already-consumed notifications
 in a single pass.
 
-`capability.invocation.started`, `capability.invocation.progress`, and
-`capability.invocation.completed` are capability lifecycle labels, not renderer
-dispatch keys. Payloads carry `CapabilityIdentity` fields when available:
+`capability.invocation.generating`, `capability.invocation.started`,
+`capability.invocation.progress`, and `capability.invocation.completed` are
+capability lifecycle labels, not renderer dispatch keys. `generating` creates
+the first visible chip and `started`/`progress`/`completed` update that same
+invocation id, preserving stable order for parallel calls. Completed payloads
+use the canonical server shape: `invocationId`, optional `modelPrimitiveName`,
+`content`, `isError`, required `duration`, optional `details`, and identity
+fields. The client derives success from `!isError`; it does not accept a second
+parallel `success`/`output` schema for clean-slate capability events. Payloads
+carry `CapabilityIdentity` fields when available:
 `modelToolName`, `contractId`, `implementationId`, `functionId`, `pluginId`,
 `workerId`, `schemaDigest`, `catalogRevision`, `trustTier`, `riskLevel`,
 `effectClass`, `traceId`, `rootInvocationId`, and `bindingDecisionId`. Active

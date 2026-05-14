@@ -13,6 +13,9 @@ struct CapabilityInvocationData: Equatable, Identifiable {
     var progressMessage: String?
     var progressPercent: Double?
     var durationMs: Int?
+    var generatedAt: Date?
+    var startedAt: Date?
+    var completedAt: Date?
     var identity: CapabilityIdentity
     var approvalState: [String: AnyCodable]?
     var artifacts: [CapabilityArtifactData]
@@ -29,6 +32,9 @@ struct CapabilityInvocationData: Equatable, Identifiable {
         progressMessage: String? = nil,
         progressPercent: Double? = nil,
         durationMs: Int? = nil,
+        generatedAt: Date? = nil,
+        startedAt: Date? = nil,
+        completedAt: Date? = nil,
         identity: CapabilityIdentity,
         approvalState: [String: AnyCodable]? = nil,
         artifacts: [CapabilityArtifactData] = [],
@@ -44,6 +50,9 @@ struct CapabilityInvocationData: Equatable, Identifiable {
         self.progressMessage = progressMessage
         self.progressPercent = progressPercent
         self.durationMs = durationMs
+        self.generatedAt = generatedAt
+        self.startedAt = startedAt
+        self.completedAt = completedAt
         self.identity = identity
         self.approvalState = approvalState
         self.artifacts = artifacts
@@ -61,6 +70,17 @@ struct CapabilityInvocationData: Equatable, Identifiable {
 
     var formattedDuration: String? {
         guard let ms = durationMs else { return nil }
+        return Self.formatDuration(ms)
+    }
+
+    func formattedElapsed(at date: Date = Date()) -> String? {
+        let anchor = startedAt ?? generatedAt
+        guard let anchor else { return formattedDuration }
+        let elapsed = max(0, Int(date.timeIntervalSince(anchor) * 1000))
+        return Self.formatDuration(elapsed)
+    }
+
+    private static func formatDuration(_ ms: Int) -> String {
         if ms < 1000 {
             return "\(ms)ms"
         }

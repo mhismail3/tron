@@ -1,6 +1,6 @@
 # Capability UI And Engine Console
 
-> Last verified: 2026-05-13
+> Last verified: 2026-05-14
 
 The iOS capability UI is a thin client over server-owned capability records. It
 does not maintain a local tool catalog and does not choose capability bindings
@@ -46,6 +46,10 @@ The DTOs preserve identifiers such as `contractId`, `implementationId`,
 `pluginId`, `workerId`, `functionId`, `schemaDigest`, and catalog/registry
 revision. UI code should render these identifiers directly or through generic
 metadata; it should not map retired tool names into capability identity.
+Search DTOs support both a single `query` and a bounded `queries` array; inspect
+DTOs support both a single target and bounded `targets`. Batch responses are
+still one capability primitive response, with per-query/per-target result
+objects and shared catalog/index status.
 
 ## Engine Console State
 
@@ -103,6 +107,12 @@ capsule treatment used elsewhere in Tron: one accent color per primitive,
 inline duration or live spinner, and a chevron to the detail sheet. This keeps
 the chip provider-neutral while still showing the concrete operation being
 performed, such as `Execute process::run · cargo test`.
+`capability.invocation.generating` creates the chip immediately, before worker
+dispatch completes; `started`, `progress`, and `completed` update that same
+invocation id. While running, chips show live elapsed time from `generatedAt` or
+`startedAt`; after completion they show the server-reported execution duration.
+Parallel calls are ordered by event enqueue order, not completion order, so a
+fast child cannot jump ahead of an earlier running invocation.
 
 Invocation detail sheets use the same display model. The toolbar carries the
 primitive icon and title, while the first card is only capability identity:

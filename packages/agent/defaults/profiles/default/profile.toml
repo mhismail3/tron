@@ -746,13 +746,13 @@ lexical = true
 localVector = true
 cloudEmbeddings = false
 maxResults = 50
-requireLocalVector = true
-allowLexicalOnlyWhenDegraded = false
+requireLocalVector = false
+allowLexicalOnlyWhenDegraded = true
 
 [capabilityContextPrimerPolicies.coreFirstParty]
 enabled = true
 mode = "coreFirstParty"
-maxTokens = 1800
+maxTokens = 2600
 includeExamples = true
 includeCompactSchemas = true
 

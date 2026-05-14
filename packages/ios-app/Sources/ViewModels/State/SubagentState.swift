@@ -268,10 +268,11 @@ final class SubagentState {
     }
 
     private func handleForwardedCapabilityCompleted(sessionId: String, data: [String: Any], date: Date) {
-        let success = data["success"] as? Bool ?? true
+        let isError = data["isError"] as? Bool ?? false
+        let success = !isError
         let invocationId = data["invocationId"] as? String
         let identity = CapabilityIdentity(payload: data)
-        let result = data["result"] as? String ?? data["output"] as? String ?? ""
+        let result = data["content"] as? String ?? ""
 
         if let invocationId,
            let index = subagentEvents[sessionId]?.lastIndex(where: { $0.invocationId == invocationId }) {

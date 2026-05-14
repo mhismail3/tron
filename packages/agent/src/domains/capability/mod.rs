@@ -49,10 +49,16 @@
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!
-//! The default search policy requires the binary-embedded first-party embedding
-//! model plus the persistent `sqlite-vec` index. Lexical-only operation is
-//! allowed only when profile policy opts into degraded search; failures surface
-//! as structured capability errors.
+//! The default search policy prefers the binary-embedded first-party embedding
+//! model plus the persistent `sqlite-vec` index, but an indexing vector table
+//! must not make agent discovery fail. Search returns lexical hits with an
+//! explicit degraded index status while vectors warm in the background. Query
+//! handling must not re-embed the whole catalog: registry documents carry text
+//! hashes, unchanged catalog revisions skip metadata resync, changed documents
+//! are warmed incrementally, and a search request embeds only the query text
+//! before fusing lexical and vector hits. Bounded batch search/inspect requests
+//! share one registry snapshot so agents can compare related capabilities
+//! without multiplying catalog sync work.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

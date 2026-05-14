@@ -120,7 +120,15 @@ async fn events_get_history_value(
 
     let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
     let oldest_event_id = events.first().map(|e| e.id.clone());
-    let mut wire_events: Vec<Value> = events.iter().map(event_wire::event_row_to_wire).collect();
+    let resolved_payloads = deps
+        .event_store
+        .resolve_event_payloads(&events)
+        .map_err(map_event_store_error)?;
+    let mut wire_events: Vec<Value> = events
+        .iter()
+        .zip(resolved_payloads)
+        .map(|(event, payload)| event_wire::event_row_to_wire_with_payload(event, Some(payload)))
+        .collect();
     crate::domains::capability_support::interactive_enrichment::enrich_interactive_capability_statuses(
         &mut wire_events,
     );
@@ -158,7 +166,15 @@ async fn events_get_since_value(
     if let Some(l) = limit {
         events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
     }
-    let mut wire_events: Vec<Value> = events.iter().map(event_wire::event_row_to_wire).collect();
+    let resolved_payloads = deps
+        .event_store
+        .resolve_event_payloads(&events)
+        .map_err(map_event_store_error)?;
+    let mut wire_events: Vec<Value> = events
+        .iter()
+        .zip(resolved_payloads)
+        .map(|(event, payload)| event_wire::event_row_to_wire_with_payload(event, Some(payload)))
+        .collect();
     crate::domains::capability_support::interactive_enrichment::enrich_interactive_capability_statuses(
         &mut wire_events,
     );
@@ -204,8 +220,15 @@ async fn events_append_value(
         .session_event(invocation, &event, invocation_workspace(params))
         .await;
 
+    let resolved = deps
+        .event_store
+        .resolve_event_payloads(std::slice::from_ref(&event))
+        .map_err(map_event_store_error)?
+        .into_iter()
+        .next();
+
     Ok(json!({
-        "event": event_wire::event_row_to_wire(&event),
+        "event": event_wire::event_row_to_wire_with_payload(&event, resolved),
         "newHeadEventId": new_head,
     }))
 }

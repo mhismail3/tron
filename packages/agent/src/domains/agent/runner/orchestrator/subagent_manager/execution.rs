@@ -764,8 +764,8 @@ fn forwarded_subagent_event(event: &TronEvent) -> Option<Value> {
                 "data": {
                     "invocationId": invocation_id,
                     "modelPrimitiveName": model_primitive_name,
-                    "success": !is_error.unwrap_or(false),
-                    "result": result_text,
+                    "isError": is_error.unwrap_or(false),
+                    "content": result_text.unwrap_or_default(),
                     "duration": duration,
                 },
                 "timestamp": chrono::Utc::now().to_rfc3339(),

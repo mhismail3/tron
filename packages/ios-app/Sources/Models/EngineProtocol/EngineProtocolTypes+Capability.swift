@@ -186,6 +186,7 @@ struct CapabilityIndexDocumentDTO: Codable, Equatable, Sendable {
 
 struct CapabilitySearchRequestDTO: Encodable, Sendable {
     var query: String
+    var queries: [String]? = nil
     var limit: Int? = nil
     var cursor: String? = nil
     var kind: String? = nil
@@ -201,7 +202,15 @@ struct CapabilitySearchRequestDTO: Encodable, Sendable {
 
 struct CapabilitySearchResponseDTO: Codable, Equatable, Sendable {
     var query: String?
+    var queries: [CapabilitySearchBatchResultDTO]?
     var catalogRevision: UInt64?
+    var results: [CapabilityIndexHitDTO]?
+    var nextCursor: String?
+    var searchMode: CapabilityIndexStatusDTO?
+}
+
+struct CapabilitySearchBatchResultDTO: Codable, Equatable, Sendable {
+    var query: String?
     var results: [CapabilityIndexHitDTO]?
     var nextCursor: String?
     var searchMode: CapabilityIndexStatusDTO?

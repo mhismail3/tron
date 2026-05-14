@@ -20,6 +20,15 @@ use crate::domains::session::event_store::types::base::SessionEvent;
 use super::{AppendOptions, EventStore};
 use crate::domains::session::event_store::redaction::redact_sensitive_content;
 
+fn resolve_payload_for_row(conn: &rusqlite::Connection, row: &EventRow) -> Result<Value> {
+    crate::shared::storage::resolve_stored_json_value(conn, &row.payload).map_err(|error| {
+        EventStoreError::Internal(format!(
+            "failed to resolve stored payload for event {}: {error:#}",
+            row.id
+        ))
+    })
+}
+
 /// Append a single event inside an existing transaction.
 ///
 /// This is the core write primitive shared by [`EventStore::append`] (which
@@ -280,6 +289,19 @@ impl EventStore {
     pub fn get_latest_events(&self, session_id: &str, limit: Option<i64>) -> Result<Vec<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_latest_events(&conn, session_id, limit)
+    }
+
+    /// Resolve payloads for event rows returned to capability clients.
+    ///
+    /// Persisted event rows may store large JSON payloads out-of-line behind an
+    /// internal `__tronPayloadRef` envelope. Active runtime APIs must expose the
+    /// original canonical event payload so clients can reconstruct invocation
+    /// state without blob-specific storage branches.
+    pub fn resolve_event_payloads(&self, rows: &[EventRow]) -> Result<Vec<Value>> {
+        let conn = self.conn()?;
+        rows.iter()
+            .map(|row| resolve_payload_for_row(&conn, row))
+            .collect()
     }
 
     /// Get events with sequence < `before_sequence`, in sequence ASC order.

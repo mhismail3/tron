@@ -774,12 +774,18 @@ final class EngineConnection {
 
             let timeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(timeoutInterval))
-                await MainActor.run {
+                let shouldRecoverConnection = await MainActor.run {
                     if let pending = self?.pendingRequests.removeValue(forKey: requestId) {
                         logger.error("Request timeout for \(operation) id=\(requestId) after \(timeoutInterval)s", category: .websocket)
                         pending.resume(throwing: EngineConnectionError.timeout)
+                        self?.timeoutTasks.removeValue(forKey: requestId)
+                        return true
                     }
                     self?.timeoutTasks.removeValue(forKey: requestId)
+                    return false
+                }
+                if shouldRecoverConnection {
+                    await self?.handleDisconnect()
                 }
             }
             timeoutTasks[requestId] = timeoutTask

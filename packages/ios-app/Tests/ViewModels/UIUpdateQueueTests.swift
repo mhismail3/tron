@@ -65,6 +65,56 @@ struct UIUpdateQueueTests {
         #expect(capabilityInvocationCompletions == ["C", "B", "A"])
     }
 
+    @Test("Parallel starts remain visible before same-batch completions")
+    func testParallelCapabilityStartsRemainBeforeCompletions() {
+        let queue = UIUpdateQueue()
+        var processedUpdates: [UIUpdateQueue.UpdateType] = []
+        queue.onProcessUpdates = { processedUpdates = $0 }
+
+        ["A", "B", "C"].forEach { id in
+            queue.enqueueCapabilityInvocationStart(.init(
+                invocationId: id,
+                modelPrimitiveName: "execute",
+                arguments: "{}",
+                timestamp: Date()
+            ))
+        }
+        ["A", "B", "C"].forEach { id in
+            queue.enqueueCapabilityInvocationEnd(.init(
+                invocationId: id,
+                success: true,
+                result: "ok",
+                durationMs: 10,
+                details: nil
+            ))
+        }
+        queue.flush()
+
+        let startIds = processedUpdates.compactMap { update -> String? in
+            if case .capabilityInvocationStarted(let data) = update { return data.invocationId }
+            return nil
+        }
+        let completionIds = processedUpdates.compactMap { update -> String? in
+            if case .capabilityInvocationCompleted(let data) = update { return data.invocationId }
+            return nil
+        }
+
+        #expect(startIds == ["A", "B", "C"])
+        #expect(completionIds == ["A", "B", "C"])
+        if let firstCompletionIndex = processedUpdates.firstIndex(where: {
+            if case .capabilityInvocationCompleted = $0 { return true }
+            return false
+        }) {
+            let startsBeforeCompletion = processedUpdates[..<firstCompletionIndex].filter {
+                if case .capabilityInvocationStarted = $0 { return true }
+                return false
+            }
+            #expect(startsBeforeCompletion.count == 3)
+        } else {
+            Issue.record("Expected completion updates")
+        }
+    }
+
     @Test("Capability end for unknown capability is processed")
     func testCapabilityInvocationEndForUnknownCapabilityProcessed() {
         let queue = UIUpdateQueue()

@@ -89,8 +89,8 @@ impl Default for CapabilitySearchPolicy {
             local_vector: true,
             cloud_embeddings: false,
             max_results: 50,
-            require_local_vector: true,
-            allow_lexical_only_when_degraded: false,
+            require_local_vector: false,
+            allow_lexical_only_when_degraded: true,
         }
     }
 }
@@ -126,7 +126,7 @@ impl Default for CapabilityContextPrimerPolicy {
         Self {
             enabled: true,
             mode: "coreFirstParty".to_owned(),
-            max_tokens: 1800,
+            max_tokens: 2600,
             include_examples: true,
             include_compact_schemas: true,
         }
@@ -153,7 +153,10 @@ impl CapabilitySearchFilters {
             actor: Some(actor),
             namespace_prefix: self.namespace.clone(),
             effect_class: self.effect,
-            max_risk: self.risk_max,
+            // Discovery must keep enough candidates available for the index to
+            // explain when model-supplied risk filters are too narrow. Execution
+            // remains policy-enforced at invoke time.
+            max_risk: None,
             health: if self.include_unavailable {
                 None
             } else {
@@ -210,6 +213,12 @@ impl CapabilitySearchFilters {
             return false;
         }
         true
+    }
+
+    fn without_risk_max(&self) -> Self {
+        let mut relaxed = self.clone();
+        relaxed.risk_max = None;
+        relaxed
     }
 }
 
@@ -749,12 +758,31 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
             .filter(|document| filters.allows_document(document))
             .cloned()
             .collect::<Vec<_>>();
-        HybridLocalCapabilityIndex::new(policy.clone()).search_with_provider(
+        let mut result = HybridLocalCapabilityIndex::new(policy.clone()).search_with_provider(
             query,
             documents,
             limit,
             embedding_provider,
-        )
+        )?;
+        if result.hits.is_empty() && filters.risk_max.is_some() {
+            let relaxed_filters = filters.without_risk_max();
+            let relaxed_documents = self
+                .documents
+                .values()
+                .filter(|document| relaxed_filters.allows_document(document))
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut relaxed = HybridLocalCapabilityIndex::new(policy.clone())
+                .search_with_provider(query, relaxed_documents, limit, embedding_provider)?;
+            if !relaxed.hits.is_empty() {
+                relaxed.status.degraded_reason = Some(
+                    "riskMax relaxed after zero strict discovery results; execution still enforces capability policy"
+                        .to_owned(),
+                );
+                result = relaxed;
+            }
+        }
+        Ok(result)
     }
 
     fn active_binding(
@@ -1073,6 +1101,55 @@ pub(crate) struct SqliteCapabilityRegistryStore {
     conn: Connection,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DocumentUpsert {
+    rowid: i64,
+    vector_stale: bool,
+}
+
+fn search_sqlite_documents(
+    store: &SqliteCapabilityRegistryStore,
+    query: &str,
+    documents: Vec<CapabilityIndexDocument>,
+    policy: &CapabilitySearchPolicy,
+    limit: usize,
+    embedding_provider: &dyn EmbeddingProvider,
+) -> Result<CapabilityIndexSearchResult, String> {
+    let mut lexical_hits = if policy.lexical {
+        lexical_rank(query, &documents)
+    } else {
+        Vec::new()
+    };
+    let mut status = ready_index_status(policy, embedding_provider);
+    if policy.local_vector && !query.trim().is_empty() && !documents.is_empty() {
+        let vector_hits = store.vector_search(query, &documents, limit, embedding_provider);
+        match vector_hits {
+            Ok(hits) => {
+                lexical_hits = fuse_hits(lexical_hits, hits, &documents);
+            }
+            Err(error) => {
+                status.state = "unavailable".to_owned();
+                status.degraded_reason = Some(error.clone());
+                if policy.require_local_vector
+                    && !policy.allow_lexical_only_when_degraded
+                    && !is_vector_indexing_error(&error)
+                {
+                    return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
+                }
+            }
+        }
+    }
+    lexical_hits.truncate(limit.min(policy.max_results.max(1)));
+    Ok(CapabilityIndexSearchResult {
+        hits: lexical_hits,
+        status,
+    })
+}
+
+fn is_vector_indexing_error(error: &str) -> bool {
+    error.starts_with("CAPABILITY_INDEX_INDEXING:")
+}
+
 impl SqliteCapabilityRegistryStore {
     pub(crate) fn open(path: &Path) -> Result<Self, String> {
         register_sqlite_vec_extension()?;
@@ -1087,6 +1164,33 @@ impl SqliteCapabilityRegistryStore {
         self.conn
             .execute_batch(CAPABILITY_REGISTRY_SCHEMA)
             .map_err(|error| format!("initialize capability registry schema: {error}"))?;
+        self.ensure_schema_columns()?;
+        Ok(())
+    }
+
+    fn ensure_schema_columns(&self) -> Result<(), String> {
+        let has_text_hash = self
+            .conn
+            .prepare("PRAGMA table_info(capability_index_documents)")
+            .and_then(|mut stmt| {
+                let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+                for column in columns {
+                    if column? == "text_hash" {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })
+            .map_err(|error| format!("inspect capability_index_documents schema: {error}"))?;
+        if !has_text_hash {
+            self.conn
+                .execute(
+                    "ALTER TABLE capability_index_documents
+                     ADD COLUMN text_hash TEXT NOT NULL DEFAULT ''",
+                    [],
+                )
+                .map_err(|error| format!("add capability document text_hash column: {error}"))?;
+        }
         Ok(())
     }
 
@@ -1248,16 +1352,29 @@ impl SqliteCapabilityRegistryStore {
             .map_err(|error| format!("record capability vector unavailable: {error}"))
     }
 
-    fn upsert_document(&self, document: &CapabilityIndexDocument) -> Result<i64, String> {
+    fn upsert_document(
+        &self,
+        document: &CapabilityIndexDocument,
+    ) -> Result<DocumentUpsert, String> {
         let key = document_key(document);
+        let text_hash = document_text_hash(document);
+        let previous_hash = self
+            .conn
+            .query_row(
+                "SELECT text_hash FROM capability_index_documents WHERE document_key = ?1",
+                params![key.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("read capability index document hash: {error}"))?;
         self.conn
             .execute(
                 "INSERT INTO capability_index_documents
                    (document_key, kind, capability_id, contract_id, implementation_id,
                     plugin_id, worker_id, function_id, catalog_revision, schema_digest,
                     trust_tier, health, visibility, effect_class, risk_level, text,
-                    document_json, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                    text_hash, document_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                  ON CONFLICT(document_key) DO UPDATE SET
                     kind = excluded.kind,
                     capability_id = excluded.capability_id,
@@ -1274,10 +1391,11 @@ impl SqliteCapabilityRegistryStore {
                     effect_class = excluded.effect_class,
                     risk_level = excluded.risk_level,
                     text = excluded.text,
+                    text_hash = excluded.text_hash,
                     document_json = excluded.document_json,
                     updated_at = excluded.updated_at",
                 params![
-                    key,
+                    key.as_str(),
                     document.kind,
                     document.capability_id,
                     document.contract_id,
@@ -1293,19 +1411,40 @@ impl SqliteCapabilityRegistryStore {
                     document.effect_class,
                     document.risk_level,
                     document.text,
+                    text_hash.as_str(),
                     serde_json::to_string(document)
                         .map_err(|error| format!("serialize index document: {error}"))?,
                     Utc::now().to_rfc3339(),
                 ],
             )
             .map_err(|error| format!("upsert capability index document: {error}"))?;
-        self.conn
+        let rowid = self
+            .conn
             .query_row(
                 "SELECT rowid FROM capability_index_documents WHERE document_key = ?1",
-                params![document_key(document)],
+                params![key.as_str()],
                 |row| row.get(0),
             )
-            .map_err(|error| format!("read capability index document rowid: {error}"))
+            .map_err(|error| format!("read capability index document rowid: {error}"))?;
+        let text_changed = previous_hash.as_deref() != Some(text_hash.as_str());
+        Ok(DocumentUpsert {
+            rowid,
+            vector_stale: text_changed || !self.vector_exists(rowid)?,
+        })
+    }
+
+    fn vector_exists(&self, rowid: i64) -> Result<bool, String> {
+        if !self.vector_table_exists()? {
+            return Ok(false);
+        }
+        self.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM capability_index_vectors WHERE rowid = ?1)",
+                params![rowid],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|value| value != 0)
+            .map_err(|error| format!("check capability vector freshness: {error}"))
     }
 
     fn load_documents(
@@ -1423,11 +1562,35 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
         tx.commit()
             .map_err(|error| format!("commit capability registry sync: {error}"))?;
 
+        let vector_index_ready = if policy.local_vector {
+            match self.ensure_vector_table(
+                embedding_provider.dimensions(),
+                embedding_provider.model_id(),
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    status.state = "unavailable".to_owned();
+                    status.degraded_reason = Some(error.clone());
+                    let _ = self.record_vector_unavailable(
+                        embedding_provider.dimensions(),
+                        embedding_provider.model_id(),
+                        &error,
+                    );
+                    if policy.require_local_vector && !policy.allow_lexical_only_when_degraded {
+                        return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
+                    }
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
         let mut vector_jobs = Vec::new();
         for document in &documents {
-            let rowid = self.upsert_document(document)?;
-            if policy.local_vector {
-                vector_jobs.push((rowid, document.text.clone()));
+            let upsert = self.upsert_document(document)?;
+            if policy.local_vector && vector_index_ready && upsert.vector_stale {
+                vector_jobs.push((upsert.rowid, document.text.clone()));
             }
         }
         if policy.local_vector && !vector_jobs.is_empty() {
@@ -1482,32 +1645,28 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
         embedding_provider: &dyn EmbeddingProvider,
     ) -> Result<CapabilityIndexSearchResult, String> {
         let documents = self.load_documents(filters)?;
-        let mut lexical_hits = if policy.lexical {
-            lexical_rank(query, &documents)
-        } else {
-            Vec::new()
-        };
-        let mut status = ready_index_status(policy, embedding_provider);
-        if policy.local_vector && !query.trim().is_empty() && !documents.is_empty() {
-            let vector_hits = self.vector_search(query, &documents, limit, embedding_provider);
-            match vector_hits {
-                Ok(hits) => {
-                    lexical_hits = fuse_hits(lexical_hits, hits, &documents);
-                }
-                Err(error) => {
-                    status.state = "unavailable".to_owned();
-                    status.degraded_reason = Some(error.clone());
-                    if policy.require_local_vector && !policy.allow_lexical_only_when_degraded {
-                        return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
-                    }
-                }
+        let mut result =
+            search_sqlite_documents(self, query, documents, policy, limit, embedding_provider)?;
+        if result.hits.is_empty() && filters.risk_max.is_some() {
+            let relaxed_filters = filters.without_risk_max();
+            let relaxed_documents = self.load_documents(&relaxed_filters)?;
+            let mut relaxed = search_sqlite_documents(
+                self,
+                query,
+                relaxed_documents,
+                policy,
+                limit,
+                embedding_provider,
+            )?;
+            if !relaxed.hits.is_empty() {
+                relaxed.status.degraded_reason = Some(
+                    "riskMax relaxed after zero strict discovery results; execution still enforces capability policy"
+                        .to_owned(),
+                );
+                result = relaxed;
             }
         }
-        lexical_hits.truncate(limit.min(policy.max_results.max(1)));
-        Ok(CapabilityIndexSearchResult {
-            hits: lexical_hits,
-            status,
-        })
+        Ok(result)
     }
 
     fn active_binding(
@@ -2264,14 +2423,21 @@ impl SqliteCapabilityRegistryStore {
         limit: usize,
         embedding_provider: &dyn EmbeddingProvider,
     ) -> Result<Vec<CapabilityIndexHit>, String> {
-        let query_embedding = embedding_provider.embed(&[query.to_owned()])?;
-        let Some(query_embedding) = query_embedding.first() else {
-            return Err("embedding provider returned no query vector".to_owned());
-        };
         self.ensure_vector_table(
             embedding_provider.dimensions(),
             embedding_provider.model_id(),
         )?;
+        let indexed = self.vector_count_for_documents(documents)?;
+        if indexed < documents.len() {
+            return Err(format!(
+                "CAPABILITY_INDEX_INDEXING: local vector index has {indexed}/{} current documents",
+                documents.len()
+            ));
+        }
+        let query_embedding = embedding_provider.embed(&[query.to_owned()])?;
+        let Some(query_embedding) = query_embedding.first() else {
+            return Err("embedding provider returned no query vector".to_owned());
+        };
         let query_bytes = bytemuck::cast_slice::<f32, u8>(query_embedding);
         let mut stmt = self
             .conn
@@ -2331,6 +2497,32 @@ impl SqliteCapabilityRegistryStore {
                 .then_with(|| a.function_id.cmp(&b.function_id))
         });
         Ok(hits)
+    }
+
+    fn vector_count_for_documents(
+        &self,
+        documents: &[CapabilityIndexDocument],
+    ) -> Result<usize, String> {
+        if documents.is_empty() {
+            return Ok(0);
+        }
+        if !self.vector_table_exists()? {
+            return Ok(0);
+        }
+        let keys = documents.iter().map(document_key).collect::<Vec<_>>();
+        let keys_json = serde_json::to_string(&keys)
+            .map_err(|error| format!("serialize vector coverage keys: {error}"))?;
+        self.conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM capability_index_documents d
+                 JOIN capability_index_vectors v ON v.rowid = d.rowid
+                 WHERE d.document_key IN (SELECT value FROM json_each(?1))",
+                params![keys_json],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count.max(0) as usize)
+            .map_err(|error| format!("count capability vector coverage: {error}"))
     }
 }
 
@@ -2606,6 +2798,7 @@ CREATE TABLE IF NOT EXISTS capability_index_documents (
   effect_class TEXT NOT NULL,
   risk_level TEXT NOT NULL,
   text TEXT NOT NULL,
+  text_hash TEXT NOT NULL DEFAULT '',
   document_json TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -3029,6 +3222,12 @@ fn document_key(document: &CapabilityIndexDocument) -> String {
     format!("{}:{}", document.kind, document.capability_id)
 }
 
+fn document_text_hash(document: &CapabilityIndexDocument) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(document.text.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 fn ready_index_status(
     policy: &CapabilitySearchPolicy,
     embedding_provider: &dyn EmbeddingProvider,
@@ -3093,6 +3292,8 @@ fn aggregate_documents(
         .into_iter()
         .filter_map(|(id, entries)| {
             let first = entries.first()?;
+            let risk_level = aggregate_risk_level(&entries);
+            let effect_class = aggregate_effect_class(&entries);
             let text = entries
                 .iter()
                 .map(|entry| {
@@ -3131,12 +3332,33 @@ fn aggregate_documents(
                 trust_tier: first.trust_tier.clone(),
                 health: "ready".to_owned(),
                 visibility: first.visibility.clone(),
-                effect_class: "pure_read".to_owned(),
-                risk_level: "low".to_owned(),
+                effect_class,
+                risk_level,
                 text,
             })
         })
         .collect()
+}
+
+fn aggregate_risk_level(entries: &[&CapabilityRegistryEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| risk_name(entry.function.risk_level))
+        .max_by_key(|risk| risk_rank(risk))
+        .unwrap_or("low")
+        .to_owned()
+}
+
+fn aggregate_effect_class(entries: &[&CapabilityRegistryEntry]) -> String {
+    let mut effects = entries
+        .iter()
+        .map(|entry| effect_name(entry.function.effect_class))
+        .collect::<BTreeSet<_>>();
+    if effects.len() == 1 {
+        effects.pop_first().unwrap_or("pure_read").to_owned()
+    } else {
+        "mixed".to_owned()
+    }
 }
 
 fn plugin_manifest_for_entry(entry: &CapabilityRegistryEntry) -> CapabilityPluginManifest {
@@ -3906,6 +4128,53 @@ mod tests {
     }
 
     #[test]
+    fn search_relaxes_risk_filter_after_zero_discovery_hits() {
+        let mut process_function = test_function("process::run");
+        process_function.effect_class = EffectClass::ExternalSideEffect;
+        process_function.risk_level = RiskLevel::High;
+        let snapshot = CapabilityRegistrySnapshot::new(vec![process_function], 1);
+        let mut store = InMemoryCapabilityRegistryStore::default();
+        let provider = HashEmbeddingProvider::new(64);
+        let policy = CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        };
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("sync");
+
+        let result = store
+            .search(
+                "process run shell command date",
+                &CapabilitySearchFilters {
+                    kind: Some("contract".to_owned()),
+                    risk_max: Some(RiskLevel::Low),
+                    ..CapabilitySearchFilters::default()
+                },
+                &policy,
+                10,
+                &provider,
+            )
+            .expect("search");
+
+        assert!(
+            result
+                .hits
+                .iter()
+                .any(|hit| hit.contract_id == "process::run"),
+            "search should still explain the shell capability even when a discovery risk filter is too narrow"
+        );
+        assert!(
+            result
+                .status
+                .degraded_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("riskMax relaxed"))
+        );
+    }
+
+    #[test]
     fn sqlite_registry_store_round_trips_documents_bindings_and_conformance() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("tron.sqlite");
@@ -4024,6 +4293,59 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_search_degrades_while_filtered_vectors_are_still_indexing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        let snapshot =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 11);
+        let metadata_only_policy = CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        };
+        let strict_search_policy = CapabilitySearchPolicy {
+            local_vector: true,
+            require_local_vector: true,
+            allow_lexical_only_when_degraded: false,
+            ..CapabilitySearchPolicy::default()
+        };
+        let provider = HashEmbeddingProvider::new(64);
+
+        store
+            .sync_snapshot(&snapshot, &provider, &metadata_only_policy)
+            .expect("metadata sync");
+        let result = store
+            .search(
+                "read file",
+                &CapabilitySearchFilters {
+                    kind: Some("contract".to_owned()),
+                    contract_id: Some("filesystem::read_file".to_owned()),
+                    ..CapabilitySearchFilters::default()
+                },
+                &strict_search_policy,
+                5,
+                &provider,
+            )
+            .expect("indexing vectors should not make search unavailable");
+
+        assert!(
+            result
+                .hits
+                .iter()
+                .any(|hit| hit.contract_id == "filesystem::read_file")
+        );
+        assert_eq!(result.status.state, "unavailable");
+        assert!(
+            result
+                .status
+                .degraded_reason
+                .as_deref()
+                .is_some_and(|reason| reason.starts_with("CAPABILITY_INDEX_INDEXING:"))
+        );
+    }
+
+    #[test]
     fn sqlite_registry_recreates_missing_vector_table_when_metadata_remains() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("tron.sqlite");
@@ -4088,6 +4410,34 @@ mod tests {
         assert!(
             provider.max_batch() > 1,
             "at least one embedding call should contain multiple documents"
+        );
+    }
+
+    #[test]
+    fn sqlite_registry_skips_unchanged_vector_documents_on_resync() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        let functions = (0..8)
+            .map(|index| test_function(&format!("stable{index}::capability")))
+            .collect::<Vec<_>>();
+        let snapshot = CapabilityRegistrySnapshot::new(functions, 11);
+        let policy = CapabilitySearchPolicy::default();
+        let provider = CountingEmbeddingProvider::new();
+
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("initial vector sync");
+        let calls_after_initial = provider.calls();
+        assert!(calls_after_initial > 0, "initial sync embeds documents");
+
+        store
+            .sync_snapshot(&snapshot, &provider, &policy)
+            .expect("unchanged resync");
+        assert_eq!(
+            provider.calls(),
+            calls_after_initial,
+            "unchanged documents must not be re-embedded on the query or warmup path"
         );
     }
 
@@ -4275,12 +4625,13 @@ mod tests {
         let snapshot =
             CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 1);
         let mut store = InMemoryCapabilityRegistryStore::default();
+        let strict_policy = CapabilitySearchPolicy {
+            require_local_vector: true,
+            allow_lexical_only_when_degraded: false,
+            ..CapabilitySearchPolicy::default()
+        };
         let error = store
-            .sync_snapshot(
-                &snapshot,
-                &FailingEmbeddingProvider,
-                &CapabilitySearchPolicy::default(),
-            )
+            .sync_snapshot(&snapshot, &FailingEmbeddingProvider, &strict_policy)
             .expect_err("strict vector policy must fail");
         assert!(error.starts_with("CAPABILITY_INDEX_UNAVAILABLE:"));
     }

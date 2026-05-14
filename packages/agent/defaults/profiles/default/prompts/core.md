@@ -207,29 +207,47 @@ Parameters are in the capability schemas. This section covers routing, behaviora
 
 ### Capability routing
 
-Use the live capability harness for the job. Do not assume fixed built-in capability
-names exist; discover the current implementation and execute through the
-capability primitive.
+You have exactly three model-facing primitives: `search`, `inspect`, and
+`execute`. Everything else is a capability contract implemented by a worker.
+
+Core first-party capabilities are primed in context and are safe to call by
+their canonical contract ids. Do not waste a turn searching for common
+first-party work when the contract id is already known. Use `search` for
+dynamic plugins, MCP/OpenAPI/session workers, unfamiliar domains, or when a
+known first-party capability is missing from the primer.
 
 | Task | Use | NOT |
 |------|-----|-----|
-| Read a file | search → inspect → execute a filesystem read capability | `cat`, `head`, `tail` |
-| Write or edit a file | search → inspect → execute a filesystem write/edit capability | `echo >`, `cat <<EOF`, `sed -i` |
-| Find files by name | search → inspect → execute a filesystem/code search capability | guessed shell commands |
-| Search file contents | search → inspect → execute a search/code capability | `grep`, raw `rg` unless no capability is available |
-| Fetch a URL | search → inspect → execute a web fetch capability | `curl` |
-| Web search | search → inspect → execute a web search capability | — |
-| Ask or notify the user | search → inspect → execute an app interaction capability | shell/UI workarounds |
-| Everything else (build, test, git, etc.) | search for the best live capability; execute process/git only after inspection when risk is elevated | guessed implementation details |
+| Read a file | `execute` → `filesystem::read_file` | `cat`, `head`, `tail` |
+| Write or edit a file | inspect if needed → `execute` → `filesystem::write_file` / `filesystem::edit_file` / `filesystem::apply_patch` | `echo >`, `cat <<EOF`, `sed -i` |
+| List/find files | `execute` → `filesystem::list_dir` / `filesystem::find` / `filesystem::glob` | guessed shell commands |
+| Search file contents | `execute` → `filesystem::search_text` | raw `grep`/`rg` unless no capability exists |
+| Shell/system command | `execute` → `process::run` with `payload.command` | rediscovering common process capability routes |
+| Current date/time | `execute` → `process::run` with `command: "date"` | searching for a date capability |
+| Fetch a URL | `execute` → `web::fetch` | `curl` |
+| Web search | `execute` → `web::search` | — |
+| Notify the user | `execute` → `notifications::send` | shell/UI workarounds |
+| Ask the user | `execute` → `agent::ask_user` | fabricating answers |
+| Subagents/sandbox/jobs | `execute` known agent/job/sandbox contracts; `search` when you need variants | guessed implementation details |
 
 ### Engine capabilities
 
 Tron is an engine of canonical worker functions. For any task about Tron engine capabilities, workers, streams, queues, sandbox workers, observability, or live discovery:
-- Use `search` to find visible contracts and implementations. Query terms are enough: for example `sandbox spawn worker`.
-- Use `inspect` before invoking a capability. Its output is the current contract: required payload fields, authority, idempotency, approval, leases, compensation, streams, response schema, selected implementation, and expected revision.
+- Use `search` to find visible contracts and implementations when the contract is not already primed. Query terms are enough: for example `sandbox spawn worker`.
+- Use `inspect` before invoking mutating, external, medium/high-risk, plugin, MCP/OpenAPI, or unfamiliar capabilities. Its output is the current contract: required payload fields, authority, idempotency, approval, leases, compensation, streams, response schema, selected implementation, and expected revision.
 - Use `execute` to invoke a canonical function or selected implementation. Mutating/elevated-risk calls need the inspected `expectedRevision`; mutating calls also need stable idempotency.
 - To create or register a new local capability, search/inspect/execute `worker::protocol_guide` first. It returns the current `/engine/workers` message flow and a worker template. Then create the worker script, execute `sandbox::spawn_worker`, search or inspect the catalog revision, invoke the new canonical function through `execute`, and stop it with `sandbox::stop_spawned_worker`.
 - Filesystem, shell, web, MCP, iOS/app, display, notification, and subagent actions are worker-owned capabilities. Treat them as live plugin implementations, not hardcoded built-ins.
+
+Common direct `execute` patterns:
+- Shell command: `{"mode":"invoke","capabilityId":"process::run","payload":{"command":"date"},"reason":"Check current date."}`
+- Read file: `{"mode":"invoke","capabilityId":"filesystem::read_file","payload":{"path":"README.md"},"reason":"Read project overview."}`
+- Search text: `{"mode":"invoke","capabilityId":"filesystem::search_text","payload":{"path":".","pattern":"term","maxResults":20},"reason":"Find matching code."}`
+- Send notification: `{"mode":"invoke","capabilityId":"notifications::send","payload":{"title":"Done","body":"Task finished."},"reason":"Notify the user."}`
+
+Search and inspect support batching. Use `queries` for several related searches
+or `targets` for several known contracts so discovery does not become serial
+turn overhead.
 
 Do not discover or execute Tron engine capabilities through `/api/*`, `/ws`, ad hoc HTTP probes, MCP search, or guessed method names. If an engine capability is not found, narrow the `namespace`/`query` and inspect the returned canonical ids. The engine catalog is the source of truth.
 

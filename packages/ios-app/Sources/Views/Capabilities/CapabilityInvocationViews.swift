@@ -22,12 +22,7 @@ struct CapabilityInvocationChip: View {
                     .truncationMode(.middle)
                     .layoutPriority(1)
 
-                if let inlineStatusText {
-                    Text(inlineStatusText)
-                        .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(textColor.opacity(0.68))
-                        .lineLimit(1)
-                }
+                inlineStatusView
 
                 trailingAccessory
             }
@@ -49,7 +44,7 @@ struct CapabilityInvocationChip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityLabel(accessibilityLabel)
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: data.status)
-        .animation(.easeInOut(duration: 0.18), value: inlineStatusText)
+        .animation(.easeInOut(duration: 0.18), value: data.formattedDuration)
     }
 
     private func titleString(size: CGFloat) -> AttributedString {
@@ -84,10 +79,29 @@ struct CapabilityInvocationChip: View {
         }
     }
 
-    private var inlineStatusText: String? {
-        if let duration = data.formattedDuration {
-            return duration
+    @ViewBuilder
+    private var inlineStatusView: some View {
+        if data.status == .running || data.status == .generating {
+            TimelineView(.periodic(from: data.startedAt ?? data.generatedAt ?? Date(), by: 0.25)) { context in
+                if let elapsed = data.formattedElapsed(at: context.date) {
+                    inlineStatusText(elapsed)
+                }
+            }
+        } else if let duration = data.formattedDuration {
+            inlineStatusText(duration)
+        } else if let status = terminalStatusText {
+            inlineStatusText(status)
         }
+    }
+
+    private func inlineStatusText(_ text: String) -> some View {
+        Text(text)
+            .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(textColor.opacity(0.68))
+            .lineLimit(1)
+    }
+
+    private var terminalStatusText: String? {
         switch data.status {
         case .error:
             return "failed"

@@ -48,7 +48,7 @@ pub(crate) async fn search_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let params = &invocation.payload;
-    let query = string_field(params, "query").unwrap_or_default();
+    let queries = search_queries(params)?;
     let limit = u64_field(params, "limit")
         .map(|value| value.clamp(1, MAX_LIMIT as u64) as usize)
         .unwrap_or(DEFAULT_LIMIT);
@@ -76,13 +76,13 @@ pub(crate) async fn search_value(
     let catalog_revision = deps.engine_host.catalog_revision().await;
     let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
     let policy = search_policy_from_runtime(invocation)?;
-    let allow_operator_degraded_vector = allows_degraded_vector_search(&policy);
-    let warmup_snapshot = if allow_operator_degraded_vector {
+    let allow_degraded_vector_search = allows_degraded_vector_search(&policy);
+    let warmup_snapshot = if policy.local_vector {
         Some(snapshot.clone())
     } else {
         None
     };
-    let query_for_index = query.clone();
+    let queries_for_index = queries.clone();
     let index_limit = cursor_offset.saturating_add(limit).saturating_add(1);
     let store = deps.registry_store.clone();
     let embedding_provider = deps.embedding_provider.clone();
@@ -93,58 +93,61 @@ pub(crate) async fn search_value(
         let mut store = store.lock().map_err(|_| CapabilityError::Internal {
             message: "capability registry store mutex poisoned".to_owned(),
         })?;
-        let sync_policy = if allow_operator_degraded_vector {
-            registry_metadata_sync_policy()
-        } else {
-            policy.clone()
-        };
-        if let Err(error) =
-            store.sync_snapshot(&snapshot, embedding_provider.as_ref(), &sync_policy)
-        {
-            let _ = store.record_audit_event(
-                "capability.search",
-                Some(&trace_id),
-                json!({
-                    "status": "error",
-                    "query": query_for_index,
-                    "catalogRevision": catalog_revision_value,
-                    "error": error.clone(),
-                }),
-            );
-            return Err(registry_store_error(error));
+        let admin_before = store.admin_status().map_err(registry_store_error)?;
+        if registry_needs_metadata_sync(&admin_before, catalog_revision_value) {
+            let sync_policy = registry_metadata_sync_policy();
+            if let Err(error) =
+                store.sync_snapshot(&snapshot, embedding_provider.as_ref(), &sync_policy)
+            {
+                let _ = store.record_audit_event(
+                    "capability.search",
+                    Some(&trace_id),
+                    json!({
+                        "status": "error",
+                        "queries": queries_for_index,
+                        "catalogRevision": catalog_revision_value,
+                        "error": error.clone(),
+                    }),
+                );
+                return Err(registry_store_error(error));
+            }
         }
         let mut effective_policy = policy.clone();
         let mut degraded_status = None;
-        if allow_operator_degraded_vector {
+        if allow_degraded_vector_search {
             let admin = store.admin_status().map_err(registry_store_error)?;
             if !admin_vector_ready(&admin) {
                 effective_policy.local_vector = false;
                 effective_policy.require_local_vector = false;
-                degraded_status = Some(degraded_operator_status(
+                degraded_status = Some(degraded_search_status(
                     &admin,
                     &policy,
                     embedding_provider.as_ref(),
                 ));
             }
         }
-        let mut result = store
-            .search(
-                &query_for_index,
-                &filters_for_index,
-                &effective_policy,
-                index_limit,
-                embedding_provider.as_ref(),
-            )
-            .map_err(registry_store_error)?;
-        if let Some(status) = degraded_status {
-            result.status = status;
+        let mut results = Vec::new();
+        for query in &queries_for_index {
+            let mut result = store
+                .search(
+                    query,
+                    &filters_for_index,
+                    &effective_policy,
+                    index_limit,
+                    embedding_provider.as_ref(),
+                )
+                .map_err(registry_store_error)?;
+            if let Some(status) = degraded_status.clone() {
+                result.status = status;
+            }
+            results.push((query.clone(), result));
         }
         store
             .record_audit_event(
                 "capability.search",
                 Some(&trace_id),
                 json!({
-                    "query": query_for_index,
+                    "queries": queries_for_index,
                     "filters": {
                         "kind": filters_for_index.kind,
                         "contractId": filters_for_index.contract_id,
@@ -152,39 +155,116 @@ pub(crate) async fn search_value(
                         "pluginId": filters_for_index.plugin_id,
                     },
                     "catalogRevision": catalog_revision_value,
-                    "indexStatus": result.status.clone(),
+                    "indexStatus": results
+                        .first()
+                        .map(|(_, result)| result.status.clone()),
                 }),
             )
             .map_err(registry_store_error)?;
-        Ok(result)
+        Ok(results)
     })
-    .await?;
+    .await;
     if let Some(snapshot) = warmup_snapshot {
         schedule_vector_warmup(snapshot, deps, catalog_revision.0);
     }
-    let next_cursor = if search_result.hits.len() > cursor_offset.saturating_add(limit) {
-        Some(cursor_offset.saturating_add(limit).to_string())
-    } else {
-        None
-    };
-    let page_hits = search_result
-        .hits
-        .into_iter()
-        .skip(cursor_offset)
-        .take(limit)
-        .collect::<Vec<_>>();
-    let results = serde_json::to_value(&page_hits).map_err(|error| CapabilityError::Internal {
-        message: error.to_string(),
-    })?;
-    let summary = render_search_summary(&query, &results);
-    capability_result_value(CapabilityResult {
-        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(summary)]),
-        details: Some(json!({
+    let search_results = search_result?;
+    render_search_result_value(search_results, catalog_revision.0, cursor_offset, limit)
+}
+
+fn search_queries(params: &Value) -> Result<Vec<String>, CapabilityError> {
+    if let Some(values) = params.get("queries").and_then(Value::as_array)
+        && !values.is_empty()
+    {
+        let mut queries = Vec::new();
+        for value in values.iter().take(8) {
+            let Some(query) = value.as_str() else {
+                return Err(CapabilityError::InvalidParams {
+                    message: "capability search queries must be strings".to_owned(),
+                });
+            };
+            queries.push(query.to_owned());
+        }
+        return Ok(queries);
+    }
+    Ok(vec![string_field(params, "query").unwrap_or_default()])
+}
+
+fn render_search_result_value(
+    search_results: Vec<(String, super::registry::CapabilityIndexSearchResult)>,
+    catalog_revision: u64,
+    cursor_offset: usize,
+    limit: usize,
+) -> Result<Value, CapabilityError> {
+    if search_results.len() == 1 {
+        let (query, search_result) = search_results
+            .into_iter()
+            .next()
+            .expect("single search result exists");
+        let next_cursor = if search_result.hits.len() > cursor_offset.saturating_add(limit) {
+            Some(cursor_offset.saturating_add(limit).to_string())
+        } else {
+            None
+        };
+        let page_hits = search_result
+            .hits
+            .into_iter()
+            .skip(cursor_offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let results =
+            serde_json::to_value(&page_hits).map_err(|error| CapabilityError::Internal {
+                message: error.to_string(),
+            })?;
+        let summary = render_search_summary(&query, &results);
+        return capability_result_value(CapabilityResult {
+            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(summary)]),
+            details: Some(json!({
+                "query": query,
+                "catalogRevision": catalog_revision,
+                "results": results,
+                "nextCursor": next_cursor,
+                "searchMode": search_result.status
+            })),
+            is_error: None,
+            stop_turn: None,
+        });
+    }
+
+    let mut batch_results = Vec::new();
+    let mut summary_lines = Vec::new();
+    for (query, search_result) in search_results {
+        let next_cursor = if search_result.hits.len() > cursor_offset.saturating_add(limit) {
+            Some(cursor_offset.saturating_add(limit).to_string())
+        } else {
+            None
+        };
+        let page_hits = search_result
+            .hits
+            .into_iter()
+            .skip(cursor_offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let result_count = page_hits.len();
+        let results =
+            serde_json::to_value(&page_hits).map_err(|error| CapabilityError::Internal {
+                message: error.to_string(),
+            })?;
+        summary_lines.push(format!("'{query}': {result_count} result(s)"));
+        batch_results.push(json!({
             "query": query,
-            "catalogRevision": catalog_revision.0,
             "results": results,
             "nextCursor": next_cursor,
-            "searchMode": search_result.status
+            "searchMode": search_result.status,
+        }));
+    }
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
+            "Capability batch search completed: {}.",
+            summary_lines.join("; ")
+        ))]),
+        details: Some(json!({
+            "queries": batch_results,
+            "catalogRevision": catalog_revision,
         })),
         is_error: None,
         stop_turn: None,
@@ -210,14 +290,50 @@ pub(crate) async fn inspect_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let actor = actor_from_invocation(invocation)?;
-    let target = resolve_target(&invocation.payload, deps, &actor).await?;
+    let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    if let Some(targets) = inspect_targets(&invocation.payload)? {
+        let mut inspections = Vec::new();
+        let mut summaries = Vec::new();
+        for target_payload in targets {
+            let inspection = inspect_one(&target_payload, deps, &actor, &trace_id).await?;
+            summaries.push(render_inspection_summary(&inspection));
+            inspections.push(inspection);
+        }
+        return capability_result_value(CapabilityResult {
+            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
+                "Inspected {} capability target(s): {}",
+                inspections.len(),
+                summaries.join("; ")
+            ))]),
+            details: Some(json!({ "inspections": inspections })),
+            is_error: None,
+            stop_turn: None,
+        });
+    }
+    let details = inspect_one(&invocation.payload, deps, &actor, &trace_id).await?;
+    let summary = render_inspection_summary(&details);
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(summary)]),
+        details: Some(details),
+        is_error: None,
+        stop_turn: None,
+    })
+}
+
+async fn inspect_one(
+    params: &Value,
+    deps: &Deps,
+    actor: &ActorContext,
+    trace_id: &str,
+) -> Result<Value, CapabilityError> {
+    let target = resolve_target(params, deps, actor).await?;
     let inspection = target.entry.inspection(target.binding_decision.clone());
     {
         let store = deps.registry_store.clone();
         let entry = target.entry.clone();
         let decision = target.binding_decision.clone();
         let handle = inspection.inspection_handle.clone();
-        let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+        let trace_id = trace_id.to_owned();
         run_blocking_task("capability.inspect.record", move || {
             let mut store = store.lock().map_err(|_| CapabilityError::Internal {
                 message: "capability registry store mutex poisoned".to_owned(),
@@ -243,16 +359,44 @@ pub(crate) async fn inspect_value(
         })
         .await?;
     }
-    let details = serde_json::to_value(inspection).map_err(|error| CapabilityError::Internal {
+    serde_json::to_value(inspection).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
-    })?;
-    let summary = render_inspection_summary(&details);
-    capability_result_value(CapabilityResult {
-        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(summary)]),
-        details: Some(details),
-        is_error: None,
-        stop_turn: None,
     })
+}
+
+fn inspect_targets(params: &Value) -> Result<Option<Vec<Value>>, CapabilityError> {
+    let Some(values) = params.get("targets").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    if values.is_empty() {
+        return Ok(None);
+    }
+    let mut targets = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for value in values.iter().take(8) {
+        let target = if let Some(id) = value.as_str() {
+            json!({ "capabilityId": id })
+        } else if value.is_object() {
+            value.clone()
+        } else {
+            return Err(CapabilityError::InvalidParams {
+                message: "capability inspect targets must be objects or capability id strings"
+                    .to_owned(),
+            });
+        };
+        if parse_target(&target).is_none() {
+            return Err(CapabilityError::InvalidParams {
+                message: "Each capability inspect target must include one of functionId, implementationId, capabilityId, or contractId".to_owned(),
+            });
+        }
+        let key = serde_json::to_string(&target).map_err(|error| CapabilityError::Internal {
+            message: error.to_string(),
+        })?;
+        if seen.insert(key) {
+            targets.push(target);
+        }
+    }
+    Ok(Some(targets))
 }
 
 pub(crate) async fn execute_value(
@@ -1736,7 +1880,12 @@ fn admin_vector_ready(admin: &Value) -> bool {
         == Some("ready")
 }
 
-fn degraded_operator_status(
+fn registry_needs_metadata_sync(admin: &Value, catalog_revision: u64) -> bool {
+    admin.get("catalogRevision").and_then(Value::as_u64) != Some(catalog_revision)
+        || admin.get("documents").and_then(Value::as_u64).unwrap_or(0) == 0
+}
+
+fn degraded_search_status(
     admin: &Value,
     policy: &CapabilitySearchPolicy,
     embedding_provider: &dyn super::embeddings::EmbeddingProvider,
@@ -1752,9 +1901,9 @@ fn degraded_operator_status(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| {
             if state == "unavailable" {
-                "local vector index is warming; lexical operator search returned".to_owned()
+                "local vector index is warming; lexical capability search returned".to_owned()
             } else {
-                format!("local vector index state is {state}; lexical operator search returned")
+                format!("local vector index state is {state}; lexical capability search returned")
             }
         });
     CapabilityIndexStatus {
@@ -2622,6 +2771,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::capability::types::CapabilityIndexHit;
     use crate::engine::{FunctionId, VisibilityScope, WorkerId};
 
     fn test_function(id: &str) -> FunctionDefinition {
@@ -2646,6 +2796,126 @@ mod tests {
         assert_eq!(entry.plugin_id, "first_party.filesystem");
         assert_eq!(entry.catalog_revision, 7);
         assert!(!entry.schema_digest.is_empty());
+    }
+
+    #[test]
+    fn search_queries_supports_batch_without_splitting_into_many_primitive_calls() {
+        let queries = search_queries(&json!({
+            "query": "ignored when batch is present",
+            "queries": [
+                "notify",
+                "ask user",
+                "spawn subagent",
+                "wait job",
+                "display image",
+                "computer action",
+                "web fetch",
+                "read file",
+                "extra ignored by schema cap"
+            ]
+        }))
+        .expect("queries");
+
+        assert_eq!(queries.len(), 8);
+        assert_eq!(queries[0], "notify");
+        assert_eq!(queries[7], "read file");
+    }
+
+    #[test]
+    fn inspect_targets_accepts_string_shorthand_and_dedupes_targets() {
+        let targets = inspect_targets(&json!({
+            "targets": [
+                "process::run",
+                {"contractId": "process::run"},
+                "process::run",
+                {"functionId": "filesystem::read_file"}
+            ]
+        }))
+        .expect("valid targets")
+        .expect("targets");
+
+        assert_eq!(targets.len(), 3);
+        assert_eq!(targets[0]["capabilityId"], json!("process::run"));
+        assert_eq!(targets[1]["contractId"], json!("process::run"));
+        assert_eq!(targets[2]["functionId"], json!("filesystem::read_file"));
+    }
+
+    #[test]
+    fn render_batch_search_preserves_per_query_statuses() {
+        let ready_status = CapabilityIndexStatus {
+            lexical: true,
+            local_vector: true,
+            cloud_embeddings: false,
+            vector_store: "sqlite-vec:vec0".to_owned(),
+            embedding_model: "fastembed:test".to_owned(),
+            state: "ready".to_owned(),
+            degraded_reason: None,
+        };
+        let degraded_status = CapabilityIndexStatus {
+            lexical: true,
+            local_vector: false,
+            cloud_embeddings: false,
+            vector_store: "none".to_owned(),
+            embedding_model: "none".to_owned(),
+            state: "unavailable".to_owned(),
+            degraded_reason: Some("embedding assets unavailable".to_owned()),
+        };
+        let hit = CapabilityIndexHit {
+            kind: "implementation".to_owned(),
+            capability_id: "process::run".to_owned(),
+            contract_id: "process::run".to_owned(),
+            implementation_id: "first_party.process.v1.run".to_owned(),
+            plugin_id: "first_party.process".to_owned(),
+            worker_id: "process".to_owned(),
+            function_id: "process::run".to_owned(),
+            catalog_revision: 7,
+            schema_digest: "digest".to_owned(),
+            trust_tier: "first_party_signed".to_owned(),
+            health: "Healthy".to_owned(),
+            visibility: "system".to_owned(),
+            effect_class: "external_side_effect".to_owned(),
+            risk_level: "low".to_owned(),
+            lexical_score: 1.0,
+            vector_score: Some(0.5),
+            fused_score: 1.5,
+            matched_by: "hybrid".to_owned(),
+            snippet: "Run a process".to_owned(),
+            requires_inspect: false,
+        };
+
+        let value = render_search_result_value(
+            vec![
+                (
+                    "process".to_owned(),
+                    super::super::registry::CapabilityIndexSearchResult {
+                        hits: vec![hit],
+                        status: ready_status,
+                    },
+                ),
+                (
+                    "notify".to_owned(),
+                    super::super::registry::CapabilityIndexSearchResult {
+                        hits: Vec::new(),
+                        status: degraded_status,
+                    },
+                ),
+            ],
+            7,
+            0,
+            10,
+        )
+        .expect("result");
+        let details = value["details"].as_object().expect("details");
+        let queries = details["queries"].as_array().expect("batch queries");
+
+        assert_eq!(queries.len(), 2);
+        assert_eq!(queries[0]["query"], json!("process"));
+        assert_eq!(queries[0]["searchMode"]["state"], json!("ready"));
+        assert_eq!(queries[1]["query"], json!("notify"));
+        assert_eq!(
+            queries[1]["searchMode"]["degradedReason"],
+            json!("embedding assets unavailable")
+        );
     }
 
     #[test]
@@ -2994,6 +3264,27 @@ mod tests {
 
         assert!(!policy.local_vector);
         assert!(!policy.require_local_vector);
+    }
+
+    #[test]
+    fn search_metadata_sync_runs_only_for_empty_or_changed_catalog() {
+        let current = json!({
+            "catalogRevision": 42,
+            "documents": 178,
+        });
+        assert!(!registry_needs_metadata_sync(&current, 42));
+
+        let changed = json!({
+            "catalogRevision": 41,
+            "documents": 178,
+        });
+        assert!(registry_needs_metadata_sync(&changed, 42));
+
+        let empty = json!({
+            "catalogRevision": 42,
+            "documents": 0,
+        });
+        assert!(registry_needs_metadata_sync(&empty, 42));
     }
 
     #[test]

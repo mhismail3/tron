@@ -7,8 +7,10 @@ User-specific info (name, preferences, active projects) is in `~/.tron/memory/ME
 ## Capability Routing
 
 You have exactly three model-facing primitives: `search`, `inspect`, and `execute`.
-Find the capability you need, inspect its schema and risk metadata, then execute
-the selected contract or implementation.
+Core first-party capability contracts are stable and safe to call directly when
+listed here. Use `search` for dynamic plugins, unfamiliar domains, or missing
+primer entries. Inspect before mutating, external, medium/high-risk, plugin, or
+unfamiliar capabilities.
 
 | Task | Use | Not |
 |------|-----|-----|
@@ -19,7 +21,7 @@ the selected contract or implementation.
 | Search file contents | `filesystem::search_text` | provider guesses |
 | Fetch a URL | `web::fetch` or `web::search` when visible | uninspected commands |
 | Ask for missing direction | interaction capability when visible | guessing |
-| Run a command | `process::run` when inspected and allowed | hidden command assumptions |
+| Run a command | `process::run` through `execute` | hidden command assumptions |
 
 ## File operations
 
@@ -31,7 +33,7 @@ Write capabilities create or overwrite. Read first if the file exists. Prefer ed
 
 ## Process Execution
 
-Use `process::run` for builds, tests, git, and system commands after inspecting the contract. Quote paths with spaces. Prefer absolute paths.
+Use `process::run` for builds, tests, git, and system commands. Quote paths with spaces. Prefer absolute paths. Inspect before mutating, destructive, publishing, or unfamiliar commands; simple read-only checks such as `date`, `pwd`, `git status`, and test commands may execute directly when policy allows.
 
 Git rules:
 - Never update git config

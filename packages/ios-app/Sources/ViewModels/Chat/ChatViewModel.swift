@@ -427,6 +427,7 @@ final class ChatViewModel {
                 invocation.status = data.success ? .success : .error
                 invocation.result = data.result
                 invocation.durationMs = data.durationMs
+                invocation.completedAt = Date()
                 invocation.details = data.details
                 invocation.progressMessage = nil
                 invocation.progressPercent = nil

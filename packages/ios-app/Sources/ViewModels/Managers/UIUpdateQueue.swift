@@ -91,8 +91,17 @@ final class UIUpdateQueue {
 
     // MARK: - State
 
+    private struct PendingUpdate {
+        let order: UInt64
+        let update: UpdateType
+    }
+
     /// Queue of pending updates
-    private var pendingUpdates: [UpdateType] = []
+    private var pendingUpdates: [PendingUpdate] = []
+    /// Monotonic enqueue order. Equal-priority updates use this to preserve
+    /// server cursor/arrival order, which keeps parallel capability chips from
+    /// jumping into completion order.
+    private var nextOrder: UInt64 = 0
     /// Batch processing task
     private var batchTask: Task<Void, Never>?
 
@@ -126,8 +135,8 @@ final class UIUpdateQueue {
     /// Enqueue a text delta update (coalesced heavily)
     func enqueueTextDelta(_ data: TextDeltaData) {
         // Text deltas are coalesced - replace any pending delta with new total
-        pendingUpdates.removeAll { update in
-            if case .textDelta = update { return true }
+        pendingUpdates.removeAll { pending in
+            if case .textDelta = pending.update { return true }
             return false
         }
         enqueue(.textDelta(data))
@@ -135,7 +144,8 @@ final class UIUpdateQueue {
 
     /// Core enqueue method
     private func enqueue(_ update: UpdateType) {
-        pendingUpdates.append(update)
+        pendingUpdates.append(PendingUpdate(order: nextOrder, update: update))
+        nextOrder += 1
         scheduleBatchProcessing()
     }
 
@@ -152,8 +162,16 @@ final class UIUpdateQueue {
                 return
             }
 
-            // Sort by priority and process
-            let updates = pendingUpdates.sorted()
+            // Sort by priority, then by stable enqueue order for parallel
+            // capability starts/completions with the same priority.
+            let updates = pendingUpdates
+                .sorted { lhs, rhs in
+                    if lhs.update.priority == rhs.update.priority {
+                        return lhs.order < rhs.order
+                    }
+                    return lhs.update.priority < rhs.update.priority
+                }
+                .map(\.update)
             pendingUpdates.removeAll()
 
             onProcessUpdates?(updates)
@@ -174,7 +192,14 @@ final class UIUpdateQueue {
 
         guard !pendingUpdates.isEmpty else { return }
 
-        let updates = pendingUpdates.sorted()
+        let updates = pendingUpdates
+            .sorted { lhs, rhs in
+                if lhs.update.priority == rhs.update.priority {
+                    return lhs.order < rhs.order
+                }
+                return lhs.update.priority < rhs.update.priority
+            }
+            .map(\.update)
         pendingUpdates.removeAll()
 
         onProcessUpdates?(updates)
@@ -185,6 +210,7 @@ final class UIUpdateQueue {
         batchTask?.cancel()
         batchTask = nil
         pendingUpdates.removeAll()
+        nextOrder = 0
     }
 
     // MARK: - Debugging

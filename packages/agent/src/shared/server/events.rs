@@ -86,8 +86,9 @@ pub(crate) fn event_row_to_server_payload(row: &EventRow) -> ServerEventPayload 
     payload
 }
 
-/// Convert an `EventRow` to wire format (camelCase).
-pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
+/// Convert an `EventRow` to wire format using a payload that has already been
+/// resolved from the event store.
+pub(crate) fn event_row_to_wire_with_payload(row: &EventRow, payload: Option<Value>) -> Value {
     let mut obj = serde_json::json!({
         "id": row.id,
         "type": row.event_type,
@@ -143,8 +144,7 @@ pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
         let _ = m.insert("cost".into(), serde_json::json!(cost));
     }
 
-    // Parse payload JSON string into a Value
-    if let Ok(payload) = serde_json::from_str::<Value>(&row.payload) {
+    if let Some(payload) = payload {
         let _ = m.insert("payload".into(), payload);
     }
 
@@ -154,6 +154,7 @@ pub(crate) fn event_row_to_wire(row: &EventRow) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::session::event_store::sqlite::row_types::EventRow;
     use serde_json::json;
 
     #[test]
@@ -179,5 +180,55 @@ mod tests {
         assert_eq!(value["sourceSequence"], 7);
         assert_eq!(value["streamCursor"], 42);
         assert!(value.get("type").is_some());
+    }
+
+    #[test]
+    fn wire_conversion_uses_resolved_payload_for_blob_backed_events() {
+        let row = EventRow {
+            id: "evt_1".into(),
+            session_id: "sess_1".into(),
+            parent_id: None,
+            sequence: 7,
+            depth: 0,
+            event_type: "capability.invocation.completed".into(),
+            timestamp: "2026-05-14T00:00:00Z".into(),
+            payload: json!({
+                "__tronPayloadRef": {
+                    "payloadBlobId": "blob_1",
+                    "payloadPreview": "{}"
+                }
+            })
+            .to_string(),
+            content_blob_id: None,
+            workspace_id: "workspace_1".into(),
+            role: Some("capability".into()),
+            model_primitive_name: None,
+            invocation_id: None,
+            turn: None,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+            checksum: None,
+            model: None,
+            latency_ms: None,
+            stop_reason: None,
+            has_thinking: None,
+            provider_type: None,
+            cost: None,
+        };
+        let resolved = json!({
+            "invocationId": "call_1",
+            "modelPrimitiveName": "inspect",
+            "content": "ok",
+            "isError": false,
+            "duration": 42
+        });
+
+        let wire = event_row_to_wire_with_payload(&row, Some(resolved));
+
+        assert_eq!(wire["payload"]["invocationId"], "call_1");
+        assert_eq!(wire["payload"]["modelPrimitiveName"], "inspect");
+        assert!(wire["payload"].get("__tronPayloadRef").is_none());
     }
 }

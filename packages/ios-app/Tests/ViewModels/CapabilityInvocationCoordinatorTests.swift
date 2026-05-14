@@ -436,7 +436,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.userInteractionCalledInTurn)
     }
 
-    func testUserInteractionCapabilityInvocationStartFallsBackOnParseFailure() async throws {
+    func testUserInteractionCapabilityInvocationStartRendersErrorOnParseFailure() async throws {
         // Given: An UserInteraction capability start with invalid JSON (parse will fail)
         let event = CapabilityInvocationStartedPlugin.Result(
             modelPrimitiveName: "execute",
@@ -449,7 +449,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         // When: Handling capability start
         coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
 
-        // Then: Should render a capability error instead of inferring an old-name fallback
+        // Then: Should render a capability error instead of inferring an old-name identity
         XCTAssertEqual(mockContext.messages.count, 1)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
             XCTAssertEqual(invocation.identity.contractId, "agent::ask_user")
@@ -775,9 +775,8 @@ extension CapabilityInvocationCompletedPlugin.Result {
         self.init(
             invocationId: invocationId,
             modelPrimitiveName: nil,
-            success: success,
-            output: success ? displayResult : nil,
-            error: success ? nil : displayResult,
+            isError: !success,
+            content: displayResult,
             duration: durationMs,
             details: details,
             rawDetails: nil,

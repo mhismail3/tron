@@ -4,7 +4,7 @@ use crate::domains::session::event_store::PooledConnection;
 use rusqlite::{Connection, params};
 use serde::Serialize;
 use serde_json::Value;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::shared::server::errors::CapabilityError;
 
@@ -224,11 +224,36 @@ fn parse_notification_content(event_id: &str, payload_str: &str) -> Option<Notif
         }
     };
 
-    let arguments = payload
-        .pointer("/details/output")
-        .or_else(|| payload.get("output"))
-        .or_else(|| payload.get("arguments"))
-        .unwrap_or(&payload);
+    let candidates = [
+        payload.get("arguments"),
+        payload.pointer("/details/output"),
+        payload.get("output"),
+        Some(&payload),
+    ];
+    let Some(arguments) = candidates.into_iter().flatten().find(|candidate| {
+        candidate
+            .get("title")
+            .and_then(Value::as_str)
+            .is_some_and(|title| !title.is_empty())
+            || candidate
+                .get("body")
+                .and_then(Value::as_str)
+                .is_some_and(|body| !body.is_empty())
+    }) else {
+        debug!(
+            event_id,
+            contract_id = payload
+                .get("contractId")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            invocation_id = payload
+                .get("invocationId")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "skipping notification inbox row without displayable title/body"
+        );
+        return None;
+    };
     let title = arguments
         .get("title")
         .and_then(Value::as_str)
@@ -239,10 +264,6 @@ fn parse_notification_content(event_id: &str, payload_str: &str) -> Option<Notif
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    if title.is_empty() && body.is_empty() {
-        warn!(event_id, "skipping notification with no title/body");
-        return None;
-    }
     Some(NotificationContent {
         title,
         body,
@@ -403,6 +424,53 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn list_uses_request_arguments_when_result_summary_omits_title_body() {
+        let ctx = make_test_context();
+        let conn = ctx.event_store.pool().get().unwrap();
+        setup_test_data(&conn);
+        let payload = json!({
+            "invocationId": "call_1",
+            "modelPrimitiveName": "execute",
+            "contractId": "notifications::send",
+            "implementationId": "first_party.notifications.v1.send",
+            "functionId": "notifications::send",
+            "pluginId": "first_party.notifications",
+            "workerId": "notifications",
+            "isError": false,
+            "duration": 3,
+            "content": "Sent",
+            "arguments": {
+                "title": "From arguments",
+                "body": "Rendered from the original request"
+            },
+            "details": {
+                "output": {
+                    "success": true,
+                    "successCount": 1,
+                    "totalCount": 1
+                }
+            }
+        });
+        insert_notify_event(
+            &conn,
+            "evt_args",
+            "sess_user",
+            "tc_args",
+            "2025-01-01T01:00:00Z",
+            &payload,
+        );
+
+        let result = NotificationInboxService::list(&conn, 50).unwrap();
+
+        assert_eq!(result.notifications.len(), 1);
+        assert_eq!(result.notifications[0].title, "From arguments");
+        assert_eq!(
+            result.notifications[0].body,
+            "Rendered from the original request"
+        );
     }
 
     #[test]

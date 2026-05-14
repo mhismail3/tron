@@ -51,9 +51,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         CapabilityInvocationCompletedPlugin.Result(
             invocationId: invocationId,
             modelPrimitiveName: nil,
-            success: success,
-            output: result,
-            error: success ? nil : result,
+            isError: !success,
+            content: result ?? "",
             duration: durationMs,
             details: nil,
             rawDetails: nil

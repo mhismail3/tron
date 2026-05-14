@@ -300,8 +300,8 @@ impl Default for CapabilitySearchPolicySpec {
             local_vector: true,
             cloud_embeddings: false,
             max_results: 50,
-            require_local_vector: true,
-            allow_lexical_only_when_degraded: false,
+            require_local_vector: false,
+            allow_lexical_only_when_degraded: true,
         }
     }
 }
@@ -327,7 +327,7 @@ impl Default for CapabilityContextPrimerPolicySpec {
         Self {
             enabled: true,
             mode: "coreFirstParty".to_owned(),
-            max_tokens: 1800,
+            max_tokens: 2600,
             include_examples: true,
             include_compact_schemas: true,
         }

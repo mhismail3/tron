@@ -14,8 +14,8 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "data": {
                 "invocationId": "capability-invocation-abc",
                 "modelPrimitiveName": "execute",
-                "success": true,
-                "output": "File content here",
+                "isError": false,
+                "content": "File content here",
                 "duration": 150
             }
         }
@@ -27,8 +27,8 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         XCTAssertEqual(event.sessionId, "session-123")
         XCTAssertEqual(event.data.invocationId, "capability-invocation-abc")
         XCTAssertEqual(event.data.modelPrimitiveName, "execute")
-        XCTAssertTrue(event.data.success)
-        XCTAssertEqual(event.data.output, "File content here")
+        XCTAssertFalse(event.data.isError)
+        XCTAssertEqual(event.data.content, "File content here")
         XCTAssertEqual(event.data.duration, 150)
     }
 
@@ -39,53 +39,37 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "sessionId": "session-123",
             "data": {
                 "invocationId": "capability-invocation-xyz",
-                "success": false,
-                "error": "File not found"
+                "modelPrimitiveName": "execute",
+                "isError": true,
+                "content": "File not found",
+                "duration": 42
             }
         }
         """.data(using: .utf8)!
 
         let event = try CapabilityInvocationCompletedPlugin.parse(from: json)
 
-        XCTAssertFalse(event.data.success)
-        XCTAssertEqual(event.data.error, "File not found")
+        XCTAssertTrue(event.data.isError)
+        XCTAssertEqual(event.data.content, "File not found")
     }
 
-    func testParseWithOutputAsString() throws {
+    func testParseWithContentString() throws {
         let json = """
         {
             "type": "capability.invocation.completed",
             "data": {
                 "invocationId": "capability-1",
-                "success": true,
-                "output": "String output"
+                "modelPrimitiveName": "execute",
+                "isError": false,
+                "content": "String output",
+                "duration": 5
             }
         }
         """.data(using: .utf8)!
 
         let event = try CapabilityInvocationCompletedPlugin.parse(from: json)
 
-        XCTAssertEqual(event.data.output, "String output")
-    }
-
-    func testParseWithOutputAsContentBlockArray() throws {
-        let json = """
-        {
-            "type": "capability.invocation.completed",
-            "data": {
-                "invocationId": "capability-2",
-                "success": true,
-                "output": [
-                    {"type": "text", "text": "First part"},
-                    {"type": "text", "text": " Second part"}
-                ]
-            }
-        }
-        """.data(using: .utf8)!
-
-        let event = try CapabilityInvocationCompletedPlugin.parse(from: json)
-
-        XCTAssertEqual(event.data.output, "First part Second part")
+        XCTAssertEqual(event.data.content, "String output")
     }
 
     func testParseWithDetails() throws {
@@ -94,7 +78,10 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "type": "capability.invocation.completed",
             "data": {
                 "invocationId": "capability-3",
-                "success": true,
+                "modelPrimitiveName": "execute",
+                "isError": false,
+                "content": "",
+                "duration": 10,
                 "details": {
                     "screenshot": "base64data...",
                     "format": "png"
@@ -115,7 +102,9 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "type": "capability.invocation.completed",
             "data": {
                 "invocationId": "capability-4",
-                "success": true,
+                "modelPrimitiveName": "execute",
+                "isError": false,
+                "content": "",
                 "duration": 500
             }
         }
@@ -136,8 +125,8 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "data": {
                 "invocationId": "capability-invocation-def",
                 "modelPrimitiveName": "execute",
-                "success": true,
-                "output": "File written successfully",
+                "isError": false,
+                "content": "File written successfully",
                 "duration": 200
             }
         }
@@ -155,7 +144,7 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         XCTAssertEqual(capabilityResult.invocationId, "capability-invocation-def")
         XCTAssertEqual(capabilityResult.modelPrimitiveName, "execute")
         XCTAssertTrue(capabilityResult.success)
-        XCTAssertEqual(capabilityResult.output, "File written successfully")
+        XCTAssertEqual(capabilityResult.content, "File written successfully")
         XCTAssertEqual(capabilityResult.duration, 200)
     }
 
@@ -165,8 +154,10 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "type": "capability.invocation.completed",
             "data": {
                 "invocationId": "capability-5",
-                "success": true,
-                "output": "Success content"
+                "modelPrimitiveName": "execute",
+                "isError": false,
+                "content": "Success content",
+                "duration": 12
             }
         }
         """.data(using: .utf8)!
@@ -183,8 +174,10 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "type": "capability.invocation.completed",
             "data": {
                 "invocationId": "capability-6",
-                "success": false,
-                "error": "Something went wrong"
+                "modelPrimitiveName": "execute",
+                "isError": true,
+                "content": "Something went wrong",
+                "duration": 12
             }
         }
         """.data(using: .utf8)!
@@ -193,5 +186,52 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         let result = CapabilityInvocationCompletedPlugin.transform(event) as? CapabilityInvocationCompletedPlugin.Result
 
         XCTAssertEqual(result?.displayResult, "Something went wrong")
+    }
+
+    func testParsesCanonicalServerEventPayloadFromCapabilityStore() throws {
+        let json = """
+        {
+            "type": "capability.invocation.completed",
+            "sessionId": "sess_019e25c9-8f30-7ed1-ae79-1646d50e1fe7",
+            "timestamp": "2026-05-14T09:24:43.940Z",
+            "data": {
+                "invocationId": "019e25cb-1234-7000-a000-000000000001",
+                "modelPrimitiveName": "execute",
+                "contractId": "filesystem::list_dir",
+                "implementationId": "first_party.filesystem.v1.list_dir",
+                "functionId": "filesystem::list_dir",
+                "pluginId": "first_party.filesystem",
+                "workerId": "filesystem",
+                "schemaDigest": "a8fe337ce28191708a15186227c6614c65da77c8771a9c6a8666bd097e462139",
+                "catalogRevision": 303,
+                "trustTier": "first_party_signed",
+                "riskLevel": "low",
+                "effectClass": "pure_read",
+                "traceId": "019e25cb-0ebe-79d1-b20c-3070e3256a15",
+                "rootInvocationId": "019e25cb-6ab0-7782-8110-684e36bc6218",
+                "bindingDecisionId": "binding_decision_019e25cb",
+                "content": "Listed session worktree.",
+                "isError": false,
+                "duration": 69,
+                "details": {
+                    "status": "ok",
+                    "output": {
+                        "path": "/Users/moose/Downloads/projects/testspace/.worktrees/session/sess_019e25c9-8f30-7ed1-ae79-1646d50e1fe7",
+                        "entries": []
+                    }
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let event = try CapabilityInvocationCompletedPlugin.parse(from: json)
+        let result = CapabilityInvocationCompletedPlugin.transform(event) as? CapabilityInvocationCompletedPlugin.Result
+
+        XCTAssertEqual(result?.invocationId, "019e25cb-1234-7000-a000-000000000001")
+        XCTAssertEqual(result?.success, true)
+        XCTAssertEqual(result?.displayResult, "Listed session worktree.")
+        XCTAssertEqual(result?.duration, 69)
+        XCTAssertEqual(result?.identity.contractId, "filesystem::list_dir")
+        XCTAssertEqual(result?.rawDetails?["status"]?.stringValue, "ok")
     }
 }

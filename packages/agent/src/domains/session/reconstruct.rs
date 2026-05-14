@@ -36,7 +36,7 @@ use crate::domains::agent::prompt_queue::PromptQueueService;
 use crate::domains::session::Deps;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, CapabilityError};
-use crate::shared::server::events::event_row_to_wire;
+use crate::shared::server::events::event_row_to_wire_with_payload;
 
 /// Hard ceiling on the number of events returned by a single
 /// `session.reconstruct` call, regardless of what the client asks for.
@@ -186,7 +186,17 @@ impl SessionReconstructService {
         let oldest_sequence = events.first().map(|e| e.sequence);
 
         // 5. Convert events to wire format
-        let mut wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
+        let resolved_payloads =
+            deps.event_store
+                .resolve_event_payloads(&events)
+                .map_err(|error| CapabilityError::Internal {
+                    message: format!("Failed to resolve event payloads: {error}"),
+                })?;
+        let mut wire_events: Vec<Value> = events
+            .iter()
+            .zip(resolved_payloads)
+            .map(|(event, payload)| event_row_to_wire_with_payload(event, Some(payload)))
+            .collect();
 
         // 5a. Enrich agent::ask_user capability.invocation.started events with server-parsed
         // status so iOS can render them without scanning event history.

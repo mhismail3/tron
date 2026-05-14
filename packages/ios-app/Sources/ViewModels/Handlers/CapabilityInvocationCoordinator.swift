@@ -51,6 +51,7 @@ final class CapabilityInvocationCoordinator {
                 id: pluginResult.invocationId,
                 status: .generating,
                 arguments: "",
+                generatedAt: Date(),
                 identity: pluginResult.identity
             )
             content = .capabilityInvocation(invocation)
@@ -102,6 +103,7 @@ final class CapabilityInvocationCoordinator {
             status: .running,
             arguments: pluginResult.formattedArguments,
             payloadJSON: pluginResult.arguments,
+            startedAt: Date(),
             identity: pluginResult.identity
         )
 
@@ -132,6 +134,7 @@ final class CapabilityInvocationCoordinator {
                     existing.arguments = pluginResult.formattedArguments
                     existing.payloadJSON = pluginResult.arguments
                     existing.status = .running
+                    existing.startedAt = existing.startedAt ?? Date()
                     existing.identity = pluginResult.identity
                     context.messages[existingIndex].content = .capabilityInvocation(existing)
                     context.currentCapabilityInvocationMessages[context.messages[existingIndex].id] = context.messages[existingIndex]

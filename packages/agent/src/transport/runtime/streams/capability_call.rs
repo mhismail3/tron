@@ -47,12 +47,18 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             capability_identity,
             ..
         } => {
-            let success = !is_error.unwrap_or(false);
+            let result_is_error = is_error.unwrap_or_else(|| {
+                result
+                    .as_ref()
+                    .and_then(|capability_result| capability_result.is_error)
+                    .unwrap_or(false)
+            });
             let mut data = json!({
                 "modelPrimitiveName": model_primitive_name,
                 "invocationId": invocation_id,
                 "duration": duration,
-                "success": success,
+                "isError": result_is_error,
+                "content": "",
             });
             if let Some(capability_result) = result {
                 let result_text = match &capability_result.content {
@@ -66,11 +72,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                         .collect::<Vec<_>>()
                         .join("\n"),
                 };
-                if success {
-                    data["output"] = json!(result_text);
-                } else {
-                    data["error"] = json!(result_text);
-                }
+                data["content"] = json!(result_text);
                 if let Some(details) = &capability_result.details {
                     data["details"] = details.clone();
                 }

@@ -81,9 +81,8 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = CapabilityInvocationCompletedPlugin.Result(
             invocationId: "inv_123",
             modelPrimitiveName: "execute",
-            success: true,
-            output: "file contents",
-            error: nil,
+            isError: false,
+            content: "file contents",
             duration: 150,
             details: nil,
             rawDetails: nil

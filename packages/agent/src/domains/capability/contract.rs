@@ -273,6 +273,12 @@ fn search_request_schema() -> serde_json::Value {
         "additionalProperties": false,
         "properties": {
             "query": {"type": "string", "description": "Natural language or identifier search over live capabilities."},
+            "queries": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 8,
+                "description": "Optional batch of related capability searches. Use this instead of several separate search calls when looking up multiple first-party or plugin capabilities."
+            },
             "limit": {"type": "integer", "minimum": 1, "maximum": 50},
             "cursor": {"type": "string"},
             "kind": {"type": "string", "enum": ["contract", "implementation", "plugin", "worker", "function"]},
@@ -297,6 +303,26 @@ fn inspect_request_schema() -> serde_json::Value {
             "contractId": {"type": "string"},
             "implementationId": {"type": "string"},
             "functionId": {"type": "string"},
+            "targets": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                    "oneOf": [
+                        {"type": "string", "description": "Capability, contract, implementation, or function id."},
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "capabilityId": {"type": "string"},
+                                "contractId": {"type": "string"},
+                                "implementationId": {"type": "string"},
+                                "functionId": {"type": "string"}
+                            }
+                        }
+                    ]
+                },
+                "description": "Optional batch of capability targets to inspect under one catalog snapshot."
+            },
             "includeExamples": {"type": "boolean"},
             "includeDocs": {"type": "boolean"},
             "includePolicy": {"type": "boolean"}

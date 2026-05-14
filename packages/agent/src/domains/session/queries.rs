@@ -281,25 +281,23 @@ impl SessionQueryService {
                 events
             };
 
+            let resolved_payloads =
+                event_store
+                    .resolve_event_payloads(&events)
+                    .map_err(|error| CapabilityError::Internal {
+                        message: format!("Failed to resolve event payloads: {error}"),
+                    })?;
+
             let messages: Vec<Value> = events
                 .iter()
-                .map(|event| {
+                .zip(resolved_payloads)
+                .map(|(event, content)| {
                     let role = match event.event_type.as_str() {
                         "message.user" => "user",
                         "message.assistant" => "assistant",
                         "capability.invocation.completed" => "capability",
                         _ => "unknown",
                     };
-                    let content =
-                        serde_json::from_str::<Value>(&event.payload).unwrap_or_else(|error| {
-                            tracing::warn!(
-                                event_id = %event.id,
-                                error = %error,
-                                "corrupt event payload"
-                            );
-                            Value::Null
-                        });
-
                     let mut message = json!({
                         "id": event.id,
                         "role": role,

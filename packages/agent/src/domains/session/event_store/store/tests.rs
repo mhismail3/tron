@@ -1735,6 +1735,46 @@ fn get_messages_at_head_resolves_blob_backed_event_payloads() {
 }
 
 #[test]
+fn resolve_event_payloads_expands_blob_backed_capability_events() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .unwrap();
+    let large_content = "inspect result ".repeat(2048);
+    let event = store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::CapabilityInvocationCompleted,
+            payload: serde_json::json!({
+                "invocationId": "call_inspect",
+                "modelPrimitiveName": "inspect",
+                "content": large_content,
+                "isError": false,
+                "duration": 33
+            }),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    assert!(
+        event
+            .payload
+            .contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
+    );
+
+    let payloads = store.resolve_event_payloads(&[event]).unwrap();
+
+    assert_eq!(payloads[0]["invocationId"], "call_inspect");
+    assert_eq!(payloads[0]["modelPrimitiveName"], "inspect");
+    assert_eq!(payloads[0]["content"], large_content);
+    assert!(
+        payloads[0]
+            .get(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
+            .is_none()
+    );
+}
+
+#[test]
 fn get_messages_at_specific_event() {
     let store = setup();
     let cr = store
