@@ -184,20 +184,20 @@ final class MessageFinderTests: XCTestCase {
         XCTAssertNil(MessageFinder.indexBySubagentSessionId("sub-x", in: [makeTextMessage()]))
     }
 
-    // MARK: - indexOfSpawnSubagentInvocation
+    // MARK: - indexOfSubagentCapabilityInvocation
 
-    func testIndexOfSpawnSubagentCapabilityMatchesBothIdAndContract() {
+    func testIndexOfSubagentCapabilityInvocationMatchesBothIdAndContract() {
         let messages = [makeCapabilityInvocationMessage(invocationId: "tc-1", contractId: "agent::spawn_subagent")]
-        XCTAssertEqual(MessageFinder.indexOfSpawnSubagentInvocation(invocationId: "tc-1", in: messages), 0)
+        XCTAssertEqual(MessageFinder.indexOfSubagentCapabilityInvocation(invocationId: "tc-1", in: messages), 0)
     }
 
-    func testIndexOfSpawnSubagentCapabilityWrongContractReturnsNil() {
+    func testIndexOfSubagentCapabilityInvocationWrongContractReturnsNil() {
         let messages = [makeCapabilityInvocationMessage(invocationId: "tc-1", contractId: "filesystem::read_file")]
-        XCTAssertNil(MessageFinder.indexOfSpawnSubagentInvocation(invocationId: "tc-1", in: messages))
+        XCTAssertNil(MessageFinder.indexOfSubagentCapabilityInvocation(invocationId: "tc-1", in: messages))
     }
 
-    func testIndexOfSpawnSubagentCapabilityWrongIdReturnsNil() {
+    func testIndexOfSubagentCapabilityInvocationWrongIdReturnsNil() {
         let messages = [makeCapabilityInvocationMessage(invocationId: "tc-wrong", contractId: "agent::spawn_subagent")]
-        XCTAssertNil(MessageFinder.indexOfSpawnSubagentInvocation(invocationId: "tc-1", in: messages))
+        XCTAssertNil(MessageFinder.indexOfSubagentCapabilityInvocation(invocationId: "tc-1", in: messages))
     }
 }

@@ -86,6 +86,10 @@ pub struct CapabilitySpec {
     pub tags: Vec<&'static str>,
     /// Compact examples supplied by the owning domain.
     pub examples: Vec<serde_json::Value>,
+    /// Capability lifecycle metadata supplied by the owning domain.
+    pub lifecycle: Option<serde_json::Value>,
+    /// Generated UI presentation hints supplied by the owning domain.
+    pub presentation_hints: Option<serde_json::Value>,
 }
 
 /// Agent-facing canonical function contract.

@@ -41,7 +41,7 @@ extension ChatViewModel {
     // MARK: - Subagent State Restoration
 
     /// Restore subagent state from reconstructed session data.
-    /// Populates SubagentState from result events and converts SpawnSubagent capability messages
+    /// Populates SubagentState from result events and converts subagent capability messages
     /// to subagent chips using lifecycle events (spawned/completed/failed).
     func restoreSubagentState(from state: ReconstructedState) {
         // Populate SubagentState from reconstructed subagent results

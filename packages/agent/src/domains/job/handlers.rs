@@ -35,6 +35,12 @@ operation_bindings! {
         "list" => |invocation, deps| {
             job_list_value(Some(&invocation.payload), deps)
         },
+        "wait" => |invocation, deps| {
+            job_wait_value(Some(&invocation.payload), deps).await
+        },
+        "stream_output" => |invocation, deps| {
+            job_stream_output_value(Some(&invocation.payload), deps)
+        },
         "subscribe" => |invocation, deps| {
             job_subscribe_value(Some(&invocation.payload), deps).await
         },

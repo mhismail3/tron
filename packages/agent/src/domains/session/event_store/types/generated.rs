@@ -35,6 +35,12 @@ define_events! {
         CapabilityInvocationCompleted => "capability.invocation.completed" => payloads::capability_invocation::CapabilityInvocationCompletedPayload,
         /// Capability invocation progress update.
         CapabilityInvocationProgress => "capability.invocation.progress" => payloads::capability_invocation::CapabilityInvocationProgressPayload,
+        /// Capability pause requested.
+        CapabilityPauseRequested => "capability.pause.requested" => payloads::capability_invocation::CapabilityPauseRequestedPayload,
+        /// Capability pause resolved.
+        CapabilityPauseResolved => "capability.pause.resolved" => payloads::capability_invocation::CapabilityPauseResolvedPayload,
+        /// Capability async run status update.
+        CapabilityRunStatus => "capability.run.status" => payloads::capability_invocation::CapabilityRunStatusPayload,
         /// Text delta during streaming.
         StreamTextDelta => "stream.text_delta" => payloads::streaming::StreamTextDeltaPayload,
         /// Thinking delta during streaming.
@@ -226,7 +232,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 80] = [
+    const EXPECTED: [(EventType, &str); 83] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -248,6 +254,15 @@ mod tests {
             EventType::CapabilityInvocationProgress,
             "capability.invocation.progress",
         ),
+        (
+            EventType::CapabilityPauseRequested,
+            "capability.pause.requested",
+        ),
+        (
+            EventType::CapabilityPauseResolved,
+            "capability.pause.resolved",
+        ),
+        (EventType::CapabilityRunStatus, "capability.run.status"),
         (EventType::StreamTextDelta, "stream.text_delta"),
         (EventType::StreamThinkingDelta, "stream.thinking_delta"),
         (EventType::StreamTurnStart, "stream.turn_start"),
@@ -374,7 +389,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 80);
+        assert_eq!(ALL_EVENT_TYPES.len(), 83);
     }
 
     #[test]

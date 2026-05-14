@@ -108,8 +108,8 @@ mod tests {
     use crate::shared::messages::{CapabilityResultMessageContent, UserMessageContent};
 
     use crate::domains::agent::runner::context::constants::{
-        SUMMARIZER_ASSISTANT_TEXT_LIMIT, SUMMARIZER_MAX_SERIALIZED_CHARS,
-        SUMMARIZER_TOOL_RESULT_TEXT_LIMIT,
+        SUMMARIZER_ASSISTANT_TEXT_LIMIT, SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT,
+        SUMMARIZER_MAX_SERIALIZED_CHARS,
     };
 
     // -- serialize_messages (delegates to summarizer module, verify integration) --
@@ -187,7 +187,7 @@ mod tests {
             thinking: None,
         }];
         let result = serialize_messages(&msgs);
-        assert!(result.starts_with("[TOOL_CALL] execute("));
+        assert!(result.starts_with("[CAPABILITY_INVOCATION] execute("));
         assert!(result.contains("file_path: /src/main.rs"));
     }
 
@@ -199,7 +199,7 @@ mod tests {
             is_error: None,
         }];
         let result = serialize_messages(&msgs);
-        assert!(result.starts_with("[TOOL_RESULT] File content"));
+        assert!(result.starts_with("[CAPABILITY_RESULT] File content"));
     }
 
     #[test]
@@ -210,7 +210,7 @@ mod tests {
             is_error: Some(true),
         }];
         let result = serialize_messages(&msgs);
-        assert!(result.starts_with("[TOOL_ERROR] Permission denied"));
+        assert!(result.starts_with("[CAPABILITY_ERROR] Permission denied"));
     }
 
     #[test]
@@ -222,8 +222,8 @@ mod tests {
             is_error: None,
         }];
         let result = serialize_messages(&msgs);
-        let content = result.strip_prefix("[TOOL_RESULT] ").unwrap();
-        assert_eq!(content.len(), SUMMARIZER_TOOL_RESULT_TEXT_LIMIT);
+        let content = result.strip_prefix("[CAPABILITY_RESULT] ").unwrap();
+        assert_eq!(content.len(), SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT);
     }
 
     #[test]

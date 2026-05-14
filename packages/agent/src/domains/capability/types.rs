@@ -212,3 +212,47 @@ pub(crate) struct CapabilityProgramRunRecord {
     pub(crate) error: Option<Value>,
     pub(crate) compensation_attempts: Vec<Value>,
 }
+
+/// Durable record for a capability invocation that paused awaiting an external
+/// decision or input.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityPauseRecord {
+    pub(crate) pause_id: String,
+    pub(crate) invocation_id: String,
+    pub(crate) contract_id: String,
+    pub(crate) implementation_id: String,
+    pub(crate) function_id: String,
+    pub(crate) plugin_id: Option<String>,
+    pub(crate) worker_id: Option<String>,
+    pub(crate) kind: String,
+    pub(crate) status: String,
+    pub(crate) prompt_payload: Value,
+    pub(crate) resume_schema: Option<Value>,
+    pub(crate) answer_authority: String,
+    pub(crate) expires_at: Option<String>,
+    pub(crate) trace_id: Option<String>,
+    pub(crate) root_invocation_id: Option<String>,
+    pub(crate) binding_decision_id: Option<String>,
+}
+
+/// Durable record for a capability invocation that continues after returning a
+/// handle, such as a background process or spawned subagent.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityRunRecord {
+    pub(crate) run_id: String,
+    pub(crate) invocation_id: String,
+    pub(crate) contract_id: String,
+    pub(crate) implementation_id: String,
+    pub(crate) function_id: String,
+    pub(crate) plugin_id: Option<String>,
+    pub(crate) worker_id: Option<String>,
+    pub(crate) status: String,
+    pub(crate) stream_topic: Option<String>,
+    pub(crate) child_invocations: Vec<String>,
+    pub(crate) trace_id: Option<String>,
+    pub(crate) root_invocation_id: Option<String>,
+    pub(crate) binding_decision_id: Option<String>,
+    pub(crate) details: Value,
+}

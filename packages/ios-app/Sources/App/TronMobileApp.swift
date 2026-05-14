@@ -272,9 +272,9 @@ struct TronMobileApp: App {
 
     // MARK: - Push Notifications
 
-    /// Register device token with the server (global registration — the
-    /// server fans out every NotifyApp to all active tokens regardless of
-    /// which session the notification originates from).
+    /// Register device token with the server. Registration is global: the
+    /// server fans out every `notifications::send` delivery to all active
+    /// tokens regardless of which session originated it.
     private func registerDeviceToken(_ token: String) async {
         guard container.engineClient.isConnected else {
             TronLogger.shared.debug("Not connected, will register token when connected", category: .notification)

@@ -95,6 +95,8 @@ struct CapabilityInvocationChip: View {
             return "unavailable"
         case .approvalRequired:
             return "approval"
+        case .paused:
+            return "paused"
         case .generating, .running, .success:
             return nil
         }

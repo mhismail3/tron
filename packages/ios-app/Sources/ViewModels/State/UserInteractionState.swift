@@ -23,6 +23,8 @@ final class UserInteractionState {
     /// Pending answer submission to send after sheet dismissal completes.
     /// Set during prepareSubmission(), consumed by executePendingSubmission().
     var pendingSubmission: [AnswerSubmission]?
+    var pendingPauseId: String?
+    var pendingInvocationId: String?
 
     init() {}
 
@@ -38,5 +40,7 @@ final class UserInteractionState {
         answers = [:]
         calledInTurn = false
         pendingSubmission = nil
+        pendingPauseId = nil
+        pendingInvocationId = nil
     }
 }

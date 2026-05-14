@@ -93,9 +93,7 @@ final class CapabilityInvocationCoordinator {
         // Parse UserInteraction params if applicable
         var userInteractionParams: UserInteractionParams?
         if isUserInteraction {
-            if let paramsData = pluginResult.formattedArguments.data(using: .utf8) {
-                userInteractionParams = try? JSONDecoder().decode(UserInteractionParams.self, from: paramsData)
-            }
+            userInteractionParams = decodeUserInteractionParams(from: pluginResult)
         }
 
         // Create capability data
@@ -354,6 +352,25 @@ final class CapabilityInvocationCoordinator {
             identity: pluginResult.identity
         )
         context.currentTurnCapabilityInvocations.append(record)
+    }
+
+    private func decodeUserInteractionParams(
+        from pluginResult: CapabilityInvocationStartedPlugin.Result
+    ) -> UserInteractionParams? {
+        if let paramsData = pluginResult.formattedArguments.data(using: .utf8),
+           let params = try? JSONDecoder().decode(UserInteractionParams.self, from: paramsData) {
+            return params
+        }
+        guard let payload = pluginResult.arguments?["payload"],
+              let payloadDict = payload.value as? [String: Any] else {
+            return nil
+        }
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: payloadDict, options: [])
+            return try JSONDecoder().decode(UserInteractionParams.self, from: jsonData)
+        } catch {
+            return nil
+        }
     }
 
 }

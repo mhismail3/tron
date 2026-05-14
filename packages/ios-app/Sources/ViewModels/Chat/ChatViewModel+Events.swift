@@ -110,6 +110,88 @@ extension ChatViewModel {
         }
     }
 
+    func handleCapabilityPauseRequested(_ result: CapabilityPauseRequestedPlugin.Result) {
+        if let index = MessageFinder.lastIndexOfUserInteraction(invocationId: result.invocationId, in: messages),
+           case .userInteraction(var data) = messages[index].content {
+            data.pauseId = result.pauseId
+            data.status = .pending
+            messages[index].content = .userInteraction(data)
+            userInteractionState.currentData = data
+            openUserInteractionSheet(for: data)
+            return
+        }
+
+        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
+
+        if case .capabilityInvocation(var invocation) = messages[index].content {
+            invocation.status = result.kind == "approval" ? .approvalRequired : .paused
+            invocation.progressMessage = lifecycleStatusMessage(kind: result.kind, status: result.status)
+            invocation.details = mergeCapabilityDetails(
+                invocation.details,
+                [
+                    "pauseId": AnyCodable(result.pauseId),
+                    "pauseKind": AnyCodable(result.kind),
+                    "pauseStatus": AnyCodable(result.status),
+                    "answerAuthority": AnyCodable(result.answerAuthority as Any),
+                    "expiresAt": AnyCodable(result.expiresAt as Any),
+                    "promptPayload": AnyCodable(result.promptPayload as Any)
+                ]
+            )
+            if !result.identity.isEmpty { invocation.identity = result.identity }
+            messages[index].content = .capabilityInvocation(invocation)
+        }
+    }
+
+    func handleCapabilityPauseResolved(_ result: CapabilityPauseResolvedPlugin.Result) {
+        if let index = MessageFinder.lastIndexOfUserInteraction(invocationId: result.invocationId, in: messages),
+           case .userInteraction(var data) = messages[index].content {
+            data.status = result.status == "resumed" ? .answered : .superseded
+            messages[index].content = .userInteraction(data)
+            return
+        }
+
+        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
+
+        if case .capabilityInvocation(var invocation) = messages[index].content {
+            invocation.status = result.status == "resumed" ? .running : .unavailable
+            invocation.progressMessage = "Pause \(result.status)"
+            invocation.details = mergeCapabilityDetails(
+                invocation.details,
+                [
+                    "pauseId": AnyCodable(result.pauseId),
+                    "pauseStatus": AnyCodable(result.status),
+                    "resolution": AnyCodable(result.resolution as Any)
+                ]
+            )
+            if !result.identity.isEmpty { invocation.identity = result.identity }
+            messages[index].content = .capabilityInvocation(invocation)
+        }
+    }
+
+    func handleCapabilityRunStatus(_ result: CapabilityRunStatusPlugin.Result) {
+        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
+
+        if case .capabilityInvocation(var invocation) = messages[index].content {
+            invocation.status = capabilityStatus(forRunStatus: result.status, current: invocation.status)
+            invocation.progressMessage = "Run \(result.status)"
+            invocation.details = mergeCapabilityDetails(
+                invocation.details,
+                [
+                    "runId": AnyCodable(result.runId),
+                    "runStatus": AnyCodable(result.status),
+                    "streamTopic": AnyCodable(result.streamTopic as Any),
+                    "childInvocations": AnyCodable(result.childInvocations),
+                    "runDetails": AnyCodable(result.details as Any)
+                ]
+            )
+            if !result.identity.isEmpty { invocation.identity = result.identity }
+            messages[index].content = .capabilityInvocation(invocation)
+        }
+    }
+
     func handleCapabilityInvocationCompleted(_ pluginResult: CapabilityInvocationCompletedPlugin.Result) {
         // Delegate directly to coordinator
         capabilityInvocationCoordinator.handleCapabilityInvocationCompleted(pluginResult, context: self)
@@ -212,6 +294,38 @@ extension ChatViewModel {
         pullUpPanelState.awaitingSuggestions = false
         // Clear queue — server context is lost, queued messages are stale
         messageQueueState.clear()
+    }
+
+    private func lifecycleStatusMessage(kind: String, status: String) -> String {
+        switch kind {
+        case "user_input": return "Waiting for your response"
+        case "approval": return "Waiting for approval"
+        default: return "\(kind.replacingOccurrences(of: "_", with: " ")) \(status)"
+        }
+    }
+
+    private func capabilityStatus(
+        forRunStatus status: String,
+        current: CapabilityInvocationStatus
+    ) -> CapabilityInvocationStatus {
+        switch status {
+        case "pending", "running": return .running
+        case "paused_for_approval", "paused": return .paused
+        case "completed", "ok": return .success
+        case "cancelled", "timeout", "failed", "worker_disconnected", "policy_denied": return .error
+        default: return current
+        }
+    }
+
+    private func mergeCapabilityDetails(
+        _ existing: [String: AnyCodable]?,
+        _ updates: [String: AnyCodable]
+    ) -> [String: AnyCodable] {
+        var merged = existing ?? [:]
+        for (key, value) in updates {
+            merged[key] = value
+        }
+        return merged
     }
 
     func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {

@@ -63,6 +63,13 @@ pub(crate) struct CapabilityContract {
     pub(crate) tags: Vec<&'static str>,
     /// Compact usage examples rendered by inspect/search/primer surfaces.
     pub(crate) examples: Vec<Value>,
+    /// Capability lifecycle metadata consumed by the runner, registry, and
+    /// generated clients. This is the contract-native replacement for any
+    /// hardcoded interactive-tool lists.
+    pub(crate) lifecycle: Option<Value>,
+    /// Optional presentation metadata for chip/sheet summaries. Renderers may
+    /// use these hints, but capability identity always comes from the contract.
+    pub(crate) presentation_hints: Option<Value>,
 }
 
 impl CapabilityContract {
@@ -101,6 +108,8 @@ impl CapabilityContract {
             description: None,
             tags: Vec::new(),
             examples: Vec::new(),
+            lifecycle: None,
+            presentation_hints: None,
         }
     }
 
@@ -200,6 +209,18 @@ impl CapabilityContract {
         self
     }
 
+    /// Attach lifecycle metadata.
+    pub(crate) fn lifecycle(mut self, lifecycle: Value) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
+    }
+
+    /// Attach presentation hints for generated UI.
+    pub(crate) fn presentation_hints(mut self, hints: Value) -> Self {
+        self.presentation_hints = Some(hints);
+        self
+    }
+
     /// Convert the local domain record to the aggregate catalog shape.
     pub(crate) fn build(self) -> EngineResult<CapabilitySpec> {
         Ok(CapabilitySpec {
@@ -224,6 +245,8 @@ impl CapabilityContract {
             description: self.description,
             tags: self.tags,
             examples: self.examples,
+            lifecycle: self.lifecycle,
+            presentation_hints: self.presentation_hints,
         })
     }
 }
@@ -288,8 +311,15 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
             | "web::search"
             | "web::fetch"
             | "notifications::send"
+            | "agent::ask_user"
             | "agent::status"
             | "agent::submit_answers"
+            | "agent::spawn_subagent"
+            | "agent::subagent_status"
+            | "agent::subagent_result"
+            | "agent::cancel_subagent"
+            | "job::wait"
+            | "job::stream_output"
             | "sandbox::spawn_worker"
             | "sandbox::list_spawned_workers"
             | "sandbox::stop_spawned_worker"
@@ -299,6 +329,18 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     } else {
         "catalog"
     };
+    let stops_turn = spec
+        .lifecycle
+        .as_ref()
+        .and_then(|value| value.get("stopsTurn"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let is_interactive = spec.lifecycle.as_ref().is_some_and(|value| {
+        matches!(
+            value.get("kind").and_then(Value::as_str),
+            Some("approval" | "user_input" | "async_run" | "stream" | "external_interaction")
+        )
+    });
     definition.metadata = json!({
         "operationKey": spec.operation_key.as_str(),
         "domainWorker": spec.domain_worker.as_str(),
@@ -318,6 +360,10 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         "domainModule": spec.domain_module,
         "highRiskContract": spec.high_risk_contract,
         "streamTopics": spec.stream_topics,
+        "lifecycle": spec.lifecycle,
+        "stopsTurn": stops_turn,
+        "isInteractive": is_interactive,
+        "presentationHints": spec.presentation_hints,
     });
     definition
 }

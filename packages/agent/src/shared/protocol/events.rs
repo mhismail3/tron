@@ -572,6 +572,56 @@ tron_events! {
         capability_identity: CapabilityEventIdentity,
     } => "capability.resolution",
 
+    /// Capability execution paused for user/client/system input.
+    CapabilityPauseRequested {
+        #[serde(rename = "pauseId")]
+        pause_id: String,
+        #[serde(rename = "invocationId")]
+        invocation_id: String,
+        kind: String,
+        status: String,
+        #[serde(rename = "promptPayload")]
+        prompt_payload: Value,
+        #[serde(rename = "resumeSchema", skip_serializing_if = "Option::is_none")]
+        resume_schema: Option<Value>,
+        #[serde(rename = "answerAuthority")]
+        answer_authority: String,
+        #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+        expires_at: Option<String>,
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.pause.requested",
+
+    /// Capability pause resolved, denied, cancelled, or expired.
+    CapabilityPauseResolved {
+        #[serde(rename = "pauseId")]
+        pause_id: String,
+        #[serde(rename = "invocationId")]
+        invocation_id: String,
+        status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resolution: Option<Value>,
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.pause.resolved",
+
+    /// Capability async run status update.
+    CapabilityRunStatus {
+        #[serde(rename = "runId")]
+        run_id: String,
+        #[serde(rename = "invocationId")]
+        invocation_id: String,
+        status: String,
+        #[serde(rename = "streamTopic", skip_serializing_if = "Option::is_none")]
+        stream_topic: Option<String>,
+        #[serde(rename = "childInvocations")]
+        child_invocations: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
+        #[serde(flatten)]
+        capability_identity: CapabilityEventIdentity,
+    } => "capability.run.status",
+
     /// Capability invocation completed.
     CapabilityInvocationCompleted {
         #[serde(rename = "invocationId")]
@@ -1428,6 +1478,9 @@ impl TronEvent {
                 | Self::CapabilityInvocationOutput { .. }
                 | Self::CapabilityInvocationProgress { .. }
                 | Self::CapabilityResolution { .. }
+                | Self::CapabilityPauseRequested { .. }
+                | Self::CapabilityPauseResolved { .. }
+                | Self::CapabilityRunStatus { .. }
                 | Self::CapabilityInvocationCompleted { .. }
         )
     }
@@ -2013,6 +2066,36 @@ mod tests {
                 requested_implementation_id: None,
                 requested_function_id: None,
                 capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
+            },
+            TronEvent::CapabilityPauseRequested {
+                base: base.clone(),
+                pause_id: "pause-1".into(),
+                invocation_id: "id".into(),
+                kind: "user_input".into(),
+                status: "pending".into(),
+                prompt_payload: json!({"questions": []}),
+                resume_schema: None,
+                answer_authority: "user".into(),
+                expires_at: None,
+                capability_identity: CapabilityEventIdentity::default(),
+            },
+            TronEvent::CapabilityPauseResolved {
+                base: base.clone(),
+                pause_id: "pause-1".into(),
+                invocation_id: "id".into(),
+                status: "resumed".into(),
+                resolution: Some(json!({"answers": []})),
+                capability_identity: CapabilityEventIdentity::default(),
+            },
+            TronEvent::CapabilityRunStatus {
+                base: base.clone(),
+                run_id: "run-1".into(),
+                invocation_id: "id".into(),
+                status: "running".into(),
+                stream_topic: Some("capability.run.run-1".into()),
+                child_invocations: vec![],
+                details: None,
+                capability_identity: CapabilityEventIdentity::default(),
             },
             TronEvent::CapabilityInvocationCompleted {
                 base: base.clone(),

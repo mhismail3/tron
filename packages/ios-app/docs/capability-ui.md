@@ -150,3 +150,23 @@ Provider protocol terminology is confined to provider-boundary and transcript pa
 Capability UI surfaces use `CapabilityIdentity` and registry DTOs as the active
 model; events without capability identity are diagnostics, not inputs to
 retired-name mapping.
+
+## Interactive And Async Lifecycle
+
+Interactive, approval-gated, streaming, and long-running capabilities use the
+same generic lifecycle model. `capability.pause.requested` creates a
+`CapabilityPauseRecord` with a `pauseId`, `invocationId`, lifecycle kind,
+resume schema, expiry, trace id, and binding decision id. The client renders
+the generic pause sheet from that record and optional presentation hints. A
+resume action must echo the exact `pauseId` and `invocationId`; once the server
+accepts or rejects it, `capability.pause.resolved` updates the sheet and chip.
+Duplicate, late, expired, cross-session, or offline submissions are local
+errors until the server can validate them.
+
+Async capabilities use `capability.run.status` and `CapabilityRunRecord`
+updates. Chips and sheets show the run handle, status, child invocations, stream
+topic, trace link, and final result without capability-specific renderer
+dispatch. Subagent, background job, display/computer-use, notification,
+approval, and future plugin-defined interactions therefore share one UI state
+machine: pending, submitting/running, paused, resumed, denied, expired,
+cancelled, completed, and failed.

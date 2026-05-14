@@ -494,9 +494,12 @@ impl StreamState {
                         }
                     }
                 }
-                let name = capability_invocation.name.clone();
+                let should_drain = capability_invocation_stops_turn(
+                    &capability_invocation,
+                    turn_stopping_capabilities,
+                );
                 self.handle_capability_invocation_end(capability_invocation);
-                if turn_stopping_capabilities.contains(&name) {
+                if should_drain {
                     self.draining = true;
                 }
             }
@@ -558,6 +561,34 @@ impl StreamState {
         }
         StreamAction::Continue
     }
+}
+
+fn capability_invocation_stops_turn(
+    capability_invocation: &CapabilityInvocationDraft,
+    turn_stopping_capabilities: &HashSet<String>,
+) -> bool {
+    if turn_stopping_capabilities.contains(&capability_invocation.name) {
+        return true;
+    }
+    if capability_invocation.name != "execute" {
+        return false;
+    }
+    execute_target_contract(&capability_invocation.arguments)
+        .is_some_and(|target| turn_stopping_capabilities.contains(target))
+}
+
+fn execute_target_contract(arguments: &Map<String, serde_json::Value>) -> Option<&str> {
+    [
+        "contractId",
+        "capabilityId",
+        "functionId",
+        "contract_id",
+        "capability_id",
+        "function_id",
+    ]
+    .iter()
+    .find_map(|key| arguments.get(*key).and_then(serde_json::Value::as_str))
+    .filter(|target| !target.trim().is_empty())
 }
 
 /// Finalize an in-progress capability invocation from accumulated deltas.

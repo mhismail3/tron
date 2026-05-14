@@ -251,6 +251,8 @@ struct AnswerSubmission: Encodable {
 
 struct SubmitAnswersParams: Encodable {
     let sessionId: String
+    let pauseId: String
+    let invocationId: String
     let questions: [AnswerSubmission]
 }
 

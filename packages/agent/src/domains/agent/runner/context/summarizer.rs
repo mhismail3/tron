@@ -14,8 +14,8 @@ use crate::shared::content::AssistantContent;
 use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
 
 use super::constants::{
-    SUMMARIZER_ASSISTANT_TEXT_LIMIT, SUMMARIZER_MAX_SERIALIZED_CHARS,
-    SUMMARIZER_THINKING_TEXT_LIMIT, SUMMARIZER_TOOL_RESULT_TEXT_LIMIT,
+    SUMMARIZER_ASSISTANT_TEXT_LIMIT, SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT,
+    SUMMARIZER_MAX_SERIALIZED_CHARS, SUMMARIZER_THINKING_TEXT_LIMIT,
 };
 use super::types::{ExtractedData, KeyDecision, SummaryResult};
 
@@ -188,9 +188,9 @@ impl Summarizer for KeywordSummarizer {
 /// [USER] text...
 /// [ASSISTANT] text... (truncated to 300 chars)
 /// [THINKING] thinking... (truncated to 500 chars)
-/// [TOOL_CALL] name(key_args)
-/// [TOOL_RESULT] text... (truncated to 100 chars)
-/// [TOOL_ERROR] text...
+/// [CAPABILITY_INVOCATION] name(key_args)
+/// [CAPABILITY_RESULT] text... (truncated to 100 chars)
+/// [CAPABILITY_ERROR] text...
 /// ```
 ///
 /// If the total transcript exceeds [`SUMMARIZER_MAX_SERIALIZED_CHARS`],
@@ -225,9 +225,9 @@ pub fn serialize_messages(messages: &[Message]) -> String {
                         } => {
                             let args = extract_key_args(arguments);
                             if args.is_empty() {
-                                lines.push(format!("[TOOL_CALL] {name}()"));
+                                lines.push(format!("[CAPABILITY_INVOCATION] {name}()"));
                             } else {
-                                lines.push(format!("[TOOL_CALL] {name}({args})"));
+                                lines.push(format!("[CAPABILITY_INVOCATION] {name}({args})"));
                             }
                         }
                     }
@@ -237,11 +237,11 @@ pub fn serialize_messages(messages: &[Message]) -> String {
                 content, is_error, ..
             } => {
                 let text = capability_result_content_text(content);
-                let t = truncate(&text, SUMMARIZER_TOOL_RESULT_TEXT_LIMIT);
+                let t = truncate(&text, SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT);
                 if *is_error == Some(true) {
-                    lines.push(format!("[TOOL_ERROR] {t}"));
+                    lines.push(format!("[CAPABILITY_ERROR] {t}"));
                 } else {
-                    lines.push(format!("[TOOL_RESULT] {t}"));
+                    lines.push(format!("[CAPABILITY_RESULT] {t}"));
                 }
             }
         }
@@ -577,7 +577,10 @@ mod tests {
             thinking: None,
         }];
         let result = serialize_messages(&messages);
-        assert_eq!(result, "[TOOL_CALL] inspect(file_path: /src/main.rs)");
+        assert_eq!(
+            result,
+            "[CAPABILITY_INVOCATION] inspect(file_path: /src/main.rs)"
+        );
     }
 
     #[test]
@@ -588,7 +591,7 @@ mod tests {
             is_error: None,
         }];
         let result = serialize_messages(&messages);
-        assert_eq!(result, "[TOOL_RESULT] file contents here");
+        assert_eq!(result, "[CAPABILITY_RESULT] file contents here");
     }
 
     #[test]
@@ -599,7 +602,7 @@ mod tests {
             is_error: Some(true),
         }];
         let result = serialize_messages(&messages);
-        assert_eq!(result, "[TOOL_ERROR] permission denied");
+        assert_eq!(result, "[CAPABILITY_ERROR] permission denied");
     }
 
     #[test]

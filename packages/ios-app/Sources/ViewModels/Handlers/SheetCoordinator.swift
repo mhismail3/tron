@@ -113,9 +113,9 @@ final class SheetCoordinator {
         present(.subagentResultsList)
     }
 
-    /// Show notify app detail sheet
-    func showNotifyApp(_ data: NotifyAppChipData) {
-        present(.notifyApp(data))
+    /// Show notification delivery detail sheet.
+    func showNotificationDelivery(_ data: NotificationDeliveryData) {
+        present(.notificationDelivery(data))
     }
 
     /// Show thinking detail sheet

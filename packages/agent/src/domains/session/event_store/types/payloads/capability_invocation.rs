@@ -1,4 +1,4 @@
-//! Capability invocation event payloads: started, progress, completed.
+//! Capability invocation event payloads: started, progress, pause/run lifecycle, completed.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -51,6 +51,80 @@ pub struct CapabilityInvocationProgressPayload {
     pub turn: i64,
     /// Capability identity used by active clients. The event type remains a
     /// protocol/storage label only.
+    #[serde(flatten, default)]
+    pub capability_identity: CapabilityEventIdentity,
+}
+
+/// Payload for `capability.pause.requested` events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityPauseRequestedPayload {
+    /// Durable pause id.
+    #[serde(rename = "pauseId")]
+    pub pause_id: String,
+    /// Owning capability invocation id.
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    /// Pause kind, for example `user_input` or `approval`.
+    pub kind: String,
+    /// Current pause status.
+    pub status: String,
+    /// Prompt/schema-specific payload rendered by the client.
+    pub prompt_payload: Value,
+    /// Optional resume schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_schema: Option<Value>,
+    /// Who can resolve this pause.
+    pub answer_authority: String,
+    /// Optional expiry timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    /// Capability identity.
+    #[serde(flatten, default)]
+    pub capability_identity: CapabilityEventIdentity,
+}
+
+/// Payload for `capability.pause.resolved` events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityPauseResolvedPayload {
+    /// Durable pause id.
+    #[serde(rename = "pauseId")]
+    pub pause_id: String,
+    /// Owning capability invocation id.
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    /// Terminal status.
+    pub status: String,
+    /// Optional redacted resolution metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<Value>,
+    /// Capability identity.
+    #[serde(flatten, default)]
+    pub capability_identity: CapabilityEventIdentity,
+}
+
+/// Payload for `capability.run.status` events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityRunStatusPayload {
+    /// Durable async run id.
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    /// Owning capability invocation id.
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    /// Current run status.
+    pub status: String,
+    /// Optional stream topic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_topic: Option<String>,
+    /// Child invocation ids linked to this run.
+    pub child_invocations: Vec<String>,
+    /// Optional redacted details.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+    /// Capability identity.
     #[serde(flatten, default)]
     pub capability_identity: CapabilityEventIdentity,
 }

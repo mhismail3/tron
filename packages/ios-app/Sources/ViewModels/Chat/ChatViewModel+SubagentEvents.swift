@@ -144,7 +144,7 @@ extension ChatViewModel {
             return
         }
 
-        if let index = MessageFinder.indexOfSpawnSubagentInvocation(invocationId: invocationId, in: messages) {
+        if let index = MessageFinder.indexOfSubagentCapabilityInvocation(invocationId: invocationId, in: messages) {
             messages[index].content = .subagent(data)
             logger.debug("Converted capability message to subagent chip for \(subagentSessionId)", category: .chat)
         }

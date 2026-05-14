@@ -41,8 +41,23 @@ operation_bindings! {
         "deliver_subagent_results" => |invocation, deps| {
             deliver_subagent_results_value(Some(&invocation.payload), deps).await
         },
+        "ask_user" => |invocation, deps| {
+            ask_user_value(Some(&invocation.payload), invocation, deps).await
+        },
         "submit_answers" => |invocation, deps| {
-            submit_answers_value(Some(&invocation.payload), deps).await
+            submit_answers_value(Some(&invocation.payload), invocation, deps).await
+        },
+        "spawn_subagent" => |invocation, deps| {
+            spawn_subagent_value(Some(&invocation.payload), invocation, deps).await
+        },
+        "subagent_status" => |invocation, deps| {
+            subagent_status_value(Some(&invocation.payload), deps)
+        },
+        "subagent_result" => |invocation, deps| {
+            subagent_result_value(Some(&invocation.payload), deps)
+        },
+        "cancel_subagent" => |invocation, deps| {
+            cancel_subagent_value(Some(&invocation.payload), invocation, deps).await
         },
     ];
 }

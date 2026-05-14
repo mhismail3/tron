@@ -87,8 +87,8 @@ struct ChatSheetContent: View {
         case .subagentResultsList:
             subagentResultsListSheet
 
-        case .notifyApp(let data):
-            NotifyAppDetailSheet(data: data)
+        case .notificationDelivery(let data):
+            NotificationDeliveryDetailSheet(data: data)
 
         case .thinkingDetail(let content):
             ThinkingDetailSheet(

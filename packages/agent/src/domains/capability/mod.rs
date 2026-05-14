@@ -16,8 +16,8 @@
 //! | `embeddings` | Embedded first-party ONNX/tokenizer provider for offline local search |
 //! | `handlers` | Declarative operation bindings for model primitives plus capability admin/console functions |
 //! | `operations` | Catalog projection, binding resolution, delegated execution, plugin lifecycle, policy, and audit operations |
-//! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, program runs, and primer rendering |
-//! | `types` | Typed contract, implementation, binding, inspection, execution, and program-run records |
+//! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, pause/run records, program runs, and primer rendering |
+//! | `types` | Typed contract, implementation, binding, inspection, execution, lifecycle, and program-run records |
 //!
 //! # INVARIANT: the model-facing surface is tiny
 //!
@@ -40,6 +40,12 @@
 //! `notifications::send` is still idempotent and audited, but it is primed and
 //! executable without a separate inspect round trip so notification parity does
 //! not depend on shelling out to OS notification commands.
+//! Interactive and async capabilities are represented by durable pause/run
+//! records, not by special runner branches. A capability that needs approval,
+//! user input, streaming, or background execution returns lifecycle metadata;
+//! the engine persists that state, emits `capability.pause.*` or
+//! `capability.run.status`, and resumes/cancels only through authority-checked
+//! capability functions.
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!

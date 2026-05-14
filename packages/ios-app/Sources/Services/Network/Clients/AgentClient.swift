@@ -131,11 +131,18 @@ final class AgentClient: EngineDomainClient {
     /// Submit answers for an UserInteraction capability invocation.
     /// Server constructs the prompt and spawns a prompt run (or queues if busy).
     func submitAnswers(
+        pauseId: String,
+        invocationId: String,
         questions: [AnswerSubmission],
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> SubmitAnswersResponse {
         let sessionId = try await requireLiveSessionEvents()
-        let params = SubmitAnswersParams(sessionId: sessionId, questions: questions)
+        let params = SubmitAnswersParams(
+            sessionId: sessionId,
+            pauseId: pauseId,
+            invocationId: invocationId,
+            questions: questions
+        )
         return try await invokeWrite(
             "agent::submit_answers",
             params,

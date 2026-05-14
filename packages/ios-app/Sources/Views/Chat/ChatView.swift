@@ -480,8 +480,8 @@ struct ChatView: View {
             )
         case .subagent(let data):
             viewModel.subagentState.showDetails(with: data)
-        case .notifyApp(let data):
-            sheetCoordinator.showNotifyApp(data)
+        case .notificationDelivery(let data):
+            sheetCoordinator.showNotificationDelivery(data)
         case .capabilityInvocation(let data):
             sheetCoordinator.showCapabilityInvocationDetail(data)
         case .cancelCapabilityInvocation(let id):

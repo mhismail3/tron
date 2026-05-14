@@ -1,10 +1,10 @@
 import Foundation
 import SwiftUI
 
-// MARK: - NotifyApp Types
+// MARK: - Notification Delivery Types
 
-/// Status for a NotifyApp push notification
-enum NotifyAppStatus: String, Equatable, Codable {
+/// Status for a `notifications::send` capability delivery.
+enum NotificationDeliveryStatus: String, Equatable, Codable {
     case sending
     case sent
     case failed
@@ -34,9 +34,9 @@ enum NotifyAppStatus: String, Equatable, Codable {
     }
 }
 
-/// Data for rendering a NotifyApp capability invocation as a compact chip
-struct NotifyAppChipData: Equatable, Identifiable {
-    /// The capability invocation ID from NotifyApp
+/// Data for rendering a notification capability invocation as a compact chip.
+struct NotificationDeliveryData: Equatable, Identifiable {
+    /// The capability invocation ID.
     let invocationId: String
     /// Notification title
     let title: String
@@ -45,7 +45,7 @@ struct NotifyAppChipData: Equatable, Identifiable {
     /// Markdown content for the detail sheet
     let sheetContent: String?
     /// Current status
-    var status: NotifyAppStatus
+    var status: NotificationDeliveryStatus
     /// Number of devices notified successfully
     var successCount: Int?
     /// Number of devices that failed

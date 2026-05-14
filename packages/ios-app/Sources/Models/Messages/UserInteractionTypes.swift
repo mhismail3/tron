@@ -88,6 +88,8 @@ enum UserInteractionStatus: Equatable {
 struct UserInteractionInvocationData: Equatable {
     /// The capability invocation ID from the agent
     let invocationId: String
+    /// Durable server pause id that must be submitted back to resolve exactly once
+    var pauseId: String? = nil
     /// The question parameters (mutable: set to placeholder during .generating, updated on capability.invocation.started)
     var params: UserInteractionParams
     /// Current answers keyed by question ID

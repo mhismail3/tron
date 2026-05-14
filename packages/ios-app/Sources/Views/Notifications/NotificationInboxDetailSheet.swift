@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Detail sheet for a notification from the inbox.
 ///
-/// Reuses the visual pattern from `NotifyAppDetailSheet` (title, body, markdown
+/// Reuses the visual pattern from `NotificationDeliveryDetailSheet` (title, body, markdown
 /// sheetContent via `MarkdownBlockParser` + `MarkdownBlockView`).
 ///
 /// Toolbar buttons:

@@ -47,7 +47,7 @@ enum MyEventPlugin: DispatchableEventPlugin {
 | Category | Location | Events |
 |----------|----------|--------|
 | Streaming | `Plugins/Streaming/` | text_delta, thinking_delta, turn_start, turn_end, agent_turn |
-| Capability invocation | `Plugins/CapabilityInvocation/` | `capability.invocation.*` and `capability.resolution` transport labels carrying capability identity |
+| Capability invocation | `Plugins/CapabilityInvocation/` | `capability.invocation.*`, `capability.resolution`, `capability.pause.*`, and `capability.run.status` transport labels carrying capability identity and lifecycle state |
 | Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, context_cleared, message_deleted, skill_deactivated, turn_failed |
 | Session | `Plugins/Session/` | connected |
 | Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
@@ -97,14 +97,15 @@ Handlers are split into domain-specific protocols:
     func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result)
 }
 
-// ... TurnLifecycleEventHandler, ContextEventHandler, BrowserEventHandler,
-//     SubagentEventHandler, TaskEventHandler, EventDispatchLogger
+// ... CapabilityLifecycleEventHandler, TurnLifecycleEventHandler,
+//     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
+//     TaskEventHandler, EventDispatchLogger
 
 // Composed target — ChatViewModel conforms to this
 @MainActor protocol EventDispatchTarget:
-    StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
-    ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-    TaskEventHandler, EventDispatchLogger {}
+    StreamingEventHandler, CapabilityInvocationEventHandler, CapabilityLifecycleEventHandler,
+    TurnLifecycleEventHandler, ContextEventHandler, BrowserEventHandler,
+    SubagentEventHandler, TaskEventHandler, EventDispatchLogger {}
 ```
 
 ### Implementation
@@ -166,11 +167,12 @@ and `SessionEvent` conform trivially since they already have all required fields
 ### Shared First-Pass Helper: buildCapabilityInvocationMaps
 
 Both `transformPersistedEvents` and `reconstructSessionState` run a shared first
-pass over the event array via `buildCapabilityInvocationMaps(from:)`. This builds lookup
-dictionaries for transport-level `capability.invocation.started` / `capability.invocation.completed` rows and consumed
-subagent event IDs so downstream handlers can resolve provider `tool_use`
-content blocks into capability-native invocation messages and filter
-already-consumed notifications in a single pass.
+pass over the event array via `buildCapabilityInvocationMaps(from:)`. This
+builds lookup dictionaries for transport-level `capability.invocation.started`
+/ `capability.invocation.completed` rows and consumed subagent event IDs so
+downstream handlers can resolve provider-boundary invocation blocks into
+capability-native invocation messages and filter already-consumed notifications
+in a single pass.
 
 `capability.invocation.started`, `capability.invocation.progress`, and
 `capability.invocation.completed` are capability lifecycle labels, not renderer
@@ -183,17 +185,19 @@ schema/result metadata. Unsupported or malformed clean-slate events become
 client diagnostics; the app does not synthesize capability identity from retired
 built-in names.
 
-### Payload Compatibility
+### Payload Contracts
 
 History reconstruction must accept the payload shape emitted by the server, not
 only the shape used by local tests. In particular, persisted `message.user`
 events from prompt and subagent paths may contain only `content`; their `turn`
 field is optional during reconstruction. Renderable persisted event types are
-guarded by transformer fixtures so messages, capability invocation chips, notifications, memory
-cards, errors, and configuration chips keep reconstructing when payload contracts
-change. The test suite also requires every persisted event type to have an
-explicit reconstruction disposition: rendered, state-handled, consumed through
-assistant content, streaming replay-only, or intentionally no-state.
+guarded by transformer fixtures so messages, capability invocation chips,
+notifications, memory cards, errors, and configuration chips keep reconstructing
+when payload contracts change inside the clean capability schema. The test
+suite also requires every persisted event type to have an explicit
+reconstruction disposition: rendered, state-handled, consumed through assistant
+content, streaming replay-only, or intentionally no-state. Pre-cutover event
+shapes are not read, normalized, or rendered.
 
 ### Reconstruction Pagination
 

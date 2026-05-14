@@ -79,6 +79,7 @@ struct CapabilityInvocationData: Equatable, Identifiable {
 enum CapabilityInvocationStatus: Equatable, Sendable {
     case generating
     case running
+    case paused
     case approvalRequired
     case success
     case error
@@ -88,6 +89,8 @@ enum CapabilityInvocationStatus: Equatable, Sendable {
         switch self {
         case .generating, .running:
             return "arrow.triangle.2.circlepath"
+        case .paused:
+            return "pause.circle.fill"
         case .approvalRequired:
             return "hand.raised.fill"
         case .success:
@@ -217,6 +220,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         switch status {
         case .generating: return "Preparing"
         case .running: return "Running"
+        case .paused: return "Paused"
         case .approvalRequired: return "Approval required"
         case .success: return "Completed"
         case .error: return "Failed"
@@ -674,7 +678,7 @@ enum CapabilityPresentation {
 
     static func statusColor(for status: CapabilityInvocationStatus, identity: CapabilityIdentity) -> Color {
         switch status {
-        case .approvalRequired:
+        case .approvalRequired, .paused:
             return .tronAmber
         case .error, .unavailable:
             return .tronError

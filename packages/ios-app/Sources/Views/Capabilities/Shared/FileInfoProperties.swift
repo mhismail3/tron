@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - File Info Properties
 
-/// Extracts and caches the 4 computed file properties duplicated across Read, Write, and Edit sheets.
+/// Extracts and caches the 4 computed file properties duplicated across filesystem capability sheets.
 /// Construct once from the capability arguments string, then pass to `CapabilityFileInfoSection`.
 struct FileInfoProperties {
     let filePath: String

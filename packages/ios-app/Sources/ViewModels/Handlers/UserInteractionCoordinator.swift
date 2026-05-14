@@ -76,6 +76,11 @@ final class UserInteractionCoordinator {
             context.userInteractionState.answers = [:]
             return
         }
+        guard let pauseId = data.pauseId, !pauseId.isEmpty else {
+            context.logError("Cannot submit answers - missing pause id for invocationId=\(data.invocationId)")
+            context.showError("This question is missing its server pause record. Reconnect and try again.")
+            return
+        }
 
         let result = UserInteractionResult(
             answers: answers,
@@ -105,6 +110,8 @@ final class UserInteractionCoordinator {
             ))
         }
         context.userInteractionState.pendingSubmission = submissions
+        context.userInteractionState.pendingPauseId = pauseId
+        context.userInteractionState.pendingInvocationId = data.invocationId
 
         // Store question count for chip display
         context.userInteractionState.lastAnsweredQuestionCount = data.params.questions.count
@@ -119,7 +126,19 @@ final class UserInteractionCoordinator {
     /// Called from ChatSheetModifier.onDismiss AFTER the sheet dismiss animation completes.
     func executePendingSubmission(context: UserInteractionContext) {
         guard let submissions = context.userInteractionState.pendingSubmission else { return }
+        guard let pauseId = context.userInteractionState.pendingPauseId, !pauseId.isEmpty,
+              let invocationId = context.userInteractionState.pendingInvocationId, !invocationId.isEmpty else {
+            context.userInteractionState.pendingSubmission = nil
+            context.userInteractionState.pendingPauseId = nil
+            context.userInteractionState.pendingInvocationId = nil
+            context.userInteractionState.currentData = nil
+            context.logError("Cannot submit answers - pending submission is missing pause identity")
+            context.showError("This question is missing its server pause record. Reconnect and try again.")
+            return
+        }
         context.userInteractionState.pendingSubmission = nil
+        context.userInteractionState.pendingPauseId = nil
+        context.userInteractionState.pendingInvocationId = nil
         context.userInteractionState.currentData = nil
 
         // Add answered questions chip to chat
@@ -134,7 +153,12 @@ final class UserInteractionCoordinator {
         // Submit via server engine protocol (server constructs the agent prompt)
         Task {
             do {
-                _ = try await context.engineClient.agent.submitAnswers(questions: submissions, idempotencyKey: .userAction("agent.submitAnswers"))
+                _ = try await context.engineClient.agent.submitAnswers(
+                    pauseId: pauseId,
+                    invocationId: invocationId,
+                    questions: submissions,
+                    idempotencyKey: .userAction("agent.submitAnswers.\(pauseId)")
+                )
                 context.logInfo("UserInteraction answers submitted via engine protocol")
             } catch {
                 context.logError("Failed to submit answers: \(error.localizedDescription)")

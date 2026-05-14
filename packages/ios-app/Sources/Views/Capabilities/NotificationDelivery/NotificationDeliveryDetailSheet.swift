@@ -1,12 +1,12 @@
 import SwiftUI
 
-// MARK: - NotifyApp Detail Sheet (iOS 26)
+// MARK: - NotificationDelivery Detail Sheet (iOS 26)
 
 /// Sheet view displaying notification details
 /// Shows title, body, optional sheet content (markdown), and delivery status
 @available(iOS 26.0, *)
-struct NotifyAppDetailSheet: View {
-    let data: NotifyAppChipData
+struct NotificationDeliveryDetailSheet: View {
+    let data: NotificationDeliveryData
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
@@ -107,9 +107,9 @@ struct NotifyAppDetailSheet: View {
 
 #if DEBUG
 @available(iOS 26.0, *)
-#Preview("NotifyApp Detail Sheet") {
-    NotifyAppDetailSheet(
-        data: NotifyAppChipData(
+#Preview("NotificationDelivery Detail Sheet") {
+    NotificationDeliveryDetailSheet(
+        data: NotificationDeliveryData(
             invocationId: "call_1",
             title: "Build Complete",
             body: "All 47 tests passed successfully",

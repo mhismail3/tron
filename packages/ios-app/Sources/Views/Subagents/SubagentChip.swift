@@ -46,7 +46,7 @@ struct SubagentChip: View {
     }
 
     /// Tiny uppercase kind badge — "SUB" (Spawn) or "WAIT". Keeps the
-    /// two subagent variants visually distinct from a Bash-BG chip even
+    /// two subagent variants visually distinct from a background-process chip even
     /// when all three share a running spinner + amber color.
     var kindBadgeText: String {
         switch variant {

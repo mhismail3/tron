@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::domains::session::event_store::types::state::Message;
 
-const INTERACTIVE_TOOL_NAMES: &[&str] = &["agent::ask_user"];
+const INTERACTIVE_CAPABILITY_IDS: &[&str] = &["agent::ask_user"];
 
 /// First-pass scan to collect `capability_invocation` block IDs that belong to an
 /// interactive capability. Their matching `capability_result` messages are then filtered
@@ -23,10 +23,10 @@ pub(super) fn collect_interactive_capability_invocation_ids(
             if block.get("type").and_then(Value::as_str) != Some("capability_invocation") {
                 continue;
             }
-            let Some(name) = block.get("name").and_then(Value::as_str) else {
+            let Some(target_id) = capability_target_id(block) else {
                 continue;
             };
-            if !INTERACTIVE_TOOL_NAMES.contains(&name) {
+            if !INTERACTIVE_CAPABILITY_IDS.contains(&target_id.as_str()) {
                 continue;
             }
             if let Some(id) = block.get("id").and_then(Value::as_str) {
@@ -43,10 +43,10 @@ pub(super) fn extract_interactive_capability_summary(block: &Value) -> Option<St
     if block.get("type").and_then(Value::as_str) != Some("capability_invocation") {
         return None;
     }
-    let name = block.get("name").and_then(Value::as_str)?;
-    let input = block.get("input")?;
+    let target_id = capability_target_id(block)?;
+    let input = capability_payload(block)?;
 
-    match name {
+    match target_id.as_str() {
         "agent::ask_user" => {
             let questions = input.get("questions").and_then(Value::as_array)?;
             let texts: Vec<String> = questions
@@ -62,6 +62,47 @@ pub(super) fn extract_interactive_capability_summary(block: &Value) -> Option<St
         }
         _ => None,
     }
+}
+
+fn capability_target_id(block: &Value) -> Option<String> {
+    if block.get("type").and_then(Value::as_str) != Some("capability_invocation") {
+        return None;
+    }
+    if let Some(name) = block.get("name").and_then(Value::as_str)
+        && INTERACTIVE_CAPABILITY_IDS.contains(&name)
+    {
+        return Some(name.to_owned());
+    }
+    let input = block.get("input")?;
+    for key in [
+        "contractId",
+        "capabilityId",
+        "functionId",
+        "contract_id",
+        "capability_id",
+        "function_id",
+    ] {
+        if let Some(value) = input.get(key).and_then(Value::as_str)
+            && INTERACTIVE_CAPABILITY_IDS.contains(&value)
+        {
+            return Some(value.to_owned());
+        }
+    }
+    None
+}
+
+fn capability_payload(block: &Value) -> Option<&Value> {
+    let input = block.get("input")?;
+    if let Some(target_id) = input
+        .get("contractId")
+        .or_else(|| input.get("capabilityId"))
+        .or_else(|| input.get("functionId"))
+        .and_then(Value::as_str)
+        && INTERACTIVE_CAPABILITY_IDS.contains(&target_id)
+    {
+        return input.get("payload").or(Some(input));
+    }
+    Some(input)
 }
 
 /// Serialize reconstructed messages to a plain-text transcript for summarization.

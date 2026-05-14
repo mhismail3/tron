@@ -53,6 +53,8 @@ use payload::{build_user_message_metadata, find_first_user_message_after, inject
 use questions::{extract_questions, parse_answers};
 use subagent::enrich_subagent_result_messages;
 
+const ASK_USER_CONTRACT_ID: &str = "agent::ask_user";
+
 /// Enrich agent::ask_user `capability.invocation.started` events in place.
 ///
 /// Walks the events array, finds each interactive capability invocation, searches for
@@ -74,12 +76,9 @@ pub fn enrich_interactive_capability_statuses(events: &mut [Value]) {
             if e.get("type").and_then(Value::as_str)? != "capability.invocation.started" {
                 return None;
             }
-            let name = e
-                .get("modelPrimitiveName")
-                .and_then(Value::as_str)?
-                .to_string();
-            if name == "agent::ask_user" {
-                Some((i, name))
+            let target = capability_target_id(e)?;
+            if target == ASK_USER_CONTRACT_ID {
+                Some((i, target))
             } else {
                 None
             }
@@ -125,4 +124,44 @@ pub fn enrich_interactive_capability_statuses(events: &mut [Value]) {
     // `PromptRequest.message_metadata`, but historical events from before
     // that change need back-filling so iOS renders a chip.
     enrich_subagent_result_messages(events);
+}
+
+fn capability_target_id(event: &Value) -> Option<String> {
+    for key in ["contractId", "functionId", "modelPrimitiveName"] {
+        if let Some(value) = event.get(key).and_then(Value::as_str)
+            && value == ASK_USER_CONTRACT_ID
+        {
+            return Some(value.to_owned());
+        }
+    }
+
+    let payload = event.get("payload")?;
+    for key in ["contractId", "functionId", "modelPrimitiveName"] {
+        if let Some(value) = payload.get(key).and_then(Value::as_str)
+            && value == ASK_USER_CONTRACT_ID
+        {
+            return Some(value.to_owned());
+        }
+    }
+
+    let args = match payload.get("arguments") {
+        Some(Value::String(raw)) => serde_json::from_str::<Value>(raw).ok()?,
+        Some(value) => value.clone(),
+        None => return None,
+    };
+    for key in [
+        "contractId",
+        "capabilityId",
+        "functionId",
+        "contract_id",
+        "capability_id",
+        "function_id",
+    ] {
+        if let Some(value) = args.get(key).and_then(Value::as_str)
+            && value == ASK_USER_CONTRACT_ID
+        {
+            return Some(value.to_owned());
+        }
+    }
+    None
 }

@@ -21,10 +21,10 @@ pub const DEFAULT_URL_IMAGE_TOKENS: u32 = 1500;
 // =============================================================================
 
 /// Minimum tokens allocated for a capability result, even under heavy context pressure.
-pub const TOOL_RESULT_MIN_TOKENS: u32 = 2_500;
+pub const CAPABILITY_RESULT_MIN_TOKENS: u32 = 2_500;
 
 /// Maximum character length for a capability result before truncation.
-pub const TOOL_RESULT_MAX_CHARS: usize = 100_000;
+pub const CAPABILITY_RESULT_MAX_CHARS: usize = 100_000;
 
 // =============================================================================
 // System Prompts
@@ -47,7 +47,7 @@ pub const SUMMARIZER_ASSISTANT_TEXT_LIMIT: usize = 300;
 pub const SUMMARIZER_THINKING_TEXT_LIMIT: usize = 500;
 
 /// Truncation limit for capability result text in the serialized transcript.
-pub const SUMMARIZER_TOOL_RESULT_TEXT_LIMIT: usize = 100;
+pub const SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT: usize = 100;
 
 /// Timeout for the summarizer subagent (milliseconds).
 pub const SUMMARIZER_SUBAGENT_TIMEOUT_MS: u64 = 30_000;

@@ -696,6 +696,22 @@ fn collect_interactive_ids_finds_user_interaction() {
 }
 
 #[test]
+fn collect_interactive_ids_finds_execute_wrapped_user_interaction() {
+    let msgs = vec![assistant_capability_invocation_with_input(
+        "execute",
+        "aq_1",
+        json!({
+            "mode": "invoke",
+            "contractId": "agent::ask_user",
+            "payload": {"questions": [{"question": "Proceed?"}]}
+        }),
+    )];
+    let ids = collect_interactive_capability_invocation_ids(&msgs);
+    assert!(ids.contains("aq_1"));
+    assert_eq!(ids.len(), 1);
+}
+
+#[test]
 fn collect_interactive_ids_ignores_non_interactive_capabilities() {
     let msgs = vec![
         assistant_capability_invocation("filesystem::read_file", "r_1"),
@@ -955,6 +971,26 @@ fn extract_summary_ask_user_single_question() {
     assert_eq!(
         extract_interactive_capability_summary(&block),
         Some("Asked: \"What's next?\"".to_string())
+    );
+}
+
+#[test]
+fn extract_summary_execute_wrapped_ask_user_single_question() {
+    let block = json!({
+        "type": "capability_invocation",
+        "id": "aq_1",
+        "name": "execute",
+        "input": {
+            "mode": "invoke",
+            "contractId": "agent::ask_user",
+            "payload": {
+                "questions": [{"question": "Continue?", "options": [{"label":"Yes"}]}]
+            }
+        }
+    });
+    assert_eq!(
+        extract_interactive_capability_summary(&block),
+        Some("Asked: \"Continue?\"".to_string())
     );
 }
 

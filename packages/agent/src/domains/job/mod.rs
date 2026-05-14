@@ -2,8 +2,11 @@
 //!
 //! This module owns canonical function execution for the job namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
-//! Queue-backed start/cancel operations and hidden apply bodies live in
-//! `operations/`; this root only registers the job worker.
+//! Queue-backed start/cancel operations, `job::wait`, `job::stream_output`, and
+//! hidden apply bodies live in `operations/`; this root only registers the job
+//! worker. Long-running jobs surface as capability run records so chat, Engine
+//! Console, audit, and trace views can track status without any job-specific
+//! execution path in the model harness.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

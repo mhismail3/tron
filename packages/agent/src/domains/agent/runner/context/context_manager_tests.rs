@@ -655,7 +655,7 @@ fn process_small_capability_result() {
 #[test]
 fn process_large_capability_result() {
     let cm = ContextManager::new(test_config());
-    let large = "x".repeat(TOOL_RESULT_MAX_CHARS + 1000);
+    let large = "x".repeat(CAPABILITY_RESULT_MAX_CHARS + 1000);
     let result = cm.process_capability_result("tc-1", &large);
     assert!(result.truncated);
     assert!(result.original_size.is_some());
@@ -670,8 +670,8 @@ fn capability_result_budget_reserves_for_response() {
     let max_size = cm.get_max_capability_result_size();
 
     // remaining=50k, reserve=8k, margin=5k → available=37k tokens → 148k chars
-    // But capped at TOOL_RESULT_MAX_CHARS (100k)
-    assert_eq!(max_size, TOOL_RESULT_MAX_CHARS);
+    // But capped at CAPABILITY_RESULT_MAX_CHARS (100k)
+    assert_eq!(max_size, CAPABILITY_RESULT_MAX_CHARS);
 }
 
 #[test]
@@ -682,10 +682,10 @@ fn capability_result_budget_near_limit() {
     let max_size = cm.get_max_capability_result_size();
 
     // remaining=5k, reserve=8k → saturating_sub yields 0 before margin
-    // Falls back to TOOL_RESULT_MIN_TOKENS (2500) * 4 = 10000 chars
+    // Falls back to CAPABILITY_RESULT_MIN_TOKENS (2500) * 4 = 10000 chars
     assert_eq!(
         max_size,
-        (TOOL_RESULT_MIN_TOKENS as usize) * (CHARS_PER_TOKEN as usize)
+        (CAPABILITY_RESULT_MIN_TOKENS as usize) * (CHARS_PER_TOKEN as usize)
     );
 }
 
@@ -1072,7 +1072,7 @@ fn local_window_capability_result_sizer_at_50k_used() {
 #[test]
 fn local_window_capability_result_sizer_floor_when_tight() {
     // When remaining < response_reserve, sizer falls back to
-    // TOOL_RESULT_MIN_TOKENS * CHARS_PER_TOKEN = 2_500 * 4 = 10_000 chars.
+    // CAPABILITY_RESULT_MIN_TOKENS * CHARS_PER_TOKEN = 2_500 * 4 = 10_000 chars.
     let mut cm = ContextManager::new(local_window_config());
     cm.set_api_context_tokens(64_000);
     let budget = cm.get_max_capability_result_size();

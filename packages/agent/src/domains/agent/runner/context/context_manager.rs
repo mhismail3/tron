@@ -12,7 +12,7 @@ use crate::shared::messages::Message;
 
 use super::compaction_engine::{CompactionDeps, CompactionEngine};
 use super::constants::{
-    CHARS_PER_TOKEN, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MIN_TOKENS, Thresholds,
+    CAPABILITY_RESULT_MAX_CHARS, CAPABILITY_RESULT_MIN_TOKENS, CHARS_PER_TOKEN, Thresholds,
 };
 use super::context_snapshot_builder::{ContextSnapshotBuilder, SnapshotDeps};
 use super::local_policy;
@@ -776,11 +776,11 @@ impl ContextManager {
         let available_tokens = remaining
             .saturating_sub(response_reserve)
             .saturating_sub(safety_margin)
-            .max(u64::from(TOOL_RESULT_MIN_TOKENS));
+            .max(u64::from(CAPABILITY_RESULT_MIN_TOKENS));
 
         #[allow(clippy::cast_possible_truncation)]
         let budget = (available_tokens as usize) * (CHARS_PER_TOKEN as usize);
-        budget.min(TOOL_RESULT_MAX_CHARS)
+        budget.min(CAPABILITY_RESULT_MAX_CHARS)
     }
 
     // ── Model switching ─────────────────────────────────────────────────

@@ -141,12 +141,14 @@ pub(crate) async fn resolve_provider_capabilities(
     context_policy: &ContextPolicy,
     capability_policy: &CapabilitySurfacePolicy,
 ) -> Result<ResolvedCapabilitySurface, String> {
-    let targets = resolve_capability_targets(host, session_id, workspace_id).await?;
+    let resolved =
+        resolve_capability_targets_with_lifecycle(host, session_id, workspace_id).await?;
+    let targets = resolved.targets;
     let local_filter = context_policy.capability_filter();
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
     let mut all_model_capability_ids = Vec::new();
-    let mut turn_stopping_capabilities = HashSet::new();
+    let mut turn_stopping_capabilities = resolved.turn_stopping_capabilities;
     for target in targets {
         if !capability_policy.allows(&target) {
             continue;
@@ -222,6 +224,23 @@ async fn resolve_capability_targets(
     session_id: &str,
     workspace_id: Option<&str>,
 ) -> Result<Vec<EngineCapabilityTarget>, String> {
+    Ok(
+        resolve_capability_targets_with_lifecycle(host, session_id, workspace_id)
+            .await?
+            .targets,
+    )
+}
+
+struct ResolvedCapabilityTargets {
+    targets: Vec<EngineCapabilityTarget>,
+    turn_stopping_capabilities: HashSet<String>,
+}
+
+async fn resolve_capability_targets_with_lifecycle(
+    host: &EngineHostHandle,
+    session_id: &str,
+    workspace_id: Option<&str>,
+) -> Result<ResolvedCapabilityTargets, String> {
     let actor = capability_surface_actor(session_id, workspace_id)?;
     let mut functions = host
         .discover(&FunctionQuery {
@@ -230,6 +249,7 @@ async fn resolve_capability_targets(
             ..FunctionQuery::default()
         })
         .await;
+    let turn_stopping_capabilities = turn_stopping_contract_ids(&functions);
     functions.sort_by_key(|function| {
         (
             function
@@ -276,7 +296,10 @@ async fn resolve_capability_targets(
             function,
         });
     }
-    Ok(targets)
+    Ok(ResolvedCapabilityTargets {
+        targets,
+        turn_stopping_capabilities,
+    })
 }
 
 fn capability_surface_actor(
@@ -325,6 +348,34 @@ fn model_capability_id(function: &FunctionDefinition) -> Option<String> {
 
 fn metadata_bool(function: &FunctionDefinition, key: &str) -> Option<bool> {
     function.metadata.get(key).and_then(Value::as_bool)
+}
+
+fn turn_stopping_contract_ids(functions: &[FunctionDefinition]) -> HashSet<String> {
+    functions
+        .iter()
+        .filter(|function| function_stops_turn(function))
+        .flat_map(|function| {
+            [
+                function.id.as_str().to_owned(),
+                function
+                    .metadata
+                    .get("contractId")
+                    .and_then(Value::as_str)
+                    .unwrap_or(function.id.as_str())
+                    .to_owned(),
+            ]
+        })
+        .collect()
+}
+
+fn function_stops_turn(function: &FunctionDefinition) -> bool {
+    metadata_bool(function, "stopsTurn").unwrap_or(false)
+        || function
+            .metadata
+            .get("lifecycle")
+            .and_then(|value| value.get("stopsTurn"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 fn execution_mode(function: &FunctionDefinition) -> ExecutionMode {

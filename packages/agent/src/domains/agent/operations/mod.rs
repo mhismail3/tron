@@ -1,8 +1,8 @@
 //! Agent operation implementations.
 //!
 //! Prompt acceptance, hidden prompt apply, turn-run startup, prompt queue
-//! control, agent commands, confirmations, answers, and subagent result delivery
-//! live here behind canonical `agent::*` functions.
+//! control, lifecycle helpers, agent commands, confirmations, answers, and
+//! subagent result delivery live here behind canonical `agent::*` functions.
 
 use crate::domains::agent::commands::AgentCommandService;
 use crate::domains::agent::prompt_queue::PromptQueueService;
@@ -24,6 +24,8 @@ mod prompt;
 pub(crate) use prompt::*;
 mod commands;
 pub(crate) use commands::*;
+mod lifecycle;
+use lifecycle::*;
 mod submissions;
 pub(crate) use submissions::*;
 mod queue;

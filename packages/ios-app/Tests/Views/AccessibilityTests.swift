@@ -32,7 +32,7 @@ struct AccessibilityTests {
         let statuses: [(String, String)] = [
             ("Run", "Completed"),
             ("Subagent", SubagentStatus.completed.label),
-            ("Notify", NotifyAppStatus.sent.label),
+            ("Notification", NotificationDeliveryStatus.sent.label),
             ("Wait", "Completed"),
         ]
 

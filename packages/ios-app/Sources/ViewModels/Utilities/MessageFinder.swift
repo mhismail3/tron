@@ -96,8 +96,8 @@ enum MessageFinder {
         })
     }
 
-    /// Find message index for SpawnSubagent capability by invocationId.
-    static func indexOfSpawnSubagentInvocation(invocationId: String, in messages: [ChatMessage]) -> Int? {
+    /// Find message index for a subagent capability invocation by invocationId.
+    static func indexOfSubagentCapabilityInvocation(invocationId: String, in messages: [ChatMessage]) -> Int? {
         messages.firstIndex(where: { message in
             if case .capabilityInvocation(let invocation) = message.content {
                 return invocation.id == invocationId

@@ -14,8 +14,12 @@ pub(super) fn extract_questions(capability_invocation_event: &Value) -> Vec<(Str
         Some(v) => v.clone(),
         None => return vec![],
     };
-    parsed
-        .get("questions")
+    let questions = parsed.get("questions").or_else(|| {
+        parsed
+            .get("payload")
+            .and_then(|payload| payload.get("questions"))
+    });
+    questions
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()

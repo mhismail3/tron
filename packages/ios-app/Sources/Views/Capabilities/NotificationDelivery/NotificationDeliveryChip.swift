@@ -1,12 +1,11 @@
 import SwiftUI
 
-// MARK: - NotifyApp Chip
+// MARK: - Notification Delivery Chip
 
-/// Compact chip for NotifyApp capability invocations
-/// Shows "Notified User" with status indicator
-/// Tappable to open NotifyAppDetailSheet
-struct NotifyAppChip: View {
-    let data: NotifyAppChipData
+/// Compact chip for `notifications::send` capability invocations.
+/// Shows notification delivery status and opens `NotificationDeliveryDetailSheet`.
+struct NotificationDeliveryChip: View {
+    let data: NotificationDeliveryData
     let onTap: () -> Void
 
     var body: some View {
@@ -30,7 +29,7 @@ struct NotifyAppChip: View {
         }
         .buttonStyle(.plain)
         .chipStyle(data.status.color)
-        .chipAccessibility(capability: "Notify", status: data.status.label)
+        .chipAccessibility(capability: "Notification", status: data.status.label)
     }
 
     @ViewBuilder
@@ -57,10 +56,10 @@ struct NotifyAppChip: View {
 // MARK: - Preview
 
 #if DEBUG
-#Preview("NotifyApp Chip States") {
+#Preview("NotificationDelivery Chip States") {
     VStack(spacing: 16) {
-        NotifyAppChip(
-            data: NotifyAppChipData(
+        NotificationDeliveryChip(
+            data: NotificationDeliveryData(
                 invocationId: "call_1",
                 title: "Build Complete",
                 body: "All tests passed",
@@ -70,8 +69,8 @@ struct NotifyAppChip: View {
             onTap: { }
         )
 
-        NotifyAppChip(
-            data: NotifyAppChipData(
+        NotificationDeliveryChip(
+            data: NotificationDeliveryData(
                 invocationId: "call_2",
                 title: "Build Complete",
                 body: "All tests passed",
@@ -82,8 +81,8 @@ struct NotifyAppChip: View {
             onTap: { }
         )
 
-        NotifyAppChip(
-            data: NotifyAppChipData(
+        NotificationDeliveryChip(
+            data: NotificationDeliveryData(
                 invocationId: "call_3",
                 title: "Build Complete",
                 body: "All tests passed",

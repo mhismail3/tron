@@ -15,6 +15,18 @@ fn make_capability_invocation(name: &str, id: &str, args: Value) -> Value {
     })
 }
 
+fn make_execute_invocation(contract_id: &str, id: &str, payload: Value) -> Value {
+    make_capability_invocation(
+        "execute",
+        id,
+        json!({
+            "mode": "invoke",
+            "contractId": contract_id,
+            "payload": payload,
+        }),
+    )
+}
+
 fn make_user_msg(content: &str) -> Value {
     json!({
         "type": "message.user",
@@ -105,6 +117,29 @@ fn answers_pending_no_message() {
     enrich_interactive_capability_statuses(&mut events);
     assert_eq!(events[0]["payload"]["interactionStatus"], "pending");
     assert!(events[0]["payload"].get("parsedAnswers").is_none());
+}
+
+#[test]
+fn answers_pending_for_execute_wrapped_ask_user() {
+    let payload = json!({"questions": [{"id": "q1", "question": "Proceed?"}]});
+    let mut events = vec![make_execute_invocation("agent::ask_user", "tc1", payload)];
+    enrich_interactive_capability_statuses(&mut events);
+    assert_eq!(events[0]["payload"]["interactionStatus"], "pending");
+}
+
+#[test]
+fn answers_execute_wrapped_ask_user_payload() {
+    let payload = json!({"questions": [{"id": "q1", "question": "Proceed?"}]});
+    let mut events = vec![
+        make_execute_invocation("agent::ask_user", "tc1", payload),
+        make_user_msg("[Answers to your questions]\n\n**Proceed?**\nAnswer: Yes"),
+    ];
+    enrich_interactive_capability_statuses(&mut events);
+    assert_eq!(events[0]["payload"]["interactionStatus"], "answered");
+    let parsed = events[0]["payload"]["parsedAnswers"].as_array().unwrap();
+    assert_eq!(parsed[0]["questionId"], "q1");
+    assert_eq!(parsed[0]["selectedValues"][0], "Yes");
+    assert_eq!(events[1]["payload"]["messageKind"], "answered_questions");
 }
 
 #[test]

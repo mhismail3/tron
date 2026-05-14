@@ -801,6 +801,66 @@ async fn drain_after_interactive_capability_drops_trailing_text() {
 }
 
 #[tokio::test]
+async fn drain_after_execute_targeting_turn_stopping_contract() {
+    let s = stream! {
+        yield Ok(StreamEvent::Start);
+        yield Ok(StreamEvent::TextStart);
+        yield Ok(StreamEvent::TextDelta { delta: "before".into() });
+        yield Ok(StreamEvent::TextEnd { text: "before".into(), signature: None });
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "tc-execute-ask".into(),
+            name: "execute".into(),
+        });
+        yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "tc-execute-ask".into(),
+            arguments_delta: r#"{"mode":"invoke","contractId":"agent::ask_user","payload":{"questions":[{"question":"Proceed?"}]}}"#.into(),
+        });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-execute-ask", "execute", {
+                let mut m = serde_json::Map::new();
+                let _ = m.insert("mode".into(), serde_json::json!("invoke"));
+                let _ = m.insert("contractId".into(), serde_json::json!("agent::ask_user"));
+                let _ = m.insert("payload".into(), serde_json::json!({"questions":[{"question":"Proceed?"}]}));
+                m
+            }),
+        });
+        yield Ok(StreamEvent::TextStart);
+        yield Ok(StreamEvent::TextDelta { delta: " should not appear".into() });
+        yield Ok(StreamEvent::TextEnd { text: " should not appear".into(), signature: None });
+        yield Ok(done_with_usage(vec![], "end_turn"));
+    };
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &ask_user_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(!result.interrupted);
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.capability_invocations[0].name, "execute");
+    let text = result
+        .message
+        .content
+        .iter()
+        .find_map(|content| match content {
+            AssistantContent::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .expect("pre-invocation text");
+    assert_eq!(text, "before");
+}
+
+#[tokio::test]
 async fn drain_preserves_thinking_and_text_before_interactive() {
     let s = stream! {
         yield Ok(StreamEvent::Start);

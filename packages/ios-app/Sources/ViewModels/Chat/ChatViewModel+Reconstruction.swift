@@ -344,6 +344,7 @@ extension ChatViewModel {
 
             let isActive = capabilityInvocation.status == CapabilityInvocationStatusDTO.running.rawValue
                 || capabilityInvocation.status == CapabilityInvocationStatusDTO.generating.rawValue
+                || capabilityInvocation.status == CapabilityInvocationStatusDTO.paused.rawValue
 
             var params = UserInteractionParams(questions: [], context: nil)
             if let argsData = argsString.data(using: .utf8),
@@ -372,9 +373,11 @@ extension ChatViewModel {
         // Create UI message for the capability invocation
         let messageId = UUID(uuidString: capabilityInvocation.invocationId) ?? UUID()
 
-        let status: CapabilityInvocationStatus = switch capabilityInvocation.status {
+            let status: CapabilityInvocationStatus = switch capabilityInvocation.status {
             case CapabilityInvocationStatusDTO.generating.rawValue, CapabilityInvocationStatusDTO.running.rawValue:
                 .running
+            case CapabilityInvocationStatusDTO.paused.rawValue:
+                .paused
             case CapabilityInvocationStatusDTO.error.rawValue:
                 .error
             default:

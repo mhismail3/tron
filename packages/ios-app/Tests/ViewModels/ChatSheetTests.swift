@@ -59,7 +59,7 @@ struct ChatSheetTests {
         #expect(sheet1.id == "compaction")
     }
 
-    @Test("Ask user question sheet has consistent id")
+    @Test("User interaction sheet has consistent id")
     func testUserInteractionId() {
         let sheet = ChatSheet.userInteraction
 
@@ -73,16 +73,16 @@ struct ChatSheetTests {
         #expect(sheet.id == "subagent")
     }
 
-    @Test("Notify app sheets with different data have different ids")
-    func testNotifyAppDifferentDataHaveDifferentIds() {
-        let data1 = NotifyAppChipData(
+    @Test("Notification delivery sheets with different data have different ids")
+    func testNotificationDeliveryDifferentDataHaveDifferentIds() {
+        let data1 = NotificationDeliveryData(
             invocationId: "invocation1",
             title: "Title 1",
             body: "Body",
             sheetContent: nil,
             status: .sending
         )
-        let data2 = NotifyAppChipData(
+        let data2 = NotificationDeliveryData(
             invocationId: "invocation2",
             title: "Title 2",
             body: "Body",
@@ -90,8 +90,8 @@ struct ChatSheetTests {
             status: .sending
         )
 
-        let sheet1 = ChatSheet.notifyApp(data1)
-        let sheet2 = ChatSheet.notifyApp(data2)
+        let sheet1 = ChatSheet.notificationDelivery(data1)
+        let sheet2 = ChatSheet.notificationDelivery(data2)
 
         #expect(sheet1.id != sheet2.id)
     }
@@ -115,7 +115,7 @@ struct ChatSheetTests {
             tags: nil
         )
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
-        let notifyData = NotifyAppChipData(
+        let notifyData = NotificationDeliveryData(
             invocationId: "capability",
             title: "Title",
             body: "Body",
@@ -141,7 +141,7 @@ struct ChatSheetTests {
             .compactionDetail(compactionData),
             .userInteraction,
             .subagentDetail,
-            .notifyApp(notifyData),
+            .notificationDelivery(notifyData),
             .thinkingDetail("content"),
             .capabilityInvocationDetail(capabilityData),
             .providerErrorDetail(providerErrorData)
@@ -388,10 +388,10 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == .subagentDetail)
     }
 
-    @Test("showNotifyApp creates notify app sheet with data")
-    func testShowNotifyAppCreatesCorrectSheet() {
+    @Test("showNotificationDelivery creates notification delivery sheet with data")
+    func testShowNotificationDeliveryCreatesCorrectSheet() {
         let coordinator = SheetCoordinator()
-        let data = NotifyAppChipData(
+        let data = NotificationDeliveryData(
             invocationId: "invocation123",
             title: "Notification",
             body: "Body text",
@@ -399,13 +399,13 @@ struct SheetCoordinatorTests {
             status: .sending
         )
 
-        coordinator.showNotifyApp(data)
+        coordinator.showNotificationDelivery(data)
 
-        if case .notifyApp(let sheetData) = coordinator.activeSheet {
+        if case .notificationDelivery(let sheetData) = coordinator.activeSheet {
             #expect(sheetData.invocationId == "invocation123")
             #expect(sheetData.title == "Notification")
         } else {
-            Issue.record("Expected notifyApp sheet")
+            Issue.record("Expected notificationDelivery sheet")
         }
     }
 

@@ -26,8 +26,7 @@ enum UserInteractionTransformer {
             return nil
         }
 
-        guard let paramsData = argumentsJson.data(using: .utf8),
-              let params = try? JSONDecoder().decode(UserInteractionParams.self, from: paramsData) else {
+        guard let params = decodeUserInteractionParams(from: argumentsJson) else {
             TronLogger.shared.warning("UserInteraction: Could not decode params from arguments", category: .events)
             return nil
         }
@@ -46,6 +45,7 @@ enum UserInteractionTransformer {
 
         let capabilityData = UserInteractionInvocationData(
             invocationId: invocationId,
+            pauseId: payload.string("pauseId"),
             params: params,
             answers: answers,
             status: status,
@@ -94,5 +94,20 @@ enum UserInteractionTransformer {
         }
 
         return (status, answers)
+    }
+
+    private static func decodeUserInteractionParams(from argumentsJson: String) -> UserInteractionParams? {
+        guard let data = argumentsJson.data(using: .utf8) else { return nil }
+        if let direct = try? JSONDecoder().decode(UserInteractionParams.self, from: data) {
+            return direct
+        }
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let payload = object["payload"] as? [String: Any],
+            let payloadData = try? JSONSerialization.data(withJSONObject: payload)
+        else {
+            return nil
+        }
+        return try? JSONDecoder().decode(UserInteractionParams.self, from: payloadData)
     }
 }

@@ -67,11 +67,102 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
+        CapabilityContract::new("agent::ask_user", "agent", EffectClass::ExternalSideEffect, RiskLevel::Medium, Some("agent.write"))
+            .description("Ask the user one or more questions and pause the turn until the client submits answers.")
+            .request_schema(user_interaction_request_schema())
+            .response_schema(capability_result_schema())
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "user-input pauses are resolved by explicit client answers or expiry; no synthetic answer is generated"))
+            .lifecycle(json!({
+                "kind": "user_input",
+                "stopsTurn": true,
+                "resumeContractId": "agent::submit_answers",
+                "statusContractId": "agent::status",
+                "cancelContractId": "agent::abort_invocation",
+                "expiresAfterMs": 86_400_000u64,
+                "answerAuthority": "user_client"
+            }))
+            .presentation_hints(json!({
+                "icon": "question",
+                "chipTitle": "Ask",
+                "summaryFields": ["questions", "context"]
+            }))
+            .tags(vec!["ask user", "question", "clarify", "choice", "input", "interaction", "pause"])
+            .examples(vec![json!({
+                "summary": "Ask the user to choose between implementation approaches.",
+                "payload": {
+                    "questions": [{
+                        "id": "approach",
+                        "question": "Which implementation direction should I use?",
+                        "mode": "single",
+                        "options": [
+                            {"label": "Minimal change", "description": "Keep the patch narrow."},
+                            {"label": "Broader cleanup", "description": "Refactor the surrounding module too."}
+                        ],
+                        "allowOther": true
+                    }],
+                    "context": "I found two viable approaches."
+                }
+            })])
+            .build()?,
         CapabilityContract::new("agent::submit_answers", "agent", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("agent.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"questions":{"items":{"additionalProperties":false,"properties":{"id":{"type":"string"},"otherValue":{"type":"string"},"question":{"type":"string"},"selectedValues":{"items":{"type":"string"},"type":"array"}},"required":["question"],"type":"object"},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","questions"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"invocationId":{"type":"string"},"pauseId":{"type":"string"},"questions":{"items":{"additionalProperties":false,"properties":{"id":{"type":"string"},"otherValue":{"type":"string"},"question":{"type":"string"},"selectedValues":{"items":{"type":"string"},"type":"array"}},"required":["question"],"type":"object"},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","pauseId","questions"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
+            .lifecycle(json!({
+                "kind": "immediate",
+                "resolvesPauseKind": "user_input",
+                "answerAuthority": "user_client"
+            }))
+            .tags(vec!["answer", "submit answers", "resume", "user input"])
+            .build()?,
+        CapabilityContract::new("agent::spawn_subagent", "agent", EffectClass::ExternalSideEffect, RiskLevel::Medium, Some("agent.write"))
+            .description("Spawn a scoped child agent and return a handle immediately; use job::wait to block for completion.")
+            .request_schema(subagent_spawn_request_schema())
+            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "agent::cancel_subagent can cancel a still-running child agent"))
+            .lifecycle(json!({
+                "kind": "async_run",
+                "stopsTurn": false,
+                "statusContractId": "agent::subagent_status",
+                "cancelContractId": "agent::cancel_subagent",
+                "streamTopics": STREAM_TOPICS,
+                "answerAuthority": "system"
+            }))
+            .presentation_hints(json!({"icon": "subagent", "chipTitle": "Subagent", "summaryFields": ["task", "model", "skills"]}))
+            .tags(vec!["subagent", "delegate", "parallel", "background agent", "spawn worker"])
+            .examples(vec![json!({
+                "summary": "Spawn a reviewer subagent and wait separately.",
+                "payload": {
+                    "sessionId": "current-session",
+                    "task": "Review the filesystem capability implementation for edge cases",
+                    "maxTurns": 4,
+                    "timeoutMs": 300000
+                }
+            })])
+            .build()?,
+        CapabilityContract::new("agent::subagent_status", "agent", EffectClass::PureRead, RiskLevel::Low, Some("agent.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"subagentSessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","subagentSessionId"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .lifecycle(json!({"kind": "immediate"}))
+            .tags(vec!["subagent status", "agent job", "progress"])
+            .build()?,
+        CapabilityContract::new("agent::subagent_result", "agent", EffectClass::PureRead, RiskLevel::Low, Some("agent.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"subagentSessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","subagentSessionId"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .lifecycle(json!({"kind": "immediate"}))
+            .tags(vec!["subagent result", "agent output", "child agent"])
+            .build()?,
+        CapabilityContract::new("agent::cancel_subagent", "agent", EffectClass::IdempotentWrite, RiskLevel::High, Some("agent.write"))
+            .approval_required(true)
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"subagentSessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","subagentSessionId"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "subagent cancellation is idempotent; completed child output remains in the ledger"))
+            .lifecycle(json!({"kind": "immediate"}))
+            .tags(vec!["cancel subagent", "stop child agent", "agent job cancel"])
             .build()?
     ];
     specs.extend(hidden_capabilities()?);
@@ -194,17 +285,112 @@ fn agent_prompt_queue_drain_response_schema() -> serde_json::Value {
     })
 }
 
+fn capability_result_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+            "content": {},
+            "details": {"type": ["object", "null"]},
+            "isError": {"type": ["boolean", "null"]},
+            "stopTurn": {"type": ["boolean", "null"]}
+        }
+    })
+}
+
+fn user_interaction_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["questions"],
+        "properties": {
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "context": {"type": "string"},
+            "questions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id", "question", "options", "mode"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "question": {"type": "string"},
+                        "mode": {"type": "string", "enum": ["single", "multi"]},
+                        "allowOther": {"type": "boolean"},
+                        "otherPlaceholder": {"type": "string"},
+                        "options": {
+                            "type": "array",
+                            "minItems": 2,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["label"],
+                                "properties": {
+                                    "label": {"type": "string"},
+                                    "value": {"type": "string"},
+                                    "description": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn subagent_spawn_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionId", "task"],
+        "properties": {
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "task": {"type": "string"},
+            "model": {"type": "string"},
+            "systemPrompt": {"type": "string"},
+            "workingDirectory": {"type": "string"},
+            "maxTurns": {"type": "integer", "minimum": 1, "maximum": 20},
+            "timeoutMs": {"type": "integer", "minimum": 1000, "maximum": 3600000},
+            "blockingTimeoutMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 300000},
+            "deniedCapabilities": {"type": "array", "items": {"type": "string"}},
+            "skills": {"type": "array", "items": {"type": "string"}},
+            "maxDepth": {"type": "integer", "minimum": 0, "maximum": 3}
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn submit_answers_contract_accepts_client_question_id() {
+    fn submit_answers_contract_accepts_pause_identity_and_client_question_id() {
         let specs = capabilities().expect("agent contracts");
         let submit = specs
             .iter()
             .find(|spec| spec.function_id.as_str() == "agent::submit_answers")
             .expect("submit answers contract");
+        assert_eq!(
+            submit
+                .request_schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/required"))
+                .and_then(serde_json::Value::as_array)
+                .map(|required| required.contains(&json!("pauseId"))),
+            Some(true)
+        );
+        assert_eq!(
+            submit
+                .request_schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/properties/invocationId/type")),
+            Some(&json!("string"))
+        );
         let id_property = submit
             .request_schema
             .as_ref()
@@ -213,6 +399,57 @@ mod tests {
         assert_eq!(
             id_property.and_then(|value| value.get("type")),
             Some(&json!("string"))
+        );
+    }
+
+    #[test]
+    fn interactive_and_subagent_contracts_project_lifecycle_metadata() {
+        let specs = capabilities().expect("agent contracts");
+        let ask = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "agent::ask_user")
+            .expect("ask user contract");
+        assert_eq!(
+            ask.lifecycle
+                .as_ref()
+                .and_then(|value| value.get("kind"))
+                .and_then(serde_json::Value::as_str),
+            Some("user_input")
+        );
+        assert_eq!(
+            ask.lifecycle
+                .as_ref()
+                .and_then(|value| value.get("stopsTurn"))
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            ask.lifecycle
+                .as_ref()
+                .and_then(|value| value.get("resumeContractId"))
+                .and_then(serde_json::Value::as_str),
+            Some("agent::submit_answers")
+        );
+
+        let spawn = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "agent::spawn_subagent")
+            .expect("spawn subagent contract");
+        assert_eq!(
+            spawn
+                .lifecycle
+                .as_ref()
+                .and_then(|value| value.get("kind"))
+                .and_then(serde_json::Value::as_str),
+            Some("async_run")
+        );
+        assert_eq!(
+            spawn
+                .lifecycle
+                .as_ref()
+                .and_then(|value| value.get("statusContractId"))
+                .and_then(serde_json::Value::as_str),
+            Some("agent::subagent_status")
         );
     }
 }

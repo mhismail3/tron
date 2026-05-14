@@ -217,6 +217,8 @@ final class UserInteractionCoordinatorTests: XCTestCase {
         mockContext.userInteractionState.pendingSubmission = [
             AnswerSubmission(id: "q1", question: "Test?", selectedValues: ["Option A"], otherValue: nil)
         ]
+        mockContext.userInteractionState.pendingPauseId = "pause-1"
+        mockContext.userInteractionState.pendingInvocationId = "tc-123"
 
         // When: Executing pending submission
         coordinator.executePendingSubmission(context: mockContext)
@@ -230,6 +232,8 @@ final class UserInteractionCoordinatorTests: XCTestCase {
         mockContext.userInteractionState.pendingSubmission = [
             AnswerSubmission(id: "q1", question: "Test?", selectedValues: ["Option A"], otherValue: nil)
         ]
+        mockContext.userInteractionState.pendingPauseId = "pause-1"
+        mockContext.userInteractionState.pendingInvocationId = "tc-123"
         mockContext.userInteractionState.currentData = createTestInteractionData(status: .answered)
 
         // When: Executing pending submission
@@ -248,6 +252,27 @@ final class UserInteractionCoordinatorTests: XCTestCase {
         coordinator.executePendingSubmission(context: mockContext)
 
         // Then: No message appended, no crash
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+    }
+
+    func testExecutePendingSubmissionClearsCorruptPendingStateWithoutAppending() {
+        // Given: A pending submission exists without the server pause identity needed to resume it exactly once.
+        mockContext.userInteractionState.pendingSubmission = [
+            AnswerSubmission(id: "q1", question: "Test?", selectedValues: ["Option A"], otherValue: nil)
+        ]
+        mockContext.userInteractionState.pendingPauseId = nil
+        mockContext.userInteractionState.pendingInvocationId = "tc-123"
+        mockContext.userInteractionState.currentData = createTestInteractionData(status: .answered)
+
+        // When: Executing pending submission
+        coordinator.executePendingSubmission(context: mockContext)
+
+        // Then: The corrupt state is cleared, the user is told to reconnect, and no answer chip is appended.
+        XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
+        XCTAssertNil(mockContext.userInteractionState.pendingPauseId)
+        XCTAssertNil(mockContext.userInteractionState.pendingInvocationId)
+        XCTAssertNil(mockContext.userInteractionState.currentData)
+        XCTAssertTrue(mockContext.showErrorCalled)
         XCTAssertTrue(mockContext.appendedMessages.isEmpty)
     }
 
@@ -276,6 +301,8 @@ final class UserInteractionCoordinatorTests: XCTestCase {
         // Then: Message should now be appended and pending cleared
         XCTAssertFalse(mockContext.appendedMessages.isEmpty)
         XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
+        XCTAssertNil(mockContext.userInteractionState.pendingPauseId)
+        XCTAssertNil(mockContext.userInteractionState.pendingInvocationId)
     }
 
     func testSwipeDismissWithoutSubmitDoesNotTriggerSubmission() {
@@ -296,12 +323,16 @@ final class UserInteractionCoordinatorTests: XCTestCase {
         mockContext.userInteractionState.pendingSubmission = [
             AnswerSubmission(id: "q1", question: "Test?", selectedValues: ["A"], otherValue: nil)
         ]
+        mockContext.userInteractionState.pendingPauseId = "pause-1"
+        mockContext.userInteractionState.pendingInvocationId = "tc-123"
 
         // When: clearAll is called
         mockContext.userInteractionState.clearAll()
 
         // Then: Pending submission should be cleared
         XCTAssertNil(mockContext.userInteractionState.pendingSubmission)
+        XCTAssertNil(mockContext.userInteractionState.pendingPauseId)
+        XCTAssertNil(mockContext.userInteractionState.pendingInvocationId)
     }
 
     // MARK: - Mark Superseded Tests
@@ -345,7 +376,7 @@ final class UserInteractionCoordinatorTests: XCTestCase {
         // When: Marking pending questions as superseded
         coordinator.markPendingQuestionsAsSuperseded(context: mockContext)
 
-        // Then: Non-AUQ messages should be unchanged
+        // Then: Non-interaction messages should be unchanged
         XCTAssertEqual(mockContext.messages.count, 3)
         if case .text(let text) = mockContext.messages[0].content {
             XCTAssertEqual(text, "Hello")
@@ -372,6 +403,7 @@ final class UserInteractionCoordinatorTests: XCTestCase {
         let params = UserInteractionParams(questions: [question], context: nil)
         return UserInteractionInvocationData(
             invocationId: invocationId,
+            pauseId: "pause-\(invocationId)",
             params: params,
             answers: [:],
             status: status,

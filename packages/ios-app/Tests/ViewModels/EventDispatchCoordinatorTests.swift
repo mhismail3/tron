@@ -457,6 +457,9 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleCapabilityInvocationStartedCalledWith: CapabilityInvocationStartedPlugin.Result?
     var handleCapabilityInvocationProgressCalledWith: CapabilityInvocationProgressPlugin.Result?
     var handleCapabilityInvocationCompletedCalledWith: CapabilityInvocationCompletedPlugin.Result?
+    var handleCapabilityPauseRequestedCalledWith: CapabilityPauseRequestedPlugin.Result?
+    var handleCapabilityPauseResolvedCalledWith: CapabilityPauseResolvedPlugin.Result?
+    var handleCapabilityRunStatusCalledWith: CapabilityRunStatusPlugin.Result?
 
     // MARK: - Turn Lifecycle
     var handleTurnStartCalledWith: TurnStartPlugin.Result?
@@ -509,6 +512,18 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result) {
         handleCapabilityInvocationCompletedCalledWith = result
+    }
+
+    func handleCapabilityPauseRequested(_ result: CapabilityPauseRequestedPlugin.Result) {
+        handleCapabilityPauseRequestedCalledWith = result
+    }
+
+    func handleCapabilityPauseResolved(_ result: CapabilityPauseResolvedPlugin.Result) {
+        handleCapabilityPauseResolvedCalledWith = result
+    }
+
+    func handleCapabilityRunStatus(_ result: CapabilityRunStatusPlugin.Result) {
+        handleCapabilityRunStatusCalledWith = result
     }
 
     func handleTurnStart(_ result: TurnStartPlugin.Result) {

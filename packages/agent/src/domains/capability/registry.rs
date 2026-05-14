@@ -21,8 +21,8 @@ use super::embeddings::HashEmbeddingProvider;
 use super::types::{
     CapabilityBindingDecision, CapabilityBindingRecord, CapabilityContractRecord,
     CapabilityImplementationRecord, CapabilityIndexHit, CapabilityIndexStatus,
-    CapabilityInspectionHandle, CapabilityInspectionRecord, CapabilityPluginManifest,
-    CapabilityProgramRunRecord,
+    CapabilityInspectionHandle, CapabilityInspectionRecord, CapabilityPauseRecord,
+    CapabilityPluginManifest, CapabilityProgramRunRecord, CapabilityRunRecord,
 };
 use crate::engine::{
     ActorContext, EffectClass, FunctionDefinition, FunctionHealth, FunctionQuery, RiskLevel,
@@ -55,8 +55,15 @@ const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "web::search",
     "web::fetch",
     "notifications::send",
+    "agent::ask_user",
     "agent::status",
     "agent::submit_answers",
+    "agent::spawn_subagent",
+    "agent::subagent_status",
+    "agent::subagent_result",
+    "agent::cancel_subagent",
+    "job::wait",
+    "job::stream_output",
     "sandbox::spawn_worker",
     "sandbox::list_spawned_workers",
     "sandbox::stop_spawned_worker",
@@ -580,6 +587,24 @@ pub(crate) trait CapabilityRegistryStore: Send {
 
     fn record_program_run(&mut self, record: &CapabilityProgramRunRecord) -> Result<(), String>;
 
+    fn record_pause(&mut self, record: &CapabilityPauseRecord) -> Result<(), String>;
+
+    fn resolve_pause(
+        &mut self,
+        pause_id: &str,
+        status: &str,
+        resolution: Value,
+    ) -> Result<Option<CapabilityPauseRecord>, String>;
+
+    fn record_run(&mut self, record: &CapabilityRunRecord) -> Result<(), String>;
+
+    fn update_run_status(
+        &mut self,
+        run_id: &str,
+        status: &str,
+        details: Value,
+    ) -> Result<Option<CapabilityRunRecord>, String>;
+
     fn program_run_query(
         &self,
         trace_id: Option<&str>,
@@ -644,6 +669,8 @@ pub(crate) struct InMemoryCapabilityRegistryStore {
     inspections: BTreeMap<String, (String, u64, String)>,
     audits: Vec<Value>,
     program_runs: BTreeMap<String, Value>,
+    pauses: BTreeMap<String, CapabilityPauseRecord>,
+    runs: BTreeMap<String, CapabilityRunRecord>,
 }
 
 impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
@@ -818,6 +845,60 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
         Ok(())
     }
 
+    fn record_pause(&mut self, record: &CapabilityPauseRecord) -> Result<(), String> {
+        let _ = self.pauses.insert(record.pause_id.clone(), record.clone());
+        Ok(())
+    }
+
+    fn resolve_pause(
+        &mut self,
+        pause_id: &str,
+        status: &str,
+        resolution: Value,
+    ) -> Result<Option<CapabilityPauseRecord>, String> {
+        let Some(record) = self.pauses.get_mut(pause_id) else {
+            return Ok(None);
+        };
+        let previous = record.clone();
+        if record.status != "pending" {
+            return Ok(Some(previous));
+        }
+        record.status = status.to_owned();
+        record.prompt_payload = merge_record_payload(
+            record.prompt_payload.clone(),
+            json!({
+                "resolution": resolution,
+                "resolvedAt": Utc::now().to_rfc3339()
+            }),
+        );
+        Ok(Some(previous))
+    }
+
+    fn record_run(&mut self, record: &CapabilityRunRecord) -> Result<(), String> {
+        let _ = self.runs.insert(record.run_id.clone(), record.clone());
+        Ok(())
+    }
+
+    fn update_run_status(
+        &mut self,
+        run_id: &str,
+        status: &str,
+        details: Value,
+    ) -> Result<Option<CapabilityRunRecord>, String> {
+        let Some(record) = self.runs.get_mut(run_id) else {
+            return Ok(None);
+        };
+        record.status = status.to_owned();
+        record.details = merge_record_payload(
+            record.details.clone(),
+            json!({
+                "statusDetails": details,
+                "updatedAt": Utc::now().to_rfc3339()
+            }),
+        );
+        Ok(Some(record.clone()))
+    }
+
     fn program_run_query(
         &self,
         trace_id: Option<&str>,
@@ -851,6 +932,8 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
             "documents": self.documents.len(),
             "auditEvents": self.audits.len(),
             "programRuns": self.program_runs.len(),
+            "pauses": self.pauses.len(),
+            "runs": self.runs.len(),
             "indexStatus": {
                 "state": "memory",
                 "lexical": true,
@@ -870,6 +953,8 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
             "bindings": self.bindings.values().cloned().collect::<Vec<_>>(),
             "documents": self.documents.values().cloned().collect::<Vec<_>>(),
             "programRuns": self.program_runs.values().cloned().collect::<Vec<_>>(),
+            "pauses": self.pauses.values().cloned().collect::<Vec<_>>(),
+            "runs": self.runs.values().cloned().collect::<Vec<_>>(),
         }))
     }
 
@@ -1003,6 +1088,77 @@ impl SqliteCapabilityRegistryStore {
             .execute_batch(CAPABILITY_REGISTRY_SCHEMA)
             .map_err(|error| format!("initialize capability registry schema: {error}"))?;
         Ok(())
+    }
+
+    fn read_pause(&self, pause_id: &str) -> Result<Option<CapabilityPauseRecord>, String> {
+        self.conn
+            .query_row(
+                "SELECT pause_id, invocation_id, contract_id, implementation_id, function_id,
+                        plugin_id, worker_id, kind, status, prompt_payload_json,
+                        resume_schema_json, answer_authority, expires_at, trace_id,
+                        root_invocation_id, binding_decision_id
+                 FROM capability_pauses WHERE pause_id = ?1",
+                params![pause_id],
+                |row| {
+                    Ok(CapabilityPauseRecord {
+                        pause_id: row.get(0)?,
+                        invocation_id: row.get(1)?,
+                        contract_id: row.get(2)?,
+                        implementation_id: row.get(3)?,
+                        function_id: row.get(4)?,
+                        plugin_id: row.get(5)?,
+                        worker_id: row.get(6)?,
+                        kind: row.get(7)?,
+                        status: row.get(8)?,
+                        prompt_payload: json_from_row(row.get::<_, String>(9)?),
+                        resume_schema: serde_json::from_str::<Option<Value>>(
+                            &row.get::<_, String>(10)?,
+                        )
+                        .unwrap_or(None),
+                        answer_authority: row.get(11)?,
+                        expires_at: row.get(12)?,
+                        trace_id: row.get(13)?,
+                        root_invocation_id: row.get(14)?,
+                        binding_decision_id: row.get(15)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|error| format!("read capability pause: {error}"))
+    }
+
+    fn read_run(&self, run_id: &str) -> Result<Option<CapabilityRunRecord>, String> {
+        self.conn
+            .query_row(
+                "SELECT run_id, invocation_id, contract_id, implementation_id, function_id,
+                        plugin_id, worker_id, status, stream_topic, child_invocations_json,
+                        trace_id, root_invocation_id, binding_decision_id, details_json
+                 FROM capability_runs WHERE run_id = ?1",
+                params![run_id],
+                |row| {
+                    let child_invocations =
+                        serde_json::from_str::<Vec<String>>(&row.get::<_, String>(9)?)
+                            .unwrap_or_default();
+                    Ok(CapabilityRunRecord {
+                        run_id: row.get(0)?,
+                        invocation_id: row.get(1)?,
+                        contract_id: row.get(2)?,
+                        implementation_id: row.get(3)?,
+                        function_id: row.get(4)?,
+                        plugin_id: row.get(5)?,
+                        worker_id: row.get(6)?,
+                        status: row.get(7)?,
+                        stream_topic: row.get(8)?,
+                        child_invocations,
+                        trace_id: row.get(10)?,
+                        root_invocation_id: row.get(11)?,
+                        binding_decision_id: row.get(12)?,
+                        details: json_from_row(row.get::<_, String>(13)?),
+                    })
+                },
+            )
+            .optional()
+            .map_err(|error| format!("read capability run: {error}"))
     }
 
     fn ensure_vector_table(&self, dimensions: usize, model_id: &str) -> Result<(), String> {
@@ -1589,6 +1745,131 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
         Ok(())
     }
 
+    fn record_pause(&mut self, record: &CapabilityPauseRecord) -> Result<(), String> {
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO capability_pauses(
+                    pause_id, invocation_id, contract_id, implementation_id, function_id,
+                    plugin_id, worker_id, kind, status, prompt_payload_json, resume_schema_json,
+                    answer_authority, expires_at, trace_id, root_invocation_id,
+                    binding_decision_id, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
+                 ON CONFLICT(pause_id) DO UPDATE SET
+                    status = excluded.status,
+                    prompt_payload_json = excluded.prompt_payload_json,
+                    updated_at = excluded.updated_at",
+                params![
+                    record.pause_id,
+                    record.invocation_id,
+                    record.contract_id,
+                    record.implementation_id,
+                    record.function_id,
+                    record.plugin_id,
+                    record.worker_id,
+                    record.kind,
+                    record.status,
+                    serde_json::to_string(&record.prompt_payload)
+                        .map_err(|error| format!("serialize pause payload: {error}"))?,
+                    serde_json::to_string(&record.resume_schema)
+                        .map_err(|error| format!("serialize pause resume schema: {error}"))?,
+                    record.answer_authority,
+                    record.expires_at,
+                    record.trace_id,
+                    record.root_invocation_id,
+                    record.binding_decision_id,
+                    now,
+                ],
+            )
+            .map_err(|error| format!("record capability pause: {error}"))?;
+        Ok(())
+    }
+
+    fn resolve_pause(
+        &mut self,
+        pause_id: &str,
+        status: &str,
+        resolution: Value,
+    ) -> Result<Option<CapabilityPauseRecord>, String> {
+        let Some(mut record) = self.read_pause(pause_id)? else {
+            return Ok(None);
+        };
+        let previous = record.clone();
+        if record.status != "pending" {
+            return Ok(Some(previous));
+        }
+        record.status = status.to_owned();
+        record.prompt_payload = merge_record_payload(
+            record.prompt_payload,
+            json!({
+                "resolution": resolution,
+                "resolvedAt": Utc::now().to_rfc3339()
+            }),
+        );
+        self.record_pause(&record)?;
+        Ok(Some(previous))
+    }
+
+    fn record_run(&mut self, record: &CapabilityRunRecord) -> Result<(), String> {
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO capability_runs(
+                    run_id, invocation_id, contract_id, implementation_id, function_id,
+                    plugin_id, worker_id, status, stream_topic, child_invocations_json,
+                    trace_id, root_invocation_id, binding_decision_id, details_json,
+                    created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+                 ON CONFLICT(run_id) DO UPDATE SET
+                    status = excluded.status,
+                    child_invocations_json = excluded.child_invocations_json,
+                    details_json = excluded.details_json,
+                    updated_at = excluded.updated_at",
+                params![
+                    record.run_id,
+                    record.invocation_id,
+                    record.contract_id,
+                    record.implementation_id,
+                    record.function_id,
+                    record.plugin_id,
+                    record.worker_id,
+                    record.status,
+                    record.stream_topic,
+                    serde_json::to_string(&record.child_invocations)
+                        .map_err(|error| format!("serialize child invocations: {error}"))?,
+                    record.trace_id,
+                    record.root_invocation_id,
+                    record.binding_decision_id,
+                    serde_json::to_string(&record.details)
+                        .map_err(|error| format!("serialize run details: {error}"))?,
+                    now,
+                ],
+            )
+            .map_err(|error| format!("record capability run: {error}"))?;
+        Ok(())
+    }
+
+    fn update_run_status(
+        &mut self,
+        run_id: &str,
+        status: &str,
+        details: Value,
+    ) -> Result<Option<CapabilityRunRecord>, String> {
+        let Some(mut record) = self.read_run(run_id)? else {
+            return Ok(None);
+        };
+        record.status = status.to_owned();
+        record.details = merge_record_payload(
+            record.details,
+            json!({
+                "statusDetails": details,
+                "updatedAt": Utc::now().to_rfc3339()
+            }),
+        );
+        self.record_run(&record)?;
+        Ok(Some(record))
+    }
+
     fn program_run_query(
         &self,
         trace_id: Option<&str>,
@@ -1706,6 +1987,8 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             "bindingDecisions": count("capability_binding_decisions")?,
             "auditEvents": count("capability_audit_events")?,
             "programRuns": count("capability_program_runs")?,
+            "pauses": count("capability_pauses")?,
+            "runs": count("capability_runs")?,
             "indexStatus": vector,
         }))
     }
@@ -1717,6 +2000,8 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             "bindings": query_bindings(&self.conn)?,
             "documents": query_json_column(&self.conn, "SELECT document_json FROM capability_index_documents ORDER BY kind, capability_id")?,
             "programRuns": self.program_run_query(None, None, 100, false)?["programRuns"].clone(),
+            "pauses": query_json_column(&self.conn, "SELECT prompt_payload_json FROM capability_pauses ORDER BY updated_at DESC LIMIT 100")?,
+            "runs": query_json_column(&self.conn, "SELECT details_json FROM capability_runs ORDER BY updated_at DESC LIMIT 100")?,
         }))
     }
 
@@ -2179,6 +2464,18 @@ fn redact_audit_event(mut event: Value, reveal_payloads: bool) -> Value {
     event
 }
 
+fn merge_record_payload(mut base: Value, extra: Value) -> Value {
+    match (base.as_object_mut(), extra.as_object()) {
+        (Some(base), Some(extra)) => {
+            for (key, value) in extra {
+                base.insert(key.clone(), value.clone());
+            }
+            Value::Object(base.clone())
+        }
+        _ => extra,
+    }
+}
+
 fn redact_program_run(mut run: Value, reveal_payloads: bool) -> Value {
     if reveal_payloads {
         run["redacted"] = json!(false);
@@ -2392,6 +2689,46 @@ CREATE TABLE IF NOT EXISTS capability_program_runs (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS capability_pauses (
+  pause_id TEXT PRIMARY KEY,
+  invocation_id TEXT NOT NULL,
+  contract_id TEXT NOT NULL,
+  implementation_id TEXT NOT NULL,
+  function_id TEXT NOT NULL,
+  plugin_id TEXT,
+  worker_id TEXT,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  prompt_payload_json TEXT NOT NULL,
+  resume_schema_json TEXT NOT NULL,
+  answer_authority TEXT NOT NULL,
+  expires_at TEXT,
+  trace_id TEXT,
+  root_invocation_id TEXT,
+  binding_decision_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capability_runs (
+  run_id TEXT PRIMARY KEY,
+  invocation_id TEXT NOT NULL,
+  contract_id TEXT NOT NULL,
+  implementation_id TEXT NOT NULL,
+  function_id TEXT NOT NULL,
+  plugin_id TEXT,
+  worker_id TEXT,
+  status TEXT NOT NULL,
+  stream_topic TEXT,
+  child_invocations_json TEXT NOT NULL,
+  trace_id TEXT,
+  root_invocation_id TEXT,
+  binding_decision_id TEXT,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_capability_documents_contract
   ON capability_index_documents(contract_id);
 CREATE INDEX IF NOT EXISTS idx_capability_documents_plugin
@@ -2404,6 +2741,14 @@ CREATE INDEX IF NOT EXISTS idx_capability_program_runs_status
   ON capability_program_runs(status);
 CREATE INDEX IF NOT EXISTS idx_capability_program_runs_binding
   ON capability_program_runs(binding_decision_id);
+CREATE INDEX IF NOT EXISTS idx_capability_pauses_invocation
+  ON capability_pauses(invocation_id);
+CREATE INDEX IF NOT EXISTS idx_capability_pauses_status
+  ON capability_pauses(status);
+CREATE INDEX IF NOT EXISTS idx_capability_runs_invocation
+  ON capability_runs(invocation_id);
+CREATE INDEX IF NOT EXISTS idx_capability_runs_status
+  ON capability_runs(status);
 "#;
 
 /// Hybrid local index.
@@ -3797,6 +4142,68 @@ mod tests {
             revealed["programRuns"][0]["compensationAttempts"][0]["status"],
             "not_declared"
         );
+    }
+
+    #[test]
+    fn lifecycle_pause_and_run_records_round_trip_in_registry_store() {
+        let mut store = InMemoryCapabilityRegistryStore::default();
+        store
+            .record_pause(&CapabilityPauseRecord {
+                pause_id: "pause_test".to_owned(),
+                invocation_id: "invocation_test".to_owned(),
+                contract_id: "agent::ask_user".to_owned(),
+                implementation_id: "first_party.agent.v1.ask_user".to_owned(),
+                function_id: "agent::ask_user".to_owned(),
+                plugin_id: Some("first_party.agent".to_owned()),
+                worker_id: Some("agent".to_owned()),
+                kind: "user_input".to_owned(),
+                status: "pending".to_owned(),
+                prompt_payload: json!({"question": "Proceed?"}),
+                resume_schema: Some(json!({"type": "object"})),
+                answer_authority: "user_client".to_owned(),
+                expires_at: Some("2026-05-14T00:00:00Z".to_owned()),
+                trace_id: Some("trace_test".to_owned()),
+                root_invocation_id: Some("root_test".to_owned()),
+                binding_decision_id: Some("binding_test".to_owned()),
+            })
+            .expect("record pause");
+        let resolved = store
+            .resolve_pause("pause_test", "resumed", json!({"answers": 1}))
+            .expect("resolve pause")
+            .expect("pause present");
+        assert_eq!(resolved.status, "pending");
+        let duplicate = store
+            .resolve_pause("pause_test", "resumed", json!({"answers": 2}))
+            .expect("duplicate resolve")
+            .expect("pause present");
+        assert_eq!(duplicate.status, "resumed");
+        assert_eq!(duplicate.prompt_payload["resolution"]["answers"], json!(1));
+
+        store
+            .record_run(&CapabilityRunRecord {
+                run_id: "run_test".to_owned(),
+                invocation_id: "invocation_test".to_owned(),
+                contract_id: "agent::spawn_subagent".to_owned(),
+                implementation_id: "first_party.agent.v1.spawn_subagent".to_owned(),
+                function_id: "agent::spawn_subagent".to_owned(),
+                plugin_id: Some("first_party.agent".to_owned()),
+                worker_id: Some("agent".to_owned()),
+                status: "running".to_owned(),
+                stream_topic: Some("agent.runtime".to_owned()),
+                child_invocations: vec!["child_test".to_owned()],
+                trace_id: Some("trace_test".to_owned()),
+                root_invocation_id: Some("root_test".to_owned()),
+                binding_decision_id: Some("binding_test".to_owned()),
+                details: json!({"task": "check"}),
+            })
+            .expect("record run");
+        let updated = store
+            .update_run_status("run_test", "completed", json!({"result": "ok"}))
+            .expect("update run")
+            .expect("run present");
+        assert_eq!(updated.status, "completed");
+        assert_eq!(updated.details["statusDetails"]["result"], json!("ok"));
+        assert_eq!(store.admin_status().expect("status")["runs"], json!(1));
     }
 
     #[test]
