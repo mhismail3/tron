@@ -259,7 +259,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
             "capabilitySchema": {
                 "name": "execute",
-                "description": "Execute a live capability by contract, implementation, capability, or function id. Mutating or elevated-risk work requires the inspectionHandle, expectedRevision, and expectedSchemaDigest returned by inspect.",
+                "description": "Execute a live capability by contract, implementation, capability, or function id. Put the selected capability arguments in payload. Safe process::run checks such as date/git status and low-risk notifications::send may run directly with idempotency; mutating or elevated-risk work requires the inspectionHandle, expectedRevision, and expectedSchemaDigest returned by inspect.",
                 "parameters": execute_request_schema()
             }
         }),

@@ -2353,6 +2353,9 @@ fn requires_fresh_revision_for_payload(
             return false;
         }
     }
+    if function.id.as_str() == "notifications::send" {
+        return false;
+    }
     requires_fresh_revision(function)
 }
 
@@ -2871,6 +2874,22 @@ mod tests {
         assert!(requires_fresh_revision_for_payload(
             &function,
             &json!({"payload": {"command": "echo hello > file.txt"}})
+        ));
+    }
+
+    #[test]
+    fn notifications_send_runs_direct_with_idempotency_without_fresh_inspection() {
+        let mut function = test_function("notifications::send");
+        function.effect_class = EffectClass::ExternalSideEffect;
+        function.risk_level = RiskLevel::Low;
+
+        assert!(!requires_fresh_revision_for_payload(
+            &function,
+            &json!({
+                "capabilityId": "notifications::send",
+                "idempotencyKey": "notify-test",
+                "payload": {"title": "Tron test", "body": "hello"}
+            })
         ));
     }
 

@@ -292,6 +292,24 @@ notifications, subagents, and sandbox workers are not provider-facing built-ins.
 They are worker-owned capabilities discovered and invoked through the three
 primitives. Provider integrations do not expose their implementation names directly.
 
+The default `coreFirstParty` primer is generated from registry metadata and
+includes the high-use first-party capabilities the agent should know without a
+search round trip. Important parity anchors are:
+
+| Previous surface | Capability contract |
+|------------------|---------------------|
+| file read/write/edit/list/find/search/diff | `filesystem::read_file`, `filesystem::write_file`, `filesystem::edit_file`, `filesystem::list_dir`, `filesystem::find`, `filesystem::glob`, `filesystem::search_text`, `filesystem::diff`, `filesystem::apply_patch` |
+| shell/process | `process::run` |
+| web search/fetch | `web::search`, `web::fetch` |
+| app notification | `notifications::send` |
+| capability discovery/execution | `capability::search`, `capability::inspect`, `capability::execute` |
+
+`process::run` and `notifications::send` both have direct, low-overhead paths
+for safe/default use: the former skips the inspect round trip for classifier-
+approved read-only checks such as `date` and `git status`, while the latter
+sends through the first-party notification delegate with an idempotency key and
+normal audit/event records.
+
 Capability identity is projected from the live catalog:
 
 | Shape | Meaning |

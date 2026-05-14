@@ -80,6 +80,12 @@ pub struct CapabilitySpec {
     pub high_risk_contract: Option<serde_json::Value>,
     /// Stream topics emitted by this capability.
     pub stream_topics: Vec<&'static str>,
+    /// Discovery description supplied by the owning domain.
+    pub description: Option<&'static str>,
+    /// Discovery/search tags supplied by the owning domain.
+    pub tags: Vec<&'static str>,
+    /// Compact examples supplied by the owning domain.
+    pub examples: Vec<serde_json::Value>,
 }
 
 /// Agent-facing canonical function contract.

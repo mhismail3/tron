@@ -36,6 +36,10 @@
 //! lower the effective risk before this check, as `process::run` does for
 //! classifier-approved read/check commands, but the same payload classifier
 //! must also drive approval so the fast path cannot bypass safety.
+//! Low-risk user-visible notifications are another explicit direct path:
+//! `notifications::send` is still idempotent and audited, but it is primed and
+//! executable without a separate inspect round trip so notification parity does
+//! not depend on shelling out to OS notification commands.
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!

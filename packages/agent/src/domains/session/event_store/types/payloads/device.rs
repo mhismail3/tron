@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Emitted when APNS rejects a device token with a terminal error
 /// (HTTP 410 `Unregistered`, HTTP 400 `BadDeviceToken`, HTTP 400
 /// `DeviceTokenNotForTopic`). The row is atomically deactivated in
-/// `device_tokens` so the next `NotifyApp` call skips it; this event
+/// `device_tokens` so the next `notifications::send` invocation skips it; this event
 /// is the audit trail + broadcast hook so iOS can see that its token
 /// was rejected without polling the DB.
 ///

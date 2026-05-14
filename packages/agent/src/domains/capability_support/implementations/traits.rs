@@ -583,7 +583,7 @@ pub trait JobManagerOps: Send + Sync {
     fn cancel_job(&self, id: &str, user_initiated: bool) -> Result<(), CapabilityExecutionError>;
 }
 
-/// iOS app notifications (`NotifyApp`).
+/// iOS app notification delivery for the `notifications::send` capability.
 #[async_trait]
 pub trait NotifyDelegate: Send + Sync {
     /// Send a push notification to every active device token.

@@ -52,7 +52,7 @@ impl SubagentSpawner for StubSubagentSpawner {
 /// engine inbox record exists and device push needs configuration.
 pub struct StubNotifyDelegate;
 
-/// Message surfaced to the agent when a `NotifyApp` call hits the stub.
+/// Message surfaced to the agent when `notifications::send` hits the stub.
 /// Extracted as a constant so tests can assert on the exact wording.
 pub const STUB_NOTIFY_WARNING: &str = "Push service is not configured on this server. The notification \
      remains available in the engine notification inbox, but no device push was delivered. \
@@ -67,7 +67,7 @@ impl NotifyDelegate for StubNotifyDelegate {
         warn!(
             title = %notification.title,
             priority = %notification.priority,
-            "NotifyApp requested but push service is not configured"
+            "notifications::send requested but push service is not configured"
         );
         Ok(NotifyResult {
             success: false,
@@ -114,7 +114,7 @@ mod tests {
         // The stub must NOT error (erroring blocks the agent's flow
         // on an unconfigured-push setup). It returns a well-formed
         // NotifyResult whose `warning` field explains the state so
-        // the NotifyApp capability can surface it.
+        // the notifications::send capability can surface it.
         let delegate = StubNotifyDelegate;
         let notification = Notification {
             title: "Test".into(),

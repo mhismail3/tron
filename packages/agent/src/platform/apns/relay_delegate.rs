@@ -49,7 +49,7 @@ impl NotifyDelegate for RelayNotifyDelegate {
         let device_tokens = push_helpers::active_tokens(&self.pool)?;
 
         if device_tokens.is_empty() {
-            warn!("NotifyApp requested but no active device tokens are registered");
+            warn!("notifications::send requested but no active device tokens are registered");
             return Ok(NotifyResult {
                 success: false,
                 message: None,

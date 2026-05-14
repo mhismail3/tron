@@ -11,7 +11,7 @@ iOS App -> Tron Server -> Cloudflare Worker relay -> api.push.apple.com
                              (owns APNs signing credentials)
 ```
 
-The local server never reads Apple `.p8` keys and never creates an APNs config directory under `~/.tron/internal/`. If relay config is absent, `NotifyApp` uses the stub delegate and reports that push delivery is disabled. If relay config is present but no active device token is registered, `NotifyApp` returns a warning instead of claiming delivery.
+The local server never reads Apple `.p8` keys and never creates an APNs config directory under `~/.tron/internal/`. If relay config is absent, `notifications::send` uses the stub delegate and reports that push delivery is disabled. If relay config is present but no active device token is registered, `notifications::send` returns a warning instead of claiming delivery.
 
 ## Relay Configuration
 
@@ -50,11 +50,11 @@ Each iOS scheme has its own bundle ID: `com.tron.mobile` for production and `com
 
 ## Delivery Model
 
-Every `NotifyApp` call fans out to all active device tokens for the user. A user with the same app on multiple devices should receive the same notification everywhere. Routing by environment and bundle ID prevents beta/prod cross-delivery.
+Every `notifications::send` invocation fans out to all active device tokens for the user. A user with the same app on multiple devices should receive the same notification everywhere. Routing by environment and bundle ID prevents beta/prod cross-delivery.
 
 Tokens that return `DeviceTokenNotForTopic`, `BadDeviceToken`, or `Unregistered` are deactivated so the database self-heals; the iOS app re-registers on next launch.
 
-Foreground iOS notification state is also driven by `/engine` stream events. When a `NotifyApp` tool completion arrives over the active engine stream, the app refreshes the notification inbox through `notifications::list`; APNs remains the background delivery transport.
+Foreground iOS notification state is also driven by `/engine` stream events. When a `notifications::send` capability completion arrives over the active engine stream, the app refreshes the notification inbox through `notifications::list`; APNs remains the background delivery transport.
 
 ## iOS Implementation
 

@@ -90,8 +90,9 @@ impl NotificationInboxService {
                  FROM events e
                  JOIN sessions s ON s.id = e.session_id
                  LEFT JOIN notification_read_state nrs ON nrs.event_id = e.id
-                 WHERE e.model_primitive_name = 'notifications::send'
-                   AND e.type = 'capability.invocation.started'
+                 WHERE e.type = 'capability.invocation.completed'
+                   AND json_valid(e.payload)
+                   AND json_extract(e.payload, '$.contractId') = 'notifications::send'
                  ORDER BY e.timestamp DESC
                  LIMIT ?1",
             )
@@ -184,8 +185,9 @@ impl NotificationInboxService {
                 "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
                  SELECT e.id, datetime('now')
                  FROM events e
-                 WHERE e.model_primitive_name = 'notifications::send'
-                   AND e.type = 'capability.invocation.started'
+                 WHERE e.type = 'capability.invocation.completed'
+                   AND json_valid(e.payload)
+                   AND json_extract(e.payload, '$.contractId') = 'notifications::send'
                    AND e.session_id = ?1
                    AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
                 params![sid],
@@ -195,8 +197,9 @@ impl NotificationInboxService {
                 "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
                  SELECT e.id, datetime('now')
                  FROM events e
-                 WHERE e.model_primitive_name = 'notifications::send'
-                   AND e.type = 'capability.invocation.started'
+                 WHERE e.type = 'capability.invocation.completed'
+                   AND json_valid(e.payload)
+                   AND json_extract(e.payload, '$.contractId') = 'notifications::send'
                    AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
                 params![],
             )
@@ -221,18 +224,28 @@ fn parse_notification_content(event_id: &str, payload_str: &str) -> Option<Notif
         }
     };
 
-    let arguments = payload.get("arguments").unwrap_or(&payload);
+    let arguments = payload
+        .pointer("/details/output")
+        .or_else(|| payload.get("output"))
+        .or_else(|| payload.get("arguments"))
+        .unwrap_or(&payload);
+    let title = arguments
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let body = arguments
+        .get("body")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if title.is_empty() && body.is_empty() {
+        warn!(event_id, "skipping notification with no title/body");
+        return None;
+    }
     Some(NotificationContent {
-        title: arguments
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        body: arguments
-            .get("body")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
+        title,
+        body,
         sheet_content: arguments.get("sheetContent").cloned(),
     })
 }
@@ -299,12 +312,37 @@ mod tests {
         assert_eq!(
             conn.execute(
                 "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, model_primitive_name, invocation_id)
-                 VALUES (?1, ?2, ?3, 'capability.invocation.started', ?4, ?5, 'ws_1', 'notifications::send', ?6)",
+                 VALUES (?1, ?2, ?3, 'capability.invocation.completed', ?4, ?5, 'ws_1', 'execute', ?6)",
                 rusqlite::params![event_id, session_id, seq, timestamp, payload.as_str(), invocation_id],
             )
             .unwrap(),
             1
         );
+    }
+
+    fn notification_payload(title: &str, body: &str) -> Value {
+        json!({
+            "invocationId": "call_1",
+            "modelPrimitiveName": "execute",
+            "contractId": "notifications::send",
+            "implementationId": "first_party.notifications.v1.send",
+            "functionId": "notifications::send",
+            "pluginId": "first_party.notifications",
+            "workerId": "notifications",
+            "isError": false,
+            "duration": 3,
+            "content": "{}",
+            "details": {
+                "output": {
+                    "title": title,
+                    "body": body,
+                    "priority": "normal",
+                    "success": true,
+                    "successCount": 1,
+                    "totalCount": 1
+                }
+            }
+        })
     }
 
     #[test]
@@ -316,7 +354,7 @@ mod tests {
         assert_eq!(
             conn.execute(
                 "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, model_primitive_name, invocation_id)
-                 VALUES ('evt_bad', 'sess_user', 1, 'capability.invocation.started', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'notifications::send', 'tc_bad')",
+                 VALUES ('evt_bad', 'sess_user', 1, 'capability.invocation.completed', '2025-01-01T01:00:00Z', 'not-json', 'ws_1', 'execute', 'tc_bad')",
                 [],
             )
             .unwrap(),
@@ -329,7 +367,7 @@ mod tests {
             "sess_cron",
             "tc_good",
             "2025-01-02T01:00:00Z",
-            &json!({"arguments": {"title": "Good", "body": "ok"}}),
+            &notification_payload("Good", "ok"),
         );
 
         let result = NotificationInboxService::list(&conn, 50).unwrap();
@@ -349,7 +387,7 @@ mod tests {
             "sess_user",
             "tc_1",
             "2025-01-01T01:00:00Z",
-            &json!({"arguments": {"title": "t", "body": "b"}}),
+            &notification_payload("t", "b"),
         );
 
         let first = NotificationInboxService::mark_read(&conn, "evt_1").unwrap();
@@ -378,7 +416,7 @@ mod tests {
             "sess_user",
             "tc_1",
             "2025-01-01T01:00:00Z",
-            &json!({"arguments": {"title": "First", "body": "b"}}),
+            &notification_payload("First", "b"),
         );
         insert_notify_event(
             &conn,
@@ -386,7 +424,7 @@ mod tests {
             "sess_cron",
             "tc_2",
             "2025-01-02T01:00:00Z",
-            &json!({"arguments": {"title": "Second", "body": "b"}}),
+            &notification_payload("Second", "b"),
         );
         let _ = NotificationInboxService::mark_read(&conn, "evt_1").unwrap();
 
@@ -405,7 +443,7 @@ mod tests {
             "sess_user",
             "tc_1",
             "2025-01-01T01:00:00Z",
-            &json!({"arguments": {"title": "User 1", "body": "b"}}),
+            &notification_payload("User 1", "b"),
         );
         insert_notify_event(
             &conn,
@@ -413,7 +451,7 @@ mod tests {
             "sess_user",
             "tc_2",
             "2025-01-01T01:01:00Z",
-            &json!({"arguments": {"title": "User 2", "body": "b"}}),
+            &notification_payload("User 2", "b"),
         );
         insert_notify_event(
             &conn,
@@ -421,7 +459,7 @@ mod tests {
             "sess_cron",
             "tc_3",
             "2025-01-01T01:02:00Z",
-            &json!({"arguments": {"title": "Cron 1", "body": "b"}}),
+            &notification_payload("Cron 1", "b"),
         );
 
         let result = NotificationInboxService::mark_all_read(&conn, Some("sess_user")).unwrap();
@@ -452,7 +490,7 @@ mod tests {
             "sess_user",
             "tc_a",
             "2025-01-01T01:00:00Z",
-            &json!({"arguments": {"title": "A", "body": "b"}}),
+            &notification_payload("A", "b"),
         );
         insert_notify_event(
             &conn,
@@ -460,7 +498,7 @@ mod tests {
             "sess_cron",
             "tc_b",
             "2025-01-01T01:01:00Z",
-            &json!({"arguments": {"title": "B", "body": "b"}}),
+            &notification_payload("B", "b"),
         );
 
         let result = NotificationInboxService::mark_all_read(&conn, None).unwrap();

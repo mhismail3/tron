@@ -13,7 +13,7 @@
 //!   (deactivate the token) vs transient. Terminal: HTTP 410, HTTP 400
 //!   `BadDeviceToken`, HTTP 400 `DeviceTokenNotForTopic`. Everything else
 //!   (JWT errors, rate limits, 5xx, `TopicDisallowed`) retries on the
-//!   next `NotifyApp` call.
+//!   next `notifications::send` invocation.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -572,7 +572,7 @@ mod tests {
     fn terminal_device_token_not_for_topic_is_terminal() {
         // *** Regression test for the original bug. ***
         // Without this deactivation, a broken Beta token stays in the DB
-        // and keeps failing every NotifyApp call.
+        // and keeps failing every notifications::send invocation.
         assert!(is_terminal_token_error(&failed(
             400,
             Some("DeviceTokenNotForTopic")

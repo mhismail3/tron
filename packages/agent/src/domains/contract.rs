@@ -57,6 +57,12 @@ pub(crate) struct CapabilityContract {
     pub(crate) high_risk_contract: Option<Value>,
     /// Stream topics emitted by the function.
     pub(crate) stream_topics: Vec<&'static str>,
+    /// Human-readable discovery description.
+    pub(crate) description: Option<&'static str>,
+    /// Search/discovery tags.
+    pub(crate) tags: Vec<&'static str>,
+    /// Compact usage examples rendered by inspect/search/primer surfaces.
+    pub(crate) examples: Vec<Value>,
 }
 
 impl CapabilityContract {
@@ -92,6 +98,9 @@ impl CapabilityContract {
             compensation: None,
             high_risk_contract: None,
             stream_topics: Vec::new(),
+            description: None,
+            tags: Vec::new(),
+            examples: Vec::new(),
         }
     }
 
@@ -173,6 +182,24 @@ impl CapabilityContract {
         self
     }
 
+    /// Override the discovery description.
+    pub(crate) fn description(mut self, description: &'static str) -> Self {
+        self.description = Some(description);
+        self
+    }
+
+    /// Attach search/discovery tags.
+    pub(crate) fn tags(mut self, tags: Vec<&'static str>) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Attach compact examples consumed by generated docs and primers.
+    pub(crate) fn examples(mut self, examples: Vec<Value>) -> Self {
+        self.examples = examples;
+        self
+    }
+
     /// Convert the local domain record to the aggregate catalog shape.
     pub(crate) fn build(self) -> EngineResult<CapabilitySpec> {
         Ok(CapabilitySpec {
@@ -194,6 +221,9 @@ impl CapabilityContract {
             approval_required: self.approval_required,
             high_risk_contract: self.high_risk_contract,
             stream_topics: self.stream_topics,
+            description: self.description,
+            tags: self.tags,
+            examples: self.examples,
         })
     }
 }
@@ -203,11 +233,14 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     let mut definition = FunctionDefinition::new(
         spec.function_id.clone(),
         spec.owner_worker.clone(),
-        format!("Canonical domain capability {}", spec.function_id.as_str()),
+        spec.description.map(str::to_owned).unwrap_or_else(|| {
+            format!("Canonical domain capability {}", spec.function_id.as_str())
+        }),
         spec.visibility.clone(),
         spec.effect_class,
     )
     .with_risk(spec.risk_level)
+    .with_tags(spec.tags.iter().map(|tag| (*tag).to_owned()).collect())
     .with_provenance(Provenance::system());
     if let Some(scope) = spec.authority_scope {
         let mut requirement = AuthorityRequirement::scope(scope);
@@ -254,6 +287,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
             | "process::run"
             | "web::search"
             | "web::fetch"
+            | "notifications::send"
             | "agent::status"
             | "agent::submit_answers"
             | "sandbox::spawn_worker"
@@ -278,7 +312,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
             "workerKind": "in_process",
             "deliveryModes": definition.allowed_delivery_modes.iter().map(|mode| mode.as_str()).collect::<Vec<_>>()
         },
-        "examples": [],
+        "examples": spec.examples,
         "domainAuthorityScope": spec.authority_scope,
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "domainModule": spec.domain_module,

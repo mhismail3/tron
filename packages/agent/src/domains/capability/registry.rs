@@ -54,6 +54,7 @@ const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "process::run",
     "web::search",
     "web::fetch",
+    "notifications::send",
     "agent::status",
     "agent::submit_answers",
     "sandbox::spawn_worker",
@@ -2590,6 +2591,8 @@ pub(crate) fn render_capability_primer(
         );
         if entry.function.id.as_str() == "process::run" {
             line.push_str(" safe read-only commands may execute directly; risky commands require inspect/approval");
+        } else if direct_execution_allowed(&entry.function) {
+            line.push_str(" direct with idempotency key");
         } else if requires_fresh_revision(&entry.function) {
             line.push_str(&format!(" inspectRevision={}", entry.function.revision.0));
         }
@@ -2597,6 +2600,12 @@ pub(crate) fn render_capability_primer(
             && let Some(schema) = compact_schema(entry.function.request_schema.as_ref())
         {
             line.push_str(&format!(" payload={schema}"));
+        }
+        if policy.include_examples
+            && let Some(example) = examples(&entry.function).first()
+            && let Ok(example) = serde_json::to_string(example)
+        {
+            line.push_str(&format!(" example={example}"));
         }
         line.push('\n');
         if estimated_tokens(out.len() + line.len()) > policy.max_tokens {
@@ -2612,6 +2621,14 @@ pub(crate) fn render_capability_primer(
 
 pub(crate) fn requires_fresh_revision(function: &FunctionDefinition) -> bool {
     function.effect_class.is_mutating() || function.risk_level >= RiskLevel::Medium
+}
+
+fn direct_execution_allowed(function: &FunctionDefinition) -> bool {
+    function
+        .metadata
+        .pointer("/highRiskContract/directExecutionAllowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub(crate) fn effect_name(effect: EffectClass) -> &'static str {
@@ -3904,15 +3921,18 @@ mod tests {
 
     #[test]
     fn primer_marks_process_run_safe_direct_path() {
-        let mut process = test_function("process::run");
-        process.effect_class = EffectClass::ExternalSideEffect;
-        process.risk_level = RiskLevel::High;
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let process = crate::domains::contract::function_definition_for_capability(&process_spec);
         let snapshot = CapabilityRegistrySnapshot::new(vec![process], 1);
 
         let text = render_capability_primer(
             &snapshot,
             &CapabilityContextPrimerPolicy {
-                max_tokens: 200,
+                max_tokens: 600,
                 include_compact_schemas: true,
                 ..Default::default()
             },
@@ -3921,6 +3941,46 @@ mod tests {
 
         assert!(text.contains("process::run"));
         assert!(text.contains("safe read-only commands may execute directly"));
+        assert!(text.contains("\"capabilityId\":\"process::run\""));
+        assert!(!text.contains("inspectRevision=1"));
+    }
+
+    #[test]
+    fn notification_send_is_core_searchable_and_primed() {
+        let notification_spec = crate::domains::notifications::contract::capabilities()
+            .expect("notification specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "notifications::send")
+            .expect("notifications::send spec");
+        let function =
+            crate::domains::contract::function_definition_for_capability(&notification_spec);
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 12);
+        assert_eq!(entry.context_primer_level, "core");
+        assert!(entry.function.tags.iter().any(|tag| tag == "push"));
+
+        let docs = vec![entry.search_document()];
+        let result = HybridLocalCapabilityIndex::new(CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        })
+        .search("send test notification push", docs, 10)
+        .expect("search");
+        assert_eq!(result.hits[0].contract_id, "notifications::send");
+
+        let snapshot = CapabilityRegistrySnapshot::new(vec![function], 12);
+        let text = render_capability_primer(
+            &snapshot,
+            &CapabilityContextPrimerPolicy {
+                max_tokens: 700,
+                include_compact_schemas: true,
+                include_examples: true,
+                ..Default::default()
+            },
+        )
+        .expect("primer");
+        assert!(text.contains("notifications::send"));
+        assert!(text.contains("\"capabilityId\":\"notifications::send\""));
         assert!(!text.contains("inspectRevision=1"));
     }
 }

@@ -115,7 +115,7 @@ async fn deliver_apns(
     title: Option<&str>,
     deps: &ExecutorDeps,
 ) -> Result<(), crate::domains::cron::errors::CronError> {
-    // Agent turns handle their own notifications via NotifyApp.
+    // Agent turns handle their own notifications via notifications::send.
     // Automatic APNS delivery only serves as failure notification recovery for agent turns.
     // Non-agent payloads (shell commands, webhooks) use APNS delivery normally.
     if run.session_id.is_some() && run.status == crate::domains::cron::types::RunStatus::Completed {

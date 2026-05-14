@@ -22,6 +22,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some("process.run"),
         )
+        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands.")
+        .tags(vec!["shell", "bash", "zsh", "command", "terminal", "date", "git status", "test", "build", "process"])
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
@@ -90,6 +92,13 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "version": 1
         }))
         .stream_topics(STREAM_TOPICS.to_vec())
+        .examples(vec![json!({
+            "mode": "invoke",
+            "capabilityId": "process::run",
+            "payload": {"command": "date"},
+            "idempotencyKey": "date-check-<turn>",
+            "reason": "Check the current local date/time."
+        })])
         .build()?,
     ])
 }
