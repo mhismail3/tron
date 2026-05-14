@@ -38,7 +38,7 @@ If the site's GitHub repo URL differs from `github.com/<github_handle>/<basename
 ### Creating new content
 
 1. **Understand the request** — Determine content type (blog long, blog mini, portfolio), topic, any references or links the user wants included.
-2. **Voice calibration** — Read 2-3 existing posts from the repo before drafting. This is mandatory. Pick posts topically close to the new content. Use `Read` on files in `<local_repo>/public/posts/` or `<local_repo>/public/projects/`.
+2. **Voice calibration** — Read 2-3 existing posts from the repo before drafting. This is mandatory. Pick posts topically close to the new content. Use `filesystem::read_file` on files in `<local_repo>/public/posts/` or `<local_repo>/public/projects/`.
 3. **Draft the content** — Write the full post following the style guide and templates below. Match the voice from the posts you just read.
 4. **Review gate** — Present the complete draft to the user. Iterate until they approve. Never commit or push without explicit approval.
 5. **Create the file** — Write to the correct path using the file naming conventions below. If the post references images, note which images are needed.
@@ -49,12 +49,12 @@ If the site's GitHub repo URL differs from `github.com/<github_handle>/<basename
 
 ### Updating existing content
 
-1. **Find the post** — Locate the file to update. List posts with `Glob` on `public/posts/*/post.md` or `public/projects/*/project.md`, or search by keyword with `Grep`. Read the full file.
+1. **Find the post** — Locate the file to update. List posts with `filesystem::find` on `public/posts/*/post.md` or `public/projects/*/project.md`, or search by keyword with `filesystem::search_text`. Read the full file with `filesystem::read_file`.
 2. **Understand the changes** — Clarify what the user wants changed: new sections, rewording, updated frontmatter (tags, date, status), added/removed content, factual corrections, etc.
 3. **Voice calibration** — If the edit involves writing new prose (not just fixing a typo or updating a tag), read 1-2 nearby posts to recalibrate voice. Skip this for mechanical edits.
 4. **Draft the changes** — Show the user what will change. For small edits, present a before/after of the affected section. For large rewrites, present the full updated post.
 5. **Review gate** — Get explicit approval before writing. Same rule as new content: never commit without approval.
-6. **Apply the edit** — Use `Edit` for targeted changes, `Write` for full rewrites. Do not change the file path or folder name (the slug is part of the URL — renaming breaks links).
+6. **Apply the edit** — Use `filesystem::edit_file` for targeted changes, `filesystem::write_file` for full rewrites. Do not change the file path or folder name (the slug is part of the URL — renaming breaks links).
 7. **Commit and push** — From `<local_repo>`, run `git add`, `git commit`, `git push origin main`.
 8. **Open the URL** — Same as new content.
 

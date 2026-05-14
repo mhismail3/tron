@@ -4,7 +4,7 @@ description: "Sync the current git branch with its remote: stash, fetch, rebase,
 version: "1.0.0"
 tags: [git, sync, rebase, workflow]
 subagent: ask
-deniedTools: [Edit]
+deniedCapabilities: [filesystem::edit_file]
 ---
 
 # Git Sync — Safe Branch Synchronization

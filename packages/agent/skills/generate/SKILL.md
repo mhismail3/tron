@@ -3,9 +3,9 @@ name: generate
 description: "Generate interactive web UIs with @json-render/shadcn, displayed in-app via WebView"
 version: "2.0.0"
 tags: [ui, generate, webview, react, shadcn]
-allowedTools:
-  - Bash
-  - Display
+allowedCapabilities:
+  - process::run
+  - display::show
 ---
 
 # Generate UI
@@ -117,9 +117,9 @@ This produces a standalone HTML file with:
 Rules:
 - NEVER run a server as a foreground command
 - NEVER chain server startup with other commands using `&&`, `;`, or newlines
-- Use TWO separate Bash calls: one to start, one to verify
+- Use TWO separate `process::run` invocations: one to start, one to verify
 
-**Step 5a — Start the server (Bash call 1):**
+**Step 5a — Start the server (`process::run` invocation 1):**
 
 Pick a port (start at 8170, increment if in use). Use `python3` (always on macOS, no npm needed):
 
@@ -127,9 +127,9 @@ Pick a port (start at 8170, increment if in use). Use `python3` (always on macOS
 python3 -m http.server 8170 --directory ~/.tron/workspace/renders/<slug-name> > /tmp/tron-serve-<slug-name>.log 2>&1 & echo $! > /tmp/tron-serve-<slug-name>.pid && echo "started pid=$(cat /tmp/tron-serve-<slug-name>.pid)"
 ```
 
-This backgrounds the server immediately and prints the PID. The Bash call returns instantly.
+This backgrounds the server immediately and prints the PID. The `process::run` invocation returns instantly.
 
-**Step 5b — Verify it's running (Bash call 2):**
+**Step 5b — Verify it's running (`process::run` invocation 2):**
 
 ```bash
 sleep 1 && curl -s -o /dev/null -w "%{http_code}" http://localhost:8170/index.html
@@ -139,7 +139,7 @@ Expect `200`. If the port was taken (connection refused), kill the old PID, pick
 
 ### 6. Get the Tailscale IP and build the URL
 
-**CRITICAL: The iOS device CANNOT reach `localhost` on the Mac server. You MUST use the Tailscale IP. NEVER pass `localhost` to the Display tool — the WebView runs on the phone.**
+**CRITICAL: The iOS device CANNOT reach `localhost` on the Mac server. You MUST use the Tailscale IP. NEVER pass `localhost` to the `display::show` capability — the WebView runs on the phone.**
 
 ```bash
 python3 -c "import pathlib,tomllib; p=pathlib.Path.home()/'.tron/profiles/user/profile.toml'; data=tomllib.loads(p.read_text()) if p.exists() else {}; print(data.get('settings',{}).get('server',{}).get('tailscaleIp',''))"
@@ -152,7 +152,7 @@ The display URL is: `http://<tailscale-ip>:<port>`
 ### 7. Display in app
 
 ```
-Display(type="webview", url="http://<tailscale-ip>:<port>", title="<name>")
+display::show(type="webview", url="http://<tailscale-ip>:<port>", title="<name>")
 ```
 
 This opens an interactive WebView in the iOS app's detail sheet.
@@ -163,7 +163,7 @@ To update the UI:
 
 1. Write the updated spec to the same `spec.json`
 2. Re-run `render.mjs` (overwrites `index.html`)
-3. Call `Display(type="webview", ...)` again with the same URL — the browser refreshes
+3. Call `display::show(type="webview", ...)` again with the same URL — the browser refreshes
 
 The HTTP server auto-serves the updated files.
 

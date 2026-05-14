@@ -2,8 +2,8 @@
 name: "Self Inspect"
 description: "Inspect Tron database, settings, auth, skills, runtime locks, health, and all ~/.tron/ state via direct sqlite3 queries and file reads. Trigger on 'debug this session', 'what went wrong', 'why did that fail', 'inspect my last turns', 'what just happened', 'debug this chat' — diagnose the current live session's errors, failed tools, and anomalies, then write a diagnostic report to ~/.tron/workspace/reports/"
 version: "3.2.0"
-allowedTools:
-  - Bash
+allowedCapabilities:
+  - process::run
 tags:
   - introspection
   - tron

@@ -33,7 +33,7 @@ If not found, tell the user:
 
 **Collection selection:**
 1. If the user specifies a collection name (e.g., 'raindrop AI Research'), resolve the collection ID via the Raindrop API: `GET https://api.raindrop.io/rest/v1/collections` with Bearer token, find the collection by title.
-2. If the user says 'raindrop' with no collection specified, use AskUserQuestion to ask: 'Which Raindrop collection should I process? (e.g., Unsorted, AI Research, or a specific collection name)'
+2. If the user says 'raindrop' with no collection specified, use agent::ask_user to ask: 'Which Raindrop collection should I process? (e.g., Unsorted, AI Research, or a specific collection name)'
 3. Support processing from any collection, not just Unsorted.
 4. Track state per collection: `AUTOMATIONS/raindrop-ingest/state/{collection-slug}-last_seen.json`
 
@@ -52,7 +52,7 @@ For each unprocessed bookmark:
 
 1. **Check the `note` field first.** The user may have written a note on the bookmark in Raindrop to indicate what they found interesting or what to focus on. If a note exists, it guides the entire extraction — treat it as the user's intent for this link.
 
-2. **Fetch content.** Use the appropriate method per `ingest.md` Extract mode (WebFetch for articles, the Twitter skill's fxtwitter API for X/Twitter links, etc.)
+2. **Fetch content.** Use the appropriate method per `ingest.md` Extract mode (web::fetch for articles, the Twitter skill's fxtwitter API for X/Twitter links, etc.)
 
 3. **Decide the ingestion path** based on what you got back:
 

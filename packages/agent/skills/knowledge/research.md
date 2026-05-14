@@ -20,16 +20,16 @@ Read WIKI_RULES before starting. Paths are defined in the skill's Paths table.
 ### Round 1: Survey
 
 1. Parse the topic into 2-5 subtopics or key questions
-2. WebSearch each subtopic with 2-3 query variations
+2. web::search each subtopic with 2-3 query variations
 3. Scan results for authoritative sources
-4. WebFetch the top 3-5 sources — read carefully
+4. web::fetch the top 3-5 sources — read carefully
 5. Note: what's established, what's contested, what's unclear
 
 ### Round 2: Deep-dive
 
 1. Identify gaps and conflicts from Round 1
 2. Search specifically for gaps and conflicts
-3. WebFetch primary sources not yet read
+3. web::fetch primary sources not yet read
 4. Cross-reference key claims across sources
 
 ### Round 3+: Targeted verification (when needed)

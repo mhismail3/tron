@@ -1,12 +1,12 @@
 ---
 name: "Heal Skill"
-description: "Validate, fix, and adapt skills to conform to Tron's format, tools, directory layout, and conventions — works on existing skills and external imports"
+description: "Validate, fix, and adapt skills to conform to Tron's format, capabilities, directory layout, and conventions — works on existing skills and external imports"
 version: "1.0.0"
 tags: [maintenance, skills, validation, import]
 ---
 
 Analyze, validate, and fix Tron skills. Use this when:
-- A first-party skill is outdated (references old paths, dead tables, removed tools)
+- A first-party skill is outdated (references old paths, dead tables, removed capabilities)
 - A third-party skill needs adaptation to Tron's format
 - Importing a skill from Claude Code, generic markdown, or another agent framework
 - Bulk-healing all installed skills
@@ -43,14 +43,14 @@ The Rust parser (`skills/discovery/parser.rs`) recognizes ONLY these keys:
 | `description` | string | Yes | 1-2 sentences, under 200 chars for iOS display |
 | `version` | string | Recommended | Semver (e.g., `"1.0.0"`) |
 | `tags` | string[] | Recommended | For discovery and categorization |
-| `allowedTools` | string[] | Optional | Preferred tools (prompt guidance, not enforced) |
-| `deniedTools` | string[] | Optional | Forbidden tools (prompt guidance, not enforced) |
+| `allowedCapabilities` | string[] | Optional | Preferred capability contracts (prompt guidance, not enforced) |
+| `deniedCapabilities` | string[] | Optional | Forbidden capability contracts (prompt guidance, not enforced) |
 | `subagent` | enum | Optional | `yes` / `ask` / `no` |
 | `subagentModel` | string | Optional | Model override for subagent execution |
 
 **Common mistakes to fix:**
-- `tools:` key → **silently ignored by parser**. Convert to `allowedTools:` if intent is to declare tool preferences
-- `tool:` (singular) → ignored. Convert to `allowedTools:`
+- Unsupported `tools` frontmatter key → **silently ignored by parser**. Convert to `allowedCapabilities:` if intent is to declare capability preferences
+- `tool:` (singular) → ignored. Convert to `allowedCapabilities:`
 - Missing `---` fences → frontmatter not parsed at all
 - Unclosed frontmatter (no closing `---`) → entire file treated as body, no metadata
 - `subagent: true` → should be `subagent: yes`
@@ -65,9 +65,9 @@ tags:
   - tag3
 ```
 
-### 4. Validate Tool References
+### 4. Validate Capability References
 
-Tools referenced in `allowedTools`, `deniedTools`, or in the skill content must be valid Tron tool names.
+Capabilities referenced in `allowedCapabilities`, `deniedCapabilities`, or in the skill content must be valid Tron capability contract ids.
 
 **Available capability contracts:**
 
@@ -85,13 +85,13 @@ Tools referenced in `allowedTools`, `deniedTools`, or in the skill content must 
 
 | External name | Tron equivalent | Notes |
 |--------------|-----------------|-------|
-| `Grep` / `rg` | `filesystem::search_text` | Search across file contents through the filesystem capability plugin |
-| `Glob` | `filesystem::find` | File discovery is owned by the filesystem capability plugin |
+| `filesystem::search_text` / `rg` | `filesystem::search_text` | Search across file contents through the filesystem capability plugin |
+| `filesystem::find` | `filesystem::find` | File discovery is owned by the filesystem capability plugin |
 | `Agent` / `Subagent` | `agent::spawn_subagent` | |
 | `TodoWrite` / `TodoRead` | *(remove)* | Not available in Tron |
-| `WebBrowser` / `Browser` | `ComputerUse` | Screenshot, click, type, scroll |
-| `Cat` / `Head` / `Tail` | `Read` | |
-| `Sed` / `Awk` | `Edit` | |
+| `WebBrowser` / `Browser` | `browser::computer_action` | Screenshot, click, type, scroll |
+| `Cat` / `Head` / `Tail` | `filesystem::read_file` | |
+| `Sed` / `Awk` | `filesystem::edit_file` | |
 | `NotebookEdit` | *(remove)* | Not available in Tron |
 | `TaskCreate` / `TaskUpdate` | *(remove)* | Not available in Tron |
 
@@ -209,7 +209,7 @@ If the skill is missing a preflight section, add one. Model it on the vault skil
 - Infer `name` from filename or first heading
 - Infer `description` from first paragraph
 - Infer `tags` from content keywords
-- Identify tool dependencies and add to `allowedTools`
+- Identify tool dependencies and add to `allowedCapabilities`
 - If complex, restructure into routing table + sub-files
 
 ### 13. Apply Fixes
@@ -241,13 +241,13 @@ After healing, re-read and confirm:
 Frontmatter:
   [PASS] name: "My Skill"
   [PASS] description: present (127 chars)
-  [FAIL] tools: key ignored by parser → convert to allowedTools
+  [FAIL] unsupported tools frontmatter key ignored by parser → convert to allowedCapabilities
   [WARN] version: missing (recommended)
   [WARN] tags: missing (recommended)
 
-Tools:
-  [FAIL] References "Grep" → should be "Search"
-  [PASS] "Bash" is valid
+Capabilities:
+  [FAIL] References "`filesystem::search_text`" → should use a valid capability contract id
+  [PASS] "`process::run`" is valid
 
 Paths:
   [FAIL] ~/.tron/database/tron.db → should be ~/.tron/internal/database/log.db

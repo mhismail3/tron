@@ -274,6 +274,33 @@ fn readme_does_not_advertise_removed_or_fictional_contracts() {
 }
 
 #[test]
+fn managed_skills_use_capability_native_references() {
+    let skills_root = repo_root().join("packages").join("agent").join("skills");
+    let forbidden = [
+        ("allowedTools", "use allowedCapabilities frontmatter"),
+        ("deniedTools", "use deniedCapabilities frontmatter"),
+        ("AskUserQuestion", "use agent::ask_user"),
+        ("NotifyApp", "use notifications::send"),
+        ("WebFetch", "use web::fetch"),
+        ("WebSearch", "use web::search"),
+        ("SpawnSubagent", "use agent::spawn_subagent"),
+        ("Display(", "use display::show"),
+    ];
+
+    for path in files_to_scan(&skills_root) {
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        for (term, replacement) in forbidden {
+            assert!(
+                !content.contains(term),
+                "{} contains retired skill surface `{term}`; {replacement}",
+                path.strip_prefix(repo_root()).unwrap().display()
+            );
+        }
+    }
+}
+
+#[test]
 fn server_blocking_work_uses_the_supervisor_entrypoint() {
     let crate_root = crate_root();
     for root in [

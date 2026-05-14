@@ -157,7 +157,7 @@ If a topic note covers multiple distinct concepts:
 
 ### Add/update tags
 
-Use Edit to modify frontmatter. Keep tags consistent across the knowledge base — check what tags already exist before inventing new ones.
+Use `filesystem::edit_file` to modify frontmatter. Keep tags consistent across the knowledge base — check what tags already exist before inventing new ones.
 
 ---
 

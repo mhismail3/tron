@@ -18,11 +18,11 @@ All paths below are derived from the Constitution path reference (AUTOMATIONS = 
 | AUTOMATIONS | `~/.tron/workspace/automations/` |
 | AUTOMATIONS_JSON | `~/.tron/workspace/automations/automations.json` |
 
-Use the standard **Read**, **Write**, and **Edit** tools to manage the file directly. Always use the absolute path AUTOMATIONS_JSON.
+Use the `filesystem::read_file`, `filesystem::write_file`, and `filesystem::edit_file` capabilities to manage the file directly. Always use the absolute path AUTOMATIONS_JSON.
 
 ## Before Creating or Updating
 
-Use **AskUserQuestion** to confirm anything the user hasn't specified:
+Use **agent::ask_user** to confirm anything the user hasn't specified:
 
 - **Schedule**: What time/frequency? What timezone? (Default to user's local timezone, not UTC)
 - **Payload type**: Shell command vs agent turn vs webhook?
@@ -281,33 +281,33 @@ For state files that must persist a single value across runs, use a fixed filena
 
 ## CRUD Workflow
 
-### Read (list all automations)
+### List all automations
 
 ```
-Read AUTOMATIONS_JSON
+filesystem::read_file AUTOMATIONS_JSON
 ```
 
 ### Create
 
-1. Read the file to get current state
+1. Use `filesystem::read_file` to get current state
 2. Generate a new ID: `cron_<uuid_v7>` (use `uuidgen` or similar)
 3. Add the new job to the `jobs` array with `createdAt` and `updatedAt` set to current ISO 8601 UTC time
-4. Write the file back
+4. Use `filesystem::write_file` or `filesystem::edit_file` to write the file back
 5. Scheduler picks up the change within 5 seconds
 
 ### Update
 
-1. Read the file
+1. Use `filesystem::read_file` to read the file
 2. Find the job by `id`
 3. Modify the desired fields
 4. Update `updatedAt` to current ISO 8601 UTC time
-5. Write the file back
+5. Use `filesystem::write_file` or `filesystem::edit_file` to write the file back
 
 ### Delete
 
-1. Read the file
+1. Use `filesystem::read_file` to read the file
 2. Filter out the job by `id`
-3. Write the file back
+3. Use `filesystem::write_file` or `filesystem::edit_file` to write the file back
 4. Run history is preserved in the database
 
 ## Validation Rules

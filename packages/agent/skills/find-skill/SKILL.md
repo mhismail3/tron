@@ -3,7 +3,7 @@ name: "Find Skill"
 description: "Search online skill repositories, evaluate candidates, and install the best match into Tron's global skills directory"
 version: "1.0.0"
 tags: [skills, discovery, install, package-manager]
-deniedTools: [SpawnSubagent]
+deniedCapabilities: [agent::spawn_subagent]
 ---
 
 # Find Skill — Skill Discovery & Installation
@@ -40,10 +40,10 @@ npx skills find "<primary-query>"
 ```
 
 ### 2b. Browse the skills.sh registry
-WebFetch `https://skills.sh` and search for the query. This is the primary public skills directory (built by Vercel) with ranked listings and install counts.
+web::fetch `https://skills.sh` and search for the query. This is the primary public skills directory (built by Vercel) with ranked listings and install counts.
 
 ### 2c. Web search
-Use WebSearch with queries like:
+Use web::search with queries like:
 - `"SKILL.md" <query> site:github.com`
 - `claude code skill <query>`
 - `agent skill <query> site:skills.sh`
@@ -53,7 +53,7 @@ Check known trusted sources when relevant:
 - `anthropics/skills` — official Anthropic skills collection (50+ skills)
 - `vercel-labs/agent-skills` — Vercel curated collection (react best practices, web design, deploy)
 
-Use WebFetch on their GitHub repos to browse available skills and match against the query.
+Use web::fetch on their GitHub repos to browse available skills and match against the query.
 
 ### When to use `npx openskills` instead
 
@@ -85,13 +85,13 @@ Reject any skill that:
 - Fetches and executes remote scripts (`curl | sh`, `wget | bash`, etc.)
 - Requests credentials, tokens, or API keys beyond what the task requires
 - Contains obfuscated or encoded content (base64 blobs, hex-encoded strings)
-- Uses unrestricted Bash without clear justification
+- Uses unrestricted `process::run` without clear justification
 - Writes outside its working directory without explanation
 - Has no SKILL.md or an empty/placeholder one
 
 ## Phase 4: Present Options
 
-Use AskUserQuestion to present a ranked shortlist (2-4 candidates).
+Use agent::ask_user to present a ranked shortlist (2-4 candidates).
 
 For each candidate, show:
 - Name and source (repo URL)
@@ -128,10 +128,10 @@ Flags: `-g` installs globally to `~/.claude/skills/`, `-a claude-code` targets C
 ls ~/.claude/skills/
 ```
 
-Find the newly downloaded skill directory and use the Read tool to inspect its SKILL.md content. **This is the security gate.** Review:
-- What tools does it request?
+Find the newly downloaded skill directory and use `filesystem::read_file` to inspect its SKILL.md content. **This is the security gate.** Review:
+- What capabilities does it request?
 - Does it write files outside expected directories?
-- Does it run any suspicious Bash commands?
+- Does it run any suspicious `process::run` commands?
 - Is the content coherent and well-structured?
 
 If anything looks suspicious, **stop and warn the user** with specifics about what's concerning. Do not proceed unless the user explicitly confirms.
@@ -150,7 +150,7 @@ Required fields:
 - `name` — derive from directory name if missing
 - `description` — derive from first paragraph if missing
 
-Use the Edit tool to add missing frontmatter. Don't overwrite existing fields.
+Use `filesystem::edit_file` to add missing frontmatter. Don't overwrite existing fields.
 
 ### Step 5: Verify installation
 
@@ -182,7 +182,7 @@ rm -rf /tmp/skill-install
 Tell the user:
 1. **How to invoke**: `@<skill-name>` in the chat
 2. **What it does**: one-sentence summary from the SKILL.md description
-3. **What tools it uses**: list any notable tool access (Bash, web access, file writes, etc.)
+3. **What capabilities it uses**: list any notable capability access (`process::run`, web access, file writes, etc.)
 4. **Subagent mode**: whether it runs inline or as a subagent
 
 ## Safety Rules
@@ -190,7 +190,7 @@ Tell the user:
 1. **Never install without user confirmation.** Always present candidates and let the user choose.
 2. **Always read SKILL.md content before copying to `~/.tron/skills/`.** This is non-negotiable.
 3. **Prefer trusted sources.** Official repos and well-starred projects over random forks.
-4. **Warn on unrestricted Bash.** If a skill doesn't deny Bash and its instructions involve shell commands, note this to the user.
+4. **Warn on unrestricted `process::run`.** If a skill doesn't deny `process::run` and its instructions involve shell commands, note this to the user.
 5. **Don't overwrite existing skills.** If `~/.tron/skills/<name>/` already exists, tell the user and ask whether to replace, rename, or skip.
 6. **Clean up temp files.** Remove any `/tmp/skill-install` directories after use.
 7. **One skill per invocation.** Search for and install one skill at a time. If the user wants multiple, handle them sequentially.

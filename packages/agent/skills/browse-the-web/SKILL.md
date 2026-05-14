@@ -3,23 +3,23 @@ name: "Browse the Web"
 description: "Browser automation via the agent-browser CLI — navigate, snapshot, interact, screenshot, scrape, and export"
 version: "1.0.0"
 tags: [browser, automation, web, scraping]
-allowedTools:
-  - Bash
-  - Display
+allowedCapabilities:
+  - process::run
+  - display::show
 ---
 
 # Browser Automation via agent-browser CLI
 
-You are controlling a headless Chrome browser through the `agent-browser` CLI tool. Every browser action is a Bash command. Execute them ONE AT A TIME sequentially — never run multiple browser commands in parallel. Wait for each command to complete before starting the next. Parallel execution causes race conditions because commands share a browser session.
+You are controlling a headless Chrome browser through the `agent-browser` CLI tool. Every browser action is a `process::run` invocation. Execute them ONE AT A TIME sequentially — never run multiple browser commands in parallel. Wait for each command to complete before starting the next. Parallel execution causes race conditions because commands share a browser session.
 
 ---
 
 ## CRITICAL FIRST STEP: Start Display Streaming
 
-**Before running ANY browser command**, you MUST call the Display tool to open a live viewport stream so the user can watch what you're doing:
+**Before running ANY browser command**, you MUST call the `display::show` capability to open a live viewport stream so the user can watch what you're doing:
 
 ```
-Display(type="stream", action="start", streamId="browser", title="Browser")
+display::show(type="stream", action="start", streamId="browser", title="Browser")
 ```
 
 Do this ONCE at the beginning. Do NOT skip this step. Without it, the user cannot see the browser and has no visibility into your actions.
@@ -200,7 +200,7 @@ agent-browser hover "nav > ul > li:nth-child(2)" --session main
 
 ```bash
 # 1. Start live stream (display capability, not shell)
-# Display(type="stream", action="start", streamId="browser", title="Browser")
+# display::show(type="stream", action="start", streamId="browser", title="Browser")
 
 # 2. Navigate
 agent-browser open "https://example.com" --session main
@@ -306,7 +306,7 @@ When you're done with browser automation:
 
 2. Stop the display stream (display capability):
    ```
-   Display(type="stream", action="stop", streamId="browser")
+   display::show(type="stream", action="stop", streamId="browser")
    ```
 
 Always clean up, even if errors occurred. If you used multiple sessions, close each one.

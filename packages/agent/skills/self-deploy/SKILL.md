@@ -3,7 +3,7 @@ name: "Self Deploy"
 description: Contributor-only guidance for Tron release/deploy checks. Production Mac updates are notarized DMG replacement; no server-side deploy API exists.
 version: "8.0.0"
 tags: [deployment, devops, tron]
-deniedTools: [SpawnSubagent]
+deniedCapabilities: [agent::spawn_subagent]
 ---
 
 # Self Deploy — Contributor Release Checks

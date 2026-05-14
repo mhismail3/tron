@@ -416,7 +416,7 @@ struct UserMemorySnapshot: Codable, Equatable {
     /// `bootstrapped == false`, this is the server-generated bootstrap stub.
     let content: String
     /// Listing of `rules/*.md` files (not contents). Agent reads individual
-    /// files on demand via the `Read` capability.
+    /// files on demand via the `filesystem::read_file` capability.
     let ruleFiles: [UserMemoryRuleFile]
     /// True iff `MEMORY.md` exists on disk at read time.
     let bootstrapped: Bool

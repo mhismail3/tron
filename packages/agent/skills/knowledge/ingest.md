@@ -21,18 +21,18 @@ Read WIKI_RULES before starting for frontmatter and naming conventions. Paths ar
 
 ### Step 1: Fetch
 
-Use WebFetch to read the URL. Extract:
+Use web::fetch to read the URL. Extract:
 - Author, title, publication date
 - Core claims, concepts, evidence
 
 | URL type | Method |
 |---|---|
-| Articles, blogs | WebFetch directly |
-| Twitter/X posts (`x.com/*/status/*`, `twitter.com/*/status/*`) | See the Twitter skill — `curl` the fxtwitter API (zero auth, structured JSON). Always walk the reply chain to get the full thread or conversation. Falls back to WebFetch if API unavailable. |
-| PDFs, papers | WebFetch with PDF handling |
-| YouTube, video | WebFetch — title, description, transcript if available |
+| Articles, blogs | web::fetch directly |
+| Twitter/X posts (`x.com/*/status/*`, `twitter.com/*/status/*`) | See the Twitter skill — `curl` the fxtwitter API (zero auth, structured JSON). Always walk the reply chain to get the full thread or conversation. Falls back to web::fetch if API unavailable. |
+| PDFs, papers | web::fetch with PDF handling |
+| YouTube, video | web::fetch — title, description, transcript if available |
 
-> **Why not WebFetch for tweets?** X's pages are heavily JavaScript-dependent — WebFetch often gets incomplete or empty content. The fxtwitter public API (`api.fxtwitter.com`) returns structured JSON reliably, including full article content for long-form posts. No auth needed. See the Twitter skill for details.
+> **Why not web::fetch for tweets?** X's pages are heavily JavaScript-dependent — web::fetch often gets incomplete or empty content. The fxtwitter public API (`api.fxtwitter.com`) returns structured JSON reliably, including full article content for long-form posts. No auth needed. See the Twitter skill for details.
 
 ### Step 2: Survey existing topics
 

@@ -186,7 +186,7 @@ done
 [ -z "$AUTH_URL" ] && { echo "no consent URL captured"; kill $LOGIN_PID; exit 1; }
 
 # 3. Drive the consent flow with agent-browser (must be HEADED — Google blocks headless OAuth)
-#    Start the Display stream first per the browse-the-web skill, then:
+#    Start the display::show stream first per the browse-the-web skill, then:
 agent-browser open "$AUTH_URL" --headed --session gws-reauth
 agent-browser snapshot -i --json --session gws-reauth
 # Click through "Choose an account" → your account → "Continue" / "Allow"

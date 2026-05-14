@@ -3,7 +3,7 @@ name: "Sandbox"
 description: Create and manage sandboxed Linux containers using Apple's container CLI. Create, execute commands, manage lifecycle, and inspect logs.
 version: "1.0.0"
 tags: [containers, sandbox, devops]
-deniedTools: [SpawnSubagent]
+deniedCapabilities: [agent::spawn_subagent]
 ---
 
 # Sandbox — Container Management Skill
@@ -231,7 +231,7 @@ After `container delete`:
 # Read current registry, remove entry by name, write back
 ```
 
-Use the Read tool to read the file and Bash with a small script to write atomically.
+Use `filesystem::read_file` to read the file and `process::run` with a small script for the atomic write.
 
 ## 7. Networking
 
