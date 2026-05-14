@@ -7,7 +7,11 @@
 //! The broad `process::run` contract has conditional approval instead of a
 //! blanket approval bit. Payload-sensitive approval classification lives in
 //! [`approval`], while schema validation, idempotency, lease, audit, and actual
-//! execution remain on the normal engine/capability path.
+//! execution remain on the normal engine/capability path. The same classifier
+//! also lets low-risk first-party read/check commands such as `date`, `pwd`,
+//! `git status`, and test/build checks skip an extra inspect turn; commands
+//! outside the low-risk set require the normal fresh-inspection and approval
+//! flow before dispatch.
 
 pub(crate) mod approval;
 pub(crate) mod contract;

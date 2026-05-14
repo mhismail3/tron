@@ -44,7 +44,11 @@ fn command_requires_approval(command: &str) -> bool {
         return true;
     }
 
-    false
+    !lower
+        .split([';', '&', '|'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .all(segment_is_low_risk)
 }
 
 fn has_redirection_or_mutating_pipe(command: &str) -> bool {
@@ -79,6 +83,79 @@ fn has_high_risk_package_operation(tokens: &[String]) -> bool {
         || tokens
             .windows(3)
             .any(|triple| triple[0] == "pip" && triple[1] == "install" && triple[2] != "--dry-run")
+}
+
+fn segment_is_low_risk(segment: &str) -> bool {
+    let tokens = shellish_tokens(segment);
+    let Some(command) = tokens.first().map(String::as_str) else {
+        return true;
+    };
+
+    if LOW_RISK_PURE_COMMANDS.contains(&command) {
+        return true;
+    }
+
+    match command {
+        "find" => find_invocation_is_read_only(&tokens),
+        "git" => tokens
+            .get(1)
+            .is_some_and(|subcommand| git_subcommand_is_read_only(subcommand, &tokens)),
+        "cargo" => tokens
+            .get(1)
+            .is_some_and(|subcommand| cargo_subcommand_is_low_risk(subcommand, &tokens)),
+        "npm" | "pnpm" | "yarn" | "bun" => tokens
+            .get(1)
+            .is_some_and(|subcommand| LOW_RISK_PACKAGE_SUBCOMMANDS.contains(&subcommand.as_str())),
+        "swift" => tokens
+            .get(1)
+            .is_some_and(|subcommand| LOW_RISK_BUILD_SUBCOMMANDS.contains(&subcommand.as_str())),
+        "xcodebuild" => tokens
+            .iter()
+            .any(|token| matches!(token.as_str(), "build" | "build-for-testing" | "test")),
+        "make" => tokens
+            .get(1)
+            .is_some_and(|subcommand| LOW_RISK_BUILD_SUBCOMMANDS.contains(&subcommand.as_str())),
+        _ => tokens
+            .get(1)
+            .is_some_and(|arg| matches!(arg.as_str(), "--version" | "-v" | "-V" | "version")),
+    }
+}
+
+fn find_invocation_is_read_only(tokens: &[String]) -> bool {
+    !tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fdelete"
+        )
+    })
+}
+
+fn git_subcommand_is_read_only(subcommand: &str, tokens: &[String]) -> bool {
+    if !LOW_RISK_GIT_SUBCOMMANDS.contains(&subcommand) {
+        return false;
+    }
+    match subcommand {
+        "branch" => !tokens.iter().any(|token| {
+            matches!(
+                token.as_str(),
+                "-d" | "-D" | "--delete" | "-m" | "-M" | "--move" | "-c" | "-C" | "--copy"
+            )
+        }),
+        "remote" => !tokens.iter().any(|token| {
+            matches!(
+                token.as_str(),
+                "add" | "remove" | "rm" | "rename" | "set-url" | "prune" | "update"
+            )
+        }),
+        _ => true,
+    }
+}
+
+fn cargo_subcommand_is_low_risk(subcommand: &str, tokens: &[String]) -> bool {
+    if subcommand == "fmt" {
+        return tokens.iter().any(|token| token == "--check");
+    }
+    LOW_RISK_CARGO_SUBCOMMANDS.contains(&subcommand)
 }
 
 fn shellish_tokens(command: &str) -> Vec<String> {
@@ -124,6 +201,32 @@ const HIGH_RISK_GIT_SUBCOMMANDS: &[&str] = &[
 const HIGH_RISK_PACKAGE_SUBCOMMANDS: &[&str] =
     &["install", "add", "remove", "uninstall", "link", "publish"];
 
+const LOW_RISK_PURE_COMMANDS: &[&str] = &[
+    "date", "pwd", "ls", "rg", "grep", "egrep", "fgrep", "cat", "head", "tail", "wc", "stat",
+    "file", "du", "df", "echo", "printf", "true", "false", "sleep", "uname", "whoami", "id",
+    "hostname", "which", "whereis",
+];
+
+const LOW_RISK_GIT_SUBCOMMANDS: &[&str] = &[
+    "status",
+    "log",
+    "diff",
+    "show",
+    "branch",
+    "rev-parse",
+    "ls-files",
+    "grep",
+    "remote",
+];
+
+const LOW_RISK_CARGO_SUBCOMMANDS: &[&str] = &[
+    "test", "check", "clippy", "fmt", "build", "metadata", "version",
+];
+
+const LOW_RISK_PACKAGE_SUBCOMMANDS: &[&str] = &["list", "ls", "version"];
+
+const LOW_RISK_BUILD_SUBCOMMANDS: &[&str] = &["test", "check", "build", "build-for-testing"];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,8 +239,15 @@ mod tests {
             "date +%Y-%m-%d",
             "pwd",
             "git status --short",
+            "git branch --show-current",
+            "git remote -v",
             "rg process::run packages/agent/src",
+            "find packages/agent/src -maxdepth 2 -name '*.rs'",
             "cargo test capability_invocation",
+            "cargo fmt -- --check",
+            "npm list",
+            "xcodebuild build-for-testing -scheme Tron",
+            "echo hello",
         ] {
             assert!(
                 !run_requires_approval(&json!({ "command": command })),
@@ -153,9 +263,20 @@ mod tests {
             "rm -rf target",
             "git commit -m test",
             "git reset --hard",
+            "git branch -D old-work",
+            "git remote add origin https://example.invalid/repo.git",
             "npm install left-pad",
+            "npm run build",
+            "npm test",
             "echo secret > file.txt",
             "cat file | tee output.txt",
+            "find . -delete",
+            "find . -exec rm {} ;",
+            "cargo fmt",
+            "touch file.txt",
+            "mkdir output",
+            "cp a b",
+            "python -c 'open(\"x\", \"w\").write(\"no\")'",
         ] {
             assert!(
                 run_requires_approval(&json!({ "command": command })),

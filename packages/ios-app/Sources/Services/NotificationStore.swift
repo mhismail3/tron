@@ -85,6 +85,11 @@ final class NotificationStore {
         sessionId: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async {
+        guard Self.shouldRefreshFromServer(connectionState: engineClient.connectionState) else {
+            TronLogger.shared.debug("Skipping mark-all-read until the engine connection is established", category: .notification)
+            return
+        }
+
         do {
             _ = try await engineClient.notifications.markAllRead(sessionId: sessionId, idempotencyKey: idempotencyKey)
             // Update local state — only flip `isRead` for rows matching

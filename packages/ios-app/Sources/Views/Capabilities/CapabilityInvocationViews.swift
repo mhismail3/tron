@@ -130,6 +130,7 @@ struct CapabilityInvocationDetailSheet: View {
     private var sourceAccent: Color { CapabilityPresentation.sourceColor(for: data.identity) }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
     private var sourceTint: TintedColors { TintedColors(accent: sourceAccent, colorScheme: colorScheme) }
+    private var primitive: String { CapabilityPresentation.primitiveName(for: data.identity) }
 
     var body: some View {
         CapabilityDetailSheetContainer(
@@ -184,14 +185,10 @@ struct CapabilityInvocationDetailSheet: View {
 
     @ViewBuilder
     private var requestSection: some View {
-        if !display.requestRows.isEmpty || display.prettyArguments != nil {
+        if !display.requestRows.isEmpty {
             CapabilityDetailSection(title: "Request", accent: sourceAccent, tint: sourceTint) {
                 VStack(alignment: .leading, spacing: 12) {
                     CapabilityReadableRows(rows: display.requestRows, tint: sourceTint)
-
-                    if let prettyArguments = display.prettyArguments {
-                        CapabilityRawDisclosure(title: "Raw arguments", text: prettyArguments, tint: sourceTint)
-                    }
                 }
             }
             .sheetSection()
@@ -210,13 +207,29 @@ struct CapabilityInvocationDetailSheet: View {
 
     @ViewBuilder
     private var resultSection: some View {
-        if let result = data.result, !result.isEmpty {
+        if data.result?.nilIfEmpty != nil || !display.resultRows.isEmpty {
             CapabilityDetailSection(title: data.status == .error ? "Failure" : "Result", accent: resultAccent, tint: resultTint) {
-                CapabilityResultRenderer(
-                    content: result,
-                    details: data.details,
-                    identity: data.identity
-                )
+                VStack(alignment: .leading, spacing: 12) {
+                    if primitive == "execute" {
+                        if !display.resultRows.isEmpty {
+                            CapabilityReadableRows(rows: display.resultRows, tint: resultTint)
+                        }
+                        if let preview = display.resultPreview?.nilIfEmpty {
+                            CapabilityInvocationCodeBlock(text: preview)
+                        } else if data.result?.nilIfEmpty != nil {
+                            CapabilityResultNote(
+                                text: "Structured output is available in Technical.",
+                                tint: resultTint
+                            )
+                        }
+                    } else if let result = data.result, !result.isEmpty {
+                        CapabilityResultRenderer(
+                            content: result,
+                            details: data.details,
+                            identity: data.identity
+                        )
+                    }
+                }
             }
             .sheetSection()
         }
@@ -262,9 +275,26 @@ struct CapabilityInvocationDetailSheet: View {
 
     @ViewBuilder
     private var technicalSection: some View {
-        if !display.technicalRows.isEmpty {
+        if !display.technicalRows.isEmpty || display.prettyArguments != nil || display.prettyResult != nil {
             CapabilityDetailSection(title: "Technical", accent: .tronSlate, tint: tint) {
-                CapabilityReadableRows(rows: display.technicalRows, tint: tint)
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if !display.technicalRows.isEmpty {
+                            CapabilityReadableRows(rows: display.technicalRows, tint: tint)
+                        }
+                        if let prettyArguments = display.prettyArguments {
+                            CapabilityRawDisclosure(title: "Raw request", text: prettyArguments, tint: tint)
+                        }
+                        if let prettyResult = display.prettyResult {
+                            CapabilityRawDisclosure(title: "Raw result", text: prettyResult, tint: tint)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text("Metadata and raw payloads")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(tint.heading)
+                }
             }
             .sheetSection()
         }
@@ -351,46 +381,14 @@ private struct CapabilityDetailHeader: View {
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: CapabilityPresentation.symbol(for: data.identity))
-                    .font(TronTypography.sans(size: 28, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 40, height: 40)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(titleString(size: TronTypography.sizeBodyLG))
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(display.statusWithDuration)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(tint.secondary)
-                }
-
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                CapabilitySourceBadge(label: CapabilityPresentation.sourceLabel(for: data.identity), color: sourceAccent)
                 Spacer(minLength: 8)
-
                 CapabilityStatusBadge(status: data.status)
             }
 
-            HStack(spacing: 8) {
-                CapabilitySourceBadge(label: CapabilityPresentation.sourceLabel(for: data.identity), color: sourceAccent)
-
-                if let pluginId = data.identity.pluginId?.nilIfEmpty {
-                    Text(pluginId)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(tint.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-
-            if let progressMessage = data.progressMessage?.nilIfEmpty {
-                Text(progressMessage)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(tint.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            CapabilityReadableRows(rows: display.capabilityRows, tint: tint)
         }
         .padding(16)
         .background {
@@ -401,18 +399,6 @@ private struct CapabilityDetailHeader: View {
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
         }
-    }
-
-    private func titleString(size: CGFloat) -> AttributedString {
-        var title = AttributedString(display.primitiveTitle)
-        title.font = TronTypography.sans(size: size, weight: .bold)
-        title.foregroundColor = accent
-
-        let detail = display.commandText.nilIfEmpty.map { " \($0)" } ?? ""
-        var detailText = AttributedString(detail)
-        detailText.font = TronTypography.code(size: size, weight: .regular)
-        detailText.foregroundColor = .tronTextSecondary
-        return title + detailText
     }
 }
 

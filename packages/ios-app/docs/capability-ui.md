@@ -104,17 +104,23 @@ inline duration or live spinner, and a chevron to the detail sheet. This keeps
 the chip provider-neutral while still showing the concrete operation being
 performed, such as `Execute process::run · cargo test`.
 
-Invocation detail sheets use the same display model. The top of the sheet is a
-human-readable summary; live status, request fields, approval state, result
-summaries, artifacts, logs, error classification, and technical identity are
-separated into sheet-native sections. Raw argument JSON is kept behind a
-disclosure group for auditability instead of leading the sheet. Search results
-summarize query, catalog revision, index/vector status, result count, cursor
-state, and ranked hits. Inspect results summarize contract, implementation,
-worker/plugin provenance, trust/health, binding decision, execution
-requirements, schema digest, inspection handle, approval requirements, and
-examples when available. Unknown result shapes still render through a generic
-readable JSON/text block.
+Invocation detail sheets use the same display model. The toolbar carries the
+primitive icon and title, while the first card is only capability identity:
+resolved capability, display name, category/source, plugin, status badge, and
+duration. Request, result, approval, artifacts, logs, and error classification
+are separated into sheet-native sections. Request cards show high-signal fields
+such as command, query, URL, compact path, reason, and mode; result cards show
+status plus domain-specific summaries such as stdout/stderr, file content, diff
+text, entry counts, match counts, and child invocation counts. Raw request JSON,
+raw result JSON/text, schema digest, trace id, binding decision, and other
+debug identifiers live in a collapsed Technical section by default. Search
+results summarize query, catalog revision, index/vector status, result count,
+cursor state, and ranked hits. Inspect results summarize contract,
+implementation, worker/plugin provenance, trust/health, binding decision,
+execution requirements, schema digest, inspection handle, approval requirements,
+and examples when available. Unknown result shapes still render through a
+generic readable JSON/text block, with oversized structured output available in
+Technical instead of taking over the primary sheet.
 
 The current Engine Console is a sheet-native operator surface built from
 capability cards, metric grids, status banners, section chips, generated action

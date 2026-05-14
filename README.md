@@ -323,6 +323,10 @@ warm up; the response reports `ready`, `unavailable`, or degraded status so the
 UI never silently pretends semantic search ran. Search kind filters accept the
 public document kinds plus `function` as the runnable implementation view, so
 agents can ask for worker functions without knowing the registry document name.
+Engine Console mutations such as plugin state changes, conformance runs,
+binding edits, and policy updates are system-idempotent operator actions. They
+do not require a chat session id, but they still go through normal capability
+schema validation, approval, audit, trace, and compensation records.
 
 Mutating or medium/high-risk execution requires a fresh `inspect` result and
 the returned `inspectionHandle`, `expectedRevision`, and
@@ -353,7 +357,7 @@ binding decision id, code/args hashes, limits, child invocations, selected
 implementations, approval state, artifacts, logs, compensation attempts, trace
 id, and final status.
 
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. The profile-backed `profiles/default/prompts/git-workflow.md` block tells agents to inspect `process::run` before using standard `git` commands and to defer risky or publishing operations to the user.
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` without a prior inspect turn, while mutating or publishing git commands still require inspection and approval.
 
 The same capability worker also registers operator/admin functions for native
 clients and the Engine Console. These are normal engine catalog functions, not

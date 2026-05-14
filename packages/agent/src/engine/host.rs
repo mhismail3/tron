@@ -1102,8 +1102,7 @@ fn lease_request_from_requirement(
             invocation.function_id
         )));
     }
-    let resource_id =
-        render_resource_template(&requirement.resource_id_template, &invocation.payload)?;
+    let resource_id = render_resource_template(&requirement.resource_id_template, invocation)?;
     Ok(AcquireResourceLease {
         resource_kind: requirement.resource_kind.clone(),
         resource_id,
@@ -1118,7 +1117,7 @@ fn lease_request_from_requirement(
     })
 }
 
-fn render_resource_template(template: &str, payload: &Value) -> Result<String> {
+fn render_resource_template(template: &str, invocation: &Invocation) -> Result<String> {
     let mut rendered = String::new();
     let mut rest = template;
     while let Some(start) = rest.find('{') {
@@ -1131,7 +1130,7 @@ fn render_resource_template(template: &str, payload: &Value) -> Result<String> {
             )));
         };
         let (field, after_field) = after_start.split_at(end);
-        rendered.push_str(&resource_template_value(payload, field)?);
+        rendered.push_str(&resource_template_value(invocation, field)?);
         rest = &after_field[1..];
     }
     rendered.push_str(rest);
@@ -1143,7 +1142,7 @@ fn render_resource_template(template: &str, payload: &Value) -> Result<String> {
     Ok(rendered)
 }
 
-fn resource_template_value(payload: &Value, field: &str) -> Result<String> {
+fn resource_template_value(invocation: &Invocation, field: &str) -> Result<String> {
     let field = field.trim();
     if field.is_empty() {
         return Err(EngineError::PolicyViolation(
@@ -1151,27 +1150,116 @@ fn resource_template_value(payload: &Value, field: &str) -> Result<String> {
         ));
     }
     let value = if field.starts_with('/') {
-        payload.pointer(field)
+        invocation
+            .payload
+            .pointer(field)
+            .map(ValueRef::Json)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(format!(
+                    "resource lease resolver could not find payload field {field}"
+                ))
+            })?
     } else {
-        field
+        let payload_value = field
             .split('.')
-            .try_fold(payload, |value, segment| value.get(segment))
+            .try_fold(&invocation.payload, |value, segment| value.get(segment))
+            .map(ValueRef::Json);
+        let context_value = resource_template_context_value(invocation, field);
+        select_resource_template_value(field, payload_value, context_value)?
+    };
+    value.into_scalar_string(field)
+}
+
+fn select_resource_template_value<'a>(
+    field: &str,
+    payload_value: Option<ValueRef<'a>>,
+    context_value: Option<ValueRef<'a>>,
+) -> Result<ValueRef<'a>> {
+    match (payload_value, context_value) {
+        (Some(payload), Some(context)) => {
+            let payload_scalar = payload.scalar_string(field)?;
+            let context_scalar = context.scalar_string(field)?;
+            if payload_scalar != context_scalar {
+                return Err(EngineError::PolicyViolation(format!(
+                    "resource lease payload field {field} does not match invocation context"
+                )));
+            }
+            Ok(context)
+        }
+        (Some(payload), None) => Ok(payload),
+        (None, Some(context)) => Ok(context),
+        (None, None) => Err(EngineError::PolicyViolation(format!(
+            "resource lease resolver could not find payload or invocation context field {field}"
+        ))),
     }
-    .ok_or_else(|| {
-        EngineError::PolicyViolation(format!(
-            "resource lease resolver could not find payload field {field}"
-        ))
-    })?;
-    match value {
-        Value::String(value) if !value.trim().is_empty() => Ok(value.clone()),
-        Value::Number(value) => Ok(value.to_string()),
-        Value::Bool(value) => Ok(value.to_string()),
-        Value::String(_) => Err(EngineError::PolicyViolation(format!(
-            "resource lease payload field {field} must not be empty"
-        ))),
-        _ => Err(EngineError::PolicyViolation(format!(
-            "resource lease payload field {field} must be a scalar"
-        ))),
+}
+
+fn resource_template_context_value<'a>(
+    invocation: &'a Invocation,
+    field: &str,
+) -> Option<ValueRef<'a>> {
+    match field {
+        "sessionId" | "session_id" => invocation
+            .causal_context
+            .session_id
+            .as_deref()
+            .map(ValueRef::BorrowedStr),
+        "workspaceId" | "workspace_id" => invocation
+            .causal_context
+            .workspace_id
+            .as_deref()
+            .map(ValueRef::BorrowedStr),
+        "actorId" | "actor_id" => Some(ValueRef::OwnedString(
+            invocation.causal_context.actor_id.to_string(),
+        )),
+        "authorityGrantId" | "authority_grant_id" => Some(ValueRef::OwnedString(
+            invocation.causal_context.authority_grant_id.to_string(),
+        )),
+        "traceId" | "trace_id" => Some(ValueRef::OwnedString(
+            invocation.causal_context.trace_id.to_string(),
+        )),
+        "invocationId" | "invocation_id" => Some(ValueRef::OwnedString(invocation.id.to_string())),
+        "parentInvocationId" | "parent_invocation_id" => invocation
+            .causal_context
+            .parent_invocation_id
+            .as_ref()
+            .map(|id| ValueRef::OwnedString(id.to_string())),
+        "idempotencyKey" | "idempotency_key" => invocation
+            .causal_context
+            .idempotency_key
+            .as_deref()
+            .map(ValueRef::BorrowedStr),
+        _ => None,
+    }
+}
+
+enum ValueRef<'a> {
+    Json(&'a Value),
+    BorrowedStr(&'a str),
+    OwnedString(String),
+}
+
+impl ValueRef<'_> {
+    fn into_scalar_string(self, field: &str) -> Result<String> {
+        self.scalar_string(field)
+    }
+
+    fn scalar_string(&self, field: &str) -> Result<String> {
+        match self {
+            Self::Json(Value::String(value)) if !value.trim().is_empty() => Ok(value.clone()),
+            Self::Json(Value::Number(value)) => Ok(value.to_string()),
+            Self::Json(Value::Bool(value)) => Ok(value.to_string()),
+            Self::BorrowedStr(value) if !value.trim().is_empty() => Ok((*value).to_owned()),
+            Self::OwnedString(value) if !value.trim().is_empty() => Ok((*value).clone()),
+            Self::Json(Value::String(_)) | Self::BorrowedStr(_) | Self::OwnedString(_) => {
+                Err(EngineError::PolicyViolation(format!(
+                    "resource lease field {field} must not be empty"
+                )))
+            }
+            Self::Json(_) => Err(EngineError::PolicyViolation(format!(
+                "resource lease field {field} must be a scalar"
+            ))),
+        }
     }
 }
 

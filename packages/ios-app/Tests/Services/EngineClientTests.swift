@@ -77,6 +77,8 @@ final class NotificationStoreConnectionTests: XCTestCase {
     func testRefreshOnlyRunsWhenEngineIsConnected() {
         XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .disconnected))
         XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .connecting))
+        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .reconnecting(attempt: 1, nextRetrySeconds: 2)))
+        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .failed(reason: "offline")))
         XCTAssertTrue(NotificationStore.shouldRefreshFromServer(connectionState: .connected))
     }
 }

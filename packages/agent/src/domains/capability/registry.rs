@@ -2588,7 +2588,9 @@ pub(crate) fn render_capability_primer(
             risk_name(entry.function.risk_level),
             entry.trust_tier
         );
-        if requires_fresh_revision(&entry.function) {
+        if entry.function.id.as_str() == "process::run" {
+            line.push_str(" safe read-only commands may execute directly; risky commands require inspect/approval");
+        } else if requires_fresh_revision(&entry.function) {
             line.push_str(&format!(" inspectRevision={}", entry.function.revision.0));
         }
         if policy.include_compact_schemas
@@ -3898,5 +3900,27 @@ mod tests {
         .expect("primer");
         assert!(text.contains("filesystem::read_file"));
         assert!(!text.contains("memory::retain"));
+    }
+
+    #[test]
+    fn primer_marks_process_run_safe_direct_path() {
+        let mut process = test_function("process::run");
+        process.effect_class = EffectClass::ExternalSideEffect;
+        process.risk_level = RiskLevel::High;
+        let snapshot = CapabilityRegistrySnapshot::new(vec![process], 1);
+
+        let text = render_capability_primer(
+            &snapshot,
+            &CapabilityContextPrimerPolicy {
+                max_tokens: 200,
+                include_compact_schemas: true,
+                ..Default::default()
+            },
+        )
+        .expect("primer");
+
+        assert!(text.contains("process::run"));
+        assert!(text.contains("safe read-only commands may execute directly"));
+        assert!(!text.contains("inspectRevision=1"));
     }
 }

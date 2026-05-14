@@ -143,18 +143,24 @@ struct CapabilityInvocationDisplayModel: Equatable {
     let statusWithDuration: String
     let targetId: String?
     let payloadSummary: String?
+    let capabilityRows: [CapabilityDisplayRow]
     let requestRows: [CapabilityDisplayRow]
+    let resultRows: [CapabilityDisplayRow]
+    let resultPreview: String?
     let technicalRows: [CapabilityDisplayRow]
     let prettyArguments: String?
+    let prettyResult: String?
 
     init(data: CapabilityInvocationData) {
         let argumentObject = Self.argumentObject(from: data)
         let primitive = CapabilityPresentation.primitiveName(for: data.identity)
         let target = Self.targetId(for: primitive, identity: data.identity, arguments: argumentObject)
         let payload = argumentObject["payload"] as? [String: Any]
-        let payloadSummary = Self.payloadSummary(from: payload ?? argumentObject)
+        let payloadSummary = Self.payloadSummary(target: target, from: payload ?? argumentObject)
         let query = Self.firstString(["query", "q", "searchQuery"], in: argumentObject)
             ?? Self.firstString(["query"], in: data.details?.rawValues ?? [:])
+        let details = data.details?.rawValues ?? [:]
+        let outputObject = Self.outputObject(from: data)
 
         self.primitiveTitle = Self.primitiveTitle(primitive)
         self.targetId = target
@@ -170,6 +176,13 @@ struct CapabilityInvocationDisplayModel: Equatable {
             payloadSummary: payloadSummary,
             identity: data.identity
         )
+        self.capabilityRows = Self.capabilityRows(
+            primitive: primitive,
+            identity: data.identity,
+            target: target,
+            status: data.status,
+            duration: data.formattedDuration
+        )
         self.requestRows = Self.requestRows(
             primitive: primitive,
             query: query,
@@ -177,8 +190,19 @@ struct CapabilityInvocationDisplayModel: Equatable {
             payloadSummary: payloadSummary,
             arguments: argumentObject
         )
+        self.resultRows = Self.resultRows(
+            data: data,
+            details: details,
+            output: outputObject
+        )
+        self.resultPreview = Self.resultPreview(
+            primitive: primitive,
+            result: data.result,
+            output: outputObject
+        )
         self.technicalRows = Self.technicalRows(identity: data.identity)
         self.prettyArguments = Self.prettyJSONString(data.arguments) ?? data.arguments.nilIfEmpty
+        self.prettyResult = data.result.flatMap(Self.prettyJSONString) ?? data.result?.nilIfEmpty
     }
 
     private static func primitiveTitle(_ primitive: String) -> String {
@@ -259,18 +283,21 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
     }
 
-    private static func payloadSummary(from object: [String: Any]) -> String? {
+    private static func payloadSummary(target: String?, from object: [String: Any]) -> String? {
         if let command = firstString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
             return command.truncated(to: 96)
         }
-        if let path = firstString(["path", "filePath", "cwd"], in: object)?.nilIfEmpty {
-            return path.abbreviatingHomeDirectory.truncated(to: 96)
-        }
         if let query = firstString(["query", "q", "searchQuery"], in: object)?.nilIfEmpty {
-            return "query: \(query.truncated(to: 80))"
+            return query.truncated(to: 80)
+        }
+        if let pattern = firstString(["pattern", "glob", "name"], in: object)?.nilIfEmpty {
+            return pattern.truncated(to: 80)
         }
         if let url = firstString(["url", "apiUrl", "endpoint"], in: object)?.nilIfEmpty {
             return url.truncated(to: 96)
+        }
+        if let path = firstString(["path", "filePath", "cwd"], in: object)?.nilIfEmpty {
+            return compactPathLabel(path).truncated(to: 80)
         }
         if let code = firstString(["code"], in: object)?.nilIfEmpty {
             let firstLine = code.lines.first?.trimmed.nilIfEmpty ?? "program"
@@ -289,6 +316,27 @@ struct CapabilityInvocationDisplayModel: Equatable {
             }
         guard !simplePairs.isEmpty else { return nil }
         return simplePairs.joined(separator: ", ").truncated(to: 96)
+    }
+
+    private static func capabilityRows(
+        primitive: String,
+        identity: CapabilityIdentity,
+        target: String?,
+        status: CapabilityInvocationStatus,
+        duration: String?
+    ) -> [CapabilityDisplayRow] {
+        var rows: [CapabilityDisplayRow] = []
+        func append(_ label: String, _ value: String?, technical: Bool = false) {
+            guard let value = value?.nilIfEmpty else { return }
+            rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
+        }
+
+        append("Capability", target ?? identity.contractId ?? identity.functionId ?? primitive)
+        append("Name", CapabilityPresentation.title(for: identity))
+        append("Category", CapabilityPresentation.sourceLabel(for: identity))
+        append("Duration", duration)
+        append("Plugin", identity.pluginId, technical: true)
+        return rows
     }
 
     private static func requestRows(
@@ -319,9 +367,13 @@ struct CapabilityInvocationDisplayModel: Equatable {
             append("Implementation", firstString(["implementationId"], in: arguments))
             append("Function", firstString(["functionId"], in: arguments))
         default:
-            append("Target", target)
+            append("Capability", target)
             append("Mode", firstString(["mode"], in: arguments))
-            append("Payload", payloadSummary)
+            if let payload = arguments["payload"] as? [String: Any] {
+                appendPayloadRows(payload, into: &rows)
+            } else {
+                append("Payload", payloadSummary)
+            }
             append("Reason", firstString(["reason"], in: arguments))
             append("Idempotency", firstString(["idempotencyKey"], in: arguments))
         }
@@ -330,6 +382,117 @@ struct CapabilityInvocationDisplayModel: Equatable {
             rows.append(CapabilityDisplayRow(label: "Request", value: payloadSummary))
         }
         return rows
+    }
+
+    private static func appendPayloadRows(_ payload: [String: Any], into rows: inout [CapabilityDisplayRow]) {
+        func append(_ label: String, _ value: String?) {
+            guard let value = value?.nilIfEmpty else { return }
+            rows.append(CapabilityDisplayRow(label: label, value: value))
+        }
+        append("Command", firstString(["command", "cmd", "shellCommand"], in: payload))
+        append("Query", firstString(["query", "q", "searchQuery", "pattern", "glob", "name"], in: payload))
+        append("URL", firstString(["url", "apiUrl", "endpoint"], in: payload))
+        if let path = firstString(["path", "filePath"], in: payload) {
+            append("Path", compactPathLabel(path))
+        }
+        if let cwd = firstString(["cwd"], in: payload) {
+            append("Working directory", compactPathLabel(cwd))
+        }
+        if let code = firstString(["code"], in: payload) {
+            append("Code", code.lines.first?.trimmed.nilIfEmpty ?? "program")
+        }
+
+        let alreadyShown = Set([
+            "command", "cmd", "shellCommand", "query", "q", "searchQuery", "pattern", "glob",
+            "name", "url", "apiUrl", "endpoint", "path", "filePath", "cwd", "code"
+        ])
+        let extraRows = payload
+            .filter { key, value in
+                !alreadyShown.contains(key) && simplePayloadExtraValue(value) != nil
+            }
+            .sorted { $0.key < $1.key }
+            .prefix(3)
+            .compactMap { key, value -> CapabilityDisplayRow? in
+                simplePayloadExtraValue(value).map { CapabilityDisplayRow(label: humanizeKey(key), value: $0) }
+            }
+        rows.append(contentsOf: extraRows)
+    }
+
+    private static func resultRows(
+        data: CapabilityInvocationData,
+        details: [String: Any],
+        output: [String: Any]
+    ) -> [CapabilityDisplayRow] {
+        var rows: [CapabilityDisplayRow] = []
+        func append(_ label: String, _ value: String?, technical: Bool = false) {
+            guard let value = value?.nilIfEmpty else { return }
+            rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
+        }
+
+        append("Status", statusText(data.status))
+        append("Duration", data.formattedDuration)
+        append("Engine status", firstString(["status"], in: details))
+        append("Exit code", firstString(["exitCode"], in: output))
+        append("Timed out", firstString(["timedOut"], in: output))
+
+        if let entries = output["entries"] as? [Any] {
+            append("Entries", String(entries.count))
+        }
+        if let matches = output["matches"] as? [Any] {
+            append("Matches", String(matches.count))
+        }
+        if let path = firstString(["path"], in: output) {
+            append("Path", compactPathLabel(path))
+        }
+        if let truncated = firstString(["outputTruncated", "truncated"], in: output) {
+            append("Truncated", truncated)
+        }
+        if let childInvocations = details["childInvocations"] as? [Any], !childInvocations.isEmpty {
+            append("Child calls", String(childInvocations.count))
+        }
+        return rows
+    }
+
+    private static func resultPreview(
+        primitive: String,
+        result: String?,
+        output: [String: Any]
+    ) -> String? {
+        guard primitive == "execute" else {
+            return nil
+        }
+        if let stdout = firstString(["stdout"], in: output)?.nilIfEmpty {
+            return stdout.truncated(to: 4_000)
+        }
+        if let stderr = firstString(["stderr"], in: output)?.nilIfEmpty {
+            return stderr.truncated(to: 4_000)
+        }
+        if let content = firstString(["content"], in: output)?.nilIfEmpty {
+            return content.truncated(to: 4_000)
+        }
+        if let diff = firstString(["diff"], in: output)?.nilIfEmpty {
+            return diff.truncated(to: 4_000)
+        }
+        if let entries = output["entries"] as? [[String: Any]] {
+            let names = entries.prefix(12).compactMap { firstString(["name", "path"], in: $0) }
+            guard !names.isEmpty else { return nil }
+            let more = entries.count > names.count ? "\n… \(entries.count - names.count) more" : ""
+            return (names.joined(separator: "\n") + more).truncated(to: 4_000)
+        }
+        if let matches = output["matches"] as? [[String: Any]] {
+            let lines = matches.prefix(8).compactMap { match -> String? in
+                let file = firstString(["path"], in: match).map(compactPathLabel)
+                let line = firstString(["line"], in: match)
+                let text = firstString(["text"], in: match)
+                return [file, line, text].compactMap { $0?.nilIfEmpty }.joined(separator: ": ")
+            }
+            guard !lines.isEmpty else { return nil }
+            let more = matches.count > lines.count ? "\n… \(matches.count - lines.count) more" : ""
+            return (lines.joined(separator: "\n") + more).truncated(to: 4_000)
+        }
+        guard let result = result?.nilIfEmpty else { return nil }
+        let pretty = prettyJSONString(result) ?? result
+        return pretty.count <= 1_200 ? pretty : nil
     }
 
     private static func technicalRows(identity: CapabilityIdentity) -> [CapabilityDisplayRow] {
@@ -360,6 +523,16 @@ struct CapabilityInvocationDisplayModel: Equatable {
             return payloadJSON.rawValues
         }
         return objectFromJSONString(data.arguments) ?? [:]
+    }
+
+    private static func outputObject(from data: CapabilityInvocationData) -> [String: Any] {
+        if let output = data.details?.anyCodableDict("output")?.rawValues {
+            return output
+        }
+        if let result = data.result, let object = objectFromJSONString(result) {
+            return object
+        }
+        return [:]
     }
 
     private static func objectFromJSONString(_ text: String) -> [String: Any]? {
@@ -404,6 +577,44 @@ struct CapabilityInvocationDisplayModel: Equatable {
         default:
             return nil
         }
+    }
+
+    private static func simplePayloadExtraValue(_ value: Any) -> String? {
+        if let bool = value as? Bool {
+            return bool ? "true" : nil
+        }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue ? "true" : nil
+        }
+        return simpleDisplayValue(value)
+    }
+
+    private static func compactPathLabel(_ path: String) -> String {
+        if path.contains("/.worktrees/session/") || path.contains("\\.worktrees\\session\\") {
+            let last = (path as NSString).lastPathComponent
+            if last.hasPrefix("sess_") || last.isEmpty {
+                return "session worktree"
+            }
+            return last
+        }
+        let abbreviated = path.abbreviatingHomeDirectory
+        let last = (abbreviated as NSString).lastPathComponent
+        if !last.isEmpty, last != "/" {
+            return last
+        }
+        return abbreviated
+    }
+
+    private static func humanizeKey(_ key: String) -> String {
+        key
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { word in
+                guard let first = word.first else { return "" }
+                return first.uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ")
     }
 }
 

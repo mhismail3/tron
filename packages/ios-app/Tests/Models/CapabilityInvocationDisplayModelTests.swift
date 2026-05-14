@@ -54,7 +54,54 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.targetId, "process::run")
         XCTAssertEqual(invocation.display.payloadSummary, "date +%s")
         XCTAssertEqual(invocation.display.commandText, "process::run · date +%s")
+        XCTAssertEqual(invocation.display.requestRows.first?.label, "Capability")
+        XCTAssertEqual(invocation.display.requestRows.first?.value, "process::run")
         XCTAssertFalse(invocation.display.commandText.contains("first_party.capability.v1.execute"))
+    }
+
+    func testExecuteChipSuppressesSessionWorktreeIdsForPathPayloads() {
+        let invocation = testCapabilityInvocation(
+            status: .success,
+            arguments: #"{"capabilityId":"filesystem::list_dir","payload":{"path":"/Users/moose/Downloads/projects/testspace/.worktrees/session/sess_019e245a-408e-7331-9644-b46ade73be0d","showHidden":false},"mode":"invoke","reason":"Smoke-test list_dir."}"#,
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "capability::execute",
+                implementationId: "first_party.capability.v1.execute",
+                functionId: "capability::execute"
+            )
+        )
+
+        XCTAssertEqual(invocation.display.commandText, "filesystem::list_dir · session worktree")
+        XCTAssertFalse(invocation.display.commandText.contains("019e245a"))
+        XCTAssertEqual(invocation.display.requestRows.map(\.label), ["Capability", "Mode", "Path", "Reason"])
+    }
+
+    func testExecuteResultHighlightsFilesystemOutput() {
+        let invocation = testCapabilityInvocation(
+            status: .success,
+            arguments: #"{"capabilityId":"filesystem::find","payload":{"path":"/tmp/work","query":"package.json"}}"#,
+            result: #"{"matches":[],"path":"/tmp/work","truncated":false}"#,
+            details: [
+                "output": AnyCodable([
+                    "matches": [],
+                    "path": "/tmp/work",
+                    "truncated": false
+                ]),
+                "status": "ok"
+            ],
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "filesystem::find",
+                implementationId: "first_party.filesystem.v1.find",
+                functionId: "filesystem::find",
+                pluginId: "first_party.filesystem",
+                trustTier: "first_party_signed"
+            )
+        )
+
+        XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Status", value: "Completed")))
+        XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Matches", value: "0")))
+        XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Path", value: "work")))
     }
 
     func testResolvedExecuteStillKeepsPrimitiveTitle() {

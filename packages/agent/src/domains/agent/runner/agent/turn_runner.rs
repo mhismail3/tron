@@ -1126,4 +1126,37 @@ mod tests {
         let waves = capability_invocations::build_execution_waves(&calls, &surface);
         assert_eq!(waves, vec![vec![0, 2], vec![1]]);
     }
+
+    #[test]
+    fn build_execution_waves_keeps_read_primitives_from_blocking_execute() {
+        let calls = vec![
+            crate::shared::messages::CapabilityInvocationDraft::new(
+                "1",
+                "search",
+                Default::default(),
+            ),
+            crate::shared::messages::CapabilityInvocationDraft::new(
+                "2",
+                "execute",
+                Default::default(),
+            ),
+            crate::shared::messages::CapabilityInvocationDraft::new(
+                "3",
+                "execute",
+                Default::default(),
+            ),
+        ];
+        let surface = surface(vec![
+            (
+                "search",
+                ExecutionMode::Serialized("capability-read".into()),
+            ),
+            (
+                "execute",
+                ExecutionMode::Serialized("capability-execute".into()),
+            ),
+        ]);
+        let waves = capability_invocations::build_execution_waves(&calls, &surface);
+        assert_eq!(waves, vec![vec![0, 1], vec![2]]);
+    }
 }

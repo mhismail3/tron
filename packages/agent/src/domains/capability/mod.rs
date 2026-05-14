@@ -26,11 +26,16 @@
 //! entries rather than prompt-expanded hardcoded capabilities. Admin functions such as
 //! `capability::status`, `capability::plugin_list`, and
 //! `capability::policy_validate` are normal catalog functions for operator
-//! clients and are never marked with model-facing capability metadata.
-//! `inspect` is the only source of freshness material for mutating or
-//! elevated-risk execution; its model-facing summary and structured
-//! `executionRequirements` must both expose the same `inspectionHandle`,
-//! `expectedRevision`, and `expectedSchemaDigest` values.
+//! clients and are never marked with model-facing capability metadata. Admin
+//! mutations are system-idempotent because the Engine Console is an operator
+//! surface, not a session transcript participant.
+//! `inspect` is the source of freshness material for mutating or elevated-risk
+//! execution; its model-facing summary and structured `executionRequirements`
+//! must both expose the same `inspectionHandle`, `expectedRevision`, and
+//! `expectedSchemaDigest` values. Payload-sensitive first-party contracts may
+//! lower the effective risk before this check, as `process::run` does for
+//! classifier-approved read/check commands, but the same payload classifier
+//! must also drive approval so the fast path cannot bypass safety.
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!

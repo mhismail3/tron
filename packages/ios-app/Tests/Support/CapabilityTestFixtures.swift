@@ -50,6 +50,7 @@ func testCapabilityInvocation(
     status: CapabilityInvocationStatus = .success,
     arguments: String = "{}",
     result: String? = nil,
+    details: [String: AnyCodable]? = nil,
     identity: CapabilityIdentity = testCapabilityIdentity()
 ) -> CapabilityInvocationData {
     CapabilityInvocationData(
@@ -57,6 +58,7 @@ func testCapabilityInvocation(
         status: status,
         arguments: arguments,
         result: result,
+        details: details,
         identity: identity
     )
 }

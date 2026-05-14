@@ -3987,7 +3987,7 @@ async fn host_invocation_enforces_resource_lease_and_records_compensation() {
     let result = handle
         .invoke(host_invocation(
             "alpha::write",
-            json!({"sessionId": "s1", "value": 1}),
+            json!({"sessionId": "session-a", "value": 1}),
             mutating_causal("lease-key").with_scope("alpha.write"),
         ))
         .await;
@@ -4021,6 +4021,99 @@ async fn host_invocation_enforces_resource_lease_and_records_compensation() {
 }
 
 #[tokio::test]
+async fn resource_lease_template_uses_causal_session_when_payload_omits_session_id() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            write_function("alpha::write", "alpha")
+                .with_risk(RiskLevel::High)
+                .with_required_authority(
+                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
+                )
+                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+                    "session",
+                    "session:{sessionId}:write",
+                    30_000,
+                ))
+                .with_compensation(CompensationContract::new(
+                    CompensationKind::ManualOnly,
+                    "test writes are manually compensated",
+                )),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let result = handle
+        .invoke(host_invocation(
+            "alpha::write",
+            json!({"value": 1}),
+            mutating_causal("lease-context-key").with_scope("alpha.write"),
+        ))
+        .await;
+
+    assert_eq!(result.error, None);
+    let host = handle.lock().await;
+    let record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .rev()
+        .find(|record| record.function_id == fid("alpha::write"))
+        .unwrap();
+    let lease_id = record.resource_lease_ids[0].clone();
+    drop(host);
+
+    let lease = handle.get_resource_lease(&lease_id).await.unwrap().unwrap();
+    assert_eq!(lease.resource_id, "session:session-a:write");
+}
+
+#[tokio::test]
+async fn resource_lease_template_rejects_payload_session_that_conflicts_with_causal_context() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            write_function("alpha::write", "alpha")
+                .with_risk(RiskLevel::High)
+                .with_required_authority(
+                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
+                )
+                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+                    "session",
+                    "session:{sessionId}:write",
+                    30_000,
+                ))
+                .with_compensation(CompensationContract::new(
+                    CompensationKind::ManualOnly,
+                    "test writes are manually compensated",
+                )),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let result = handle
+        .invoke(host_invocation(
+            "alpha::write",
+            json!({"sessionId": "session-b", "value": 1}),
+            mutating_causal("lease-context-conflict-key").with_scope("alpha.write"),
+        ))
+        .await;
+
+    assert!(matches!(
+        result.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("payload field sessionId does not match invocation context")
+    ));
+}
+
+#[tokio::test]
 async fn host_resource_lease_conflict_fails_before_handler_execution() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
@@ -4050,14 +4143,14 @@ async fn host_resource_lease_conflict_fails_before_handler_execution() {
         )
         .unwrap();
     let held = handle
-        .acquire_resource_lease(lease_request("session", "session:s1:locked", 30_000))
+        .acquire_resource_lease(lease_request("session", "session:session-a:locked", 30_000))
         .await
         .unwrap();
 
     let result = handle
         .invoke(host_invocation(
             "alpha::locked",
-            json!({"sessionId": "s1"}),
+            json!({"sessionId": "session-a"}),
             mutating_causal("locked-key").with_scope("alpha.write"),
         ))
         .await;

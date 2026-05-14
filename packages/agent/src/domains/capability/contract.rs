@@ -219,7 +219,7 @@ fn admin_write_contract(
     .domain_module("capability")
     .request_schema(request_schema)
     .response_schema(response_schema)
-    .idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .idempotency(IdempotencyContract::caller_system_engine_ledger())
     .compensation(CompensationContract::new(
         CompensationKind::InverseCommandAvailable,
         "capability admin mutations are audited and can be reversed by setting the previous binding, plugin state, implementation state, or profile policy value",
@@ -234,7 +234,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityPrimitive": true,
             "modelPrimitiveName": "search",
             "capabilityOrder": 10,
-            "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
+            "capabilityExecutionMode": {"kind": "serialized", "group": "capability-read"},
             "capabilitySchema": {
                 "name": "search",
                 "description": "Search the live Tron capability catalog for contracts, implementations, workers, plugins, examples, and docs visible to this session.",
@@ -245,7 +245,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityPrimitive": true,
             "modelPrimitiveName": "inspect",
             "capabilityOrder": 20,
-            "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
+            "capabilityExecutionMode": {"kind": "serialized", "group": "capability-read"},
             "capabilitySchema": {
                 "name": "inspect",
                 "description": "Inspect one capability contract or implementation, including schemas, authority, risk, provenance, idempotency, and copyable execute freshness fields.",
@@ -256,7 +256,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityPrimitive": true,
             "modelPrimitiveName": "execute",
             "capabilityOrder": 30,
-            "capabilityExecutionMode": {"kind": "serialized", "group": "capability"},
+            "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
             "capabilitySchema": {
                 "name": "execute",
                 "description": "Execute a live capability by contract, implementation, capability, or function id. Mutating or elevated-risk work requires the inspectionHandle, expectedRevision, and expectedSchemaDigest returned by inspect.",
@@ -563,6 +563,33 @@ mod tests {
             POLICY_UPDATE_FUNCTION_ID,
         ] {
             assert!(ids.contains(expected), "{expected} missing");
+        }
+    }
+
+    #[test]
+    fn console_admin_mutations_are_system_idempotent() {
+        let capabilities = capabilities().expect("contracts");
+        for function_id in [
+            BINDING_SET_FUNCTION_ID,
+            PLUGIN_INSTALL_FUNCTION_ID,
+            PLUGIN_UPDATE_FUNCTION_ID,
+            PLUGIN_SET_STATE_FUNCTION_ID,
+            PLUGIN_PROMOTE_FUNCTION_ID,
+            CONFORMANCE_RUN_FUNCTION_ID,
+            IMPLEMENTATION_SET_STATE_FUNCTION_ID,
+            POLICY_UPDATE_FUNCTION_ID,
+        ] {
+            let spec = capabilities
+                .iter()
+                .find(|spec| spec.function_id.as_str() == function_id)
+                .unwrap_or_else(|| panic!("{function_id} missing"));
+            assert_eq!(
+                spec.idempotency
+                    .as_ref()
+                    .map(|contract| &contract.dedupe_scope),
+                Some(&VisibilityScope::System),
+                "{function_id} should not require a session id when invoked from Engine Console"
+            );
         }
     }
 }

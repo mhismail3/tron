@@ -193,7 +193,10 @@ the client awaits the `events.session` subscription; if that cannot be
 established, it does not start server work that the UI cannot observe.
 Foreground notification inbox updates follow the same thin-client rule:
 notification capability completions delivered over `/engine` refresh the inbox, while
-APNs remains the background device-delivery transport.
+APNs remains the background device-delivery transport. Read-state mutations are
+also connection-gated; views may request a scoped mark-read while the socket is
+still warming up, but `NotificationStore` skips those writes until the engine is
+connected instead of logging a warning for expected startup timing.
 
 ### Capability Console Boundary
 

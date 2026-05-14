@@ -39,8 +39,9 @@
 //!   through `EngineHostHandle` so the stored invocation resumes in one trace;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   high-risk shared-state mutations, so the host can acquire/release one
-//!   domain resource, record auditable rollback/compensation state, and avoid
-//!   blocking the whole host or inventing per-handler locks;
+//!   domain resource from payload fields plus causal context such as `sessionId`,
+//!   record auditable rollback/compensation state, and avoid blocking the whole
+//!   host or inventing per-handler locks;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;

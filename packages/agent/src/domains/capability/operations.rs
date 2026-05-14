@@ -904,7 +904,7 @@ async fn execute_invoke_value(
         .or_else(|| string_field(&invocation.payload, "expected_schema_digest"));
     let inspection_handle = string_field(&invocation.payload, "inspectionHandle")
         .or_else(|| string_field(&invocation.payload, "inspection_handle"));
-    if requires_fresh_revision(&function) {
+    if requires_fresh_revision_for_payload(&function, &invocation.payload) {
         if expected_revision.is_none()
             || expected_schema_digest.is_none()
             || inspection_handle.is_none()
@@ -2341,6 +2341,21 @@ fn validate_target_payload(
     Ok(())
 }
 
+fn requires_fresh_revision_for_payload(
+    function: &FunctionDefinition,
+    invocation_payload: &Value,
+) -> bool {
+    if function.id.as_str() == "process::run" {
+        let target_payload = invocation_payload
+            .get("payload")
+            .unwrap_or(invocation_payload);
+        if !crate::domains::process::approval::run_requires_approval(target_payload) {
+            return false;
+        }
+    }
+    requires_fresh_revision(function)
+}
+
 fn execution_requires_approval(function: &FunctionDefinition, payload: &Value) -> bool {
     function.required_authority.approval_required
         || (function.id.as_str() == "process::run"
@@ -2825,6 +2840,38 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn process_run_date_does_not_require_fresh_inspection_handle() {
+        let mut function = test_function("process::run");
+        function.effect_class = EffectClass::ExternalSideEffect;
+        function.risk_level = RiskLevel::High;
+
+        assert!(!requires_fresh_revision_for_payload(
+            &function,
+            &json!({"payload": {"command": "date"}})
+        ));
+        assert!(!requires_fresh_revision_for_payload(
+            &function,
+            &json!({"payload": {"command": "git status --short"}})
+        ));
+    }
+
+    #[test]
+    fn process_run_risky_commands_still_require_fresh_inspection_handle() {
+        let mut function = test_function("process::run");
+        function.effect_class = EffectClass::ExternalSideEffect;
+        function.risk_level = RiskLevel::High;
+
+        assert!(requires_fresh_revision_for_payload(
+            &function,
+            &json!({"payload": {"command": "rm -rf target"}})
+        ));
+        assert!(requires_fresh_revision_for_payload(
+            &function,
+            &json!({"payload": {"command": "echo hello > file.txt"}})
+        ));
     }
 
     #[test]

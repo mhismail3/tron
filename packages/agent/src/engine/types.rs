@@ -358,9 +358,10 @@ pub enum ResourceLeaseFailureBehavior {
 /// Engine-owned resource lease contract for a mutating function.
 ///
 /// The first implementation resolves `resource_id_template` from invocation
-/// payload fields, for example `session:{sessionId}:worktree`. Keeping this
-/// metadata on the function definition makes resource ownership visible through
-/// discovery and enforceable by the host before any domain handler runs.
+/// payload fields plus canonical causal-context fields such as `sessionId` and
+/// `workspaceId`. Keeping this metadata on the function definition makes
+/// resource ownership visible through discovery and enforceable by the host
+/// before any domain handler runs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceLeaseRequirement {
