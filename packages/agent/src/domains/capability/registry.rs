@@ -304,6 +304,7 @@ impl CapabilityRegistryEntry {
     }
 
     pub(crate) fn contract_record(&self) -> CapabilityContractRecord {
+        let conditional_approval = conditional_approval_contract(&self.function);
         CapabilityContractRecord {
             contract_id: self.contract_id.clone(),
             version: self.function.revision.0,
@@ -315,7 +316,9 @@ impl CapabilityRegistryEntry {
             risk_level: risk_name(self.function.risk_level).to_owned(),
             idempotency_contract: serde_json::to_value(&self.function.idempotency).ok(),
             approval_contract: json!({
-                "approvalRequired": self.function.required_authority.approval_required
+                "approvalMode": approval_mode(&self.function),
+                "approvalRequired": self.function.required_authority.approval_required,
+                "conditionalApproval": conditional_approval
             }),
             lease_contract: serde_json::to_value(&self.function.resource_lease).ok(),
             compensation_contract: serde_json::to_value(&self.function.compensation).ok(),
@@ -354,6 +357,7 @@ impl CapabilityRegistryEntry {
         &self,
         decision: CapabilityBindingDecision,
     ) -> CapabilityInspectionRecord {
+        let conditional_approval = conditional_approval_contract(&self.function);
         CapabilityInspectionRecord {
             contract: self.contract_record(),
             implementation: self.implementation_record(),
@@ -376,7 +380,9 @@ impl CapabilityRegistryEntry {
                 "expectedSchemaDigest": self.schema_digest,
                 "freshInspectionRequired": requires_fresh_revision(&self.function),
                 "idempotencyKeyRequired": self.function.effect_class.is_mutating(),
+                "approvalMode": approval_mode(&self.function),
                 "approvalRequired": self.function.required_authority.approval_required,
+                "conditionalApproval": conditional_approval,
                 "timeoutMs": self.function.metadata.pointer("/runtimeRequirements/timeoutMs").cloned().unwrap_or(Value::Null),
                 "budget": self.function.metadata.pointer("/runtimeRequirements/budget").cloned().unwrap_or(Value::Null)
             }),
@@ -3276,6 +3282,24 @@ fn is_capability_primitive(function: &FunctionDefinition) -> bool {
         .unwrap_or(false)
 }
 
+fn conditional_approval_contract(function: &FunctionDefinition) -> Value {
+    function
+        .metadata
+        .pointer("/highRiskContract/conditionalApproval")
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn approval_mode(function: &FunctionDefinition) -> &'static str {
+    if function.required_authority.approval_required {
+        "always"
+    } else if !conditional_approval_contract(function).is_null() {
+        "conditional"
+    } else {
+        "none"
+    }
+}
+
 fn compact_description(description: &str) -> String {
     let mut text = description.replace('\n', " ");
     if text.len() > 120 {
@@ -3419,6 +3443,50 @@ mod tests {
         assert_eq!(entry.trust_tier, "first_party_signed");
         assert_eq!(entry.context_primer_level, "core");
         assert!(!entry.schema_digest.is_empty());
+    }
+
+    #[test]
+    fn registry_entry_surfaces_conditional_approval_metadata() {
+        let mut function = test_function("process::run");
+        function.effect_class = EffectClass::ExternalSideEffect;
+        function.risk_level = RiskLevel::High;
+        function.metadata = json!({
+            "highRiskContract": {
+                "conditionalApproval": {
+                    "owner": "process",
+                    "policy": "process::run command classifier",
+                    "approvalRequiredFor": ["destructive commands"],
+                    "approvalNotRequiredFor": ["date"]
+                }
+            }
+        });
+        let entry = CapabilityRegistryEntry::from_function(function, 17);
+        let contract = entry.contract_record();
+        let inspection = entry.inspection(CapabilityBindingDecision {
+            decision_id: "binding_decision_test".to_owned(),
+            contract_id: entry.contract_id.clone(),
+            selected_implementation: entry.implementation_id.clone(),
+            selected_function_id: entry.function_id.clone(),
+            selection_policy: "test".to_owned(),
+            rejected_candidates: Vec::new(),
+            catalog_revision: entry.catalog_revision,
+            schema_digest: entry.schema_digest.clone(),
+        });
+
+        assert_eq!(contract.approval_contract["approvalMode"], "conditional");
+        assert_eq!(contract.approval_contract["approvalRequired"], false);
+        assert_eq!(
+            contract.approval_contract["conditionalApproval"]["policy"],
+            "process::run command classifier"
+        );
+        assert_eq!(
+            inspection.execution_requirements["approvalMode"],
+            "conditional"
+        );
+        assert_eq!(
+            inspection.execution_requirements["conditionalApproval"]["approvalNotRequiredFor"][0],
+            "date"
+        );
     }
 
     #[test]

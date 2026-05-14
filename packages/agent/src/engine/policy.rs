@@ -28,6 +28,7 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
             .requires_approval_for_agent_visibility()
             && !function.required_authority.approval_required
             && !has_sandbox_autonomy_contract(function)
+            && !has_conditional_approval_contract(function)
         {
             return Err(EngineError::PolicyViolation(format!(
                 "irreversible agent-visible function {} requires approval metadata",
@@ -38,6 +39,7 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
             && function.risk_level >= RiskLevel::High
             && !function.required_authority.approval_required
             && !has_sandbox_autonomy_contract(function)
+            && !has_conditional_approval_contract(function)
         {
             return Err(EngineError::PolicyViolation(format!(
                 "high-risk agent-visible function {} requires approval metadata",
@@ -128,6 +130,27 @@ fn has_sandbox_autonomy_contract(function: &FunctionDefinition) -> bool {
             .get("requiresCompensation")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
+}
+
+fn has_conditional_approval_contract(function: &FunctionDefinition) -> bool {
+    let Some(contract) = function
+        .metadata
+        .pointer("/highRiskContract/conditionalApproval")
+    else {
+        return false;
+    };
+    contract
+        .get("owner")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        && contract
+            .get("policy")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        && contract
+            .get("approvalRequiredFor")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|items| !items.is_empty())
 }
 
 /// Validate a trigger definition before registration.
@@ -285,5 +308,66 @@ fn actor_from_causal_context(context: &CausalContext) -> ActorContext {
         authority_scopes: context.authority_scopes.clone(),
         session_id: context.session_id.clone(),
         workspace_id: context.workspace_id.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{
+        AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, FunctionId,
+        IdempotencyContract, Provenance, ResourceLeaseRequirement, WorkerId,
+    };
+    use serde_json::json;
+
+    fn high_risk_process_function(metadata: serde_json::Value) -> FunctionDefinition {
+        let mut function = FunctionDefinition::new(
+            FunctionId::new("process::run").expect("function id"),
+            WorkerId::new("process").expect("worker id"),
+            "Run process".to_owned(),
+            VisibilityScope::System,
+            EffectClass::ExternalSideEffect,
+        )
+        .with_risk(RiskLevel::High)
+        .with_required_authority(AuthorityRequirement::scope("process.run"))
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+            "process",
+            "process:{sessionId}",
+            60_000,
+        ))
+        .with_compensation(CompensationContract::new(
+            CompensationKind::ManualOnly,
+            "process output is the audit boundary",
+        ))
+        .with_provenance(Provenance::system());
+        function.metadata = metadata;
+        function
+    }
+
+    #[test]
+    fn conditional_approval_contract_satisfies_high_risk_registration_policy() {
+        let function = high_risk_process_function(json!({
+            "highRiskContract": {
+                "conditionalApproval": {
+                    "owner": "process",
+                    "policy": "process::run command classifier",
+                    "approvalRequiredFor": ["privileged commands"]
+                }
+            }
+        }));
+
+        validate_function_registration(&function).expect("conditional approval is metadata");
+    }
+
+    #[test]
+    fn missing_conditional_approval_contract_is_rejected_for_high_risk_agent_visible_function() {
+        let function = high_risk_process_function(json!({}));
+
+        let error = validate_function_registration(&function).expect_err("missing approval");
+
+        assert!(
+            matches!(error, EngineError::PolicyViolation(message) if message.contains("requires approval metadata"))
+        );
     }
 }

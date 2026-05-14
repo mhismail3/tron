@@ -25,9 +25,9 @@ use super::types::{
     CapabilityPluginManifest, CapabilityRejectedCandidate,
 };
 use crate::engine::{
-    ActorContext, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EffectClass,
-    EngineApprovalRequest, FunctionDefinition, FunctionHealth, FunctionQuery, FunctionRevision,
-    Invocation, RiskLevel,
+    ActorContext, ActorKind, ApprovalStatus, AuthorityGrantId, CausalContext, DeliveryMode,
+    EffectClass, EngineApprovalRecord, EngineApprovalRequest, FunctionDefinition, FunctionHealth,
+    FunctionQuery, FunctionRevision, Invocation, RiskLevel,
 };
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -979,6 +979,7 @@ async fn execute_invoke_value(
         .get("payload")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    validate_target_payload(&function, &payload)?;
     let idempotency_key = child_idempotency_key(
         invocation,
         &function,
@@ -1012,11 +1013,11 @@ async fn execute_invoke_value(
         causal_context = causal_context.with_idempotency_key(key);
     }
 
-    let mut child = Invocation::new_sync(function.id.clone(), payload, causal_context);
+    let mut child = Invocation::new_sync(function.id.clone(), payload.clone(), causal_context);
     if let Some(expected) = expected_revision {
         child = child.expecting_revision(FunctionRevision(expected));
     }
-    if function.required_authority.approval_required {
+    if execution_requires_approval(&function, &payload) {
         let approval = deps
             .engine_host
             .request_approval(EngineApprovalRequest {
@@ -1027,25 +1028,7 @@ async fn execute_invoke_value(
             })
             .await
             .map_err(engine_error_to_capability_error)?;
-        return capability_result_value(CapabilityResult {
-            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
-                "Approval required before executing {}.",
-                function.id.as_str()
-            ))]),
-            details: Some(json!({
-                "status": "approval_required",
-                "approvalState": {
-                    "approvalId": approval.approval_id,
-                    "status": approval.status,
-                    "functionId": function.id.as_str(),
-                    "traceId": approval.trace_id.as_str()
-                },
-                "selectedImplementation": target.binding_decision.selected_implementation,
-                "bindingDecision": target.binding_decision
-            })),
-            is_error: Some(true),
-            stop_turn: Some(true),
-        });
+        return await_approval_result(invocation, deps, &function, &target, approval).await;
     }
     let result = deps.engine_host.invoke(child).await;
     if let Some(error) = result.error.clone() {
@@ -1110,6 +1093,142 @@ async fn execute_invoke_value(
         details: Some(details),
         is_error: None,
         stop_turn: None,
+    })
+}
+
+async fn await_approval_result(
+    invocation: &Invocation,
+    deps: &Deps,
+    function: &FunctionDefinition,
+    target: &ResolvedCapabilityTarget,
+    approval: EngineApprovalRecord,
+) -> Result<Value, CapabilityError> {
+    let approval_id = approval.approval_id.clone();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30 * 60);
+    let mut latest = approval;
+
+    loop {
+        match latest.status {
+            ApprovalStatus::Executed => {
+                let output = latest.result.clone().unwrap_or(Value::Null);
+                return approved_execution_result(invocation, function, target, &latest, output);
+            }
+            ApprovalStatus::Failed => {
+                let message = latest
+                    .error
+                    .as_ref()
+                    .map(|error| error.message.clone())
+                    .unwrap_or_else(|| {
+                        format!("Approved invocation of {} failed.", function.id.as_str())
+                    });
+                return capability_result_value(CapabilityResult {
+                    content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                        message,
+                    )]),
+                    details: Some(approval_details(function, target, &latest, "failed")),
+                    is_error: Some(true),
+                    stop_turn: None,
+                });
+            }
+            ApprovalStatus::Denied => {
+                return capability_result_value(CapabilityResult {
+                    content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                        format!("Approval denied for {}.", function.id.as_str()),
+                    )]),
+                    details: Some(approval_details(function, target, &latest, "denied")),
+                    is_error: Some(true),
+                    stop_turn: Some(true),
+                });
+            }
+            ApprovalStatus::Pending | ApprovalStatus::Approved => {
+                if tokio::time::Instant::now() >= deadline {
+                    return capability_result_value(CapabilityResult {
+                        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                            format!(
+                                "Timed out waiting for approval before executing {}.",
+                                function.id.as_str()
+                            ),
+                        )]),
+                        details: Some(approval_details(function, target, &latest, "timeout")),
+                        is_error: Some(true),
+                        stop_turn: Some(true),
+                    });
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                latest = deps
+                    .engine_host
+                    .get_approval(&approval_id)
+                    .await
+                    .map_err(engine_error_to_capability_error)?
+                    .ok_or_else(|| CapabilityError::Custom {
+                        code: "APPROVAL_NOT_FOUND".to_owned(),
+                        message: format!("approval {approval_id} disappeared before resolution"),
+                        details: Some(json!({ "approvalId": approval_id })),
+                    })?;
+            }
+        }
+    }
+}
+
+fn approved_execution_result(
+    invocation: &Invocation,
+    function: &FunctionDefinition,
+    target: &ResolvedCapabilityTarget,
+    approval: &EngineApprovalRecord,
+    output: Value,
+) -> Result<Value, CapabilityError> {
+    let record = CapabilityExecutionRecord {
+        status: "ok".to_owned(),
+        trace_id: approval.trace_id.as_str().to_owned(),
+        root_invocation_id: invocation.id.as_str().to_owned(),
+        child_invocations: Vec::new(),
+        selected_implementation: target.binding_decision.selected_implementation.clone(),
+        function_id: function.id.as_str().to_owned(),
+        catalog_revision: target.entry.catalog_revision,
+        function_revision: function.revision.0,
+        output: output.clone(),
+        approval_state: Some(json!({
+            "approvalId": approval.approval_id,
+            "status": approval.status,
+            "functionId": function.id.as_str(),
+            "traceId": approval.trace_id.as_str()
+        })),
+        plugin_versions: vec![target.entry.plugin_id.clone()],
+        binding_decision: target.binding_decision.clone(),
+        schema_digest: target.entry.schema_digest.clone(),
+    };
+    let details = serde_json::to_value(&record).map_err(|error| CapabilityError::Internal {
+        message: error.to_string(),
+    })?;
+    if let Ok(mut nested) = serde_json::from_value::<CapabilityResult>(output.clone()) {
+        nested.details = Some(merge_optional_details(nested.details, details));
+        return capability_result_value(nested);
+    }
+    let text = serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string());
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(text)]),
+        details: Some(details),
+        is_error: None,
+        stop_turn: None,
+    })
+}
+
+fn approval_details(
+    function: &FunctionDefinition,
+    target: &ResolvedCapabilityTarget,
+    approval: &EngineApprovalRecord,
+    status: &str,
+) -> Value {
+    json!({
+        "status": status,
+        "approvalState": {
+            "approvalId": approval.approval_id,
+            "status": approval.status,
+            "functionId": function.id.as_str(),
+            "traceId": approval.trace_id.as_str()
+        },
+        "selectedImplementation": target.binding_decision.selected_implementation,
+        "bindingDecision": target.binding_decision
     })
 }
 
@@ -2211,6 +2330,23 @@ fn enforce_execution_policy(
     })
 }
 
+fn validate_target_payload(
+    function: &FunctionDefinition,
+    payload: &Value,
+) -> Result<(), CapabilityError> {
+    if let Some(schema) = &function.request_schema {
+        crate::engine::schema::validate_payload(&function.id, "request", schema, payload)
+            .map_err(engine_error_to_capability_error)?;
+    }
+    Ok(())
+}
+
+fn execution_requires_approval(function: &FunctionDefinition, payload: &Value) -> bool {
+    function.required_authority.approval_required
+        || (function.id.as_str() == "process::run"
+            && crate::domains::process::approval::run_requires_approval(payload))
+}
+
 fn policy_scope_matches(scopes: &[String], prefix: &str, candidates: &[&str]) -> bool {
     scopes.iter().any(|scope| {
         let Some(value) = scope.strip_prefix(prefix) else {
@@ -2333,6 +2469,10 @@ fn render_inspection_summary(details: &Value) -> String {
 
     if requirements["approvalRequired"].as_bool().unwrap_or(false) {
         summary.push_str("\n- approvalRequired=true; execution may pause for user approval.");
+    } else if requirements["approvalMode"].as_str() == Some("conditional") {
+        summary.push_str(
+            "\n- approvalMode=conditional; safe read-only payloads run directly, while risky payloads pause for user approval.",
+        );
     }
 
     summary
@@ -2523,6 +2663,44 @@ mod tests {
     }
 
     #[test]
+    fn process_run_date_does_not_require_approval_but_destructive_command_does() {
+        let function = test_function("process::run");
+        assert!(!execution_requires_approval(
+            &function,
+            &json!({ "command": "date +%Y-%m-%d" })
+        ));
+        assert!(execution_requires_approval(
+            &function,
+            &json!({ "command": "rm -rf target" })
+        ));
+    }
+
+    #[test]
+    fn execute_validates_target_payload_before_requesting_approval() {
+        let mut function = test_function("process::run");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string"}
+            }
+        }));
+
+        let error = validate_target_payload(&function, &json!({})).expect_err("schema error");
+
+        match error {
+            CapabilityError::InvalidParams { message } => {
+                assert!(message.contains("required field is missing"));
+            }
+            CapabilityError::Custom { message, .. } => {
+                assert!(message.contains("required field is missing"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn explicit_implementation_id_can_address_function_ids() {
         let params = json!({"implementationId": "function:filesystem::read_file"});
         let target = parse_target(&params).expect("target");
@@ -2582,6 +2760,38 @@ mod tests {
         assert!(summary.contains("Execute payload must include: command."));
         assert!(summary.contains("idempotencyKey is required"));
         assert!(summary.contains("approvalRequired=true"));
+    }
+
+    #[test]
+    fn inspection_summary_explains_conditional_approval() {
+        let details = json!({
+            "contract": {
+                "contractId": "process::run",
+                "effectClass": "external_side_effect",
+                "riskLevel": "high",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["command"]
+                }
+            },
+            "implementation": {
+                "functionId": "process::run"
+            },
+            "executionRequirements": {
+                "approvalMode": "conditional",
+                "approvalRequired": false,
+                "expectedRevision": 1,
+                "expectedSchemaDigest": "digest-123",
+                "freshInspectionRequired": true,
+                "idempotencyKeyRequired": true,
+                "inspectionHandle": "capability-inspection:v1:test"
+            }
+        });
+
+        let summary = render_inspection_summary(&details);
+
+        assert!(summary.contains("approvalMode=conditional"));
+        assert!(summary.contains("safe read-only payloads run directly"));
     }
 
     #[test]

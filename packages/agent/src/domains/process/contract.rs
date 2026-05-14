@@ -22,7 +22,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some("process.run"),
         )
-        .approval_required(true)
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
@@ -62,7 +61,23 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "external processes may mutate host state; command output and trace records are the audit boundary",
         ))
         .high_risk_contract(json!({
-            "approvalRequiredForAgentVisibility": true,
+            "approvalRequiredForAgentVisibility": false,
+            "conditionalApproval": {
+                "owner": "process",
+                "policy": "process::run command classifier",
+                "approvalRequiredFor": [
+                    "privileged commands",
+                    "destructive filesystem operations",
+                    "git write operations",
+                    "package installation or publication",
+                    "shell redirection that writes files"
+                ],
+                "approvalNotRequiredFor": [
+                    "read-only inspection commands",
+                    "date/time checks",
+                    "build and test commands without privileged or mutating shell operators"
+                ]
+            },
             "resourceLock": {
                 "idTemplate": "process:{sessionId}",
                 "kind": "process",

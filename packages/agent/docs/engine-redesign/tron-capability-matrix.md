@@ -14,7 +14,7 @@ primitives over that same catalog.
 | `approval` | System | Idempotent writes, reads | System scoped writes | User/system-authorized resolution only; agent self-resolution is rejected. |
 | `auth` | System | Reads, reversible side effects | System scoped writes | Auth-file leases; secrets never logged or embedded in docs/tests. |
 | `browser` / `display` | System | Reads, reversible stream controls | System scoped writes | Stream lifecycle records and local authority. |
-| `capability` | System | Pure read, delegated invocation | Session scoped delegated execution | Collapsed model harness; exposes only `search`, `inspect`, and `execute` while concrete work remains owned by live workers. |
+| `capability` | System | Pure read, delegated invocation | Session scoped delegated execution | Collapsed model harness; exposes only `search`, `inspect`, and `execute` while concrete work remains owned by live workers. Approval-required `execute` calls keep the original turn open until the engine approval record resolves. |
 | `config` / `model` / `settings` | System | Reads, reversible side effects | Session/system scoped writes | Resource leases protect session model/reasoning and settings profile writes. |
 | `context` / `memory` | System | Reads, reversible/external side effects | Session scoped writes | Event-store truth remains authoritative; retain/compact flows are high risk. |
 | `cron` | System plus hidden apply | Reads, high-risk side effects, scheduled triggers | System scoped writes/runs | `cron_schedule` triggers dispatch through the engine runtime. |
@@ -28,6 +28,7 @@ primitives over that same catalog.
 | `mcp` / discovered `mcp::*` tools | System/session as discovered | Conservative read/side-effect classification | Explicit for mutating tools | Unknown MCP tools default to approval-required side effects. |
 | `plan` | Session/workspace | Reads, idempotent writes | Session/workspace scoped | Plan state is local execution state, not durable session truth. |
 | `prompt_library` | System | Reads, idempotent writes, irreversible deletes | System scoped writes | Prompt history/snippets are local global state. |
+| `process` | System | External side effects | Session-scoped idempotency and process lease | `process::run` uses a domain-owned conditional approval classifier: read-only checks such as date/status/test commands run directly, while privileged, destructive, source-control mutating, package-installing, or redirection-based writes pause for approval. |
 | `sandbox` | System | Reads, high-risk lifecycle side effects | Container scoped writes | Local-only authority; no remote sandbox execution in this branch. |
 | `session` | System | Reads, idempotent/reversible lifecycle writes | Session/system scoped writes | Session truth is event-sourced; mutations are causally recorded. |
 | `skills` | System/session | Reads, idempotent session writes | Session scoped writes | Activation state is reconstructed from events. |

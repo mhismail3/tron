@@ -1,12 +1,11 @@
 //! Agent workflow operations.
 use super::{
-    AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, EngineQueueDrainer, EnqueueInvocation,
-    FunctionId, PromptEngineCausality, PromptRequest, drain_prompt_queue, errors,
-    publish_queue_lifecycle_event,
+    AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, PromptEngineCausality, PromptRequest,
+    drain_prompt_queue, errors,
 };
 use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
-use crate::engine::{ActorContext, FunctionRevision, Invocation};
+use crate::engine::{ActorContext, FunctionId, FunctionRevision, Invocation};
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::opt_array;
 use crate::shared::server::params::opt_string;
@@ -45,7 +44,7 @@ pub(crate) async fn prompt_value(
         json!({"runId": run_id}),
     )
     .await;
-    enqueue_and_sync_drain_agent_function(
+    invoke_agent_function_sync(
         invocation,
         deps,
         &submission.session_id,
@@ -72,7 +71,7 @@ pub(crate) async fn prompt_apply_value(
         json!({"runId": run_id}),
     )
     .await;
-    enqueue_and_sync_drain_agent_function(
+    invoke_agent_function_sync(
         invocation,
         deps,
         &submission.session_id,
@@ -267,7 +266,7 @@ pub(crate) fn validate_attachment_arrays(
     Ok(())
 }
 
-pub(crate) async fn enqueue_and_sync_drain_agent_function(
+pub(crate) async fn invoke_agent_function_sync(
     invocation: &Invocation,
     deps: &Deps,
     session_id: &str,
@@ -285,32 +284,14 @@ pub(crate) async fn enqueue_and_sync_drain_agent_function(
     {
         authority_scopes.push(ENGINE_INTERNAL_INVOKE_SCOPE.to_owned());
     }
-    let item = deps
-        .engine_host
-        .enqueue_invocation(EnqueueInvocation {
-            queue: "agent".to_owned(),
-            target_revision: target_revision_for_enqueue(
-                &deps.engine_host,
-                &function_id,
-                invocation,
-            )
-            .await?,
-            function_id,
-            payload,
-            actor_id: invocation.causal_context.actor_id.clone(),
-            actor_kind: invocation.causal_context.actor_kind.clone(),
-            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
-            authority_scopes,
-            trace_id: invocation.causal_context.trace_id.clone(),
-            parent_invocation_id: Some(invocation.id.clone()),
-            trigger_id: invocation.causal_context.trigger_id.clone(),
-            session_id: invocation.causal_context.session_id.clone(),
-            workspace_id: invocation.causal_context.workspace_id.clone(),
-            idempotency_key: Some(format!("{idempotency_prefix}:{}", invocation.id)),
-        })
-        .await
-        .map_err(crate::shared::server::error_mapping::engine_error_to_capability_error)?;
-    publish_queue_lifecycle_event(&deps.engine_host, "enqueue", &item, None).await;
+    let mut context = invocation.causal_context.clone();
+    context.parent_invocation_id = Some(invocation.id.clone());
+    context.authority_scopes = authority_scopes;
+    context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
+    context.delivery_mode = crate::engine::DeliveryMode::Sync;
+    let mut child = Invocation::new_sync(function_id.clone(), payload, context);
+    child.expected_function_revision =
+        target_revision_for_enqueue(&deps.engine_host, &function_id, invocation).await?;
     publish_prompt_stream(
         invocation,
         deps,
@@ -320,30 +301,18 @@ pub(crate) async fn enqueue_and_sync_drain_agent_function(
             .as_deref()
             .unwrap_or_default(),
         "apply_enqueued",
-        json!({"receiptId": item.receipt_id, "queue": item.queue, "function": idempotency_prefix}),
+        json!({"function": idempotency_prefix}),
     )
     .await;
 
-    let drained = tokio::time::timeout(
+    let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        EngineQueueDrainer::drain_receipt(&deps.engine_host, &item.receipt_id, "engine-agent-sync"),
+        deps.engine_host.invoke(child),
     )
     .await
     .map_err(|_| CapabilityError::Internal {
-        message: format!(
-            "Timed out waiting for queued prompt command receipt {}",
-            item.receipt_id
-        ),
-    })?
-    .map_err(crate::shared::server::error_mapping::engine_error_to_capability_error)?;
-    let Some(result) = drained else {
-        return Err(CapabilityError::Internal {
-            message: format!(
-                "Queued prompt command receipt {} was not claimable",
-                item.receipt_id
-            ),
-        });
-    };
+        message: format!("Timed out waiting for prompt command {idempotency_prefix}"),
+    })?;
     if let Some(error) = &result.error {
         publish_prompt_stream(
             invocation,
@@ -351,7 +320,6 @@ pub(crate) async fn enqueue_and_sync_drain_agent_function(
             session_id,
             "apply_failed",
             json!({
-                "receiptId": item.receipt_id,
                 "error": error.to_string(),
             }),
         )

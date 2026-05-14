@@ -588,6 +588,7 @@ pub async fn execute_capability_invocation(
         };
     };
 
+    let result_stops_turn = capability_result.stop_turn.unwrap_or(false);
     let duration_ms = duration_ceil_ms(start.elapsed());
     let resolved_identity = capability_identity_from_result(
         &model_primitive_name,
@@ -711,7 +712,7 @@ pub async fn execute_capability_invocation(
         duration_ms,
         blocked_by_hook: false,
         blocked_by_guardrail: false,
-        stops_turn,
+        stops_turn: stops_turn || result_stops_turn,
         is_interactive,
     }
 }
@@ -930,6 +931,7 @@ mod tests {
         AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel,
         VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
     };
+    use crate::shared::content::CapabilityResultContent;
     use crate::shared::model_capabilities::CapabilityResultBody;
     use async_trait::async_trait;
     use parking_lot::Mutex;
@@ -1127,6 +1129,97 @@ mod tests {
             *self.captured.lock() = Some(invocation);
             Ok(json!({"content": "ok"}))
         }
+    }
+
+    #[derive(Clone)]
+    struct StopTurnCapabilityHandler;
+
+    #[async_trait]
+    impl crate::engine::InProcessFunctionHandler for StopTurnCapabilityHandler {
+        async fn invoke(&self, _invocation: Invocation) -> crate::engine::Result<Value> {
+            serde_json::to_value(crate::shared::model_capabilities::CapabilityResult {
+                content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                    "approval required",
+                )]),
+                details: None,
+                is_error: Some(true),
+                stop_turn: Some(true),
+            })
+            .map_err(|error| crate::engine::EngineError::HandlerFailed(error.to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_not_static_stop()
+    {
+        let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+        engine_host
+            .register_worker(
+                WorkerDefinition::new(
+                    WorkerId::new("capability").expect("worker id"),
+                    WorkerKind::InProcess,
+                    ActorId::new("capability-owner").expect("actor id"),
+                    AuthorityGrantId::new("capability-grant").expect("grant id"),
+                )
+                .with_namespace_claim("capability"),
+                false,
+            )
+            .await
+            .expect("register worker");
+
+        let function_id = FunctionId::new("capability::stop").expect("function id");
+        let function = FunctionDefinition::new(
+            function_id.clone(),
+            WorkerId::new("capability").expect("worker id"),
+            "Stop capability invocation".to_owned(),
+            VisibilityScope::System,
+            EffectClass::PureRead,
+        )
+        .with_risk(RiskLevel::Low)
+        .with_required_authority(AuthorityRequirement::scope("capability.execute"));
+        engine_host
+            .register_function(
+                function.clone(),
+                Some(Arc::new(StopTurnCapabilityHandler)),
+                false,
+            )
+            .await
+            .expect("register function");
+
+        let mut targets_by_name = BTreeMap::new();
+        let _ = targets_by_name.insert(
+            "execute".to_owned(),
+            EngineCapabilityTarget {
+                model_capability_id: "execute".to_owned(),
+                function_id,
+                function,
+                stops_turn: false,
+                is_interactive: false,
+                execution_mode: ExecutionMode::Parallel,
+            },
+        );
+        let surface = ResolvedCapabilitySurface {
+            catalog_revision: crate::engine::CatalogRevision(42),
+            capabilities: Vec::new(),
+            targets_by_name,
+            all_model_capability_ids: vec!["execute".to_owned()],
+            turn_stopping_capabilities: HashSet::new(),
+        };
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let spec = default_execution_spec();
+        let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+        ctx.engine_host = Some(&engine_host);
+
+        let call = CapabilityInvocationDraft::new("capability-invocation-1", "execute", {
+            let mut args = serde_json::Map::new();
+            args.insert("mode".to_owned(), json!("invoke"));
+            args
+        });
+        let result = execute_capability_invocation(&call, "session-1", "/tmp/worktree", &ctx).await;
+
+        assert!(result.result.is_error.unwrap_or(false));
+        assert!(result.stops_turn);
     }
 
     #[tokio::test]

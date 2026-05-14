@@ -545,10 +545,14 @@ High-risk engine capabilities publish `approval.pending` records to the
 Thin clients render those records and resolve them by invoking the canonical
 `approval::resolve` primitive; the decision, resumed child invocation, ledger
 entry, and `approval.resolved` stream event all remain engine-owned. Agents can
-not see or invoke `approval::*` functions in their live catalog. When an engine
-capability invocation returns `APPROVAL_REQUIRED`, the turn stops and waits for the
-client/user approval record to resolve instead of polling private endpoints or
-asking through a model-visible confirmation capability.
+not see or invoke `approval::*` functions in their live catalog. Approval-required
+capability invocations keep the originating turn open until the approval record
+is resolved, denied, failed, or timed out, then return that outcome to the model
+as the original `execute` result. Broad first-party capabilities may declare a
+conditional approval contract: for example, `process::run` allows read-only
+checks such as `date`, `pwd`, `git status`, and test/build commands without a
+prompt, while privileged, destructive, package-installing, source-control
+mutating, or file-redirection shell commands pause for user approval.
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` capability frames when iOS clients are subscribed.
 

@@ -3,7 +3,13 @@
 //! This worker owns host process execution as a capability. The model never
 //! receives a shell-specific capability; it discovers and invokes `process::run`
 //! through the capability primitives.
+//!
+//! The broad `process::run` contract has conditional approval instead of a
+//! blanket approval bit. Payload-sensitive approval classification lives in
+//! [`approval`], while schema validation, idempotency, lease, audit, and actual
+//! execution remain on the normal engine/capability path.
 
+pub(crate) mod approval;
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;

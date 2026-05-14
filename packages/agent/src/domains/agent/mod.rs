@@ -8,8 +8,10 @@
 //! 1. `/engine` builds an `EngineTransportRequest` for `agent::prompt`.
 //! 2. The engine validates schema, authority, idempotency, approval, leases, and
 //!    catalog revision before this domain handler runs.
-//! 3. `agent::prompt` derives the run id, records the accepted prompt, enqueues
-//!    hidden `agent::prompt_apply`, and returns the acknowledgement envelope.
+//! 3. `agent::prompt` derives the run id, records the accepted prompt, invokes
+//!    hidden `agent::prompt_apply` synchronously through the engine fabric, and
+//!    returns the acknowledgement envelope. The prompt path does not race the
+//!    background queue drainer for its own receipt.
 //! 4. `agent::prompt_apply` acquires the session run guard and starts
 //!    `agent::run_turn`.
 //! 5. The turn runner resolves capabilities from the live engine catalog, writes session
